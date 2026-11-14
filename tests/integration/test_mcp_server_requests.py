@@ -432,6 +432,37 @@ async def test_both_lists_page_and_a_managers_page_keeps_each_servers_requests_t
     assert [entry.catalog_name for entry in newest.data + older.data] == [LINEAR[0], SENTRY[0]]
 
 
+@pytest.mark.asyncio
+async def test_a_waiting_request_stays_on_the_first_page_behind_any_number_of_answers(async_db: AsyncSession) -> None:
+    team = await _team(async_db)
+    world = _World(async_db)
+    waiting = await world.requests.create(user=team.ada, workspace_id=team.workspace.id, request=_ask())
+    # Written directly, past the daily cap: more answers than one default page, all newer and unacknowledged.
+    later = datetime.now(UTC) + timedelta(minutes=1)
+    for n in range(51):
+        async_db.add(
+            McpServerRequest(
+                workspace_id=team.workspace.id,
+                catalog_name=LINEAR[0],
+                title=LINEAR[1],
+                url=LINEAR[2],
+                requester_id=team.ada.id,
+                status=McpServerRequestStatus.DECLINED,
+                decided_at=later,
+                created_at=later + timedelta(seconds=n),
+            )
+        )
+    await async_db.commit()
+
+    first = (await world.requests.mine(user=team.ada, workspace_id=team.workspace.id)).data
+
+    assert len(first) == 50
+    assert first[0].id == waiting.id
+    assert [entry.status for entry in first[1:]] == ["declined"] * 49
+    # The answers behind it stay newest first, so what the page cuts is the oldest of them.
+    assert first[1].created_at > first[-1].created_at
+
+
 async def _waiting(db: AsyncSession, team: _Team, entry: tuple[str, str, str], people: int) -> None:
     """``people`` members of their own asking for one catalog server, written directly: each asks once."""
     start = datetime.now(UTC)

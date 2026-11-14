@@ -5,7 +5,7 @@ from collections.abc import Collection
 from datetime import datetime
 from typing import Never
 
-from sqlalchemy import func, select, update
+from sqlalchemy import case, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -205,9 +205,12 @@ class McpServerRequestRepository(BaseRepository[McpServerRequest, Never, Never])
         skip: int = 0,
         limit: int,
     ) -> list[McpServerRequest]:
-        """A requester's pending requests in a workspace, and the answers they have not acknowledged, newest first.
+        """A requester's pending requests in a workspace, and the answers they have not acknowledged.
 
-        An approval whose server is gone is left out: there is nothing left to point at.
+        Pending requests come first, then the answers, each newest first. A requester holds at most
+        ``MAX_PENDING_REQUESTS_PER_MEMBER`` pending requests, so a first page at least that long
+        holds every one of them however many answers pile up behind. An approval whose server is
+        gone is left out: there is nothing left to point at.
         """
         unacknowledged = McpServerRequest.acknowledged_at.is_(None)
         rows = await self.db.execute(
@@ -223,7 +226,11 @@ class McpServerRequestRepository(BaseRepository[McpServerRequest, Never, Never])
                     & McpServerRequest.server_id.is_not(None)
                 ),
             )
-            .order_by(McpServerRequest.created_at.desc(), McpServerRequest.id)
+            .order_by(
+                case((McpServerRequest.status == _PENDING, 0), else_=1),
+                McpServerRequest.created_at.desc(),
+                McpServerRequest.id,
+            )
             .offset(skip)
             .limit(limit)
         )
