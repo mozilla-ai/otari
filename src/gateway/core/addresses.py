@@ -22,11 +22,15 @@ def normalized_address(value: str) -> str | None:
     Its local part is ASCII, because the SMTP transport does not ask for SMTPUTF8 (RFC 6531).
     Its domain has two or more labels, and no label is empty.
     """
-    candidate = value.strip().lower()
+    candidate = value.strip()
+    # Checked before lower-casing, which turns a character such as the Kelvin sign (U+212A) into ASCII "k".
+    if not candidate.partition("@")[0].isascii():
+        return None
+    candidate = candidate.lower()
     if not candidate.isprintable() or not _NOT_IN_A_PLAIN_ADDRESS.isdisjoint(candidate) or _ENCODED_WORD in candidate:
         return None
     local, at, domain = candidate.partition("@")
-    if not local or not local.isascii() or not at or "@" in domain or "." not in domain[1:-1]:
+    if not local or not at or "@" in domain or "." not in domain[1:-1]:
         return None
     # An empty label ("example.com.", "a..b") is refused: a mail server will not
     # take one, and the send would fail where nobody sees it.
