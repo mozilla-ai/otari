@@ -34,7 +34,7 @@ limit and the public-catalog limit count failures per client address, so ten
 wrong passwords from one visitor lock everyone out of the dashboard for a
 minute. A [country file](#the-country-file) also looks up the client address.
 
-Use `*` only where the proxy is the only path to the container, as on Railway:
+Use `*` only where the proxy is the only path to the container:
 any peer in the list can set its own client address. When the setting is unset,
 uvicorn's `FORWARDED_ALLOW_IPS` applies, and without that only `127.0.0.1` is
 trusted.
@@ -99,11 +99,6 @@ To test source changes, add `docker-compose.build.yml`:
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
 ```
-
-## Managed deployment templates
-
-- [Railway](../deploy/railway/README.md): that page owns its image tag,
-  variables, platform limits and maintenance steps.
 
 ## Optional services
 

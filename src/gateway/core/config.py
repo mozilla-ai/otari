@@ -118,7 +118,7 @@ OTLP_ROOT = "/otlp"
 # OTARI_PORT), which is also the native pydantic prefix below.
 OTARI_ENV_PREFIX = "OTARI_"
 # Full structured config supplied through the environment, for PaaS platforms
-# (Railway, Render, Fly.io, Kubernetes) where mounting a config.yml is awkward.
+# (Render, Fly.io, Kubernetes) where mounting a config.yml is awkward.
 # These carry the entire YAML schema (providers, pricing, etc.), not just the
 # scalar fields reachable via OTARI_<FIELD>. Raw YAML wins when both are set.
 # Instance names a ``providers:`` entry may not take. ``otari`` is the reserved
@@ -655,7 +655,7 @@ class GatewayConfig(
             "X-Forwarded-Proto headers `otari serve` trusts, or '*' for any peer. The per-IP sign-in "
             "and public-catalog limits key on the address these headers resolve to, so behind a "
             "proxy that is not listed every visitor shares the proxy's address. Use '*' only where "
-            "the proxy is the sole path to the server, as on Railway. Unset leaves it to uvicorn: "
+            "the proxy is the sole path to the server. Unset leaves it to uvicorn: "
             "FORWARDED_ALLOW_IPS if set, otherwise 127.0.0.1."
         ),
     )
