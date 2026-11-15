@@ -594,10 +594,13 @@ function AppShellChrome() {
   const asideRef = useRef<HTMLElement>(null)
   const mainRef = useRef<HTMLElement>(null)
   const toggleRef = useRef<HTMLButtonElement>(null)
-  // Tracks the X position where a touch began, so the swipe handler can
+  // Tracks the touch that began a swipe gesture, so the end handler can
   // measure displacement without storing intermediate move coordinates.
+  // The identifier ties the end event to the same contact that started it,
+  // so a second finger lifting does not trigger the drawer.
   const swipeStartXRef = useRef<number | null>(null)
   const swipeStartYRef = useRef<number | null>(null)
+  const swipeTouchIdRef = useRef<number | null>(null)
   const orgNavTriggerRef = useRef<HTMLButtonElement>(null)
   const railBackRef = useRef<HTMLButtonElement>(null)
   // Which level was last open, read on the way out when the level itself is
@@ -1229,12 +1232,18 @@ function AppShellChrome() {
             onTouchStart={
               isMobile && !mobileNavOpen
                 ? (e) => {
+                    // Ignore multi-touch; clear any stale gesture first.
+                    swipeStartXRef.current = null
+                    swipeStartYRef.current = null
+                    swipeTouchIdRef.current = null
+                    if (e.touches.length !== 1) return
                     const touch = e.touches[0]
                     // Only begin tracking a swipe that starts near the left
                     // edge (within 30px), where a nav-open gesture belongs.
                     if (touch && touch.clientX <= 30) {
                       swipeStartXRef.current = touch.clientX
                       swipeStartYRef.current = touch.clientY
+                      swipeTouchIdRef.current = touch.identifier
                     }
                   }
                 : undefined
@@ -1244,10 +1253,18 @@ function AppShellChrome() {
                 ? (e) => {
                     const startX = swipeStartXRef.current
                     const startY = swipeStartYRef.current
+                    const touchId = swipeTouchIdRef.current
                     swipeStartXRef.current = null
                     swipeStartYRef.current = null
-                    if (startX === null || startY === null) return
-                    const touch = e.changedTouches[0]
+                    swipeTouchIdRef.current = null
+                    if (startX === null || startY === null || touchId === null)
+                      return
+                    // Match the ending contact to the one that started the
+                    // gesture by identifier, so a second finger lifting does
+                    // not trigger the drawer.
+                    const touch = Array.from(e.changedTouches).find(
+                      (t) => t.identifier === touchId,
+                    )
                     if (!touch) return
                     // Open the drawer when the finger has moved at least 50px
                     // to the right without drifting more than 75px vertically,
@@ -1257,6 +1274,15 @@ function AppShellChrome() {
                     if (dx >= 50 && dy < 75) {
                       setMobileNavOpen(true)
                     }
+                  }
+                : undefined
+            }
+            onTouchCancel={
+              isMobile && !mobileNavOpen
+                ? () => {
+                    swipeStartXRef.current = null
+                    swipeStartYRef.current = null
+                    swipeTouchIdRef.current = null
                   }
                 : undefined
             }
