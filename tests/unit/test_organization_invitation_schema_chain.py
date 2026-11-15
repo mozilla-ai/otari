@@ -13,6 +13,7 @@ import gateway.models  # noqa: F401  (registers every table on the shared metada
 _ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
 _REVISION = "3ec751593322"
 _DELIVERY_REVISION = "62256ffefe75"
+_SEND_REQUEST_REVISION = "a6c9fa1da92a"
 _DELIVERY_COLUMNS = {"next_send_at", "delivery_attempts"}
 _NEXT_SEND_AT_INDEX = "ix_organization_invitation_next_send_at"
 _TABLES = {"organization_invitation", "organization_membership_origin"}
@@ -141,3 +142,54 @@ def test_the_delivery_columns_round_trip(sqlite_at_head: tuple[Config, Engine]) 
     command.upgrade(config, _DELIVERY_REVISION)
     assert _DELIVERY_COLUMNS <= set(_invitation_columns(engine))
     assert _NEXT_SEND_AT_INDEX in _invitation_indexes(engine)
+
+
+def test_a_null_last_send_requested_at_is_backfilled_from_created_at(tmp_path: Path) -> None:
+    database_url = f"sqlite:///{tmp_path / 'backfill-send-request.db'}"
+    config = _alembic_config(database_url)
+    command.upgrade(config, _DELIVERY_REVISION)
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO organization_invitation (id, organization_id, email, role, token_hash,"
+                    " workspace_assignments, expires_at, send_count, created_at)"
+                    " VALUES ('i1', 'o1', 'ada@example.com', 'member', 't1', '[]',"
+                    " '2030-01-01 00:00:00', 0, '2026-01-01 00:00:00')"
+                )
+            )
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            row = connection.execute(
+                text("SELECT last_send_requested_at, created_at FROM organization_invitation")
+            ).one()
+        nullable = _invitation_columns(engine)["last_send_requested_at"]
+    finally:
+        engine.dispose()
+
+    assert row.last_send_requested_at == row.created_at
+    assert nullable is False
+
+
+def test_last_send_requested_at_nullability_round_trips(sqlite_at_head: tuple[Config, Engine]) -> None:
+    config, engine = sqlite_at_head
+    assert _invitation_columns(engine)["last_send_requested_at"] is False
+
+    command.downgrade(config, _DELIVERY_REVISION)
+    assert _invitation_columns(engine)["last_send_requested_at"] is True
+
+    command.upgrade(config, _SEND_REQUEST_REVISION)
+    assert _invitation_columns(engine)["last_send_requested_at"] is False
+
+
+def test_the_invitation_table_keeps_its_foreign_keys_through_the_send_request_revision(
+    sqlite_at_head: tuple[Config, Engine],
+) -> None:
+    _, engine = sqlite_at_head
+    foreign_keys = {
+        tuple(key["constrained_columns"]): key["referred_table"]
+        for key in inspect(engine).get_foreign_keys("organization_invitation")
+    }
+    assert foreign_keys[("organization_id",)] == "organization"
+    assert foreign_keys[("invited_by_user_id",)] == "user"

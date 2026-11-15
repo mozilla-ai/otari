@@ -17,7 +17,8 @@ from gateway.services.organizations._poll import poll as background_poll
 # One more attempt follows each wait, in order.
 RETRY_WAITS = (timedelta(minutes=5), timedelta(minutes=10))
 MAX_ATTEMPTS = len(RETRY_WAITS) + 1
-# NOTE: This must be longer than one send can take, or a second email is sent while the first is on its way.
+# NOTE: This must be longer than one send can take,
+# or the worker claims the same invitation again before the first claim's result is recorded.
 CLAIM_HOLD = timedelta(minutes=10)
 POLL_SECONDS = 30.0
 

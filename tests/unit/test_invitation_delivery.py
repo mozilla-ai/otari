@@ -158,6 +158,7 @@ class _Store:
         async with self.uow:
             row = await self.invitations.add(
                 NewInvitation(
+                    created_at=_NOW,
                     email=email,
                     expires_at=expires_at,
                     invited_by_user_id=None,
@@ -168,6 +169,7 @@ class _Store:
                     workspace_assignments=[],
                 )
             )
+            assert row is not None
             row.declined_at = declined_at
             await self._session.flush()
             return row.id
@@ -230,7 +232,7 @@ def _assert_send_is_finished(row: OrganizationInvitation | None, *, attempts: in
     assert row.next_send_at is None
     assert row.delivery_attempts == attempts
     assert not row.token_hash.startswith(_SEED_HASH_PREFIX)
-    assert (row.send_count, row.last_send_requested_at) == (0, None)
+    assert (row.send_count, row.last_send_requested_at) == (1, _NOW)
 
 
 def _assert_logs_hold_no_send_values(
