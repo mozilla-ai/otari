@@ -228,14 +228,33 @@ class OrganizationInvitationRepository(BaseRepository[OrganizationInvitation, Ne
             workspace_assignments=row.workspace_assignments,
         )
 
-    async def delete_expired_before(self, cutoff: datetime) -> int:
-        """Delete the invitations that expired before ``cutoff``, and return how many there were."""
+    async def delete_expired_before(self, cutoff: datetime, *, limit: int) -> int:
+        """Delete up to ``limit`` of the oldest invitations that expired before ``cutoff``.
+
+        Returns how many there were, which may be fewer than ``limit``.
+        A row another writer already holds is left for a later sweep rather than waited for.
+
+        NOTE: A caller must not look up one of these by id again on the same transaction;
+        the lookup can still return it.
+        """
+        candidates = await self.db.execute(
+            select(OrganizationInvitation.id)
+            .where(OrganizationInvitation.expires_at < cutoff)
+            .order_by(OrganizationInvitation.expires_at)
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+        invitation_ids = list(candidates.scalars().all())
+        if not invitation_ids:
+            return 0
         result = cast(
             CursorResult[Any],
             await self.db.execute(
                 delete(OrganizationInvitation)
-                .where(OrganizationInvitation.expires_at < cutoff)
-                .execution_options(synchronize_session="fetch")
+                # The predicate again, not the ids alone: SQLite has no FOR UPDATE,
+                # so a row renewed between the select and here is no longer one this may delete.
+                .where(OrganizationInvitation.id.in_(invitation_ids), OrganizationInvitation.expires_at < cutoff)
+                .execution_options(synchronize_session=False)
             ),
         )
         return result.rowcount

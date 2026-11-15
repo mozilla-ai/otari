@@ -168,6 +168,7 @@ from gateway.services.oauth_service import provider_label, redirect_uri
 from gateway.services.organization_pricing_service import OrganizationPricingService
 from gateway.services.organizations import (
     DeliveryRule,
+    ExpiredInvitationCleanup,
     InvitationDelivery,
     InvitationFactsReader,
     InvitationMailLimit,
@@ -2337,6 +2338,11 @@ def build_invitation_delivery(uow: UnitOfWork, config: GatewayConfig) -> Invitat
     )
 
 
+def build_invitation_cleanup(uow: UnitOfWork) -> ExpiredInvitationCleanup:
+    """Build the remover of expired invitations on a worker job's Unit of Work."""
+    return ExpiredInvitationCleanup(uow, OrganizationRepositories.on(uow))
+
+
 def build_update_check_service(uow: UnitOfWork, config: GatewayConfig) -> UpdateCheckService:
     """Build the update check service on a request's Unit of Work, or the worker's own."""
     return UpdateCheckService(uow, UpdateCheckStateRepository(uow), config)
@@ -3291,6 +3297,7 @@ __all__ = [
     "get_unavailable_model_reporter",
     "UpdateCheckServiceDep",
     "build_update_check_service",
+    "build_invitation_cleanup",
     "build_invitation_delivery",
     "RequestSessionModelProviderPortDep",
     "TelemetryStoragePortDep",

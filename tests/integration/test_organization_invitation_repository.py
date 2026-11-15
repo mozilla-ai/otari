@@ -5,6 +5,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -399,9 +400,107 @@ async def test_expired_invitations_older_than_a_cutoff_are_deleted(async_db: Asy
             ),
         )
 
-        assert await repository.delete_expired_before(cutoff) == 1
+        assert await repository.delete_expired_before(cutoff, limit=10) == 1
         assert await repository.get_in_organization(expired.id, organization.id) is None
         assert await repository.get_in_organization(not_expired.id, organization.id) is not None
+
+
+async def test_delete_expired_before_skips_a_renewal_in_progress_and_leaves_it_in_place(postgres_url: str) -> None:
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    cutoff = datetime(2026, 1, 10, tzinfo=UTC)
+    renewed_expires_at = datetime(2030, 1, 1, tzinfo=UTC)
+
+    async def renew(session: AsyncSession, invitation_id: uuid.UUID) -> None:
+        await session.execute(
+            update(OrganizationInvitation)
+            .where(OrganizationInvitation.id == invitation_id)
+            .values(expires_at=renewed_expires_at)
+        )
+
+    async def cleanup(session: AsyncSession) -> int:
+        return await OrganizationInvitationRepository(session).delete_expired_before(cutoff, limit=10)
+
+    try:
+        async with sessions() as setup:
+            organization = await create_organization(setup, slug="cleanup-skips-a-renewal")
+            repository = OrganizationInvitationRepository(setup)
+            renewed = await _add(
+                repository,
+                _invitation(
+                    organization,
+                    email="renewed@example.com",
+                    token_hash="renewed",
+                    expires_at=datetime(2026, 1, 2, tzinfo=UTC),
+                ),
+            )
+            control = await _add(
+                repository,
+                _invitation(
+                    organization,
+                    email="control@example.com",
+                    token_hash="control",
+                    expires_at=datetime(2026, 1, 1, tzinfo=UTC),
+                ),
+            )
+            await setup.commit()
+            organization_id, renewed_id, control_id = organization.id, renewed.id, control.id
+
+        async with sessions() as renewal, sessions() as deleting:
+            await renew(renewal, renewed_id)
+            # The renewal holds its row locked, uncommitted; skip_locked skips it rather than waiting.
+            deleted = await asyncio.wait_for(cleanup(deleting), timeout=0.5)
+            await deleting.commit()
+            await renewal.commit()
+    finally:
+        await engine.dispose()
+
+    assert deleted == 1
+    async with sessions() as check:
+        repository = OrganizationInvitationRepository(check)
+        assert await repository.get_in_organization(renewed_id, organization_id) is not None
+        assert await repository.get_in_organization(control_id, organization_id) is None
+
+
+async def test_delete_expired_before_does_not_wait_on_the_invite_paths_delete(postgres_url: str) -> None:
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    cutoff = datetime(2026, 1, 10, tzinfo=UTC)
+
+    async def replace(session: AsyncSession, invitation_id: uuid.UUID, organization_id: uuid.UUID) -> int:
+        return await OrganizationInvitationRepository(session).delete_expired_in_organization(
+            [invitation_id], organization_id, expired_by=cutoff
+        )
+
+    async def sweep(session: AsyncSession) -> int:
+        return await OrganizationInvitationRepository(session).delete_expired_before(cutoff, limit=10)
+
+    try:
+        async with sessions() as setup:
+            organization = await create_organization(setup, slug="sweep-does-not-wait-on-invite-delete")
+            invitation = await _add(
+                OrganizationInvitationRepository(setup),
+                _invitation(
+                    organization,
+                    email="replaced@example.com",
+                    token_hash="replaced",
+                    expires_at=datetime(2026, 1, 1, tzinfo=UTC),
+                ),
+            )
+            await setup.commit()
+            invitation_id, organization_id = invitation.id, organization.id
+
+        async with sessions() as replacing, sessions() as sweeping:
+            replaced_count = await replace(replacing, invitation_id, organization_id)
+            assert replaced_count == 1
+            # The replace has not committed, so its row is still locked when the sweep runs here.
+            swept = await asyncio.wait_for(sweep(sweeping), timeout=0.5)
+            await sweeping.commit()
+            await replacing.commit()
+    finally:
+        await engine.dispose()
+
+    assert swept == 0
 
 
 async def test_invitations_are_listed_and_counted_only_for_their_own_organization(async_db: AsyncSession) -> None:
@@ -480,9 +579,36 @@ async def test_the_sweep_keeps_a_row_expiring_exactly_at_the_cutoff_and_deletes_
             ),
         )
 
-        assert await repository.delete_expired_before(cutoff) == 1
+        assert await repository.delete_expired_before(cutoff, limit=10) == 1
         assert await repository.get_in_organization(at_cutoff.id, organization.id) is not None
         assert await repository.get_in_organization(just_before.id, organization.id) is None
+
+
+async def test_delete_expired_before_stops_at_its_limit(async_db: AsyncSession) -> None:
+    cutoff = datetime(2026, 1, 10, tzinfo=UTC)
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        organization = await create_organization(async_db, slug="expired-invite-batch")
+        repository = OrganizationInvitationRepository(uow)
+        rows = [
+            await _add(
+                repository,
+                _invitation(
+                    organization,
+                    email=f"expired-{i}@example.com",
+                    token_hash=f"expired-{i}",
+                    expires_at=datetime(2026, 1, 1, tzinfo=UTC) + timedelta(hours=i),
+                ),
+            )
+            for i in range(3)
+        ]
+
+        deleted = await repository.delete_expired_before(cutoff, limit=2)
+
+        assert deleted == 2
+        survivors = [row for row in rows if await repository.get_in_organization(row.id, organization.id) is not None]
+        assert len(survivors) == 1
 
 
 async def test_an_address_is_stored_and_found_in_its_normalized_form(async_db: AsyncSession) -> None:
