@@ -81,9 +81,12 @@ model. When budgets are small, set `CLAUDE_CODE_MAX_OUTPUT_TOKENS` lower. See
 
 ## Choosing a model
 
-Otari can serve Claude Code's requests from non-Anthropic models. Set Claude
-Code's default Opus, Sonnet and Haiku model variables when its built-in aliases
-do not exist on your deployment.
+Claude Code names its models bare (`claude-opus-5-5`), and Otari reads such a
+name as the model's [catalog id](https://docs.otari.ai/reference/gateway/models#catalog-spellings), so no alias is
+needed. An alias of the same name wins, which is how to send it elsewhere.
+
+Otari can also serve Claude Code's requests from non-Anthropic models: set
+Claude Code's default Opus, Sonnet and Haiku model variables to them.
 
 A non-Claude model may lose Anthropic-specific behavior such as extended
 thinking, prompt caching or tool semantics, and Anthropic's server-side context
@@ -124,7 +127,7 @@ In a Claude Code session:
 The install asks for the gateway URL and an API key. The key goes to Claude
 Code's secure storage. The URL must be `https` unless the gateway runs on the
 same machine. The plugin stays active in every session after that; its
-[README](https://github.com/mozilla-ai/otari/blob/3895813475a5f5558d770214c89919860b127935/plugins/otari-router/README.md) has the options and how to update.
+[README](https://github.com/mozilla-ai/otari/blob/a6bde644d8b7431d59c3519b84bb9d79a711448a/plugins/otari-router/README.md) has the options and how to update.
 
 Each spawn then leaves a dim line in the transcript naming the model Otari chose
 and why. If Otari does not answer, the subagent starts on the model it would
