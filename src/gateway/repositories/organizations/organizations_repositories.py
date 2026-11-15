@@ -14,10 +14,7 @@ from gateway.repositories.users_repository import UserAccessRepository
 
 @dataclass(frozen=True)
 class OrganizationRepositories:
-    """The organizations domain's repositories, all on one Unit of Work.
-
-    ``users`` is still in the flat ``users_repository`` module, which holds every query on the users table.
-    """
+    """The organizations domain's repositories, all on one Unit of Work."""
 
     invitations: OrganizationInvitationRepository
     members: OrganizationMemberRepository

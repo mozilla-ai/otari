@@ -4,7 +4,7 @@ from gateway.repositories.organizations.organization_invitation_repository impor
     SendRequest,
     SendResult,
 )
-from gateway.repositories.organizations.organization_repositories import OrganizationRepositories
+from gateway.repositories.organizations.organizations_repositories import OrganizationRepositories
 
 __all__ = [
     "DueInvitation",
