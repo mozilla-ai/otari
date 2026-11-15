@@ -10,6 +10,7 @@ from types import TracebackType
 from typing import Self
 
 from gateway.core.addresses import stored_address
+from gateway.exceptions.organizations_exceptions import InvitationLimitCeiling
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
 
 # NOTE: A fixed window.
@@ -66,8 +67,10 @@ class InvitationLimits:
         self._per_day = per_day
         self._per_address_per_day = per_address_per_day
 
-    async def admit(self, *, account_id: uuid.UUID, email: str, organization_id: uuid.UUID) -> Admission | None:
-        """Count one invitation request, or return None once any of its four keys is full.
+    async def admit(
+        self, *, account_id: uuid.UUID, email: str, organization_id: uuid.UUID
+    ) -> Admission | InvitationLimitCeiling:
+        """Count one invitation request, or return the ceiling that refused it once one of its four keys is full.
 
         Raise ``ValueError`` when ``email`` is not an address that can be stored.
         """
@@ -78,21 +81,26 @@ class InvitationLimits:
         organization_address_hash = hashlib.sha256(f"organization:{organization_id}:{address}".encode()).hexdigest()
         account_address_hash = hashlib.sha256(f"account:{account_id}:{address}".encode()).hexdigest()
         keyed_limits = (
-            (f"invitation:organization:{organization_id}", self._per_day),
-            (f"invitation:account:{account_id}", self._per_day),
+            (f"invitation:organization:{organization_id}", self._per_day, InvitationLimitCeiling.DAILY),
+            (f"invitation:account:{account_id}", self._per_day, InvitationLimitCeiling.DAILY),
             (
                 f"invitation:organization:{organization_id}:address:{organization_address_hash}",
                 self._per_address_per_day,
+                InvitationLimitCeiling.ADDRESS,
             ),
-            (f"invitation:account:{account_id}:address:{account_address_hash}", self._per_address_per_day),
+            (
+                f"invitation:account:{account_id}:address:{account_address_hash}",
+                self._per_address_per_day,
+                InvitationLimitCeiling.ADDRESS,
+            ),
         )
         entries: list[tuple[str, str]] = []
         try:
-            for key, limit in keyed_limits:
+            for key, limit, ceiling in keyed_limits:
                 window = await self._store.hit(key, limit, _WINDOW_SEC)
                 if window.handle is None:
                     await _settle_all(self._store, entries)
-                    return None
+                    return ceiling
                 entries.append((key, window.handle))
         except BaseException:
             await _settle_all(self._store, entries)

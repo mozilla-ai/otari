@@ -52,9 +52,9 @@ def _invitation(
 
 async def _add(repository: OrganizationInvitationRepository, new: NewInvitation) -> OrganizationInvitation:
     """Add an invitation that is not expected to collide, for a test that is not about that."""
-    invitation = await repository.add(new)
-    assert invitation is not None
-    return invitation
+    rows = await repository.add_many([new])
+    assert rows
+    return rows[0]
 
 
 async def test_a_delete_waits_for_a_concurrent_one_and_then_finds_nothing_to_remove(postgres_url: str) -> None:
@@ -196,6 +196,134 @@ async def test_add_still_raises_for_another_refusal(async_db: AsyncSession) -> N
                     workspace_assignments=[],
                 )
             )
+
+
+async def test_add_many_inserts_every_address_in_one_call(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="batched-add")
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        repository = OrganizationInvitationRepository(uow)
+        rows = await repository.add_many(
+            [
+                _invitation(organization, email="b@example.com", token_hash="b"),
+                _invitation(organization, email="a@example.com", token_hash="a"),
+            ]
+        )
+
+        assert {row.email for row in rows} == {"a@example.com", "b@example.com"}
+        assert await repository.get_by_organization_and_emails(organization.id, ["a@example.com", "b@example.com"])
+
+
+async def test_add_many_counts_the_first_send_request(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="first-send-request")
+    uow = UnitOfWork(async_db)
+    created_at = datetime(2026, 1, 5, tzinfo=UTC)
+
+    async with uow:
+        repository = OrganizationInvitationRepository(uow)
+        rows = await repository.add_many(
+            [_invitation(organization, email="ada@example.com", token_hash="t1", created_at=created_at)]
+        )
+
+        [invitation] = rows
+        assert invitation.send_count == 1
+        assert invitation.last_send_requested_at == created_at
+        assert invitation.created_at == created_at
+
+
+async def test_add_many_skips_an_address_already_invited(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="batched-add-duplicate")
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        repository = OrganizationInvitationRepository(uow)
+        await _add(repository, _invitation(organization, email="grace@x.test", token_hash="t1"))
+
+        rows = await repository.add_many(
+            [
+                _invitation(organization, email="GRACE@x.test", token_hash="t2"),
+                _invitation(organization, email="new@example.com", token_hash="t3"),
+            ]
+        )
+
+        assert {row.email for row in rows} == {"new@example.com"}
+
+
+async def test_add_many_with_nothing_to_add_touches_nothing(async_db: AsyncSession) -> None:
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        assert await OrganizationInvitationRepository(uow).add_many([]) == []
+
+
+async def test_add_many_still_raises_for_another_refusal(async_db: AsyncSession) -> None:
+    uow = UnitOfWork(async_db)
+
+    with pytest.raises(IntegrityError):
+        async with uow:
+            repository = OrganizationInvitationRepository(uow)
+            await repository.add_many(
+                [
+                    NewInvitation(
+                        created_at=_NOW,
+                        email="ada@example.com",
+                        expires_at=_FAR_FUTURE,
+                        invited_by_user_id=None,
+                        next_send_at=None,
+                        organization_id=uuid.uuid4(),
+                        role="member",
+                        token_hash="t1",
+                        workspace_assignments=[],
+                    )
+                ]
+            )
+
+
+async def test_add_many_rejects_text_that_is_not_an_address(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="not-an-address-batch")
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        repository = OrganizationInvitationRepository(uow)
+
+        with pytest.raises(ValueError, match="email address"):
+            await repository.add_many([_invitation(organization, email="not an address", token_hash="t1")])
+
+
+async def test_two_batched_adds_sharing_an_address_wait_rather_than_time_out(postgres_url: str) -> None:
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    shared_address = "shared@example.com"
+
+    async def add_many(session: AsyncSession, organization: Organization, suffix: str) -> list[OrganizationInvitation]:
+        return await OrganizationInvitationRepository(session).add_many(
+            [
+                _invitation(organization, email=f"only-{suffix}@example.com", token_hash=f"only-{suffix}"),
+                _invitation(organization, email=shared_address, token_hash=f"shared-{suffix}"),
+            ]
+        )
+
+    try:
+        async with sessions() as setup:
+            organization = await create_organization(setup, slug="batched-add-lock-wait")
+            await setup.commit()
+
+        async with sessions() as first, sessions() as second:
+            first_result = await add_many(first, organization, "first")
+            second_task = asyncio.create_task(add_many(second, organization, "second"))
+            # Still waiting after 2.5 seconds: a batched add sets no lock timeout, so the
+            # second call waits for the first's row lock instead of failing fast.
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(asyncio.shield(second_task), timeout=2.5)
+            await first.commit()
+            second_result = await second_task
+            await second.commit()
+    finally:
+        await engine.dispose()
+
+    assert {row.email for row in first_result} == {"only-first@example.com", shared_address}
+    assert {row.email for row in second_result} == {"only-second@example.com"}
 
 
 async def test_an_invitation_in_another_organization_is_not_found(async_db: AsyncSession) -> None:

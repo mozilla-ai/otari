@@ -156,20 +156,23 @@ class _Store:
         if organization_id is None:
             organization_id = await self.organization()
         async with self.uow:
-            row = await self.invitations.add(
-                NewInvitation(
-                    created_at=_NOW,
-                    email=email,
-                    expires_at=expires_at,
-                    invited_by_user_id=None,
-                    next_send_at=_NOW,
-                    organization_id=organization_id,
-                    role="member",
-                    token_hash=f"{_SEED_HASH_PREFIX}{uuid.uuid4().hex}",
-                    workspace_assignments=[],
-                )
+            rows = await self.invitations.add_many(
+                [
+                    NewInvitation(
+                        created_at=_NOW,
+                        email=email,
+                        expires_at=expires_at,
+                        invited_by_user_id=None,
+                        next_send_at=_NOW,
+                        organization_id=organization_id,
+                        role="member",
+                        token_hash=f"{_SEED_HASH_PREFIX}{uuid.uuid4().hex}",
+                        workspace_assignments=[],
+                    )
+                ]
             )
-            assert row is not None
+            assert rows
+            row = rows[0]
             row.declined_at = declined_at
             await self._session.flush()
             return row.id

@@ -47,9 +47,9 @@ def _invitation(
 
 async def _add(repository: OrganizationInvitationRepository, new: NewInvitation) -> OrganizationInvitation:
     """Add an invitation that is not expected to collide, for a test that is not about that."""
-    invitation = await repository.add(new)
-    assert invitation is not None
-    return invitation
+    rows = await repository.add_many([new])
+    assert rows
+    return rows[0]
 
 
 @pytest_asyncio.fixture

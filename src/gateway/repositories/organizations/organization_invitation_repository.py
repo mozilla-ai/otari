@@ -16,6 +16,9 @@ from gateway.models.organizations import OrganizationInvitation, WorkspaceAssign
 from gateway.models.tenancy import OrganizationMemberRole
 from gateway.repositories.base_repository import BaseRepository
 
+# NOTE: Two writers that each hold a row the other wants fail fast instead of waiting.
+_ADD_LOCK_TIMEOUT_MS = 2000
+
 
 @dataclass(frozen=True, kw_only=True)
 class DueInvitation:
@@ -119,8 +122,54 @@ class OrganizationInvitationRepository(BaseRepository[OrganizationInvitation, Ne
             [invitation],
             conflict=[OrganizationInvitation.organization_id, OrganizationInvitation.email],
             returning=OrganizationInvitation,
+            lock_timeout_ms=_ADD_LOCK_TIMEOUT_MS,
         )
         return rows[0] if rows else None
+
+    async def add_many(self, news: Sequence[NewInvitation]) -> list[OrganizationInvitation]:
+        """Save every new invitation in one statement, skipping any address its organization already has.
+
+        Creating an invitation counts as its first send request.
+        An address missing from the result already had an invitation in its organization.
+        The transaction stays usable.
+        Raise ``ValueError`` when one of ``news`` has an email that is not an email address that can be stored.
+
+        NOTE: Rows are inserted in address order,
+        so two calls sharing addresses only ever wait on each other here, never deadlock.
+        That is why this sets no lock timeout to fail fast on.
+        """
+        if not news:
+            return []
+        validated: list[tuple[str, NewInvitation]] = []
+        for new in news:
+            email = stored_address(new.email)
+            if email is None:
+                msg = "An invitation needs an email address that can be stored."
+                raise ValueError(msg)
+            validated.append((email, new))
+        validated.sort(key=lambda item: item[0])
+        invitations = [
+            OrganizationInvitation(
+                created_at=new.created_at,
+                email=email,
+                expires_at=new.expires_at,
+                invited_by_user_id=new.invited_by_user_id,
+                last_send_requested_at=new.created_at,
+                next_send_at=new.next_send_at,
+                organization_id=new.organization_id,
+                role=new.role,
+                send_count=1,
+                token_hash=new.token_hash,
+                workspace_assignments=list(new.workspace_assignments),
+            )
+            for email, new in validated
+        ]
+        return await insert_ignoring_duplicates(
+            self.db,
+            invitations,
+            conflict=[OrganizationInvitation.organization_id, OrganizationInvitation.email],
+            returning=OrganizationInvitation,
+        )
 
     async def claim_due_send(
         self, *, now: datetime, held_until: datetime, max_attempts: int, token_hash: str
@@ -205,6 +254,33 @@ class OrganizationInvitationRepository(BaseRepository[OrganizationInvitation, Ne
             ),
         )
         return result.rowcount == 1
+
+    async def delete_expired_in_organization(
+        self, invitation_ids: Collection[uuid.UUID], organization_id: uuid.UUID, *, expired_by: datetime
+    ) -> int:
+        """Delete these invitations if they belong to this organization and are still expired as of ``expired_by``.
+
+        Returns how many were deleted, which may be fewer than given.
+        A renewal that committed first leaves that row in place for its own invitation to keep.
+
+        NOTE: A caller must not look up one of these by id again on the same transaction;
+        the lookup can still return it.
+        """
+        if not invitation_ids:
+            return 0
+        result = cast(
+            CursorResult[Any],
+            await self.db.execute(
+                delete(OrganizationInvitation)
+                .where(
+                    OrganizationInvitation.id.in_(invitation_ids),
+                    OrganizationInvitation.organization_id == organization_id,
+                    OrganizationInvitation.expires_at <= expired_by,
+                )
+                .execution_options(synchronize_session=False)
+            ),
+        )
+        return result.rowcount
 
     async def finish_send(self, invitation_id: uuid.UUID, *, token_hash: str) -> bool:
         """Record that the send of a claim is finished, and return True if it was recorded.

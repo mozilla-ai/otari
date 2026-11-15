@@ -10,6 +10,7 @@ from gateway.models.organizations import WorkspaceAssignment
 from gateway.models.tenancy import OrganizationMemberRole
 from gateway.repositories.tenancy import OrganizationRepository, UserRepository, WorkspaceRepository
 from gateway.services.organizations._claimed_domains import ClaimedDomains, proven_domains
+from gateway.services.organizations._workspace_assignments import workspace_id_of
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -46,13 +47,7 @@ class InvitationTerms(Protocol):
 
 
 def _workspace_ids(assignments: Sequence[WorkspaceAssignment]) -> list[uuid.UUID]:
-    ids = []
-    for assignment in assignments:
-        try:
-            ids.append(uuid.UUID(str(assignment.get("workspace_id"))))
-        except ValueError:
-            continue
-    return ids
+    return [workspace_id for assignment in assignments if (workspace_id := workspace_id_of(assignment)) is not None]
 
 
 class InvitationFactsReader:
