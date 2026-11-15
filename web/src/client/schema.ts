@@ -8968,7 +8968,7 @@ export interface components {
             output_price_per_million: number;
             /**
              * Provider
-             * @description The decision provider: typesafe, openrouter or llamacpp.
+             * @description The decision provider: typesafe, openrouter, gemini or llamacpp.
              */
             provider: string;
         };
