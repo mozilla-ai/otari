@@ -2,7 +2,7 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/a6bde644d8b7431d59c3519b84bb9d79a711448a/docs/public/openapi.json), the source of truth for paths,
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/f8bd36fd3abb67206172f4d3444c0506b0ba7e45/docs/public/openapi.json), the source of truth for paths,
 parameters, and schemas.
 
 ## Base URL
@@ -1033,7 +1033,8 @@ in the operator's order; a value out of range is a `422`.
 probabilities rather than generated text: `noul` (the probability of yes),
 `choice` (one of the named options) and `score` (a level on an ordered scale).
 The body is TypeSafe's System One shape, which OpenRouter's alpha Decisions API
-and llama-server also take:
+and llama-server also take, and which Otari translates for Google's Gemini
+Decisions API:
 
 ```json
 {
@@ -1053,8 +1054,9 @@ and llama-server also take:
 `model` is `<provider>:<model>`, where the provider is an entry under
 [`decision_providers`](https://docs.otari.ai/self-hosting/configuration#decision-providers). The answer comes back
 as the provider returned it, keyed like the questions, with `probabilities`,
-`confidence` and `usage`. `images` takes data URLs for a vision decision model
-served by llama-server; other providers refuse it.
+`confidence` and `usage` (a Gemini answer also gets `model`, and its token counts
+as `usage.input_tokens` and `usage.output_tokens`). `images` takes data URLs for a
+vision decision model served by llama-server or Gemini; other providers refuse it.
 
 `POST /api/v1/systemone` serves the same request at the path TypeSafe's SDK and
 llama-server use, so a client written for either works against Otari with its

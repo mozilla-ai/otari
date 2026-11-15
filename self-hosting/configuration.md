@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/a6bde644d8b7431d59c3519b84bb9d79a711448a/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/f8bd36fd3abb67206172f4d3444c0506b0ba7e45/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -855,7 +855,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/a6bde644d8b7431d59c3519b84bb9d79a711448a/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/f8bd36fd3abb67206172f4d3444c0506b0ba7e45/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -1622,7 +1622,8 @@ calls, its 422 past it, and its own enrichment through the built-in fetcher.
 
 `decision_providers` configures the upstreams behind `POST /api/v1/decisions`. The
 key is the prefix callers write in `model`, so the entry below serves
-`typesafe:jev-latest`, `openrouter:typesafe/jev-1.13` and `local:openjev`:
+`typesafe:jev-latest`, `openrouter:typesafe/jev-1.13`, `gemini:gemini-decision-1`
+and `local:openjev`:
 
 ```yaml
 decision_providers:
@@ -1630,16 +1631,29 @@ decision_providers:
     api_key: ${TYPESAFE_API_KEY}
   openrouter:
     api_key: ${OPENROUTER_API_KEY}
+  gemini:
+    api_key: ${GEMINI_API_KEY}
   local:
     provider: llamacpp
     api_base: "http://127.0.0.1:8080"
 ```
 
-`provider` is one of `typesafe`, `openrouter` or `llamacpp`, and defaults to the
-key. TypeSafe and OpenRouter need an `api_key`, and their default `api_base` can be
-replaced with another https root. A `llamacpp` entry points at a `llama-server`
+`provider` is one of `typesafe`, `openrouter`, `gemini` or `llamacpp`, and defaults
+to the key. TypeSafe, OpenRouter and Gemini need an `api_key`, and their default
+`api_base` can be replaced with another https root. A `llamacpp` entry points at a `llama-server`
 running a decision model and needs an `api_base`; it may use plain http only when
 it has no `api_key`. `timeout` sets the seconds to wait for an answer (default 30).
+
+A `gemini` entry calls Google's
+[Decisions API](https://aistudio.google.com/docs/decisions-api) with a Gemini API
+key. Callers keep sending the same request body: the gateway translates it to
+Gemini's shape (`state` becomes `input`, a `noul` question's `true` and `false`
+criteria become `true_description` and `false_description`, structured JSON is
+serialized to text, and each data URL in `images` becomes an inline image block)
+and returns Gemini's answer with its token counts as `usage.input_tokens` and
+`usage.output_tokens`. Question fields Gemini has no counterpart for are not sent.
+Gemini reports no cost, so price its model in `pricing` (as
+`gemini:gemini-decision-1`) to have its requests charged against budgets.
 
 These entries are separate from `providers` because none of these upstreams serves
 chat: they never appear in `/api/v1/models` or provider health. Price a decision
@@ -1876,7 +1890,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/a6bde644d8b7431d59c3519b84bb9d79a711448a/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/f8bd36fd3abb67206172f4d3444c0506b0ba7e45/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Contacting the Otari team
