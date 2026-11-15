@@ -1,4 +1,7 @@
-"""Creating and listing organization invitations, with a set clock and an in-memory rate limit store, on SQLite."""
+"""Creating, listing, canceling and resending organization invitations, and noting an unproven address.
+
+With a set clock and an in-memory rate limit store, on SQLite.
+"""
 
 import dataclasses
 import logging
@@ -36,6 +39,7 @@ from gateway.exceptions.organizations_exceptions import (
 from gateway.log_config import logger as gateway_logger
 from gateway.models.organizations import OrganizationInvitation
 from gateway.models.tenancy import (
+    DOMAIN_PROOF_TTL,
     MAX_BULK_INVITATIONS,
     MAX_WORKSPACE_ASSIGNMENTS,
     Organization,
@@ -59,6 +63,7 @@ from gateway.services.organizations._invitation_facts import InvitationFactsRead
 from gateway.services.organizations._invitation_limits import Admission, InvitationLimits
 from gateway.services.organizations._invitations import (
     ActingMember,
+    AddressNote,
     InvitationEntry,
     InvitationOffer,
     InvitationPolicy,
@@ -1349,6 +1354,139 @@ async def test_resend_refuses_after_the_caller_is_removed(store: _Store) -> None
 
     with pytest.raises(NotAuthorizedError):
         await service.resend(by, issued.invitation.id)
+
+
+async def test_address_notes_ignores_whether_the_address_has_an_account(store: _Store) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id)
+    await store.actor(organization_id, role="member", email="ada@example.com")
+
+    notes = await store.invitations().address_notes(by, ["ada@example.com"])
+
+    assert notes == [AddressNote(domain="example.com", email="ada@example.com")]
+
+
+async def test_no_note_for_an_address_at_an_own_proven_domain(store: _Store) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id)
+    async with store.uow:
+        store._session.add(
+            OrganizationDomain(
+                organization_id=organization_id,
+                domain="example.org",
+                verification_token=uuid.uuid4().hex,
+                verified_at=store.clock.now,
+            )
+        )
+        await store._session.flush()
+
+    notes = await store.invitations().address_notes(by, ["ada@example.org"])
+
+    assert notes == []
+
+
+async def test_no_note_for_a_public_email_provider(store: _Store) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id)
+
+    notes = await store.invitations().address_notes(by, ["ada@gmail.com"])
+
+    assert notes == []
+
+
+async def test_a_note_for_any_other_address(store: _Store) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id)
+
+    notes = await store.invitations().address_notes(by, ["Ada@Example.com"])
+
+    assert notes == [AddressNote(domain="example.com", email="Ada@Example.com")]
+
+
+async def test_a_note_for_an_own_domain_whose_proof_has_expired(store: _Store) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id)
+    async with store.uow:
+        store._session.add(
+            OrganizationDomain(
+                organization_id=organization_id,
+                domain="example.org",
+                verification_token=uuid.uuid4().hex,
+                verified_at=store.clock.now - DOMAIN_PROOF_TTL - timedelta(days=1),
+            )
+        )
+        await store._session.flush()
+
+    notes = await store.invitations().address_notes(by, ["ada@example.org"])
+
+    assert notes == [AddressNote(domain="example.org", email="ada@example.org")]
+
+
+async def test_the_note_is_the_same_whether_or_not_another_organization_proved_the_domain(store: _Store) -> None:
+    organization_id = await store.organization()
+    other_organization_id = await store.organization("Other")
+    by = await store.actor(organization_id)
+    async with store.uow:
+        store._session.add(
+            OrganizationDomain(
+                organization_id=other_organization_id,
+                domain="example.org",
+                verification_token=uuid.uuid4().hex,
+                verified_at=store.clock.now,
+            )
+        )
+        await store._session.flush()
+
+    notes = await store.invitations().address_notes(by, ["ada@example.org"])
+
+    assert notes == [AddressNote(domain="example.org", email="ada@example.org")]
+
+
+async def test_no_note_for_text_an_invitation_would_refuse(store: _Store) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id)
+
+    notes = await store.invitations().address_notes(by, ["not-an-address"])
+
+    assert notes == []
+
+
+async def test_address_notes_keeps_order_and_skips_addresses_needing_none(store: _Store) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id)
+    async with store.uow:
+        store._session.add(
+            OrganizationDomain(
+                organization_id=organization_id,
+                domain="example.org",
+                verification_token=uuid.uuid4().hex,
+                verified_at=store.clock.now,
+            )
+        )
+        await store._session.flush()
+
+    notes = await store.invitations().address_notes(
+        by, ["ada@example.org", "grace@gmail.com", "mae@example.net", "not-an-address"]
+    )
+
+    assert notes == [AddressNote(domain="example.net", email="mae@example.net")]
+
+
+async def test_address_notes_refuses_more_than_100_addresses(store: _Store) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id)
+    emails = [f"user{i}@example.com" for i in range(MAX_BULK_INVITATIONS + 1)]
+
+    with pytest.raises(InvitationRequestTooLargeError):
+        await store.invitations().address_notes(by, emails)
+
+
+async def test_address_notes_refuses_a_member(store: _Store) -> None:
+    organization_id = await store.organization()
+    member = await store.actor(organization_id, role="member")
+
+    with pytest.raises(NotAuthorizedError):
+        await store.invitations().address_notes(member, ["ada@example.com"])
 
 
 async def test_invite_logs_nothing_that_names_the_address_or_a_token(

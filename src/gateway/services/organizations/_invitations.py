@@ -1,4 +1,4 @@
-"""Creating, listing, canceling and resending an organization's invitations."""
+"""Creating, listing, canceling and resending an organization's invitations, and noting an unproven address."""
 
 import uuid
 from collections.abc import Callable, Sequence
@@ -9,6 +9,7 @@ from enum import StrEnum
 from typing import Protocol
 
 from gateway.core.addresses import stored_address
+from gateway.core.email_domains import email_domain, is_public_email_domain
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions import TenancyError
 from gateway.exceptions.identity_exceptions import InvalidEmailError
@@ -39,7 +40,7 @@ from gateway.models.tenancy import (
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.repositories.organizations import NewInvitation, OrganizationRepositories, SendRequest
 from gateway.services.mail import Mailer
-from gateway.services.organizations._claimed_domains import ClaimedDomain
+from gateway.services.organizations._claimed_domains import ClaimedDomain, proven_domains
 from gateway.services.organizations._invitation_limits import Admission, InvitationLimits
 from gateway.services.organizations._send_token import Mint, mint_send
 from gateway.services.organizations._workspace_assignments import workspace_id_of
@@ -176,6 +177,14 @@ class OwnClaimedDomains(Protocol):
         ...
 
 
+@dataclass(frozen=True, kw_only=True)
+class AddressNote:
+    """A note that an address's domain is neither one the inviting organization has proven nor a public provider's."""
+
+    domain: str
+    email: str
+
+
 @dataclass
 class _Candidate:
     """One address through a bulk invitation call, in the order the caller gave it.
@@ -193,7 +202,7 @@ class _Candidate:
 
 
 class Invitations:
-    """Creates, lists, cancels and resends an organization's invitations.
+    """Creates, lists, cancels and resends an organization's invitations, and notes an unproven address.
 
     NOTE: A refusal must never name another organization or say whether an address holds an account anywhere.
     Add no read to this service that could answer either question.
@@ -333,6 +342,32 @@ class Invitations:
         return IssuedInvitation(
             accept_link=mint.accept_link, email=invitation.email, invitation=self._entry(invitation, now=now)
         )
+
+    async def address_notes(self, by: ActingMember, emails: Sequence[str]) -> list[AddressNote]:
+        """Note each address whose domain is neither one this organization has proven nor a public provider's.
+
+        Refuses unless the caller may manage the organization, and caps how many addresses one call may name.
+        It makes no SSO check.
+        An address that cannot be stored gets no note.
+        """
+        if len(emails) > MAX_BULK_INVITATIONS:
+            raise InvitationRequestTooLargeError.too_many_addresses(MAX_BULK_INVITATIONS)
+        now = self._clock()
+        async with self._uow:
+            await self._require_management(by)
+            claims = await self._domains.for_organization(by.organization_id)
+        proven = proven_domains(claims, now=now)
+
+        notes: list[AddressNote] = []
+        for email in emails:
+            address = stored_address(email)
+            if address is None:
+                continue
+            domain = email_domain(address)
+            if domain is None or domain in proven or is_public_email_domain(domain):
+                continue
+            notes.append(AddressNote(domain=domain, email=email))
+        return notes
 
     async def _invite_many(self, by: ActingMember, emails: Sequence[str], offer: InvitationOffer) -> BulkInvitations:
         """Invite every address, owning its own Unit of Work transaction from here to its return."""
