@@ -3,7 +3,7 @@
 import dataclasses
 import logging
 import uuid
-from collections.abc import AsyncIterator, Iterator, Sequence
+from collections.abc import AsyncIterator, Collection, Iterator, Sequence
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -23,7 +23,10 @@ from gateway.exceptions.organizations_exceptions import (
     DuplicateInvitationAddressError,
     InvitationLimitCeiling,
     InvitationLimitError,
+    InvitationNotFoundError,
     InvitationRequestTooLargeError,
+    InvitationResendLimitError,
+    InvitationResendTooSoonError,
     InvitationsNeedSsoError,
     MembershipUpdateError,
     NotAuthorizedError,
@@ -43,9 +46,16 @@ from gateway.ports.rate_limit_store_port import RateLimitStorePort, RateLimitWin
 from gateway.repositories.identity import BlockedEmailRepository
 from gateway.repositories.organizations import NewInvitation, OrganizationRepositories
 from gateway.repositories.organizations.organization_invitation_repository import OrganizationInvitationRepository
-from gateway.repositories.tenancy import OrganizationDomainRepository, UserRepository, WorkspaceRepository
-from gateway.services.mail import Mailer
-from gateway.services.organizations import OrganizationClaimedDomains
+from gateway.repositories.tenancy import (
+    OrganizationDomainRepository,
+    OrganizationRepository,
+    UserRepository,
+    WorkspaceRepository,
+)
+from gateway.services.mail import MailDelivery, Mailer, MailMessage
+from gateway.services.organizations import DeliveryRule, InvitationDelivery, OrganizationClaimedDomains
+from gateway.services.organizations._delivery import MAX_ATTEMPTS
+from gateway.services.organizations._invitation_facts import InvitationFactsReader
 from gateway.services.organizations._invitation_limits import Admission, InvitationLimits
 from gateway.services.organizations._invitations import (
     ActingMember,
@@ -61,6 +71,8 @@ from gateway.services.organizations._invitations import (
 pytestmark = pytest.mark.asyncio
 
 _NOW = datetime(2026, 6, 1, 12, tzinfo=UTC)
+_DELIVERED = MailDelivery(delivered=True, transport="test")
+_NOT_DELIVERED = MailDelivery(delivered=False, transport="test", reason="refused")
 
 
 class _Clock:
@@ -129,10 +141,12 @@ class _Store:
             await self._session.flush()
             return row.id
 
-    async def actor(self, organization_id: uuid.UUID, *, role: str = "owner", email: str | None = None) -> ActingMember:
+    async def actor(
+        self, organization_id: uuid.UUID, *, role: str = "owner", email: str | None = None, full_name: str = "Actor"
+    ) -> ActingMember:
         async with self.uow:
             user = await UserRepository(self.uow).create_local_identity(
-                full_name="Actor", active_organization_id=organization_id, email=email
+                full_name=full_name, active_organization_id=organization_id, email=email
             )
             await self.repositories.members.create_membership(
                 organization_id=organization_id, user_id=user.id, role=role
@@ -174,6 +188,51 @@ class _Store:
             row.next_send_at = next_send_at
             row.delivery_attempts = attempts
             await self._session.flush()
+
+    async def set_sso_required(self, organization_id: uuid.UUID, *, value: bool) -> None:
+        async with self.uow:
+            row = await self.repositories.organizations.get(organization_id)
+            assert row is not None
+            row.sso_required = value
+            await self._session.flush()
+
+    def delivery_with(self, mailer: Mailer) -> InvitationDelivery:
+        domains = OrganizationClaimedDomains(OrganizationDomainRepository(self.uow))
+        return InvitationDelivery(
+            self.uow,
+            OrganizationRepositories.on(self.uow),
+            rule=DeliveryRule(domains, _Blocklist()),
+            facts=InvitationFactsReader(
+                domains=domains,
+                organizations=OrganizationRepository(self.uow),
+                users=UserRepository(self.uow),
+                workspaces=WorkspaceRepository(self.uow),
+            ),
+            mailer=mailer,
+            clock=self.clock,
+        )
+
+
+class _Blocklist:
+    """Blocks nothing, so the delivery rule's own say is the only thing a resend test has to account for."""
+
+    async def blocked_among(self, emails: Collection[str]) -> set[str]:
+        return set()
+
+
+class _RecordingMailer(Mailer):
+    """Records each address sent to and answers with ``result``, with no real socket I/O."""
+
+    def __init__(self, **settings: str) -> None:
+        super().__init__(_config(**settings))
+        self.sent: list[str] = []
+        self.result = _DELIVERED
+
+    async def send(
+        self, *, to: str, message: MailMessage, reply_to: str | None = None, sender_name: str | None = None
+    ) -> MailDelivery:
+        self.sent.append(to)
+        return self.result
 
 
 class _SpyRateLimitStore:
@@ -313,6 +372,40 @@ async def test_invite_does_the_same_work_whatever_the_delivery_rule_says(store: 
     normalized = {_normalized(result.invitation) for result in results}
     assert len(normalized) == 1
     assert [result.accept_link is None for result in results] == [True, True, True]
+
+
+async def test_resend_does_the_same_work_whatever_the_delivery_rule_says(store: _Store) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id)
+    service = store.invitations()
+
+    ordinary = await service.invite(by, "ordinary@example.com", _offer())
+
+    other_organization_id = await store.organization("Other")
+    async with store.uow:
+        store._session.add(
+            OrganizationDomain(
+                organization_id=other_organization_id,
+                domain="proven.test",
+                verification_token=uuid.uuid4().hex,
+                verified_at=store.clock.now,
+            )
+        )
+        await store._session.flush()
+    proven_domain = await service.invite(by, "someone@proven.test", _offer())
+
+    async with store.uow:
+        await BlockedEmailRepository(store.uow).add(
+            pattern="blocked@example.com", reason=None, created_by_user_id=by.user_id
+        )
+    blocked = await service.invite(by, "blocked@example.com", _offer())
+
+    store.clock.now += timedelta(hours=2)
+    resent = [await service.resend(by, issued.invitation.id) for issued in (ordinary, proven_domain, blocked)]
+
+    normalized = {_normalized(result.invitation) for result in resent}
+    assert len(normalized) == 1
+    assert [result.accept_link is None for result in resent] == [True, True, True]
 
 
 async def test_entries_hide_how_delivery_went(store: _Store) -> None:
@@ -877,6 +970,385 @@ async def test_resend_available_at_follows_the_wait_and_the_limit(store: _Store)
 
     [entry] = (await service.page(by, skip=0, limit=10))[0]
     assert entry.resend_available_at is None
+
+
+async def test_cancel_removes_the_invitation_and_its_link(store: _Store) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id)
+    service = store.invitations(mailer=Mailer(_config(mail_transport="none")))
+    issued = await service.invite(by, "ada@example.com", _offer())
+    assert issued.accept_link is not None
+    token_hash = hash_token(issued.accept_link.rsplit("token=", 1)[-1])
+
+    await service.cancel(by, issued.invitation.id)
+
+    assert await store.invitation(issued.invitation.id) is None
+    async with store.uow:
+        assert await store.repositories.invitations.get_by_token_hash(token_hash) is None
+
+
+async def test_cancel_of_another_organizations_invitation_is_not_found(store: _Store) -> None:
+    organization_id = await store.organization()
+    other_organization_id = await store.organization("Other")
+    by = await store.actor(organization_id)
+    other_by = await store.actor(other_organization_id)
+    service = store.invitations()
+    issued = await service.invite(by, "ada@example.com", _offer())
+
+    with pytest.raises(InvitationNotFoundError):
+        await service.cancel(other_by, issued.invitation.id)
+
+
+async def test_an_admin_cannot_cancel_an_owner_invitation(store: _Store) -> None:
+    organization_id = await store.organization()
+    owner = await store.actor(organization_id, role="owner")
+    admin = await store.actor(organization_id, role="admin")
+    service = store.invitations()
+    issued = await service.invite(owner, "ada@example.com", _offer(role="owner"))
+
+    with pytest.raises(MembershipUpdateError):
+        await service.cancel(admin, issued.invitation.id)
+
+
+async def test_an_admin_cannot_resend_an_owner_invitation(store: _Store) -> None:
+    organization_id = await store.organization()
+    owner = await store.actor(organization_id, role="owner")
+    admin = await store.actor(organization_id, role="admin")
+    service = store.invitations()
+    issued = await service.invite(owner, "ada@example.com", _offer(role="owner"))
+
+    with pytest.raises(MembershipUpdateError):
+        await service.resend(admin, issued.invitation.id)
+
+
+async def test_an_owner_can_cancel_and_resend_an_owner_invitation(store: _Store) -> None:
+    organization_id = await store.organization()
+    owner = await store.actor(organization_id, role="owner")
+    service = store.invitations()
+    issued = await service.invite(owner, "ada@example.com", _offer(role="owner"))
+
+    store.clock.now += timedelta(hours=2)
+    resent = await service.resend(owner, issued.invitation.id)
+    assert resent.invitation.role == "owner"
+
+    await service.cancel(owner, resent.invitation.id)
+    assert await store.invitation(resent.invitation.id) is None
+
+
+async def test_cancel_refuses_a_member(store: _Store) -> None:
+    organization_id = await store.organization()
+    owner = await store.actor(organization_id, role="owner")
+    member = await store.actor(organization_id, role="member")
+    issued = await store.invitations().invite(owner, "ada@example.com", _offer())
+
+    with pytest.raises(NotAuthorizedError):
+        await store.invitations().cancel(member, issued.invitation.id)
+
+
+async def test_resend_replaces_the_link(store: _Store) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id)
+    service = store.invitations(mailer=Mailer(_config(mail_transport="none")))
+    issued = await service.invite(by, "ada@example.com", _offer())
+    assert issued.accept_link is not None
+    old_hash = hash_token(issued.accept_link.rsplit("token=", 1)[-1])
+
+    store.clock.now += timedelta(hours=2)
+    resent = await service.resend(by, issued.invitation.id)
+
+    assert resent.accept_link is not None
+    assert resent.accept_link != issued.accept_link
+    async with store.uow:
+        assert await store.repositories.invitations.get_by_token_hash(old_hash) is None
+        new_hash = hash_token(resent.accept_link.rsplit("token=", 1)[-1])
+        assert await store.repositories.invitations.get_by_token_hash(new_hash) is not None
+
+
+async def test_resend_after_three_failed_sends_sends_again(store: _Store) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id)
+    mailer = _RecordingMailer()
+    service = store.invitations(mailer=mailer)
+    delivery = store.delivery_with(mailer)
+    issued = await service.invite(by, "ada@example.com", _offer())
+
+    mailer.result = _NOT_DELIVERED
+    for _ in range(MAX_ATTEMPTS):
+        assert await delivery.send_due() is True
+        store.clock.now += timedelta(hours=1)
+    assert len(mailer.sent) == MAX_ATTEMPTS
+    row = await store.invitation(issued.invitation.id)
+    assert row is not None
+    assert row.next_send_at is None
+
+    await service.resend(by, issued.invitation.id)
+
+    mailer.result = _DELIVERED
+    assert await delivery.send_due() is True
+    assert mailer.sent == ["ada@example.com"] * (MAX_ATTEMPTS + 1)
+
+
+async def test_a_send_in_flight_records_nothing_after_a_resend(store: _Store) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id)
+    mailer = _RecordingMailer()
+    service = store.invitations(mailer=mailer)
+    delivery = store.delivery_with(mailer)
+    issued = await service.invite(by, "ada@example.com", _offer())
+
+    async with store.uow:
+        claim = await store.repositories.invitations.claim_due_send(
+            now=store.clock.now,
+            held_until=store.clock.now + timedelta(minutes=10),
+            max_attempts=MAX_ATTEMPTS,
+            token_hash="in-flight",
+        )
+    assert claim is not None
+
+    store.clock.now += timedelta(hours=2)
+    await service.resend(by, issued.invitation.id)
+
+    async with store.uow:
+        assert await store.repositories.invitations.finish_send(issued.invitation.id, token_hash="in-flight") is False
+
+    mailer.result = _DELIVERED
+    assert await delivery.send_due() is True
+    assert mailer.sent == ["ada@example.com"]
+
+
+async def test_resend_after_email_is_lost_during_a_send(store: _Store) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id)
+    service = store.invitations(mailer=Mailer(_config(mail_transport="smtp")))
+    issued = await service.invite(by, "ada@example.com", _offer())
+
+    async with store.uow:
+        claim = await store.repositories.invitations.claim_due_send(
+            now=store.clock.now,
+            held_until=store.clock.now + timedelta(minutes=10),
+            max_attempts=MAX_ATTEMPTS,
+            token_hash="claim-a",
+        )
+    assert claim is not None
+
+    store.clock.now += timedelta(hours=2)
+    service_without_email = store.invitations(mailer=Mailer(_config(mail_transport="none")))
+    resent = await service_without_email.resend(by, issued.invitation.id)
+    assert resent.accept_link is not None
+
+    row = await store.invitation(issued.invitation.id)
+    assert row is not None
+    assert row.next_send_at is None
+    assert row.token_hash == hash_token(resent.accept_link.rsplit("token=", 1)[-1])
+
+    store.clock.now += timedelta(minutes=20)
+    async with store.uow:
+        assert (
+            await store.repositories.invitations.claim_due_send(
+                now=store.clock.now,
+                held_until=store.clock.now + timedelta(minutes=10),
+                max_attempts=MAX_ATTEMPTS,
+                token_hash="probe",
+            )
+            is None
+        )
+        assert await store.repositories.invitations.finish_send(issued.invitation.id, token_hash="claim-a") is False
+        assert (
+            await store.repositories.invitations.retry_send(
+                issued.invitation.id, token_hash="claim-a", next_send_at=store.clock.now + timedelta(minutes=5)
+            )
+            is False
+        )
+
+
+async def test_resend_after_email_is_configured_makes_the_row_due(store: _Store) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id)
+    service_without_email = store.invitations(mailer=Mailer(_config(mail_transport="none")))
+    issued = await service_without_email.invite(by, "ada@example.com", _offer())
+    assert issued.accept_link is not None
+    old_hash = hash_token(issued.accept_link.rsplit("token=", 1)[-1])
+
+    store.clock.now += timedelta(hours=2)
+    service_with_email = store.invitations(mailer=Mailer(_config(mail_transport="smtp")))
+    resent = await service_with_email.resend(by, issued.invitation.id)
+
+    assert resent.accept_link is None
+    row = await store.invitation(issued.invitation.id)
+    assert row is not None
+    assert row.next_send_at == store.clock.now
+    async with store.uow:
+        assert await store.repositories.invitations.get_by_token_hash(old_hash) is None
+
+
+async def test_resend_of_an_expired_invitation_is_pending_and_sent(store: _Store) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id)
+    policy = _policy(expires_after=timedelta(hours=1))
+    service = store.invitations(policy=policy)
+    issued = await service.invite(by, "ada@example.com", _offer())
+    store.clock.now += timedelta(hours=2)
+    [before], _ = await service.page(by, skip=0, limit=10)
+    assert before.state == InvitationState.EXPIRED
+
+    resent = await service.resend(by, issued.invitation.id)
+
+    assert resent.invitation.state == InvitationState.PENDING
+    assert resent.invitation.expires_at == store.clock.now + policy.expires_after
+    row = await store.invitation(issued.invitation.id)
+    assert row is not None
+    assert row.next_send_at == store.clock.now
+
+
+async def test_resend_of_a_declined_invitation_sends_nothing(store: _Store) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id)
+    mailer = _RecordingMailer()
+    service = store.invitations(mailer=mailer)
+    delivery = store.delivery_with(mailer)
+    issued = await service.invite(by, "ada@example.com", _offer())
+    await store.decline(issued.invitation.id)
+
+    store.clock.now += timedelta(hours=2)
+    resent = await service.resend(by, issued.invitation.id)
+    assert resent.invitation.state == InvitationState.PENDING
+
+    assert await delivery.send_due() is True
+    assert mailer.sent == []
+    row = await store.invitation(issued.invitation.id)
+    assert row is not None
+    assert row.next_send_at is None
+
+
+async def test_resend_waits_and_stops_at_the_limit(store: _Store) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id)
+    policy = _policy(resend_limit=2, resend_wait=timedelta(hours=1), per_day=100, per_address_per_day=100)
+    spy_store = _SpyRateLimitStore(store.rate_limit_store)
+    service = Invitations(
+        store.uow,
+        store.repositories,
+        clock=store.clock,
+        domains=OrganizationClaimedDomains(OrganizationDomainRepository(store.uow)),
+        mailer=Mailer(_config()),
+        policy=policy,
+        store=spy_store,
+    )
+    issued = await service.invite(by, "ada@example.com", _offer())
+    spy_store.hit_calls = 0
+
+    with pytest.raises(InvitationResendTooSoonError) as too_soon:
+        await service.resend(by, issued.invitation.id)
+    assert "UTC" in str(too_soon.value)
+    assert spy_store.hit_calls == 0
+
+    store.clock.now += policy.resend_wait
+    await service.resend(by, issued.invitation.id)
+    store.clock.now += policy.resend_wait
+    await service.resend(by, issued.invitation.id)
+
+    spy_store.hit_calls = 0
+    store.clock.now += policy.resend_wait
+    with pytest.raises(InvitationResendLimitError):
+        await service.resend(by, issued.invitation.id)
+    assert spy_store.hit_calls == 0
+
+
+async def test_resend_counts_against_the_caller(store: _Store) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id)
+    policy = _policy(per_day=2, per_address_per_day=2, resend_wait=timedelta(milliseconds=1))
+    service = store.invitations(policy=policy)
+    issued = await service.invite(by, "ada@example.com", _offer())
+
+    store.clock.now += timedelta(milliseconds=1)
+    await service.resend(by, issued.invitation.id)
+
+    store.clock.now += timedelta(milliseconds=1)
+    with pytest.raises(InvitationLimitError):
+        await service.resend(by, issued.invitation.id)
+
+
+async def test_every_count_comes_back_when_a_resends_commit_fails_after_its_write_matches(
+    store: _Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id)
+    policy = _policy(per_day=2, per_address_per_day=2)
+    issued = await store.invitations(policy=policy).invite(by, "ada@example.com", _offer())
+    store.clock.now += timedelta(hours=2)
+
+    # request_send's own UPDATE matches, but the commit that would make it durable never runs.
+    async def commit_that_fails(self: AsyncSession) -> None:
+        msg = "simulated failure during commit, after the resend's write matched"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(AsyncSession, "commit", commit_that_fails)
+    service = store.invitations(policy=policy)
+
+    with pytest.raises(RuntimeError):
+        await service.resend(by, issued.invitation.id)
+
+    monkeypatch.undo()
+
+    # The failed resend's own admission came back along with its rolled-back write, so the one
+    # already spent by the invite still leaves exactly one more admission of room, not zero.
+    probe = await InvitationLimits(store.rate_limit_store, per_day=2, per_address_per_day=2).admit(
+        account_id=by.user_id, email="ada@example.com", organization_id=organization_id
+    )
+    assert isinstance(probe, Admission)
+
+
+async def test_resend_makes_the_caller_the_inviter(store: _Store) -> None:
+    organization_id = await store.organization()
+    owner = await store.actor(organization_id, role="owner", full_name="Owner")
+    second_admin = await store.actor(organization_id, role="admin", full_name="Second Admin")
+    service = store.invitations()
+    issued = await service.invite(owner, "ada@example.com", _offer())
+
+    store.clock.now += timedelta(hours=2)
+    resent = await service.resend(second_admin, issued.invitation.id)
+
+    row = await store.invitation(resent.invitation.id)
+    assert row is not None
+    assert row.invited_by_user_id == second_admin.user_id
+
+    async with store.uow:
+        facts_reader = InvitationFactsReader(
+            domains=OrganizationClaimedDomains(OrganizationDomainRepository(store.uow)),
+            organizations=OrganizationRepository(store.uow),
+            users=UserRepository(store.uow),
+            workspaces=WorkspaceRepository(store.uow),
+        )
+        facts = await facts_reader.read(row, now=store.clock.now)
+    assert facts is not None
+    assert facts.inviter_name == "Second Admin"
+
+
+async def test_resend_refuses_where_the_organization_requires_sso(store: _Store) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id)
+    service = store.invitations()
+    issued = await service.invite(by, "ada@example.com", _offer())
+    await store.set_sso_required(organization_id, value=True)
+
+    with pytest.raises(InvitationsNeedSsoError):
+        await service.resend(by, issued.invitation.id)
+
+
+async def test_resend_refuses_after_the_caller_is_removed(store: _Store) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id, role="owner")
+    service = store.invitations()
+    issued = await service.invite(by, "ada@example.com", _offer())
+
+    async with store.uow:
+        member = await store.repositories.members.get_active_by_organization_and_user(organization_id, by.user_id)
+        assert member is not None
+        await store.repositories.members.update_membership(member, {"status": "removed"})
+
+    with pytest.raises(NotAuthorizedError):
+        await service.resend(by, issued.invitation.id)
 
 
 async def test_invite_logs_nothing_that_names_the_address_or_a_token(

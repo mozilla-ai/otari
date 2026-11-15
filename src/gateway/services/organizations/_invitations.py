@@ -1,4 +1,4 @@
-"""Creating and listing an organization's invitations."""
+"""Creating, listing, canceling and resending an organization's invitations."""
 
 import uuid
 from collections.abc import Callable, Sequence
@@ -17,7 +17,10 @@ from gateway.exceptions.organizations_exceptions import (
     DuplicateInvitationAddressError,
     InvitationLimitCeiling,
     InvitationLimitError,
+    InvitationNotFoundError,
     InvitationRequestTooLargeError,
+    InvitationResendLimitError,
+    InvitationResendTooSoonError,
     InvitationsNeedSsoError,
     MembershipUpdateError,
     NotAuthorizedError,
@@ -34,7 +37,7 @@ from gateway.models.tenancy import (
     WorkspaceMemberRole,
 )
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
-from gateway.repositories.organizations import NewInvitation, OrganizationRepositories
+from gateway.repositories.organizations import NewInvitation, OrganizationRepositories, SendRequest
 from gateway.services.mail import Mailer
 from gateway.services.organizations._claimed_domains import ClaimedDomain
 from gateway.services.organizations._invitation_limits import Admission, InvitationLimits
@@ -61,6 +64,10 @@ class InvitationPolicy:
     """How long an invitation lives, and how often this organization may ask for one.
 
     Every field must be positive.
+
+    NOTE: Canceling an invitation and inviting the address again starts it over:
+    ``send_count``, ``declined_at`` and the resend budget all reset.
+    ``per_address_per_day`` is the only one of these numbers that still bounds that address across a cancel.
     """
 
     expires_after: timedelta
@@ -127,14 +134,10 @@ class InvitationEntry:
 
 @dataclass(frozen=True, kw_only=True)
 class IssuedInvitation:
-    """One invitation just created.
+    """An invitation as issued or reissued.
 
-    ``email`` is the address exactly as the caller typed it; ``invitation.email`` is the
-    normalized form that was stored. A caller lines the two up by address this way, the
-    same way a refusal does.
-
-    NOTE: ``accept_link`` is set only when this deployment cannot email the invitee.
-    Whoever invited them must hand it on.
+    ``email`` is the address the caller named, which for a resend is the stored one.
+    ``accept_link`` is present only when this deployment cannot email the invitee.
     """
 
     accept_link: str | None
@@ -190,7 +193,7 @@ class _Candidate:
 
 
 class Invitations:
-    """Creates and lists an organization's invitations.
+    """Creates, lists, cancels and resends an organization's invitations.
 
     NOTE: A refusal must never name another organization or say whether an address holds an account anywhere.
     Add no read to this service that could answer either question.
@@ -256,6 +259,80 @@ class Invitations:
             await self._require_management(by)
             rows, total = await self._invitations.list_for_organization(by.organization_id, skip=skip, limit=limit)
         return [self._entry(row, now=now) for row in rows], total
+
+    async def cancel(self, by: ActingMember, invitation_id: uuid.UUID) -> None:
+        """Delete an invitation, raising the refusal that stops it."""
+        async with self._uow:
+            await self._require_invitation(by, invitation_id)
+            if not await self._invitations.delete_in_organization(invitation_id, by.organization_id):
+                raise InvitationNotFoundError(invitation_id)
+
+    async def resend(self, by: ActingMember, invitation_id: uuid.UUID) -> IssuedInvitation:
+        """Resend an invitation with a fresh token and lifetime, raising the refusal that stops it.
+
+        NOTE: Callers must not call this from inside an already-open Unit of Work block.
+
+        NOTE: This consults no delivery rule.
+        A resend therefore tells the caller nothing that creating the invitation would not.
+
+        NOTE: Resending a declined invitation spends an admission and a resend, but nothing is delivered for it;
+        a decline is recorded quietly, and resending does not undo that.
+        """
+        now = self._clock()
+        async with AsyncExitStack() as stack:
+            async with self._uow:
+                row = await self._require_invitation(by, invitation_id)
+                if await self._organizations.is_sso_enforced(by.organization_id):
+                    raise InvitationsNeedSsoError()
+                if row.send_count > self._policy.resend_limit:
+                    raise InvitationResendLimitError()
+                available_at = row.last_send_requested_at + self._policy.resend_wait
+                if now < available_at:
+                    raise InvitationResendTooSoonError(available_at)
+
+                admission = await self._limits.admit(
+                    account_id=by.user_id, email=row.email, organization_id=by.organization_id
+                )
+                if isinstance(admission, InvitationLimitCeiling):
+                    raise InvitationLimitError(admission)
+                await stack.enter_async_context(admission)
+
+                await self._organizations.lock_settings(by.organization_id)
+                # Re-decided under the lock: a role change or an SSO toggle can commit while the admission above waits.
+                # NOTE: The result is discarded.
+                # A second `select` of this invitation, in the same session,
+                # can return the identity-mapped row with its first-loaded attributes.
+                await self._require_invitation(by, invitation_id)
+                if await self._organizations.is_sso_enforced(by.organization_id):
+                    raise InvitationsNeedSsoError()
+
+                mint = mint_send(self._mailer, now)
+                request = SendRequest(
+                    expires_at=now + self._policy.expires_after,
+                    invited_by_user_id=by.user_id,
+                    next_send_at=mint.next_send_at,
+                    requested_at=now,
+                    token_hash=mint.token_hash,
+                )
+                result = await self._invitations.request_send(
+                    row.id, by.organization_id, request, expected_send_count=row.send_count
+                )
+                invitation = result.invitation
+                if invitation is None:
+                    raise InvitationNotFoundError(invitation_id)
+                if not result.sent:
+                    if invitation.send_count > self._policy.resend_limit:
+                        raise InvitationResendLimitError()
+                    raise InvitationResendTooSoonError(invitation.last_send_requested_at + self._policy.resend_wait)
+
+            # Only after the write above has returned (committed):
+            # a failure during the commit itself must give the count back,
+            # rather than keep one for a resend that never took effect.
+            admission.keep()
+
+        return IssuedInvitation(
+            accept_link=mint.accept_link, email=invitation.email, invitation=self._entry(invitation, now=now)
+        )
 
     async def _invite_many(self, by: ActingMember, emails: Sequence[str], offer: InvitationOffer) -> BulkInvitations:
         """Invite every address, owning its own Unit of Work transaction from here to its return."""
@@ -415,6 +492,22 @@ class Invitations:
         if role is None or role not in MANAGEMENT_ROLES:
             raise NotAuthorizedError()
         return role
+
+    async def _require_invitation(self, by: ActingMember, invitation_id: uuid.UUID) -> OrganizationInvitation:
+        """Return the invitation the caller may act on, raising the refusal that stops them.
+
+        Only an owner may act on an invitation that offers the owner role.
+
+        NOTE: Callers must call this inside an open Unit of Work block.
+        """
+        role = await self._require_management(by)
+        row = await self._invitations.get_in_organization(invitation_id, by.organization_id)
+        if row is None:
+            raise InvitationNotFoundError(invitation_id)
+        if row.role == OWNER_ROLE and role != OWNER_ROLE:
+            msg = "Only organization owners can cancel or resend an invitation for the owner role"
+            raise MembershipUpdateError(msg)
+        return row
 
     def _check_offer_shape(self, offer: InvitationOffer) -> None:
         if len(offer.workspaces) > MAX_WORKSPACE_ASSIGNMENTS:

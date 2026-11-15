@@ -1,5 +1,6 @@
 """Errors the organization and workspace surfaces raise, and the HTTP status each carries."""
 
+from datetime import UTC, datetime
 from enum import StrEnum
 
 from fastapi import status
@@ -461,6 +462,21 @@ class InvitationLimitError(TenancyError):
         super().__init__(detail)
 
 
+class InvitationResendLimitError(TenancyConflictError):
+    """An invitation has already been resent the most times the deployment's settings allow."""
+
+    def __init__(self) -> None:
+        super().__init__("This invitation has been resent the most times allowed.")
+
+
+class InvitationResendTooSoonError(TenancyConflictError):
+    """A resend was asked for before the deployment's wait since the invitation's last send had passed."""
+
+    def __init__(self, available_at: datetime) -> None:
+        shown = available_at.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        super().__init__(f"This invitation can be resent at {shown} UTC.")
+
+
 class InvitationRequestTooLargeError(TenancyValidationError):
     """One invitation request named more addresses or workspaces than it may, or named a workspace twice."""
 
@@ -521,6 +537,8 @@ __all__ = [
     "InvitationNotFoundError",
     "InvitationPasswordNotAcceptedError",
     "InvitationRequestTooLargeError",
+    "InvitationResendLimitError",
+    "InvitationResendTooSoonError",
     "InvitationsNeedSsoError",
     "LastOrganizationError",
     "LastWorkspaceError",
