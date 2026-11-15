@@ -72,7 +72,7 @@ class _Maps:
     offerings: dict[str, tuple[str, ...]]
     model_selectors: dict[str, str]
     rates: dict[str, float | None]
-    bare: dict[str, str]
+    bare: dict[str, tuple[str, ...]]
 
 
 @dataclass(frozen=True)
@@ -101,7 +101,13 @@ class OrganizationSelectors:
     """``instance:<name>`` to the one dated build of it the organization serves, matched case-sensitively."""
 
     names: dict[str, str] = field(default_factory=dict)
-    bare: dict[str, str] = field(default_factory=dict)
+
+    bare: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    """A bare name to every catalog ID in the union that ends in it, kept where one of them is the organization's.
+
+    Kept whole so that a name the organization's own model makes ambiguous stays
+    unresolved for its callers rather than falling through to the deployment's one ID.
+    """
 
 
 @dataclass(frozen=True)
@@ -129,8 +135,8 @@ class SelectorIndex:
     names: dict[str, str] = field(default_factory=dict)
     """Catalog ID, lowercased, to the model's display name."""
 
-    bare: dict[str, str] = field(default_factory=dict)
-    """A model's bare name, lowercased, to the one ``vendor/<name>`` catalog ID that ends in it."""
+    bare: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    """A bare name, lowercased, to every ``vendor/<name>`` catalog ID that ends in it; it resolves only to one."""
 
     organizations: dict[uuid.UUID, OrganizationSelectors] = field(default_factory=dict)
     """Each organization's own view, keyed by organization."""
@@ -199,9 +205,10 @@ def _catalog_id(index: SelectorIndex, view: OrganizationSelectors | None, spelli
     """The catalog ID a lowercased spelling names: itself, or the one ID its bare model name stands for."""
     if "/" in spelling or ":" in spelling or spelling in index.models or (view is not None and spelling in view.models):
         return spelling
-    if view is not None and (slug := view.bare.get(spelling)) is not None:
-        return slug
-    return index.bare.get(spelling, spelling)
+    candidates = view.bare.get(spelling) if view is not None else None
+    if candidates is None:
+        candidates = index.bare.get(spelling, ())
+    return candidates[0] if len(candidates) == 1 else spelling
 
 
 def resolve_undated_selector(model_selector: str, *, workspace_id: uuid.UUID | None = None) -> str | None:
@@ -387,7 +394,7 @@ def _build_maps(
         offerings=ranked,
         model_selectors=model_selectors,
         rates=rates,
-        bare={name: slugs[0] for name, slugs in by_name.items() if len(slugs) == 1},
+        bare={name: tuple(slugs) for name, slugs in by_name.items()},
     )
 
 
@@ -457,5 +464,5 @@ def build_organization_selectors(
         rates={selector: rate for selector, rate in maps.rates.items() if selector in touched_selectors},
         undated=undated_spellings(own),
         names={slug: name for slug, name in (names or {}).items() if slug in touched},
-        bare={name: slug for name, slug in maps.bare.items() if slug in touched},
+        bare={name: slugs for name, slugs in maps.bare.items() if touched.intersection(slugs)},
     )

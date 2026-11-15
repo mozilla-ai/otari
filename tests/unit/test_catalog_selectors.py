@@ -492,7 +492,7 @@ def test_a_bare_name_resolves_as_the_one_catalog_id_ending_in_it(claude_index: s
 
 
 def test_a_bare_name_two_catalog_ids_end_in_resolves_to_nothing(claude_index: selectors.SelectorIndex) -> None:
-    assert "llama-4" not in claude_index.bare
+    assert claude_index.bare["llama-4"] == ("meta/llama-4", "acme/llama-4")
     assert selectors.resolve_catalog_selector("llama-4") is None
     assert selectors.resolve_catalog_offerings("llama-4") == ()
 
@@ -532,5 +532,30 @@ def test_a_bare_name_reaches_an_organizations_own_key_first() -> None:
         assert selectors.resolve_catalog_selector("claude-opus-5-5", workspace_id=_WORKSPACE_B) == (
             "bedrock:anthropic.claude-opus-5-5"
         )
+    finally:
+        selectors.reset_selector_index()
+
+
+def test_a_bare_name_an_organizations_own_model_makes_ambiguous_resolves_to_nothing_for_it() -> None:
+    """The deployment serves one ``llama-4``; the organization's key adds another, so its callers get neither."""
+    deployment = [selectors.OfferingRow("groq:llama-4", "groq", "groq", 0.1)]
+    own = [selectors.OfferingRow("together:llama-4", "together", "together", 0.2)]
+    union: dict[str, tuple[str, tuple[str, ...]]] = {
+        "meta/llama-4": ("llama-4", ("groq:llama-4",)),
+        "acme/llama-4": ("acme-llama-4", ("together:llama-4",)),
+    }
+    view = selectors.build_organization_selectors(deployment, own, union)
+    selectors.set_selector_index(
+        selectors.build_selector_index(
+            deployment,
+            {"meta/llama-4": ("llama-4", ("groq:llama-4",))},
+            organizations={_ORG_A: view},
+            workspace_organization={_WORKSPACE_A: _ORG_A},
+        )
+    )
+    try:
+        assert selectors.resolve_catalog_selector("llama-4", workspace_id=_WORKSPACE_A) is None
+        assert selectors.resolve_catalog_offerings("llama-4", workspace_id=_WORKSPACE_A) == ()
+        assert selectors.resolve_catalog_selector("llama-4", workspace_id=_WORKSPACE_B) == "groq:llama-4"
     finally:
         selectors.reset_selector_index()
