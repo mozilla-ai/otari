@@ -1240,11 +1240,26 @@ function AppShellChrome() {
                     const touch = e.touches[0]
                     // Only begin tracking a swipe that starts near the left
                     // edge (within 30px), where a nav-open gesture belongs.
-                    if (touch && touch.clientX <= 30) {
-                      swipeStartXRef.current = touch.clientX
-                      swipeStartYRef.current = touch.clientY
-                      swipeTouchIdRef.current = touch.identifier
+                    if (!touch || touch.clientX > 30) return
+                    // Skip if the touch lands inside a horizontally scrollable
+                    // element, so a table or chart swipe does not also open the
+                    // drawer. Walk the target's ancestor chain looking for any
+                    // element that scrolls horizontally.
+                    let node = e.target as Element | null
+                    while (node && node !== e.currentTarget) {
+                      const style = window.getComputedStyle(node)
+                      const overflowX = style.overflowX
+                      if (
+                        (overflowX === "auto" || overflowX === "scroll") &&
+                        node.scrollWidth > node.clientWidth
+                      ) {
+                        return
+                      }
+                      node = node.parentElement
                     }
+                    swipeStartXRef.current = touch.clientX
+                    swipeStartYRef.current = touch.clientY
+                    swipeTouchIdRef.current = touch.identifier
                   }
                 : undefined
             }
