@@ -594,6 +594,10 @@ function AppShellChrome() {
   const asideRef = useRef<HTMLElement>(null)
   const mainRef = useRef<HTMLElement>(null)
   const toggleRef = useRef<HTMLButtonElement>(null)
+  // Tracks the X position where a touch began, so the swipe handler can
+  // measure displacement without storing intermediate move coordinates.
+  const swipeStartXRef = useRef<number | null>(null)
+  const swipeStartYRef = useRef<number | null>(null)
   const orgNavTriggerRef = useRef<HTMLButtonElement>(null)
   const railBackRef = useRef<HTMLButtonElement>(null)
   // Which level was last open, read on the way out when the level itself is
@@ -1222,6 +1226,40 @@ function AppShellChrome() {
             // 390px e2e check measures overflow under it. Not `overflow-x-clip`,
             // which computes to `hidden` beside `overflow-y: auto` anyway.
             className="flex-1 overflow-x-hidden overflow-y-auto focus:outline-none"
+            onTouchStart={
+              isMobile && !mobileNavOpen
+                ? (e) => {
+                    const touch = e.touches[0]
+                    // Only begin tracking a swipe that starts near the left
+                    // edge (within 30px), where a nav-open gesture belongs.
+                    if (touch && touch.clientX <= 30) {
+                      swipeStartXRef.current = touch.clientX
+                      swipeStartYRef.current = touch.clientY
+                    }
+                  }
+                : undefined
+            }
+            onTouchEnd={
+              isMobile && !mobileNavOpen
+                ? (e) => {
+                    const startX = swipeStartXRef.current
+                    const startY = swipeStartYRef.current
+                    swipeStartXRef.current = null
+                    swipeStartYRef.current = null
+                    if (startX === null || startY === null) return
+                    const touch = e.changedTouches[0]
+                    if (!touch) return
+                    // Open the drawer when the finger has moved at least 50px
+                    // to the right without drifting more than 75px vertically,
+                    // so an upward scroll near the edge does not trigger it.
+                    const dx = touch.clientX - startX
+                    const dy = Math.abs(touch.clientY - startY)
+                    if (dx >= 50 && dy < 75) {
+                      setMobileNavOpen(true)
+                    }
+                  }
+                : undefined
+            }
           >
             <div className="mx-auto flex max-w-[112.5rem] flex-col gap-6 px-4 pt-5 pb-[calc(1.25rem+var(--shell-corner-clearance))] md:px-6 md:pt-6 md:pb-[calc(1.5rem+var(--shell-corner-clearance))]">
               {answerIsStillComing ? (
