@@ -41,6 +41,7 @@ from gateway.services.web_retrieval_policy import canonicalize_web_url
 from gateway.services.web_search_providers import WebSearchProviderError
 
 from .conftest import (
+    ALL_KEY_SCOPES,
     FAKE_FETCH,
     FAKE_SEARCH,
     MODEL_NAME,
@@ -268,7 +269,9 @@ def _key_on_budget(client: TestClient, master_key_header: dict[str, str], user_i
         f"{API_ROOT}/users", json={"user_id": user_id, "budget_id": budget["budget_id"]}, headers=master_key_header
     )
     key = client.post(
-        f"{API_ROOT}/keys", json={"key_name": f"{user_id}-key", "user_id": user_id}, headers=master_key_header
+        f"{API_ROOT}/keys",
+        json={"scopes": ALL_KEY_SCOPES, "key_name": f"{user_id}-key", "user_id": user_id},
+        headers=master_key_header,
     ).json()
     return str(key["key"])
 
@@ -1060,7 +1063,9 @@ async def test_a_configuration_file_price_prices_a_fetch_instance(
     db_session_factory: Callable[[], Session],
 ) -> None:
     client = configured_fetch_price_client
-    key = client.post(f"{API_ROOT}/keys", json={"key_name": "fetch-price"}, headers=master_key_header).json()
+    key = client.post(
+        f"{API_ROOT}/keys", json={"scopes": ALL_KEY_SCOPES, "key_name": "fetch-price"}, headers=master_key_header
+    ).json()
 
     # The instance serves the fetch, so the built-in fetcher, which would reach the network, is never called.
     with patch.object(WebFetchService, "fetch", new=AsyncMock(side_effect=AssertionError("builtin_fetch ran"))):

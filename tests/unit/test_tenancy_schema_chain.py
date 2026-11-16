@@ -36,6 +36,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from _alembic_support import parent_of
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
@@ -80,22 +81,6 @@ _DEFINITIONS_TABLE = "organization_guardrail_definitions"
 _MANDATES_TABLE = "organization_guardrails"
 _MANDATES_BACKEND_CHECK = "ck_organization_guardrails_single_backend"
 _MANDATES_DEFINITION_FK = "fk_organization_guardrails_definition"
-
-
-def _parent_of(revision: str) -> str:
-    """The revision immediately below ``revision``, read from the chain itself.
-
-    Deliberately derived rather than written down. This pair of revisions sits at
-    the end of the chain, so every migration that lands on ``main`` while the
-    branch is open re-points the lower one's ``down_revision``, and a hardcoded
-    constant here is a second place to remember. Reading it back means the
-    downgrade targets below follow the re-point on their own, and the test keeps
-    asserting what it means ("roll back to just before this revision") rather
-    than a literal that goes stale.
-    """
-    parent = ScriptDirectory.from_config(_alembic_config("sqlite://")).get_revision(revision).down_revision
-    assert isinstance(parent, str), f"{revision} should have exactly one parent, got {parent!r}"
-    return parent
 
 
 _TOKEN_REVISION = "db8fbf901ee0"
@@ -825,7 +810,7 @@ def test_the_widening_round_trips(sqlite_at_head: tuple[Config, Engine]) -> None
     """
     config, engine = sqlite_at_head
 
-    command.downgrade(config, _parent_of(_ALIAS_WIDEN_REVISION))
+    command.downgrade(config, parent_of(_ALIAS_WIDEN_REVISION, alembic_dir=_ALEMBIC_DIR))
 
     inspector = inspect(engine)
     for table in ("model_aliases", "routing_policies"):
@@ -1145,7 +1130,7 @@ def test_the_guardrail_definitions_revision_round_trips(sqlite_at_head: tuple[Co
     over to collide with.
     """
     config, engine = sqlite_at_head
-    parent = _parent_of(_GUARDRAIL_DEFINITIONS_REVISION)
+    parent = parent_of(_GUARDRAIL_DEFINITIONS_REVISION, alembic_dir=_ALEMBIC_DIR)
 
     command.downgrade(config, parent)
 

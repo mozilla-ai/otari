@@ -74,6 +74,7 @@ from gateway.api.deps import (
     verify_api_key_or_master_key,
     workspace_keeps_trace_content,
 )
+from gateway.api.key_scopes import key_scope
 from gateway.api.routes._helpers import retryable_on_database_outage
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, release_session
@@ -115,6 +116,7 @@ from gateway.services.traces import (
     record_otlp_export,
     record_priced_requests,
 )
+from gateway.types.key_scope import KeyScope
 
 router = APIRouter(tags=["otel"])
 
@@ -565,7 +567,7 @@ def _otlp_response(content_type: str, response: Message) -> Response:
     return Response(content=response.SerializeToString(), media_type="application/x-protobuf")
 
 
-@router.post("/v1/traces")
+@router.post("/v1/traces", openapi_extra=key_scope(KeyScope.TELEMETRY_WRITE))
 async def receive_traces(
     request: Request,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
@@ -670,7 +672,7 @@ async def receive_traces(
     return _otlp_response(content_type, response)
 
 
-@router.post("/v1/logs")
+@router.post("/v1/logs", openapi_extra=key_scope(KeyScope.TELEMETRY_WRITE))
 async def receive_logs(
     request: Request,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
@@ -734,7 +736,7 @@ async def receive_logs(
     return _otlp_response(content_type, response)
 
 
-@router.post("/v1/metrics")
+@router.post("/v1/metrics", openapi_extra=key_scope(KeyScope.TELEMETRY_WRITE))
 async def receive_metrics(
     request: Request,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],

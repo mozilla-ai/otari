@@ -35,6 +35,8 @@ from gateway.services.tools import WebSearchBackend
 from gateway.services.tools._web_admission import WEB_SEARCH_NOT_CONFIGURED_DETAIL
 from gateway.services.web_retrieval_policy import canonicalize_domain_rules
 
+from .conftest import ALL_KEY_SCOPES
+
 _REQUEST = {
     "model": "anthropic:claude-3-5-sonnet-20241022",
     "messages": [{"role": "user", "content": "what happened today"}],
@@ -824,7 +826,7 @@ def test_the_direct_search_endpoint_honors_the_same_veto(
     client.post(f"{API_ROOT}/users", json={"user_id": "direct-search-user"}, headers=master_key_header)
     key = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "direct-search-key", "user_id": "direct-search-user"},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "direct-search-key", "user_id": "direct-search-user"},
         headers=master_key_header,
     ).json()
 
@@ -868,7 +870,11 @@ def test_invalid_legacy_domain_rule_returns_503_from_direct_search(
     client.post(f"{API_ROOT}/users", json={"user_id": "invalid-config-search-user"}, headers=master_key_header)
     key = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "invalid-config-search-key", "user_id": "invalid-config-search-user"},
+        json={
+            "scopes": ALL_KEY_SCOPES,
+            "key_name": "invalid-config-search-key",
+            "user_id": "invalid-config-search-user",
+        },
         headers=master_key_header,
     ).json()
 
@@ -893,7 +899,7 @@ def test_the_direct_search_endpoint_is_unchanged_for_a_workspace_with_no_row(
     client.post(f"{API_ROOT}/users", json={"user_id": "open-search-user"}, headers=master_key_header)
     key = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "open-search-key", "user_id": "open-search-user"},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "open-search-key", "user_id": "open-search-user"},
         headers=master_key_header,
     ).json()
 
@@ -957,7 +963,7 @@ def test_the_direct_search_endpoint_refuses_a_workspace_with_no_row_where_web_ac
     client.post(f"{API_ROOT}/users", json={"user_id": "opt-in-search-user"}, headers=master_key_header)
     key = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "opt-in-search-key", "user_id": "opt-in-search-user"},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "opt-in-search-key", "user_id": "opt-in-search-user"},
         headers=master_key_header,
     ).json()
 

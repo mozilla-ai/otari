@@ -39,6 +39,7 @@ from gateway.api.deps import (
     verify_api_key_or_master_key,
     verify_api_key_or_master_key_for_upload,
 )
+from gateway.api.key_scopes import key_scope
 from gateway.api.routes._helpers import bounded_body
 from gateway.api.routes._request_body import MULTIPART_OVERHEAD_BYTES, form_field
 from gateway.core.config import GatewayConfig
@@ -60,6 +61,7 @@ from gateway.services.files import (
     FileScope,
     NewFile,
 )
+from gateway.types.key_scope import KeyScope
 
 _FILES_BETA = "files-api-2025-04-14"
 
@@ -244,12 +246,13 @@ def _content_disposition(filename: str) -> str:
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}},
         },
     },
-    openapi_extra={
-        "requestBody": {
+    openapi_extra=key_scope(
+        KeyScope.FILES_WRITE,
+        requestBody={
             "required": True,
             "content": {"multipart/form-data": {"schema": _FILE_UPLOAD_SCHEMA}},
-        }
-    },
+        },
+    ),
 )
 async def create_file(
     raw_request: Request,
@@ -282,7 +285,7 @@ async def create_file(
         return OpenAIFileObject.of(record)
 
 
-@router.get("/files")
+@router.get("/files", openapi_extra=key_scope(KeyScope.FILES_READ))
 async def list_files(
     raw_request: Request,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
@@ -353,7 +356,7 @@ async def list_files(
     )
 
 
-@router.get("/files/{file_id}")
+@router.get("/files/{file_id}", openapi_extra=key_scope(KeyScope.FILES_READ))
 async def get_file(
     file_id: str,
     raw_request: Request,
@@ -390,6 +393,7 @@ async def get_file(
             },
         }
     },
+    openapi_extra=key_scope(KeyScope.FILES_READ),
 )
 async def get_file_content(
     file_id: str,
@@ -413,7 +417,7 @@ async def get_file_content(
     )
 
 
-@router.delete("/files/{file_id}")
+@router.delete("/files/{file_id}", openapi_extra=key_scope(KeyScope.FILES_WRITE))
 async def delete_file(
     file_id: str,
     raw_request: Request,

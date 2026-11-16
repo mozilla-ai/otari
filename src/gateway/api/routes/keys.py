@@ -46,6 +46,7 @@ from gateway.services.model_access import (
 )
 from gateway.services.organizations import AccessLists
 from gateway.services.workspace_scope import organization_default_workspace_id
+from gateway.types.key_scope import DEFAULT_KEY_SCOPES, KeyScope, KeyScopeSet
 
 router = APIRouter(
     prefix="/keys",
@@ -108,6 +109,17 @@ def _organization_service_key() -> ColumnElement[bool]:
     return and_(col(APIKey.is_service_key).is_(True), col(APIKey.self_service).is_(True))
 
 
+# The ``scopes`` field's description on every surface that writes a key.
+CREATE_SCOPES_DESCRIPTION = (
+    "The endpoint groups the key may reach. Omitted, the key gets 'inference:run' alone, which calls models and "
+    "nothing else. The end-users scopes are a service key's alone."
+)
+UPDATE_SCOPES_DESCRIPTION = (
+    "The endpoint groups the key may reach, replacing the ones it holds; omitted or null leaves them unchanged. "
+    "Takes effect on the key's next request. The end-users scopes are a service key's alone."
+)
+
+
 class CreateKeyRequest(BaseModel):
     """Request model for creating a new API key."""
 
@@ -123,6 +135,9 @@ class CreateKeyRequest(BaseModel):
         default=None,
         description="Tool allow-list for POST /api/v1/search and /api/v1/fetch: null = inherit the user's, "
         "[] = no tool, or search and fetch tool names ('*' for every tool). A model wildcard never grants a tool.",
+    )
+    scopes: list[KeyScope] = Field(
+        default_factory=lambda: list(DEFAULT_KEY_SCOPES), min_length=1, description=CREATE_SCOPES_DESCRIPTION
     )
     exclude_from_budget: bool = Field(
         default=False,
@@ -194,6 +209,7 @@ class CreateKeyResponse(BaseModel):
     is_active: bool
     allowed_models: list[str] | None
     allowed_tools: list[str] | None
+    scopes: list[KeyScope]
     exclude_from_budget: bool
     reject_user_mismatch: bool | None
     capture_agent_telemetry: bool | None
@@ -228,6 +244,8 @@ class KeyInfo(BaseModel):
     operator_can_enable: bool
     allowed_models: list[str] | None
     allowed_tools: list[str] | None
+    # The endpoint groups the key may reach (``types/key_scope.py``).
+    scopes: list[KeyScope]
     exclude_from_budget: bool
     reject_user_mismatch: bool | None
     capture_agent_telemetry: bool | None
@@ -263,6 +281,7 @@ class KeyInfo(BaseModel):
             operator_can_enable=operator_enable_refusal(key) is None,
             allowed_models=list(key.allowed_models) if key.allowed_models is not None else None,
             allowed_tools=list(key.allowed_tools) if key.allowed_tools is not None else None,
+            scopes=list(key.scopes),
             exclude_from_budget=bool(key.exclude_from_budget),
             reject_user_mismatch=None if key.reject_user_mismatch is None else bool(key.reject_user_mismatch),
             capture_agent_telemetry=(
@@ -299,6 +318,8 @@ class UpdateKeyRequest(BaseModel):
     allowed_models: list[str] | None = None
     # Tri-state the same way: null = inherit the user's search tool access.
     allowed_tools: list[str] | None = None
+    # Not nullable on the key, so absent and null both leave it unchanged.
+    scopes: list[KeyScope] | None = Field(default=None, min_length=1, description=UPDATE_SCOPES_DESCRIPTION)
     is_service_key: bool | None = None
     # Tri-state via model_fields_set: absent = unchanged, null = end users this
     # key creates from now on are uncapped. End users already created keep theirs.
@@ -336,6 +357,7 @@ async def create_key(
     try:
         allowed_models = validate_allowed_models(config, request.allowed_models)
         allowed_tools = validate_allowed_tools(config, request.allowed_tools)
+        scopes = KeyScopeSet.checked(request.scopes, is_service_key=request.is_service_key)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     # Before anything is staged: the check runs in a Unit of Work block, and the
@@ -428,6 +450,7 @@ async def create_key(
         expires_at=request.expires_at,
         allowed_models=allowed_models,
         allowed_tools=allowed_tools,
+        scopes=scopes,
         exclude_from_budget=request.exclude_from_budget,
         reject_user_mismatch=request.reject_user_mismatch,
         capture_agent_telemetry=request.capture_agent_telemetry,
@@ -541,6 +564,14 @@ async def update_key(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    try:
+        scopes = key.scopes.updated(
+            request.scopes,
+            was_service_key=key.is_service_key,
+            is_service_key=key.is_service_key if request.is_service_key is None else request.is_service_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     # Tri-state via model_fields_set, like the lists above: both columns
     # are nullable and the dashboard's edit form sends null to clear them
@@ -561,6 +592,7 @@ async def update_key(
         key.capture_agent_telemetry = request.capture_agent_telemetry
     key.allowed_models = access.models
     key.allowed_tools = access.tools
+    key.scopes = scopes
     if request.is_service_key is not None:
         key.is_service_key = request.is_service_key
     if "end_user_budget_id" in request.model_fields_set:

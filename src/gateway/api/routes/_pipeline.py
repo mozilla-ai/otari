@@ -84,6 +84,7 @@ from gateway.api.deps import (
     routed_trace_content,
     verify_api_key_or_master_key,
 )
+from gateway.api.key_scopes import may_read_files
 from gateway.api.request_id import set_request_id
 from gateway.api.routes._attempt_metrics import record_attempt
 from gateway.api.routes._attempts import (
@@ -163,6 +164,7 @@ from gateway.core.usage import (
     service_tier_of,
 )
 from gateway.exceptions import TenancyError
+from gateway.exceptions.api_keys_exceptions import KeyScopeMissingError
 from gateway.exceptions.budget_exceptions import (
     EndUserBudgetWithoutEndUserError,
     ProviderSpendCeilingExceededError,
@@ -382,6 +384,7 @@ from gateway.services.tool_usage import (
     ToolUsageTally,
 )
 from gateway.services.tools import (
+    BUILTIN_TOOLS,
     CONTAINER_GONE_DETAIL_TEMPLATE,
     NO_WEB_TOOLS,
     WEB_FETCH_TOOL_NAME,
@@ -453,6 +456,7 @@ from gateway.streaming import (
     streaming_generator,
 )
 from gateway.types.attempt import Attempt
+from gateway.types.key_scope import KeyScope
 from gateway.types.normalization_target import NormalizationTarget
 from gateway.types.provider_account import ResolvedCredential
 from gateway.types.provider_file import ProviderFile
@@ -692,11 +696,14 @@ def domain_error(adapter: FormatAdapter[Any, Any], exc: TenancyError) -> HTTPExc
     if exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
         logger.error("Request failed: %s", exc.message)
         return adapter.error(exc.status_code, "Internal server error", ErrorKind.API)
+    headers = error_headers(exc.error_code) if exc.error_code is not None else {}
+    if isinstance(exc, KeyScopeMissingError):
+        headers = {**headers, **exc.challenge}
     return adapter.error(
         exc.status_code,
         exc.message,
         _DOMAIN_ERROR_KINDS.get(exc.status_code, ErrorKind.INVALID_REQUEST),
-        headers=error_headers(exc.error_code) if exc.error_code is not None else None,
+        headers=headers or None,
     )
 
 
@@ -2308,7 +2315,7 @@ async def resolve_request_context(
     session_principal: SessionPrincipal | None = None,
     routing_signal: Callable[[], RoutingSignal] | None = None,
     normalize_messages: Callable[[NormalizationTarget], Awaitable[tuple[int, CompletionUsage | None]]] | None = None,
-    tools: list[dict[str, Any]] | None = None,
+    declared: DeclaredTools,
     idempotency: IdempotencyGuard | None = None,
     tags: dict[str, str] | None = None,
     turn: TurnFacts | None = None,
@@ -2407,6 +2414,10 @@ async def resolve_request_context(
     else:
         api_key, is_master_key = await verify_api_key_or_master_key(raw_request, db, config)
         api_key_id = api_key.id if api_key else None
+        # This check runs ahead of the reservation and the pricing gate, so a key that may
+        # not run a declared tool is told that rather than what the deployment prices. It
+        # also runs before the end user is resolved, because resolving one may create it.
+        _require_declared_tool_scopes(adapter, api_key, declared)
         # Zero I/O for a keyed request: `api_key.workspace_id` is already an
         # in-memory attribute on the row just loaded. Only a master-key request
         # pays a lookup, which `resolve_workspace_id` itself accepts as
@@ -2901,7 +2912,7 @@ async def resolve_request_context(
     # who runs the code. Only a request declaring code execution on a
     # deployment with a sandbox has anything to decide. The estimate is
     # already reserved, so a read that fails releases it before propagating.
-    if config.sandbox_configured() and declares_code_execution(tools):
+    if config.sandbox_configured() and declares_code_execution(declared.tools):
         try:
             code_execution_policy = await code_execution_policies.for_request(workspace_id)
         except Exception:
@@ -2939,7 +2950,8 @@ async def resolve_request_context(
             # workspace", matching the /api/v1/files routes.
             post_chars, vision_usage = await normalize_messages(
                 NormalizationTarget(
-                    user_id=user_id,
+                    file_user_id=user_id,
+                    may_read_files=may_read_files(api_key),
                     provider=gate_impl,
                     model=gate_model,
                     instance=gate_instance,
@@ -3793,11 +3805,14 @@ class _ToolRefusal:
     """Why the candidates that share one answer cannot be served.
 
     ``unpriced_tool`` is the tool ``require_pricing`` refused, logged as a rejection
-    only where the refusal answers the request.
+    only where the refusal answers the request. ``admitted`` is the code execution
+    admitted before the refusal, whose container claim the request gives back
+    unless another candidate runs in that container.
     """
 
     error: HTTPException
     unpriced_tool: PricedTool | None = None
+    admitted: AdmittedCodeExecution | None = None
 
 
 def _decide_for_candidates(
@@ -3841,6 +3856,7 @@ async def _admit_candidates(
             claims[candidate.claimed] = await _declare_claims(
                 adapter, ctx, code, candidate.claimed, beside_sandbox=beside_sandbox
             )
+    await _release_unused_claims(claims.values())
     requested = [
         tool
         for tool in (WebTool.SEARCH, WebTool.FETCH)
@@ -3872,8 +3888,73 @@ async def _declare_claims(
     try:
         web = extract_web_tools(admitted.tools_after_sandbox, config=ctx.config, claims=web_claims)
     except WebToolDeclarationError as exc:
-        return _ToolRefusal(domain_error(adapter, exc))
+        return _refuse_after_admission(adapter, admitted, exc)
     return _DeclaredClaims(code=admitted, web=web)
+
+
+def _refuse_after_admission(
+    adapter: FormatAdapter[Any, Any], admitted: AdmittedCodeExecution, error: TenancyError
+) -> _ToolRefusal:
+    """Refuse a candidate admission already ran for, keeping the admission so its claim can be given back."""
+    return _ToolRefusal(domain_error(adapter, error), admitted=admitted)
+
+
+async def _release_unused_claims(claims: Iterable[_DeclaredClaims | _ToolRefusal]) -> None:
+    """Give back each container claim that only refused candidates took.
+
+    Candidates resuming one container share one claim, so a claim is released only
+    where no admitted candidate runs in that container. Left held, it would keep the
+    caller's own next resume of the container busy until it expires.
+    """
+    held: dict[str, AdmittedCodeExecution] = {}
+    in_use: set[str] = set()
+    for claim in claims:
+        admitted = claim.code if isinstance(claim, _DeclaredClaims) else claim.admitted
+        if admitted is None or admitted.container_lease is None or admitted.containers is None:
+            continue
+        container_id = admitted.container_lease.container_id
+        if isinstance(claim, _DeclaredClaims):
+            in_use.add(container_id)
+        else:
+            held.setdefault(container_id, admitted)
+    for container_id, admitted in held.items():
+        if container_id in in_use or admitted.containers is None:
+            continue
+        try:
+            await admitted.containers.release(container_id)
+        except DATABASE_ERRORS as exc:
+            logger.warning("could not release container claim %s: %s", container_id, describe_database_error(exc))
+
+
+def _declares_mcp(declared: DeclaredTools) -> bool:
+    """Whether the request asks to reach an MCP server, its own or one its IDs name."""
+    return bool(declared.mcp_servers or declared.mcp_server_ids or declares_provider_mcp(declared.tools))
+
+
+def _require_declared_tool_scopes(
+    adapter: FormatAdapter[Any, Any], api_key: APIKey | None, declared: DeclaredTools
+) -> None:
+    """Hold ``api_key`` to a scope for each tool ``declared`` names, whoever would run it.
+
+    Reads the key and the request body alone, so it needs none of the request's resolved state.
+
+    Raises:
+        HTTPException: the key lacks the scope one of the declared tools needs.
+    """
+    for tool in BUILTIN_TOOLS:
+        if not tool.declares(declared.tools):
+            continue
+        if missing := _missing_scope(api_key, tool.key_scope, f"the {tool.name} tool"):
+            raise domain_error(adapter, missing)
+    if _declares_mcp(declared) and (missing := _missing_scope(api_key, KeyScope.MCP_EXECUTE, "calling MCP tools")):
+        raise domain_error(adapter, missing)
+
+
+def _missing_scope(api_key: APIKey | None, scope: KeyScope, what: str) -> KeyScopeMissingError | None:
+    """Why ``api_key`` may not do ``what``, or ``None`` where it holds ``scope`` or no key made the request."""
+    if api_key is None or scope in api_key.scopes:
+        return None
+    return KeyScopeMissingError(scope, what)
 
 
 async def _admit_tool_funding(
@@ -4107,12 +4188,13 @@ async def _admit_mcp_servers(
 ) -> list[McpServerConfig] | None:
     """The MCP servers the request may reach: its own, then the stored ones its IDs name."""
     provider_mcp = declares_provider_mcp(declared.tools)
+    declares_mcp = _declares_mcp(declared)
     try:
         access = (
             await resolve_request_mcp_access(
                 ctx.db, ctx.api_key, ctx.workspace_id, session_user_id=ctx.user_id if ctx.session else None
             )
-            if declared.mcp_servers or declared.mcp_server_ids or provider_mcp
+            if declares_mcp
             else McpAccess()
         )
         return await admit_mcp_servers(

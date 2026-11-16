@@ -47,6 +47,7 @@ from gateway.api.deps import (
     verify_api_key_or_master_key,
     verify_catalog_reader,
 )
+from gateway.api.key_scopes import key_scope, may_read_files
 from gateway.api.request_id import set_request_id
 from gateway.api.routes._helpers import DIRECT_TOOL_COST_HEADERS
 from gateway.api.routes._passthrough import resolve_passthrough_user_id
@@ -61,6 +62,7 @@ from gateway.core.database import release_session
 from gateway.core.error_codes import INSUFFICIENT_FUNDS, PRICING_REQUIRED, error_headers
 from gateway.core.metered_pricing import quantize_cost
 from gateway.exceptions import TenancyError
+from gateway.exceptions.api_keys_exceptions import KeyScopeMissingError
 from gateway.exceptions.budget_exceptions import EndUserBudgetWithoutEndUserError
 from gateway.inflight import track_request
 from gateway.log_config import logger
@@ -107,6 +109,7 @@ from gateway.services.tools import (
     unpriced_tool_detail,
 )
 from gateway.services.workspace_scope import organization_for_key_id, workspace_for_key_id
+from gateway.types.key_scope import KeyScope
 from gateway.types.tool_charges import GATEWAY_TOOL_PRICING_PROVIDER, gateway_tool_pricing_key
 
 router = APIRouter(prefix="/code", tags=["code-execution"])
@@ -123,7 +126,11 @@ _DECLARATION: list[dict[str, Any]] = [{"type": "otari_code_execution"}]
 _PRICING_KEY = gateway_tool_pricing_key(CODE_EXECUTION_TOOL_NAME)
 
 
-@router.post("/execute", responses={200: {"headers": DIRECT_TOOL_COST_HEADERS}})
+@router.post(
+    "/execute",
+    responses={200: {"headers": DIRECT_TOOL_COST_HEADERS}},
+    openapi_extra=key_scope(KeyScope.CODE_EXECUTE),
+)
 async def execute_code(
     raw_request: Request,
     response: Response,
@@ -217,6 +224,10 @@ async def execute_code(
         inputs=[],
     )
     if request.file_ids:
+        if api_key is not None and KeyScope.FILES_READ not in api_key.scopes:
+            # The run can print a staged file, so staging one reads it.
+            missing = KeyScopeMissingError(KeyScope.FILES_READ, "staging stored files")
+            raise await refuse(missing.message, status.HTTP_403_FORBIDDEN, missing.challenge)
         if file_bridge is None or files is None:
             raise await refuse(FILES_NOT_ENABLED_DETAIL, status.HTTP_400_BAD_REQUEST)
         # The master key acts deployment-wide, so it reaches an upload in any workspace.
@@ -237,12 +248,18 @@ async def execute_code(
             config=config,
             resolve_policy=lambda: policies.for_request(workspace_id),
             container_registry=build_sandbox_container_registry(
-                config=config, uow=uow, user_id=user_id, workspace_id=workspace_id, port=port
+                config=config,
+                uow=uow,
+                user_id=user_id,
+                workspace_id=workspace_id,
+                port=port,
+                may_read_stored_files=may_read_files(api_key),
             ),
         )
         admitted = await declared.admit(claimed=False, beside_sandbox=False, environment=request.environment)
     except TenancyError as exc:
-        raise await refuse(exc.message, exc.status_code) from exc
+        challenge = exc.challenge if isinstance(exc, KeyScopeMissingError) else None
+        raise await refuse(exc.message, exc.status_code, challenge) from exc
 
     claimed = admitted.container_lease
     containers = admitted.containers
@@ -451,7 +468,7 @@ async def execute_code(
     )
 
 
-@catalog_router.get("/environments")
+@catalog_router.get("/environments", openapi_extra=key_scope(None))
 async def list_code_execution_environments(
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
     environments: CodeExecutionEnvironmentServiceDep,

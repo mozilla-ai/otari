@@ -483,7 +483,6 @@ ROUTE_DATABASE_IMPORT_BASELINE = (
     "gateway/api/routes/code_execution.py",
     "gateway/api/routes/embeddings.py",
     "gateway/api/routes/health.py",
-    "gateway/api/routes/hooks.py",
     "gateway/api/routes/images.py",
     "gateway/api/routes/keys.py",
     "gateway/api/routes/maintenance_mode.py",

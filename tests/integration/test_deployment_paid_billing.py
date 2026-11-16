@@ -57,7 +57,7 @@ from gateway.ports.billing_port import BilledModel, ToolUse
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.services.secret_box import generate_secret_key
 
-from .conftest import FAKE_SEARCH, build_test_client, price_fake_search
+from .conftest import ALL_KEY_SCOPES, FAKE_SEARCH, build_test_client, price_fake_search
 
 MODULE = "probe_deployment_paid"
 PROBE_BOOTSTRAP = """
@@ -297,7 +297,9 @@ def _key(client: TestClient) -> dict[str, Any]:
         f"{API_ROOT}/users", json={"user_id": "billed", "budget_id": budget.json()["budget_id"]}, headers=MASTER
     )
     assert user.status_code == status.HTTP_200_OK, user.text
-    created = client.post(f"{API_ROOT}/keys", json={"key_name": "billed", "user_id": "billed"}, headers=MASTER)
+    created = client.post(
+        f"{API_ROOT}/keys", json={"scopes": ALL_KEY_SCOPES, "key_name": "billed", "user_id": "billed"}, headers=MASTER
+    )
     assert created.status_code == status.HTTP_200_OK, created.text
     key: dict[str, Any] = created.json()
     return key

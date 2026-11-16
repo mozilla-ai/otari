@@ -62,16 +62,27 @@ operations, a separately scoped endpoint serves it to the caller's own
 organization: `/api/v1/organizations/me/usage` for usage, and
 `/api/v1/organizations/me/keys` for a member's own API keys.
 
-An API key reaches:
+An API key reaches the routes its [scopes](api-keys.md#scopes) name, and is
+refused the others with `403` naming the scope it lacks (the MCP routes answer
+with a fixed `forbidden` error that names none):
 
-- the inference routes;
-- `GET /api/v1/usage/requests/{request_id}` for its own requests;
-- [`/api/v1/key`](#a-keys-own-budget-and-usage) for its own budget and usage;
-- the catalog reads: `GET /api/v1/models`, `/pricing`, `/tools`,
-  `/providers/catalog`, `/tool-settings/guardrails/catalog`,
-  `/tool-settings/guardrails/profiles`, `/search-tools/providers` and
-  `/search-tools/catalog`;
-- for a [service key](end-users.md), the end-user routes.
+- the inference routes (`inference:run`), files, batches, search, fetch, code
+  execution, MCP, OpenTelemetry ingest and the coding-agent hooks, each under a
+  scope of its own;
+- `GET /api/v1/usage/requests/{request_id}` and
+  [`/api/v1/key`](#a-keys-own-budget-and-usage) for its own requests, budget and
+  usage (`usage:read`);
+- for a [service key](end-users.md), the end-user routes (the `end-users`
+  scopes).
+
+A model call that declares a web, code execution or MCP tool needs that tool's
+scope as well as `inference:run`, whichever of Otari and the provider runs it.
+
+Every key, whatever its scopes, reaches the catalog reads: `GET /api/v1/models`,
+`/pricing`, `/tools`, `/providers/catalog`, `/tool-settings/guardrails/catalog`,
+`/tool-settings/guardrails/profiles`, `/search-tools/providers`,
+`/search-tools/catalog` and `/code/environments`, each with its by-id or
+by-key variant where it has one.
 
 The rest of the management API, including `/api/v1/usage`, `/api/v1/budgets`
 and everything under `/api/v1/organizations/me`, takes the master key or a
@@ -445,8 +456,9 @@ looked up by its `Otari-Request-ID`:
 ### A key's own budget and usage
 
 These routes answer for the API key a request authenticates with, and take no
-parameter that names a user, a key or a workspace. The master key and a dashboard
-session get `401`: neither has a key of its own.
+parameter that names a user, a key or a workspace. They need the key's
+`usage:read` scope. The master key and a dashboard session get `401`: neither
+has a key of its own.
 
 | Route | Returns |
 |---|---|
@@ -992,7 +1004,7 @@ it settled at in `Otari-Cost-USD` and `Otari-Pricing-Source`
 |---|---|
 | `400` | No sandbox is configured, `container` names a sandbox that has expired or does not exist, a `file_ids` entry is not an upload the caller can read (or the Files API is off), `environment` is not one the gateway offers, or `container` names a sandbox created in another environment, or in one it did not record. |
 | `402` | `require_pricing` is on and neither the environment's `otari:code_execution:<image>` nor `otari:code_execution` has a price (`pricing_required`), or the organization's funds are exhausted. |
-| `403` | The workspace's code execution policy is off or pins another environment, or the billed user's budget is spent. |
+| `403` | The workspace's code execution policy is off or pins another environment, the billed user's budget is spent, or the key lacks `files:read` and the request stages a `file_ids` entry or names a `container` to re-enter. |
 | `409` | The named container is running another request. |
 | `502` | The sandbox could not be reached. |
 | `503` | The sandbox is temporarily out of capacity, with `Retry-After` when it gave one. |

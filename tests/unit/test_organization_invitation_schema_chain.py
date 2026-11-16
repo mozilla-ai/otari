@@ -26,17 +26,27 @@ def _alembic_config(database_url: str) -> Config:
     return config
 
 
-@pytest.fixture
-def sqlite_at_head(tmp_path: Path) -> Iterator[tuple[Config, Engine]]:
-    """Yield a SQLite database at the latest migration, with the Alembic config that built it."""
+def _sqlite_upgraded_to(tmp_path: Path, target: str) -> Iterator[tuple[Config, Engine]]:
     database_url = f"sqlite:///{tmp_path / 'invitation.db'}"
     config = _alembic_config(database_url)
-    command.upgrade(config, "head")
+    command.upgrade(config, target)
     engine = create_engine(database_url)
     try:
         yield config, engine
     finally:
         engine.dispose()
+
+
+@pytest.fixture
+def sqlite_at_head(tmp_path: Path) -> Iterator[tuple[Config, Engine]]:
+    """Yield a SQLite database at the latest migration, so these tables are checked as they survive to it."""
+    yield from _sqlite_upgraded_to(tmp_path, "head")
+
+
+@pytest.fixture
+def sqlite_at_revision(tmp_path: Path) -> Iterator[tuple[Config, Engine]]:
+    """Yield a SQLite database at this revision, so a relative downgrade target names this migration."""
+    yield from _sqlite_upgraded_to(tmp_path, _REVISION)
 
 
 def test_upgrade_creates_both_tables(sqlite_at_head: tuple[Config, Engine]) -> None:
@@ -73,8 +83,8 @@ def test_the_membership_origins_inviter_column_is_indexed(sqlite_at_head: tuple[
     assert indexes["ix_organization_membership_origin_invited_by_user_id"] == ["invited_by_user_id"]
 
 
-def test_upgrade_downgrade_upgrade_round_trips(sqlite_at_head: tuple[Config, Engine]) -> None:
-    config, engine = sqlite_at_head
+def test_upgrade_downgrade_upgrade_round_trips(sqlite_at_revision: tuple[Config, Engine]) -> None:
+    config, engine = sqlite_at_revision
 
     command.downgrade(config, f"{_REVISION}-1")
     assert not (_TABLES & set(inspect(engine).get_table_names()))

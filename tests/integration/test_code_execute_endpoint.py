@@ -34,6 +34,8 @@ from gateway.ports.code_execution_port import SandboxFileEntry, SandboxNotReacha
 from gateway.services.code_execution import CONTAINER_ID_PREFIX
 from gateway.types.code_execution import CodeExecutionResult, ResultBlock
 
+from .conftest import ALL_SERVICE_KEY_SCOPES
+
 _SANDBOX_URL = "http://127.0.0.1:9999/sandbox"
 _ENDPOINT = f"{API_ROOT}/code/execute"
 _USAGE_LABEL = "/v1/code/execute"
@@ -221,6 +223,74 @@ def test_uploads_are_put_in_the_sandbox_and_written_files_come_back(
     assert content.content == b"png-bytes"
 
 
+def test_staging_an_upload_needs_files_read(
+    client: TestClient,
+    port: _FakePort,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    master_key_header: dict[str, str],
+    tmp_file_store: None,
+) -> None:
+    """A run can print what it is given, so a key that may not read a file may not stage it."""
+    upload = client.post(
+        f"{API_ROOT}/files",
+        headers=api_key_header,
+        files={"file": ("data.csv", b"a,b\n1,2\n", "text/csv")},
+        data={"purpose": "user_data"},
+    )
+    assert upload.status_code == 200, upload.text
+    narrowed = client.patch(
+        f"{API_ROOT}/keys/{api_key_obj['id']}", json={"scopes": ["code:execute"]}, headers=master_key_header
+    )
+    assert narrowed.status_code == 200, narrowed.text
+
+    resp = client.post(
+        _ENDPOINT,
+        json={"code": "print(open('data.csv').read())", "file_ids": [upload.json()["id"]]},
+        headers=api_key_header,
+    )
+
+    assert resp.status_code == 403, resp.text
+    assert "'files:read'" in resp.json()["detail"]
+    assert resp.headers["WWW-Authenticate"] == 'Bearer error="insufficient_scope", scope="files:read"'
+    assert port.opened == []
+
+
+def test_resuming_a_container_needs_files_read(
+    client: TestClient,
+    port: _FakePort,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    master_key_header: dict[str, str],
+    tmp_file_store: None,
+) -> None:
+    """A held container keeps what a run staged in it, so resuming one reaches those files again."""
+    upload = client.post(
+        f"{API_ROOT}/files",
+        headers=api_key_header,
+        files={"file": ("data.csv", b"a,b\n1,2\n", "text/csv")},
+        data={"purpose": "user_data"},
+    )
+    assert upload.status_code == 200, upload.text
+    staged = client.post(
+        _ENDPOINT,
+        json={"code": "x = 1", "file_ids": [upload.json()["id"]], "container": "auto"},
+        headers=api_key_header,
+    )
+    assert staged.status_code == 200, staged.text
+    container_id = staged.headers["Otari-Container-Id"]
+    narrowed = client.patch(
+        f"{API_ROOT}/keys/{api_key_obj['id']}", json={"scopes": ["code:execute"]}, headers=master_key_header
+    )
+    assert narrowed.status_code == 200, narrowed.text
+
+    resumed = client.post(_ENDPOINT, json={"code": "print(1)", "container": container_id}, headers=api_key_header)
+
+    assert resumed.status_code == 403, resumed.text
+    assert "'files:read'" in resumed.json()["detail"]
+    assert resumed.headers["WWW-Authenticate"] == 'Bearer error="insufficient_scope", scope="files:read"'
+
+
 def test_an_upload_the_caller_cannot_reach_is_a_400(
     client: TestClient, port: _FakePort, api_key_header: dict[str, str], tmp_file_store: None
 ) -> None:
@@ -237,7 +307,12 @@ def test_a_service_key_reads_back_what_an_end_users_run_wrote(
     """The key names the end user on the upload, the run and the download, and owns nothing of theirs itself."""
     key = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "code-service", "user_id": "code-service", "is_service_key": True},
+        json={
+            "key_name": "code-service",
+            "user_id": "code-service",
+            "is_service_key": True,
+            "scopes": ALL_SERVICE_KEY_SCOPES,
+        },
         headers=master_key_header,
     ).json()
     headers = {API_KEY_HEADER: f"Bearer {key['key']}"}
@@ -485,6 +560,7 @@ def test_a_service_key_bills_the_end_user_it_names(
     key = client.post(
         f"{API_ROOT}/keys",
         json={
+            "scopes": ALL_SERVICE_KEY_SCOPES,
             "key_name": "code-service",
             "user_id": "code-service",
             "is_service_key": True,

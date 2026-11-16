@@ -26,6 +26,7 @@ from gateway.api.deps import (
     get_log_writer,
     get_unit_of_work,
 )
+from gateway.api.key_scopes import key_scope, may_read_files
 from gateway.api.routes._guardrail_targets import chat_targets
 from gateway.api.routes._helpers import routing_signal, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuard, IdempotencyGuardDep, IdempotentReplay
@@ -92,6 +93,7 @@ from gateway.services.tools import (
 from gateway.services.traces import read_context, read_turn
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt
+from gateway.types.key_scope import KeyScope
 from gateway.types.normalization_target import NormalizationTarget
 from gateway.types.session_principal import SessionPrincipal
 
@@ -485,7 +487,7 @@ _MASTER_KEY_USER_REQUIRED = "When using master key, 'user' field is required in 
 _USER_FORBIDDEN = "'user' field does not match the authenticated API key's user"
 
 
-@router.post("/completions", response_model=None)
+@router.post("/completions", response_model=None, openapi_extra=key_scope(KeyScope.INFERENCE_RUN))
 async def chat_completions(
     raw_request: Request,
     response: Response,
@@ -592,7 +594,8 @@ async def run_chat_completion(
             provider=target.provider,
             model=target.model,
             files=files,
-            user_id=target.user_id,
+            user_id=target.file_user_id,
+            may_read_files=target.may_read_files,
             instance=target.instance,
             workspace_id=target.file_workspace_id,
             candidates=target.candidate_providers,
@@ -613,6 +616,19 @@ async def run_chat_completion(
         return len(str(request.messages)), stats.vision_usage()
 
     output_cap = _effective_output_cap(request.max_tokens, request.max_completion_tokens)
+
+    declared = DeclaredTools(
+        guardrails=request.guardrails,
+        guardrail_targets=lambda: chat_targets(request.messages),
+        tools=request.tools,
+        mcp_servers=request.mcp_servers,
+        mcp_server_ids=request.mcp_server_ids,
+        max_tool_iterations=request.max_tool_iterations,
+        tools_header=request.tools_header,
+        code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
+        web_fetch_header=raw_request.headers.get(WEB_FETCH_HEADER),
+        web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
+    )
 
     try:
         ctx = await resolve_request_context(
@@ -635,7 +651,7 @@ async def run_chat_completion(
             streaming=bool(request.stream),
             routing_signal=lambda: routing_signal(raw_request),
             normalize_messages=_normalize,
-            tools=request.tools,
+            declared=declared,
             code_execution_policies=tool_ports.code_execution_policy,
             model_provider=model_provider,
             idempotency=None if request.stream else idempotency,
@@ -652,18 +668,7 @@ async def run_chat_completion(
         adapter=adapter,
         ctx=ctx,
         response=response,
-        declared=DeclaredTools(
-            guardrails=request.guardrails,
-            guardrail_targets=lambda: chat_targets(request.messages),
-            tools=request.tools,
-            mcp_servers=request.mcp_servers,
-            mcp_server_ids=request.mcp_server_ids,
-            max_tool_iterations=request.max_tool_iterations,
-            tools_header=request.tools_header,
-            code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
-            web_fetch_header=raw_request.headers.get(WEB_FETCH_HEADER),
-            web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
-        ),
+        declared=declared,
         backends=ToolBackends(
             ports=tool_ports,
             sandbox_containers=build_sandbox_container_registry(
@@ -672,6 +677,7 @@ async def run_chat_completion(
                 user_id=ctx.user_id,
                 workspace_id=ctx.workspace_id,
                 port=tool_ports.code_execution,
+                may_read_stored_files=may_read_files(ctx.api_key),
             ),
             sandbox_files=build_sandbox_file_bridge(
                 raw_request=raw_request,

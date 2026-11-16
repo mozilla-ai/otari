@@ -68,6 +68,8 @@ from gateway.api.deps import (
 )
 from gateway.api.routes._helpers import database_error
 from gateway.api.routes.keys import (
+    CREATE_SCOPES_DESCRIPTION,
+    UPDATE_SCOPES_DESCRIPTION,
     CreateKeyResponse,
     KeyInfo,
     _load_key_in_organization,
@@ -104,6 +106,7 @@ from gateway.services.model_access import (
 from gateway.services.tenancy import DeploymentAdministrationAccess, OrganizationService
 from gateway.services.tenancy.authorization import resolve_workspace_in_organization
 from gateway.services.workspace_scope import organization_default_workspace_id
+from gateway.types.key_scope import DEFAULT_KEY_SCOPES, KeyScope, KeyScopeSet
 
 router = APIRouter(
     prefix="/organizations/me/keys",
@@ -140,6 +143,9 @@ class CreateOwnKeyRequest(BaseModel):
         description="Tool allow-list for POST /api/v1/search and /api/v1/fetch: null = inherit your own, "
         "[] = no tool, or search and fetch tool names ('*' for every tool). "
         "A key can only narrow your own tool access.",
+    )
+    scopes: list[KeyScope] = Field(
+        default_factory=lambda: list(DEFAULT_KEY_SCOPES), min_length=1, description=CREATE_SCOPES_DESCRIPTION
     )
     reject_user_mismatch: bool | None = Field(
         default=None,
@@ -211,6 +217,8 @@ class UpdateOwnKeyRequest(BaseModel):
     allowed_models: list[str] | None = None
     # Tri-state the same way: null = inherit your own search tool access.
     allowed_tools: list[str] | None = None
+    # Not nullable on the key, so absent and null both leave it unchanged.
+    scopes: list[KeyScope] | None = Field(default=None, min_length=1, description=UPDATE_SCOPES_DESCRIPTION)
     is_service_key: bool | None = None
     # A service key's alone. Tri-state via model_fields_set: absent = unchanged,
     # null = end users this key creates from now on are uncapped.
@@ -344,6 +352,7 @@ async def create_own_key(
     try:
         allowed_models = validate_allowed_models(config, request.allowed_models)
         allowed_tools = validate_allowed_tools(config, request.allowed_tools)
+        scopes = KeyScopeSet.checked(request.scopes, is_service_key=request.is_service_key)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -397,6 +406,7 @@ async def create_own_key(
         expires_at=request.expires_at,
         allowed_models=allowed_models,
         allowed_tools=allowed_tools,
+        scopes=scopes,
         exclude_from_budget=False,
         self_service=True,
         reject_user_mismatch=request.reject_user_mismatch,
@@ -496,11 +506,18 @@ async def update_own_key(
     refuse_service_key_flag_change(key, request.is_service_key)
 
     # Tri-state via model_fields_set: the nullable columns take null to clear
-    # them, so "absent" and "null" have to be told apart. ``is_active`` and
-    # ``metadata`` are not nullable, so ``is not None`` is the whole distinction there.
-    changes = request.model_dump(include=fields - {"is_active", "metadata", "is_service_key"} - END_USER_SETTINGS)
+    # them, so "absent" and "null" have to be told apart. ``is_active``,
+    # ``metadata`` and ``scopes`` are not nullable, so ``is not None`` is the whole distinction there.
+    changes = request.model_dump(
+        include=fields - {"is_active", "metadata", "is_service_key", "scopes"} - END_USER_SETTINGS
+    )
     if request.is_active is not None:
         changes["is_active"] = request.is_active
+    if request.scopes is not None:
+        try:
+            changes["scopes"] = KeyScopeSet.checked(request.scopes, is_service_key=key.is_service_key)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if request.metadata is not None:
         changes["metadata_"] = request.metadata
     changes |= await organization_key_changes(

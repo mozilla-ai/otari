@@ -21,6 +21,7 @@ from gateway.core.config import API_ROOT
 from gateway.models.usage import AgentTelemetry, UsageLog
 from gateway.models.users import User
 
+from .conftest import ALL_KEY_SCOPES
 from .otlp_helpers import gauge_metric, metrics_export, metrics_export_protobuf, number_point, sum_metric
 
 _PATH = "/otlp/v1/metrics"
@@ -60,7 +61,12 @@ def _exempt_key(client: TestClient, master_key_header: dict[str, str], user_id: 
     client.post(f"{API_ROOT}/users", json={"user_id": user_id}, headers=master_key_header)
     response = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": f"metrics-import-{user_id}", "user_id": user_id, "exclude_from_budget": True},
+        json={
+            "scopes": ALL_KEY_SCOPES,
+            "key_name": f"metrics-import-{user_id}",
+            "user_id": user_id,
+            "exclude_from_budget": True,
+        },
         headers=master_key_header,
     )
     assert response.status_code == 200, response.text
@@ -355,6 +361,7 @@ def _key_with_capture_override(
 ) -> tuple[dict[str, str], str]:
     client.post(f"{API_ROOT}/users", json={"user_id": user_id}, headers=master_key_header)
     payload: dict[str, object] = {
+        "scopes": ALL_KEY_SCOPES,
         "key_name": f"metrics-import-{user_id}",
         "user_id": user_id,
         "exclude_from_budget": True,

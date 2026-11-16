@@ -32,7 +32,7 @@ from gateway.core.settings.api_keys import FederationIssuer
 from gateway.services.api_keys import FederatedTokenVerifier
 from gateway.services.secret_box import generate_secret_key
 
-from .conftest import MODEL_NAME, build_test_client
+from .conftest import ALL_KEY_SCOPES, MODEL_NAME, all_scopes, build_test_client
 
 ISSUER = "https://issuer.example.com"
 JWKS_URI = "https://issuer.example.com/keys"
@@ -135,7 +135,9 @@ class _Federated:
 
     def __init__(self, client: TestClient, master_key_header: dict[str, str], **settings: Any) -> None:
         created = client.post(
-            KEYS, json={"key_name": "hackbot", "user_id": "hackbot", **settings}, headers=master_key_header
+            KEYS,
+            json={"scopes": all_scopes(settings), "key_name": "hackbot", "user_id": "hackbot", **settings},
+            headers=master_key_header,
         )
         assert created.status_code == 200, created.text
         self.key_id: str = created.json()["id"]
@@ -285,7 +287,9 @@ def test_a_refused_grant_is_invalid_grant_with_one_description(
 def test_an_identity_token_valid_for_another_rule_is_refused_for_this_one(
     client: TestClient, master_key_header: dict[str, str], federated: _Federated
 ) -> None:
-    other = client.post(KEYS, json={"key_name": "other", "user_id": "other"}, headers=master_key_header).json()
+    other = client.post(
+        KEYS, json={"scopes": ALL_KEY_SCOPES, "key_name": "other", "user_id": "other"}, headers=master_key_header
+    ).json()
     other_rule = client.post(
         f"{KEYS}/{other['id']}/federation-rules",
         json={"issuer": ISSUER, "audience": AUDIENCE, "subject": "another-workload"},
@@ -515,7 +519,7 @@ def test_the_access_token_and_the_identity_token_each_take_their_own_path(
 def test_a_key_secret_still_authenticates_beside_access_tokens(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
-    created = client.post(KEYS, json={"user_id": "plain"}, headers=master_key_header).json()
+    created = client.post(KEYS, json={"scopes": ALL_KEY_SCOPES, "user_id": "plain"}, headers=master_key_header).json()
 
     assert _chat(client, {API_KEY_HEADER: f"Bearer {created['key']}"}).status_code == 200
 
