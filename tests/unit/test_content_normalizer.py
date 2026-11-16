@@ -591,6 +591,27 @@ def test_container_copies_are_named_without_changing_the_request() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("fmt", "block"),
+    [
+        ("openai", {"type": "file", "file": {"file_id": "file-nope"}}),
+        ("openai", {"type": "image_url", "image_url": {"url": ""}, "file_id": "file-nope"}),
+        ("openai", {"type": "input_file", "file_id": "file-nope"}),
+        ("anthropic", {"type": "document", "source": {"type": "file", "file_id": "file-nope"}}),
+        ("anthropic", {"type": "image", "source": {"type": "file", "file_id": "file-nope"}}),
+    ],
+)
+async def test_a_block_naming_a_file_the_caller_cannot_reach_refuses(fmt: Any, block: dict[str, Any]) -> None:
+    """The ID would otherwise reach the provider, which fails or ignores it with no word of why."""
+    msgs = [{"role": "user", "content": [block]}]
+
+    with pytest.raises(AttachedFileUnavailableError, match="file-nope"):
+        await normalize_messages(
+            msgs, config=GatewayConfig(), caps=_TEXT_ONLY, fmt=fmt, files=_files(_stored()), user_id="u"
+        )
+
+
+@pytest.mark.asyncio
 async def test_container_upload_naming_an_unknown_file_refuses() -> None:
     """A provider file ID of the caller's choosing must never reach the provider."""
     msgs = [{"role": "user", "content": [{"type": "container_upload", "file_id": "file_someone_elses"}]}]

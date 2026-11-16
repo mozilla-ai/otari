@@ -17,7 +17,7 @@ from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Never, cast
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx2
 import pytest
@@ -310,6 +310,115 @@ def test_file_id_extracted_reaches_provider(
     assert "report.txt" in sent
     # ...and the raw file block did not (it was replaced by a text block).
     assert "file_id" not in sent
+
+
+def _service_key(client: TestClient, master_key_header: dict[str, str], header_name: str, name: str) -> dict[str, str]:
+    created = client.post(
+        f"{API_ROOT}/keys",
+        json={"key_name": name, "user_id": name, "is_service_key": True},
+        headers=master_key_header,
+    )
+    assert created.status_code == 200, created.text
+    return {header_name: f"Bearer {created.json()['key']}"}
+
+
+def test_a_service_key_keeps_each_end_users_files_apart(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    tmp_file_store: None,
+) -> None:
+    """A service key's ``user`` naming an end user owns the upload as that end user, on every verb."""
+    service_key = _service_key(client, master_key_header, next(iter(api_key_header)), "svc")
+    up = client.post(
+        f"{API_ROOT}/files",
+        headers=service_key,
+        files={"file": ("notes.txt", b"alice's notes", "text/plain")},
+        data={"user": "alice"},
+    )
+    assert up.status_code == 200, up.text
+    file_id = up.json()["id"]
+    bob = client.post(
+        f"{API_ROOT}/files",
+        headers=service_key,
+        files={"file": ("notes.txt", b"bob's notes", "text/plain")},
+        data={"user": "bob"},
+    )
+    assert bob.status_code == 200, bob.text
+
+    listed = client.get(f"{API_ROOT}/files", headers=service_key, params={"user": "alice"})
+    assert [f["id"] for f in listed.json()["data"]] == [file_id]
+    content = client.get(f"{API_ROOT}/files/{file_id}/content", headers=service_key, params={"user": "alice"})
+    assert content.content == b"alice's notes"
+    # Neither the key's own user, another end user nor an end user it never named reaches it.
+    assert client.get(f"{API_ROOT}/files", headers=service_key).json()["data"] == []
+    assert client.get(f"{API_ROOT}/files/{file_id}", headers=service_key, params={"user": "bob"}).status_code == 404
+    assert client.get(f"{API_ROOT}/files", headers=service_key, params={"user": "carol"}).json()["data"] == []
+    assert client.get(f"{API_ROOT}/files/{file_id}", headers=service_key, params={"user": "carol"}).status_code == 404
+
+    deleted = client.delete(f"{API_ROOT}/files/{file_id}", headers=service_key, params={"user": "alice"})
+    assert deleted.status_code == 200, deleted.text
+
+
+def test_an_end_users_upload_reaches_their_requests_and_no_one_elses(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    tmp_file_store: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A file a service key uploads for alice is read in alice's requests and refused, by ID, in bob's."""
+
+    async def fake_extract(data: bytes, mime: str, filename: str | None) -> ExtractionResult:
+        return ExtractionResult(f"EXTRACTED::{data.decode()}", True, "ok")
+
+    monkeypatch.setattr("gateway.services.content_normalizer.extract_text_from_file", fake_extract)
+    service_key = _service_key(client, master_key_header, next(iter(api_key_header)), "svc")
+    up = client.post(
+        f"{API_ROOT}/files",
+        headers=service_key,
+        files={"file": ("notes.txt", b"alice's notes", "text/plain")},
+        data={"user": "alice"},
+    )
+    assert up.status_code == 200, up.text
+    file_id = up.json()["id"]
+    mock_acompletion = AsyncMock(return_value=_make_completion())
+
+    def chat(user: str) -> Any:
+        body = {
+            "model": "ollama:llama3",
+            "user": user,
+            "messages": [{"role": "user", "content": [{"type": "file", "file": {"file_id": file_id}}]}],
+        }
+        with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
+            return client.post(f"{API_ROOT}/chat/completions", headers=service_key, json=body)
+
+    resp = chat("alice")
+    assert resp.status_code == 200, resp.text
+    assert "EXTRACTED::alice's notes" in json.dumps(mock_acompletion.call_args.kwargs["messages"])
+
+    mock_acompletion.reset_mock()
+    refused = chat("bob")
+    assert refused.status_code == 400, refused.text
+    assert file_id in refused.text
+    mock_acompletion.assert_not_called()
+
+
+def test_a_file_id_the_caller_cannot_reach_is_a_400_naming_it(
+    client: TestClient, api_key_header: dict[str, str], tmp_file_store: None
+) -> None:
+    """An unknown ``file_id`` is refused rather than forwarded to a provider that cannot read it."""
+    mock_acompletion = AsyncMock(return_value=_make_completion())
+    body = {
+        "model": "ollama:llama3",
+        "messages": [{"role": "user", "content": [{"type": "file", "file": {"file_id": "file-nope"}}]}],
+    }
+    with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
+        resp = client.post(f"{API_ROOT}/chat/completions", headers=api_key_header, json=body)
+
+    assert resp.status_code == 400, resp.text
+    assert "file-nope" in resp.text
+    mock_acompletion.assert_not_called()
 
 
 def test_budget_rejection_skips_normalization(

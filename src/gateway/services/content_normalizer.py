@@ -285,6 +285,11 @@ async def _resolve_from_ref(
     ``read_bytes=False`` resolves a ``file_id`` to its record without loading
     the blob, for a block that is only staged into the sandbox and never shown
     to the model.
+
+    Raises:
+        AttachedFileUnavailableError: a ``file_id`` the caller cannot reach. Forwarding
+            it would fail at the provider with no word of why, or let a provider's own
+            file ID of the caller's choosing reach an account that is not the caller's.
     """
     filename = ref.get("filename")
     file_id = ref.get("file_id")
@@ -293,8 +298,7 @@ async def _resolve_from_ref(
         scope = None if user_id is None else FileScope(user_id, workspace_id)
         staged = None if scope is None else await files.staged_upload(str(file_id), scope)
         if staged is None:
-            logger.warning("content normalizer: file_id %s not available to user %s", file_id, user_id)
-            return None
+            raise AttachedFileUnavailableError(str(file_id))
         data = await files.read_bytes(staged) if read_bytes else None
         return _Resolved(data, staged.mime_type, staged.filename, staged)
 
@@ -629,6 +633,8 @@ async def _normalize_block(
             sandbox_requested=sandbox_requested,
             provider_container=provider_container,
         )
+    except AttachedFileUnavailableError:
+        raise
     except Exception as exc:  # noqa: BLE001 — never fail the request over a block
         logger.warning("content normalizer: failed to classify block: %s", exc)
         if provider_container and _is_container_block(block, fmt):

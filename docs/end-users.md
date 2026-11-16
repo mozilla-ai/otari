@@ -86,7 +86,9 @@ A request that names no one, or the key's own user, bills the key's user as on
 any other key.
 
 End users work on `/v1/chat/completions`, `/v1/responses`, `/v1/messages`,
-`/v1/search`, `/v1/fetch` and `/v1/code/execute`. On those endpoints, a request
+`/v1/search`, `/v1/fetch` and `/v1/code/execute`, and on `/v1/files`, where the
+file belongs to the end user ([Who can see an uploaded file](files.md#who-can-see-an-uploaded-file)).
+On the first six, a request
 that sends `Otari-End-User-Budget` without naming an end user, or sends it on a
 key that is not a service key, is refused with `400`
 (`end_user_budget_without_end_user`), since there is no end user for the budget

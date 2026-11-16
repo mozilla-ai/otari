@@ -217,15 +217,16 @@ async def normalize_request_messages(
     decide whether attachments past the provider's inline limit are moved to its
     own storage (see ``inline_limit_for``).
 
-    An attachment the model reads never fails the request, because this runs
-    after the budget reservation and a refusal here would lose it.
-    The input is returned untouched instead, which is also the answer where file
-    understanding is off or the provider could not be parsed.
+    An attachment the model reads does not fail the request when it cannot be
+    rendered: the input is returned untouched instead, which is also the answer
+    where file understanding is off or the provider could not be parsed. A
+    ``file_id`` the caller cannot reach is refused, as the provider could not read it either.
     The exception is an attachment past an inline limit that could not be moved,
     which the provider would refuse anyway, so the request is refused here first.
 
     Raises:
-        ProviderAttachmentError: only where ``provider_container`` is set.
+        AttachedFileUnavailableError: a ``file_id`` the caller cannot reach.
+        ProviderAttachmentError: otherwise only where ``provider_container`` is set.
         InlineAttachmentsTooLargeError: the attachments pass the provider's inline limit and could not be moved.
     """
     if provider_container and not config.file_understanding_enabled and has_container_blocks(messages, fmt):
