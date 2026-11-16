@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.47.0/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.48.0/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -326,7 +326,9 @@ Name origins instead of `*` to open the endpoints to those pages alone. Each
 entry is an origin as a browser sends it: a scheme and a host in lowercase, with
 a port only when it is not the scheme's default, and nothing after it, such as
 `https://app.example.com` or `http://localhost:5173`. An entry that is not one,
-`https://app.example.com:443` for instance, is refused at startup.
+`https://app.example.com:443` for instance, is refused at startup. So is a
+wildcard inside an origin, such as `https://*.example.com`: an origin is matched
+whole, so list each subdomain, or use `*` alone.
 
 An origin listed in `cors_allow_origins` keeps that list's policy on every
 path, the model endpoints included. With `*` there, every origin does, and
@@ -376,6 +378,7 @@ the next start. It takes:
 | `ceiling` | Budget that caps the key as a whole, across all of its end users: a scoped budget with `scope_type: api_token` on the key. |
 | `exclude_from_budget` | Log the key's cost without enforcing any budget. |
 | `reject_user_mismatch` | Per-key override of the deployment setting. |
+| `scopes` | The endpoint groups the key may reach; see [Scopes](https://docs.otari.ai/guides/control/api-keys#scopes). Unset gives every scope that existed when scopes were introduced (the end-user scopes only to a service key) and never one added since. |
 
 Unknown fields are refused, so a misspelled limit stops the start rather than
 leaving a budget uncapped. A key may name a budget declared here or one that
@@ -853,7 +856,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/v0.47.0/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/v0.48.0/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -1607,20 +1610,29 @@ OTARI_WEB_SEARCH_URL=
 A variable exported in the shell that runs Docker Compose wins over `.env`, so
 unset an exported `OTARI_WEB_SEARCH_URL` there too.
 
+### The legacy provider settings
+
+`web_search_provider` and `web_search_provider_api_key` are deprecated, and a
+coming breaking release refuses to start while they are set. They name the
+Tavily or Brave account the in-loop tool searches with when no search instance
+is its default. Replace them with a search instance named after the provider,
+with the key and a price, and name it in `web_search_default_tool`; for Tavily,
+add `include_raw_content: true` to its options to keep each page's full text.
+The startup log says the same while they are set.
+
 ### The older in-loop backend
 
-The older in-loop backend still serves some requests until it is removed: a
-search on `web_search_provider`, or on a Tavily or Brave organization key, and a
-request that declares only the fetch tool. `web_fetch_default_tool` governs every
-fetch tool call, while `web_search_max_calls` and `fetch_tool` apply only where a
-search instance serves the request: the older backend keeps its fixed limit of 10
-calls, its 422 past it, and its own enrichment through the built-in fetcher.
+The older in-loop backend still serves a request that declares only the fetch
+tool, until it is removed. `web_fetch_default_tool` governs every fetch tool call,
+while `web_search_max_calls` does not apply there: the older backend keeps its
+fixed limit of 10 calls and its 422 past it.
 
 ## Decision providers
 
 `decision_providers` configures the upstreams behind `POST /api/v1/decisions`. The
 key is the prefix callers write in `model`, so the entry below serves
-`typesafe:jev-latest`, `openrouter:typesafe/jev-1.13` and `local:openjev`:
+`typesafe:jev-latest`, `openrouter:typesafe/jev-1.13`, `gemini:gemini-decision-1`
+and `local:openjev`:
 
 ```yaml
 decision_providers:
@@ -1628,16 +1640,29 @@ decision_providers:
     api_key: ${TYPESAFE_API_KEY}
   openrouter:
     api_key: ${OPENROUTER_API_KEY}
+  gemini:
+    api_key: ${GEMINI_API_KEY}
   local:
     provider: llamacpp
     api_base: "http://127.0.0.1:8080"
 ```
 
-`provider` is one of `typesafe`, `openrouter` or `llamacpp`, and defaults to the
-key. TypeSafe and OpenRouter need an `api_key`, and their default `api_base` can be
-replaced with another https root. A `llamacpp` entry points at a `llama-server`
+`provider` is one of `typesafe`, `openrouter`, `gemini` or `llamacpp`, and defaults
+to the key. TypeSafe, OpenRouter and Gemini need an `api_key`, and their default
+`api_base` can be replaced with another https root. A `llamacpp` entry points at a `llama-server`
 running a decision model and needs an `api_base`; it may use plain http only when
 it has no `api_key`. `timeout` sets the seconds to wait for an answer (default 30).
+
+A `gemini` entry calls Google's
+[Decisions API](https://aistudio.google.com/docs/decisions-api) with a Gemini API
+key. Callers keep sending the same request body: the gateway translates it to
+Gemini's shape (`state` becomes `input`, a `noul` question's `true` and `false`
+criteria become `true_description` and `false_description`, structured JSON is
+serialized to text, and each data URL in `images` becomes an inline image block)
+and returns Gemini's answer with its token counts as `usage.input_tokens` and
+`usage.output_tokens`. Question fields Gemini has no counterpart for are not sent.
+Gemini reports no cost, so price its model in `pricing` (as
+`gemini:gemini-decision-1`) to have its requests charged against budgets.
 
 These entries are separate from `providers` because none of these upstreams serves
 chat: they never appear in `/api/v1/models` or provider health. Price a decision
@@ -1691,6 +1716,10 @@ smtp_user: ${SMTP_USER}
 smtp_password: ${SMTP_PASSWORD}
 ```
 
+`mail_from_email` is the address alone, with no display name, comment or quoted text.
+`mail_from_name` sets the name shown beside it.
+With `mail_transport: smtp`, Otari does not start when `mail_from_email` is anything else.
+
 `mail_transport: console` writes complete messages to logs for local testing.
 Those messages can contain invitation or password-reset tokens, so never use it
 where logs are shared. Test delivery from Settings or
@@ -1742,7 +1771,7 @@ settings, and the deployment's Web search page shows the web-search ones. Common
   `sandbox_environments` (see [Sandbox environments](#sandbox-environments))
 - `code_execution_executor`
 - `web_search_url` (deprecated, see [The legacy SearXNG settings](#the-legacy-searxng-settings))
-- `web_search_provider` and `web_search_provider_api_key`
+- `web_search_provider` and `web_search_provider_api_key` (deprecated, see [The legacy provider settings](#the-legacy-provider-settings))
 - `web_search_default_tool`, `web_fetch_default_tool` and `web_search_max_calls`
   (see [Search tools](#search-tools))
 - `guardrails_url`
@@ -1870,7 +1899,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.47.0/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.48.0/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Contacting the Otari team
