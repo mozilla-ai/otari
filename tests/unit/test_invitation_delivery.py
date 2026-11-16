@@ -620,8 +620,8 @@ def poll_without_a_database(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     async def sleep(seconds: float) -> None:
         sleeps.append(seconds)
 
-    monkeypatch.setattr("gateway.services.organizations._delivery.create_unit_of_work", unit_of_work)
-    monkeypatch.setattr("gateway.services.organizations._delivery.asyncio.sleep", sleep)
+    monkeypatch.setattr("gateway.services.organizations._poll.create_unit_of_work", unit_of_work)
+    monkeypatch.setattr("gateway.services.organizations._poll.asyncio.sleep", sleep)
     return sleeps
 
 
