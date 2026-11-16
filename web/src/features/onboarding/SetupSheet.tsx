@@ -221,7 +221,9 @@ export function SetupSheet({
         <p className="text-caption text-subtle">
           {tab === "agent"
             ? "Works with Claude Code, Codex, and Cursor. Reads your key from the environment."
-            : "Hidden keys use a stand-in; copies include your real key."}
+            : tab === "curl"
+              ? "Hidden keys use a stand-in; copies include your real key."
+              : `Reads your key from ${SNIPPET_KEY_ENV_VAR}; export it as the cURL tab shows.`}
         </p>
         {model === undefined ? (
           <p className="text-caption text-subtle">

@@ -552,7 +552,9 @@ describe("KeysPage", () => {
     expect(curl.value).toContain(
       `${window.location.origin}${API_ROOT}/chat/completions`,
     )
-    expect(python.value).toContain(NEW_SECRET)
+    // A copied program lands in a source file, so only the shell carries the key.
+    expect(python.value).toContain('os.environ["OTARI_API_KEY"]')
+    expect(python.value).not.toContain(NEW_SECRET)
 
     // One credential, one reveal: concealing the key conceals the requests that
     // carry it, rather than leaving it in plain sight twice over.
@@ -570,7 +572,6 @@ describe("KeysPage", () => {
     await user.click(within(reveal).getByRole("button", { name: "Show curl" }))
     expect(within(reveal).getByLabelText("Secret key")).toHaveValue(NEW_SECRET)
     expect(curl.value).toContain(NEW_SECRET)
-    expect(python.value).toContain(NEW_SECRET)
 
     // The acknowledgement is the dialog's footer action, so it is outside the
     // alert that holds the key. It is unique on screen either way.

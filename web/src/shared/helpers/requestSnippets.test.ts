@@ -60,6 +60,11 @@ describe("buildCurlSnippet", () => {
     expect(snippet.split("\n")[0]).toMatch(/^curl /)
   })
 
+  it("quotes the concealed stand-in", () => {
+    const snippet = buildCurlSnippet({ ...INPUT, apiKey: "otk_ab…••••" })
+    expect(snippet.split("\n")[0]).toBe("export OTARI_API_KEY='otk_ab…••••'")
+  })
+
   it("quotes a key the shell would otherwise split", () => {
     const snippet = buildCurlSnippet({ ...INPUT, apiKey: "a b'c" })
     expect(snippet.split("\n")[0]).toBe(`export OTARI_API_KEY='a b'\\''c'`)
@@ -126,7 +131,7 @@ describe("buildPythonSnippet", () => {
     expect(buildPythonSnippet(INPUT)).toBe(
       [
         "# pip install openai",
-        "# export OTARI_API_KEY=gw-abc123",
+        "# Set OTARI_API_KEY in your environment first",
         "",
         "import os",
         "",
@@ -185,12 +190,18 @@ describe("buildPythonSnippet", () => {
   })
 })
 
+describe("buildPythonSnippet's key", () => {
+  it("never carries the key, not even in a comment", () => {
+    expect(buildPythonSnippet(INPUT)).not.toContain("gw-abc123")
+  })
+})
+
 describe("buildTypescriptSnippet", () => {
   it("installs the client and exports the key, then reads it from the environment", () => {
     expect(buildTypescriptSnippet(INPUT)).toBe(
       [
         "// npm i openai",
-        "// export OTARI_API_KEY=gw-abc123",
+        "// Set OTARI_API_KEY in your environment first",
         "",
         'import OpenAI from "openai"',
         "",
@@ -204,9 +215,8 @@ describe("buildTypescriptSnippet", () => {
     )
   })
 
-  it("never inlines the key in the code", () => {
-    const code = buildTypescriptSnippet(INPUT).split("\n").slice(3).join("\n")
-    expect(code).not.toContain("gw-abc123")
+  it("never carries the key, not even in a comment", () => {
+    expect(buildTypescriptSnippet(INPUT)).not.toContain("gw-abc123")
   })
 })
 

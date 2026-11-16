@@ -346,7 +346,7 @@ describe("SetupGuide", () => {
     )
     await user.click(screen.getByRole("button", { name: "cURL" }))
     expect(snippet("curl")).toHaveTextContent(
-      "export OTARI_API_KEY=••••••••••••••••",
+      "export OTARI_API_KEY='••••••••••••••••'",
     )
   })
 
@@ -403,10 +403,11 @@ describe("SetupGuide", () => {
       const hint =
         label === "Agent"
           ? screen.getByText(/Works with Claude Code/)
-          : screen.getByText(/Hidden keys use a stand-in/)
+          : label === "cURL"
+            ? screen.getByText(/Hidden keys use a stand-in/)
+            : screen.getByText(/Reads your key from OTARI_API_KEY/)
       const original = hint.textContent
-      if (label !== "Agent") {
-        expect(hint).toHaveTextContent("Hidden keys use a stand-in")
+      if (label === "cURL") {
         expect(hint).toHaveTextContent("copies include your real key")
       }
       await user.click(

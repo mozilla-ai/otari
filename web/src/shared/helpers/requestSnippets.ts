@@ -58,9 +58,9 @@ export interface RequestSnippetInput {
 /**
  * The environment variable every snippet reads the key from.
  *
- * The agent prompt only names it, so the secret never lands in the agent's
- * transcript. The runnable snippets name it too, and open with the `export`
- * that sets it, so a copy still carries the key without inlining it in code.
+ * Only the cURL snippet carries the key, on the shell `export` that sets it.
+ * The programs and the agent prompt name the variable, so a copy never puts
+ * the secret in a source file or an agent's transcript.
  */
 export const SNIPPET_KEY_ENV_VAR = "OTARI_API_KEY"
 
@@ -102,7 +102,9 @@ function keyFromEnvironment(apiKey: string): {
   const named = ENV_REFERENCE.exec(apiKey)?.[1]
   if (named) return { reference: named, setup: [] }
   // Quoted only when it has to be, so an ordinary key reads like the docs'.
-  const value = /^[\w.\-…•]+$/.test(apiKey) ? apiKey : shellSingleQuoted(apiKey)
+  const value = /^[A-Za-z0-9_-]+$/.test(apiKey)
+    ? apiKey
+    : shellSingleQuoted(apiKey)
   return {
     reference: SNIPPET_KEY_ENV_VAR,
     setup: [`export ${SNIPPET_KEY_ENV_VAR}=${value}`],
@@ -110,17 +112,22 @@ function keyFromEnvironment(apiKey: string): {
 }
 
 /**
- * A program's opening comments: the install and the `export`, for a snippet
- * given the key itself. A reader given a reference has done both.
+ * A program's opening comments, for a snippet given the key itself: the
+ * install, and where the key goes. Never the key: a copied program lands in a
+ * source file. A reader given a reference has done both.
  */
 function setupComments(
   apiKey: string,
   comment: string,
   install: string,
 ): string[] {
-  const { setup } = keyFromEnvironment(apiKey)
+  const { reference, setup } = keyFromEnvironment(apiKey)
   if (setup.length === 0) return []
-  return [...[install, ...setup].map((line) => `${comment} ${line}`), ""]
+  return [
+    `${comment} ${install}`,
+    `${comment} Set ${reference} in your environment first`,
+    "",
+  ]
 }
 
 /**
