@@ -498,6 +498,10 @@ class _ResponsesToolLoopStrategy:
                 "items the gateway already executed (no-op on the client side).",
             )
 
+    def end_answer(self, result: Response) -> None:
+        """Nothing to mark: a response that holds no call already reads as an answer."""
+        del result
+
     async def advance_transcript(
         self,
         transcript: list[Any],
@@ -694,6 +698,11 @@ class _ResponsesToolLoopStrategy:
             await _execute_stream_owned(state, pool, budget=self._budget, tools=self._native_tools)
             for event in self.synthetic_events(state, acc):
                 yield event
+
+    def end_stream_answer(self, state: _ResponsesStreamState) -> None:
+        # The gateway's function_call items were hidden, and ``terminal_events`` drops
+        # them from the completed response too, so nothing else marks the round.
+        del state
 
     def terminal_events(self, state: _ResponsesStreamState, acc: dict[str, Any]) -> list[ResponseStreamEvent]:
         if state.deferred_terminal is None:
