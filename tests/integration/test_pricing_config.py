@@ -904,9 +904,6 @@ async def test_log_usage_finds_pricing_with_legacy_slash_format(async_db: AsyncS
             self.logs.append(log)
             return True
 
-        async def stage(self, _db: object, logs: list[UsageLog]) -> None:
-            self.logs.extend(logs)
-
         async def after_commit(self, _logs: list[UsageLog]) -> None:
             pass
 
@@ -954,9 +951,6 @@ async def test_log_usage_finds_pricing_with_colon_format(async_db: AsyncSession)
         async def put(self, log: UsageLog) -> bool:
             self.logs.append(log)
             return True
-
-        async def stage(self, _db: object, logs: list[UsageLog]) -> None:
-            self.logs.extend(logs)
 
         async def after_commit(self, _logs: list[UsageLog]) -> None:
             pass

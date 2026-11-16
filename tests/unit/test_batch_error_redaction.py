@@ -1,8 +1,12 @@
+from typing import Any
+
 import pytest
 from any_llm.types.batch import BatchResultError
 
 from gateway.api.routes.batches import _public_batch_error
-from gateway.services.upstream_redaction import PASSTHROUGH_PROVIDER_ERROR_DETAIL
+from gateway.core.error_details import ProviderDetail
+
+_SECRET = "sk-proj-AAAAAAAAAAAAAAAAAAAAAAAA"
 
 
 @pytest.mark.parametrize(
@@ -11,42 +15,51 @@ from gateway.services.upstream_redaction import PASSTHROUGH_PROVIDER_ERROR_DETAI
         ("invalid_request_error", "Request body is invalid"),
         ("model_not_found", "The requested model was not found"),
         ("unprocessable_entity", "The request cannot be processed"),
-        ("rate_limit", "Quota exceeded; retry after 60 seconds"),
-        ("rate_limit_error", "Quota exceeded; retry after 60 seconds"),
+        ("rate_limit_error", "You exceeded your per-minute rate limit"),
+        ("400", "Request body is invalid"),
     ],
 )
-def test_actionable_batch_errors_return_redacted_provider_text(code: str, message: str) -> None:
-    raw = f"{message}. Request to https://provider.example failed with key sk-proj-AAAAAAAAAAAAAAAA"
+def test_caller_actionable_line_errors_pass_redacted_provider_text(code: str, message: str) -> None:
+    raw = f"{message}. Request to https://provider.example failed with key {_SECRET}"
 
     result = _public_batch_error(BatchResultError(code=code, message=raw))
 
-    assert result["code"] == code
-    assert "https://provider.example" not in result["message"]
-    assert "sk-proj-AAAAAAAAAAAAAAAA" not in result["message"]
+    assert result.public["code"] == code
+    assert message in result.public["message"]
+    assert _SECRET not in result.public["message"]
 
 
 @pytest.mark.parametrize(
-    "code",
+    ("code", "message", "detail"),
     [
-        "400",
-        "404",
-        "422",
-        "429",
-        "invalid_api_key",
-        "insufficient_quota",
-        "billing_hard_limit_reached",
-        "server_error",
-        "unknown",
+        ("authentication_error", f"invalid x-api-key {_SECRET}", ProviderDetail.CREDENTIALS),
+        ("server_error", "provider internal details", ProviderDetail.ERROR),
+        ("unknown", "provider internal details", ProviderDetail.ERROR),
+        (None, None, ProviderDetail.ERROR),
     ],
 )
-def test_non_actionable_batch_errors_use_fixed_public_text(code: str) -> None:
-    result = _public_batch_error(BatchResultError(code=code, message="provider internal details"))
+def test_gateway_side_line_errors_use_fixed_public_text(code: str | None, message: str | None, detail: str) -> None:
+    result = _public_batch_error(BatchResultError(code=code, message=message))  # type: ignore[arg-type]
 
-    assert result == {"code": code, "message": PASSTHROUGH_PROVIDER_ERROR_DETAIL}
+    assert result.public["message"] == detail
 
 
-@pytest.mark.parametrize("code", ["rate_limit", "rate_limit_error"])
-def test_rate_limit_without_quota_or_retry_guidance_uses_fixed_public_text(code: str) -> None:
-    result = _public_batch_error(BatchResultError(code=code, message="Provider account authentication failed"))
+def test_an_exhausted_provider_account_reads_as_billing_not_a_bad_request() -> None:
+    error = BatchResultError(
+        code="invalid_request_error",
+        message="Your credit balance is too low to access the Anthropic API.",
+    )
 
-    assert result == {"code": code, "message": PASSTHROUGH_PROVIDER_ERROR_DETAIL}
+    result = _public_batch_error(error)
+
+    assert result.public["message"] == ProviderDetail.BILLING
+
+
+def test_a_numeric_error_code_is_classified_as_its_http_status() -> None:
+    # Bedrock reports a line's errorCode as a number, which the adapter passes through unconverted.
+    code: Any = 429
+
+    result = _public_batch_error(BatchResultError(code=code, message="Too many tokens, please wait"))
+
+    assert result.public == {"code": "429", "message": "Too many tokens, please wait"}
+    assert result.logged_status == 429

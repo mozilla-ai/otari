@@ -1,6 +1,5 @@
 """The pricing domain: which meter a rate prices, what an attempt costs at it, and the models.dev default prices."""
 
-from gateway.services.pricing._batch_pricing import BatchPricingService
 from gateway.services.pricing._deployment_pricing_service import DeploymentPricingService
 from gateway.services.pricing._price_rules import (
     NO_FACTS,
@@ -82,7 +81,6 @@ from gateway.services.pricing.models_dev_index import (
 
 __all__ = [
     "AppliedRate",
-    "BatchPricingService",
     "BUNDLED_SNAPSHOT_NAME",
     "DeploymentPricingService",
     "MAX_RATE_PER_MILLION",

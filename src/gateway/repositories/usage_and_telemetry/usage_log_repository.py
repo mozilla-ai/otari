@@ -8,7 +8,6 @@ from decimal import Decimal
 from typing import Any, Never, cast
 
 from sqlalchemy import ColumnElement, Select, and_, case, false, func, null, or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.metered_pricing import ChargeLine
 from gateway.core.sql import bucket_expr, canonical_bucket, dialect_name, match_any, utc_bound
@@ -430,8 +429,8 @@ def _billed_output_sum() -> Any:
 class UsageLogRepository(BaseRepository[UsageLog, Never, Never]):
     """Read usage rows inside a set of workspaces."""
 
-    def __init__(self, db: AsyncSession | UnitOfWork) -> None:
-        super().__init__(db, UsageLog)
+    def __init__(self, uow: UnitOfWork) -> None:
+        super().__init__(uow, UsageLog)
 
     async def add(self, row: UsageLog) -> None:
         """Stage ``row`` in the open block, so it commits with the step that settled it."""

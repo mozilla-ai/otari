@@ -1,11 +1,12 @@
 """Account completed batch results as one transactional business step."""
 
+from collections.abc import Awaitable, Callable
 from decimal import Decimal
 from typing import Protocol
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.usage import UsageLog
-from gateway.services.budgets import BudgetService
+from gateway.ports.billing_port import NO_TOOLS
 from gateway.services.inference._deployment_funding import DeploymentCharge
 
 
@@ -31,12 +32,12 @@ class BatchResultsService:
         uow: UnitOfWork,
         batches: _BatchClaim,
         usage_logs: _UsageLogRepository,
-        budgets: BudgetService,
+        fold_spend: Callable[[str, Decimal], Awaitable[None]],
     ) -> None:
         self._uow = uow
         self._batches = batches
         self._usage_logs = usage_logs
-        self._budgets = budgets
+        self._fold_spend = fold_spend
 
     async def account(
         self,
@@ -51,6 +52,7 @@ class BatchResultsService:
         batch_exempt: bool,
         charge: DeploymentCharge | None,
         model: str,
+        description: str,
     ) -> bool:
         """Account a batch once, keeping claim, rows and settlement in one UoW block."""
         if not recorded:
@@ -65,14 +67,14 @@ class BatchResultsService:
             if charge is not None:
                 await charge.settle(
                     cost,
-                    tools={},
+                    tools=NO_TOOLS,
                     model=model,
-                    description=f"batch:{model}",
+                    description=description,
                     expects_cost=bool(total_tokens),
                     savepoint=self._uow.savepoint,
                 )
             if cost and user_id and not batch_exempt:
-                await self._budgets.record_external_spend(user_id, cost)
+                await self._fold_spend(user_id, cost)
 
         await writer.after_commit(logs)
         return True

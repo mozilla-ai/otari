@@ -5,9 +5,4 @@ from gateway.repositories.inference.idempotency_repository import IdempotencyRep
 from gateway.repositories.inference.inference_repositories import InferenceRepositories
 from gateway.repositories.inference.video_job_repository import VideoJobRepository
 
-__all__ = [
-    "CountryDatabaseRepository",
-    "IdempotencyRepository",
-    "InferenceRepositories",
-    "VideoJobRepository",
-]
+__all__ = ["CountryDatabaseRepository", "IdempotencyRepository", "InferenceRepositories", "VideoJobRepository"]

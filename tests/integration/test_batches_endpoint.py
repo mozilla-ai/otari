@@ -1054,7 +1054,7 @@ def test_recorded_batch_results_log_each_item_and_redact_errors(
     ):
         with (
             patch(
-                "gateway.services.budgets.BudgetService.record_external_spend",
+                "gateway.api.deps.record_external_spend",
                 new_callable=AsyncMock,
                 side_effect=RuntimeError("spend fold failed"),
             ),

@@ -42,7 +42,8 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.core.config import GatewayConfig
 from gateway.core.error_codes import INSUFFICIENT_FUNDS, MODEL_NOT_ALLOWED, error_headers
-from gateway.core.metered_pricing import calculate_token_cost
+from gateway.core.error_details import ProviderDetail
+from gateway.core.metered_pricing import allocate_rounded_total, calculate_token_cost
 from gateway.core.usage import cache_read_tokens_of
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
@@ -77,7 +78,7 @@ from gateway.services.model_access import (
     organization_key_refusal,
     resolve_request_allowlist,
 )
-from gateway.services.pricing import BatchPricingService, PriceFacts, apply_rules
+from gateway.services.pricing import PriceFacts, apply_rules
 from gateway.services.pricing_service import find_model_pricing
 from gateway.services.provider_kwargs import (
     MissingCredential,
@@ -89,11 +90,7 @@ from gateway.services.providers import (
     ensure_provider_country,
     serve_on_hosted_provider,
 )
-from gateway.services.upstream_redaction import (
-    PASSTHROUGH_PROVIDER_ERROR_DETAIL,
-    redact_upstream_message,
-    redacted_upstream_detail,
-)
+from gateway.services.upstream_redaction import redact_upstream_message
 from gateway.services.workspace_scope import (
     organization_for_workspace_id,
     resolve_workspace_id,
@@ -111,7 +108,9 @@ USAGE_ENDPOINT_RESULTS = "/v1/batches/results"
 # checked on retrieve/cancel/results. The gateway stores no batch table, so the
 # provider-side metadata is the ownership anchor.
 _OWNER_METADATA_KEY = "otari_user_id"
-# Batch errors expose codes rather than HTTP statuses, so only known caller-actionable codes may expose text.
+# A batch line reports its failure as a provider error code rather than an HTTP
+# status. These are the codes whose status is known, so the line is classified
+# by the same rules as a synchronous failure with that status.
 _BATCH_ERROR_STATUS_BY_CODE = {
     "invalid_argument": 400,
     "invalid_parameter": 400,
@@ -121,6 +120,10 @@ _BATCH_ERROR_STATUS_BY_CODE = {
     "invalid_value": 400,
     "unsupported_value": 400,
     "context_length_exceeded": 400,
+    "billing_hard_limit_reached": 400,
+    "insufficient_quota": 429,
+    "authentication_error": 401,
+    "permission_error": 403,
     "model_not_found": 404,
     "not_found": 404,
     "not_found_error": 404,
@@ -134,6 +137,23 @@ _BATCH_ERROR_STATUS_BY_CODE = {
 }
 
 
+class _BatchLineFailure(Exception):
+    """A failed batch line, shaped like the upstream exception a synchronous call would raise."""
+
+    def __init__(self, status_code: int | None, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.message = message
+
+
+@dataclass(frozen=True)
+class _BatchLineError:
+    """What the caller and the usage row see of one failed batch line."""
+
+    public: dict[str, str]
+    logged_status: int
+
+
 @dataclass(frozen=True)
 class _BatchResultLine:
     model: str
@@ -142,20 +162,34 @@ class _BatchResultLine:
     total_tokens: int | None
     cache_read_tokens: int | None
     has_usage: bool
-    error: dict[str, str] | None
+    error: _BatchLineError | None
 
 
-def _public_batch_error(error: BatchResultError) -> dict[str, str]:
-    raw_code = error.code or ""
-    code = redact_upstream_message(raw_code) or "provider_error"
-    status_code = _BATCH_ERROR_STATUS_BY_CODE.get(raw_code.strip().casefold())
-    if status_code == 429 and not any(term in error.message.casefold() for term in ("quota", "retry", "try again")):
-        status_code = None
-    if status_code not in (400, 404, 422, 429):
-        message = PASSTHROUGH_PROVIDER_ERROR_DETAIL
-    else:
-        message = redacted_upstream_detail(error.message, PASSTHROUGH_PROVIDER_ERROR_DETAIL)
-    return {"code": code, "message": message}
+def _batch_line_status(code: str) -> int | None:
+    """The HTTP status a batch error code stands for, or ``None`` when it names none."""
+    normalized = code.strip().casefold()
+    if normalized.isdigit() and 400 <= int(normalized) <= 599:
+        return int(normalized)
+    return _BATCH_ERROR_STATUS_BY_CODE.get(normalized)
+
+
+def _public_batch_error(error: BatchResultError) -> _BatchLineError:
+    """Classify one failed line with the synchronous routes' taxonomy.
+
+    Provider adapters fill ``BatchResultError`` without validation, so a numeric
+    code (Bedrock) or a missing message is coerced to text first.
+    """
+    raw_code = "" if error.code is None else str(error.code)
+    message = "" if error.message is None else str(error.message)
+    failure = UpstreamFailure(_BatchLineFailure(_batch_line_status(raw_code), message))
+    mapping = failure.mapping
+    return _BatchLineError(
+        public={
+            "code": redact_upstream_message(raw_code) or "provider_error",
+            "message": mapping.detail if mapping is not None else ProviderDetail.ERROR,
+        },
+        logged_status=failure.logged_status,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -954,16 +988,17 @@ async def retrieve_batch_results(
                     cache_tokens_included=True,
                     quantize=False,
                 )
-            cost, line_costs = BatchPricingService.allocate_costs(line_costs)
+            cost, line_costs = allocate_rounded_total(line_costs)
 
     # A retrieval that finds billable tokens but no pricing row (cost is None)
     # does not claim the slot, so once pricing exists a later retrieval still
-    # accounts it. Legacy batches with no record keep the prior behavior (log
-    # every retrieval, no spend fold), since they cannot be deduplicated.
+    # accounts it. Legacy batches with no record keep the prior behavior (one
+    # aggregate row on every retrieval, no spend fold), since they cannot be
+    # deduplicated and a row per line would multiply with every poll.
     pricing_missing = record is not None and bool(total_tokens) and cost is None and not batch_exempt
     if not pricing_missing:
         batch_usage_logs: list[UsageLog] = []
-        if result_lines:
+        if result_lines and record is not None:
             for line, line_cost in zip(result_lines, line_costs, strict=True):
                 batch_usage_logs.append(
                     await log_batch_usage(
@@ -973,7 +1008,8 @@ async def retrieve_batch_results(
                         provider=provider,
                         endpoint=USAGE_ENDPOINT_RESULTS,
                         user_id=user_id,
-                        error=line.error["message"] if line.error is not None else None,
+                        error=line.error.public["message"] if line.error is not None else None,
+                        status_code=line.error.logged_status if line.error is not None else None,
                         prompt_tokens=line.prompt_tokens,
                         completion_tokens=line.completion_tokens,
                         total_tokens=line.total_tokens,
@@ -985,8 +1021,8 @@ async def retrieve_batch_results(
                     )
                 )
         else:
-            # Keep a successful row for a completed batch that returned no
-            # result lines; there is no item to account for individually.
+            # One aggregate row: a legacy batch, or a completed batch with no
+            # result lines to account for individually.
             batch_usage_logs.append(
                 await log_batch_usage(
                     db=db,
@@ -1026,6 +1062,7 @@ async def retrieve_batch_results(
             batch_exempt=batch_exempt,
             charge=charge,
             model=batch_model,
+            description=f"{provider}:{batch_model}",
         )
 
     return {
@@ -1033,7 +1070,7 @@ async def retrieve_batch_results(
             {
                 "custom_id": item.custom_id,
                 "result": item.result.model_dump() if item.result else None,
-                "error": line.error,
+                "error": line.error.public if line.error is not None else None,
             }
             for item, line in zip(result.results, result_lines, strict=True)
         ]

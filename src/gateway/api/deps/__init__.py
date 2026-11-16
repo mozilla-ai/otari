@@ -1568,15 +1568,28 @@ def get_usage_service(uow: UnitOfWorkDep) -> UsageService:
 UsageServiceDep = Annotated[UsageService, Depends(get_usage_service)]
 
 
-def get_batch_results_service(db: Annotated[AsyncSession, Depends(get_db)], uow: UnitOfWorkDep) -> BatchResultsService:
-    """Build the batch-results accounting service on the request's Unit of Work."""
-    budgets = get_budget_service(uow, db)
+class _BatchAccountingClaim:
+    """Claims a recorded batch's one-time results accounting on the request's session."""
 
-    class RequestBatchClaim:
-        async def claim_accounting(self, batch_id: str) -> bool:
-            return await claim_batch_accounting(db, batch_id)
+    def __init__(self, db: AsyncSession) -> None:
+        self._db = db
 
-    return BatchResultsService(uow, RequestBatchClaim(), UsageLogRepository(uow), budgets)
+    async def claim_accounting(self, batch_id: str) -> bool:
+        return await claim_batch_accounting(self._db, batch_id)
+
+
+def get_batch_results_service(db: PortSessionDep, uow: UnitOfWorkDep) -> BatchResultsService:
+    """Build the batch-results accounting service on the request's Unit of Work.
+
+    The claim, the usage rows and the spend fold land on the request's session,
+    in one commit, as a video job's settlement does.
+    """
+    return BatchResultsService(
+        uow,
+        _BatchAccountingClaim(db),
+        UsageLogRepository(uow),
+        fold_spend=partial(record_external_spend, db),
+    )
 
 
 BatchResultsServiceDep = Annotated[BatchResultsService, Depends(get_batch_results_service)]
