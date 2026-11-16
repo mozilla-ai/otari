@@ -12,11 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps._base import (
     ContainerDep,
+    MembershipListenerDep,
     PortSessionDep,
     UnitOfWorkDep,
     get_config,
     get_container,
     get_enabled_features,
+    get_membership_listener,
     get_unit_of_work,
     reset_config,
     set_config,
@@ -142,7 +144,6 @@ from gateway.repositories.tools import (
     WorkspaceCodeExecutionPolicyRepository,
     WorkspaceWebSearchKeyOverrideRepository,
 )
-from gateway.repositories.traces import TracesRepositories
 from gateway.repositories.update_check import UpdateCheckStateRepository
 from gateway.repositories.usage_and_telemetry import (
     UsageLogRepository,
@@ -155,7 +156,6 @@ from gateway.services.api_keys import (
     MASTER_KEY_USER_REQUIRED_DETAIL,
     USER_MISMATCH_DETAIL,
     ApiKeyDeactivationListener,
-    ApiKeyMembershipListener,
     ApiKeyService,
     FederatedTokenVerifier,
     FederationTokenExchange,
@@ -163,7 +163,6 @@ from gateway.services.api_keys import (
     resolve_user_id,
 )
 from gateway.services.budgets import (
-    BudgetMembershipListener,
     BudgetScopeRequest,
     BudgetService,
     ReservationHandle,
@@ -237,8 +236,6 @@ from gateway.services.secret_box import configured_secret_keys
 from gateway.services.tenancy import (
     DomainAutoJoinListener,
     InvitationClaimSettings,
-    MembershipListener,
-    MembershipListeners,
     OrganizationDomainService,
     OrganizationService,
     VerifiedDomainLookup,
@@ -265,7 +262,6 @@ from gateway.services.tools import (
     DirectToolRate,
     DirectToolService,
     DirectToolUsage,
-    McpGrantMembershipListener,
     SearchCatalogCaller,
     SearchToolService,
     ToolRateInForce,
@@ -275,7 +271,6 @@ from gateway.services.tools import (
     WorkspaceSearchKeys,
     web_search_configured,
 )
-from gateway.services.traces import TraceMembershipListener
 from gateway.services.update_check import UpdateCheckService
 from gateway.services.usage_and_telemetry import UsageScope, UsageService, VideoUsageWriter
 from gateway.services.workspace_scope import (
@@ -293,6 +288,8 @@ from gateway.types.traces import (
 
 # The names this root re-exports from the submodules it is being split into.
 __all__ = [
+    "MembershipListenerDep",
+    "get_membership_listener",
     "DatabaseSessionOwners",
     "NoSessionOwners",
     "TRACE_CONTENT_HEADER_INVALID_DETAIL",
@@ -453,22 +450,6 @@ async def get_maintenance_mode(db: Annotated[AsyncSession, Depends(get_db)]) -> 
 
 
 MaintenanceModeDep = Annotated[bool, Depends(get_maintenance_mode)]
-
-
-def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
-    """Return the listener that keeps members' budget ceilings, own keys, session shares and MCP grants in step.
-
-    It writes through the request's Unit of Work, so a service that changes membership must be built on the same one.
-    """
-    return MembershipListeners(
-        BudgetMembershipListener(BudgetRepositories.on(uow)),
-        ApiKeyMembershipListener(ApiKeyRepositories.on(uow)),
-        TraceMembershipListener(TracesRepositories.on(uow)),
-        McpGrantMembershipListener(uow),
-    )
-
-
-MembershipListenerDep = Annotated[MembershipListener, Depends(get_membership_listener)]
 
 
 def get_inference_service(
