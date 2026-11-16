@@ -2071,7 +2071,7 @@ def _post_fetch_keyword(
     with (
         patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
         patch("gateway.api.routes.messages.amessages", new=fake_amessages),
-        patch("gateway.api.routes._pipeline._build_web_retrieval_backend", return_value=fake_builder_result),
+        patch("gateway.api.routes._pipeline.build_web_fetch_backend", return_value=fake_builder_result),
     ):
         return client.post(
             f"{API_ROOT}/messages",

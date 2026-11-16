@@ -2,12 +2,9 @@
 
 The search backend, and the fetch backend when the request declared the fetch
 tool, share the request's call allowance and open as two members of the
-request's pool, so each rendering reads the backend that ran its call. A
-request that declared only the fetch tool opens the fetch backend alone, on the
-same allowance. A request whose search runs on the old backend keeps the old
-backend's own builder, which takes its fetch backend from
-:func:`build_web_fetch_backend`. What each backend runs on was resolved when
-the request was admitted, so nothing here resolves.
+request's pool, so each rendering reads the backend that ran its call. What
+each backend runs on was resolved when the request was admitted, so nothing
+here resolves.
 """
 
 from __future__ import annotations

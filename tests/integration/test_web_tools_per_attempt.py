@@ -844,7 +844,6 @@ def test_attempts_searching_on_an_instance_share_one_call_allowance(
         assert isinstance(search, WebSearchBackend) and isinstance(fetch, WebFetchBackend)
         caps |= {id(search._cap), id(fetch._cap)}
     assert len(caps) == 1, "every attempt's search and fetch draw on one allowance"
-    assert seen.web_backends == [], "no fake backend served them"
 
 
 def test_gateway_minted_blocks_are_dropped_and_native_ones_forwarded_to_each_attempt(

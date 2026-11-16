@@ -851,7 +851,7 @@ def test_a_request_on_the_libraries_gets_its_search_and_fetch_as_two_backends_wi
 
 
 def test_a_request_that_declares_only_fetch_gets_the_fetch_backend_on_the_requests_cap() -> None:
-    context = _context(_config(web_search_max_calls=4), search=False, fetch=True)
+    context = _context(_config(), search=False, fetch=True)
 
     (fetch,) = context.build_web_backends()
 
