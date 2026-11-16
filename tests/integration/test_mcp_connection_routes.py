@@ -37,6 +37,8 @@ from gateway.services.tools._mcp_oauth import (
     McpOAuthTokens,
 )
 
+from .conftest import ALL_KEY_SCOPES
+
 PUBLIC_URL = "https://93.184.216.34/mcp"
 ISSUER = "https://93.184.216.36"
 ORIGIN = "https://otari.example.com"
@@ -82,7 +84,9 @@ def user_key(client: TestClient, master_key_header: dict[str, str]) -> dict[str,
     created = client.post(f"{API_ROOT}/users", json={"user_id": "alice"}, headers=master_key_header)
     assert created.status_code == 200, created.text
     response = client.post(
-        f"{API_ROOT}/keys", json={"key_name": "alice", "user_id": "alice"}, headers=master_key_header
+        f"{API_ROOT}/keys",
+        json={"key_name": "alice", "user_id": "alice", "scopes": ALL_KEY_SCOPES},
+        headers=master_key_header,
     )
     assert response.status_code == 200, response.text
     key: dict[str, Any] = response.json()
