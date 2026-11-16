@@ -301,7 +301,9 @@ class Invitations:
                     raise InvitationResendTooSoonError(available_at)
                 address, send_count = row.email, row.send_count
 
-            # No transaction is open across the store's round trips.
+            # No transaction is open across the store's round trips below.
+            # A caller that holds one open is refused here, rather than counting inside it.
+            await self._uow.release()
             admission = await self._limits.admit(
                 account_id=by.user_id, email=address, organization_id=by.organization_id
             )
@@ -374,7 +376,7 @@ class Invitations:
         return notes
 
     async def _invite_many(self, by: ActingMember, emails: Sequence[str], offer: InvitationOffer) -> BulkInvitations:
-        """Invite every address, owning its own Unit of Work transaction from here to its return."""
+        """Invite every address, owning every Unit of Work block it needs."""
         if len(emails) > MAX_BULK_INVITATIONS:
             raise InvitationRequestTooLargeError.too_many_addresses(MAX_BULK_INVITATIONS)
         self._check_offer_shape(offer)
@@ -404,6 +406,9 @@ class Invitations:
             await self._refuse_existing_members_and_invitations(candidates, by=by, now=now)
 
         async with AsyncExitStack() as stack:
+            # No transaction is open across the store's round trips below.
+            # A caller that holds one open is refused here, rather than counting inside it.
+            await self._uow.release()
             for candidate in candidates:
                 if candidate.address is None or candidate.outcome is not None:
                     continue

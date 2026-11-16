@@ -19,7 +19,7 @@ import gateway.models  # noqa: F401  (registers every table on the metadata)
 from gateway.adapters.rate_limit_store_adapter import InMemoryRateLimitStore
 from gateway.core.config import GatewayConfig
 from gateway.core.tokens import hash_token, is_shared_token
-from gateway.core.unit_of_work import UnitOfWork
+from gateway.core.unit_of_work import InsideUnitOfWorkError, UnitOfWork
 from gateway.exceptions.identity_exceptions import InvalidEmailError
 from gateway.exceptions.organizations_exceptions import (
     AddressAlreadyInvitedError,
@@ -805,6 +805,52 @@ async def test_invite_many_counts_outside_its_transaction(store: _Store) -> None
 
     assert len(result.issued) == 2
     assert spy_store.in_transaction_at_hit == [False] * 8
+
+
+async def test_invite_many_refuses_a_caller_that_holds_a_block_open(store: _Store) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id)
+    spy_store = _SpyRateLimitStore(store.rate_limit_store, store._session)
+    service = Invitations(
+        store.uow,
+        store.repositories,
+        clock=store.clock,
+        domains=OrganizationClaimedDomains(OrganizationDomainRepository(store.uow)),
+        mailer=Mailer(_config()),
+        policy=_policy(),
+        store=spy_store,
+    )
+
+    with pytest.raises(InsideUnitOfWorkError):
+        async with store.uow:
+            await service.invite_many(by, ["ada@example.com"], _offer())
+
+    assert spy_store.hit_calls == 0
+
+
+async def test_resend_refuses_a_caller_that_holds_a_block_open(store: _Store) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id)
+    policy = _policy(resend_wait=timedelta(hours=1))
+    spy_store = _SpyRateLimitStore(store.rate_limit_store, store._session)
+    service = Invitations(
+        store.uow,
+        store.repositories,
+        clock=store.clock,
+        domains=OrganizationClaimedDomains(OrganizationDomainRepository(store.uow)),
+        mailer=Mailer(_config()),
+        policy=policy,
+        store=spy_store,
+    )
+    issued = await service.invite(by, "ada@example.com", _offer())
+    store.clock.now += policy.resend_wait
+    spy_store.hit_calls = 0
+
+    with pytest.raises(InsideUnitOfWorkError):
+        async with store.uow:
+            await service.resend(by, issued.invitation.id)
+
+    assert spy_store.hit_calls == 0
 
 
 async def test_resend_counts_outside_its_transaction(store: _Store) -> None:
