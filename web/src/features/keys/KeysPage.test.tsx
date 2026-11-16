@@ -153,6 +153,9 @@ function mockApi(
       const url = String(input)
       const method = (init?.method ?? "GET").toUpperCase()
 
+      if (/\/keys\/[^/]+\/end-user-count/.test(url)) {
+        return jsonResponse({ count: 0, max_end_users: 10000 })
+      }
       if (/\/keys\/[^/]+\/end-users/.test(url)) return jsonResponse([])
       if (KEYS_URL.test(url)) {
         if (url.endsWith("/rotate") && method === "POST") {
