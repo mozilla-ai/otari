@@ -11,6 +11,7 @@ from sqlmodel import SQLModel
 
 import gateway.models  # noqa: F401  (registers every table on the metadata)
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.models.organizations import OrganizationInvitation
 from gateway.repositories.organizations import DueInvitation, NewInvitation
 from gateway.repositories.organizations.organization_invitation_repository import OrganizationInvitationRepository
 
@@ -24,9 +25,15 @@ _MAX_ATTEMPTS = 3
 
 
 def _invitation(
-    organization_id: uuid.UUID, *, email: str, token_hash: str, next_send_at: datetime | None = None
+    organization_id: uuid.UUID,
+    *,
+    email: str,
+    token_hash: str,
+    created_at: datetime = _NOW,
+    next_send_at: datetime | None = None,
 ) -> NewInvitation:
     return NewInvitation(
+        created_at=created_at,
         email=email,
         expires_at=_EXPIRES_AT,
         invited_by_user_id=None,
@@ -36,6 +43,13 @@ def _invitation(
         token_hash=token_hash,
         workspace_assignments=[{"workspace_id": "w1", "role": "member"}],
     )
+
+
+async def _add(repository: OrganizationInvitationRepository, new: NewInvitation) -> OrganizationInvitation:
+    """Add an invitation that is not expected to collide, for a test that is not about that."""
+    rows = await repository.add_many([new])
+    assert rows
+    return rows[0]
 
 
 @pytest_asyncio.fixture
@@ -58,7 +72,7 @@ async def test_deleting_an_invitation_removes_it_from_the_session_too(
     organization_id = uuid.uuid4()
 
     async with uow:
-        invitation = await repository.add(_invitation(organization_id, email="ada@example.com", token_hash="t1"))
+        invitation = await _add(repository, _invitation(organization_id, email="ada@example.com", token_hash="t1"))
 
         assert await repository.delete_in_organization(invitation.id, organization_id) is True
         assert await repository.get(invitation.id) is None
@@ -71,8 +85,8 @@ async def test_a_claim_returns_the_values_of_the_invitation_and_counts_the_attem
     organization_id = uuid.uuid4()
 
     async with uow:
-        invitation = await repository.add(
-            _invitation(organization_id, email="ada@example.com", token_hash="seed", next_send_at=_NOW)
+        invitation = await _add(
+            repository, _invitation(organization_id, email="ada@example.com", token_hash="seed", next_send_at=_NOW)
         )
 
         first = await repository.claim_due_send(
@@ -103,8 +117,8 @@ async def test_a_due_invitation_is_claimed_once(
     uow, repository = store
 
     async with uow:
-        invitation = await repository.add(
-            _invitation(uuid.uuid4(), email="ada@example.com", token_hash="seed", next_send_at=_NOW)
+        invitation = await _add(
+            repository, _invitation(uuid.uuid4(), email="ada@example.com", token_hash="seed", next_send_at=_NOW)
         )
 
         first = await repository.claim_due_send(
@@ -126,8 +140,8 @@ async def test_the_claim_of_the_last_attempt_leaves_no_send_due(
     later = _HELD_UNTIL + _HOLD
 
     async with uow:
-        invitation = await repository.add(
-            _invitation(uuid.uuid4(), email="ada@example.com", token_hash="seed", next_send_at=_NOW)
+        invitation = await _add(
+            repository, _invitation(uuid.uuid4(), email="ada@example.com", token_hash="seed", next_send_at=_NOW)
         )
 
         first = await repository.claim_due_send(now=_NOW, held_until=_HELD_UNTIL, max_attempts=2, token_hash="first")
@@ -149,8 +163,8 @@ async def test_an_invitation_is_due_by_its_due_time_alone(
     uow, repository = store
 
     async with uow:
-        invitation = await repository.add(
-            _invitation(uuid.uuid4(), email="ada@example.com", token_hash="seed", next_send_at=_NOW)
+        invitation = await _add(
+            repository, _invitation(uuid.uuid4(), email="ada@example.com", token_hash="seed", next_send_at=_NOW)
         )
         await repository.claim_due_send(now=_NOW, held_until=_HELD_UNTIL, max_attempts=1, token_hash="first")
         await repository.retry_send(invitation.id, token_hash="first", next_send_at=_HELD_UNTIL)
@@ -170,8 +184,8 @@ async def test_a_claim_that_would_hold_the_invitation_for_no_time_is_refused(
     uow, repository = store
 
     async with uow:
-        invitation = await repository.add(
-            _invitation(uuid.uuid4(), email="ada@example.com", token_hash="seed", next_send_at=_NOW)
+        invitation = await _add(
+            repository, _invitation(uuid.uuid4(), email="ada@example.com", token_hash="seed", next_send_at=_NOW)
         )
 
         with pytest.raises(ValueError, match="held"):
@@ -187,14 +201,15 @@ async def test_an_invitation_with_no_send_due_is_not_claimed(
     organization_id = uuid.uuid4()
 
     async with uow:
-        await repository.add(_invitation(organization_id, email="none@example.com", token_hash="none"))
-        await repository.add(
+        await _add(repository, _invitation(organization_id, email="none@example.com", token_hash="none"))
+        await _add(
+            repository,
             _invitation(
                 organization_id,
                 email="later@example.com",
                 token_hash="later",
                 next_send_at=_NOW + timedelta(microseconds=1),
-            )
+            ),
         )
 
         assert (
@@ -212,16 +227,17 @@ async def test_the_invitation_that_has_been_due_longest_is_claimed_first(
     organization_id = uuid.uuid4()
 
     async with uow:
-        newer = await repository.add(
-            _invitation(organization_id, email="newer@example.com", token_hash="newer", next_send_at=_NOW)
+        newer = await _add(
+            repository, _invitation(organization_id, email="newer@example.com", token_hash="newer", next_send_at=_NOW)
         )
-        older = await repository.add(
+        older = await _add(
+            repository,
             _invitation(
                 organization_id,
                 email="older@example.com",
                 token_hash="older",
                 next_send_at=_NOW - timedelta(minutes=1),
-            )
+            ),
         )
 
         first = await repository.claim_due_send(
@@ -242,8 +258,8 @@ async def test_a_claim_replaces_the_token_hash_of_the_invitation(
     uow, repository = store
 
     async with uow:
-        invitation = await repository.add(
-            _invitation(uuid.uuid4(), email="ada@example.com", token_hash="old", next_send_at=_NOW)
+        invitation = await _add(
+            repository, _invitation(uuid.uuid4(), email="ada@example.com", token_hash="old", next_send_at=_NOW)
         )
 
         await repository.claim_due_send(now=_NOW, held_until=_HELD_UNTIL, max_attempts=_MAX_ATTEMPTS, token_hash="new")
@@ -265,8 +281,8 @@ async def test_finishing_a_send_leaves_no_send_due(
     uow, repository = store
 
     async with uow:
-        invitation = await repository.add(
-            _invitation(uuid.uuid4(), email="ada@example.com", token_hash="seed", next_send_at=_NOW)
+        invitation = await _add(
+            repository, _invitation(uuid.uuid4(), email="ada@example.com", token_hash="seed", next_send_at=_NOW)
         )
         await repository.claim_due_send(
             now=_NOW, held_until=_HELD_UNTIL, max_attempts=_MAX_ATTEMPTS, token_hash="claim"
@@ -289,8 +305,8 @@ async def test_retrying_a_send_makes_it_due_at_the_later_time(
     retry_at = _NOW + timedelta(minutes=5)
 
     async with uow:
-        invitation = await repository.add(
-            _invitation(uuid.uuid4(), email="ada@example.com", token_hash="seed", next_send_at=_NOW)
+        invitation = await _add(
+            repository, _invitation(uuid.uuid4(), email="ada@example.com", token_hash="seed", next_send_at=_NOW)
         )
         await repository.claim_due_send(
             now=_NOW, held_until=_HELD_UNTIL, max_attempts=_MAX_ATTEMPTS, token_hash="claim"
@@ -320,8 +336,8 @@ async def test_a_result_from_an_earlier_claim_changes_nothing(
     uow, repository = store
 
     async with uow:
-        invitation = await repository.add(
-            _invitation(uuid.uuid4(), email="ada@example.com", token_hash="seed", next_send_at=_NOW)
+        invitation = await _add(
+            repository, _invitation(uuid.uuid4(), email="ada@example.com", token_hash="seed", next_send_at=_NOW)
         )
         await repository.claim_due_send(
             now=_NOW, held_until=_HELD_UNTIL, max_attempts=_MAX_ATTEMPTS, token_hash="earlier"
@@ -344,8 +360,8 @@ async def test_a_result_for_a_deleted_invitation_changes_nothing(
     organization_id = uuid.uuid4()
 
     async with uow:
-        invitation = await repository.add(
-            _invitation(organization_id, email="ada@example.com", token_hash="seed", next_send_at=_NOW)
+        invitation = await _add(
+            repository, _invitation(organization_id, email="ada@example.com", token_hash="seed", next_send_at=_NOW)
         )
         await repository.claim_due_send(
             now=_NOW, held_until=_HELD_UNTIL, max_attempts=_MAX_ATTEMPTS, token_hash="claim"

@@ -29,6 +29,7 @@ from gateway.api.deps import (
     build_hosted_discovery,
     build_hosted_provider_service,
     build_inference_service,
+    build_invitation_cleanup,
     build_invitation_delivery,
     build_scheduled_catalog_update,
     build_search_tool_refresh,
@@ -119,7 +120,7 @@ from gateway.services.model_discovery_service import (
     run_discovery_refresher,
 )
 from gateway.services.oauth_service import callback_landing_target
-from gateway.services.organizations import InvitationDelivery
+from gateway.services.organizations import ExpiredInvitationCleanup, InvitationDelivery
 from gateway.services.policy_store import (
     load_policies_at_startup,
     reset_policy_cache,
@@ -645,6 +646,10 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     _LifespanWorker(
         "invitation email",
         lambda config, _container: InvitationDelivery.poll(lambda uow: build_invitation_delivery(uow, config)),
+    ),
+    _LifespanWorker(
+        "invitation cleanup",
+        lambda _config, _container: ExpiredInvitationCleanup.poll(build_invitation_cleanup),
     ),
 )
 
