@@ -15,7 +15,7 @@ second, pool-backed backend for [otari.ai](https://otari.ai). Both implement thi
 contract, and Otari cannot tell which one answered.
 
 The contract is HTTP/JSON, described by OpenAPI. Its machine-readable form is
-[`public/code-execution-openapi.yaml`](https://github.com/mozilla-ai/otari/blob/31a7d888d892b03ccbfcda24adb3ef7e00ce776d/docs/public/code-execution-openapi.yaml),
+[`public/code-execution-openapi.yaml`](https://github.com/mozilla-ai/otari/blob/31c7959290e1e2d462121c3b0b553e90dd194a7b/docs/public/code-execution-openapi.yaml),
 which a backend implementer can generate a server stub or a client from
 directly. The two are normative in different registers, and neither is
 redundant: the OpenAPI document is normative for shapes, paths, and status
@@ -420,7 +420,7 @@ stored on the dashboard's Tools page, which wins and is rotated without a
 restart, or `E2B_API_KEY`). Everything above the seam is the same either way, including the
 per-workspace policy, the usage tally, and seeding and collecting files, so the
 choice is about what you run, not about what a request can do. The seam itself
-is `CodeExecutionPort` (see [ARCHITECTURE.md](https://github.com/mozilla-ai/otari/blob/31a7d888d892b03ccbfcda24adb3ef7e00ce776d/ARCHITECTURE.md)); a provider
+is `CodeExecutionPort` (see [ARCHITECTURE.md](https://github.com/mozilla-ai/otari/blob/31c7959290e1e2d462121c3b0b553e90dd194a7b/ARCHITECTURE.md)); a provider
 Otari does not ship is an adapter, and `scripts/check_code_execution_conformance.py`
 certifies a backend rather than an adapter.
 
