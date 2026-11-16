@@ -34,6 +34,7 @@ from openai.types.responses.response_usage import InputTokensDetails, OutputToke
 
 from gateway.log_config import logger
 from gateway.services._tool_loop import (
+    RoundGate,
     StreamAction,
     log_tool_failure,
     run_tool_loop,
@@ -807,6 +808,7 @@ async def responses_tool_loop(
     on_first_response: Callable[[], None] | None = None,
     use_budget: ToolUseBudget | None = None,
     native_tools: frozenset[str] = frozenset(),
+    round_gate: RoundGate | None = None,
 ) -> Response:
     """Non-streaming OpenAI Responses tool-use loop.
 
@@ -835,6 +837,7 @@ async def responses_tool_loop(
         pool=pool,
         max_iterations=max_iterations,
         on_first_response=on_first_response,
+        round_gate=round_gate,
     )
 
 
@@ -846,6 +849,7 @@ async def responses_tool_loop_stream(
     use_budget: ToolUseBudget | None = None,
     native_tools: frozenset[str] = frozenset(),
     on_first_response: Callable[[], None] | None = None,
+    round_gate: RoundGate | None = None,
 ) -> AsyncGenerator[ResponseStreamEvent, None]:
     """Streaming OpenAI Responses tool-use loop.
 
@@ -874,6 +878,7 @@ async def responses_tool_loop_stream(
             pool=pool,
             max_iterations=max_iterations,
             on_first_response=on_first_response,
+            round_gate=round_gate,
         )
     ) as inner:
         async for event in inner:

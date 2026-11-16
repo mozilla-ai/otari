@@ -54,6 +54,20 @@ class ToolBackend(Protocol):
     def purpose_hints(self) -> list[tuple[str, str]]: ...
 
 
+class RoundGate(Protocol):
+    """Holds each tool-loop round after the first on the request's budgets before the round is sent.
+
+    The request's own hold covers its first round. Every later round resends the
+    whole transcript and is billed too, so it is held on its own; a round the
+    budgets cannot hold is sent as the loop's last, without the gateway's tools,
+    so the request still ends with an answer.
+    """
+
+    async def admit(self, prompt_chars: int) -> bool:
+        """Whether a round whose request is ``prompt_chars`` long fits the request's budgets."""
+        ...
+
+
 def tool_failure_detail(pool: ToolBackend, name: str) -> str:
     """What the model and the caller are told when a call to ``name`` raised.
 
@@ -229,6 +243,74 @@ def _released_tool_choice(choice: Any) -> Any:
 FINAL_ROUND_NOTE = "No more tool calls are available for this request. Answer now from the results you already have."
 
 
+# What one inline image or audio clip counts toward a round's size: about the
+# tokens an image costs, not its encoded length.
+_INLINE_MEDIA_CHARS = 6_000
+
+
+def _is_inline_media(part: dict[str, Any]) -> bool:
+    """Whether a content part is an image or audio clip sent inline as base64.
+
+    A file such as a PDF is not: it bills by its pages, which its encoded length
+    overstates but an image's allowance can understate many times over.
+    """
+    kind = part.get("type")
+    if kind == "input_audio":
+        return True
+    if kind == "image":
+        source = part.get("source")
+        return isinstance(source, dict) and source.get("type") == "base64"
+    if kind in {"image_url", "input_image"}:
+        # Chat Completions nests the URL in an object; Responses gives it as a string.
+        url = part.get("image_url")
+        if isinstance(url, dict):
+            url = url.get("url")
+        return isinstance(url, str) and url.startswith("data:image/")
+    return False
+
+
+def _request_chars(value: Any) -> int:
+    """The size of a round's request, with each inline image or audio part at :data:`_INLINE_MEDIA_CHARS`.
+
+    Every round resends the whole transcript, so an image counted at its encoded
+    length would grow the hold by hundreds of thousands of tokens on each round
+    for an image the provider bills a few thousand for.
+    """
+    if isinstance(value, str):
+        return len(value)
+    if isinstance(value, dict):
+        if _is_inline_media(value):
+            return _INLINE_MEDIA_CHARS
+        return sum(len(str(key)) + _request_chars(item) for key, item in value.items())
+    if isinstance(value, (list, tuple)):
+        return sum(_request_chars(item) for item in value)
+    if hasattr(value, "model_dump"):
+        return _request_chars(value.model_dump(exclude_none=True))
+    return len(str(value))
+
+
+async def _round_fits(gate: RoundGate | None, iteration: int, kwargs: dict[str, Any]) -> bool:
+    """Whether round ``iteration``, sent as ``kwargs``, fits the request's budgets; the first rides on its own hold."""
+    return gate is None or iteration == 1 or await gate.admit(_request_chars(kwargs))
+
+
+def _round_request(
+    transcript_key: str,
+    base: dict[str, Any],
+    merged_tools: list[dict[str, Any]],
+    user_tools: list[dict[str, Any]],
+    pool: ToolBackend,
+    transcript: list[Any],
+    *,
+    first: bool,
+    final: bool,
+) -> dict[str, Any]:
+    """What one round sends: its tool arguments and its transcript."""
+    kwargs = _round_kwargs(base, merged_tools, user_tools, pool, first=first, final=final)
+    kwargs[transcript_key] = _round_transcript(transcript, final=final)
+    return kwargs
+
+
 def _round_kwargs(
     base: dict[str, Any],
     merged_tools: list[dict[str, Any]],
@@ -297,6 +379,7 @@ async def run_tool_loop(
     max_iterations: int,
     on_first_response: Callable[[], None] | None = None,
     check_first_response: Callable[[ResultT], ResultT] | None = None,
+    round_gate: RoundGate | None = None,
 ) -> ResultT:
     """Non-streaming tool loop, generic over the wire format.
 
@@ -336,11 +419,26 @@ async def run_tool_loop(
     acc = strategy.new_usage_accumulator()
     first_response_signaled = False
 
+    final = False
     for iteration in range(1, max_iterations + 1):
-        kwargs = _round_kwargs(
-            base, merged_tools, user_tools, pool, first=iteration == 1, final=iteration == max_iterations
+        if final:
+            break
+        final = iteration == max_iterations
+        kwargs = _round_request(
+            strategy.transcript_key, base, merged_tools, user_tools, pool, transcript, first=iteration == 1, final=final
         )
-        kwargs[strategy.transcript_key] = _round_transcript(transcript, final=iteration == max_iterations)
+        if not await _round_fits(round_gate, iteration, kwargs):
+            final = True
+            kwargs = _round_request(
+                strategy.transcript_key,
+                base,
+                merged_tools,
+                user_tools,
+                pool,
+                transcript,
+                first=iteration == 1,
+                final=True,
+            )
         kwargs["stream"] = False
 
         result = await strategy.call(kwargs)
@@ -380,6 +478,7 @@ async def run_tool_loop_stream(
     pool: ToolBackend,
     max_iterations: int,
     on_first_response: Callable[[], None] | None = None,
+    round_gate: RoundGate | None = None,
 ) -> AsyncGenerator[ChunkT, None]:
     """Streaming tool loop, generic over the wire format.
 
@@ -420,11 +519,26 @@ async def run_tool_loop_stream(
     base["stream"] = True
     acc = strategy.new_stream_accumulator()
 
+    final = False
     for iteration in range(1, max_iterations + 1):
-        kwargs = _round_kwargs(
-            base, merged_tools, user_tools, pool, first=iteration == 1, final=iteration == max_iterations
+        if final:
+            break
+        final = iteration == max_iterations
+        kwargs = _round_request(
+            strategy.transcript_key, base, merged_tools, user_tools, pool, transcript, first=iteration == 1, final=final
         )
-        kwargs[strategy.transcript_key] = _round_transcript(transcript, final=iteration == max_iterations)
+        if not await _round_fits(round_gate, iteration, kwargs):
+            final = True
+            kwargs = _round_request(
+                strategy.transcript_key,
+                base,
+                merged_tools,
+                user_tools,
+                pool,
+                transcript,
+                first=iteration == 1,
+                final=True,
+            )
 
         stream = await strategy.open_stream(kwargs)
         state = strategy.new_stream_state()
