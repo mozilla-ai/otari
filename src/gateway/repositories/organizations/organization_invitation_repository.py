@@ -51,6 +51,11 @@ class NewInvitation:
     workspace_assignments: Sequence[WorkspaceAssignment]
 
 
+def _in_organization(invitation_id: uuid.UUID, organization_id: uuid.UUID) -> tuple[ColumnElement[bool], ...]:
+    """The conditions that match the invitation only when it belongs to the organization."""
+    return (OrganizationInvitation.id == invitation_id, OrganizationInvitation.organization_id == organization_id)
+
+
 class OrganizationInvitationRepository(BaseRepository[OrganizationInvitation, Never, Never]):
     """Reads and writes organization invitations.
 
@@ -160,10 +165,7 @@ class OrganizationInvitationRepository(BaseRepository[OrganizationInvitation, Ne
             CursorResult[Any],
             await self.db.execute(
                 delete(OrganizationInvitation)
-                .where(
-                    OrganizationInvitation.id == invitation_id,
-                    OrganizationInvitation.organization_id == organization_id,
-                )
+                .where(*_in_organization(invitation_id, organization_id))
                 .execution_options(synchronize_session="fetch")
             ),
         )
@@ -205,10 +207,7 @@ class OrganizationInvitationRepository(BaseRepository[OrganizationInvitation, Ne
     ) -> OrganizationInvitation | None:
         """Return the invitation if it belongs to this organization, or None if it does not."""
         result = await self.db.execute(
-            select(OrganizationInvitation).where(
-                OrganizationInvitation.id == invitation_id,
-                OrganizationInvitation.organization_id == organization_id,
-            )
+            select(OrganizationInvitation).where(*_in_organization(invitation_id, organization_id))
         )
         return result.scalar_one_or_none()
 
