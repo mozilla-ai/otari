@@ -229,7 +229,7 @@ class _RoundGate:
     def __init__(self) -> None:
         self.asked: list[int] = []
 
-    async def admit(self, prompt_chars: int) -> bool:
+    async def admit(self, prompt_chars: int, output_tokens: int | None) -> bool:
         self.asked.append(prompt_chars)
         return True
 
