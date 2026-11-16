@@ -1404,7 +1404,7 @@ async def test_a_round_the_budget_cannot_hold_is_the_last_and_offers_no_gateway_
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stream", [False, True], ids=["non-streaming", "streaming"])
-async def test_a_round_the_budget_cannot_hold_ends_the_loop_even_if_the_model_calls_a_tool_anyway(
+async def test_a_round_the_budget_cannot_hold_ends_as_the_answer_even_if_the_model_calls_a_tool_anyway(
     monkeypatch: pytest.MonkeyPatch, stream: bool
 ) -> None:
     """No round runs after the one the budget could not hold, whatever the model asks for in it."""
@@ -1421,18 +1421,20 @@ async def test_a_round_the_budget_cannot_hold_ends_the_loop_even_if_the_model_ca
     completion_kwargs = {"model": "fake", "messages": [{"role": "user", "content": "go"}]}
     pool = _FakePool(tool_names=["fetch_url"])
 
-    with pytest.raises(MaxToolIterationsExceeded):
-        if stream:
-            async for _ in mcp_tool_loop_stream(
-                completion_kwargs=completion_kwargs, pool=pool, max_iterations=10, round_gate=_RoundGate(False)
-            ):
-                pass
-        else:
-            await mcp_tool_loop(
-                completion_kwargs=completion_kwargs, pool=pool, max_iterations=10, round_gate=_RoundGate(False)
-            )
+    if stream:
+        async for _ in mcp_tool_loop_stream(
+            completion_kwargs=completion_kwargs, pool=pool, max_iterations=10, round_gate=_RoundGate(False)
+        ):
+            pass
+    else:
+        result = await mcp_tool_loop(
+            completion_kwargs=completion_kwargs, pool=pool, max_iterations=10, round_gate=_RoundGate(False)
+        )
+        assert result.choices[0].finish_reason == "stop"
+        assert not result.choices[0].message.tool_calls
 
     assert len(sent) == 2
+    assert pool.calls == [("fetch_url", {})], "only the first round's call runs"
 
 
 @pytest.mark.asyncio
