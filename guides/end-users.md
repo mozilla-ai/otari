@@ -52,7 +52,7 @@ spend of all its end users together, give the key its own spend ceiling (see
 
 Through the API, a service key is created with `is_service_key`,
 `end_user_budget_ids`, `end_user_budget_id` and `max_end_users`; see the
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/f411860266b2709bc8bf5ee2e1e64de7a7ea33b0/docs/public/openapi.json).
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/99f01b9e983275e5b4cd6f1253cc1a249f2e2e76/docs/public/openapi.json).
 
 ## 3. Name the end user on each request
 
@@ -174,7 +174,10 @@ guests), keep separate caps:
   a place, and is refused when the key is full.
 - A key that assigns no budget counts every end user of its user.
 
-The cap holds across replicas.
+The cap holds across replicas. To see it coming, open the key's **End users**
+in **API keys**, which shows how many end users the cap counts against it, or
+read `end_users` from `GET /api/v1/key/budget` with the key itself, for example
+`{"count": 19, "max_end_users": 20}`.
 
 ## End-user routes
 

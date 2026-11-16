@@ -2,7 +2,7 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/f411860266b2709bc8bf5ee2e1e64de7a7ea33b0/docs/public/openapi.json), the source of truth for paths,
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/99f01b9e983275e5b4cd6f1253cc1a249f2e2e76/docs/public/openapi.json), the source of truth for paths,
 parameters, and schemas.
 
 ## Base URL
@@ -450,7 +450,7 @@ session get `401`: neither has a key of its own.
 
 | Route | Returns |
 |---|---|
-| `GET /api/v1/key/budget` | What the key may still spend, and every cap that decides it. |
+| `GET /api/v1/key/budget` | What the key may still spend, and every cap that decides it. On a service key, `end_users` also gives how many end users its cap counts and the cap (`max_end_users`, `null` for none); `null` on any other key. |
 | `GET /api/v1/key/usage/summary` | The `/api/v1/usage/summary` response over the key's own requests, with the same filters, `dimensions` and `group_by_tag`. |
 | `GET /api/v1/key/usage/series` | The `/api/v1/usage/series` response over the key's own requests. |
 
@@ -473,7 +473,8 @@ session get `401`: neither has a key of its own.
       "used_requests": null,
       "remaining_requests": null
     }
-  ]
+  ],
+  "end_users": null
 }
 ```
 
