@@ -2433,7 +2433,8 @@ export interface paths {
          *     requests in flight. A period that has ended reads as the fresh one the next
          *     request starts. ``remaining_usd`` is the least any cap on every provider
          *     leaves, which is what a request can still spend before a 403. Caps shared with
-         *     the rest of the workspace or organization report only what they leave.
+         *     the rest of the workspace or organization report only what they leave. On a
+         *     service key, ``end_users`` counts its end users against its ``max_end_users``.
          */
         get: operations["key-get_key_budget"];
         put?: never;
@@ -14301,6 +14302,8 @@ export interface components {
              * @description False when budgets are off for this key: it is budget-exempt, or the deployment runs with budget_strategy disabled. True otherwise, even when no cap applies
              */
             budgets_enforced: boolean;
+            /** @description A service key's end users against its cap; null for any other key */
+            end_users?: components["schemas"]["KeyEndUsersPublic"] | null;
             /**
              * Limits
              * @description The key's user's budget first, then each spend ceiling, the most specific first
@@ -14311,6 +14314,22 @@ export interface components {
              * @description The fewest dollars any dollar cap on every provider leaves; null when none applies. A token, request or provider-narrowed cap in limits can refuse a request sooner
              */
             remaining_usd: number | null;
+        };
+        /**
+         * KeyEndUsersPublic
+         * @description How many end users a service key has, against its ``max_end_users``.
+         */
+        KeyEndUsersPublic: {
+            /**
+             * Count
+             * @description The live end users the cap counts: those on the budgets the key assigns, and those on none when the key has a list and no default
+             */
+            count: number;
+            /**
+             * Max End Users
+             * @description The key's cap; null when it has none. A request naming a new end user is refused with end_user_limit_reached once count reaches it
+             */
+            max_end_users: number | null;
         };
         /**
          * KeyInfo

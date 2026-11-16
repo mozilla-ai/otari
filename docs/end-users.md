@@ -172,7 +172,9 @@ guests), keep separate caps:
   a place, and is refused when the key is full.
 - A key that assigns no budget counts every end user of its user.
 
-The cap holds across replicas.
+The cap holds across replicas. To see it coming, the key reads `end_users` from
+`GET /api/v1/key/budget`: the end users the cap counts and the cap itself, for
+example `{"count": 19, "max_end_users": 20}`.
 
 ## End-user routes
 

@@ -70,7 +70,8 @@ async def get_key_budget(
     requests in flight. A period that has ended reads as the fresh one the next
     request starts. ``remaining_usd`` is the least any cap on every provider
     leaves, which is what a request can still spend before a 403. Caps shared with
-    the rest of the workspace or organization report only what they leave.
+    the rest of the workspace or organization report only what they leave. On a
+    service key, ``end_users`` counts its end users against its ``max_end_users``.
     """
     return await budgets.key_budget(api_key, strategy=config.budget_strategy)
 

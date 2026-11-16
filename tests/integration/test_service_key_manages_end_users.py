@@ -400,6 +400,18 @@ def test_a_service_key_of_a_blocked_owner_manages_none_of_its_end_users(
     assert read.json()["budget_id"] == "eu-ai"
 
 
+def test_a_key_reads_its_end_users_against_its_cap(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """A list with no default starts an end user on no budget, and the cap counts that one too."""
+    _budgets(client, master_key_header)
+    mlpa = _key(client, master_key_header, "mlpa", is_service_key=True, end_user_budget_ids=["eu-ai"], max_end_users=5)
+
+    assert client.get(f"{API_ROOT}/key/budget", headers=mlpa).json()["end_users"] == {"count": 0, "max_end_users": 5}
+    assert _chat(client, mlpa, "a").status_code == 200
+    assert client.put(f"{END_USERS}/b", json={"budget_id": "eu-ai"}, headers=mlpa).status_code == 201
+
+    assert client.get(f"{API_ROOT}/key/budget", headers=mlpa).json()["end_users"] == {"count": 2, "max_end_users": 5}
+
+
 def test_a_key_with_a_cap_refuses_one_end_user_more(
     client: TestClient, master_key_header: dict[str, str], db_session: Session
 ) -> None:
@@ -416,12 +428,14 @@ def test_a_key_with_a_cap_refuses_one_end_user_more(
 
     first = _chat(client, mlpa, "a")
     second = client.put(f"{END_USERS}/b", json={"budget_id": "eu-ai"}, headers=mlpa)
+    seats = client.get(f"{API_ROOT}/key/budget", headers=mlpa)
     by_request = _chat(client, mlpa, "c")
     by_put = client.put(f"{END_USERS}/c", json={"budget_id": "eu-ai"}, headers=mlpa)
     existing = _chat(client, mlpa, "a")
 
     assert first.status_code == 200, first.text
     assert second.status_code == 201, second.text
+    assert seats.json()["end_users"] == {"count": 2, "max_end_users": 2}
     assert by_request.status_code == 403
     assert by_request.headers["Otari-Error-Code"] == "end_user_limit_reached"
     assert by_put.status_code == 403

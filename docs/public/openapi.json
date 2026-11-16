@@ -12244,6 +12244,17 @@
             "title": "Budgets Enforced",
             "type": "boolean"
           },
+          "end_users": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KeyEndUsersPublic"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A service key's end users against its cap; null for any other key"
+          },
           "limits": {
             "description": "The key's user's budget first, then each spend ceiling, the most specific first",
             "items": {
@@ -12271,6 +12282,34 @@
           "limits"
         ],
         "title": "KeyBudgetPublic",
+        "type": "object"
+      },
+      "KeyEndUsersPublic": {
+        "description": "How many end users a service key has, against its ``max_end_users``.",
+        "properties": {
+          "count": {
+            "description": "The live end users the cap counts: those on the budgets the key assigns, and those on none when the key has a list and no default",
+            "title": "Count",
+            "type": "integer"
+          },
+          "max_end_users": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The key's cap; null when it has none. A request naming a new end user is refused with end_user_limit_reached once count reaches it",
+            "title": "Max End Users"
+          }
+        },
+        "required": [
+          "count",
+          "max_end_users"
+        ],
+        "title": "KeyEndUsersPublic",
         "type": "object"
       },
       "KeyInfo": {
@@ -38063,7 +38102,7 @@
     },
     "/api/v1/key/budget": {
       "get": {
-        "description": "What the calling key may still spend, and every cap that decides it.\n\nLists the budget the key's user is on and each spend ceiling on a scope the\nkey bills to (the key itself, its user's memberships, its workspace and its\norganization), as the budget gate counts them: recorded use plus the holds of\nrequests in flight. A period that has ended reads as the fresh one the next\nrequest starts. ``remaining_usd`` is the least any cap on every provider\nleaves, which is what a request can still spend before a 403. Caps shared with\nthe rest of the workspace or organization report only what they leave.",
+        "description": "What the calling key may still spend, and every cap that decides it.\n\nLists the budget the key's user is on and each spend ceiling on a scope the\nkey bills to (the key itself, its user's memberships, its workspace and its\norganization), as the budget gate counts them: recorded use plus the holds of\nrequests in flight. A period that has ended reads as the fresh one the next\nrequest starts. ``remaining_usd`` is the least any cap on every provider\nleaves, which is what a request can still spend before a 403. Caps shared with\nthe rest of the workspace or organization report only what they leave. On a\nservice key, ``end_users`` counts its end users against its ``max_end_users``.",
         "operationId": "key-get_key_budget",
         "responses": {
           "200": {

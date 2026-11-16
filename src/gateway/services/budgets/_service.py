@@ -322,11 +322,17 @@ class BudgetService:
         return listed
 
     async def key_budget(self, api_key: APIKey, *, strategy: str | None) -> KeyBudgetPublic:
-        """What a key may still spend, and every cap that decides it; none when no budget gates the key."""
-        if api_key.exclude_from_budget or _normalize_strategy(strategy) == "disabled":
-            return KeyBudgetPublic(budgets_enforced=False, remaining_usd=None, limits=[])
+        """What a key may still spend, and every cap that decides it; none when no budget gates the key.
+
+        A service key's end-user cap holds whether or not budgets do, so it is reported either way.
+        """
         async with self._uow:
-            return await self._key_limits.read(api_key)
+            end_users = await self._end_users.seats(api_key) if api_key.is_service_key else None
+            if api_key.exclude_from_budget or _normalize_strategy(strategy) == "disabled":
+                found = KeyBudgetPublic(budgets_enforced=False, remaining_usd=None, limits=[])
+            else:
+                found = await self._key_limits.read(api_key)
+        return found.model_copy(update={"end_users": end_users})
 
     async def minute_limits(self, user_id: str, *, strategy: str | None) -> BudgetMinuteLimits | None:
         """The user's own budget and its per-minute limits, or None when the user is on none or budgets are disabled."""
