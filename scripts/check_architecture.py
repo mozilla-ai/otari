@@ -2091,6 +2091,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/identity/blocked_email_repository.py",
         "baseline": (),
     },
+    "gateway.models.identity.ErasedAccount": {
+        "repository": "gateway/repositories/identity/erased_account_repository.py",
+        "baseline": (),
+    },
     "gateway.models.identity.OAuthAppGrant": {
         "repository": "gateway/repositories/identity/oauth_app_grant_repository.py",
         "baseline": (),

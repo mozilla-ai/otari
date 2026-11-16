@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-query"
 import type {
   CallerIdentity,
+  DeleteAccountRequest,
   MailedLinkStatusResponse,
   OrganizationContext,
   Passkey,
@@ -409,3 +410,17 @@ export function useResetPassword() {
 
 // `enabled` lets a page that only sometimes offers a workspace control (the
 // organization-wide Usage page's filter) skip the read everywhere else.
+
+/**
+ * Delete the signed-in account (`DELETE /v1/auth/account`). The server ends
+ * every session it held, so the caller signs out locally once this succeeds.
+ */
+export function useDeleteAccount() {
+  return useMutation({
+    mutationFn: (body: DeleteAccountRequest) =>
+      apiFetch<void>("/auth/account", {
+        method: "DELETE",
+        body: JSON.stringify(body),
+      }),
+  })
+}

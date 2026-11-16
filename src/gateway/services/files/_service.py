@@ -185,6 +185,14 @@ class FileService:
         self._default_workspace = default_workspace
         self._provider_copies = ProviderCopies(uow, repositories.provider_copies, backends, config)
 
+    async def release_owned(self, user_ids: Collection[str], to_user_id: str) -> None:
+        """Move these users' files onto ``to_user_id`` as deleted and unnamed, for the sweep to give their bytes back.
+
+        Their rows outlive the users, so the sweep still finds the bytes once the users are gone.
+        """
+        async with self._uow:
+            await self._files.release_owned(user_ids, to_user_id, datetime.now(UTC))
+
     async def store(self, upload: NewFile) -> FileObject:
         """Store an upload's bytes and record the file, and return the row.
 

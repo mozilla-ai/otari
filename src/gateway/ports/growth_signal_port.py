@@ -261,16 +261,10 @@ class GrowthSignalPort(Protocol):
         user_id: uuid.UUID,
         email: str,
     ) -> None:
-        """Notify that an account was deleted, so a vendor can mark it churned.
+        """Notify that a person deleted their account, so a vendor can erase what it holds on them.
 
-        Called with primitives captured before the delete, so an adapter must
-        not assume the user row still exists when its background task runs.
-
-        Nothing calls this either: no route here deletes an account.
-        ``DELETE /v1/users`` soft-deletes an attribution row and revokes the
-        keys on it, which ends a spend identity rather than a person, and the
-        one thing that touches an identity itself is
-        ``PATCH /v1/admin/users/{user_id}`` deactivating it, which an operator
-        can undo and which this port has no counterpart for.
+        Called after the deletion commits, with primitives captured before it, so
+        an adapter must not assume the user row still exists when its background
+        task runs.
         """
         ...

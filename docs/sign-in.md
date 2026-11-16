@@ -45,6 +45,32 @@ no name until they set one; with no name, you are shown by your sign-in address.
 Signing in can also add you to an organization that has proven your email
 domain; see [Email-domain auto-join](members.md#email-domain-auto-join).
 
+### Deleting your account
+
+**Account settings** ends with **Delete account** (`DELETE /api/v1/auth/account`).
+You confirm it by typing your sign-in address, and your password if you have
+one. It cannot be undone.
+
+What identifies you is deleted: your sign-in identity, sessions, passkeys and
+linked Google or GitHub accounts, your Playground conversations, your agent
+traces and telemetry, your files (their bytes go with the next files sweep),
+your keys, and the end users your service keys named.
+
+What the deployment still has to count is kept, under a new id that nothing
+links back to you: your usage rows stay in their organizations' totals with
+their tokens and cost, and lose their request tags and end-user identifier. An
+organization nobody else is active in is renamed **Deleted organization** and
+its keys are revoked, so its usage and its configuration stay attached to it.
+In an organization other people use, you lose only your membership.
+
+Deletion is refused while you are the last active owner of an organization
+other people are active in; make one of them an owner first. The bootstrap
+operator cannot delete its own account.
+
+The `erased_account` table keeps each deleted account's old id and when it was
+deleted, and nothing else, so an operator restoring a backup taken before a
+deletion knows which accounts to delete again.
+
 ### Dashboard sessions and identity
 
 The first operator signs in with the master key, which Otari exchanges for an

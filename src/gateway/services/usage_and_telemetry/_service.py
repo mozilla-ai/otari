@@ -82,6 +82,11 @@ class UsageService:
         self._keys = keys
         self._users = users
 
+    async def reassign_owner(self, user_ids: Collection[str], to_user_id: str) -> None:
+        """Move these users' usage onto ``to_user_id``, clearing the caller-supplied fields that could name a person."""
+        async with self._uow:
+            await self._usage_logs.reassign_owner(user_ids, to_user_id)
+
     async def served_traffic(self, *, workspace_ids: Collection[uuid.UUID], since: datetime) -> list[ServedTraffic]:
         """The requests served here since ``since`` in these workspaces, by name sent, offering reached and key."""
         async with self._uow:

@@ -7477,6 +7477,39 @@
         "title": "DecisionUsage",
         "type": "object"
       },
+      "DeleteAccountRequest": {
+        "description": "The confirmation an account deletion needs.",
+        "example": {
+          "confirm_email": "ada@example.com",
+          "current_password": "..."
+        },
+        "properties": {
+          "confirm_email": {
+            "description": "The account's email address, typed to confirm the deletion.",
+            "maxLength": 255,
+            "title": "Confirm Email",
+            "type": "string"
+          },
+          "current_password": {
+            "anyOf": [
+              {
+                "maxLength": 72,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The account's password. Required when the account has one.",
+            "title": "Current Password"
+          }
+        },
+        "required": [
+          "confirm_email"
+        ],
+        "title": "DeleteAccountRequest",
+        "type": "object"
+      },
       "DeploymentAdminAccessPublic": {
         "description": "Whether the caller may reach the deployment administration surface.\n\nThe one endpoint in that surface that answers 200 for everybody, and\ndeliberately: the rest refuse with 404 so they do not confirm they exist,\nwhich leaves the dashboard nothing to gate its navigation on but a failed\nrequest. This says the same thing a caller could learn by trying, without\nthe try.",
         "properties": {
@@ -32705,6 +32738,49 @@
         ],
         "x-otari-key-scopes": [
           "inference:run"
+        ]
+      }
+    },
+    "/api/v1/auth/account": {
+      "delete": {
+        "description": "Delete the caller's account and sign them out.\n\nErases the account's sign-in identity, sessions, passkeys, Playground\nconversations, agent traces, telemetry, files and keys. Usage rows are\nkept for the deployment's totals under a new id that does not identify\nthe person, and an organization nobody else is active in is renamed and\nits keys revoked. Refused while the account is the last active owner of\nan organization other people are active in.",
+        "operationId": "auth-delete_own_account",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Own Account",
+        "tags": [
+          "auth"
         ]
       }
     },

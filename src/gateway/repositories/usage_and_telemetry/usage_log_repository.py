@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Never, cast
 
-from sqlalchemy import ColumnElement, Select, and_, case, false, func, null, or_, select
+from sqlalchemy import ColumnElement, Select, and_, case, false, func, null, or_, select, update
 
 from gateway.core.metered_pricing import ChargeLine
 from gateway.core.sql import bucket_expr, canonical_bucket, dialect_name, match_any, utc_bound
@@ -436,6 +436,21 @@ class UsageLogRepository(BaseRepository[UsageLog, Never, Never]):
         """Stage ``row`` in the open block, so it commits with the step that settled it."""
         self.db.add(row)
         await self.db.flush()
+
+    async def reassign_owner(self, user_ids: Collection[str], to_user_id: str) -> None:
+        """Stage moving these users' rows onto ``to_user_id``, without the fields that could name a person.
+
+        The caller's tags and the provider-facing end-user identifier are cleared;
+        the counts and costs stay.
+        """
+        if not user_ids:
+            return
+        await self.db.execute(
+            update(UsageLog)
+            .where(UsageLog.user_id.in_(list(user_ids)))
+            .values(user_id=to_user_id, tags=None, safety_identifier=None)
+            .execution_options(synchronize_session=False)
+        )
 
     async def served_traffic(self, *, workspace_ids: Collection[uuid.UUID], since: datetime) -> list[ServedTraffic]:
         """The requests served here since ``since`` in these workspaces, by name sent, offering reached and key.

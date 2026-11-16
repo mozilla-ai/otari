@@ -274,6 +274,16 @@ class OrganizationInvitationRepository(BaseRepository[OrganizationInvitation, Ne
         )
         return result.rowcount == 1
 
+    async def delete_all_in_organizations(self, organization_ids: Collection[uuid.UUID]) -> None:
+        """Stage the deletion of every invitation to these organizations."""
+        if not organization_ids:
+            return
+        await self.db.execute(
+            delete(OrganizationInvitation)
+            .where(OrganizationInvitation.organization_id.in_(list(organization_ids)))
+            .execution_options(synchronize_session=False)
+        )
+
     async def delete_expired_in_organization(
         self, invitation_ids: Collection[uuid.UUID], organization_id: uuid.UUID, *, expired_by: datetime
     ) -> int:

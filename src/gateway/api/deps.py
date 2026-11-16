@@ -147,7 +147,13 @@ from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, reso
 from gateway.services.feedback import FeedbackService
 from gateway.services.files import FileBackends, FileService, SandboxFileBridge, StagedFile
 from gateway.services.health_checks import HealthCheckService, UnavailableModelListener
-from gateway.services.identity import EmailBlocklist, IdentityService, OAuthAppService, OIDCConnectionService
+from gateway.services.identity import (
+    AccountDeletionService,
+    EmailBlocklist,
+    IdentityService,
+    OAuthAppService,
+    OIDCConnectionService,
+)
 from gateway.services.inference import (
     CompletedVideoUsage,
     DeploymentCharge,
@@ -167,6 +173,7 @@ from gateway.services.model_discovery_service import DiscoveryDial, HostedDiscov
 from gateway.services.oauth_service import provider_label, redirect_uri
 from gateway.services.organization_pricing_service import OrganizationPricingService
 from gateway.services.organizations import (
+    AccountRelease,
     DeliveryRule,
     ExpiredInvitationCleanup,
     InvitationDelivery,
@@ -2931,6 +2938,33 @@ async def get_optional_file_service(
 
 
 OptionalFileServiceDep = Annotated[FileService | None, Depends(get_optional_file_service)]
+
+
+async def get_account_deletion_service(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    uow: UnitOfWorkDep,
+    files: OptionalFileServiceDep,
+    traces: TraceServiceDep,
+    telemetry: TelemetryStoragePortDep,
+) -> AccountDeletionService:
+    """Build account deletion on the request's Unit of Work, with every domain an account leaves records in."""
+    return AccountDeletionService(
+        uow,
+        IdentityRepositories.on(uow),
+        bootstrap_operator_id=await OrganizationService(db, membership_listener=None).bootstrap_operator_id(),
+        organizations=AccountRelease(OrganizationRepositories.on(uow)),
+        users=get_user_access(uow),
+        keys=get_api_key_service(uow),
+        usage=get_usage_service(uow),
+        files=files,
+        traces=traces,
+        trace_writer=getattr(request.app.state, "trace_writer", None),
+        telemetry=telemetry,
+    )
+
+
+AccountDeletionServiceDep = Annotated[AccountDeletionService, Depends(get_account_deletion_service)]
 
 
 async def _caller_organization_id(

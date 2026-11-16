@@ -55,6 +55,9 @@ export type PasswordResponse = Schemas["PasswordResponse"]
 // ---------------------------------------------------------------------------
 export type UpdateProfileRequest = Schemas["UpdateProfileRequest"]
 export type UpdateAvatarRequest = Schemas["UpdateAvatarRequest"]
+// Deleting the signed-in account (`DELETE /v1/auth/account`), confirmed by its
+// address and, where it has one, its password.
+export type DeleteAccountRequest = Schemas["DeleteAccountRequest"]
 
 // ---------------------------------------------------------------------------
 // The public auth flows (otari#650): signup, email verification, and password
