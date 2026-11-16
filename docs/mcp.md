@@ -25,9 +25,11 @@ allowed round (the one `max_tool_iterations` names, or an earlier one the
 request's budget cannot hold; see [Budget enforcement](budget-enforcement.md#holds-and-settlement))
 offers the model none of Otari's tools and tells it to answer from the results
 it already has. Your own tools stay on offer in that round. If the model calls
-one of Otari's tools anyway (on Bedrock, which has to be told of every tool the
-conversation already called, it can), Otari does not run it: the round ends as
-the answer, with whatever text the model wrote and the call left out.
+only Otari's tools anyway (on Bedrock, which has to be told of every tool the
+conversation already called, it can), Otari does not run them: the round ends as
+the answer, with whatever text the model wrote and the calls left out. A round
+that also calls one of your tools ends as any round does: Otari runs its own
+calls and hands you yours.
 
 That loop is managed MCP. To run the tool loop in your own application instead,
 see [Caller-orchestrated MCP](#caller-orchestrated-mcp).

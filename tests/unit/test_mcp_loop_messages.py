@@ -1047,7 +1047,7 @@ async def test_stream_a_tool_call_on_the_last_round_ends_as_the_answer(monkeypat
 
     assert pool.calls == [("fetch_url", {})]
     assert [e.type for e in events] == ["message_start", "message_delta", "message_stop"]
-    assert events[1].delta.stop_reason == "end_turn"
+    assert cast(Any, events[1]).delta.stop_reason == "end_turn"
 
 
 @pytest.mark.asyncio
