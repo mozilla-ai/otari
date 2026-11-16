@@ -136,8 +136,8 @@ Any status from 400 raises `ProviderError`, tagged with Brave's `error.code` in 
 `http_error`: `subscription_token_invalid` for a refused key, which comes as a 422, and
 `validation` for a parameter out of range. The rest of the body never reaches the error.
 
-Every field read from a successful answer is checked. An answer without `web` found nothing and
-has no hits. A `web` without a `results` list, a result whose `url` or `title` is missing or not a
+Every field read from a successful answer is checked. An answer without `web`, or with `web`
+null, found nothing and has no hits. A `web` without a `results` list, a result whose `url` or `title` is missing or not a
 string, or whose `description` or `page_age` is neither a string nor null, raises `ProviderError`
 with the tag `unexpected_response`.
 

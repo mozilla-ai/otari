@@ -128,8 +128,9 @@ async def test_reads_the_recorded_answer() -> None:
 
 @pytest.mark.asyncio
 async def test_an_answer_without_web_results_has_no_hits_and_no_error() -> None:
-    result, _ = await _search(_recorded("empty"))
-    assert (result.hits, result.error) == ([], None)
+    for answer in (_recorded("empty"), httpx.Response(200, json={"web": None})):
+        result, _ = await _search(answer)
+        assert (result.hits, result.error) == ([], None)
 
 
 @pytest.mark.asyncio
@@ -213,7 +214,6 @@ async def test_page_age_is_read_as_utc_and_left_out_when_it_does_not_parse(
 @pytest.mark.parametrize(
     "web",
     [
-        pytest.param(None, id="web-null"),
         pytest.param([], id="web-not-an-object"),
         pytest.param({}, id="results-missing"),
         pytest.param({"results": {}}, id="results-not-a-list"),

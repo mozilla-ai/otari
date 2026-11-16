@@ -15,8 +15,8 @@ A failure is an HTTP status with a code in ``error.code``, such as
 
 The fields checked in a successful answer:
 
-- ``web`` is absent when Brave found nothing, which makes a search with no
-  hits. When present, it must hold a ``results`` list.
+- ``web`` is absent or null when Brave found nothing, which makes a search
+  with no hits. Otherwise it must hold a ``results`` list.
 - Each result must have a ``url`` and a ``title``, both strings.
 - ``description`` and ``page_age`` can be absent or null, and are strings otherwise.
   ``page_age`` is an ISO 8601 date, read as UTC when it has no zone. It comes
@@ -152,9 +152,9 @@ class BraveProvider(AnySearch):
         response = await self._http.request("GET", endpoint, params=params, headers=headers)
         body = _body(response)
         hits: list[SearchHit] = []
-        # Brave leaves ``web`` out when it found nothing.
-        if "web" in body:
-            web = body["web"]
+        # Brave leaves ``web`` out, or sends it as null, when it found nothing.
+        web = body.get("web")
+        if web is not None:
             results = web.get("results") if isinstance(web, dict) else None
             if not isinstance(results, list):
                 raise _unexpected(response)
