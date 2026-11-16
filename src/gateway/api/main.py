@@ -58,6 +58,7 @@ from gateway.api.routes import (
     overview,
     playground,
     pricing,
+    prompts,
     provider_endpoints,
     providers,
     rate_limits,
@@ -232,6 +233,7 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     overview.router,
     aliases.router,
     provider_endpoints.router,
+    prompts.router,
     routing.router,
     # Both prefixed /pricing, split by who may call them; operator first, so
     # its DELETE /{model_key:path} does not sit behind the catalog catch-all.

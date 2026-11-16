@@ -13,6 +13,7 @@
  */
 
 // Registered third-party apps, separate from dashboard sign-in providers.
+export const PROMPTS = "prompts"
 export const OAUTH_APPS = "oauth-apps"
 export const MODELS = "models"
 // The same selectors as MODELS, folded by model and priced for the viewer. Its

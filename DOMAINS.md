@@ -279,6 +279,14 @@ every request, so this domain holds no enforcement. Counting stays in
 `gateway/rate_limit.py`, over the rate-limit store port. A config.yml rule is
 listed and never edited here.
 
+### prompts
+
+Named text blocks an operator stores from the dashboard so callers can
+reference them by name instead of embedding the text inline. Updating a prompt
+here changes every caller that references it without redeploying the gateway.
+The prompts domain owns the `stored_prompts` table and its CRUD surface; it
+writes no usage row and holds no budget.
+
 ### health-checks
 
 The scheduled checks an operator turns on from the Health page: every model the

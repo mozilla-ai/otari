@@ -2273,6 +2273,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/rate_limits/rate_limit_rule_repository.py",
         "baseline": ("gateway/services/rate_limits/_service.py",),
     },
+    "gateway.models.prompts.StoredPrompt": {
+        "repository": "gateway/repositories/prompts/stored_prompt_repository.py",
+        "baseline": (),
+    },
     "gateway.models.routing.AgentRecommender": {
         "repository": "gateway/repositories/routing/agent_recommender_repository.py",
         "baseline": (),

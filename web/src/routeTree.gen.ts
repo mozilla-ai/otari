@@ -22,6 +22,7 @@ import { Route as MembersRouteImport } from './routes/members'
 import { Route as ModelsRouteImport } from './routes/models'
 import { Route as OrganizationRouteImport } from './routes/organization'
 import { Route as PlaygroundRouteImport } from './routes/playground'
+import { Route as PromptsRouteImport } from './routes/prompts'
 import { Route as RoutingRouteImport } from './routes/routing'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ToolsRouteImport } from './routes/tools'
@@ -120,6 +121,11 @@ const OrganizationRoute = OrganizationRouteImport.update({
 const PlaygroundRoute = PlaygroundRouteImport.update({
   id: '/playground',
   path: '/playground',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PromptsRoute = PromptsRouteImport.update({
+  id: '/prompts',
+  path: '/prompts',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RoutingRoute = RoutingRouteImport.update({
@@ -314,6 +320,7 @@ export interface FileRoutesByFullPath {
   '/models': typeof ModelsRouteWithChildren
   '/organization': typeof OrganizationRouteWithChildren
   '/playground': typeof PlaygroundRoute
+  '/prompts': typeof PromptsRoute
   '/routing': typeof RoutingRouteWithChildren
   '/settings': typeof SettingsRoute
   '/tools': typeof ToolsRouteWithChildren
@@ -360,6 +367,7 @@ export interface FileRoutesByTo {
   '/keys': typeof KeysRoute
   '/members': typeof MembersRoute
   '/playground': typeof PlaygroundRoute
+  '/prompts': typeof PromptsRoute
   '/settings': typeof SettingsRoute
   '/usage': typeof UsageRoute
   '/requests': typeof OverviewRequestsRoute
@@ -407,6 +415,7 @@ export interface FileRoutesById {
   '/models': typeof ModelsRouteWithChildren
   '/organization': typeof OrganizationRouteWithChildren
   '/playground': typeof PlaygroundRoute
+  '/prompts': typeof PromptsRoute
   '/routing': typeof RoutingRouteWithChildren
   '/settings': typeof SettingsRoute
   '/tools': typeof ToolsRouteWithChildren
@@ -459,6 +468,7 @@ export interface FileRouteTypes {
     | '/models'
     | '/organization'
     | '/playground'
+    | '/prompts'
     | '/routing'
     | '/settings'
     | '/tools'
@@ -505,6 +515,7 @@ export interface FileRouteTypes {
     | '/keys'
     | '/members'
     | '/playground'
+    | '/prompts'
     | '/settings'
     | '/usage'
     | '/requests'
@@ -551,6 +562,7 @@ export interface FileRouteTypes {
     | '/models'
     | '/organization'
     | '/playground'
+    | '/prompts'
     | '/routing'
     | '/settings'
     | '/tools'
@@ -602,6 +614,7 @@ export interface RootRouteChildren {
   ModelsRoute: typeof ModelsRouteWithChildren
   OrganizationRoute: typeof OrganizationRouteWithChildren
   PlaygroundRoute: typeof PlaygroundRoute
+  PromptsRoute: typeof PromptsRoute
   RoutingRoute: typeof RoutingRouteWithChildren
   SettingsRoute: typeof SettingsRoute
   ToolsRoute: typeof ToolsRouteWithChildren
@@ -705,6 +718,13 @@ declare module '@tanstack/react-router' {
       path: '/playground'
       fullPath: '/playground'
       preLoaderRoute: typeof PlaygroundRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/prompts': {
+      id: '/prompts'
+      path: '/prompts'
+      fullPath: '/prompts'
+      preLoaderRoute: typeof PromptsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/routing': {
@@ -1085,6 +1105,7 @@ const rootRouteChildren: RootRouteChildren = {
   ModelsRoute: ModelsRouteWithChildren,
   OrganizationRoute: OrganizationRouteWithChildren,
   PlaygroundRoute: PlaygroundRoute,
+  PromptsRoute: PromptsRoute,
   RoutingRoute: RoutingRouteWithChildren,
   SettingsRoute: SettingsRoute,
   ToolsRoute: ToolsRouteWithChildren,

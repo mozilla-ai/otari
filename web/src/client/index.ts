@@ -258,6 +258,10 @@ export type WorstAllocation = Schemas["WorstAllocationResponse"]
 
 export type PricingResponse = Schemas["PricingResponse"]
 
+export type StoredPrompt = Schemas["PromptResponse"]
+export type CreatePromptRequest = Schemas["PromptCreate"]
+export type UpdatePromptRequest = Schemas["PromptUpdate"]
+
 // The catalog folded by model (`/v1/catalog`): one summary per model in the
 // list, and one detail carrying every offering of it the caller may use.
 export type CatalogResponse = Schemas["CatalogResponse"]

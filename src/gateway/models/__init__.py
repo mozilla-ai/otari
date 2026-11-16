@@ -21,6 +21,7 @@ from gateway.models import (  # noqa: F401
     platform,
     playground,
     pricing,
+    prompts,
     provider_keys,
     providers,
     rate_limits,

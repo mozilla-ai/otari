@@ -5822,6 +5822,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/prompts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Prompts
+         * @description List all stored prompts, ordered by name.
+         */
+        get: operations["prompts-list_prompts"];
+        put?: never;
+        /**
+         * Create Prompt
+         * @description Create a new stored prompt.
+         *
+         *     The name must be unique across all stored prompts.
+         */
+        post: operations["prompts-create_prompt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/prompts/{prompt_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Prompt
+         * @description Get a single stored prompt by ID.
+         */
+        get: operations["prompts-get_prompt"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Prompt
+         * @description Delete a stored prompt.
+         */
+        delete: operations["prompts-delete_prompt"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Prompt
+         * @description Update a stored prompt's name, content, or both.
+         */
+        patch: operations["prompts-update_prompt"];
+        trace?: never;
+    };
     "/api/v1/provider-endpoints": {
         parameters: {
             query?: never;
@@ -17947,6 +18001,63 @@ export interface components {
             min_input_tokens: number;
             /** Output Price Per Million */
             output_price_per_million?: number | null;
+        };
+        /**
+         * PromptCreate
+         * @description A prompt to store.
+         */
+        PromptCreate: {
+            /**
+             * Content
+             * @description The prompt text.
+             */
+            content: string;
+            /**
+             * Name
+             * @description Unique name callers use to reference this prompt.
+             */
+            name: string;
+        };
+        /**
+         * PromptResponse
+         * @description A stored prompt.
+         */
+        PromptResponse: {
+            /** Content */
+            content: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * PromptUpdate
+         * @description Fields to change on a stored prompt. An omitted field keeps its value.
+         */
+        PromptUpdate: {
+            /**
+             * Content
+             * @description New prompt text.
+             */
+            content?: string | null;
+            /**
+             * Name
+             * @description New name for the prompt.
+             */
+            name?: string | null;
         };
         /**
          * ProviderCapabilitiesSchema
@@ -32717,6 +32828,154 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "prompts-list_prompts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptResponse"][];
+                };
+            };
+        };
+    };
+    "prompts-create_prompt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromptCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "prompts-get_prompt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                prompt_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "prompts-delete_prompt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                prompt_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "prompts-update_prompt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                prompt_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromptUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptResponse"];
+                };
             };
             /** @description Validation Error */
             422: {

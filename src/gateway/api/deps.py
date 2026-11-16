@@ -73,6 +73,7 @@ from gateway.repositories.inference import InferenceRepositories
 from gateway.repositories.organizations import OrganizationRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
 from gateway.repositories.pricing import ModelPricingRepository, OrganizationModelPricingRepository
+from gateway.repositories.prompts import StoredPromptRepository
 from gateway.repositories.providers import (
     HostedProviderModelRepository,
     HostedProviderRepository,
@@ -183,6 +184,7 @@ from gateway.services.pricing_service import (
     resolve_model_pricing,
     resolve_tool_rate,
 )
+from gateway.services.prompts import PromptService
 from gateway.services.providers import (
     HostedCatalogUpdate,
     HostedProviderService,
@@ -2245,6 +2247,16 @@ def get_rate_limit_service(
 RateLimitServiceDep = Annotated[RateLimitService, Depends(get_rate_limit_service)]
 
 
+def get_prompt_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+) -> PromptService:
+    """Build the prompt service on the request's unit of work."""
+    return PromptService(uow, StoredPromptRepository(uow))
+
+
+PromptServiceDep = Annotated[PromptService, Depends(get_prompt_service)]
+
+
 def build_health_check_service(uow: UnitOfWork, config: GatewayConfig) -> HealthCheckService:
     """Build the health checks service on a request's Unit of Work, or the worker's own.
 
@@ -3249,6 +3261,7 @@ __all__ = [
     "OrgProviderModelServiceDep",
     "ModelMetadataOverrideServiceDep",
     "RateLimitServiceDep",
+    "PromptServiceDep",
     "HealthCheckServiceDep",
     "build_health_check_service",
     "build_unavailable_model_reporter",

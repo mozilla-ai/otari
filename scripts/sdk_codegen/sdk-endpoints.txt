@@ -178,6 +178,12 @@ GET /api/v1/rate-limits                             # not yet wrapped
 POST /api/v1/rate-limits                            # not yet wrapped
 PATCH /api/v1/rate-limits/{name}                    # not yet wrapped
 DELETE /api/v1/rate-limits/{name}                   # not yet wrapped
+# Stored prompts (operator dashboard only)
+GET /api/v1/prompts                                 # operator dashboard only
+POST /api/v1/prompts                                # operator dashboard only
+GET /api/v1/prompts/{prompt_id}                     # operator dashboard only
+PATCH /api/v1/prompts/{prompt_id}                   # operator dashboard only
+DELETE /api/v1/prompts/{prompt_id}                  # operator dashboard only
 # Runtime settings
 GET /api/v1/settings                                # not yet wrapped
 PATCH /api/v1/settings                              # not yet wrapped
