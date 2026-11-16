@@ -60,6 +60,8 @@ EXPECTED: dict[str, Expected] = {
     "serply": Expected(snippets=True),
     # Synthetic returns page text and no snippet; it dates hits by default.
     "synthetic": Expected(dated={}),
+    # Tavily returns a snippet, and page text only on request; it dates every hit on topic news.
+    "tavily": Expected(dated={"topic": "news"}, snippets=True),
 }
 
 

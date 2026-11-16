@@ -1,9 +1,9 @@
 """An organization's own web search and fetch keys: managing them, and the requests using them.
 
-The cases on the older backend go through ``/api/v1/messages`` with it patched out, so
-what is asserted is which provider and key it was built with. The cases on the
-libraries go through ``/api/v1/chat/completions`` with a scripted model, and answer the
-provider's calls through the app's web provider client.
+Some cases go through ``/api/v1/messages`` with the search backend patched out, so
+what is asserted is which search, provider and key it was built with. Others go through
+``/api/v1/chat/completions`` with a scripted model, and answer the provider's calls
+through the app's web provider client.
 """
 
 from __future__ import annotations
@@ -334,10 +334,10 @@ def test_a_workspace_with_a_key_searches_with_it(
 ) -> None:
     _add_key(client, master_key_header, api_key="tvly-org-secret", default=True)
 
-    seen = _searched_with(client, api_key_header)
+    search = _searched_with(client, api_key_header)["search"].search
 
-    assert seen["provider"] == "tavily"
-    assert seen["provider_api_key"] == "tvly-org-secret"
+    assert (search.provider, search.api_key, search.label) == ("tavily", "tvly-org-secret", "org:tavily")
+    assert search.on_credential is True
 
 
 def test_a_workspace_that_turned_its_keys_off_uses_the_deployments_search(
@@ -378,7 +378,7 @@ def test_an_archived_key_is_not_searched_with(
 ) -> None:
     serve_search_on_fake()
     key = _add_key(client, master_key_header, api_key="tvly-org-secret", default=True)
-    assert _searched_with(client, api_key_header)["provider_api_key"] == "tvly-org-secret"
+    assert _searched_with(client, api_key_header)["search"].search.api_key == "tvly-org-secret"
 
     archived = client.post(f"{_KEYS}/{key['id']}/archive", headers=master_key_header)
 
@@ -564,8 +564,6 @@ def test_a_keys_kind_is_fixed(client: TestClient, master_key_header: dict[str, s
         {"provider": "tabstack"},
         {"provider": "mojeek", "kind": "fetch"},
         {"provider": "exa", "api_key": None},
-        {"provider": "tavily", "api_base": "https://tavily.example"},
-        {"provider": "tavily", "options": {"topic": "news"}},
         {"provider": "brave", "options": {"no_such_option": 1}},
         {"provider": "exa", "api_base": "http://exa.example"},
         {"provider": "exa", "options": {"no_such_option": 1}},
@@ -577,8 +575,6 @@ def test_a_keys_kind_is_fixed(client: TestClient, master_key_header: dict[str, s
         "search-on-a-fetch-provider",
         "fetch-on-a-search-provider",
         "keyless-on-a-keyed-provider",
-        "tavily-endpoint",
-        "tavily-options",
         "brave-unknown-option",
         "key-over-http",
         "unknown-option",
@@ -759,9 +755,9 @@ def test_a_tavily_key_serves_an_explicit_declaration_where_the_deployment_has_no
 ) -> None:
     _add_key(client, master_key_header, api_key="tvly-org-secret", default=True)
 
-    seen = _searched_with(client, api_key_header)
+    search = _searched_with(client, api_key_header)["search"].search
 
-    assert (seen["provider"], seen["provider_api_key"]) == ("tavily", "tvly-org-secret")
+    assert (search.provider, search.api_key) == ("tavily", "tvly-org-secret")
 
 
 def test_the_workspace_page_counts_its_key_where_the_deployment_has_no_search(

@@ -408,8 +408,8 @@ class SearchToolSelectionError(TenancyValidationError):
 class DirectSearchFieldRefusedError(TenancyValidationError):
     """A direct search asking ``include_raw`` or ``provider_options`` of a call that does not run on any-search.
 
-    Such a call runs on the older Tavily client: a Tavily organization key, or
-    ``web_search_provider: tavily``.
+    Such a call runs on the old search client: a key on a provider any-search
+    does not serve, an organization's or the legacy settings'.
     """
 
     def __init__(self, provider: str) -> None:

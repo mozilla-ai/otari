@@ -1,10 +1,10 @@
 """The direct search endpoint's old client, for the organization keys that do not run on any-search.
 
 The direct search endpoint runs on any-search (``gateway.services.tools``), except
-a search on a workspace's Tavily organization key (#2015), or on the legacy
-settings' Tavily key on a deployment with no search tool, which any-search has no
-adapter for: it runs here, through the provider mapping the
-in-loop backend uses. It reads the request in the gateway's provider-neutral terms
+a search on a key whose provider any-search does not serve, a workspace's
+organization key (#2015) or the legacy settings' key on a deployment with no
+search tool: it runs here, through the provider mapping the in-loop backend
+uses. It reads the request in the gateway's provider-neutral terms
 (``SearchQuery``) and sends through the client its caller passes, the app's web
 provider client. It keeps its own ceiling of 20 results.
 """

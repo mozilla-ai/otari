@@ -414,3 +414,28 @@ The first provider that replaced old gateway code for a provider otari's own set
   leave a long one that it validates itself (`country`) to the provider.
 - Fixture recipes: `normal` with `--max-results 2` and `result_filter=web` keeps it small; `empty`
   with `site:` set to a domain that does not exist; `error` with a made-up key.
+
+### 2026-11-16, Tavily (any-search)
+
+The first provider whose old gateway client sent an option the provider leaves off by default.
+
+- When the host's old client sent an option the provider's own default leaves out, the adapter
+  sends the provider's default, and the host keeps the option where its callers rely on it.
+  otari's old client always asked Tavily for page text (`include_raw_content`). The adapter does
+  not: otari's legacy settings add the option themselves, and a data migration wrote it into each
+  stored key's options, where the key's owner sees it and can turn it off.
+- An error body can hold only a sentence: Tavily answers `{"detail": {"error": "Unauthorized:
+  ..."}}`, a 422 with pydantic's list that quotes the input, or its own statuses 432 and 433 for
+  plan limits. With no code to read, tag by the status the provider documents.
+- A provider can report what a call cost in its own unit: Tavily's `usage.credits`, sent when
+  `include_usage` asks, counts credits, whose dollar price depends on the plan. That is not a
+  reported cost: `reports_cost` stays false, and the host prices each tier (`search_depth`).
+- An option can raise the price by choosing a tier itself: `auto_parameters` costs 2 credits and
+  may pick `advanced`. Leave such an option out until the host can lock it.
+- Page text can be very large: one `raw_content` was 946,000 characters. The host cuts what
+  reaches a model; the adapter passes it as it came.
+- Dates can be RFC 1123 (`Thu, 15 Oct 2026 00:00:00 GMT`); `email.utils.parsedate_to_datetime`
+  reads them.
+- Fixture recipes: `normal` with `--max-results 2 -o topic=news`, which dates every hit; `empty`
+  with `include_domains=["example.com"]` and words no page there holds (a domain that does not
+  exist is a 400); `error` with a made-up `tvly-` key.

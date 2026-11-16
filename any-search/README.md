@@ -388,6 +388,36 @@ lacking `url` or `title`, or with either of the wrong type, or with a `text` or 
 neither a string nor null, or a `published` that does not parse, raises `ProviderError` with the
 tag `unexpected_response`. Fields the adapter does not read are ignored.
 
+## Tavily
+
+`tavily` calls Tavily's [Search API](https://docs.tavily.com/documentation/api-reference/endpoint/search),
+`POST /search`, with the key read from `TAVILY_API_KEY` when not passed. The key travels as a
+Bearer token.
+
+| `SearchHit` | From Tavily |
+|---|---|
+| `url`, `title` | `url`, `title` of each item in `results` |
+| `snippet` | `content`, the passages of the page relevant to the query |
+| `text` | `raw_content`, the page's full text, which Tavily returns only when `include_raw_content` asks for it; else `None` |
+| `published` | `published_date`, an RFC 1123 date such as `Thu, 15 Oct 2026 00:00:00 GMT`; `None` when Tavily sends none or one that does not parse, which stays in `raw` |
+
+Tavily reports credits, not dollars, so it reports no cost. `search_depth` is its cost tier:
+`basic`, `fast` and `ultra-fast` cost 1 credit a search, `advanced` 2. `auto_parameters` is not
+offered, since it always costs 2 credits. `max_results` is sent at most 20, and only when passed;
+`time_range` is Tavily's own parameter of that name. The other native options are Tavily's own,
+such as `topic`, `include_domains` and `include_published_date`; `--describe tavily` lists them.
+An option set to `None` is not sent.
+
+Tavily signals every failure with an HTTP status and a sentence, which never reaches the error.
+Any status from 400 raises `ProviderError`, tagged by its status: `unauthorized` (401),
+`rate_limited` (429), `plan_limit_exceeded` (432), `pay_as_you_go_limit_exceeded` (433), else
+`http_error`.
+
+Every field read from a successful answer is checked. An answer without a `results` list, a
+result whose `url`, `title` or `content` is missing or not a string, or whose `raw_content` or
+`published_date` is neither a string nor null, raises `ProviderError` with the tag
+`unexpected_response`.
+
 ## The fake provider
 
 `fake` is a provider like any other, in the `test` tier. It answers from canned data and takes its

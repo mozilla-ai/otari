@@ -20,7 +20,7 @@ CATALOG = f"{API_ROOT}/search-tools/catalog"
 
 @pytest.fixture
 def test_config(postgres_url: str) -> GatewayConfig:
-    """Two search tools any-search serves, one priced and the default, and one it cannot run."""
+    """Three search tools any-search serves, one priced and the default."""
     return GatewayConfig(
         database_url=postgres_url,
         master_key="test-master-key",
@@ -36,7 +36,7 @@ def test_config(postgres_url: str) -> GatewayConfig:
                 "price_per_call": 0.004,
             },
             "fake-fast": {"provider": "fake"},
-            "legacy": {"provider": "tavily", "api_key": "tvly-secret-key"},
+            "tavily-search": {"provider": "tavily", "api_key": "tvly-secret-key"},
         },
         web_search_default_tool="fake-search",
     )
@@ -88,11 +88,18 @@ def test_an_api_key_lists_the_tools_a_direct_search_serves_with_their_price_and_
             "price_per_call": 0.004,
             "default": True,
         },
+        {
+            "id": "tavily-search",
+            "object": "search_tool",
+            "provider": "tavily",
+            "label": "Tavily",
+            "price_per_call": None,
+            "default": False,
+        },
     ]
-    # Nothing of a tool's configuration reaches the caller, and a tool a direct search cannot run is not listed.
+    # Nothing of a tool's configuration reaches the caller.
     assert "search.internal.example" not in resp.text
     assert "tvly-secret-key" not in resp.text
-    assert "legacy" not in resp.text
 
 
 def test_the_callers_organization_override_prices_its_listing(
@@ -110,7 +117,7 @@ def test_the_callers_organization_override_prices_its_listing(
 
     prices = {entry["id"]: entry["price_per_call"] for entry in _entries(client, api_key_header)}
 
-    assert prices == {"fake-fast": None, "fake-search": pytest.approx(0.001)}
+    assert prices == {"fake-fast": None, "fake-search": pytest.approx(0.001), "tavily-search": None}
 
 
 def test_a_workspace_with_web_search_off_lists_nothing_to_its_key(
@@ -122,7 +129,11 @@ def test_a_workspace_with_web_search_off_lists_nothing_to_its_key(
 
     assert _entries(client, {API_KEY_HEADER: f"Bearer {key.json()['key']}"}) == []
     # The master key belongs to no one workspace, so it gets the deployment's list.
-    assert [entry["id"] for entry in _entries(client, master_key_header)] == ["fake-fast", "fake-search"]
+    assert [entry["id"] for entry in _entries(client, master_key_header)] == [
+        "fake-fast",
+        "fake-search",
+        "tavily-search",
+    ]
 
 
 def test_a_key_sees_only_the_tools_its_allowed_tools_grants(
@@ -219,4 +230,8 @@ def test_a_search_tool_hides_the_legacy_engine_from_the_catalog(
 ) -> None:
     legacy = {"web_search_provider": "tavily", "web_search_provider_api_key": "tvly-secret-key"}
     for client in build_test_client(test_config.model_copy(update=legacy)):
-        assert [entry["id"] for entry in _entries(client, master_key_header)] == ["fake-fast", "fake-search"]
+        assert [entry["id"] for entry in _entries(client, master_key_header)] == [
+            "fake-fast",
+            "fake-search",
+            "tavily-search",
+        ]
