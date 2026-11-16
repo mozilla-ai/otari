@@ -151,6 +151,15 @@ async def _resolve(config: GatewayConfig) -> pipeline.RequestContext:
         code_execution_policies=cast(WorkspaceCodeExecutionPolicies, object()),
         model_provider=cast(ModelProviderPort, object()),
         normalize_messages=_normalize_with_vision,
+        declared=pipeline.DeclaredTools(
+            guardrails=None,
+            guardrail_targets=tuple,
+            tools=None,
+            mcp_servers=None,
+            mcp_server_ids=None,
+            max_tool_iterations=None,
+            tools_header=None,
+        ),
     )
 
 

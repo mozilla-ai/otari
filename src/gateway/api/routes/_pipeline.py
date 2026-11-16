@@ -2315,7 +2315,7 @@ async def resolve_request_context(
     session_principal: SessionPrincipal | None = None,
     routing_signal: Callable[[], RoutingSignal] | None = None,
     normalize_messages: Callable[[NormalizationTarget], Awaitable[tuple[int, CompletionUsage | None]]] | None = None,
-    tools: list[dict[str, Any]] | None = None,
+    declared: DeclaredTools,
     idempotency: IdempotencyGuard | None = None,
     tags: dict[str, str] | None = None,
     turn: TurnFacts | None = None,
@@ -2414,6 +2414,10 @@ async def resolve_request_context(
     else:
         api_key, is_master_key = await verify_api_key_or_master_key(raw_request, db, config)
         api_key_id = api_key.id if api_key else None
+        # This check runs ahead of the reservation and the pricing gate, so a key that may
+        # not run a declared tool is told that rather than what the deployment prices. It
+        # also runs before the end user is resolved, because resolving one may create it.
+        _require_declared_tool_scopes(adapter, api_key, declared)
         # Zero I/O for a keyed request: `api_key.workspace_id` is already an
         # in-memory attribute on the row just loaded. Only a master-key request
         # pays a lookup, which `resolve_workspace_id` itself accepts as
@@ -2908,7 +2912,7 @@ async def resolve_request_context(
     # who runs the code. Only a request declaring code execution on a
     # deployment with a sandbox has anything to decide. The estimate is
     # already reserved, so a read that fails releases it before propagating.
-    if config.sandbox_configured() and declares_code_execution(tools):
+    if config.sandbox_configured() and declares_code_execution(declared.tools):
         try:
             code_execution_policy = await code_execution_policies.for_request(workspace_id)
         except Exception:
@@ -3683,7 +3687,6 @@ async def prepare_gateway_tools(
     web_policy = _RequestWebPolicy(backends.ports.web_search_policy, ctx.workspace_id)
     unpriced_tool: PricedTool | None = None
     try:
-        _require_declared_tool_scopes(adapter, ctx, declared)
         web_candidates = await _admit_web_declarations(adapter, ctx, declared, web_policy)
         guardrails = await _admit_guardrails(adapter, ctx, response, declared)
         mcp_servers = await _admit_mcp_servers(adapter, ctx, declared, backends.ports.mcp_server)
@@ -3929,23 +3932,27 @@ def _declares_mcp(declared: DeclaredTools) -> bool:
 
 
 def _require_declared_tool_scopes(
-    adapter: FormatAdapter[Any, Any], ctx: RequestContext, declared: DeclaredTools
+    adapter: FormatAdapter[Any, Any], api_key: APIKey | None, declared: DeclaredTools
 ) -> None:
-    """Hold the request's key to a scope for each tool it declared, whoever would run it.
+    """Hold ``api_key`` to a scope for each tool ``declared`` names, whoever would run it.
+
+    Reads the key and the request body alone, so it needs none of the request's resolved state.
 
     Raises:
         HTTPException: the key lacks the scope one of the declared tools needs.
     """
     for tool in BUILTIN_TOOLS:
-        if tool.declares(declared.tools) and (missing := _missing_scope(ctx, tool.key_scope, f"the {tool.name} tool")):
+        if not tool.declares(declared.tools):
+            continue
+        if missing := _missing_scope(api_key, tool.key_scope, f"the {tool.name} tool"):
             raise domain_error(adapter, missing)
-    if _declares_mcp(declared) and (missing := _missing_scope(ctx, KeyScope.MCP_EXECUTE, "calling MCP tools")):
+    if _declares_mcp(declared) and (missing := _missing_scope(api_key, KeyScope.MCP_EXECUTE, "calling MCP tools")):
         raise domain_error(adapter, missing)
 
 
-def _missing_scope(ctx: RequestContext, scope: KeyScope, what: str) -> KeyScopeMissingError | None:
-    """Why the request's key may not do ``what``, or ``None`` where it holds ``scope`` or no key made the request."""
-    if ctx.api_key is None or scope in ctx.api_key.scopes:
+def _missing_scope(api_key: APIKey | None, scope: KeyScope, what: str) -> KeyScopeMissingError | None:
+    """Why ``api_key`` may not do ``what``, or ``None`` where it holds ``scope`` or no key made the request."""
+    if api_key is None or scope in api_key.scopes:
         return None
     return KeyScopeMissingError(scope, what)
 

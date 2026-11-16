@@ -1025,6 +1025,23 @@ async def create_message(
         sandbox_inputs.extend(stats.sandbox_inputs)
         return len(str(request.messages)) + len(str(request.system or "")), stats.vision_usage()
 
+    declared = DeclaredTools(
+        guardrails=request.guardrails,
+        guardrail_targets=lambda: messages_targets(request),
+        tools=request.tools,
+        mcp_servers=request.mcp_servers,
+        mcp_server_ids=request.mcp_server_ids,
+        max_tool_iterations=request.max_tool_iterations,
+        tools_header=request.tools_header,
+        code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
+        web_fetch_header=raw_request.headers.get(WEB_FETCH_HEADER),
+        web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
+        # Anthropic's own field, which is where an Anthropic SDK puts the id it
+        # read off the last response. Resolved at admission against this caller's
+        # leases; the provider never sees it when the sandbox runs the code.
+        container_id=request.container,
+    )
+
     try:
         ctx = await resolve_request_context(
             adapter=adapter,
@@ -1050,7 +1067,7 @@ async def create_message(
             streaming=bool(request.stream),
             routing_signal=lambda: routing_signal(raw_request),
             normalize_messages=_normalize,
-            tools=request.tools,
+            declared=declared,
             code_execution_policies=tool_ports.code_execution_policy,
             model_provider=model_provider,
             idempotency=None if request.stream else idempotency,
@@ -1066,22 +1083,7 @@ async def create_message(
         adapter=adapter,
         ctx=ctx,
         response=response,
-        declared=DeclaredTools(
-            guardrails=request.guardrails,
-            guardrail_targets=lambda: messages_targets(request),
-            tools=request.tools,
-            mcp_servers=request.mcp_servers,
-            mcp_server_ids=request.mcp_server_ids,
-            max_tool_iterations=request.max_tool_iterations,
-            tools_header=request.tools_header,
-            code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
-            web_fetch_header=raw_request.headers.get(WEB_FETCH_HEADER),
-            web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
-            # Anthropic's own field, which is where an Anthropic SDK puts the id it
-            # read off the last response. Resolved at admission against this caller's
-            # leases; the provider never sees it when the sandbox runs the code.
-            container_id=request.container,
-        ),
+        declared=declared,
         backends=ToolBackends(
             ports=tool_ports,
             sandbox_containers=build_sandbox_container_registry(

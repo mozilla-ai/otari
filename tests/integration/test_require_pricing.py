@@ -22,7 +22,7 @@ from gateway.log_config import logger as gateway_logger
 from gateway.models.pricing import API_ORIGIN, OPERATOR_ORIGIN, OrganizationModelPricing
 from gateway.models.usage import UsageLog
 
-from .conftest import build_test_client
+from .conftest import ALL_KEY_SCOPES, build_test_client
 
 _MASTER_HEADER = {API_KEY_HEADER: "Bearer test-master-key"}
 _MESSAGES = [{"role": "user", "content": "hi"}]
@@ -573,3 +573,28 @@ def test_unpriced_image_edit_is_pricing_required(strict_pricing_client: TestClie
     assert resp.headers["Otari-Error-Code"] == "pricing_required"
     read.assert_not_called()
     mock.assert_not_called()
+
+
+def test_a_tool_scope_refusal_takes_precedence_over_the_pricing_gate(
+    strict_pricing_client: TestClient,
+) -> None:
+    """A key that may not run a tool it declared is told that, whatever the deployment prices.
+
+    The scope a declared tool needs is a fact about the key and the body, so it is
+    settled before the request reaches a gate that reads the deployment's pricing.
+    """
+    created = strict_pricing_client.post(
+        f"{API_ROOT}/keys",
+        json={"key_name": "no-search", "scopes": [held for held in ALL_KEY_SCOPES if held != "web:search"]},
+        headers=_MASTER_HEADER,
+    )
+    assert created.status_code == 200, created.text
+
+    refused = strict_pricing_client.post(
+        f"{API_ROOT}/chat/completions",
+        json={"model": "openai:gpt-4o", "messages": _MESSAGES, "tools": [{"type": "otari_web_search"}]},
+        headers={API_KEY_HEADER: f"Bearer {created.json()['key']}"},
+    )
+
+    assert refused.status_code == 403, refused.text
+    assert refused.headers["WWW-Authenticate"] == 'Bearer error="insufficient_scope", scope="web:search"'

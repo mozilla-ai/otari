@@ -482,6 +482,19 @@ async def create_response(
         chars = len(str(request_body.input)) + len(str(getattr(request_body, "instructions", "") or ""))
         return chars, stats.vision_usage()
 
+    declared = DeclaredTools(
+        guardrails=request_body.guardrails,
+        guardrail_targets=lambda: responses_targets(request_body),
+        tools=request_body.tools,
+        mcp_servers=request_body.mcp_servers,
+        mcp_server_ids=request_body.mcp_server_ids,
+        max_tool_iterations=request_body.max_tool_iterations,
+        tools_header=request_body.tools_header,
+        code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
+        web_fetch_header=raw_request.headers.get(WEB_FETCH_HEADER),
+        web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
+    )
+
     try:
         ctx = await resolve_request_context(
             adapter=_ADAPTER,
@@ -503,7 +516,7 @@ async def create_response(
             streaming=bool(request_body.stream),
             routing_signal=lambda: routing_signal(raw_request),
             normalize_messages=_normalize,
-            tools=request_body.tools,
+            declared=declared,
             code_execution_policies=tool_ports.code_execution_policy,
             model_provider=model_provider,
             idempotency=None if bool(request_body.stream) else idempotency,
@@ -542,18 +555,7 @@ async def create_response(
         adapter=_ADAPTER,
         ctx=ctx,
         response=response,
-        declared=DeclaredTools(
-            guardrails=request_body.guardrails,
-            guardrail_targets=lambda: responses_targets(request_body),
-            tools=request_body.tools,
-            mcp_servers=request_body.mcp_servers,
-            mcp_server_ids=request_body.mcp_server_ids,
-            max_tool_iterations=request_body.max_tool_iterations,
-            tools_header=request_body.tools_header,
-            code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
-            web_fetch_header=raw_request.headers.get(WEB_FETCH_HEADER),
-            web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
-        ),
+        declared=declared,
         backends=ToolBackends(
             ports=tool_ports,
             sandbox_containers=build_sandbox_container_registry(
