@@ -171,6 +171,7 @@ from gateway.services.api_keys import (
     names_end_user,
     resolve_user_id,
 )
+from gateway.services.batch_service import claim_batch_accounting
 from gateway.services.budgets import (
     BudgetScopeRequest,
     BudgetService,
@@ -187,6 +188,7 @@ from gateway.services.files import FileBackends, FileService, SandboxFileBridge,
 from gateway.services.health_checks import HealthCheckService, UnavailableModelListener
 from gateway.services.identity import EmailBlocklist, IdentityService, OAuthAppService, OIDCConnectionService
 from gateway.services.inference import (
+    BatchResultsService,
     DeploymentCharge,
     InferenceService,
     UnavailableModelReporter,
@@ -1566,6 +1568,33 @@ def get_usage_service(uow: UnitOfWorkDep) -> UsageService:
 UsageServiceDep = Annotated[UsageService, Depends(get_usage_service)]
 
 
+class _BatchAccountingClaim:
+    """Claims a recorded batch's one-time results accounting on the request's session."""
+
+    def __init__(self, db: AsyncSession) -> None:
+        self._db = db
+
+    async def claim_accounting(self, batch_id: str) -> bool:
+        return await claim_batch_accounting(self._db, batch_id)
+
+
+def get_batch_results_service(db: PortSessionDep, uow: UnitOfWorkDep) -> BatchResultsService:
+    """Build the batch-results accounting service on the request's Unit of Work.
+
+    The claim, the usage rows and the spend fold land on the request's session,
+    in one commit, as a video job's settlement does.
+    """
+    return BatchResultsService(
+        uow,
+        _BatchAccountingClaim(db),
+        UsageLogRepository(uow),
+        fold_spend=partial(record_external_spend, db),
+    )
+
+
+BatchResultsServiceDep = Annotated[BatchResultsService, Depends(get_batch_results_service)]
+
+
 def get_routing_service(
     uow: UnitOfWorkDep,
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -2115,5 +2144,6 @@ __all__ = [
     "DirectToolServiceDep",
     "get_direct_tool_service",
     "OAuthAppServiceDep",
+    "BatchResultsServiceDep",
     "get_oauth_app_service",
 ]
