@@ -684,7 +684,7 @@ class KeyEndUsersPublic(BaseModel):
 
     count: int = Field(
         description="The live end users the cap counts: those on the budgets the key assigns, and those on none "
-        "when the key has a list and no default"
+        "when the key has a list and no default. A key that assigns no budget counts every live end user of its user"
     )
     max_end_users: int | None = Field(
         description="The key's cap; null when it has none. A request naming a new end user is refused with "
