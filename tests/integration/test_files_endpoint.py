@@ -362,6 +362,24 @@ def test_a_service_keys_upload_reaches_the_requests_it_sends_for_its_end_users(
     assert resp.status_code == 200, resp.text
     assert "EXTRACTED::alice's notes" in json.dumps(captured["messages"])
 
+    # Another user's service key naming an end user of the same name reaches nothing.
+    other = client.post(
+        f"{API_ROOT}/keys",
+        json={"key_name": "other-svc", "user_id": "other-svc", "is_service_key": True},
+        headers=master_key_header,
+    )
+    assert other.status_code == 200, other.text
+    captured.clear()
+    with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
+        resp = client.post(
+            f"{API_ROOT}/chat/completions",
+            headers={next(iter(api_key_header)): f"Bearer {other.json()['key']}"},
+            json=body,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert "alice's notes" not in json.dumps(captured["messages"])
+
 
 def test_budget_rejection_skips_normalization(
     client: TestClient,

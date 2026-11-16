@@ -151,7 +151,10 @@ async def execute_code(
     api_key_id = api_key.id if api_key else None
     budget_exempt = api_key is not None and api_key.exclude_from_budget
 
+    # A service key uploads as its own user, so its end users' runs read those uploads too.
+    file_owner_id: str | None = None
     if api_key is not None and request.user and names_end_user(api_key, request.user):
+        file_owner_id = str(api_key.user_id)
         rate_limit_info = await check_rate_limit(raw_request, str(api_key.user_id))
         end_user = await budget_service.resolve_end_user(
             api_key=api_key,
@@ -200,15 +203,9 @@ async def execute_code(
         if file_bridge is None or files is None:
             raise await refuse(FILES_NOT_ENABLED_DETAIL, status.HTTP_400_BAD_REQUEST)
         # The master key acts deployment-wide, so it reaches an upload in any workspace.
-        scope = FileScope(
-            user_id,
-            None if api_key is None else workspace_id,
-            fallback_user_id=str(api_key.user_id)
-            if api_key is not None and names_end_user(api_key, request.user)
-            else None,
-        )
+        scope = FileScope(user_id, None if api_key is None else workspace_id)
         for file_id in dict.fromkeys(request.file_ids):
-            staged = await files.staged_upload(file_id, scope)
+            staged = await files.staged_upload(file_id, scope, fallback_user_id=file_owner_id)
             if staged is None:
                 raise await refuse(FILE_NOT_FOUND_DETAIL_TEMPLATE.format(file_id=file_id), status.HTTP_400_BAD_REQUEST)
             taken = {existing.filename for existing in file_bridge.inputs}

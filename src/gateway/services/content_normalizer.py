@@ -285,14 +285,19 @@ async def _resolve_from_ref(
 
     ``read_bytes=False`` resolves a ``file_id`` to its record without loading
     the blob, for a block that is only staged into the sandbox and never shown
-    to the model. ``file_owner_id`` is the scope's fallback owner (see :class:`FileScope`).
+    to the model. ``file_owner_id`` is the fallback owner :meth:`FileService.staged_upload` takes.
     """
     filename = ref.get("filename")
     file_id = ref.get("file_id")
     if file_id and files is not None:
         # A request with no resolved user owns no file, so it resolves nothing.
-        scope = None if user_id is None else FileScope(user_id, workspace_id, fallback_user_id=file_owner_id)
-        staged = None if scope is None else await files.staged_upload(str(file_id), scope)
+        staged = (
+            None
+            if user_id is None
+            else await files.staged_upload(
+                str(file_id), FileScope(user_id, workspace_id), fallback_user_id=file_owner_id
+            )
+        )
         if staged is None:
             logger.warning("content normalizer: file_id %s not available to user %s", file_id, user_id)
             return None

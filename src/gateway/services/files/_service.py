@@ -62,15 +62,11 @@ class FileScope:
 
     ``workspace_id`` is the workspace the authenticating key belongs to, and is
     None for the master key, which is the operator acting deployment-wide and
-    sees every workspace. ``fallback_user_id`` is a second owner a reference in a
-    request resolves under when ``user_id`` owns no such file: a service key's own
-    user, for a request it sends for one of its end users, since that key uploads
-    as itself.
+    sees every workspace.
     """
 
     user_id: str
     workspace_id: uuid.UUID | None = None
-    fallback_user_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -285,7 +281,9 @@ class FileService:
             raise FileStorageError(f"Could not read the bytes of {file_id}") from exc
         return FileContent(chunks=chunks, filename=record.filename, mime_type=record.mime_type)
 
-    async def staged_upload(self, file_id: str, scope: FileScope) -> StagedFile | None:
+    async def staged_upload(
+        self, file_id: str, scope: FileScope, *, fallback_user_id: str | None = None
+    ) -> StagedFile | None:
         """The stored upload under ``file_id``, ready to be read or handed to a sandbox, or None.
 
         None whenever the file cannot be served to this caller, and for a row
@@ -295,11 +293,16 @@ class FileService:
         It answers whether or not the deployment serves the Files API, because
         it resolves a reference a request already holds rather than serving that
         API, and its caller has a switch of its own.
+
+        ``fallback_user_id`` is a second owner tried when ``scope.user_id`` owns
+        no such file: a service key's own user, for a request it sends for one of
+        its end users, since that key uploads as itself. Only this lookup takes
+        it, so a key's end users can read its uploads but never discard them.
         """
         async with self._uow:
             record = await self._files.live(file_id, scope.user_id, workspace_id=scope.workspace_id)
-            if record is None and scope.fallback_user_id is not None:
-                record = await self._files.live(file_id, scope.fallback_user_id, workspace_id=scope.workspace_id)
+            if record is None and fallback_user_id is not None:
+                record = await self._files.live(file_id, fallback_user_id, workspace_id=scope.workspace_id)
         if record is None or record.storage_ref is None:
             return None
         return StagedFile(record.id, record.filename, record.mime_type, record.storage_ref, record.expires_at)

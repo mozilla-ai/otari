@@ -215,7 +215,9 @@ class _FakeFiles:
         self._data = data
         self.reads: list[str] = []
 
-    async def staged_upload(self, file_id: str, scope: FileScope) -> StagedFile | None:
+    async def staged_upload(
+        self, file_id: str, scope: FileScope, *, fallback_user_id: str | None = None
+    ) -> StagedFile | None:
         return self._staged.get(file_id)
 
     async def read_bytes(self, staged: StagedFile) -> bytes:
@@ -616,7 +618,7 @@ async def test_a_container_upload_whose_lookup_fails_refuses(monkeypatch: pytest
     """
 
     class _Broken:
-        async def staged_upload(self, file_id: str, scope: Any) -> None:
+        async def staged_upload(self, file_id: str, scope: Any, *, fallback_user_id: str | None = None) -> None:
             raise RuntimeError("database unavailable")
 
     msgs = [{"role": "user", "content": [{"type": "container_upload", "file_id": "file-csv"}]}]

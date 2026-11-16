@@ -3543,11 +3543,7 @@ async def resolve_request_context(
                     hosted_credential=_hosted_credential,
                     client_country=country_gate.country,
                     # A service key uploads as its own user, the only owner /v1/files lets it name.
-                    file_owner_id=(
-                        str(api_key.user_id)
-                        if api_key is not None and names_end_user(api_key, user_id_from_request)
-                        else None
-                    ),
+                    file_owner_id=str(api_key.user_id) if end_user_named and api_key is not None else None,
                 )
             )
             # Bill the vision describe side-call before the reservation
