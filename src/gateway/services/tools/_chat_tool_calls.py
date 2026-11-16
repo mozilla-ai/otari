@@ -12,7 +12,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Literal
 
 from gateway.schemas.tools import OtariToolCall, OtariToolCallError
-from gateway.services.tools._web_tool_failure import CALL_LIMIT_TAG, WebToolFailure
+from gateway.services.tools._native import Refusal
+from gateway.services.tools._web_tool_failure import CALL_LIMIT_TAG, INVALID_INPUT_TAG, WebToolFailure
 
 if TYPE_CHECKING:
     from gateway.services.tools._native import NativeCall
@@ -72,9 +73,10 @@ def mcp_entry(
     )
 
 
-def call_limit_error() -> OtariToolCallError:
-    """The ``error`` of a call refused because the request used up its calls, which reached no provider."""
-    return OtariToolCallError.model_validate(WebToolFailure.of(None, None, CALL_LIMIT_TAG).as_dict())
+def refusal_error(reason: Refusal) -> OtariToolCallError:
+    """The ``error`` of a call refused for ``reason`` before it reached a provider."""
+    tag = CALL_LIMIT_TAG if reason is Refusal.CALL_LIMIT else INVALID_INPUT_TAG
+    return OtariToolCallError.model_validate(WebToolFailure.of(None, None, tag).as_dict())
 
 
 def without_otari_tool_calls(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:

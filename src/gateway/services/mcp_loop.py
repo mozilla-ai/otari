@@ -64,6 +64,7 @@ from gateway.services.tools import (
     OTARI_TOOL_CALLS_FIELD,
     Dialect,
     NativeCall,
+    Refusal,
     ToolUseBudget,
     is_capped_call,
     mcp_entry,
@@ -267,13 +268,13 @@ async def _run_owned_calls(
         if args is None:
             results.append({"role": "tool", "tool_call_id": tc["id"] or "", "content": INVALID_ARGUMENTS_ERROR})
             if rendering is not None:
-                yield True, rendering.refused(call)
+                yield True, rendering.refused(call, Refusal.INVALID_INPUT)
             continue
         capped = is_capped_call(budget, pool, name)
         if capped and budget is not None and budget.exhausted(name):
             results.append({"role": "tool", "tool_call_id": tc["id"] or "", "content": MAX_USES_EXCEEDED_ERROR})
             if rendering is not None:
-                yield True, rendering.refused(call)
+                yield True, rendering.refused(call, Refusal.CALL_LIMIT)
             continue
         owner = owning_backend(pool, name)
         server = _mcp_server(owner, name) if rendering is None else None
@@ -288,7 +289,7 @@ async def _run_owned_calls(
             # backend, after its started entry went out, so the entry ends before the
             # request fails. On the libraries, a call past the limit returns a tool error.
             if rendering is not None:
-                yield True, rendering.refused(call)
+                yield True, rendering.refused(call, Refusal.CALL_LIMIT)
             raise
         except Exception as exc:  # noqa: BLE001 — see docstring
             detail = tool_failure_detail(owner, name)

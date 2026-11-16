@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from gateway.services._tool_loop import ToolBackend
-    from gateway.services.tools._native import NativeCall
+    from gateway.services.tools._native import NativeCall, Refusal
 
 # The gateway's own ``web_search_call`` item ids. OpenAI issues ``ws_`` ids, so a
 # reserved prefix is what lets an echoed item be told apart from one describing a
@@ -93,7 +93,7 @@ class ResponsesWebSearchRendering:
             )
         ]
 
-    def refused(self, call: NativeCall) -> list[Any]:
+    def refused(self, call: NativeCall, reason: Refusal) -> list[Any]:
         """Nothing: no search ran, so there is nothing to announce."""
         return []
 

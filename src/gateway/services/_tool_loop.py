@@ -94,18 +94,19 @@ def log_tool_failure(name: str, detail: str, exc: BaseException) -> None:
 
 
 INVALID_ARGUMENTS_ERROR = (
-    "[tool error] invalid_arguments: the arguments were not a JSON object, so the tool did not run"
+    "[tool error] invalid_input: the arguments were not a JSON object, so the tool did not run. "
+    "Call the tool again with its arguments as a JSON object."
 )
 
 
 def parse_tool_arguments(name: str, raw: str | None) -> dict[str, Any] | None:
     """The arguments the model sent for a call to ``name``, or ``None`` when they are not a JSON object.
 
-    Empty arguments read as none. A call whose arguments are ``None`` here is refused with
-    :data:`INVALID_ARGUMENTS_ERROR` rather than run with arguments it did not send.
+    Empty or blank arguments read as none. A call whose arguments are ``None`` here is refused
+    with :data:`INVALID_ARGUMENTS_ERROR` rather than run with arguments it did not send.
     """
     try:
-        parsed = json.loads(raw or "{}")
+        parsed = json.loads((raw or "").strip() or "{}")
     except json.JSONDecodeError:
         parsed = None
     if isinstance(parsed, dict):

@@ -55,6 +55,7 @@ from gateway.services.tools import (
     MAX_USES_EXCEEDED_ERROR,
     Dialect,
     NativeCall,
+    Refusal,
     ToolUseBudget,
     is_capped_call,
     native_rendering,
@@ -120,12 +121,13 @@ class _NativeSink:
         self._blocks.extend(blocks)
 
 
-def _refused_result(call: NativeCall, native: _NativeSink | None, error: str) -> dict[str, Any]:
+def _refused_result(call: NativeCall, native: _NativeSink | None, reason: Refusal) -> dict[str, Any]:
     """The tool_result for a call refused before it ran, collecting its native blocks."""
     if native is not None and native.wants(call.name):
         rendering = native_rendering(call.name, Dialect.MESSAGES)
         if rendering is not None:
-            native.extend(rendering.refused(call))
+            native.extend(rendering.refused(call, reason))
+    error = MAX_USES_EXCEEDED_ERROR if reason is Refusal.CALL_LIMIT else INVALID_ARGUMENTS_ERROR
     return {"type": "tool_result", "tool_use_id": call.id, "content": error}
 
 
@@ -185,7 +187,7 @@ async def _execute_tool_uses(
         arguments = dict(block.input or {})
         capped = is_capped_call(budget, pool, block.name)
         if capped and budget is not None and budget.exhausted(block.name):
-            out.append(_refused_result(NativeCall(block.name, block.id, arguments), native, MAX_USES_EXCEEDED_ERROR))
+            out.append(_refused_result(NativeCall(block.name, block.id, arguments), native, Refusal.CALL_LIMIT))
             continue
         owner = owning_backend(pool, block.name)
         try:
@@ -446,11 +448,11 @@ async def _execute_stream_owned_events(
         name = str(spec["name"])
         parsed_input = parse_tool_arguments(name, state.tool_use_json_bufs.get(spec["index"], ""))
         if parsed_input is None:
-            results.append(_refused_result(NativeCall(name, spec["id"], {}), native, INVALID_ARGUMENTS_ERROR))
+            results.append(_refused_result(NativeCall(name, spec["id"], {}), native, Refusal.INVALID_INPUT))
             continue
         capped = is_capped_call(budget, pool, name)
         if capped and budget is not None and budget.exhausted(name):
-            results.append(_refused_result(NativeCall(name, spec["id"], parsed_input), native, MAX_USES_EXCEEDED_ERROR))
+            results.append(_refused_result(NativeCall(name, spec["id"], parsed_input), native, Refusal.CALL_LIMIT))
             continue
         owner = owning_backend(pool, name)
         mcp_backend = _as_mcp_tool_backend(owner)

@@ -1917,6 +1917,68 @@ async def test_stream_native_max_uses_stops_further_searches_and_reports_an_erro
 
 
 @pytest.mark.asyncio
+async def test_stream_native_search_whose_input_is_cut_off_reports_invalid_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    streams = iter(
+        [
+            _async_iter(
+                _msg_start_event(),
+                _tool_use_block_start(0, "tu_1", "web_search"),
+                _input_json_delta(0, '{"query": "fir'),
+                _content_block_stop(0),
+                _msg_delta_event("tool_use"),
+                _msg_stop_event(),
+            ),
+            _async_iter(
+                _msg_start_event(),
+                _tool_use_block_start(0, "tu_2", "web_search"),
+                _input_json_delta(0, '{"query": "first"}'),
+                _content_block_stop(0),
+                _msg_delta_event("tool_use"),
+                _msg_stop_event(),
+            ),
+            _async_iter(
+                _msg_start_event(),
+                _text_block_start(0),
+                _text_delta(0, "done"),
+                _content_block_stop(0),
+                _msg_delta_event("end_turn"),
+                _msg_stop_event(),
+            ),
+        ]
+    )
+
+    async def fake_amessages(**kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+        return next(streams)
+
+    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+    pool = _FakeSearchPool()
+    events = [
+        event
+        async for event in anthropic_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
+            pool=cast(Any, pool),
+            max_iterations=5,
+            native_tools=frozenset({WEB_SEARCH_TOOL_NAME}),
+            use_budget=_use_budget(1),
+        )
+    ]
+
+    assert pool.calls == [("web_search", {"query": "first"})], "the refused call spent none of the allowance"
+    native_starts = [event.content_block for event in events if event.type == "content_block_start"]
+    assert [block.type for block in native_starts[:4]] == [
+        "server_tool_use",
+        "web_search_tool_result",
+        "server_tool_use",
+        "web_search_tool_result",
+    ]
+    error_content = cast(Any, native_starts[1]).content
+    assert error_content.type == "web_search_tool_result_error"
+    assert error_content.error_code == "invalid_tool_input"
+
+
+@pytest.mark.asyncio
 async def test_native_max_uses_error_block_is_anthropic_schema_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

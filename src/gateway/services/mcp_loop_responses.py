@@ -56,6 +56,7 @@ from gateway.services.tools import (
     MAX_USES_EXCEEDED_ERROR,
     Dialect,
     NativeCall,
+    Refusal,
     ToolUseBudget,
     is_capped_call,
     native_rendering,
@@ -126,13 +127,13 @@ async def _execute_function_calls(
         call = NativeCall(str(item.name or ""), str(item.call_id or ""), args or {})
         if args is None:
             if native_items is not None:
-                native_items.extend(_native_items(call, pool, tools, refused=True))
+                native_items.extend(_native_items(call, pool, tools, refused=Refusal.INVALID_INPUT))
             out.append({"type": "function_call_output", "call_id": item.call_id, "output": INVALID_ARGUMENTS_ERROR})
             continue
         capped = is_capped_call(budget, pool, item.name)
         if capped and budget is not None and budget.exhausted(item.name):
             if native_items is not None:
-                native_items.extend(_native_items(call, pool, tools, refused=True))
+                native_items.extend(_native_items(call, pool, tools, refused=Refusal.CALL_LIMIT))
             out.append({"type": "function_call_output", "call_id": item.call_id, "output": MAX_USES_EXCEEDED_ERROR})
             continue
         owner = owning_backend(pool, item.name)
@@ -148,7 +149,7 @@ async def _execute_function_calls(
             if capped and budget is not None:
                 budget.record(item.name, text)
         if native_items is not None:
-            native_items.extend(_native_items(replace(call, failed=is_tool_error(text)), owner, tools, refused=False))
+            native_items.extend(_native_items(replace(call, failed=is_tool_error(text)), owner, tools, refused=None))
         out.append({"type": "function_call_output", "call_id": item.call_id, "output": text})
     return out
 
@@ -252,10 +253,10 @@ def _reoutput_indexed(event: Any, visible_index: int) -> Any:
     return event.model_copy(update={"output_index": visible_index})
 
 
-def _native_items(call: NativeCall, pool: ToolBackend, tools: frozenset[str], *, refused: bool) -> list[Any]:
+def _native_items(call: NativeCall, pool: ToolBackend, tools: frozenset[str], *, refused: Refusal | None) -> list[Any]:
     """Native items announcing one gateway-run call, if this caller asked to hear about it.
 
-    A refused call is announced through its tool's refusal rendering, which for a
+    A call ``refused`` before it ran is announced through its tool's refusal rendering, which for a
     search is nothing: no search ran. An MCP call has no native equivalent at all and
     stays invisible.
     """
@@ -264,7 +265,7 @@ def _native_items(call: NativeCall, pool: ToolBackend, tools: frozenset[str], *,
     rendering = native_rendering(call.name, Dialect.RESPONSES)
     if rendering is None:
         return []
-    return rendering.refused(call) if refused else rendering.ran(call, pool)
+    return rendering.ran(call, pool) if refused is None else rendering.refused(call, refused)
 
 
 def _compaction_items(output: list[Any]) -> list[Any]:
@@ -305,12 +306,12 @@ async def _execute_stream_owned(
         args = parse_tool_arguments(str(spec["name"]), spec.get("arguments"))
         call = NativeCall(str(spec["name"]), str(spec.get("call_id") or ""), args or {})
         if args is None:
-            state.native_items.extend(_native_items(call, pool, tools, refused=True))
+            state.native_items.extend(_native_items(call, pool, tools, refused=Refusal.INVALID_INPUT))
             results.append({"type": "function_call_output", "call_id": call.id, "output": INVALID_ARGUMENTS_ERROR})
             continue
         capped = is_capped_call(budget, pool, call.name)
         if capped and budget is not None and budget.exhausted(call.name):
-            state.native_items.extend(_native_items(call, pool, tools, refused=True))
+            state.native_items.extend(_native_items(call, pool, tools, refused=Refusal.CALL_LIMIT))
             results.append({"type": "function_call_output", "call_id": call.id, "output": MAX_USES_EXCEEDED_ERROR})
             continue
         owner = owning_backend(pool, call.name)
@@ -325,7 +326,7 @@ async def _execute_stream_owned(
         else:
             if capped and budget is not None:
                 budget.record(call.name, text)
-        state.native_items.extend(_native_items(replace(call, failed=is_tool_error(text)), owner, tools, refused=False))
+        state.native_items.extend(_native_items(replace(call, failed=is_tool_error(text)), owner, tools, refused=None))
         results.append({"type": "function_call_output", "call_id": call.id, "output": text})
     return results
 
