@@ -24,6 +24,18 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
     def __init__(self, uow: UnitOfWork) -> None:
         super().__init__(uow, Budget)
 
+    async def record_external_spend(self, user_id: str, cost: Decimal) -> None:
+        """Stage already-incurred asynchronous spend in the current transaction."""
+        amount = max(cost, Decimal(0))
+        if not amount:
+            return
+        await self.db.execute(
+            update(User)
+            .where(User.user_id == user_id, User.deleted_at.is_(None))
+            .values(spend=User.spend + amount)
+            .execution_options(synchronize_session=False)
+        )
+
     async def add(self, budget: Budget) -> Budget:
         """Stage a new budget and return it with its generated values."""
         self.db.add(budget)

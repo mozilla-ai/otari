@@ -171,6 +171,7 @@ from gateway.services.api_keys import (
     names_end_user,
     resolve_user_id,
 )
+from gateway.services.batch_service import claim_batch_accounting
 from gateway.services.budgets import (
     BudgetScopeRequest,
     BudgetService,
@@ -187,6 +188,7 @@ from gateway.services.files import FileBackends, FileService, SandboxFileBridge,
 from gateway.services.health_checks import HealthCheckService, UnavailableModelListener
 from gateway.services.identity import EmailBlocklist, IdentityService, OAuthAppService, OIDCConnectionService
 from gateway.services.inference import (
+    BatchResultsService,
     DeploymentCharge,
     InferenceService,
     UnavailableModelReporter,
@@ -1566,6 +1568,20 @@ def get_usage_service(uow: UnitOfWorkDep) -> UsageService:
 UsageServiceDep = Annotated[UsageService, Depends(get_usage_service)]
 
 
+def get_batch_results_service(db: Annotated[AsyncSession, Depends(get_db)], uow: UnitOfWorkDep) -> BatchResultsService:
+    """Build the batch-results accounting service on the request's Unit of Work."""
+    budgets = get_budget_service(uow, db)
+
+    class RequestBatchClaim:
+        async def claim_accounting(self, batch_id: str) -> bool:
+            return await claim_batch_accounting(db, batch_id)
+
+    return BatchResultsService(uow, RequestBatchClaim(), UsageLogRepository(uow), budgets)
+
+
+BatchResultsServiceDep = Annotated[BatchResultsService, Depends(get_batch_results_service)]
+
+
 def get_routing_service(
     uow: UnitOfWorkDep,
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -2115,5 +2131,6 @@ __all__ = [
     "DirectToolServiceDep",
     "get_direct_tool_service",
     "OAuthAppServiceDep",
+    "BatchResultsServiceDep",
     "get_oauth_app_service",
 ]

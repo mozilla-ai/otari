@@ -2,6 +2,7 @@ import asyncio
 import uuid
 from collections.abc import Callable, Mapping
 from datetime import datetime
+from decimal import Decimal
 
 from fastapi import BackgroundTasks
 
@@ -90,6 +91,11 @@ class BudgetService:
         self._member_policies = _MemberPolicies(repositories, organizations, workspace_access)
         self._moves = _ReservationMoves(repositories)
         self._key_limits = _KeyLimits(repositories, organizations, users)
+
+    async def record_external_spend(self, user_id: str, cost: Decimal) -> None:
+        """Stage already-incurred spend in this service's Unit of Work."""
+        async with self._uow:
+            await self._budgets.record_external_spend(user_id, cost)
 
     async def list_deployment_budgets(self, organization_id: uuid.UUID, *, skip: int, limit: int) -> list[Budget]:
         """A page of the budgets the deployment owns and the operator's organization owns."""
