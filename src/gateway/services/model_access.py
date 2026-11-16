@@ -545,9 +545,15 @@ def model_not_allowed_detail(model: str) -> str:
 def unresolvable_model_detail(model_selector: str) -> str:
     """Human-readable 400 detail for a selector the gateway cannot resolve."""
     return (
-        f"Unknown or unsupported model {model_selector!r}. Send a 'provider:model' selector, an alias, "
-        f"or a model id from the catalog (GET {API_ROOT}/models)."
+        f"Unknown or unsupported model {model_selector!r}. Send a model id from the catalog "
+        f"(GET {API_ROOT}/models) such as 'vendor/model', an alias, or a 'provider:model' selector."
     )
+
+
+def unknown_model_detail(model_selector: str, nearest: Sequence[str]) -> str:
+    """404 detail for a model no offering of the deployment has, naming the ``nearest`` catalog ids."""
+    suggestion = f" Did you mean {' or '.join(nearest)}?" if nearest else ""
+    return f"Unknown model {model_selector!r}.{suggestion} See GET {API_ROOT}/models."
 
 
 def _quoted(names: tuple[str, ...]) -> str:

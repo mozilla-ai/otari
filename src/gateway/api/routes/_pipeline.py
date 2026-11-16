@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import difflib
 import hashlib
 import json
 import operator
@@ -133,6 +134,7 @@ from gateway.core.error_codes import (
     COUNTRY_NOT_SUPPORTED,
     INSUFFICIENT_FUNDS,
     INVALID_MODEL,
+    MODEL_NOT_FOUND,
     PRICING_REQUIRED,
     PROVIDER_NOT_CONFIGURED,
     USER_BLOCKED,
@@ -250,7 +252,7 @@ from gateway.services.budgets import (
     settle_cut_stream,
     user_subject,
 )
-from gateway.services.catalog import metadata_entry, not_chat_detail, organization_offerings
+from gateway.services.catalog import catalog_models, metadata_entry, not_chat_detail, organization_offerings
 from gateway.services.code_execution import (
     ContainerLease,
     SandboxContainerRegistry,
@@ -298,6 +300,7 @@ from gateway.services.model_access import (
     owned_endpoint_refusal,
     resolve_request_allowlist,
     resolve_request_mcp_access,
+    unknown_model_detail,
     unresolvable_model_detail,
     unresolved_model_refusal,
 )
@@ -1165,6 +1168,56 @@ async def _refuse_if_hosted_model_switched_off(
     )
 
 
+async def _refuse_if_model_unknown(
+    ctx: RequestContext, resolved: ResolvedProvider, *, adapter: FormatAdapter[Any, Any]
+) -> None:
+    """Refuse a model of a vendor in the caller's catalog that neither the catalog nor models.dev knows.
+
+    That is most often a misspelled catalog id (``openai/gpt-oss-12``), which
+    would otherwise be told its provider is not configured. The refusal names
+    the nearest catalog ids. A known model keeps the provider's own answer, as
+    do an alias, whose target stays hidden, and a prefix the catalog has
+    nothing under, such as an undeclared local provider. Called after
+    :func:`_refuse_if_hosted_model_switched_off`, so a hosted provider's own
+    roster keeps answering for its models.
+    """
+    if resolved.alias is not None:
+        return
+    models = catalog_models(organization_id=ctx.organization_id)
+    prefix, wanted = resolved.instance.lower(), resolved.model.lower()
+    known_prefix = False
+    for model in models:
+        vendor, _, name = model.id.lower().rpartition("/")
+        offered = [offering.lower().partition(":") for offering in model.offerings]
+        if wanted == name or any(wanted == offered_model for _, _, offered_model in offered):
+            return
+        known_prefix = known_prefix or prefix == vendor or any(prefix == instance for instance, _, _ in offered)
+    if not known_prefix:
+        return
+    if metadata_entry(cached_models_dev_catalog(), resolved.provider.value, resolved.model) is not None:
+        return
+    spelled = f"{resolved.instance}/{resolved.model}".lower()
+    nearest = difflib.get_close_matches(spelled, [model.id for model in models], n=2)
+    detail = unknown_model_detail(f"{resolved.instance}:{resolved.model}", nearest)
+    await release_reservation(ctx)
+    await log_gateway_rejection(
+        db=ctx.db,
+        log_writer=ctx.log_writer,
+        api_key_id=ctx.api_key_id,
+        user_id=ctx.user_id,
+        model=resolved.model,
+        provider=resolved.instance,
+        endpoint=adapter.endpoint,
+        detail=detail,
+        status_code=status.HTTP_404_NOT_FOUND,
+        started_at=ctx.started_at,
+        request_id=ctx.request_id,
+        tags=ctx.tags,
+        safety_identifier=ctx.upstream_user,
+    )
+    raise adapter.error(status.HTTP_404_NOT_FOUND, detail, ErrorKind.NOT_FOUND, headers=error_headers(MODEL_NOT_FOUND))
+
+
 async def _hold_at_deployment_paid_rate(
     ctx: RequestContext, served: ResolvedProvider, *, adapter: FormatAdapter[Any, Any]
 ) -> None:
@@ -1672,6 +1725,7 @@ async def _serve_from_hosted_credential(
 
     if credential is None and not lookup.own_name_only:
         await _refuse_if_hosted_model_switched_off(ctx, resolved, adapter=adapter, port=port)
+        await _refuse_if_model_unknown(ctx, resolved, adapter=adapter)
     if credential is None or not lookup.accepts(credential.response_provider, resolved.instance):
         raise await _provider_not_configured(ctx, resolved, missing, adapter=adapter)
     try:

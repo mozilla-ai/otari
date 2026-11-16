@@ -1263,7 +1263,7 @@ at the top level of the body.
 | `invalid_model` | 400 | The model selector names no configured provider, alias, policy or catalog model id; checked before the key's allow-list, so a restricted key gets it too, and before `require_pricing`, so it is never answered as `pricing_required`. A `provider:model` selector whose provider resolves is not judged here, since only the provider knows its models | |
 | `model_not_allowed` | 403 | The key may not use the model | |
 | `model_not_serving` | 403 | The organization offers the model on a provider key, with its serving switch off | |
-| `model_not_found` | 404 | A provider key of the organization serves the provider, and none offers the model | |
+| `model_not_found` | 404 | A provider key of the organization serves the provider, and none offers the model; or no credential serves the provider and neither the caller's catalog nor models.dev knows the model (a misspelled catalog id), when `detail` names up to two of the nearest catalog ids | |
 | `country_not_supported` | 403 | `provider_supported_countries` closes the model's provider to the country the request comes from, or the country is unknown. See [Supported countries](configuration.md#supported-countries) | |
 | `context_length_exceeded` | 400 | The prompt is too long for the model | |
 | `request_too_large` | 413 | The provider refused the request for its size, such as a prompt over a tokens-per-minute limit | |

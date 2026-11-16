@@ -19,9 +19,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig, _resolve_env_vars
-from gateway.core.error_codes import ERROR_CODE_HEADER, PROVIDER_NOT_CONFIGURED
+from gateway.core.error_codes import ERROR_CODE_HEADER, MODEL_NOT_FOUND, PROVIDER_NOT_CONFIGURED
 from gateway.models.routing import RoutingConfig
 from gateway.models.usage import UsageLog
+from gateway.services.catalog import OfferingRow, build_selector_index, reset_selector_index, set_selector_index
 from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.secret_box import generate_secret_key
 
@@ -136,6 +137,64 @@ def test_the_messages_route_answers_in_its_own_envelope(
     assert "'anthropic'" in message
     assert "hosted provider" in message
     assert _ANY_LLM_WORDING not in message
+
+
+@pytest.fixture
+def gpt_oss_catalog() -> Generator[None]:
+    """A catalog serving two gpt-oss models on groq, a provider this deployment does not otherwise configure."""
+    offerings = {"openai/gpt-oss-120b": "groq:openai/gpt-oss-120b", "openai/gpt-oss-20b": "groq:openai/gpt-oss-20b"}
+    rows = [OfferingRow(selector, "groq", "groq", 0.15) for selector in offerings.values()]
+    set_selector_index(
+        build_selector_index(rows, {model: (model, (selector,)) for model, selector in offerings.items()})
+    )
+    yield
+    reset_selector_index()
+
+
+@pytest.mark.parametrize("path", ["/chat/completions", "/messages"])
+def test_a_model_no_offering_has_is_not_found_and_names_the_nearest_catalog_ids(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    test_user: dict[str, Any],
+    gpt_oss_catalog: None,
+    path: str,
+) -> None:
+    response = client.post(
+        f"{API_ROOT}{path}",
+        json={"model": "openai/gpt-oss-12", "max_tokens": 16, "messages": [{"role": "user", "content": "Hello"}]},
+        headers=api_key_header,
+    )
+
+    assert response.status_code == 404, response.text
+    assert response.headers[ERROR_CODE_HEADER] == MODEL_NOT_FOUND
+    body = response.json()
+    detail = body["detail"] if path == "/chat/completions" else body["error"]["message"]
+    assert detail == (
+        "Unknown model 'openai:gpt-oss-12'. Did you mean openai/gpt-oss-120b or openai/gpt-oss-20b? "
+        f"See GET {API_ROOT}/models."
+    )
+
+
+@pytest.mark.parametrize(
+    ("model", "provider"),
+    [("openai:gpt-oss-120b", "openai"), ("mistral:no-such-model", "mistral")],
+    ids=["a model an offering has", "a provider the catalog has nothing of"],
+)
+def test_an_unconfigured_provider_keeps_its_answer_where_the_catalog_cannot_judge_the_model(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    test_user: dict[str, Any],
+    gpt_oss_catalog: None,
+    model: str,
+    provider: str,
+) -> None:
+    response = client.post(
+        f"{API_ROOT}/chat/completions",
+        json={"model": model, "messages": [{"role": "user", "content": "Hello"}]},
+        headers=api_key_header,
+    )
+
+    _assert_provider_not_configured(response, provider)
 
 
 # ---------------------------------------------------------------------------
