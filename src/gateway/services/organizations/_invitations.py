@@ -289,6 +289,7 @@ class Invitations:
         """
         now = self._clock()
         async with AsyncExitStack() as stack:
+            # Read-only, and before any counting: a refusal this read alone can decide is never paid for.
             async with self._uow:
                 row = await self._require_invitation(by, invitation_id)
                 if await self._organizations.is_sso_enforced(by.organization_id):
@@ -298,14 +299,17 @@ class Invitations:
                 available_at = row.last_send_requested_at + self._policy.resend_wait
                 if now < available_at:
                     raise InvitationResendTooSoonError(available_at)
+                address, send_count = row.email, row.send_count
 
-                admission = await self._limits.admit(
-                    account_id=by.user_id, email=row.email, organization_id=by.organization_id
-                )
-                if isinstance(admission, InvitationLimitCeiling):
-                    raise InvitationLimitError(admission)
-                await stack.enter_async_context(admission)
+            # No transaction is open across the store's round trips.
+            admission = await self._limits.admit(
+                account_id=by.user_id, email=address, organization_id=by.organization_id
+            )
+            if isinstance(admission, InvitationLimitCeiling):
+                raise InvitationLimitError(admission)
+            await stack.enter_async_context(admission)
 
+            async with self._uow:
                 await self._organizations.lock_settings(by.organization_id)
                 # Re-decided under the lock: a role change or an SSO toggle can commit while the admission above waits.
                 # NOTE: The result is discarded.
@@ -324,7 +328,7 @@ class Invitations:
                     token_hash=mint.token_hash,
                 )
                 result = await self._invitations.request_send(
-                    row.id, by.organization_id, request, expected_send_count=row.send_count
+                    invitation_id, by.organization_id, request, expected_send_count=send_count
                 )
                 invitation = result.invitation
                 if invitation is None:
