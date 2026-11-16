@@ -2,8 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { API_ROOT } from "@/shared/api/client"
 import type { RequestPolicy } from "@/shared/api/requestPolicy"
 import {
+  buildAgentPrompt,
   buildCurlSnippet,
   buildPythonSnippet,
+  buildTypescriptSnippet,
   resolveSnippetBaseUrl,
   SNIPPET_MODEL_PLACEHOLDER,
 } from "@/shared/helpers/requestSnippets"
@@ -45,8 +47,22 @@ describe("buildCurlSnippet", () => {
     )
   })
 
-  it("authenticates with the header the gateway names itself", () => {
-    expect(buildCurlSnippet(INPUT)).toContain('-H "Otari-Key: gw-abc123"')
+  it("exports the key, then sends the variable as a Bearer token", () => {
+    const lines = buildCurlSnippet(INPUT).split("\n")
+    expect(lines[0]).toBe("export OTARI_API_KEY=gw-abc123")
+    expect(lines).toContain('  -H "Authorization: Bearer $OTARI_API_KEY" \\')
+    expect(lines.slice(1).join("\n")).not.toContain("gw-abc123")
+  })
+
+  it("sets nothing when the reader has already exported the key", () => {
+    const snippet = buildCurlSnippet({ ...INPUT, apiKey: "$OTARI_API_KEY" })
+    expect(snippet).not.toContain("export")
+    expect(snippet.split("\n")[0]).toMatch(/^curl /)
+  })
+
+  it("quotes a key the shell would otherwise split", () => {
+    const snippet = buildCurlSnippet({ ...INPUT, apiKey: "a b'c" })
+    expect(snippet.split("\n")[0]).toBe(`export OTARI_API_KEY='a b'\\''c'`)
   })
 
   it("names the model it was given", () => {
@@ -91,7 +107,7 @@ describe("buildCurlSnippet", () => {
 
     // The whole URL is one shell word, so the `;` never reaches the shell as a
     // separator: `'\''` closes the quote, emits a literal apostrophe, reopens.
-    expect(snippet.split("\n")[0]).toBe(
+    expect(snippet.split("\n")[1]).toBe(
       `curl 'https://gw.example/a b'\\''; echo pwned; '\\''${API_ROOT}/chat/completions' \\`,
     )
   })
@@ -106,13 +122,17 @@ describe("buildCurlSnippet", () => {
 })
 
 describe("buildPythonSnippet", () => {
-  it("gives the Keys page and the setup guide the same request, key as a string", () => {
-    // Both pass the key's value, so nothing reads the environment here.
+  it("installs the client and exports the key, then reads it from the environment", () => {
     expect(buildPythonSnippet(INPUT)).toBe(
       [
+        "# pip install openai",
+        "# export OTARI_API_KEY=gw-abc123",
+        "",
+        "import os",
+        "",
         "from openai import OpenAI",
         "",
-        `client = OpenAI(base_url="https://otari.example.com${API_ROOT}", api_key="gw-abc123")`,
+        `client = OpenAI(base_url="https://otari.example.com${API_ROOT}", api_key=os.environ["OTARI_API_KEY"])`,
         "resp = client.chat.completions.create(",
         '    model="openai:gpt-4o-mini",',
         '    messages=[{"role": "user", "content": "Hello"}],',
@@ -125,13 +145,14 @@ describe("buildPythonSnippet", () => {
   it("reads a key given as a shell reference from the environment", () => {
     const snippet = buildPythonSnippet({ ...INPUT, apiKey: "$OTARI_API_KEY" })
 
+    // The reader has exported it already, so there is nothing to set up.
     expect(snippet).toMatch(/^import os\n\nfrom openai import OpenAI\n/)
     expect(snippet).toContain('api_key=os.environ["OTARI_API_KEY"])')
   })
 
   it("points the OpenAI client at the gateway's API root", () => {
     expect(buildPythonSnippet(INPUT)).toContain(
-      `client = OpenAI(base_url="https://otari.example.com${API_ROOT}", api_key="gw-abc123")`,
+      `client = OpenAI(base_url="https://otari.example.com${API_ROOT}", api_key=`,
     )
   })
 
@@ -161,6 +182,39 @@ describe("buildPythonSnippet", () => {
     })
 
     expect(snippet).toContain(`base_url="https://gw.example/x\\"${API_ROOT}"`)
+  })
+})
+
+describe("buildTypescriptSnippet", () => {
+  it("installs the client and exports the key, then reads it from the environment", () => {
+    expect(buildTypescriptSnippet(INPUT)).toBe(
+      [
+        "// npm i openai",
+        "// export OTARI_API_KEY=gw-abc123",
+        "",
+        'import OpenAI from "openai"',
+        "",
+        `const client = new OpenAI({ baseURL: "https://otari.example.com${API_ROOT}", apiKey: process.env.OTARI_API_KEY })`,
+        "const resp = await client.chat.completions.create({",
+        '  model: "openai:gpt-4o-mini",',
+        '  messages: [{ role: "user", content: "Hello" }],',
+        "})",
+        "console.log(resp.choices[0].message.content)",
+      ].join("\n"),
+    )
+  })
+
+  it("never inlines the key in the code", () => {
+    const code = buildTypescriptSnippet(INPUT).split("\n").slice(3).join("\n")
+    expect(code).not.toContain("gw-abc123")
+  })
+})
+
+describe("buildAgentPrompt", () => {
+  it("names the variable and the Bearer header, never the key", () => {
+    const prompt = buildAgentPrompt(INPUT)
+    expect(prompt).toContain("Authorization: Bearer $OTARI_API_KEY")
+    expect(prompt).not.toContain("gw-abc123")
   })
 })
 

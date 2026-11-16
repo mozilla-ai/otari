@@ -56,11 +56,17 @@ export interface RequestSnippetInput {
 }
 
 /**
- * cURL, with the key in the canonical `Otari-Key` header.
+ * The environment variable every snippet reads the key from.
  *
- * Deliberately not `Authorization: Bearer`, which the gateway also accepts: the
- * header it names itself is the one worth teaching, and it cannot be confused
- * with the master key an operator holds for the management API.
+ * The agent prompt only names it, so the secret never lands in the agent's
+ * transcript. The runnable snippets name it too, and open with the `export`
+ * that sets it, so a copy still carries the key without inlining it in code.
+ */
+export const SNIPPET_KEY_ENV_VAR = "OTARI_API_KEY"
+
+/**
+ * cURL with the key as `Authorization: Bearer`, the header the docs and the
+ * OpenAI SDKs send.
  */
 export function buildCurlSnippet({
   baseUrl,
@@ -68,10 +74,12 @@ export function buildCurlSnippet({
   model = SNIPPET_MODEL_PLACEHOLDER,
   message = DEFAULT_MESSAGE,
 }: RequestSnippetInput): string {
+  const { reference, setup } = keyFromEnvironment(apiKey)
   const body = `{"model": ${literal(model)}, "messages": [{"role": "user", "content": ${literal(message)}}]}`
   return [
+    ...setup,
     `curl ${shellSingleQuoted(`${baseUrl}${API_ROOT}/chat/completions`)} \\`,
-    `  -H "Otari-Key: ${apiKey}" \\`,
+    `  -H "Authorization: Bearer $${reference}" \\`,
     `  -H "Content-Type: application/json" \\`,
     `  -d ${shellSingleQuoted(body)}`,
   ].join("\n")
@@ -79,6 +87,41 @@ export function buildCurlSnippet({
 
 /** A key spelled as a shell reference, `$OTARI_API_KEY`, naming its variable. */
 const ENV_REFERENCE = /^\$([A-Za-z_][A-Za-z0-9_]*)$/
+
+/**
+ * Which variable a snippet reads the key from, and the lines that set it.
+ *
+ * Given a shell reference, the reader has already exported it, so there is
+ * nothing to set. Given the key itself, the snippet opens with the `export`,
+ * which is how a copy carries the real key while the code reads the variable.
+ */
+function keyFromEnvironment(apiKey: string): {
+  reference: string
+  setup: string[]
+} {
+  const named = ENV_REFERENCE.exec(apiKey)?.[1]
+  if (named) return { reference: named, setup: [] }
+  // Quoted only when it has to be, so an ordinary key reads like the docs'.
+  const value = /^[\w.\-…•]+$/.test(apiKey) ? apiKey : shellSingleQuoted(apiKey)
+  return {
+    reference: SNIPPET_KEY_ENV_VAR,
+    setup: [`export ${SNIPPET_KEY_ENV_VAR}=${value}`],
+  }
+}
+
+/**
+ * A program's opening comments: the install and the `export`, for a snippet
+ * given the key itself. A reader given a reference has done both.
+ */
+function setupComments(
+  apiKey: string,
+  comment: string,
+  install: string,
+): string[] {
+  const { setup } = keyFromEnvironment(apiKey)
+  if (setup.length === 0) return []
+  return [...[install, ...setup].map((line) => `${comment} ${line}`), ""]
+}
 
 /**
  * The key as a Python expression. A shell reference reads its environment
@@ -102,9 +145,8 @@ export function pythonProgram(
 }
 
 /**
- * Python through the OpenAI client (`pip install openai`), pointed at the
- * gateway's `/api/v1`. It sends the key as `Authorization: Bearer`, which the
- * gateway also accepts.
+ * Python through the OpenAI client, pointed at the gateway's `/api/v1`. The
+ * client sends the key as `Authorization: Bearer`.
  */
 export function buildPythonSnippet({
   baseUrl,
@@ -112,33 +154,39 @@ export function buildPythonSnippet({
   model = SNIPPET_MODEL_PLACEHOLDER,
   message = DEFAULT_MESSAGE,
 }: RequestSnippetInput): string {
-  return pythonProgram(
-    apiKey,
-    [],
-    [
-      "from openai import OpenAI",
-      "",
-      `client = OpenAI(base_url=${literal(`${baseUrl}${API_ROOT}`)}, api_key=${pythonKey(apiKey)})`,
-      "resp = client.chat.completions.create(",
-      `    model=${literal(model)},`,
-      `    messages=[{"role": "user", "content": ${literal(message)}}],`,
-      ")",
-      "print(resp.choices[0].message.content)",
-    ],
-  )
+  const reference = `$${keyFromEnvironment(apiKey).reference}`
+  return [
+    ...setupComments(apiKey, "#", "pip install openai"),
+    pythonProgram(
+      reference,
+      [],
+      [
+        "from openai import OpenAI",
+        "",
+        `client = OpenAI(base_url=${literal(`${baseUrl}${API_ROOT}`)}, api_key=${pythonKey(reference)})`,
+        "resp = client.chat.completions.create(",
+        `    model=${literal(model)},`,
+        `    messages=[{"role": "user", "content": ${literal(message)}}],`,
+        ")",
+        "print(resp.choices[0].message.content)",
+      ],
+    ),
+  ].join("\n")
 }
 
-/** TypeScript through the OpenAI client (`openai`), the same call the Python snippet makes. */
+/** TypeScript through the OpenAI client, the same call the Python snippet makes. */
 export function buildTypescriptSnippet({
   baseUrl,
   apiKey,
   model = SNIPPET_MODEL_PLACEHOLDER,
   message = DEFAULT_MESSAGE,
 }: RequestSnippetInput): string {
+  const { reference } = keyFromEnvironment(apiKey)
   return [
+    ...setupComments(apiKey, "//", "npm i openai"),
     'import OpenAI from "openai"',
     "",
-    `const client = new OpenAI({ baseURL: ${literal(`${baseUrl}${API_ROOT}`)}, apiKey: "${apiKey}" })`,
+    `const client = new OpenAI({ baseURL: ${literal(`${baseUrl}${API_ROOT}`)}, apiKey: process.env.${reference} })`,
     "const resp = await client.chat.completions.create({",
     `  model: ${literal(model)},`,
     `  messages: [{ role: "user", content: ${literal(message)} }],`,
@@ -146,16 +194,6 @@ export function buildTypescriptSnippet({
     "console.log(resp.choices[0].message.content)",
   ].join("\n")
 }
-
-/**
- * The environment variable the agent prompt points at instead of the key.
- *
- * The prompt tells the agent to read the key from the environment and never
- * print or hardcode it, so pasting the live secret into the same text would
- * contradict the instruction and put the key in the agent's transcript. The
- * runnable snippets still inline it, because there it is the thing being run.
- */
-export const SNIPPET_KEY_ENV_VAR = "OTARI_API_KEY"
 
 /**
  * A prompt to paste into a coding agent, for the operator whose first request
@@ -185,7 +223,7 @@ export function buildAgentPrompt({
     "If it is not set, stop and tell me how to export it.",
     "",
     `POST ${endpoint}`,
-    `Otari-Key: $${SNIPPET_KEY_ENV_VAR}`,
+    `Authorization: Bearer $${SNIPPET_KEY_ENV_VAR}`,
     `Content-Type: application/json`,
     `Body: {"model": ${literal(model)}, "messages": [{"role": "user", "content": ${literal(message)}}]}`,
     "",

@@ -87,7 +87,7 @@ describe("buildEndpointRequest", () => {
   ] as const)("posts the smallest body %s takes", (endpoint, body) => {
     const { curl } = requestFor(endpoint)
     expect(curl.split("\n")[0]).toBe(`curl '${ROOT}${endpoint}' \\`)
-    expect(curl).toContain('-H "Otari-Key: gw-abc123"')
+    expect(curl).toContain('-H "Authorization: Bearer gw-abc123"')
     expect(curl).toContain('-H "Content-Type: application/json"')
     expect(jsonBody(curl)).toEqual(body)
   })
@@ -151,7 +151,7 @@ describe("buildEndpointRequest", () => {
     expect(video.curl).toContain(`curl '${ROOT}/videos/VIDEO_ID/content' \\`)
     // An error answer is not saved as the video.
     expect(video.curl).toContain(
-      `curl '${ROOT}/videos/VIDEO_ID/content' \\\n  -H "Otari-Key: gw-abc123" \\\n  --fail \\\n  --output video.mp4`,
+      `curl '${ROOT}/videos/VIDEO_ID/content' \\\n  -H "Authorization: Bearer gw-abc123" \\\n  --fail \\\n  --output video.mp4`,
     )
     // The OpenAI SDK posts a video as a form, which the route refuses.
     expect(video.pythonPackage).toBe("httpx")
@@ -201,7 +201,9 @@ describe("buildEndpointRequest", () => {
     expect(responses.python).toMatch(/^import os\n\nfrom openai import OpenAI/)
     expect(responses.python).toContain(`api_key=${key})`)
     // The shell expands it, so cURL keeps the reference.
-    expect(responses.curl).toContain('-H "Otari-Key: $OTARI_API_KEY"')
+    expect(responses.curl).toContain(
+      '-H "Authorization: Bearer $OTARI_API_KEY"',
+    )
 
     expect(requestFor("/images/generations", fromEnv).python).toMatch(
       /^import base64\nimport os\n\nfrom openai import OpenAI/,

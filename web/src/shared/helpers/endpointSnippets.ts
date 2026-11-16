@@ -69,7 +69,7 @@ const RERANK_DOCUMENTS = [
 function curl(url: string, apiKey: string, args: string[] = []): string {
   return [
     `curl ${shellSingleQuoted(url)}`,
-    `-H "Otari-Key: ${apiKey}"`,
+    `-H "Authorization: Bearer ${apiKey}"`,
     ...args,
   ].join(" \\\n  ")
 }

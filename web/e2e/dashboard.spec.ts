@@ -91,15 +91,15 @@ test.describe("dashboard core flows", () => {
     const curl = sheet.getByRole("region", { name: "curl code" })
     await expect(curl).toBeVisible()
     // Concealed in the example too, because it is the same secret.
-    await expect(curl).toContainText(`Otari-Key: ${concealedKey}`)
+    await expect(curl).toContainText(`export OTARI_API_KEY=${concealedKey}`)
     await expect(curl).not.toContainText(fullKey)
 
     await sheet.getByRole("button", { name: "Show Your API key" }).click()
     await expect(key).toHaveValue(fullKey)
-    await expect(curl).toContainText(`Otari-Key: ${fullKey}`)
+    await expect(curl).toContainText(`export OTARI_API_KEY=${fullKey}`)
     await sheet.getByRole("button", { name: "Hide Your API key" }).click()
     await expect(key).toHaveValue(concealedKey)
-    await expect(curl).toContainText(`Otari-Key: ${concealedKey}`)
+    await expect(curl).toContainText(`export OTARI_API_KEY=${concealedKey}`)
     await expect(curl).not.toContainText(fullKey)
 
     // It is watching for the request while all of that is on screen.

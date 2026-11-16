@@ -548,7 +548,7 @@ describe("KeysPage", () => {
     const python = within(reveal).getByLabelText(
       "Python (OpenAI SDK)",
     ) as HTMLTextAreaElement
-    expect(curl.value).toContain(`Otari-Key: ${NEW_SECRET}`)
+    expect(curl.value).toContain(`export OTARI_API_KEY=${NEW_SECRET}`)
     expect(curl.value).toContain(
       `${window.location.origin}${API_ROOT}/chat/completions`,
     )

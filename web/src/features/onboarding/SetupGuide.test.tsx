@@ -326,7 +326,7 @@ describe("SetupGuide", () => {
 
     await user.click(screen.getByRole("button", { name: "Show Your API key" }))
     expect(screen.getByDisplayValue(KEY)).toBeInTheDocument()
-    expect(snippet("curl")).toHaveTextContent(`Otari-Key: ${KEY}`)
+    expect(snippet("curl")).toHaveTextContent(`export OTARI_API_KEY=${KEY}`)
 
     await user.click(screen.getByRole("button", { name: "Hide Your API key" }))
     expect(screen.getByLabelText("Your API key")).toHaveValue(CONCEALED_KEY)
@@ -345,7 +345,9 @@ describe("SetupGuide", () => {
       "••••••••••••••••",
     )
     await user.click(screen.getByRole("button", { name: "cURL" }))
-    expect(snippet("curl")).toHaveTextContent("Otari-Key: ••••••••••••••••")
+    expect(snippet("curl")).toHaveTextContent(
+      "export OTARI_API_KEY=••••••••••••••••",
+    )
   })
 
   it("copies the full activation key while keeping its fingerprint on screen", async () => {
