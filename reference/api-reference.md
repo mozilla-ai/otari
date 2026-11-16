@@ -2,7 +2,7 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/286b9a7742709284bd5a5b774a1bd32c0e188962/docs/public/openapi.json), the source of truth for paths,
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/865be423a753528ebbed9ff00e54533b0854fde6/docs/public/openapi.json), the source of truth for paths,
 parameters, and schemas.
 
 ## Base URL
@@ -731,10 +731,6 @@ for it works against Otari with its base URL changed. `include_raw` and
 | `include_raw` | boolean | Also return `raw`, the provider's whole response. Default `false`. |
 | `provider_options` | object | Native options of the provider serving the call, under its own names, as `GET /api/v1/search-tools/providers` lists them. They win over the tool's own options; the fields above win over them. An option the provider does not take, or takes only from the deployment, is a 400 naming it. A call that names no tool may be served by an organization key on another provider, so name the tool when the options are meant for one provider. |
 | `user` | string | Who the search is billed to; see below. |
-
-Until any-search has its adapter, `include_raw` and `provider_options` are a
-400 on a call Tavily serves, on an organization key or on `web_search_provider`;
-`false` and `{}` pass.
 
 **Response.**
 

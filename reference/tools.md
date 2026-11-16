@@ -9,8 +9,8 @@ Otari can run three tools during Chat Completions, Messages, and Responses:
 Code execution needs a sandbox: a `sandbox_url` for the default `protocol`
 provider, or a hosted `sandbox_provider` such as `e2b`, which needs none. Search
 needs a search tool (see [Search tools](https://docs.otari.ai/self-hosting/configuration#search-tools)), a
-workspace's [organization search key](#organization-search-keys), or a legacy
-setting: `web_search_provider` with its key, or the deprecated `web_search_url`.
+workspace's [organization search key](#organization-search-keys), or a
+deprecated legacy setting: `web_search_provider` with its key, or `web_search_url`.
 Fetch runs in the gateway.
 One request may declare any of them together, and MCP servers beside them: see
 [Combining tools](#combining-tools).
@@ -282,10 +282,9 @@ deployment-paid.
 
 Every fetch is labeled by the instance that served it, `builtin:builtin_fetch`
 when `web_fetch_default_tool` names none, and so is every in-loop search on a
-search instance. A search on the legacy settings or on a Tavily organization key
-is labeled `otari:web_search`: `web_search_url` searches on any-search's SearXNG
-adapter, `web_search_provider: brave` on its Brave adapter, and the older
-backend runs Tavily. Searches a
+search instance. A search on the legacy settings is labeled `otari:web_search`:
+`web_search_url` searches on any-search's SearXNG adapter, and
+`web_search_provider` on the adapter of the provider it names. Searches a
 model's provider runs itself carry the provider's label, as the next section
 says.
 
@@ -301,12 +300,9 @@ instance that read them, `builtin_fetch` included:
 - A page that cannot be read is neither billed nor counted.
 - Pages read on an [organization fetch key](#organization-search-keys) are
   labeled `org:<provider>` and priced under `otari:web_fetch`.
-- A search the older backend runs (`web_search_provider: tavily` with its key,
-  or a Tavily organization key) reads its pages on the built-in fetcher
-  and records no fetch, until that backend is removed.
 - With `require_pricing` on, a search whose pages would be read through a
   fetch instance with no price is refused with `402` before it runs, the detail
-  naming that instance's row. A search the older backend runs is not.
+  naming that instance's row.
 - `web_search_extract: false` turns the reading of pages off.
 
 ### Searches a provider runs itself
@@ -770,9 +766,8 @@ search's results does not. A call past it gets
 which the model can recover from, and a Chat Completions client sees the call in
 `otari_tool_calls` as `failed` with the tag `call_limit`.
 
-A request the older search backend serves keeps a fixed limit of 10 instead:
-one whose search runs on `web_search_provider: tavily` or on a Tavily
-organization key, and one that declares Fetch alone. There, an eleventh call aborts the tool
+A request that declares Fetch alone keeps a fixed limit of 10 instead, since the
+older backend serves it. There, an eleventh call aborts the tool
 loop rather than returning a `[tool error]`. Non-streaming requests return HTTP
 `422`; a response that is already streaming emits an error event and ends
 without a completed answer.
@@ -890,10 +885,11 @@ provider such as Tabstack answers a site's error page as the page's text. A page
 that cannot be fetched, or that the domain checks refuse, leaves the result its
 snippet.
 
-On the legacy settings, Otari reaches a licensed search API directly. Set
-`web_search_provider` to `tavily` or `brave` and `web_search_provider_api_key` to
-that provider's key; the key stays in the gateway process and never reaches a
-caller.
+On the legacy settings, which are deprecated, Otari reaches a licensed search
+API directly: `web_search_provider` set to `tavily` or `brave` and
+`web_search_provider_api_key` to that provider's key. A search tool on that
+provider replaces them; see the upgrade note
+[From 0.47](#from-047-brave-and-tavily-search-on-any-search).
 `web_search_url`, which is deprecated (see
 [The legacy SearXNG settings](https://docs.otari.ai/self-hosting/configuration#the-legacy-searxng-settings)),
 points at a SearXNG instance, such as the bundled one
@@ -916,8 +912,8 @@ JavaScript), and text-bearing PDFs. HTML and PDF parsing runs in a supervised
 single-worker process with fixed time, memory, queue, page, and intermediate
 output limits. Unsafe, unreachable, unsupported, empty, timed-out, or
 unextractable results fall back to the search provider's snippet. Page text
-the provider already returned, such as Tavily's on the legacy settings, is used
-and not fetched again.
+the provider already returned, such as Tavily's with `include_raw_content`, is
+used and not fetched again.
 
 Each complete `web_search` tool result is limited to 50 KiB of valid UTF-8,
 including any truncation notice. The 1,500-character per-result content limit
@@ -993,7 +989,7 @@ kind, fixed when it is added:
 
 - a `search` key serves model-initiated search and a
   [direct search](#direct-search) that names no tool. Its provider is one
-  `GET /api/v1/search-tools/providers` lists, or `tavily`. A
+  `GET /api/v1/search-tools/providers` lists. A
   `searxng` key names its own instance in `api_base`, since a key never takes
   the deployment's `web_search_url`;
 - a `fetch` key serves the fetch tool and the enrichment of search hits. Its
@@ -1015,9 +1011,7 @@ any environment proxy, as calls to a workspace's own model endpoint do. Moving
 a key that holds a secret to another `api_base` needs the secret in the same
 request (`api_key`, and any masked `options` entry), since the next call sends
 it there. An organization's model provider keys follow the same rule, with
-`client_args` in place of `options`. A
-`tavily` key takes neither, since the older backend that runs it calls Tavily's
-public endpoint.
+`client_args` in place of `options`.
 A key's calls never fall back to the deployment's own key or endpoint for its
 provider.
 
@@ -1052,9 +1046,7 @@ declaration goes to the model's provider.
 
 A key's calls are labeled `org:<provider>` and priced under `otari:web_search`
 or `otari:web_fetch`, at the cost the provider reported when it reports one (see
-[Pricing a gateway-run tool](#pricing-a-gateway-run-tool)). A `tavily` key's
-in-loop searches are labeled `otari:web_search` while the older backend runs
-them.
+[Pricing a gateway-run tool](#pricing-a-gateway-run-tool)).
 
 ### Try web search with the bundled SearXNG
 
@@ -1097,9 +1089,7 @@ the deployment's default tool. The request is still checked against the key's
 `allowed_tools`, rate-limited and timed out as that tool and logged under its
 name, or, with no default tool to pick, as `web_search` on the key's provider
 with a 30 second timeout. The search is priced under `otari:web_search`. A search that names a tool, in the path or in
-`search_tool_name`, runs on that tool with its own key. A
-Tavily key ignores the request's `country`, since Tavily takes a country by its
-full name.
+`search_tool_name`, runs on that tool with its own key.
 
 A deployment with no search tool falls back to the search backend the legacy
 settings describe (`web_search_provider` with its key, else `web_search_url`),
@@ -1242,6 +1232,17 @@ refuse such a value when a tool is saved.
   takes no result count and no recency filter: Otari keeps at most 10 results and,
   for a `time_range`, drops the hits dated before it. Its hits carry page text but
   no snippet.
+- **Tavily** (`tavily`) needs an API key, read from the tool's `api_key`, such as
+  `${TAVILY_API_KEY}`. It reports credits, not dollars, so a search is billed at
+  the tool's own rate (its `price_per_call`, or a `search` price set on the
+  dashboard's Web search page or through the API). Tavily's
+  [pricing](https://docs.tavily.com/documentation/api-credits), read 2026-11-16, is
+  $0.008 a credit pay-as-you-go, $0.005 to $0.0075 on a monthly plan.
+  `search_depth` is its cost tier: `basic` (its default), `fast` and `ultra-fast`
+  cost 1 credit a search, `advanced` 2, so configure one tool per depth you
+  offer, each at its own price. A search returns at most 20 results, with a
+  snippet; set `include_raw_content: true` in the tool's `options` for each
+  page's full text, which spares the in-loop tool reading the pages itself.
 - **SearXNG** (`searxng`) is self-hosted and reports no cost, so a search is billed
   at the tool's rate. The tool's `api_base` is the instance's root URL, and the
   instance must list `json` under `search.formats`, or every search fails with
@@ -1290,40 +1291,57 @@ The request, the response and the errors are in the
 
 Each note applies when upgrading from the release it names to a later one.
 
-### From 0.47: Brave searches on any-search
+### From 0.47: Brave and Tavily search on any-search
 
-Brave runs on any-search's Brave adapter wherever Otari searches with it:
-`web_search_provider: brave`, a Brave organization key, and a search tool on
-`brave`, which is new. For a deployment or an organization that already
-searches with Brave:
+Brave and Tavily run on any-search's adapters wherever Otari searches with them:
+`web_search_provider` and its key, an organization key, and a search tool on
+`brave` or `tavily`, which is new. For a deployment or an organization that
+already searches with either:
 
 - In the loop, a failed search is a `[tool error]` the model can recover from,
   rather than a `502` for the whole request, and the call limit is
   `web_search_max_calls`, with a `[tool error]` past it, rather than a fixed 10
   and a `422`.
-- Brave returns no page text, so the pages of its hits are read through the
-  fetch tool and billed as fetches, as for any search tool (see
+- `web_search_provider: tavily` keeps asking Tavily for each page's full text.
+  So do the organization Tavily keys that exist at the upgrade, which adds
+  `include_raw_content: true` to their options. A Tavily key or search tool
+  added later gets snippets only, Tavily's own default, unless its options set
+  `include_raw_content`.
+- Hits without page text, Brave's always and Tavily's without
+  `include_raw_content`, have their pages read through the fetch tool and
+  billed as fetches, as for any search tool (see
   [Pricing a gateway-run tool](#pricing-a-gateway-run-tool)). With
   `require_pricing` on, a search whose pages would be read through an unpriced
   fetch tool is refused with `402`, so price that tool, `builtin_fetch` unless
   `web_fetch_default_tool` or an organization fetch key names another; the
   startup log names it while it has no price. `web_search_extract: false` reads
-  no pages.
-- A Brave organization key's in-loop searches are labeled `org:brave`, where
-  they were labeled `otari:web_search`, and are still priced under
-  `otari:web_search`. A key may now carry its own `api_base` and Brave's
-  options, checked when it is written.
-- `provider_options` are checked against Brave's options, where the older
-  backend forwarded `time_range` and `country` and dropped the rest silently. A
-  workspace's option Brave does not take is left out with a warning; the same
-  option in a request's `otari_web_search` declaration is refused with `400`.
-  `time_range` takes `day`, `week`, `month` or `year`, and `country` is sent as
-  written, so Brave answers a full country name such as `Germany` with an error.
+  no pages. This holds for `web_search_provider: tavily` too: Tavily returns page
+  text for nearly every hit, but the check runs before the search, so the fetch
+  tool needs a price, which can be `0`.
+- An organization key's in-loop searches are labeled `org:brave` or
+  `org:tavily`, where they were labeled `otari:web_search`, and are still priced
+  under `otari:web_search`. A key may carry its own `api_base` and its
+  provider's options, checked when it is written.
+- `provider_options` are checked against the provider's options, where the
+  older backend forwarded a few (Brave's `time_range` and `country`; Tavily's
+  `search_depth`, `topic`, `time_range` and `include_answer`) and dropped the
+  rest silently. A workspace's option the provider does not take is left out
+  with a warning; the same option in a request's `otari_web_search` declaration
+  is refused with `400`. `time_range` takes `day`, `week`, `month` or `year`.
+  Brave's `country` is sent as written, so Brave answers a full country name
+  such as `Germany` with an error.
+- Tavily's `search_depth` is a cost tier (`advanced` costs twice `basic`), so
+  only a search tool's or an organization key's options set it: a request that
+  sets it is refused with `400`, and a workspace's is left out with a warning.
 - On [direct search](#direct-search), `include_raw` and `provider_options` are
-  taken on a call Brave serves, and the request's `country` no longer reaches
-  Brave; pass `provider_options: {"country": "DE"}` instead. A result's `date`
-  is Brave's `page_age` in ISO 8601 form with its zone, such as
-  `2026-11-12T22:37:39+00:00`, and `null` when Brave sent no `page_age`.
+  taken, and the request's `country` reaches neither provider; pass it in
+  `provider_options`, such as `{"country": "DE"}` for Brave. A result's `date`
+  is in ISO 8601 form with its zone, such as `2026-11-12T22:37:39+00:00`.
+- `web_search_provider` and `web_search_provider_api_key` are deprecated, and
+  the startup log says what replaces them: a search tool named after the
+  provider, with the key (and `include_raw_content: true` for Tavily) and a
+  price, named in `web_search_default_tool`. A coming breaking release refuses
+  to start while they are set.
 
 ### From 0.46: E2B creates each sandbox from the session image
 
