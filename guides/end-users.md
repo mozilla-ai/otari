@@ -52,7 +52,7 @@ spend of all its end users together, give the key its own spend ceiling (see
 
 Through the API, a service key is created with `is_service_key`,
 `end_user_budget_ids`, `end_user_budget_id` and `max_end_users`; see the
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/f8bd36fd3abb67206172f4d3444c0506b0ba7e45/docs/public/openapi.json).
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/f411860266b2709bc8bf5ee2e1e64de7a7ea33b0/docs/public/openapi.json).
 
 ## 3. Name the end user on each request
 
@@ -86,7 +86,9 @@ A request that names no one, or the key's own user, bills the key's user as on
 any other key.
 
 End users work on `/v1/chat/completions`, `/v1/responses`, `/v1/messages`,
-`/v1/search`, `/v1/fetch` and `/v1/code/execute`. On those endpoints, a request
+`/v1/search`, `/v1/fetch` and `/v1/code/execute`, and on `/v1/files`, where the
+file belongs to the end user ([Who can see an uploaded file](https://docs.otari.ai/reference/gateway/files#who-can-see-an-uploaded-file)).
+On the first six, a request
 that sends `Otari-End-User-Budget` without naming an end user, or sends it on a
 key that is not a service key, is refused with `400`
 (`end_user_budget_without_end_user`), since there is no end user for the budget
