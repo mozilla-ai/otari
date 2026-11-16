@@ -12,6 +12,7 @@ from datetime import datetime
 
 from gateway.metrics import REGISTRY, Counter
 from gateway.models.memory import MemoryEntry, MemoryKind, MemoryProposal, MemoryReviewReason, MemoryScope, MemoryTrust
+from gateway.ports.memory_ranking_port import RankCandidate
 from gateway.repositories.memory import MemoryRepositories, NewEntry, NewProposal, parse_review_reason
 from gateway.services.memory._keys import WorkspaceKeys
 from gateway.services.memory._recall_vectors import RecallVectors
@@ -31,15 +32,6 @@ UNOPENED_ROWS = Counter(
     ["table"],
     registry=REGISTRY,
 )
-
-
-@dataclass(frozen=True)
-class RankedVector:
-    """An entry recall may hand over, as it ranks it: its id, confidence and opened embedding, no text."""
-
-    id: uuid.UUID
-    confidence: float
-    embedding: Sequence[float]
 
 
 @dataclass(frozen=True)
@@ -223,7 +215,7 @@ class EntryStore:
         )
         return await self._open_entries(workspace_id, rows)
 
-    async def recallable_vectors(
+    async def recallable_refs(
         self,
         workspace_id: uuid.UUID,
         *,
@@ -231,13 +223,11 @@ class EntryStore:
         include_workspace: bool,
         include_external: bool,
         embedding_model: str,
-        held: RecallVectors | None,
-    ) -> list[RankedVector]:
-        """Each active entry ``member_id`` may recall that ``embedding_model`` embedded, with its embedding opened.
+    ) -> list[RankCandidate]:
+        """Each active entry ``member_id`` may recall that ``embedding_model`` embedded, by id and confidence.
 
-        The entries are listed from the database every time; only their embeddings come from ``held`` where it
-        holds them, and those opened here are kept in it. Texts are left sealed: :meth:`opened` opens the few
-        handed over. An embedding that does not open is left out.
+        Listed from the database every time, under its row-level security: what decides what a member may recall
+        is never what a ranker holds.
         """
         refs = await self._repos.entries.recallable_refs(
             workspace_id,
@@ -246,16 +236,26 @@ class EntryStore:
             include_external=include_external,
             embedding_model=embedding_model,
         )
+        return [RankCandidate(ref.id, ref.confidence) for ref in refs]
+
+    async def embeddings(
+        self, workspace_id: uuid.UUID, entry_ids: Sequence[uuid.UUID], held: RecallVectors | None
+    ) -> dict[uuid.UUID, Sequence[float]]:
+        """These entries' embeddings, opened, by id: from ``held`` where it holds them, the rest opened and kept in it.
+
+        Texts are left sealed: :meth:`opened` opens the few handed over. An id the workspace does not hold, or whose
+        embedding does not open, is left out.
+        """
         vectors: dict[uuid.UUID, Sequence[float]] = {}
         if held is not None:
-            vectors.update(held.take(workspace_id, (ref.id for ref in refs)))
-        missing = [ref.id for ref in refs if ref.id not in vectors]
+            vectors.update(held.take(workspace_id, entry_ids))
+        missing = [entry_id for entry_id in entry_ids if entry_id not in vectors]
         if missing:
             opened = await self._open_embeddings(workspace_id, missing)
             if held is not None:
                 held.keep(workspace_id, opened)
             vectors.update(opened)
-        return [RankedVector(ref.id, ref.confidence, vectors[ref.id]) for ref in refs if ref.id in vectors]
+        return vectors
 
     async def opened(self, workspace_id: uuid.UUID, entry_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, OpenedEntry]:
         """These entries of the workspace, opened, by id; any that does not open is left out."""

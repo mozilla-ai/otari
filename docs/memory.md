@@ -368,7 +368,9 @@ entry three members flag leaves recall until an admin looks at it.
   handed over from what is held. Erasing a workspace drops what the process that
   erased it holds; other processes hold its embeddings until they expire, and
   hand over none of them. Off, every entry is opened on every turn: plaintext
-  lives no longer than a request.
+  lives no longer than a request. With a
+  [memory service](#run-memory-as-its-own-service), the service holds them and
+  the gateway none.
 - **Checked by the organization's guardrails.** What the organization mandates
   on requests also checks every proposal before it is kept, so a prompt
   injection its mandates refuse on a request is not handed to other members
@@ -380,6 +382,42 @@ entry three members flag leaves recall until an admin looks at it.
   and counts, never what an agent wrote. A proposal a guardrail refused or flagged is
   logged by its id and the guardrail's profile.
 
+## Run memory as its own service
+
+By default each gateway process ranks what a member may recall and runs the
+consolidator. Ranking opens every candidate's embedding and compares it with the
+turn, which costs CPU and memory in proportion to the workspace's entries. To
+keep that out of the processes that serve requests, run it apart:
+
+```bash
+otari memory-service -c config.yml --port 8011    # the gateway's own config
+```
+
+and point each gateway at it:
+
+```yaml
+memory_service_url: "http://otari-memory:8011"
+```
+
+Both sides need the same `memory_service_token` (`OTARI_MEMORY_SERVICE_TOKEN`),
+at least 32 characters and different from the master key. The service reaches
+the same database and key source as the gateway, never migrates the database,
+and answers only a caller that presents the token: neither an API key nor the
+master key opens it. Keep its port on the deployment's private network.
+
+- **The gateway still decides what is recalled.** It lists, from the database
+  and under row-level security, which entries the member may recall, and sends
+  their ids, their confidence and the turn's embedding. The service opens those
+  embeddings, holds them, ranks, and answers with ids and scores. No entry's
+  text crosses; the gateway opens the few it hands over.
+- **The service runs the consolidator**, and a gateway with
+  `memory_service_url` does not.
+- **When the service is down or slower than two seconds**, automatic recall goes
+  on without memory, and `memory_search` answers that memory can't search right
+  now. Nothing else in the request waits on it.
+- **Erasing a workspace** tells the service to drop what it holds of it. If the
+  service cannot be reached, what it holds expires within ten minutes.
+
 ## Settings
 
 | Setting | Default | Purpose |
@@ -389,6 +427,8 @@ entry three members flag leaves recall until an admin looks at it.
 | `memory_consolidation_model` | unset | The model that decides what a proposal does to memory. |
 | `memory_rerank_model` | unset | The rerank model automatic recall checks relevance with, where a workspace turns the check on. |
 | `memory_recall_cache` | `true` | Hold the embeddings automatic recall opens, ten minutes each, in each process. See [Data protection](#data-protection). |
+| `memory_service_url` | unset | The [memory service](#run-memory-as-its-own-service) a gateway hands ranking and consolidation to. Unset, the gateway does both. |
+| `memory_service_token` | unset | The secret a gateway shows the memory service, set on both. |
 | `memory_max_entries_per_workspace` | `5000` | Active entries one workspace holds; past it, the least used is retired. |
 | `memory_entry_max_length` | `2000` | Longest proposal, in characters. |
 | `memory_retention_days` | `180` | Days an unused entry or version is kept. |

@@ -4,7 +4,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field
 
-from gateway.core.settings_view import OMITTED, SettingsGroup, Shown
+from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 
 
 class MemorySettings(BaseModel):
@@ -47,6 +47,29 @@ class MemorySettings(BaseModel):
             "turn opens only those it has not opened yet. Embeddings only, never text, and which entries a member "
             "may recall is read from the database every turn. Off opens every entry on every turn: plaintext lives "
             "no longer than a request, and erasing a workspace leaves nothing opened in any process."
+        ),
+    )
+    memory_service_url: Annotated[str | None, OMITTED] = Field(
+        default=None,
+        description=(
+            "The memory service this gateway hands recall's ranking and the consolidator to, such as "
+            "http://otari-memory:8011: the same otari, started with `otari memory-service`. The gateway still reads "
+            "which entries a member may recall from the database; the service opens their embeddings, holds them and "
+            "ranks. Unset, the gateway ranks and consolidates in its own process. Requires memory_service_token."
+        ),
+    )
+    memory_service_token: Annotated[str | None, SECRET] = Field(
+        default=None,
+        description=(
+            "The shared secret a gateway sends the memory service and the service requires, on both sides. Any long "
+            "random string; it must differ from the master key."
+        ),
+    )
+    memory_engine: Annotated[bool, OMITTED] = Field(
+        default=False,
+        description=(
+            "This process is the memory service: it ranks for the gateways that set memory_service_url and runs the "
+            "consolidator. `otari memory-service` sets it."
         ),
     )
     memory_max_entries_per_workspace: Annotated[int, OMITTED] = Field(

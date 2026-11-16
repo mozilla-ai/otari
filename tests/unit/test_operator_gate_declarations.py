@@ -33,6 +33,7 @@ from gateway.api.deps import (
     verify_catalog_reader,
     verify_catalog_reader_or_public,
     verify_master_key,
+    verify_memory_service_token,
     verify_service_key,
 )
 from gateway.api.routes import (
@@ -183,6 +184,7 @@ _ROUTER_LEVEL_GATES: frozenset[Callable[..., Any]] = frozenset(
         verify_catalog_reader,
         verify_catalog_reader_or_public,
         verify_master_key,
+        verify_memory_service_token,
         verify_service_key,
     }
 )

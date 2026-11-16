@@ -30,14 +30,21 @@ from gateway.api.deps import (
     memory_keys_for,
     verify_api_key,
     verify_master_key,
+    verify_memory_service_token,
 )
 from gateway.core.config import GatewayConfig
 from gateway.core.feature import CoreFeature
 from gateway.core.surface import Surface
+from gateway.log_config import logger
 from gateway.ports.content_key_port import ContentKeyPort
+from gateway.ports.memory_ranking_port import RankCandidate
 from gateway.schemas.memory import (
     ArmSummaryPublic,
     DifferencePublic,
+    EngineForgetRequest,
+    EngineForgotten,
+    EngineRankRequest,
+    EngineRankResponse,
     HeldProposalPublic,
     MemoryCallsPublic,
     MemoryExperimentPublic,
@@ -387,7 +394,38 @@ async def set_organization_memory(
     )
 
 
+# The memory service's own routes, mounted only on it (``memory_engine``), for the gateways that hand it their
+# ranking. Out of the API's schema: no client or agent calls them.
+engine_router = APIRouter(
+    prefix="/memory/engine", dependencies=[Depends(verify_memory_service_token)], include_in_schema=False
+)
+
+
+@engine_router.post("/rank")
+async def rank_for_gateway(body: EngineRankRequest, service: MemoryServiceDep) -> EngineRankResponse:
+    """Rank a gateway's candidates against a turn, over the embeddings this process opened and holds."""
+    ranked = await service.rank_here(
+        body.workspace_id,
+        [RankCandidate(entry_id, confidence) for entry_id, confidence in body.candidates],
+        body.queries,
+        order=body.order,
+        keep_top=body.keep_top,
+        keep_above=body.keep_above,
+    )
+    return EngineRankResponse(ranked=[(entry.id, entry.confidence, entry.similarity) for entry in ranked])
+
+
+@engine_router.post("/forget")
+async def forget_for_gateway(body: EngineForgetRequest, service: MemoryServiceDep) -> EngineForgotten:
+    """Drop what this process holds of a workspace whose memory a gateway erased."""
+    await service.forget_here(body.workspace_id)
+    return EngineForgotten(workspace_id=body.workspace_id)
+
+
 async def _consolidate(config: GatewayConfig) -> None:
+    if config.memory_service_url:
+        logger.info("Memory consolidation runs in the memory service, not in this gateway")
+        return
     # A worker is handed the config alone, so it binds its own ports the way the app does,
     # overlay included: memory is sealed and opened under the same key source either way.
     from gateway.container import build_container  # noqa: PLC0415 - the composition root, needed by this worker only
@@ -409,6 +447,10 @@ FEATURE = CoreFeature(
     # Published while the deployment offers memory, so the dashboard shows its switches only then.
     surface=Surface("memory"),
     enabled=lambda config: config.memory_enabled,
-    routers=lambda config: (router, workspace_router, organization_router),
+    routers=lambda config: (
+        (router, workspace_router, organization_router, engine_router)
+        if config.memory_engine
+        else (router, workspace_router, organization_router)
+    ),
     worker=_consolidate,
 )

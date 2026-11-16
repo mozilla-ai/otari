@@ -8,3 +8,4 @@ webui/.*.env
 otari-files/
 bench/results-*.json
 __pycache__/
+memory-service.log

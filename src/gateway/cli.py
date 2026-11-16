@@ -166,6 +166,58 @@ def serve(
         sys.exit(0)
 
 
+MEMORY_SERVICE_DEFAULT_PORT = 8011
+
+
+@cli.command(name="memory-service")
+@click.option(
+    "--config",
+    "-c",
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to config YAML file, the gateway's own",
+    default=None,
+)
+@click.option("--host", default=None, help="Host to bind the memory service to")
+@click.option("--port", default=None, type=int, help=f"Port to bind to (default {MEMORY_SERVICE_DEFAULT_PORT})")
+@click.option(
+    "--log-level",
+    default="INFO",
+    callback=_parse_log_level,
+    help="Logging level (case-insensitive): DEBUG, INFO, WARNING, ERROR, CRITICAL.",
+)
+def memory_service(config: str | None, host: str | None, port: int | None, log_level: int) -> None:
+    """Start the memory service: recall's ranking for the gateways that set memory_service_url, and the consolidator.
+
+    It reads the gateway's config, so it reaches the same database and key source. It never migrates the database;
+    the gateway does.
+    """
+    from gateway.main import create_app
+
+    gateway_config = _load_config_or_fail(config)
+    setup_logger(level=log_level)
+    if log_level > logging.DEBUG:
+        warnings.filterwarnings("ignore", category=SAWarning)
+    gateway_config.memory_engine = True
+    gateway_config.memory_service_url = None
+    gateway_config.auto_migrate = False
+    gateway_config.host = host or gateway_config.host
+    gateway_config.port = port or MEMORY_SERVICE_DEFAULT_PORT
+    logger.info("Starting Otari's memory service on %s:%s", gateway_config.host, gateway_config.port)
+    try:
+        app = create_app(gateway_config)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    try:
+        uvicorn.run(
+            app,
+            host=gateway_config.host,
+            port=gateway_config.port,
+            log_config=uvicorn_log_config(log_level, probe_paths=HEALTH_PROBE_PATHS),
+        )
+    except KeyboardInterrupt:
+        sys.exit(0)
+
+
 @cli.command()
 @click.option("--config", "-c", type=click.Path(exists=True), help="Path to config YAML file")
 @click.option("--database-url", envvar="DATABASE_URL", help="Database connection URL")

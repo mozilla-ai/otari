@@ -32,6 +32,8 @@ add_secret OTARI_SECRET_KEY \
   "(cd '$ROOT' && uv run --frozen python -c 'from gateway.services.secret_box import generate_secret_key; print(generate_secret_key())')"
 add_secret OTARI_MASTER_KEY 'echo "sk-local-$(openssl rand -hex 16)"'
 add_secret OTARI_PROVIDER_ACCOUNT_PEPPER 'openssl rand -base64 32'
+# What a gateway shows the memory service, with ./start.sh --split.
+add_secret OTARI_MEMORY_SERVICE_TOKEN 'openssl rand -hex 32'
 
 echo "== postgres"
 if ! docker container inspect otari-memory-pg >/dev/null 2>&1; then

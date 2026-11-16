@@ -6,6 +6,7 @@ from gateway.exceptions import TenancyError, TenancyForbiddenError, TenancyNotFo
 
 SEALING_UNAVAILABLE = "Memory can't store anything right now. Try again later."
 MODEL_UNAVAILABLE = "Memory can't search or store right now. Try again later."
+RANKING_UNAVAILABLE = "Memory can't search right now. Try again later."
 MEMORY_OFF = (
     "Memory is off for this workspace. Its organization's owners or admins, and then the workspace's, can turn it on."
 )
@@ -42,6 +43,15 @@ class MemoryModelUnavailableError(TenancyError):
 
     def __init__(self) -> None:
         super().__init__(MODEL_UNAVAILABLE)
+
+
+class MemoryRankingUnavailableError(TenancyError):
+    """The ranker, in this process or a memory service, did not answer, so nothing is searched or recalled."""
+
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
+    def __init__(self) -> None:
+        super().__init__(RANKING_UNAVAILABLE)
 
 
 class MemoryOffError(TenancyForbiddenError):

@@ -7,7 +7,7 @@ names a workspace or a member: those come from the caller's key.
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -274,3 +274,41 @@ class OrganizationMemoryUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool
+
+
+# -- The memory service's side of recall ranking, called by gateways only --
+
+ENGINE_MAX_CANDIDATES = 100_000
+ENGINE_MAX_QUERIES = 4
+ENGINE_MAX_DIMENSIONS = 8_192
+
+
+class EngineRankRequest(BaseModel):
+    """A gateway's candidates, as ``[id, confidence]``, and the turn's vectors."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_id: uuid.UUID
+    candidates: list[tuple[uuid.UUID, float]] = Field(max_length=ENGINE_MAX_CANDIDATES)
+    queries: list[Annotated[list[float], Field(min_length=1, max_length=ENGINE_MAX_DIMENSIONS)]] = Field(
+        min_length=1, max_length=ENGINE_MAX_QUERIES
+    )
+    order: Literal["similarity", "relevance"]
+    keep_top: int = Field(ge=0, le=ENGINE_MAX_CANDIDATES)
+    keep_above: float | None = None
+
+
+class EngineRankResponse(BaseModel):
+    """The kept candidates best first, as ``[id, confidence, similarity]``."""
+
+    ranked: list[tuple[uuid.UUID, float, float]]
+
+
+class EngineForgetRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_id: uuid.UUID
+
+
+class EngineForgotten(BaseModel):
+    workspace_id: uuid.UUID

@@ -20,6 +20,7 @@ from gateway.exceptions.memory_exceptions import (
     MemoryModelUnavailableError,
     MemoryOffError,
     MemoryProposalNotFoundError,
+    MemoryRankingUnavailableError,
     MemoryReadOnlyError,
     MemoryRefusedError,
     MemoryTooLongError,
@@ -37,6 +38,13 @@ from gateway.models.memory import (
     MemoryWritePolicy,
 )
 from gateway.models.tenancy import User
+from gateway.ports.memory_ranking_port import (
+    MemoryRankingError,
+    MemoryRankingPort,
+    RankCandidate,
+    RankedCandidate,
+    RankOrder,
+)
 from gateway.repositories.memory import MemoryRepositories
 from gateway.services.memory._experiment import (
     ArmSummary,
@@ -58,6 +66,7 @@ from gateway.services.memory._models import (
     MemoryModels,
     ModelUse,
 )
+from gateway.services.memory._ranking import LocalMemoryRanking
 from gateway.services.memory._recall_vectors import RecallVectors
 from gateway.services.memory._scoring import INITIAL_CONFIDENCE, QUARANTINE_FLAGS, confidence, cosine, relevance
 from gateway.services.memory._screening import screen
@@ -316,6 +325,7 @@ class MemoryService:
         *,
         ledger: UsageLedger | None = None,
         recall_vectors: RecallVectors | None = None,
+        ranking: MemoryRankingPort | None = None,
         guardrails: MemoryGuardrails | None = None,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
@@ -327,8 +337,11 @@ class MemoryService:
         self._config = config
         self._managers = managers
         self._ledger = ledger
-        # The embeddings automatic recall opened, shared by every request of the process; None opens them each turn.
-        self._recall_vectors = recall_vectors
+        # Ranking in this process, over the embeddings it opened and shares with every request of the process
+        # (``recall_vectors``; None opens them each turn). A memory service ranks with this one.
+        self._local_ranking = LocalMemoryRanking(uow, self._store, recall_vectors)
+        # Where recall and search rank: a memory service the deployment runs apart, or this process.
+        self._ranking: MemoryRankingPort = ranking or self._local_ranking
         # The guardrails the organization mandates, run over each proposal; None runs none.
         self._guardrails = guardrails
         self._keys = keys
@@ -347,25 +360,32 @@ class MemoryService:
             switches = await self._switches(caller.workspace_id)
         [vector] = await self._embed([query], caller.workspace_id, caller.api_key_id)
         model = self._models.embedding_model
+        if model is None:
+            return []
         async with self._uow:
-            entries = await self._store.recallable(
+            candidates = await self._store.recallable_refs(
                 caller.workspace_id,
                 member_id=caller.member_id,
                 include_workspace=switches.workspace_scope,
                 include_external=not switches.hide_external,
+                embedding_model=model,
             )
-            ranked = sorted(
-                (
-                    Recalled(entry, relevance(cosine(vector, entry.embedding), entry.confidence))
-                    for entry in entries
-                    if entry.embedding is not None and entry.embedding_model == model
-                ),
-                key=lambda recalled: recalled.relevance,
-                reverse=True,
-            )[: max(1, min(limit, SEARCH_LIMIT_MAX))]
-            ids = [recalled.entry.id for recalled in ranked]
-            await self._record_read(caller, "memory_search", ids)
-        return ranked
+        best = await self._rank(
+            caller.workspace_id,
+            candidates,
+            [vector],
+            order="relevance",
+            keep_top=max(1, min(limit, SEARCH_LIMIT_MAX)),
+        )
+        async with self._uow:
+            opened = await self._store.opened(caller.workspace_id, [ranked.id for ranked in best])
+            found = [
+                Recalled(opened[ranked.id], relevance(ranked.similarity, ranked.confidence))
+                for ranked in best
+                if ranked.id in opened
+            ]
+            await self._record_read(caller, "memory_search", [recalled.entry.id for recalled in found])
+        return found
 
     async def get(self, caller: MemoryCaller, entry_id: uuid.UUID) -> EntryWithHistory:
         """One entry the caller may recall, with the versions it replaced.
@@ -514,18 +534,16 @@ class MemoryService:
         if model is None:
             return []
         async with self._uow:
-            candidates = await self._store.recallable_vectors(
+            candidates = await self._store.recallable_refs(
                 caller.workspace_id,
                 member_id=caller.member_id,
                 include_workspace=switches.workspace_scope,
                 include_external=not switches.hide_external,
                 embedding_model=model,
-                held=self._recall_vectors,
             )
-        alike = sorted(
-            ((max(cosine(vector, candidate.embedding) for vector in vectors), candidate) for candidate in candidates),
-            key=lambda scored: scored[0],
-            reverse=True,
+        # The most alike, which the rerank model checks, and every other alike enough to be handed over without it.
+        alike = await self._rank(
+            caller.workspace_id, candidates, vectors, order="similarity", keep_top=RERANK_CANDIDATES, keep_above=floor
         )
         # Each kept entry's score, id and confidence; texts are opened only for what the reranker reads and what
         # is handed over.
@@ -533,7 +551,7 @@ class MemoryService:
         opened: dict[uuid.UUID, OpenedEntry] = {}
         if min_relevance is not None and self._models.can_rerank:
             asked = query if not context else f"{query}\n(Said earlier in the conversation: {context})"
-            checked = [candidate.id for _, candidate in alike[:RERANK_CANDIDATES]]
+            checked = [candidate.id for candidate in alike[:RERANK_CANDIDATES]]
             async with self._uow:
                 opened = await self._store.opened(caller.workspace_id, checked)
             relevant = await self._relevant(
@@ -542,11 +560,11 @@ class MemoryService:
             if relevant is not None:
                 kept = [(score, entry.id, entry.confidence) for score, entry in relevant if score >= min_relevance]
         if kept is None:
-            best = alike[0][0] if alike else floor
+            best = alike[0].similarity if alike else floor
             kept = [
-                (similarity, candidate.id, candidate.confidence)
-                for similarity, candidate in alike
-                if similarity >= max(floor, best - RECALL_MARGIN)
+                (candidate.similarity, candidate.id, candidate.confidence)
+                for candidate in alike
+                if candidate.similarity >= max(floor, best - RECALL_MARGIN)
             ]
         chosen = sorted(kept, key=lambda scored: relevance(scored[0], scored[2]), reverse=True)[:most]
         if not chosen:
@@ -563,6 +581,49 @@ class MemoryService:
             if ranked:
                 await self._record_read(caller, RECALL_TOOL, [recalled.entry.id for recalled in ranked])
         return ranked
+
+    async def _rank(
+        self,
+        workspace_id: uuid.UUID,
+        candidates: Sequence[RankCandidate],
+        queries: Sequence[Sequence[float]],
+        *,
+        order: RankOrder,
+        keep_top: int,
+        keep_above: float | None = None,
+    ) -> list[RankedCandidate]:
+        try:
+            return await self._ranking.rank(
+                workspace_id, candidates, queries, order=order, keep_top=keep_top, keep_above=keep_above
+            )
+        except MemoryRankingError as exc:
+            logger.warning("Memory could not rank what a member may recall: %s", exc)
+            raise MemoryRankingUnavailableError from exc
+
+    # -- What a memory service does for the gateways that hand ranking to it --
+
+    async def rank_here(
+        self,
+        workspace_id: uuid.UUID,
+        candidates: Sequence[RankCandidate],
+        queries: Sequence[Sequence[float]],
+        *,
+        order: RankOrder,
+        keep_top: int,
+        keep_above: float | None = None,
+    ) -> list[RankedCandidate]:
+        """Rank in this process, whatever ranker the service was given: the memory service's side of the port.
+
+        Only the workspace's own entries are opened, under its row-level security; an id it does not hold is left
+        out. Which of them a member may recall was decided by the gateway that sent them.
+        """
+        return await self._local_ranking.rank(
+            workspace_id, candidates, queries, order=order, keep_top=keep_top, keep_above=keep_above
+        )
+
+    async def forget_here(self, workspace_id: uuid.UUID) -> None:
+        """Drop what this process holds of the workspace's embeddings, as a gateway erased its memory."""
+        await self._local_ranking.forget(workspace_id)
 
     async def _relevant(
         self, caller: MemoryCaller, query: str, candidates: list[OpenedEntry]
@@ -712,8 +773,7 @@ class MemoryService:
             reads = await self._repos.reads.delete_all(workspace_id)
             keys = await self._repos.keys.delete_all(workspace_id)
         self._keys.forget(keys)
-        if self._recall_vectors is not None:
-            self._recall_vectors.forget(workspace_id)
+        await self._ranking.forget(workspace_id)
         logger.info("Memory of workspace %s was erased by a manager", workspace_id)
         return Swept(entries, proposals, reads, len(keys))
 

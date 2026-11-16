@@ -54,6 +54,7 @@ from gateway.ports.feedback_delivery_port import FeedbackDeliveryPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
+from gateway.ports.memory_ranking_port import MemoryRankingPort
 from gateway.ports.model_provider_port import HostedModels, ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
@@ -781,6 +782,18 @@ ServiceKey = Annotated[APIKey, Depends(verify_service_key)]
 
 # The API key a request authenticates with, for a route that answers for that key alone.
 CallingKey = Annotated[APIKey, Depends(verify_api_key)]
+
+
+def verify_memory_service_token(request: Request, config: Annotated[GatewayConfig, Depends(get_config)]) -> None:
+    """Admit only a gateway of this deployment to the memory service, by ``memory_service_token``.
+
+    Neither an API key nor the master key opens it: the service answers about any workspace, and only a gateway,
+    which has already decided what each member may recall, is trusted to ask.
+    """
+    expected = config.memory_service_token
+    token = extract_credential_token(request)
+    if not config.memory_engine or not expected or not secrets.compare_digest(token, expected):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not a gateway of this deployment.")
 
 
 async def verify_master_key(
@@ -2448,12 +2461,14 @@ def build_memory_service(
     db: AsyncSession | None = None,
     *,
     recall_vectors: RecallVectors | None = None,
+    ranking: MemoryRankingPort | None = None,
 ) -> MemoryService:
     """Build the memory service on a request's Unit of Work, or the consolidator's own.
 
     ``container`` serves the hosted providers memory's models may run on, read on the same Unit of Work.
     ``db`` is the request's session, for the management checks; the consolidator has no caller to check.
     ``recall_vectors`` is the process's opened embeddings, for automatic recall and erasing what it holds.
+    ``ranking`` is the memory service recall and search rank on; None ranks in this process.
     """
     managers = None
     if db is not None:
@@ -2469,6 +2484,7 @@ def build_memory_service(
         managers,
         ledger=_MemoryLedger(uow, UsageLogRepository(uow)),
         recall_vectors=recall_vectors,
+        ranking=ranking,
         guardrails=_MemoryGuardrails(config),
     )
 
@@ -2484,15 +2500,27 @@ def get_memory_keys(request: Request) -> WorkspaceKeys:
 
 
 def get_recall_vectors(request: Request) -> RecallVectors | None:
-    """This app's opened recall embeddings, held for every request; None where the deployment holds none."""
+    """This app's opened recall embeddings, held for every request; None where the deployment holds none.
+
+    A gateway that hands ranking to a memory service holds none: the service does.
+    """
     config: GatewayConfig = request.app.state.config
-    if not config.memory_recall_cache:
+    if not config.memory_recall_cache or config.memory_service_url:
         return None
     held: RecallVectors | None = getattr(request.app.state, "memory_recall_vectors", None)
     if held is None:
         held = RecallVectors()
         request.app.state.memory_recall_vectors = held
     return held
+
+
+def get_memory_ranking(request: Request) -> MemoryRankingPort | None:
+    """The memory service this app hands recall's ranking to; None where it ranks in its own process."""
+    config: GatewayConfig = request.app.state.config
+    if not config.memory_service_url:
+        return None
+    ranking: MemoryRankingPort = get_container(request).resolve(MemoryRankingPort, None)
+    return ranking
 
 
 def get_memory_service(
@@ -2502,9 +2530,10 @@ def get_memory_service(
     keys: Annotated[WorkspaceKeys, Depends(get_memory_keys)],
     container: ContainerDep,
     recall_vectors: Annotated[RecallVectors | None, Depends(get_recall_vectors)],
+    ranking: Annotated[MemoryRankingPort | None, Depends(get_memory_ranking)],
 ) -> MemoryService:
     """The request's memory service. The consolidator builds its own through ``build_memory_service``."""
-    return build_memory_service(uow, config, keys, container, db, recall_vectors=recall_vectors)
+    return build_memory_service(uow, config, keys, container, db, recall_vectors=recall_vectors, ranking=ranking)
 
 
 NOT_A_MEMBER = "Memory is for workspace members, and this key names none of its workspace."
@@ -2593,11 +2622,13 @@ class MemoryToolAdmission:
         keys: WorkspaceKeys,
         container: Container,
         recall_vectors: RecallVectors | None = None,
+        ranking: MemoryRankingPort | None = None,
     ) -> None:
         self._config = config
         self._keys = keys
         self._container = container
         self._recall_vectors = recall_vectors
+        self._ranking = ranking
 
     async def admit(
         self,
@@ -2642,7 +2673,14 @@ class MemoryToolAdmission:
     async def _run(self, caller: MemoryCaller, name: str, arguments: dict[str, Any]) -> ToolOutcome | None:
         # A Unit of Work per call: the request's own session is released before the provider is called.
         async with create_unit_of_work() as uow:
-            service = build_memory_service(uow, self._config, self._keys, self._container)
+            service = build_memory_service(
+                uow,
+                self._config,
+                self._keys,
+                self._container,
+                recall_vectors=self._recall_vectors,
+                ranking=self._ranking,
+            )
             return await call_memory_tool(service, caller, name, arguments)
 
     async def _recall(self, caller: MemoryCaller, query: str, context: str | None) -> tuple[str | None, int]:
@@ -2650,7 +2688,12 @@ class MemoryToolAdmission:
         try:
             async with asyncio.timeout(MEMORY_RECALL_BUDGET_S), create_unit_of_work() as uow:
                 service = build_memory_service(
-                    uow, self._config, self._keys, self._container, recall_vectors=self._recall_vectors
+                    uow,
+                    self._config,
+                    self._keys,
+                    self._container,
+                    recall_vectors=self._recall_vectors,
+                    ranking=self._ranking,
                 )
                 return await recall_for_turn(service, caller, query, context)
         except TimeoutError:
@@ -2667,7 +2710,13 @@ def get_memory_tool_admission(request: Request) -> MemoryToolAdmission | None:
     config: GatewayConfig = request.app.state.config
     if not config.memory_enabled:
         return None
-    return MemoryToolAdmission(config, get_memory_keys(request), get_container(request), get_recall_vectors(request))
+    return MemoryToolAdmission(
+        config,
+        get_memory_keys(request),
+        get_container(request),
+        get_recall_vectors(request),
+        get_memory_ranking(request),
+    )
 
 
 MemoryServiceDep = Annotated[MemoryService, Depends(get_memory_service)]

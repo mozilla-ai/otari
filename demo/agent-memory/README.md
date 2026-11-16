@@ -41,6 +41,11 @@ commit or paste them.
 
 From then on, `./start.sh` is enough; `./stop.sh` stops the containers and keeps their data.
 
+`./start.sh --split` also starts the memory service (`otari memory-service`, http://127.0.0.1:8011, its log in
+`memory-service.log`) and points the gateway at it: recall ranks, and the consolidator runs, there and not in the
+gateway. Every demo works the same either way. See
+[Run memory as its own service](../../docs/memory.md#run-memory-as-its-own-service).
+
 ## Pick a demo
 
 - **Two chat windows**, as anyone would use it: Alice teaches her assistant, Bob's assistant knows.

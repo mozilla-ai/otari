@@ -915,6 +915,28 @@ def _validate_rate_limit_store(config: GatewayConfig) -> None:
         raise ValueError(msg)
 
 
+def _validate_memory_service(config: GatewayConfig) -> None:
+    """Refuse a memory service, or a gateway handing work to one, that could not tell its callers from anyone else."""
+    if not (config.memory_engine or config.memory_service_url):
+        return
+    if not config.memory_enabled:
+        msg = "memory_service_url and the memory service need memory_enabled"
+        raise ValueError(msg)
+    if config.memory_engine and config.memory_service_url:
+        msg = "The memory service ranks in its own process; unset memory_service_url on it"
+        raise ValueError(msg)
+    if not config.memory_service_token:
+        msg = "memory_service_url and the memory service need memory_service_token"
+        raise ValueError(msg)
+    if len(config.memory_service_token) < MEMORY_SERVICE_TOKEN_MIN_LENGTH:
+        msg = f"memory_service_token must be at least {MEMORY_SERVICE_TOKEN_MIN_LENGTH} characters"
+        raise ValueError(msg)
+    _refuse_shared_secret("memory_service_token", config.memory_service_token, config)
+
+
+MEMORY_SERVICE_TOKEN_MIN_LENGTH = 32
+
+
 def _refuse_shared_secret(name: str, value: str, config: GatewayConfig) -> None:
     """Refuse a secret equal to the master key or an ``OTARI_SECRET_KEY`` key, naming it by ``name``."""
     if value == config.master_key:
@@ -1439,6 +1461,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
     _validate_metrics_support(config)
     _validate_client_country_database(config)
     _validate_rate_limit_store(config)
+    _validate_memory_service(config)
     config.validate_declared_access()
     refuse_unusable_declared_secrets(config.api_keys, config.master_key)
     # A set-but-invalid OTARI_SECRET_KEY must not silently pass startup and then

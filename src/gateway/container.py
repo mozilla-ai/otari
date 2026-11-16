@@ -40,6 +40,7 @@ from gateway.adapters.feedback_delivery_adapter import ReceiverFeedbackDeliveryA
 from gateway.adapters.file_storage_adapter import build_file_storage_port
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
+from gateway.adapters.memory_ranking_adapter import HttpMemoryRanking
 from gateway.adapters.model_provider_adapter import HostedProviderModelProviderAdapter
 from gateway.adapters.provider_file_adapter import AnyLlmProviderFiles
 from gateway.adapters.rate_limit_store_adapter import build_rate_limit_store
@@ -59,6 +60,7 @@ from gateway.ports.feedback_delivery_port import FeedbackDeliveryPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
+from gateway.ports.memory_ranking_port import MemoryRankingPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
@@ -448,6 +450,23 @@ def _content_key_port_factory(config: GatewayConfig | None) -> PortFactory[Conte
     return factory
 
 
+def _memory_ranking_port_factory(url: str, token: str) -> PortFactory[MemoryRankingPort]:
+    """The ``MemoryRankingPort`` factory for a memory service at ``url``.
+
+    Built on first resolve and reused, so a process holds one connection pool to the service.
+    """
+    ranking: MemoryRankingPort | None = None
+
+    def factory(session: AsyncSession | None) -> MemoryRankingPort:
+        del session
+        nonlocal ranking
+        if ranking is None:
+            ranking = HttpMemoryRanking(url, token)
+        return ranking
+
+    return factory
+
+
 def _rate_limit_store_port_factory(config: GatewayConfig | None) -> PortFactory[RateLimitStorePort]:
     """The core ``RateLimitStorePort`` factory, closed over this app's config.
 
@@ -568,6 +587,12 @@ def build_container(
     # Feedback: the base forwards each message to the otari.ai intake. The
     # build that runs the intake delivers in its own process instead.
     container.bind(FeedbackDeliveryPort, _feedback_delivery_adapter)
+    # Memory's recall ranking: bound only where the deployment runs a memory
+    # service apart. Unbound, the memory service ranks in this process.
+    if config is not None and config.memory_service_url and config.memory_service_token:
+        container.bind(
+            MemoryRankingPort, _memory_ranking_port_factory(config.memory_service_url, config.memory_service_token)
+        )
     if config is not None:
         # Asked once, at build, rather than per request: selecting a hosted
         # provider is itself what publishes code execution on ``/v1/tools``, in
