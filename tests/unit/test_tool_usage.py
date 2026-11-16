@@ -5,7 +5,7 @@ from decimal import Decimal
 import pytest
 
 from gateway.models.money import MAX_USD_COST
-from gateway.services.pricing._tool_pricing import tool_rate_lookup
+from gateway.services.pricing import tool_rate_lookup
 from gateway.services.tool_usage import MAX_TOOL_NAME_CHARS, MAX_TOOL_NAMES, OVERFLOW_TOOL_NAME, ToolUsageTally
 from gateway.types.tool_charges import LabelCalls, gateway_tool_pricing_key
 
