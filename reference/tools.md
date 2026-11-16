@@ -282,9 +282,10 @@ deployment-paid.
 
 Every fetch is labeled by the instance that served it, `builtin:builtin_fetch`
 when `web_fetch_default_tool` names none, and so is every in-loop search on a
-search instance. A search on the legacy settings or on a Tavily or Brave
-organization key is labeled `otari:web_search`: `web_search_url` searches on
-any-search's SearXNG adapter, and the older backend runs the rest. Searches a
+search instance. A search on the legacy settings or on a Tavily organization key
+is labeled `otari:web_search`: `web_search_url` searches on any-search's SearXNG
+adapter, `web_search_provider: brave` on its Brave adapter, and the older
+backend runs Tavily. Searches a
 model's provider runs itself carry the provider's label, as the next section
 says.
 
@@ -300,8 +301,8 @@ instance that read them, `builtin_fetch` included:
 - A page that cannot be read is neither billed nor counted.
 - Pages read on an [organization fetch key](#organization-search-keys) are
   labeled `org:<provider>` and priced under `otari:web_fetch`.
-- A search the older backend runs (`web_search_provider` with its key, or a
-  Tavily or Brave organization key) reads its pages on the built-in fetcher
+- A search the older backend runs (`web_search_provider: tavily` with its key,
+  or a Tavily organization key) reads its pages on the built-in fetcher
   and records no fetch, until that backend is removed.
 - With `require_pricing` on, a search whose pages would be read through a
   fetch instance with no price is refused with `402` before it runs, the detail
@@ -580,6 +581,12 @@ provider serves the code execution (see
 0) serves the request and reports no container. An id is a requirement, so the
 same deployment refuses it.
 
+A container keeps what earlier runs staged into it, so re-entering one reads
+those files. An API key therefore needs `files:read` as well as `code:execute`
+to send an id back, and is refused with a 403 naming the scope. A key without
+it is served normally and reports no container, because one it could never
+re-enter is worth nothing to it.
+
 The provider's own timer does the reclaiming: the gateway tells it the idle
 timeout when the request ends, and a periodic sweep only drops the rows that
 named a sandbox nobody can resume any more.
@@ -764,8 +771,8 @@ which the model can recover from, and a Chat Completions client sees the call in
 `otari_tool_calls` as `failed` with the tag `call_limit`.
 
 A request the older search backend serves keeps a fixed limit of 10 instead:
-one whose search runs on the legacy settings or on a Tavily or Brave organization
-key, and one that declares Fetch alone. There, an eleventh call aborts the tool
+one whose search runs on `web_search_provider: tavily` or on a Tavily
+organization key, and one that declares Fetch alone. There, an eleventh call aborts the tool
 loop rather than returning a `[tool error]`. Non-streaming requests return HTTP
 `422`; a response that is already streaming emits an error event and ends
 without a completed answer.
@@ -986,7 +993,7 @@ kind, fixed when it is added:
 
 - a `search` key serves model-initiated search and a
   [direct search](#direct-search) that names no tool. Its provider is one
-  `GET /api/v1/search-tools/providers` lists, or `tavily` or `brave`. A
+  `GET /api/v1/search-tools/providers` lists, or `tavily`. A
   `searxng` key names its own instance in `api_base`, since a key never takes
   the deployment's `web_search_url`;
 - a `fetch` key serves the fetch tool and the enrichment of search hits. Its
@@ -1009,8 +1016,8 @@ a key that holds a secret to another `api_base` needs the secret in the same
 request (`api_key`, and any masked `options` entry), since the next call sends
 it there. An organization's model provider keys follow the same rule, with
 `client_args` in place of `options`. A
-`tavily` or `brave` key takes neither, since the older backend that runs them
-calls their public endpoints.
+`tavily` key takes neither, since the older backend that runs it calls Tavily's
+public endpoint.
 A key's calls never fall back to the deployment's own key or endpoint for its
 provider.
 
@@ -1045,8 +1052,8 @@ declaration goes to the model's provider.
 
 A key's calls are labeled `org:<provider>` and priced under `otari:web_search`
 or `otari:web_fetch`, at the cost the provider reported when it reports one (see
-[Pricing a gateway-run tool](#pricing-a-gateway-run-tool)). A `tavily` or `brave`
-key's in-loop searches are labeled `otari:web_search` while the older backend runs
+[Pricing a gateway-run tool](#pricing-a-gateway-run-tool)). A `tavily` key's
+in-loop searches are labeled `otari:web_search` while the older backend runs
 them.
 
 ### Try web search with the bundled SearXNG
@@ -1091,8 +1098,8 @@ the deployment's default tool. The request is still checked against the key's
 name, or, with no default tool to pick, as `web_search` on the key's provider
 with a 30 second timeout. The search is priced under `otari:web_search`. A search that names a tool, in the path or in
 `search_tool_name`, runs on that tool with its own key. A
-Brave key localizes results to the request's `country`; Tavily takes a country by
-its full name, so a Tavily key does not.
+Tavily key ignores the request's `country`, since Tavily takes a country by its
+full name.
 
 A deployment with no search tool falls back to the search backend the legacy
 settings describe (`web_search_provider` with its key, else `web_search_url`),
@@ -1140,6 +1147,16 @@ tool does not take it as its default, its connection test is refused, and a
 fetch tool is left out, as if nothing named it. The dashboard and the API
 refuse such a value when a tool is saved.
 
+- **Brave** (`brave`) needs an API key, read from the tool's `api_key`, such as
+  `${BRAVE_API_KEY}`. Brave takes the query in the request URL, which Otari keeps
+  out of its logs. It reports no cost, so a search is billed at the tool's own
+  rate (its `price_per_call`, or a `search` price set on the dashboard's Web
+  search page or through the API). Brave's
+  [pricing](https://brave.com/search/api/), read 2026-11-14, is $5 per 1,000
+  successful requests, with $5 of free credit a month. A search returns at most
+  20 results, and its hits carry a snippet but no page text. In the tool's
+  `options`, `result_filter: web` keeps the answer to web results, and
+  `text_decorations: false` keeps HTML out of the snippets.
 - **DeepSeek** (`deepseek`) needs an API key, read from the tool's `api_key`, such
   as `${DEEPSEEK_API_KEY}`, the key DeepSeek's models take too. It reports no
   cost, so a search is billed at the tool's own rate (its `price_per_call`, or a
@@ -1272,6 +1289,41 @@ The request, the response and the errors are in the
 ## Upgrading
 
 Each note applies when upgrading from the release it names to a later one.
+
+### From 0.47: Brave searches on any-search
+
+Brave runs on any-search's Brave adapter wherever Otari searches with it:
+`web_search_provider: brave`, a Brave organization key, and a search tool on
+`brave`, which is new. For a deployment or an organization that already
+searches with Brave:
+
+- In the loop, a failed search is a `[tool error]` the model can recover from,
+  rather than a `502` for the whole request, and the call limit is
+  `web_search_max_calls`, with a `[tool error]` past it, rather than a fixed 10
+  and a `422`.
+- Brave returns no page text, so the pages of its hits are read through the
+  fetch tool and billed as fetches, as for any search tool (see
+  [Pricing a gateway-run tool](#pricing-a-gateway-run-tool)). With
+  `require_pricing` on, a search whose pages would be read through an unpriced
+  fetch tool is refused with `402`, so price that tool, `builtin_fetch` unless
+  `web_fetch_default_tool` or an organization fetch key names another; the
+  startup log names it while it has no price. `web_search_extract: false` reads
+  no pages.
+- A Brave organization key's in-loop searches are labeled `org:brave`, where
+  they were labeled `otari:web_search`, and are still priced under
+  `otari:web_search`. A key may now carry its own `api_base` and Brave's
+  options, checked when it is written.
+- `provider_options` are checked against Brave's options, where the older
+  backend forwarded `time_range` and `country` and dropped the rest silently. A
+  workspace's option Brave does not take is left out with a warning; the same
+  option in a request's `otari_web_search` declaration is refused with `400`.
+  `time_range` takes `day`, `week`, `month` or `year`, and `country` is sent as
+  written, so Brave answers a full country name such as `Germany` with an error.
+- On [direct search](#direct-search), `include_raw` and `provider_options` are
+  taken on a call Brave serves, and the request's `country` no longer reaches
+  Brave; pass `provider_options: {"country": "DE"}` instead. A result's `date`
+  is Brave's `page_age` in ISO 8601 form with its zone, such as
+  `2026-11-12T22:37:39+00:00`, and `null` when Brave sent no `page_age`.
 
 ### From 0.46: E2B creates each sandbox from the session image
 
