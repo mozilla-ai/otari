@@ -84,13 +84,6 @@ SURFACE = Surface("usage")
 # the capped list, and the longest-running are the ones kept.
 _MAX_IN_FLIGHT_ROWS = 50
 
-# Sessions (``source_label``) are an order of magnitude higher-cardinality than
-# models or users: one agent workload can open hundreds of them in a month, and
-# the interesting signal is a long-ish head ("which tasks burned the budget"),
-# not just the top few. Give that dimension a deeper cap so the head is not
-# swallowed by the "other" fold.
-_SESSION_BREAKDOWN_TOP_N = 250
-
 # How many request groups one call may ask for. The dashboard batches the groups
 # visible on a page of the activity log into a single lookup, so the bound tracks
 # the largest page size (1000) rather than a plan's candidate count; it exists to
