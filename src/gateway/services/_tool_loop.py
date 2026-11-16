@@ -243,24 +243,44 @@ def _released_tool_choice(choice: Any) -> Any:
 FINAL_ROUND_NOTE = "No more tool calls are available for this request. Answer now from the results you already have."
 
 
-# What one inline attachment (an image or a file sent as base64) counts toward a
-# round's size: about the tokens an image costs, not its encoded length.
-_INLINE_DATA_CHARS = 6_000
+# What one inline image or audio clip counts toward a round's size: about the
+# tokens an image costs, not its encoded length.
+_INLINE_MEDIA_CHARS = 6_000
+
+
+def _is_inline_media(part: dict[str, Any]) -> bool:
+    """Whether a content part is an image or audio clip sent inline as base64.
+
+    A file such as a PDF is not: it bills by its pages, which its encoded length
+    overstates but an image's allowance can understate many times over.
+    """
+    kind = part.get("type")
+    if kind == "input_audio":
+        return True
+    if kind == "image":
+        source = part.get("source")
+        return isinstance(source, dict) and source.get("type") == "base64"
+    if kind in {"image_url", "input_image"}:
+        # Chat Completions nests the URL in an object; Responses gives it as a string.
+        url = part.get("image_url")
+        if isinstance(url, dict):
+            url = url.get("url")
+        return isinstance(url, str) and url.startswith("data:image/")
+    return False
 
 
 def _request_chars(value: Any) -> int:
-    """The size of a round's request, with each inline attachment at :data:`_INLINE_DATA_CHARS`.
+    """The size of a round's request, with each inline image or audio part at :data:`_INLINE_MEDIA_CHARS`.
 
-    Every round resends the whole transcript, so an attachment counted at its
-    encoded length would grow the hold by hundreds of thousands of tokens on
-    each round for an image the provider bills a few thousand for. An attachment
-    is a ``data:`` URL (Chat Completions, Responses) or a Messages ``base64`` source.
+    Every round resends the whole transcript, so an image counted at its encoded
+    length would grow the hold by hundreds of thousands of tokens on each round
+    for an image the provider bills a few thousand for.
     """
     if isinstance(value, str):
-        return _INLINE_DATA_CHARS if value.startswith("data:") and ";base64," in value[:200] else len(value)
+        return len(value)
     if isinstance(value, dict):
-        if value.get("type") == "base64" and isinstance(value.get("data"), str):
-            return _INLINE_DATA_CHARS
+        if _is_inline_media(value):
+            return _INLINE_MEDIA_CHARS
         return sum(len(str(key)) + _request_chars(item) for key, item in value.items())
     if isinstance(value, (list, tuple)):
         return sum(_request_chars(item) for item in value)

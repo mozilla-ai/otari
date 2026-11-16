@@ -32,7 +32,7 @@ from openai.types.chat.chat_completion_message_custom_tool_call import ChatCompl
 from gateway.core.usage import cache_write_1h_tokens_of, provider_web_searches_of, reasoning_tokens_of
 from gateway.log_config import logger
 from gateway.services import mcp_loop as mcp_loop_module
-from gateway.services._tool_loop import _released_tool_choice
+from gateway.services._tool_loop import _released_tool_choice, _request_chars
 from gateway.services.inference import EmptyCompletionError
 from gateway.services.mcp_loop import (
     MaxToolIterationsExceeded,
@@ -1439,6 +1439,36 @@ async def test_a_round_counts_an_inline_image_by_what_it_costs_not_its_encoded_l
 
     [asked] = gate.asked
     assert asked < 10_000 < len(image)
+
+
+_BASE64 = "iVBORw0K" * 131_072
+
+
+@pytest.mark.parametrize(
+    "part",
+    [
+        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{_BASE64}"}},
+        {"type": "input_image", "image_url": f"data:image/png;base64,{_BASE64}"},
+        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": _BASE64}},
+        {"type": "input_audio", "input_audio": {"data": _BASE64, "format": "wav"}},
+    ],
+)
+def test_an_inline_image_or_audio_part_counts_at_a_fixed_allowance(part: dict[str, Any]) -> None:
+    assert _request_chars([part]) < 10_000 < len(_BASE64)
+
+
+@pytest.mark.parametrize(
+    "part",
+    [
+        {"type": "text", "text": f"data:text/plain;base64,{_BASE64}"},
+        {"type": "file", "file": {"file_data": f"data:application/pdf;base64,{_BASE64}"}},
+        {"type": "input_file", "file_data": f"data:application/pdf;base64,{_BASE64}"},
+        {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": _BASE64}},
+    ],
+)
+def test_text_and_inline_files_count_at_their_length(part: dict[str, Any]) -> None:
+    """Text bills at its length and a PDF by its pages, which an image's allowance can understate many times over."""
+    assert _request_chars([part]) > len(_BASE64)
 
 
 @pytest.mark.asyncio
