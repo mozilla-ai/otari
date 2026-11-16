@@ -3473,7 +3473,7 @@ class ToolContext:
         its call allowance. A request that declared only the fetch tool gets the
         fetch backend alone, on the instance its admission resolved.
         """
-        if self.web.in_loop_search is None and self.use_web_search:
+        if self.web.on_old_backend:
             return [self.build_web_retrieval_backend()]
         search_tool_entry = self.web_search_tool_entry or {}
         return build_web_search_backends(
