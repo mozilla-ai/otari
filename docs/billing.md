@@ -20,6 +20,11 @@ balance minus what running requests hold.
 When nothing is available, new requests paid from the balance are refused until funds arrive. Requests on your own provider keys are not affected.
 Requests already running finish, so the balance can end slightly below zero.
 
+A refused request answers `402` with the code `insufficient_funds` and a link to
+the Billing page, in the message, in a `billing_url` field and in the
+`Otari-Billing-Url` header. Owners and admins also see a banner across the
+dashboard, and a refused Playground message offers **Add funds** in place.
+
 The organization created for you at signup starts with a one-time $2 credit,
 so its first request can run before you add funds.
 
