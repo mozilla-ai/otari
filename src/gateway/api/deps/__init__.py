@@ -13,6 +13,33 @@ from fastapi import Depends, HTTPException, Query, Request, status
 from sqlalchemy import Select, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.api.deps._base import (
+    ContainerDep as ContainerDep,
+)
+from gateway.api.deps._base import (
+    PortSessionDep as PortSessionDep,
+)
+from gateway.api.deps._base import (
+    UnitOfWorkDep as UnitOfWorkDep,
+)
+from gateway.api.deps._base import (
+    get_config as get_config,
+)
+from gateway.api.deps._base import (
+    get_container as get_container,
+)
+from gateway.api.deps._base import (
+    get_enabled_features as get_enabled_features,
+)
+from gateway.api.deps._base import (
+    get_unit_of_work as get_unit_of_work,
+)
+from gateway.api.deps._base import (
+    reset_config as reset_config,
+)
+from gateway.api.deps._base import (
+    set_config as set_config,
+)
 from gateway.api.key_scopes import UndeclaredKeyScope, declared_key_scope
 from gateway.auth.models import hash_key
 from gateway.container import Container
@@ -26,7 +53,6 @@ from gateway.core.config import (
     GatewayConfig,
 )
 from gateway.core.database import DATABASE_ERRORS, create_session, describe_database_error, get_db, release_session
-from gateway.core.feature import CoreFeature
 from gateway.core.settings.tools import ToolKind
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work, create_unit_of_work_with_session
 from gateway.exceptions.api_keys_exceptions import KeyScopeMissingError
@@ -202,7 +228,6 @@ from gateway.services.routing import (
     AgentRecommenderService,
     AutomaticRouter,
     RoutingService,
-    clear_router_backend_cache,
 )
 from gateway.services.secret_box import configured_secret_keys
 from gateway.services.tenancy import (
@@ -266,10 +291,6 @@ from gateway.types.traces import (
     WorkspaceContent,
 )
 
-# Legacy module-level fallback. Config now lives on ``app.state.config`` (set in
-# ``create_app``); ``get_config`` reads from the request's app state and only
-# falls back to this shim for callers that set it directly (see ``set_config``).
-_config: GatewayConfig | None = None
 _LAST_USED_UPDATE_INTERVAL_SECONDS = 300
 
 # How a key that is not a service key is refused where only a service key may go.
@@ -314,53 +335,6 @@ def _as_utc(value: datetime | None) -> datetime | None:
     if value is None or value.tzinfo is not None:
         return value
     return value.replace(tzinfo=UTC)
-
-
-def set_config(config: GatewayConfig) -> None:
-    """Set the legacy module-level config fallback.
-
-    Compatibility shim. Config is stored on ``app.state.config`` by
-    ``create_app``; this only updates the module-level fallback that
-    ``get_config`` consults when no request-scoped app state is available.
-    """
-    global _config  # noqa: PLW0603
-    _config = config
-
-
-async def get_config(request: Request) -> GatewayConfig:
-    """Return the config for the current app from ``request.app.state``.
-
-    Every shared resource (rate limiter, log writer, file store) lives on
-    ``app.state``; config does too, so two apps in one process no longer share
-    a single instance. Falls back to the legacy module-level shim only when the
-    app state has no config attached.
-    """
-    config: GatewayConfig | None = getattr(request.app.state, "config", None)
-    if config is None:
-        config = _config
-    if config is None:
-        msg = "Config not initialized"
-        raise RuntimeError(msg)
-    return config
-
-
-def reset_config() -> None:
-    """Reset the legacy module-level config fallback. Intended for testing only."""
-    global _config  # noqa: PLW0603
-    _config = None
-    # Router backends are cached per config signature and hold a per-process
-    # decision cache, so a test that swaps config must not inherit the previous
-    # one's trace stickiness.
-    clear_router_backend_cache()
-
-
-def get_enabled_features(request: Request) -> tuple[CoreFeature, ...]:
-    """Return the core features this app enabled when it was built."""
-    enabled: tuple[CoreFeature, ...] | None = getattr(request.app.state, "enabled_features", None)
-    if enabled is None:
-        msg = "Enabled features not initialized"
-        raise RuntimeError(msg)
-    return enabled
 
 
 def extract_credential_token(request: Request) -> str:
@@ -1166,18 +1140,6 @@ def build_sandbox_container_registry(
     )
 
 
-def get_unit_of_work(db: Annotated[AsyncSession, Depends(get_db)]) -> UnitOfWork:
-    """Return the request's Unit of Work over its session.
-
-    Gotcha: the rest of the request writes to this same session.
-    A block's commit also stores what that code staged outside a block, and its rollback discards it.
-    """
-    return UnitOfWork(db)
-
-
-UnitOfWorkDep = Annotated[UnitOfWork, Depends(get_unit_of_work)]
-
-
 def build_model_metadata_override_service(uow: UnitOfWork) -> ModelMetadataOverrideService:
     """Build the model details service on ``uow``, for the request dependency and the services that compose it."""
     return ModelMetadataOverrideService(uow, overrides=ModelMetadataOverrideRepository(uow))
@@ -1392,22 +1354,6 @@ async def require_deployment_operator_or_absent(
 # Every port is resolved here and nowhere else: a dependency names the port and
 # asks the container for whichever adapter this build bound to it, so no route
 # or service ever names a concrete adapter (ARCHITECTURE.md, rule 5).
-
-
-def get_container(request: Request) -> Container:
-    """Return the composition-root container this app was built with."""
-    container: Container | None = getattr(request.app.state, "container", None)
-    if container is None:
-        msg = "Composition root not initialized"
-        raise RuntimeError(msg)
-    return container
-
-
-ContainerDep = Annotated[Container, Depends(get_container)]
-# The request's own session: FastAPI caches a dependency per callable, so a port
-# resolved on this shares the session of the route that resolved it, and its
-# writes land in the commit that settles the request.
-PortSessionDep = Annotated[AsyncSession, Depends(get_db)]
 
 
 def get_agent_model_recommender_port(container: ContainerDep) -> AgentModelRecommenderPort:

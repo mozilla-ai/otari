@@ -690,7 +690,7 @@ def check_transaction_control(src_root: Path) -> list[str]:
 
 UNIT_OF_WORK_TYPE = "UnitOfWork"
 UNIT_OF_WORK_MODULE = "gateway.core.unit_of_work"
-UNIT_OF_WORK_FACTORY = "gateway/api/deps/__init__.py"
+UNIT_OF_WORK_FACTORY = "gateway/api/deps/_base.py"
 UNIT_OF_WORK_FACTORY_FUNCTION = "get_unit_of_work"
 UNIT_OF_WORK_WORKER_FACTORIES = "create_unit_of_work or create_log_unit_of_work"
 
