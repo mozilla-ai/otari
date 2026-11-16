@@ -2323,7 +2323,7 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     "gateway.models.tenancy.User": {
         "repository": "gateway/repositories/tenancy/user_repository.py",
         "baseline": (
-            "gateway/api/deps/__init__.py",
+            "gateway/api/deps/identity.py",
             "gateway/repositories/tenancy/organization_member_repository.py",
             "gateway/repositories/tenancy/workspace_repository.py",
             "gateway/services/dashboard_session_service.py",

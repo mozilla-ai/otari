@@ -47,6 +47,11 @@ from gateway.api.deps.auth import (
     verify_master_key,
     verify_service_key,
 )
+from gateway.api.deps.identity import (
+    CurrentIdentity,
+    get_current_identity,
+    require_deployment_operator_or_absent,
+)
 from gateway.api.deps.traces import (
     TRACE_CONTENT_HEADER_INVALID_DETAIL,
     DatabaseSessionOwners,
@@ -70,7 +75,6 @@ from gateway.core.config import (
 from gateway.core.database import get_db, release_session
 from gateway.core.settings.tools import ToolKind
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work, create_unit_of_work_with_session
-from gateway.exceptions.identity_exceptions import DeploymentAdministrationUnavailableError
 from gateway.exceptions.tools_exceptions import DirectToolCallError, FundsCheckFailedError
 from gateway.exceptions.traces_exceptions import (
     TraceBreakGlassForbiddenError,
@@ -248,7 +252,6 @@ from gateway.services.tenancy.organization_guardrail_definition_service import (
     OrganizationGuardrailDefinitionService,
 )
 from gateway.services.tenancy.organization_guardrail_service import OrganizationGuardrailService
-from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.workspace_activation_service import WorkspaceActivationService
 from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServers, WorkspaceMcpServerService
 from gateway.services.tenancy.workspace_service import WorkspaceService
@@ -288,6 +291,9 @@ from gateway.types.traces import (
 
 # The names this root re-exports from the submodules it is being split into.
 __all__ = [
+    "CurrentIdentity",
+    "get_current_identity",
+    "require_deployment_operator_or_absent",
     "MembershipListenerDep",
     "get_membership_listener",
     "DatabaseSessionOwners",
@@ -564,63 +570,6 @@ def get_playground_tool_offer(config: Annotated[GatewayConfig, Depends(get_confi
 
 
 PlaygroundToolOfferDep = Annotated[PlaygroundToolOffer, Depends(get_playground_tool_offer)]
-
-
-async def get_current_identity(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
-    _master_key: Annotated[str | None, Depends(verify_master_key)],
-    uow: UnitOfWorkDep,
-    membership_listener: MembershipListenerDep,
-) -> TenancyUser:
-    """Resolve the tenancy identity acting on this request.
-
-    A dashboard session names the identity it was minted for, so a
-    cookie-authenticated request resolves that identity and, through its
-    ``active_organization_id``, the organization it is acting in. No second
-    lookup: ``verify_master_key`` already resolved it through the same cached
-    dependency to decide the cookie authenticates at all.
-
-    A header master key names nobody, so it falls back to the deployment's
-    bootstrap operator, provisioned on first use (otari-ai#1716 option A, see
-    `gateway.services.tenancy.provisioning_service`). That is also the identity
-    master-key sign-in binds a session to, so both credentials resolve to the
-    same operator; the difference matters once the per-user sign-in flows mint
-    sessions for other identities.
-
-    Depending on ``verify_master_key`` keeps the credential check exactly where
-    the rest of the management API has it, and keeps a request with no credential
-    at all from provisioning anything.
-    """
-    if session_identity is not None:
-        return session_identity
-    return await ensure_bootstrap_identity(
-        db,
-        uow=uow,
-        membership_listener=membership_listener,
-    )
-
-
-CurrentIdentity = Annotated[TenancyUser, Depends(get_current_identity)]
-
-
-async def require_deployment_operator_or_absent(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    identity: Annotated[TenancyUser, Depends(get_current_identity)],
-) -> None:
-    """Refuse a non-operator with the 404 ``/api/v1/admin`` answers, so the surface does not confirm it exists.
-
-    The same predicate as :func:`require_deployment_operator`, with the other
-    status: a deployment-wide surface that holds the deployment's own
-    credentials is one worth not confirming to a signed-in member, who gets
-    the answer an unentitled deployment gets. A header master key is the
-    deployment credential itself, resolved to the bootstrap operator, so it
-    passes. Declared on a router rather than per route, for the reason the 403
-    gate gives.
-    """
-    if not await DeploymentAdministrationAccess(db).has_administration_access(identity):
-        record_auth_failure("not_deployment_operator")
-        raise DeploymentAdministrationUnavailableError
 
 
 # =============================================================================
