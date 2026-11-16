@@ -465,8 +465,10 @@ def test_managed_web_tool_dispatches_through_the_gateways_web_backend(
 
     with (
         patch("gateway.api.routes.responses.responses_tool_loop", new=fake_loop),
-        patch("gateway.api.routes._pipeline.build_web_search_backends", return_value=[opened(search_backend)]),
-        patch("gateway.api.routes._pipeline.build_web_fetch_backend", return_value=opened(fetch_backend)),
+        patch(
+            "gateway.api.routes._pipeline.build_web_search_backends",
+            new=lambda _config, search, **_kwargs: [opened(search_backend if search is not None else fetch_backend)],
+        ),
     ):
         resp = client.post(
             f"{API_ROOT}/responses",

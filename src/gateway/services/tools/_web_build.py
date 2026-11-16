@@ -1,6 +1,6 @@
 """One request's web tool backends on the libraries.
 
-The search backend, and the fetch backend when the request declared the fetch
+The search backend and the fetch backend, each when the request declared its
 tool, share the request's call allowance and open as two members of the
 request's pool, so each rendering reads the backend that ran its call. What
 each backend runs on was resolved when the request was admitted, so nothing
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
 def build_web_search_backends(
     config: GatewayConfig,
-    search: InLoopSearch,
+    search: InLoopSearch | None,
     *,
     search_tool_entry: Mapping[str, Any],
     fetch: ResolvedFetch | None,
@@ -42,30 +42,32 @@ def build_web_search_backends(
     tally: ToolUsageTally | None,
     trace: RequestTrace | None,
 ) -> list[WebSearchBackend | WebFetchBackend]:
-    """The search backend on ``search``, and the fetch backend on ``fetch`` when the fetch tool was declared.
+    """The search backend on ``search`` and the fetch backend on ``fetch``, each where its tool was declared.
 
     ``search_tool_entry`` is the search declaration once the workspace's policy
     narrowed it: its count and domain rules.
     """
     trust_env_proxy = config.web_retrieval_trust_env_proxy
-    backends: list[WebSearchBackend | WebFetchBackend] = [
-        WebSearchBackend(
-            search,
-            cap=cap,
-            max_results=_max_results(config, search_tool_entry, search.search.max_results),
-            policy=DomainPolicy(
-                allowed=canonicalize_domain_rules(_domains(search_tool_entry, "allowed_domains")),
-                blocked=canonicalize_domain_rules(_domains(search_tool_entry, "blocked_domains")),
-            ),
-            enrich=enrichment_enabled(config),
-            allow_private=config.web_search_allow_private_hosts,
-            trust_env_proxy=trust_env_proxy,
-            purpose_hint=purpose_hint,
-            web_provider_client=web_provider_client,
-            tally=tally,
-            trace=trace,
+    backends: list[WebSearchBackend | WebFetchBackend] = []
+    if search is not None:
+        backends.append(
+            WebSearchBackend(
+                search,
+                cap=cap,
+                max_results=_max_results(config, search_tool_entry, search.search.max_results),
+                policy=DomainPolicy(
+                    allowed=canonicalize_domain_rules(_domains(search_tool_entry, "allowed_domains")),
+                    blocked=canonicalize_domain_rules(_domains(search_tool_entry, "blocked_domains")),
+                ),
+                enrich=enrichment_enabled(config),
+                allow_private=config.web_search_allow_private_hosts,
+                trust_env_proxy=trust_env_proxy,
+                purpose_hint=purpose_hint,
+                web_provider_client=web_provider_client,
+                tally=tally,
+                trace=trace,
+            )
         )
-    ]
     if fetch is not None:
         backends.append(
             build_web_fetch_backend(

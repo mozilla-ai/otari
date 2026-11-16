@@ -409,7 +409,6 @@ from gateway.services.tools import (
     admit_mcp_servers,
     admit_web_access,
     admitted_tools,
-    build_web_fetch_backend,
     build_web_search_backends,
     decide_candidate_tools,
     declare_code_execution,
@@ -3474,20 +3473,8 @@ class ToolContext:
         its call allowance. A request that declared only the fetch tool gets the
         fetch backend alone, on the instance its admission resolved.
         """
-        if self.web.in_loop_search is None:
-            if self.use_web_search or self.web.fetch is None:
-                return [self.build_web_retrieval_backend()]
-            return [
-                build_web_fetch_backend(
-                    self.web.fetch,
-                    policy=self.web_fetch_policy,
-                    trust_env_proxy=self.config.web_retrieval_trust_env_proxy,
-                    web_provider_client=self.web_provider_client,
-                    tally=self.tally,
-                    trace=self.trace,
-                    cap=self.web_call_cap,
-                )
-            ]
+        if self.web.in_loop_search is None and self.use_web_search:
+            return [self.build_web_retrieval_backend()]
         search_tool_entry = self.web_search_tool_entry or {}
         return build_web_search_backends(
             self.config,

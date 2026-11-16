@@ -252,7 +252,7 @@ def _fake_sandbox(seen: _Seen) -> Any:
 
 
 def _fake_web_backend(seen: _Seen) -> Any:
-    def _build(*_args: Any, **_kwargs: Any) -> _FakeWebBackend:
+    def _build(**_kwargs: Any) -> _FakeWebBackend:
         backend = _FakeWebBackend()
         seen.web_backends.append(backend)
         return backend
@@ -261,7 +261,7 @@ def _fake_web_backend(seen: _Seen) -> Any:
 
 
 def _fake_web_search_backends(seen: _Seen) -> Any:
-    """What a search on an instance opens, as one fake backend that serves the search and the fetch."""
+    """What a request's web tools open, as one fake backend that serves the search and the fetch."""
     build = _fake_web_backend(seen)
 
     def _build(*_args: Any, **kwargs: Any) -> list[_FakeWebBackend]:
@@ -336,7 +336,6 @@ def _post_messages(
     )
     with ExitStack() as stack:
         stack.enter_context(patch("gateway.api.routes.messages.amessages", new=fake_amessages))
-        stack.enter_context(patch("gateway.api.routes._pipeline.build_web_fetch_backend", new=_fake_web_backend(seen)))
         if not real_search_backends:
             stack.enter_context(
                 patch("gateway.api.routes._pipeline.build_web_search_backends", new=_fake_web_search_backends(seen))
@@ -903,7 +902,6 @@ def _post_responses(
     with (
         patch("gateway.api.routes.responses.aresponses", new=fake_aresponses),
         patch("gateway.api.routes.responses.responses_tool_loop", new=fake_loop),
-        patch("gateway.api.routes._pipeline.build_web_fetch_backend", new=_fake_web_backend(seen)),
         patch("gateway.api.routes._pipeline.build_web_search_backends", new=_fake_web_search_backends(seen)),
     ):
         response = client.post(f"{API_ROOT}/responses", json=body, headers=headers)
