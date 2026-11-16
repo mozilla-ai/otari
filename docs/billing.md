@@ -20,8 +20,8 @@ balance minus what running requests hold.
 When nothing is available, new requests paid from the balance are refused until funds arrive. Requests on your own provider keys are not affected.
 Requests already running finish, so the balance can end slightly below zero.
 
-A new organization gets $2 once its creator answers every question in the
-welcome questionnaire.
+The organization created for you at signup starts with a one-time $2 credit,
+so its first request can run before you add funds.
 
 ## Three ways to add funds
 
