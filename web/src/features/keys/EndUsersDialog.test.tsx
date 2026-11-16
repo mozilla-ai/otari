@@ -181,6 +181,28 @@ describe("EndUsersDialog", () => {
     expect(screen.queryByText("Full")).not.toBeInTheDocument()
   })
 
+  it("says the cap could not be read, and reads it again on Retry", async () => {
+    const fetchSpy = mockApi([endUser()])
+    const answer = fetchSpy.getMockImplementation()!
+    let failing = true
+    fetchSpy.mockImplementation(async (input, init) => {
+      if (failing && String(input).includes("/end-user-count")) {
+        return jsonResponse({ detail: "Database error" }, 500)
+      }
+      return answer(input, init)
+    })
+    const user = userEvent.setup()
+    renderDialog()
+
+    expect(
+      await screen.findByText("Could not read the cap"),
+    ).toBeInTheDocument()
+    failing = false
+    await user.click(screen.getByRole("button", { name: "Retry" }))
+
+    expect(await screen.findByText("1 of 10,000 end users")).toBeInTheDocument()
+  })
+
   it("says when the key has no end users", async () => {
     mockApi([])
     renderDialog()
