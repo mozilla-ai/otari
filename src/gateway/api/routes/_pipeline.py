@@ -2049,7 +2049,8 @@ class ReservationRoundGate:
     admission prices the first: about four characters per token. It grows it by
     what the round before wrote as well, at the output rate, so the hold stays
     the output written so far plus one output limit for the round being sent. A
-    round before that reported no usage is held at a whole output limit. A round
+    round before that reported no usage is held at the output allowance admission
+    holds (the request's limit, or the deployment default when it sets none). A round
     that does not fit is sent as the loop's last, without the gateway's tools
     (``RoundGate``). A round that costs nothing, on a free or an unpriced model,
     holds its tokens alone.
@@ -2079,7 +2080,7 @@ class ReservationRoundGate:
         try:
             prices = ctx.prices if ctx.prices is not None else get_request_prices(ctx.db, ctx.organization_id)
             resolved = await prices.resolve(ctx.db, instance, model, deployment_paid=deployment_paid)
-            # No usage reported is held as admission holds a round: at the request's output limit.
+            # No usage reported is held as admission holds a round: at its limit, or the default.
             written = output_tokens if output_tokens is not None else inputs.max_output_tokens
             cost = estimate_cost(
                 resolved.pricing if resolved is not None else None,
