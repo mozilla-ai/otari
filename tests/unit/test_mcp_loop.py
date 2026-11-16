@@ -1403,6 +1403,45 @@ async def test_a_round_the_budget_cannot_hold_ends_the_loop_even_if_the_model_ca
 
 
 @pytest.mark.asyncio
+async def test_a_round_counts_an_inline_image_by_what_it_costs_not_its_encoded_length(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every round resends the image, so its megabyte of base64 would otherwise be held again on each one."""
+    sent: list[dict[str, Any]] = []
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        sent.append(kwargs)
+        if len(sent) == 1:
+            return _completion(finish="tool_calls", tool_calls=[("c1", "fetch_url", "{}")])
+        return _completion(finish="stop", content="done")
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    image = "data:image/png;base64," + "iVBORw0K" * 131_072
+    gate = _RoundGate()
+
+    await mcp_tool_loop(
+        completion_kwargs={
+            "model": "fake",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "what is this"},
+                        {"type": "image_url", "image_url": {"url": image}},
+                    ],
+                }
+            ],
+        },
+        pool=_FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"}),
+        max_iterations=5,
+        round_gate=gate,
+    )
+
+    [asked] = gate.asked
+    assert asked < 10_000 < len(image)
+
+
+@pytest.mark.asyncio
 async def test_the_last_round_max_tool_iterations_allows_is_held_too(monkeypatch: pytest.MonkeyPatch) -> None:
     """The loop's own last round resends the transcript and is billed like any other, so it is held too."""
     sent: list[dict[str, Any]] = []

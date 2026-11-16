@@ -243,9 +243,35 @@ def _released_tool_choice(choice: Any) -> Any:
 FINAL_ROUND_NOTE = "No more tool calls are available for this request. Answer now from the results you already have."
 
 
+# What one inline attachment (an image or a file sent as base64) counts toward a
+# round's size: about the tokens an image costs, not its encoded length.
+_INLINE_DATA_CHARS = 6_000
+
+
+def _request_chars(value: Any) -> int:
+    """The size of a round's request, with each inline attachment at :data:`_INLINE_DATA_CHARS`.
+
+    Every round resends the whole transcript, so an attachment counted at its
+    encoded length would grow the hold by hundreds of thousands of tokens on
+    each round for an image the provider bills a few thousand for. An attachment
+    is a ``data:`` URL (Chat Completions, Responses) or a Messages ``base64`` source.
+    """
+    if isinstance(value, str):
+        return _INLINE_DATA_CHARS if value.startswith("data:") and ";base64," in value[:200] else len(value)
+    if isinstance(value, dict):
+        if value.get("type") == "base64" and isinstance(value.get("data"), str):
+            return _INLINE_DATA_CHARS
+        return sum(len(str(key)) + _request_chars(item) for key, item in value.items())
+    if isinstance(value, (list, tuple)):
+        return sum(_request_chars(item) for item in value)
+    if hasattr(value, "model_dump"):
+        return _request_chars(value.model_dump(exclude_none=True))
+    return len(str(value))
+
+
 async def _round_fits(gate: RoundGate | None, iteration: int, kwargs: dict[str, Any]) -> bool:
     """Whether round ``iteration``, sent as ``kwargs``, fits the request's budgets; the first rides on its own hold."""
-    return gate is None or iteration == 1 or await gate.admit(len(str(kwargs)))
+    return gate is None or iteration == 1 or await gate.admit(_request_chars(kwargs))
 
 
 def _round_request(
