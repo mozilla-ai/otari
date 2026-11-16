@@ -1,11 +1,12 @@
-import { play, type SoundName, unlock } from "cuelume"
-
 /**
  * The picker's sounds, played through cuelume, which synthesizes each one with
  * Web Audio. One material for the whole picker, its water theme, every cue at
  * its quietest arrangement: the picker is the one playful moment in the
  * dashboard, and it should still sound like part of it.
  */
+
+import { play, type SoundName, unlock } from "cuelume"
+
 export type PickerMoment =
   | "open"
   | "pass"

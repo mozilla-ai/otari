@@ -228,8 +228,8 @@ export function AvatarField({
     onChangeRef.current(id, "drag")
     if (drag.current?.pointerType === "touch") haptic()
     if (isLanding) return
-    const step = previous ? cell.c - previous.c || cell.r - previous.r : 1
-    playPickerSound("pass", step >= 0 ? "forward" : "back")
+    const moved = previous ? cell.c - previous.c || cell.r - previous.r : 1
+    playPickerSound("pass", moved >= 0 ? "forward" : "back")
   }
 
   const settle = () => {
