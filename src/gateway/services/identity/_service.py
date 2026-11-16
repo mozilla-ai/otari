@@ -9,6 +9,7 @@ from typing import Protocol, cast
 import idna
 
 from gateway.core.email_domains import blocklist_entry, blocklist_keys
+from gateway.core.tokens import generate_shared_token, generate_token, hash_token
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
     BlockedEmailEntryNotFoundError,
@@ -48,9 +49,6 @@ from gateway.services.mail import Mailer
 from gateway.services.oauth_service import provider_label
 from gateway.services.tenancy import (
     OrganizationService,
-    generate_shared_token,
-    generate_token,
-    hash_token,
     render_password_reset_email,
     sso_blocks_membership,
     unverified_identity_is_claimable,

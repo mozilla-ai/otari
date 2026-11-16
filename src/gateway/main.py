@@ -646,7 +646,6 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
         "invitation email",
         lambda config, _container: InvitationDelivery.poll(lambda uow: build_invitation_delivery(uow, config)),
     ),
-    # A trace is kept for its retention and no longer.
 )
 
 
