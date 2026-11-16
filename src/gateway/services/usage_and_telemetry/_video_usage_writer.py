@@ -1,4 +1,4 @@
-"""The usage row a settled video job writes, staged on the settlement's own session."""
+"""Recording what a settled video job used, in the transaction that claims it."""
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
@@ -10,13 +10,10 @@ from gateway.services.pricing_service import pricing_provenance
 
 
 class VideoUsageWriter:
-    """Writes the row that settles a completed video job in the claim's own transaction.
+    """Records what a settled video job used, in the same transaction that claims the job.
 
-    The log writer would write it on a connection of its own, which a SQLite
-    file refuses while the claim holds the write lock, and a batching writer
-    may drop after accepting. The row is staged on the settlement's session
-    instead, and reported to the usage signal port once that commit has landed,
-    as the signaling writer reports a row it accepted.
+    NOTE: callers own that transaction and must not record the usage through the shared usage log,
+    which may drop what it has already accepted.
     """
 
     def __init__(self, uow: UnitOfWork, signal: UsageSignalPort) -> None:
@@ -48,6 +45,7 @@ class VideoUsageWriter:
         await self._rows.add(row)
 
     async def recorded(self, usage: CompletedVideoUsage) -> None:
+        """Announces the usage once the caller has committed it."""
         facts = self._facts.pop(usage.video_id, None)
         if facts is None:
             return
