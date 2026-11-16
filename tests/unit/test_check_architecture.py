@@ -2055,3 +2055,85 @@ def test_a_relative_import_in_the_root_is_resolved(tmp_path: Path, monkeypatch: 
     _write(tmp_path, "gateway/services/things/_thing.py", _FREE_FUNCTION)
     _write(tmp_path, "gateway/services/things/__init__.py", "from ._thing import names_a_thing\n")
     assert len(check.check_service_root_exports(tmp_path)) == 1
+
+
+# ---------------------------------------------------------------------------
+# Rule 25: import cycles
+# ---------------------------------------------------------------------------
+
+
+def test_two_sibling_modules_importing_each_other_is_flagged(tmp_path: Path) -> None:
+    _write(tmp_path, "gateway/api/deps/__init__.py", "")
+    _write(tmp_path, "gateway/api/deps/one.py", "from gateway.api.deps.two import thing\n")
+    _write(tmp_path, "gateway/api/deps/two.py", "from gateway.api.deps.one import other\n")
+
+    violations = check.check_import_cycles(tmp_path)
+
+    assert len(violations) == 1
+    assert "gateway.api.deps.one, gateway.api.deps.two" in violations[0]
+
+
+def test_a_package_and_its_own_member_may_import_each_other(tmp_path: Path) -> None:
+    """The package body binds what the member needs before the member runs, so one of them finishes."""
+    _write(tmp_path, "gateway/services/widgets/__init__.py", "from gateway.services.widgets._store import Store\n")
+    _write(tmp_path, "gateway/services/widgets/_store.py", "from gateway.services.widgets import Thing\n")
+
+    assert check.check_import_cycles(tmp_path) == []
+
+
+def test_a_cycle_through_three_siblings_is_flagged(tmp_path: Path) -> None:
+    _write(tmp_path, "gateway/services/widgets/__init__.py", "")
+    _write(tmp_path, "gateway/services/widgets/a.py", "from gateway.services.widgets.b import b\n")
+    _write(tmp_path, "gateway/services/widgets/b.py", "from gateway.services.widgets.c import c\n")
+    _write(tmp_path, "gateway/services/widgets/c.py", "from gateway.services.widgets.a import a\n")
+
+    violations = check.check_import_cycles(tmp_path)
+
+    assert len(violations) == 1
+    assert "widgets.a, gateway.services.widgets.b, gateway.services.widgets.c" in violations[0]
+
+
+def test_an_import_that_does_not_run_at_import_time_is_not_a_cycle(tmp_path: Path) -> None:
+    """A deferred import is how a cycle is broken, so reading one as an edge would refuse the fix."""
+    _write(tmp_path, "gateway/api/deps/__init__.py", "")
+    _write(tmp_path, "gateway/api/deps/one.py", "from gateway.api.deps.two import thing\n")
+    _write(
+        tmp_path,
+        "gateway/api/deps/two.py",
+        "from typing import TYPE_CHECKING\n\nif TYPE_CHECKING:\n    from gateway.api.deps.one import other\n",
+    )
+
+    assert check.check_import_cycles(tmp_path) == []
+
+
+def test_a_module_importing_itself_is_not_reported(tmp_path: Path) -> None:
+    _write(tmp_path, "gateway/api/deps/__init__.py", "")
+    _write(tmp_path, "gateway/api/deps/one.py", "from gateway.api.deps.one import thing\n")
+
+    assert check.check_import_cycles(tmp_path) == []
+
+
+def test_a_cycle_through_a_package_initializer_is_flagged(tmp_path: Path) -> None:
+    """Importing a.b runs a's body first, so a package a module reaches through is on the cycle."""
+    _write(tmp_path, "gateway/__init__.py", "")
+    _write(tmp_path, "gateway/a.py", "from gateway.pkg.child import C\n\nA = 1\n")
+    _write(tmp_path, "gateway/pkg/__init__.py", "from gateway.a import A\n")
+    _write(tmp_path, "gateway/pkg/child.py", "C = 2\n")
+
+    violations = check.check_import_cycles(tmp_path)
+
+    assert len(violations) == 1
+    assert "gateway.a, gateway.pkg" in violations[0]
+
+
+def test_a_cycle_group_holding_a_module_from_outside_the_package_is_flagged(tmp_path: Path) -> None:
+    """The package and its member may close a cycle, so the module from outside must not hide behind them."""
+    _write(tmp_path, "gateway/__init__.py", "")
+    _write(tmp_path, "gateway/p/__init__.py", "from gateway.p.m import M\n\nP = 1\n")
+    _write(tmp_path, "gateway/p/m.py", "from gateway.p import P\nfrom gateway.q import Q\n\nM = 2\n")
+    _write(tmp_path, "gateway/q.py", "from gateway.p.m import M\n\nQ = 3\n")
+
+    violations = check.check_import_cycles(tmp_path)
+
+    assert len(violations) == 1
+    assert "gateway.q" in violations[0]
