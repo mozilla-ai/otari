@@ -97,11 +97,6 @@ class ApplicableBudget:
     request_limit: int | None = None
 
     @property
-    def caps_counts(self) -> bool:
-        """Whether this ceiling caps tokens or requests as well as dollars."""
-        return self.token_limit is not None or self.request_limit is not None
-
-    @property
     def subject(self) -> str:
         """The scope's name in a refusal message."""
         return _SCOPE_SUBJECT.get(self.scope_type, "Budget")

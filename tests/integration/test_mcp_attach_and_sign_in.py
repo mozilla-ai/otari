@@ -53,7 +53,7 @@ from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.tools import OTARI_TOOL_CALLS_FIELD, _mcp_oauth
 from gateway.services.tools._mcp_oauth import AUTH_METHOD_NONE, McpOAuthClient, McpOAuthMetadata, McpOAuthTokens
 
-from .conftest import MODEL_NAME
+from .conftest import ALL_KEY_SCOPES, MODEL_NAME
 
 PUBLIC_URL = "https://93.184.216.34/mcp"
 ISSUER = "https://93.184.216.36"
@@ -144,8 +144,10 @@ def _bearer(key: dict[str, Any]) -> dict[str, str]:
     return {API_KEY_HEADER: f"Bearer {key['key']}"}
 
 
-def _key(client: TestClient, master: dict[str, str], user_id: str | None = "alice") -> dict[str, Any]:
-    body: dict[str, Any] = {"key_name": f"k-{uuid.uuid4().hex[:6]}"}
+def _key(
+    client: TestClient, master: dict[str, str], user_id: str | None = "alice", scopes: list[str] | None = None
+) -> dict[str, Any]:
+    body: dict[str, Any] = {"key_name": f"k-{uuid.uuid4().hex[:6]}", "scopes": scopes or ALL_KEY_SCOPES}
     if user_id is not None:
         client.post(f"{API_ROOT}/users", json={"user_id": user_id}, headers=master)
         body["user_id"] = user_id
@@ -299,6 +301,19 @@ def test_an_attached_server_joins_a_request_that_named_nothing_beside_the_client
     assert response.json()["choices"][0]["message"]["content"] == "done"
     [entry] = response.json()[OTARI_TOOL_CALLS_FIELD]
     assert (entry["server"], entry["name"], entry["status"]) == ("jira", "list_issues", "completed")
+
+
+def test_a_key_that_may_not_call_mcp_tools_gets_no_attached_server(
+    client: TestClient, master_key_header: dict[str, str], test_db: Session, mcp: _Mcp
+) -> None:
+    key = _key(client, master_key_header, scopes=["inference:run"])
+    _server(client, master_key_header, _workspace(test_db, key), "jira", attach_by_default=True)
+
+    with patch("gateway.api.routes.chat.acompletion", return_value=_round(None)):
+        response = _chat(client, key)
+
+    assert response.status_code == 200, response.text
+    assert mcp.headers == []
 
 
 def test_a_client_call_still_goes_back_to_the_client(

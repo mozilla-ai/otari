@@ -1284,7 +1284,7 @@ export interface paths {
          *     A model the caller may not see answers 404, the same as one that does not
          *     exist, so the route cannot be used to probe the catalog behind an allow-list.
          *     A signed-in caller's offerings also carry their organization's own usage of
-         *     each over the last 30 days.
+         *     each over the last 30 days, and so do an API key's when it holds ``usage:read``.
          */
         get: operations["catalog-get_catalog_model"];
         put?: never;
@@ -2433,7 +2433,8 @@ export interface paths {
          *     requests in flight. A period that has ended reads as the fresh one the next
          *     request starts. ``remaining_usd`` is the least any cap on every provider
          *     leaves, which is what a request can still spend before a 403. Caps shared with
-         *     the rest of the workspace or organization report only what they leave.
+         *     the rest of the workspace or organization report only what they leave. On a
+         *     service key, ``end_users`` counts its end users against its ``max_end_users``.
          */
         get: operations["key-get_key_budget"];
         put?: never;
@@ -2564,6 +2565,26 @@ export interface paths {
          *     Requires master key authentication.
          */
         patch: operations["keys-update_key"];
+        trace?: never;
+    };
+    "/api/v1/keys/{key_id}/end-user-count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get End User Count
+         * @description How many end users a service key's ``max_end_users`` counts, and the cap itself.
+         */
+        get: operations["keys-get_end_user_count"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/keys/{key_id}/end-users": {
@@ -3830,6 +3851,28 @@ export interface paths {
          * @description Update one of the caller's own API keys, or one of the organization's service keys for an owner or admin.
          */
         patch: operations["organization-keys-update_own_key"];
+        trace?: never;
+    };
+    "/api/v1/organizations/me/keys/{key_id}/end-user-count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Own Key End User Count
+         * @description How many end users one of the caller's service keys counts against its ``max_end_users``, and the cap.
+         *
+         *     The same keys as listing their end users: the caller's own, or for an owner or admin the organization's.
+         */
+        get: operations["organization-keys-get_own_key_end_user_count"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/organizations/me/keys/{key_id}/end-users": {
@@ -10052,6 +10095,11 @@ export interface components {
              * @constant
              */
             response_type: "code";
+            /**
+             * Scopes
+             * @description The scopes the consent screen showed. The key holds these and what the registration still names, so one added since the screen was drawn is left out and one removed since takes effect.
+             */
+            scopes: components["schemas"]["KeyScope"][];
             /** State */
             state: string;
             /**
@@ -10065,7 +10113,10 @@ export interface components {
             /** Redirect Uri */
             redirect_uri: string;
         };
-        /** AppDetails */
+        /**
+         * AppDetails
+         * @description What the consent screen shows about an app before a person approves it.
+         */
         AppDetails: {
             /** Issuer */
             issuer: string;
@@ -10073,6 +10124,11 @@ export interface components {
             name: string;
             /** Redirect Uri */
             redirect_uri: string;
+            /**
+             * Scopes
+             * @description The scopes each key this app is issued will hold, from its registration.
+             */
+            scopes: components["schemas"]["KeyScope"][];
         };
         /** AppRevocationRequest */
         AppRevocationRequest: {
@@ -10100,10 +10156,18 @@ export interface components {
             /** Redirect Uri */
             redirect_uri: string;
         };
-        /** AppTokenResponse */
+        /**
+         * AppTokenResponse
+         * @description A minted app key, as RFC 6749 section 5.1 shapes it.
+         */
         AppTokenResponse: {
             /** Access Token */
             access_token: string;
+            /**
+             * Scope
+             * @description The scopes the key holds, space delimited. Fewer than the registration names where the person approved it before an operator narrowed it.
+             */
+            scope: string;
             /**
              * Token Type
              * @default Bearer
@@ -12001,6 +12065,11 @@ export interface components {
              */
             reject_user_mismatch?: boolean | null;
             /**
+             * Scopes
+             * @description The endpoint groups the key may reach. Omitted, the key gets 'inference:run' alone, which calls models and nothing else. The end-users scopes are a service key's alone.
+             */
+            scopes?: components["schemas"]["KeyScope"][];
+            /**
              * User Id
              * @description Optional user ID to associate with this key
              */
@@ -12059,6 +12128,8 @@ export interface components {
             };
             /** Reject User Mismatch */
             reject_user_mismatch: boolean | null;
+            /** Scopes */
+            scopes: components["schemas"]["KeyScope"][];
             /** User Id */
             user_id: string | null;
         };
@@ -12130,6 +12201,11 @@ export interface components {
              * @description Per-key override of the deployment-wide reject_user_mismatch setting: null (default) inherits it, true always rejects a request naming a different 'user', false always accepts it. Spend binds to your own user either way.
              */
             reject_user_mismatch?: boolean | null;
+            /**
+             * Scopes
+             * @description The endpoint groups the key may reach. Omitted, the key gets 'inference:run' alone, which calls models and nothing else. The end-users scopes are a service key's alone.
+             */
+            scopes?: components["schemas"]["KeyScope"][];
             /**
              * Workspace Id
              * @description Workspace this key belongs to, which must be one you may see in your active organization. Omitted means that organization's default workspace, refused when you are not a member of it.
@@ -14819,6 +14895,8 @@ export interface components {
              * @description False when budgets are off for this key: it is budget-exempt, or the deployment runs with budget_strategy disabled. True otherwise, even when no cap applies
              */
             budgets_enforced: boolean;
+            /** @description A service key's end users against its cap; null for any other key */
+            end_users?: components["schemas"]["KeyEndUsersPublic"] | null;
             /**
              * Limits
              * @description The key's user's budget first, then each spend ceiling, the most specific first
@@ -14829,6 +14907,22 @@ export interface components {
              * @description The fewest dollars any dollar cap on every provider leaves; null when none applies. A token, request or provider-narrowed cap in limits can refuse a request sooner
              */
             remaining_usd: number | null;
+        };
+        /**
+         * KeyEndUsersPublic
+         * @description How many end users a service key has, against its ``max_end_users``.
+         */
+        KeyEndUsersPublic: {
+            /**
+             * Count
+             * @description The live end users the cap counts: those on the budgets the key assigns, and those on none when the key has a list and no default. A key that assigns no budget counts every live end user of its user
+             */
+            count: number;
+            /**
+             * Max End Users
+             * @description The key's cap; null when it has none. A request naming a new end user is refused with end_user_limit_reached once count reaches it
+             */
+            max_end_users: number | null;
         };
         /**
          * KeyInfo
@@ -14883,6 +14977,8 @@ export interface components {
             operator_can_enable: boolean;
             /** Reject User Mismatch */
             reject_user_mismatch: boolean | null;
+            /** Scopes */
+            scopes: components["schemas"]["KeyScope"][];
             /** User Id */
             user_id: string | null;
             /**
@@ -14944,6 +15040,16 @@ export interface components {
              */
             used_usd: number | null;
         };
+        /**
+         * KeyScope
+         * @description One group of endpoints an API key may be granted, named ``resource:action``.
+         *
+         *     Ordered by resource, not A-Z: the order is what a stored list is normalized
+         *     to and what the dashboard renders, and the end-user scopes come last because
+         *     only a service key may hold them.
+         * @enum {string}
+         */
+        KeyScope: "inference:run" | "files:read" | "files:write" | "batches:read" | "batches:write" | "web:search" | "web:fetch" | "code:execute" | "mcp:read" | "mcp:execute" | "telemetry:write" | "agents:write" | "usage:read" | "usage:write" | "end-users:read" | "end-users:write" | "end-users:delete";
         /**
          * KnownProviderSchema
          * @description A selected provider's autofill hints for the add-provider form.
@@ -17019,7 +17125,7 @@ export interface components {
             } | null;
             /**
              * Provider
-             * @description The provider the key is for: one the provider catalog, GET /api/v1/search-tools/providers, lists for the key's kind, other than searxng, or tavily or brave for a search key.
+             * @description The provider the key is for: one the provider catalog, GET /api/v1/search-tools/providers, lists for the key's kind, other than searxng.
              */
             provider: string;
         };
@@ -21811,6 +21917,11 @@ export interface components {
             } | null;
             /** Reject User Mismatch */
             reject_user_mismatch?: boolean | null;
+            /**
+             * Scopes
+             * @description The endpoint groups the key may reach, replacing the ones it holds; omitted or null leaves them unchanged. Takes effect on the key's next request. The end-users scopes are a service key's alone.
+             */
+            scopes?: components["schemas"]["KeyScope"][] | null;
         };
         /**
          * UpdateMaintenanceModeRequest
@@ -21861,6 +21972,11 @@ export interface components {
             } | null;
             /** Reject User Mismatch */
             reject_user_mismatch?: boolean | null;
+            /**
+             * Scopes
+             * @description The endpoint groups the key may reach, replacing the ones it holds; omitted or null leaves them unchanged. Takes effect on the key's next request. The end-users scopes are a service key's alone.
+             */
+            scopes?: components["schemas"]["KeyScope"][] | null;
         };
         /**
          * UpdateProfileRequest
@@ -21934,8 +22050,6 @@ export interface components {
             budget_estimate_default_output_tokens?: number | null;
             /** Default Pricing */
             default_pricing?: boolean | null;
-            /** File Understanding Enabled */
-            file_understanding_enabled?: boolean | null;
             /** Model Cache Ttl Seconds */
             model_cache_ttl_seconds?: number | null;
             /** Model Discovery */
@@ -27996,6 +28110,37 @@ export interface operations {
             };
         };
     };
+    "keys-get_end_user_count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KeyEndUsersPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "keys-list_end_users": {
         parameters: {
             query?: {
@@ -30462,6 +30607,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KeyInfo"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-keys-get_own_key_end_user_count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KeyEndUsersPublic"];
                 };
             };
             /** @description Validation Error */

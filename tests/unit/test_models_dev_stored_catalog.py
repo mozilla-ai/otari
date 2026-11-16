@@ -121,3 +121,15 @@ def test_a_stored_catalog_keeps_the_conditions_it_does_not_know() -> None:
 
     assert document["issues"] == {"models": 1, "unknown_conditions": ["tide"]}
     assert read_catalog_document(document) == catalog
+
+
+def test_catalogs_read_apart_share_their_text() -> None:
+    raw = {"p": {"id": "p", "models": {"m": {"id": "m", "name": "A model name", "family": "fam"}}}}
+    stored = {"_meta": {"format": CATALOG_FORMAT}, **catalog_document(parse_catalog(raw))}
+
+    first = read_catalog_document(json.loads(json.dumps(stored))).providers["p"].models["m"]
+    second = read_catalog_document(json.loads(json.dumps(stored))).providers["p"].models["m"]
+    parsed = parse_catalog(json.loads(json.dumps(raw))).providers["p"].models["m"]
+
+    assert first.name is second.name is parsed.name
+    assert first.family is second.family is parsed.family

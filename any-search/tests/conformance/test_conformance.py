@@ -55,6 +55,11 @@ def _replay(provider: str, case: str) -> Callable[[httpx.Request], httpx.Respons
 
 # A provider that signals no error inside a successful response leaves "in_body_error" out.
 SCENARIOS: dict[str, dict[Case, Scenario]] = {
+    "brave": {
+        "normal": Scenario(handler=_replay("brave", "normal")),
+        "empty": Scenario(handler=_replay("brave", "empty")),
+        "error": Scenario(handler=_replay("brave", "error")),
+    },
     "deepseek": {
         "normal": Scenario(handler=_replay("deepseek", "normal")),
         "empty": Scenario(handler=_replay("deepseek", "empty")),
@@ -92,6 +97,11 @@ SCENARIOS: dict[str, dict[Case, Scenario]] = {
         "normal": Scenario(handler=_replay("serply", "normal")),
         "empty": Scenario(handler=_replay("serply", "empty")),
         "error": Scenario(handler=_replay("serply", "error")),
+    },
+    "tavily": {
+        "normal": Scenario(handler=_replay("tavily", "normal")),
+        "empty": Scenario(handler=_replay("tavily", "empty")),
+        "error": Scenario(handler=_replay("tavily", "error")),
     },
     # Synthetic's "normal" is the example its documentation gives, and "empty" that shape with no
     # results; neither is a recording, since a search needs a subscription. Record both once one is

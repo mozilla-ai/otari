@@ -21,7 +21,7 @@ of a definition answers two questions at once, what was saved and whether it is
 running, and the second belongs to the runner. The runner already imports this
 module, for the one function that undoes the secret split, so importing it back
 would close a cycle. The composition root passes the two functions in instead
-(`api/deps.py`), which is also what lets a test say what a worker holds without
+(`api/deps/`), which is also what lets a test say what a worker holds without
 one.
 
 **Almost every rule is read off the catalog.** A list of guardrails, arguments

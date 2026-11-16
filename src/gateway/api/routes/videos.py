@@ -38,6 +38,7 @@ from gateway.api.deps import (
     model_provider_port_on,
     verify_api_key_or_master_key,
 )
+from gateway.api.key_scopes import key_scope
 from gateway.api.routes._helpers import country_gate_for, database_error
 from gateway.api.routes._passthrough import provider_call_failure, resolve_provider_by_name, run_passthrough
 from gateway.core.config import API_ROOT, GatewayConfig
@@ -68,6 +69,7 @@ from gateway.services.pricing import PriceFacts, estimate_video_cost, video_rate
 from gateway.services.provider_kwargs import ResolvedProvider
 from gateway.services.upstream_redaction import redact_upstream_message
 from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
+from gateway.types.key_scope import KeyScope
 
 router = APIRouter(prefix="/videos", tags=["videos"])
 
@@ -112,7 +114,7 @@ def job_response(job: VideoJob, *, provider: str) -> VideoJobResponse:
     )
 
 
-@router.post("", response_model=VideoJobResponse)
+@router.post("", response_model=VideoJobResponse, openapi_extra=key_scope(KeyScope.INFERENCE_RUN))
 async def create_video(
     raw_request: Request,
     response: Response,
@@ -346,7 +348,7 @@ async def _retrieve(
     return record, job, provider, kwargs
 
 
-@router.get("/{video_id}", response_model=VideoJobResponse)
+@router.get("/{video_id}", response_model=VideoJobResponse, openapi_extra=key_scope(KeyScope.INFERENCE_RUN))
 async def retrieve_video(
     video_id: str,
     raw_request: Request,
@@ -377,6 +379,7 @@ async def retrieve_video(
         status.HTTP_409_CONFLICT: {"description": "The job has not completed"},
         status.HTTP_502_BAD_GATEWAY: {"description": "LLM provider error"},
     },
+    openapi_extra=key_scope(KeyScope.INFERENCE_RUN),
 )
 async def retrieve_video_content(
     video_id: str,
@@ -416,7 +419,7 @@ async def retrieve_video_content(
     return Response(content=content, media_type=output.mime_type)
 
 
-@router.get("", response_model=VideoJobList)
+@router.get("", response_model=VideoJobList, openapi_extra=key_scope(KeyScope.INFERENCE_RUN))
 async def list_videos(
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
     jobs: VideoJobServiceDep,

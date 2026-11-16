@@ -101,6 +101,23 @@ class WorkspaceRepository(BaseRepository[Workspace, WorkspaceCreate, WorkspaceUp
         result = await self.db.execute(select(Workspace).where(col(Workspace.id).in_(list(workspace_ids))))
         return list(result.scalars().all())
 
+    async def get_by_organization_and_ids(
+        self, organization_id: uuid.UUID, workspace_ids: Collection[uuid.UUID]
+    ) -> Sequence[Workspace]:
+        """Return an organization's own workspaces named by a batch of ids (order unspecified).
+
+        A workspace id outside the organization is excluded by the query, not filtered afterward.
+        """
+        if not workspace_ids:
+            return []
+        result = await self.db.execute(
+            select(Workspace).where(
+                col(Workspace.organization_id) == organization_id,
+                col(Workspace.id).in_(list(workspace_ids)),
+            )
+        )
+        return list(result.scalars().all())
+
     async def get_by_organization(
         self,
         organization_id: uuid.UUID,

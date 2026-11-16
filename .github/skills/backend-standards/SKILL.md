@@ -104,7 +104,7 @@ Catch specific exceptions, not a broad `except Exception`.
 
 A domain's service is its Service Layer, and [DOMAINS.md](../../../DOMAINS.md#the-target-shape)
 gives its shape: one service per domain with a small public API, built by constructor injection,
-from a builder in `api/deps.py`. One rule adds to it:
+from a builder in `api/deps/`. One rule adds to it:
 
 - **Moving old code.** A module-level function that takes a session becomes a method of its
   domain's service, or a repository method when all it does is run a query. A helper that
@@ -116,7 +116,7 @@ A Unit of Work (`core/unit_of_work.py`) marks where a business transaction start
 rolls back.
 
 - Each request, and each worker job, has one Unit of Work over its one session, and every service
-  built in that scope shares it. A request gets it from `get_unit_of_work` in `api/deps.py`. A
+  built in that scope shares it. A request gets it from `get_unit_of_work` in `api/deps/`. A
   worker job gets it from `create_unit_of_work()`, or from `create_log_unit_of_work()` for work
   on the metering pool. A worker whose own reads still take the session gets both from
   `create_unit_of_work_with_session()`, until those reads move into repositories.

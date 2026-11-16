@@ -5,12 +5,14 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.models.organizations import OrganizationInvitation
 from gateway.models.tenancy import Organization
-from gateway.repositories.organizations import DueInvitation, NewInvitation
+from gateway.repositories.organizations import DueInvitation, NewInvitation, SendRequest
 from gateway.repositories.organizations.membership_origin_repository import MembershipOriginRepository
 from gateway.repositories.organizations.organization_invitation_repository import OrganizationInvitationRepository
 from gateway.repositories.tenancy import OrganizationMemberRepository
@@ -32,10 +34,12 @@ def _invitation(
     *,
     email: str,
     token_hash: str,
+    created_at: datetime = _NOW,
     expires_at: datetime = _FAR_FUTURE,
     next_send_at: datetime | None = None,
 ) -> NewInvitation:
     return NewInvitation(
+        created_at=created_at,
         email=email,
         expires_at=expires_at,
         invited_by_user_id=None,
@@ -45,6 +49,13 @@ def _invitation(
         token_hash=token_hash,
         workspace_assignments=[],
     )
+
+
+async def _add(repository: OrganizationInvitationRepository, new: NewInvitation) -> OrganizationInvitation:
+    """Add an invitation that is not expected to collide, for a test that is not about that."""
+    rows = await repository.add_many([new])
+    assert rows
+    return rows[0]
 
 
 async def test_a_delete_waits_for_a_concurrent_one_and_then_finds_nothing_to_remove(postgres_url: str) -> None:
@@ -57,8 +68,9 @@ async def test_a_delete_waits_for_a_concurrent_one_and_then_finds_nothing_to_rem
     try:
         async with sessions() as setup:
             organization = await create_organization(setup, slug="concurrent-delete")
-            invitation = await OrganizationInvitationRepository(setup).add(
-                _invitation(organization, email="ada@example.com", token_hash="concurrent")
+            invitation = await _add(
+                OrganizationInvitationRepository(setup),
+                _invitation(organization, email="ada@example.com", token_hash="concurrent"),
             )
             await setup.commit()
             invitation_id, organization_id = invitation.id, organization.id
@@ -105,17 +117,214 @@ async def test_a_membership_origin_is_recorded(async_db: AsyncSession) -> None:
         assert (origin.invited_by_user_id, origin.invited_at, origin.joined_at) == (inviter.id, invited_at, joined_at)
 
 
-async def test_a_second_invitation_for_one_address_in_one_organization_is_refused(
-    async_db: AsyncSession,
-) -> None:
+async def test_add_counts_the_first_send_request(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="first-send-request")
+    uow = UnitOfWork(async_db)
+    created_at = datetime(2026, 1, 5, tzinfo=UTC)
+
+    async with uow:
+        repository = OrganizationInvitationRepository(uow)
+        invitation = await repository.add(
+            _invitation(organization, email="ada@example.com", token_hash="t1", created_at=created_at)
+        )
+
+        assert invitation is not None
+        assert invitation.send_count == 1
+        assert invitation.last_send_requested_at == created_at
+        assert invitation.created_at == created_at
+
+
+async def test_add_returns_none_for_an_address_already_invited(async_db: AsyncSession) -> None:
     organization = await create_organization(async_db, slug="duplicate-invite")
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        repository = OrganizationInvitationRepository(uow)
+        first = await _add(repository, _invitation(organization, email="grace@x.test", token_hash="t1"))
+
+        second = await repository.add(_invitation(organization, email="GRACE@x.test", token_hash="t2"))
+
+        assert second is None
+        assert await repository.get(first.id) is not None
+
+
+async def test_two_adds_at_once_give_one_row(postgres_url: str) -> None:
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def add(session: AsyncSession, organization: Organization, token_hash: str) -> OrganizationInvitation | None:
+        return await OrganizationInvitationRepository(session).add(
+            _invitation(organization, email="ada@example.com", token_hash=token_hash)
+        )
+
+    try:
+        async with sessions() as setup:
+            organization = await create_organization(setup, slug="concurrent-add")
+            await setup.commit()
+
+        async with sessions() as first, sessions() as second:
+            first_result = await add(first, organization, "first")
+            waiting = asyncio.create_task(add(second, organization, "second"))
+            # The first add has not committed, so the second cannot finish.
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(asyncio.shield(waiting), timeout=0.5)
+            await first.commit()
+            second_result = await waiting
+            await second.commit()
+    finally:
+        await engine.dispose()
+
+    assert first_result is not None
+    assert second_result is None
+
+
+async def test_add_still_raises_for_another_refusal(async_db: AsyncSession) -> None:
     uow = UnitOfWork(async_db)
 
     with pytest.raises(IntegrityError):
         async with uow:
             repository = OrganizationInvitationRepository(uow)
-            await repository.add(_invitation(organization, email="ada@example.com", token_hash="t1"))
-            await repository.add(_invitation(organization, email="ada@example.com", token_hash="t2"))
+            await repository.add(
+                NewInvitation(
+                    created_at=_NOW,
+                    email="ada@example.com",
+                    expires_at=_FAR_FUTURE,
+                    invited_by_user_id=None,
+                    next_send_at=None,
+                    organization_id=uuid.uuid4(),
+                    role="member",
+                    token_hash="t1",
+                    workspace_assignments=[],
+                )
+            )
+
+
+async def test_add_many_inserts_every_address_in_one_call(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="batched-add")
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        repository = OrganizationInvitationRepository(uow)
+        rows = await repository.add_many(
+            [
+                _invitation(organization, email="b@example.com", token_hash="b"),
+                _invitation(organization, email="a@example.com", token_hash="a"),
+            ]
+        )
+
+        assert {row.email for row in rows} == {"a@example.com", "b@example.com"}
+        assert await repository.get_by_organization_and_emails(organization.id, ["a@example.com", "b@example.com"])
+
+
+async def test_add_many_counts_the_first_send_request(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="first-send-request")
+    uow = UnitOfWork(async_db)
+    created_at = datetime(2026, 1, 5, tzinfo=UTC)
+
+    async with uow:
+        repository = OrganizationInvitationRepository(uow)
+        rows = await repository.add_many(
+            [_invitation(organization, email="ada@example.com", token_hash="t1", created_at=created_at)]
+        )
+
+        [invitation] = rows
+        assert invitation.send_count == 1
+        assert invitation.last_send_requested_at == created_at
+        assert invitation.created_at == created_at
+
+
+async def test_add_many_skips_an_address_already_invited(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="batched-add-duplicate")
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        repository = OrganizationInvitationRepository(uow)
+        await _add(repository, _invitation(organization, email="grace@x.test", token_hash="t1"))
+
+        rows = await repository.add_many(
+            [
+                _invitation(organization, email="GRACE@x.test", token_hash="t2"),
+                _invitation(organization, email="new@example.com", token_hash="t3"),
+            ]
+        )
+
+        assert {row.email for row in rows} == {"new@example.com"}
+
+
+async def test_add_many_with_nothing_to_add_touches_nothing(async_db: AsyncSession) -> None:
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        assert await OrganizationInvitationRepository(uow).add_many([]) == []
+
+
+async def test_add_many_still_raises_for_another_refusal(async_db: AsyncSession) -> None:
+    uow = UnitOfWork(async_db)
+
+    with pytest.raises(IntegrityError):
+        async with uow:
+            repository = OrganizationInvitationRepository(uow)
+            await repository.add_many(
+                [
+                    NewInvitation(
+                        created_at=_NOW,
+                        email="ada@example.com",
+                        expires_at=_FAR_FUTURE,
+                        invited_by_user_id=None,
+                        next_send_at=None,
+                        organization_id=uuid.uuid4(),
+                        role="member",
+                        token_hash="t1",
+                        workspace_assignments=[],
+                    )
+                ]
+            )
+
+
+async def test_add_many_rejects_text_that_is_not_an_address(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="not-an-address-batch")
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        repository = OrganizationInvitationRepository(uow)
+
+        with pytest.raises(ValueError, match="email address"):
+            await repository.add_many([_invitation(organization, email="not an address", token_hash="t1")])
+
+
+async def test_two_batched_adds_sharing_an_address_wait_rather_than_time_out(postgres_url: str) -> None:
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    shared_address = "shared@example.com"
+
+    async def add_many(session: AsyncSession, organization: Organization, suffix: str) -> list[OrganizationInvitation]:
+        return await OrganizationInvitationRepository(session).add_many(
+            [
+                _invitation(organization, email=f"only-{suffix}@example.com", token_hash=f"only-{suffix}"),
+                _invitation(organization, email=shared_address, token_hash=f"shared-{suffix}"),
+            ]
+        )
+
+    try:
+        async with sessions() as setup:
+            organization = await create_organization(setup, slug="batched-add-lock-wait")
+            await setup.commit()
+
+        async with sessions() as first, sessions() as second:
+            first_result = await add_many(first, organization, "first")
+            second_task = asyncio.create_task(add_many(second, organization, "second"))
+            # Still waiting after 2.5 seconds: a batched add sets no lock timeout, so the
+            # second call waits for the first's row lock instead of failing fast.
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(asyncio.shield(second_task), timeout=2.5)
+            await first.commit()
+            second_result = await second_task
+            await second.commit()
+    finally:
+        await engine.dispose()
+
+    assert {row.email for row in first_result} == {"only-first@example.com", shared_address}
+    assert {row.email for row in second_result} == {"only-second@example.com"}
 
 
 async def test_an_invitation_in_another_organization_is_not_found(async_db: AsyncSession) -> None:
@@ -125,7 +334,7 @@ async def test_an_invitation_in_another_organization_is_not_found(async_db: Asyn
 
     async with uow:
         repository = OrganizationInvitationRepository(uow)
-        invitation = await repository.add(_invitation(organization, email="ada@example.com", token_hash="t1"))
+        invitation = await _add(repository, _invitation(organization, email="ada@example.com", token_hash="t1"))
 
         assert await repository.get_in_organization(invitation.id, other.id) is None
         assert await repository.get_in_organization(invitation.id, organization.id) == invitation
@@ -137,7 +346,7 @@ async def test_deleting_an_invitation_makes_it_unreachable_in_the_same_session(a
 
     async with uow:
         repository = OrganizationInvitationRepository(uow)
-        invitation = await repository.add(_invitation(organization, email="ada@example.com", token_hash="t1"))
+        invitation = await _add(repository, _invitation(organization, email="ada@example.com", token_hash="t1"))
 
         assert await repository.delete_in_organization(invitation.id, organization.id) is True
         assert await repository.get(invitation.id) is None
@@ -149,7 +358,7 @@ async def test_deleting_an_invitation_reports_whether_a_row_was_removed(async_db
 
     async with uow:
         repository = OrganizationInvitationRepository(uow)
-        invitation = await repository.add(_invitation(organization, email="ada@example.com", token_hash="t1"))
+        invitation = await _add(repository, _invitation(organization, email="ada@example.com", token_hash="t1"))
 
         assert await repository.delete_in_organization(invitation.id, organization.id) is True
         assert await repository.delete_in_organization(invitation.id, organization.id) is False
@@ -162,7 +371,7 @@ async def test_deleting_in_the_wrong_organization_leaves_the_row(async_db: Async
 
     async with uow:
         repository = OrganizationInvitationRepository(uow)
-        invitation = await repository.add(_invitation(organization, email="ada@example.com", token_hash="t1"))
+        invitation = await _add(repository, _invitation(organization, email="ada@example.com", token_hash="t1"))
 
         assert await repository.delete_in_organization(invitation.id, other.id) is False
         assert await repository.get_in_organization(invitation.id, organization.id) is not None
@@ -175,23 +384,123 @@ async def test_expired_invitations_older_than_a_cutoff_are_deleted(async_db: Asy
     async with uow:
         organization = await create_organization(async_db, slug="expired-invite")
         repository = OrganizationInvitationRepository(uow)
-        expired = await repository.add(
+        expired = await _add(
+            repository,
             _invitation(
                 organization,
                 email="expired@example.com",
                 token_hash="expired",
                 expires_at=datetime(2026, 1, 1, tzinfo=UTC),
-            )
+            ),
         )
-        not_expired = await repository.add(
+        not_expired = await _add(
+            repository,
             _invitation(
                 organization, email="later@example.com", token_hash="later", expires_at=datetime(2026, 2, 1, tzinfo=UTC)
-            )
+            ),
         )
 
-        assert await repository.delete_expired_before(cutoff) == 1
+        assert await repository.delete_expired_before(cutoff, limit=10) == 1
         assert await repository.get_in_organization(expired.id, organization.id) is None
         assert await repository.get_in_organization(not_expired.id, organization.id) is not None
+
+
+async def test_delete_expired_before_skips_a_renewal_in_progress_and_leaves_it_in_place(postgres_url: str) -> None:
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    cutoff = datetime(2026, 1, 10, tzinfo=UTC)
+    renewed_expires_at = datetime(2030, 1, 1, tzinfo=UTC)
+
+    async def renew(session: AsyncSession, invitation_id: uuid.UUID) -> None:
+        await session.execute(
+            update(OrganizationInvitation)
+            .where(OrganizationInvitation.id == invitation_id)
+            .values(expires_at=renewed_expires_at)
+        )
+
+    async def cleanup(session: AsyncSession) -> int:
+        return await OrganizationInvitationRepository(session).delete_expired_before(cutoff, limit=10)
+
+    try:
+        async with sessions() as setup:
+            organization = await create_organization(setup, slug="cleanup-skips-a-renewal")
+            repository = OrganizationInvitationRepository(setup)
+            renewed = await _add(
+                repository,
+                _invitation(
+                    organization,
+                    email="renewed@example.com",
+                    token_hash="renewed",
+                    expires_at=datetime(2026, 1, 2, tzinfo=UTC),
+                ),
+            )
+            control = await _add(
+                repository,
+                _invitation(
+                    organization,
+                    email="control@example.com",
+                    token_hash="control",
+                    expires_at=datetime(2026, 1, 1, tzinfo=UTC),
+                ),
+            )
+            await setup.commit()
+            organization_id, renewed_id, control_id = organization.id, renewed.id, control.id
+
+        async with sessions() as renewal, sessions() as deleting:
+            await renew(renewal, renewed_id)
+            # The renewal holds its row locked, uncommitted; skip_locked skips it rather than waiting.
+            deleted = await asyncio.wait_for(cleanup(deleting), timeout=0.5)
+            await deleting.commit()
+            await renewal.commit()
+    finally:
+        await engine.dispose()
+
+    assert deleted == 1
+    async with sessions() as check:
+        repository = OrganizationInvitationRepository(check)
+        assert await repository.get_in_organization(renewed_id, organization_id) is not None
+        assert await repository.get_in_organization(control_id, organization_id) is None
+
+
+async def test_delete_expired_before_does_not_wait_on_the_invite_paths_delete(postgres_url: str) -> None:
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    cutoff = datetime(2026, 1, 10, tzinfo=UTC)
+
+    async def replace(session: AsyncSession, invitation_id: uuid.UUID, organization_id: uuid.UUID) -> int:
+        return await OrganizationInvitationRepository(session).delete_expired_in_organization(
+            [invitation_id], organization_id, expired_by=cutoff
+        )
+
+    async def sweep(session: AsyncSession) -> int:
+        return await OrganizationInvitationRepository(session).delete_expired_before(cutoff, limit=10)
+
+    try:
+        async with sessions() as setup:
+            organization = await create_organization(setup, slug="sweep-does-not-wait-on-invite-delete")
+            invitation = await _add(
+                OrganizationInvitationRepository(setup),
+                _invitation(
+                    organization,
+                    email="replaced@example.com",
+                    token_hash="replaced",
+                    expires_at=datetime(2026, 1, 1, tzinfo=UTC),
+                ),
+            )
+            await setup.commit()
+            invitation_id, organization_id = invitation.id, organization.id
+
+        async with sessions() as replacing, sessions() as sweeping:
+            replaced_count = await replace(replacing, invitation_id, organization_id)
+            assert replaced_count == 1
+            # The replace has not committed, so its row is still locked when the sweep runs here.
+            swept = await asyncio.wait_for(sweep(sweeping), timeout=0.5)
+            await sweeping.commit()
+            await replacing.commit()
+    finally:
+        await engine.dispose()
+
+    assert swept == 0
 
 
 async def test_invitations_are_listed_and_counted_only_for_their_own_organization(async_db: AsyncSession) -> None:
@@ -201,9 +510,9 @@ async def test_invitations_are_listed_and_counted_only_for_their_own_organizatio
         organization = await create_organization(async_db, slug="list-org")
         other = await create_organization(async_db, slug="other-list-org")
         repository = OrganizationInvitationRepository(uow)
-        await repository.add(_invitation(organization, email="one@example.com", token_hash="t1"))
-        await repository.add(_invitation(organization, email="two@example.com", token_hash="t2"))
-        await repository.add(_invitation(other, email="three@example.com", token_hash="t3"))
+        await _add(repository, _invitation(organization, email="one@example.com", token_hash="t1"))
+        await _add(repository, _invitation(organization, email="two@example.com", token_hash="t2"))
+        await _add(repository, _invitation(other, email="three@example.com", token_hash="t3"))
 
         rows, total = await repository.list_for_organization(organization.id, skip=0, limit=10)
 
@@ -218,9 +527,9 @@ async def test_list_for_organization_pages_oldest_first_and_honors_skip_and_limi
         organization = await create_organization(async_db, slug="list-order")
         repository = OrganizationInvitationRepository(uow)
         # The insertion order and the address order both differ from the creation order.
-        newest = await repository.add(_invitation(organization, email="b@example.com", token_hash="b"))
-        oldest = await repository.add(_invitation(organization, email="c@example.com", token_hash="c"))
-        middle = await repository.add(_invitation(organization, email="a@example.com", token_hash="a"))
+        newest = await _add(repository, _invitation(organization, email="b@example.com", token_hash="b"))
+        oldest = await _add(repository, _invitation(organization, email="c@example.com", token_hash="c"))
+        middle = await _add(repository, _invitation(organization, email="a@example.com", token_hash="a"))
         newest.created_at = datetime(2026, 1, 3, tzinfo=UTC)
         oldest.created_at = datetime(2026, 1, 1, tzinfo=UTC)
         middle.created_at = datetime(2026, 1, 2, tzinfo=UTC)
@@ -239,11 +548,11 @@ async def test_the_same_address_can_be_invited_by_two_organizations(async_db: As
 
     async with uow:
         repository = OrganizationInvitationRepository(uow)
-        in_first = await repository.add(_invitation(first, email="ada@example.com", token_hash="token-one"))
-        in_second = await repository.add(_invitation(second, email="ada@example.com", token_hash="token-two"))
+        in_first = await _add(repository, _invitation(first, email="ada@example.com", token_hash="token-one"))
+        in_second = await _add(repository, _invitation(second, email="ada@example.com", token_hash="token-two"))
 
-        assert await repository.get_by_organization_and_email(first.id, "ada@example.com") == in_first
-        assert await repository.get_by_organization_and_email(second.id, "ada@example.com") == in_second
+        assert await repository.get_by_organization_and_emails(first.id, ["ada@example.com"]) == [in_first]
+        assert await repository.get_by_organization_and_emails(second.id, ["ada@example.com"]) == [in_second]
         assert await repository.get_by_token_hash("token-one") == in_first
         assert await repository.get_by_token_hash("token-two") == in_second
 
@@ -257,21 +566,49 @@ async def test_the_sweep_keeps_a_row_expiring_exactly_at_the_cutoff_and_deletes_
     async with uow:
         organization = await create_organization(async_db, slug="sweep-boundary")
         repository = OrganizationInvitationRepository(uow)
-        at_cutoff = await repository.add(
-            _invitation(organization, email="at@example.com", token_hash="at", expires_at=cutoff)
+        at_cutoff = await _add(
+            repository, _invitation(organization, email="at@example.com", token_hash="at", expires_at=cutoff)
         )
-        just_before = await repository.add(
+        just_before = await _add(
+            repository,
             _invitation(
                 organization,
                 email="before@example.com",
                 token_hash="before",
                 expires_at=cutoff - timedelta(microseconds=1),
-            )
+            ),
         )
 
-        assert await repository.delete_expired_before(cutoff) == 1
+        assert await repository.delete_expired_before(cutoff, limit=10) == 1
         assert await repository.get_in_organization(at_cutoff.id, organization.id) is not None
         assert await repository.get_in_organization(just_before.id, organization.id) is None
+
+
+async def test_delete_expired_before_stops_at_its_limit(async_db: AsyncSession) -> None:
+    cutoff = datetime(2026, 1, 10, tzinfo=UTC)
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        organization = await create_organization(async_db, slug="expired-invite-batch")
+        repository = OrganizationInvitationRepository(uow)
+        rows = [
+            await _add(
+                repository,
+                _invitation(
+                    organization,
+                    email=f"expired-{i}@example.com",
+                    token_hash=f"expired-{i}",
+                    expires_at=datetime(2026, 1, 1, tzinfo=UTC) + timedelta(hours=i),
+                ),
+            )
+            for i in range(3)
+        ]
+
+        deleted = await repository.delete_expired_before(cutoff, limit=2)
+
+        assert deleted == 2
+        survivors = [row for row in rows if await repository.get_in_organization(row.id, organization.id) is not None]
+        assert len(survivors) == 1
 
 
 async def test_an_address_is_stored_and_found_in_its_normalized_form(async_db: AsyncSession) -> None:
@@ -280,33 +617,50 @@ async def test_an_address_is_stored_and_found_in_its_normalized_form(async_db: A
 
     async with uow:
         repository = OrganizationInvitationRepository(uow)
-        added = await repository.add(_invitation(organization, email="  Ada@Example.COM ", token_hash="t1"))
-        found = await repository.get_by_organization_and_email(organization.id, "ADA@example.com")
+        added = await _add(repository, _invitation(organization, email="  Ada@Example.COM ", token_hash="t1"))
+        found = await repository.get_by_organization_and_emails(organization.id, ["ADA@example.com"])
 
         assert added.email == "ada@example.com"
-        assert found is not None
-        assert found.id == added.id
+        assert found == [added]
 
 
-async def test_a_second_invitation_that_differs_only_in_case_is_refused(async_db: AsyncSession) -> None:
-    organization = await create_organization(async_db, slug="case-duplicate")
+async def test_get_by_organization_and_emails_matches_each_spelling(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="emails-org")
+    other = await create_organization(async_db, slug="emails-other")
     uow = UnitOfWork(async_db)
 
-    with pytest.raises(IntegrityError):
-        async with uow:
-            repository = OrganizationInvitationRepository(uow)
-            await repository.add(_invitation(organization, email="ada@example.com", token_hash="t1"))
-            await repository.add(_invitation(organization, email="ADA@EXAMPLE.COM", token_hash="t2"))
+    async with uow:
+        repository = OrganizationInvitationRepository(uow)
+        grace = await _add(repository, _invitation(organization, email="grace@x.test", token_hash="grace"))
+        ada = await _add(repository, _invitation(organization, email="ada@x.test", token_hash="ada"))
+        await _add(repository, _invitation(other, email="grace@x.test", token_hash="other-grace"))
+
+        found = await repository.get_by_organization_and_emails(
+            organization.id, [" Grace@X.test", "ada@x.test", "not an address"]
+        )
+
+        assert {row.id for row in found} == {grace.id, ada.id}
 
 
-async def test_text_that_is_not_an_address_cannot_be_invited_and_matches_nothing(async_db: AsyncSession) -> None:
+async def test_get_by_organization_and_emails_with_nothing_to_look_up_matches_nothing(
+    async_db: AsyncSession,
+) -> None:
+    organization = await create_organization(async_db, slug="emails-empty")
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        repository = OrganizationInvitationRepository(uow)
+
+        assert await repository.get_by_organization_and_emails(organization.id, []) == []
+
+
+async def test_adding_text_that_is_not_an_address_raises(async_db: AsyncSession) -> None:
     organization = await create_organization(async_db, slug="not-an-address")
     uow = UnitOfWork(async_db)
 
     async with uow:
         repository = OrganizationInvitationRepository(uow)
 
-        assert await repository.get_by_organization_and_email(organization.id, "not an address") is None
         with pytest.raises(ValueError, match="email address"):
             await repository.add(_invitation(organization, email="not an address", token_hash="t1"))
 
@@ -318,8 +672,10 @@ async def test_a_claim_returns_the_values_of_the_invitation_and_counts_the_attem
         organization = await create_organization(async_db, slug="claim-values")
         inviter = await create_member(async_db, organization, role="owner", full_name="Inviter")
         repository = OrganizationInvitationRepository(uow)
-        invitation = await repository.add(
+        invitation = await _add(
+            repository,
             NewInvitation(
+                created_at=_NOW,
                 email="ada@example.com",
                 expires_at=_FAR_FUTURE,
                 invited_by_user_id=inviter.id,
@@ -328,7 +684,7 @@ async def test_a_claim_returns_the_values_of_the_invitation_and_counts_the_attem
                 role="admin",
                 token_hash="seed",
                 workspace_assignments=[{"workspace_id": "w1", "role": "member"}],
-            )
+            ),
         )
 
         first = await repository.claim_due_send(
@@ -359,8 +715,8 @@ async def test_a_due_invitation_is_claimed_once(async_db: AsyncSession) -> None:
     async with uow:
         organization = await create_organization(async_db, slug="claim-once")
         repository = OrganizationInvitationRepository(uow)
-        invitation = await repository.add(
-            _invitation(organization, email="ada@example.com", token_hash="seed", next_send_at=_NOW)
+        invitation = await _add(
+            repository, _invitation(organization, email="ada@example.com", token_hash="seed", next_send_at=_NOW)
         )
 
         first = await repository.claim_due_send(
@@ -387,8 +743,9 @@ async def test_of_two_claims_made_before_either_commits_only_one_gets_the_invita
     try:
         async with sessions() as setup:
             organization = await create_organization(setup, slug="concurrent-claim")
-            invitation = await OrganizationInvitationRepository(setup).add(
-                _invitation(organization, email="ada@example.com", token_hash="seed", next_send_at=_NOW)
+            invitation = await _add(
+                OrganizationInvitationRepository(setup),
+                _invitation(organization, email="ada@example.com", token_hash="seed", next_send_at=_NOW),
             )
             await setup.commit()
 
@@ -421,8 +778,8 @@ async def test_the_claim_of_the_last_attempt_leaves_no_send_due(async_db: AsyncS
     async with uow:
         organization = await create_organization(async_db, slug="claim-last-attempt")
         repository = OrganizationInvitationRepository(uow)
-        invitation = await repository.add(
-            _invitation(organization, email="ada@example.com", token_hash="seed", next_send_at=_NOW)
+        invitation = await _add(
+            repository, _invitation(organization, email="ada@example.com", token_hash="seed", next_send_at=_NOW)
         )
 
         first = await repository.claim_due_send(now=_NOW, held_until=_HELD_UNTIL, max_attempts=2, token_hash="first")
@@ -446,8 +803,8 @@ async def test_an_invitation_is_due_by_its_due_time_alone(async_db: AsyncSession
     async with uow:
         organization = await create_organization(async_db, slug="claim-due-time-alone")
         repository = OrganizationInvitationRepository(uow)
-        invitation = await repository.add(
-            _invitation(organization, email="ada@example.com", token_hash="seed", next_send_at=_NOW)
+        invitation = await _add(
+            repository, _invitation(organization, email="ada@example.com", token_hash="seed", next_send_at=_NOW)
         )
         await repository.claim_due_send(now=_NOW, held_until=_HELD_UNTIL, max_attempts=1, token_hash="first")
         await repository.retry_send(invitation.id, token_hash="first", next_send_at=_HELD_UNTIL)
@@ -469,7 +826,7 @@ async def test_a_claim_that_would_hold_the_invitation_for_no_time_is_refused(asy
     async with uow:
         organization = await create_organization(async_db, slug="claim-no-hold")
         repository = OrganizationInvitationRepository(uow)
-        await repository.add(_invitation(organization, email="ada@example.com", token_hash="seed", next_send_at=_NOW))
+        await _add(repository, _invitation(organization, email="ada@example.com", token_hash="seed", next_send_at=_NOW))
 
         with pytest.raises(ValueError, match="held"):
             await repository.claim_due_send(now=_NOW, held_until=_NOW, max_attempts=_MAX_ATTEMPTS, token_hash="claim")
@@ -483,14 +840,15 @@ async def test_an_invitation_with_no_send_due_is_not_claimed(async_db: AsyncSess
     async with uow:
         organization = await create_organization(async_db, slug="claim-not-due")
         repository = OrganizationInvitationRepository(uow)
-        await repository.add(_invitation(organization, email="none@example.com", token_hash="none"))
-        await repository.add(
+        await _add(repository, _invitation(organization, email="none@example.com", token_hash="none"))
+        await _add(
+            repository,
             _invitation(
                 organization,
                 email="later@example.com",
                 token_hash="later",
                 next_send_at=_NOW + timedelta(microseconds=1),
-            )
+            ),
         )
 
         assert (
@@ -507,16 +865,17 @@ async def test_the_invitation_that_has_been_due_longest_is_claimed_first(async_d
     async with uow:
         organization = await create_organization(async_db, slug="claim-order")
         repository = OrganizationInvitationRepository(uow)
-        newer = await repository.add(
-            _invitation(organization, email="newer@example.com", token_hash="newer", next_send_at=_NOW)
+        newer = await _add(
+            repository, _invitation(organization, email="newer@example.com", token_hash="newer", next_send_at=_NOW)
         )
-        older = await repository.add(
+        older = await _add(
+            repository,
             _invitation(
                 organization,
                 email="older@example.com",
                 token_hash="older",
                 next_send_at=_NOW - timedelta(minutes=1),
-            )
+            ),
         )
 
         first = await repository.claim_due_send(
@@ -537,8 +896,8 @@ async def test_a_claim_replaces_the_token_hash_of_the_invitation(async_db: Async
     async with uow:
         organization = await create_organization(async_db, slug="claim-hash")
         repository = OrganizationInvitationRepository(uow)
-        invitation = await repository.add(
-            _invitation(organization, email="ada@example.com", token_hash="old", next_send_at=_NOW)
+        invitation = await _add(
+            repository, _invitation(organization, email="ada@example.com", token_hash="old", next_send_at=_NOW)
         )
 
         await repository.claim_due_send(now=_NOW, held_until=_HELD_UNTIL, max_attempts=_MAX_ATTEMPTS, token_hash="new")
@@ -560,8 +919,8 @@ async def test_finishing_a_send_leaves_no_send_due(async_db: AsyncSession) -> No
     async with uow:
         organization = await create_organization(async_db, slug="finish-send")
         repository = OrganizationInvitationRepository(uow)
-        invitation = await repository.add(
-            _invitation(organization, email="ada@example.com", token_hash="seed", next_send_at=_NOW)
+        invitation = await _add(
+            repository, _invitation(organization, email="ada@example.com", token_hash="seed", next_send_at=_NOW)
         )
         await repository.claim_due_send(
             now=_NOW, held_until=_HELD_UNTIL, max_attempts=_MAX_ATTEMPTS, token_hash="claim"
@@ -584,8 +943,8 @@ async def test_retrying_a_send_makes_it_due_at_the_later_time(async_db: AsyncSes
     async with uow:
         organization = await create_organization(async_db, slug="retry-send")
         repository = OrganizationInvitationRepository(uow)
-        invitation = await repository.add(
-            _invitation(organization, email="ada@example.com", token_hash="seed", next_send_at=_NOW)
+        invitation = await _add(
+            repository, _invitation(organization, email="ada@example.com", token_hash="seed", next_send_at=_NOW)
         )
         await repository.claim_due_send(
             now=_NOW, held_until=_HELD_UNTIL, max_attempts=_MAX_ATTEMPTS, token_hash="claim"
@@ -615,8 +974,8 @@ async def test_a_result_from_an_earlier_claim_changes_nothing(async_db: AsyncSes
     async with uow:
         organization = await create_organization(async_db, slug="stale-result")
         repository = OrganizationInvitationRepository(uow)
-        invitation = await repository.add(
-            _invitation(organization, email="ada@example.com", token_hash="seed", next_send_at=_NOW)
+        invitation = await _add(
+            repository, _invitation(organization, email="ada@example.com", token_hash="seed", next_send_at=_NOW)
         )
         await repository.claim_due_send(
             now=_NOW, held_until=_HELD_UNTIL, max_attempts=_MAX_ATTEMPTS, token_hash="earlier"
@@ -638,8 +997,8 @@ async def test_a_result_for_a_deleted_invitation_changes_nothing(async_db: Async
     async with uow:
         organization = await create_organization(async_db, slug="deleted-result")
         repository = OrganizationInvitationRepository(uow)
-        invitation = await repository.add(
-            _invitation(organization, email="ada@example.com", token_hash="seed", next_send_at=_NOW)
+        invitation = await _add(
+            repository, _invitation(organization, email="ada@example.com", token_hash="seed", next_send_at=_NOW)
         )
         await repository.claim_due_send(
             now=_NOW, held_until=_HELD_UNTIL, max_attempts=_MAX_ATTEMPTS, token_hash="claim"
@@ -648,3 +1007,173 @@ async def test_a_result_for_a_deleted_invitation_changes_nothing(async_db: Async
 
         assert await repository.finish_send(invitation.id, token_hash="claim") is False
         assert await repository.retry_send(invitation.id, token_hash="claim", next_send_at=_NOW) is False
+
+
+async def test_request_send_replaces_the_hash_and_resets_the_attempts(async_db: AsyncSession) -> None:
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        organization = await create_organization(async_db, slug="request-send")
+        inviter = await create_member(async_db, organization, role="owner", full_name="Inviter")
+        repository = OrganizationInvitationRepository(uow)
+        invitation = await _add(
+            repository, _invitation(organization, email="ada@example.com", token_hash="seed", next_send_at=_NOW)
+        )
+        invitation.declined_at = _NOW
+        await async_db.flush()
+        await repository.claim_due_send(now=_NOW, held_until=_HELD_UNTIL, max_attempts=_MAX_ATTEMPTS, token_hash="a")
+        await repository.claim_due_send(
+            now=_HELD_UNTIL, held_until=_HELD_UNTIL + _HOLD, max_attempts=_MAX_ATTEMPTS, token_hash="b"
+        )
+        await repository.claim_due_send(
+            now=_HELD_UNTIL + _HOLD, held_until=_FAR_FUTURE, max_attempts=_MAX_ATTEMPTS, token_hash="c"
+        )
+        new_expires_at = _FAR_FUTURE + timedelta(days=1)
+        new_next_send_at = _FAR_FUTURE + timedelta(minutes=1)
+        requested_at = _FAR_FUTURE + timedelta(seconds=1)
+
+        result = await repository.request_send(
+            invitation.id,
+            organization.id,
+            SendRequest(
+                expires_at=new_expires_at,
+                invited_by_user_id=inviter.id,
+                next_send_at=new_next_send_at,
+                requested_at=requested_at,
+                token_hash="new-hash",
+            ),
+            expected_send_count=1,
+        )
+
+        assert result.sent is True
+        stored = result.invitation
+        assert stored is not None
+        assert stored.delivery_attempts == 0
+        assert stored.token_hash == "new-hash"
+        assert stored.send_count == 2
+        assert stored.expires_at == new_expires_at
+        assert stored.next_send_at == new_next_send_at
+        assert stored.last_send_requested_at == requested_at
+        assert stored.invited_by_user_id == inviter.id
+        assert stored.declined_at == _NOW
+
+
+async def test_request_send_with_a_stale_send_count_changes_nothing(async_db: AsyncSession) -> None:
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        organization = await create_organization(async_db, slug="stale-send-count")
+        repository = OrganizationInvitationRepository(uow)
+        invitation = await _add(repository, _invitation(organization, email="ada@example.com", token_hash="seed"))
+
+        result = await repository.request_send(
+            invitation.id,
+            organization.id,
+            SendRequest(
+                expires_at=_FAR_FUTURE,
+                invited_by_user_id=None,
+                next_send_at=_NOW,
+                requested_at=_NOW,
+                token_hash="new-hash",
+            ),
+            expected_send_count=2,
+        )
+
+        assert result.sent is False
+        stored = result.invitation
+        assert stored is not None
+        assert (stored.token_hash, stored.send_count, stored.next_send_at) == ("seed", 1, None)
+
+
+async def test_request_send_in_another_organization_changes_nothing(async_db: AsyncSession) -> None:
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        organization = await create_organization(async_db, slug="request-send-scope")
+        other = await create_organization(async_db, slug="request-send-scope-other")
+        repository = OrganizationInvitationRepository(uow)
+        invitation = await _add(repository, _invitation(organization, email="ada@example.com", token_hash="seed"))
+
+        result = await repository.request_send(
+            invitation.id,
+            other.id,
+            SendRequest(
+                expires_at=_FAR_FUTURE,
+                invited_by_user_id=None,
+                next_send_at=_NOW,
+                requested_at=_NOW,
+                token_hash="new-hash",
+            ),
+            expected_send_count=1,
+        )
+
+        assert result.sent is False
+        assert result.invitation is None
+        stored = await repository.get(invitation.id)
+        assert stored is not None
+        assert (stored.token_hash, stored.send_count, stored.next_send_at) == ("seed", 1, None)
+
+
+async def test_a_send_in_flight_records_nothing_after_request_send(async_db: AsyncSession) -> None:
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        organization = await create_organization(async_db, slug="send-in-flight")
+        repository = OrganizationInvitationRepository(uow)
+        invitation = await _add(
+            repository, _invitation(organization, email="ada@example.com", token_hash="seed", next_send_at=_NOW)
+        )
+        claimed = await repository.claim_due_send(
+            now=_NOW, held_until=_HELD_UNTIL, max_attempts=_MAX_ATTEMPTS, token_hash="A"
+        )
+        assert claimed is not None
+
+        result = await repository.request_send(
+            invitation.id,
+            organization.id,
+            SendRequest(
+                expires_at=_FAR_FUTURE,
+                invited_by_user_id=None,
+                next_send_at=_FAR_FUTURE,
+                requested_at=_FAR_FUTURE,
+                token_hash="B",
+            ),
+            expected_send_count=1,
+        )
+        assert result.sent is True
+
+        assert await repository.finish_send(invitation.id, token_hash="A") is False
+        assert await repository.retry_send(invitation.id, token_hash="A", next_send_at=_NOW) is False
+
+        again = await repository.claim_due_send(
+            now=_FAR_FUTURE, held_until=_FAR_FUTURE + _HOLD, max_attempts=_MAX_ATTEMPTS, token_hash="C"
+        )
+
+        assert again is not None
+        assert again.attempt == 1
+
+
+async def test_request_send_returns_false_for_a_deleted_invitation(async_db: AsyncSession) -> None:
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        organization = await create_organization(async_db, slug="deleted-request-send")
+        repository = OrganizationInvitationRepository(uow)
+        invitation = await _add(repository, _invitation(organization, email="ada@example.com", token_hash="seed"))
+        await repository.delete_in_organization(invitation.id, organization.id)
+
+        result = await repository.request_send(
+            invitation.id,
+            organization.id,
+            SendRequest(
+                expires_at=_FAR_FUTURE,
+                invited_by_user_id=None,
+                next_send_at=None,
+                requested_at=_NOW,
+                token_hash="new-hash",
+            ),
+            expected_send_count=1,
+        )
+
+        assert result.sent is False
+        assert result.invitation is None

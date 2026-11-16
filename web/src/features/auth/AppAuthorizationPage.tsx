@@ -6,6 +6,7 @@ import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { ComboBoxField } from "@/design-system/forms/ComboBoxField"
 import { ProductMark } from "@/design-system/ProductMark"
+import { SCOPE_INFO } from "@/features/keys/scopes"
 import {
   useAuthorizeOAuthApp,
   useOAuthApp,
@@ -26,7 +27,7 @@ export function AppAuthorizationPage() {
     search,
     Boolean(app.data) && !app.error,
   )
-  const approval = useAuthorizeOAuthApp(params)
+  const approval = useAuthorizeOAuthApp(params, app.data?.scopes ?? [])
   const choices = workspaces.data?.data ?? []
   const soleWorkspace =
     !search && !workspaces.isPlaceholderData && workspaces.data?.count === 1
@@ -101,11 +102,28 @@ export function AppAuthorizationPage() {
                 className="mt-0.5 size-4 shrink-0 text-muted"
               />
               <div className="flex flex-col gap-1">
-                <p className="text-emphasis">Use your models and tools</p>
-                <p className="text-caption">
-                  The app can send AI requests using the access you have in this
-                  workspace.
+                <p className="text-emphasis">
+                  This app will be able to, with the access you have in this
+                  workspace:
                 </p>
+                <ul className="flex flex-col gap-1">
+                  {app.data.scopes.map((scope) => {
+                    // A gateway newer than this bundle can name a scope it has
+                    // no description for, which is still worth showing raw.
+                    const info = SCOPE_INFO[scope]
+                    return (
+                      <li key={scope} className="text-caption">
+                        {info ? info.label : `${scope} (not described here)`}
+                        {info?.risk ? (
+                          <span className="text-warning">
+                            {" "}
+                            &middot; {info.risk}
+                          </span>
+                        ) : null}
+                      </li>
+                    )
+                  })}
+                </ul>
               </div>
             </div>
             <div className="flex items-start gap-3">

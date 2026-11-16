@@ -46,6 +46,7 @@ from gateway.api.deps import (
     require_deployment_operator,
     verify_catalog_reader_or_public,
 )
+from gateway.api.key_scopes import key_scope
 from gateway.core.config import HOSTED_OFFERING_INSTANCE, GatewayConfig
 from gateway.core.metered_pricing import effective_rates
 from gateway.models.api_keys import APIKey
@@ -78,6 +79,7 @@ from gateway.services.merged_catalog_service import (
     served_on_deployment_key,
     viewer_organization,
     viewer_price,
+    viewer_reads_usage,
     viewer_zero_data_retention,
 )
 from gateway.services.model_catalog_service import ModelCatalogEntry
@@ -467,14 +469,17 @@ async def _group(
     )
 
 
-async def _with_usage(db: AsyncSession, grouped: _Grouped, members: list[_Offering]) -> list[CatalogOffering]:
+async def _with_usage(
+    db: AsyncSession, grouped: _Grouped, members: list[_Offering], caller: CatalogCaller
+) -> list[CatalogOffering]:
     """One model's offerings with the viewer's 30-day usage of each.
 
     Queried for these selectors alone rather than the whole catalog's: a usage
     row is matched on two unindexed columns, and a detail read asks about one
-    model. A visitor has no organization and gets the offerings as they are.
+    model. A visitor has no organization, and a viewer that does not read usage
+    may not read this one's, so both get the offerings as they are.
     """
-    if grouped.organization_id is None:
+    if grouped.organization_id is None or not viewer_reads_usage(caller):
         return [member.wire for member in members]
     usage = await _usage_by_selector(
         db,
@@ -627,7 +632,7 @@ async def _merged_for(
     )
 
 
-@router.get("/models")
+@router.get("/models", openapi_extra=key_scope(None))
 async def list_catalog(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -677,7 +682,7 @@ async def list_catalog(
     )
 
 
-@router.get("/models/{model_id:path}")
+@router.get("/models/{model_id:path}", openapi_extra=key_scope(None))
 async def get_catalog_model(
     model_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -703,7 +708,7 @@ async def get_catalog_model(
     A model the caller may not see answers 404, the same as one that does not
     exist, so the route cannot be used to probe the catalog behind an allow-list.
     A signed-in caller's offerings also carry their organization's own usage of
-    each over the last 30 days.
+    each over the last 30 days, and so do an API key's when it holds ``usage:read``.
     """
     merged = await _merged_for(db, config, caller, session_identity, model_provider, workspace_id)
     grouped = await _group(
@@ -724,7 +729,7 @@ async def get_catalog_model(
     # The cheapest offering first, unpriced ones last, so the comparison the
     # page exists for is the order the rows arrive in.
     offerings = sorted(
-        await _with_usage(db, grouped, members),
+        await _with_usage(db, grouped, members, caller),
         key=lambda o: (o.pricing is None, o.pricing.input_price_per_million if o.pricing else 0.0, o.selector),
     )
     return CatalogModelDetail(

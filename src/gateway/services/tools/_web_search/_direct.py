@@ -20,7 +20,7 @@ its own allowlist, budget and usage steps.
 - :func:`unpriced_direct_search_detail` names the row ``require_pricing``
   needs, for the 402 a direct tool call answers when none prices it.
 - :func:`run_direct_search` calls the provider through any-search, or through
-  the Tavily or Brave client for a key on those providers.
+  the old search client for a provider any-search does not serve.
 
 Whichever key serves the call, the instance supplies the allowlist entry, the
 rate-limit rules, the timeout, the usage row's names and the response's
@@ -354,12 +354,12 @@ def direct_unpriced_detail(kind: ToolKind, tool: str, rate_key: RateKey, *, gate
 async def run_direct_search(search: DirectSearch, client: httpx.AsyncClient) -> DirectSearchResult:
     """Run a direct search through the app's web provider client.
 
-    The call runs on any-search, or on the Tavily or Brave client for a key
-    on those providers: an organization's, or the legacy settings'. Raises :class:`DirectSearchFailedError`
-    when the provider fails the call, an error inside a successful answer
-    included. Its message, for the usage row and the log, holds only the
-    failure's safe fields, since the Tavily and Brave clients' own text can
-    quote the upstream body.
+    The call runs on any-search, or on the old search client for a key on a
+    provider any-search does not serve: an organization's, or the legacy
+    settings'. Raises :class:`DirectSearchFailedError` when the provider fails
+    the call, an error inside a successful answer included. Its message, for
+    the usage row and the log, holds only the failure's safe fields, since the
+    old client's own text can quote the upstream body.
     """
     # Imported here: the old clients' module imports this package's root.
     from gateway.services.search_backend import SearchProviderError
@@ -411,7 +411,7 @@ async def _on_old_client(search: DirectSearch, client: httpx.AsyncClient) -> Dir
     if search.credential is not None:
         outcome = await run_keyed_search(search.credential, search.query, timeout_s=resolved.timeout, client=client)
     else:
-        # The legacy settings' Tavily or Brave key, which the deployment pays for.
+        # The legacy settings' key, which the deployment pays for.
         outcome = await run_provider_search(
             resolved.provider, resolved.api_key, search.query, timeout_s=resolved.timeout, client=client
         )

@@ -87,8 +87,7 @@ def _library_call(instance: ToolInstance) -> tuple[dict[str, Any], dict[str, Any
 
     The instance's own key and base URL, never the environment's: the libraries
     read a provider's variable when none is passed, and an empty one counts as
-    passed. Options carry otari's defaults below them, and leave out the ones
-    the rules drop.
+    passed. Options leave out the ones the rules drop.
     """
     default_timeout = any_search.DEFAULT_TIMEOUT if instance.kind == "search" else any_fetch.DEFAULT_TIMEOUT
     settings = {
@@ -97,7 +96,7 @@ def _library_call(instance: ToolInstance) -> tuple[dict[str, Any], dict[str, Any
         "timeout": instance.timeout or default_timeout,
     }
     kept = {key: value for key, value in instance.options.items() if key not in instance.dropped_options}
-    return settings, {**instance.provider_defaults, **kept}
+    return settings, kept
 
 
 async def _test_with_library(

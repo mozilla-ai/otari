@@ -32,7 +32,7 @@ from conftest import seed_workspace_id
 from gateway.core.config import API_ROOT, REQUEST_ID_HEADER
 from gateway.models.usage import UsageLog
 
-from .conftest import MODEL_NAME
+from .conftest import ALL_KEY_SCOPES, MODEL_NAME
 
 # $1.00 per million tokens each way, so 100k in plus 200k out settles at $0.30.
 _USAGE = CompletionUsage(prompt_tokens=100_000, completion_tokens=200_000, total_tokens=300_000)
@@ -312,7 +312,9 @@ def test_an_api_key_sees_its_own_requests_and_no_other_keys(
     api_key_header: dict[str, str],
 ) -> None:
     _price_model(client, master_key_header)
-    other = client.post(f"{API_ROOT}/keys", json={"key_name": "other-key"}, headers=master_key_header)
+    other = client.post(
+        f"{API_ROOT}/keys", json={"scopes": ALL_KEY_SCOPES, "key_name": "other-key"}, headers=master_key_header
+    )
     assert other.status_code == 200, other.text
     other_header = {name: f"Bearer {other.json()['key']}" for name in api_key_header}
 

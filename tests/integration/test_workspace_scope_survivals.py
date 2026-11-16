@@ -25,6 +25,8 @@ from fastapi.testclient import TestClient
 from gateway.adapters.file_storage_adapter import LocalDirFileStore
 from gateway.core.config import API_ROOT
 
+from .conftest import ALL_KEY_SCOPES
+
 ALIASES = f"{API_ROOT}/aliases"
 POLICIES = f"{API_ROOT}/routing/policies"
 NOWHERE = "00000000-0000-0000-0000-000000000000"
@@ -53,7 +55,7 @@ def _key_header(client: TestClient, master: dict[str, str], template: dict[str, 
     The gateway requires a "Bearer " prefix on every header form, so the header
     name is taken from the fixture's own rather than hardcoded.
     """
-    created = client.post(f"{API_ROOT}/keys", json={"key_name": "k", **body}, headers=master)
+    created = client.post(f"{API_ROOT}/keys", json={"scopes": ALL_KEY_SCOPES, "key_name": "k", **body}, headers=master)
     assert created.status_code == status.HTTP_200_OK, created.text
     return {next(iter(template)): f"Bearer {created.json()['key']}"}
 

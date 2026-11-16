@@ -5,9 +5,8 @@ options and echoes the request it got in ``raw``, so these exercise the route
 and its rules without a network: auth, which tool and which key, the
 workspace's policy, budget reservation and settlement, the LiteLLM mapping on a
 provider without native equivalents, and the usage row that makes a search
-visible in the Activity and Usage views. A Tavily organization key, which runs
-on the old client until any-search has its adapter, is stubbed at
-``run_keyed_search``.
+visible in the Activity and Usage views. A Tavily organization key runs on
+any-search's Tavily adapter, with the app's web provider client stubbed.
 """
 
 import json
@@ -54,11 +53,10 @@ from gateway.models.pricing import API_ORIGIN, OPERATOR_ORIGIN, OrganizationMode
 from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential, WebTool, WebToolCredentialSource
 from gateway.models.usage import UsageLog
 from gateway.schemas.tools import SearchResponse
-from gateway.services.search_backend import SearchHit, SearchOutcome, SearchProviderError
 from gateway.services.secret_box import generate_secret_key
 from gateway.services.tools import DirectSearch, DirectSearchResult
 
-from .conftest import build_test_client
+from .conftest import ALL_KEY_SCOPES, ALL_SERVICE_KEY_SCOPES, build_test_client
 
 SEARCH_USAGE_LABEL = "/v1/search"
 
@@ -72,8 +70,6 @@ _HIT = {
     "published": "2026-01-02T00:00:00Z",
 }
 _PAGE_HIT = {"url": "https://example.org/page", "title": "Page", "snippet": "short", "text": "The page text."}
-
-_OLD_CLIENT_HITS = [SearchHit(url="https://example.com/otari", title="Otari", snippet="From the old client.")]
 
 
 def _search_tools() -> dict[str, dict[str, Any]]:
@@ -103,7 +99,11 @@ def _client_on(test_config: GatewayConfig, **updates: Any) -> Generator[TestClie
 
 def _keyed(client: TestClient, master_key_header: dict[str, str], user_id: str) -> dict[str, str]:
     assert client.post(f"{API_ROOT}/users", json={"user_id": user_id}, headers=master_key_header).status_code == 200
-    key = client.post(f"{API_ROOT}/keys", json={"key_name": user_id, "user_id": user_id}, headers=master_key_header)
+    key = client.post(
+        f"{API_ROOT}/keys",
+        json={"scopes": ALL_KEY_SCOPES, "key_name": user_id, "user_id": user_id},
+        headers=master_key_header,
+    )
     assert key.status_code == 200, key.text
     return {API_KEY_HEADER: f"Bearer {key.json()['key']}"}
 
@@ -274,22 +274,23 @@ def test_an_unnamed_call_runs_on_the_organizations_key_with_no_tool_of_the_deplo
     headers = _keyed(client, master_key_header, "no-tools-org-key")
     _add_org_search_key(client, master_key_header, "tvly-org-secret")
     _price(client, master_key_header, "otari:web_search", 5000.0)
-    keyed = AsyncMock(return_value=SearchOutcome(results=_OLD_CLIENT_HITS))
-    with patch("gateway.services.search_backend.run_keyed_search", keyed):
-        resp = client.post(f"{API_ROOT}/search", json={**SEARCH_PAYLOAD, "max_results": 2}, headers=headers)
-        named = client.post(f"{API_ROOT}/search/tavily", json=SEARCH_PAYLOAD, headers=headers)
+    seen = _provider_answers(client, _TAVILY_ANSWER)
+    resp = client.post(f"{API_ROOT}/search", json={**SEARCH_PAYLOAD, "max_results": 2}, headers=headers)
+    named = client.post(f"{API_ROOT}/search/tavily", json=SEARCH_PAYLOAD, headers=headers)
 
     assert resp.status_code == 200, resp.text
     assert (resp.headers[COST_USD_HEADER], resp.headers[PRICING_SOURCE_HEADER]) == ("0.005000", "deployment")
     assert resp.json()["search_tool"] == "web_search"
-    assert resp.json()["results"][0]["snippet"] == "From the old client."
-    credential = keyed.call_args.args[0]
-    assert (credential.provider, credential.api_key) == ("tavily", "tvly-org-secret")
-    assert keyed.call_args.args[1].max_results == 2
+    assert resp.json()["results"][0]["url"] == "https://example.com/tavily"
+    [request] = seen
+    assert (request.url.host, request.headers["authorization"]) == ("api.tavily.com", "Bearer tvly-org-secret")
+    sent = json.loads(request.content)
+    # The key sends Tavily's own defaults, without the legacy settings' page text.
+    assert sent["max_results"] == 2
+    assert "include_raw_content" not in sent
     # Naming a tool means a tool of the deployment's, and it has none.
     assert named.status_code == 400
     assert named.json()["detail"].startswith("No search tools are configured.")
-    keyed.assert_awaited_once()
     rows = _search_rows(client, master_key_header, "no-tools-org-key")
     [served] = [row for row in rows if row["status"] == "success"]
     assert (served["model"], served["provider"]) == ("web_search", "tavily")
@@ -342,13 +343,12 @@ def test_an_unnamed_call_runs_on_the_organizations_key_when_no_tool_is_the_defau
     """Two tools and no default leave nothing to pick, but the key serves an unnamed call all the same."""
     headers = _keyed(client, master_key_header, "ambiguous-org-key")
     _add_org_search_key(client, master_key_header, "tvly-org-secret")
-    keyed = AsyncMock(return_value=SearchOutcome(results=_OLD_CLIENT_HITS))
-    with patch("gateway.services.search_backend.run_keyed_search", keyed):
-        resp = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
+    seen = _provider_answers(client, _TAVILY_ANSWER)
+    resp = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
 
     assert resp.status_code == 200, resp.text
     assert resp.json()["search_tool"] == "web_search"
-    keyed.assert_awaited_once()
+    assert [request.url.host for request in seen] == ["api.tavily.com"]
 
 
 def test_web_access_turned_off_refuses_a_call_the_organizations_key_would_serve(
@@ -358,12 +358,11 @@ def test_web_access_turned_off_refuses_a_call_the_organizations_key_would_serve(
     headers = _keyed(client, master_key_header, "no-tools-disabled")
     key = WebSearchCredential(provider="tavily", source=WebToolCredentialSource.ORG, api_key="tvly-k")
     _stub_policy(client, _policy(enabled=False, credential=key))
-    keyed = AsyncMock(return_value=SearchOutcome(results=_OLD_CLIENT_HITS))
-    with patch("gateway.services.search_backend.run_keyed_search", keyed):
-        resp = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
+    seen = _provider_answers(client, _TAVILY_ANSWER)
+    resp = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
 
     assert resp.status_code == 403
-    keyed.assert_not_called()
+    assert seen == []
     (row,) = _search_rows(client, master_key_header, "no-tools-disabled")
     assert (row["model"], row["provider"], row["status_code"]) == ("unknown", None, 403)
 
@@ -644,7 +643,12 @@ def test_search_honors_the_keys_model_allowlist(
     client.post(f"{API_ROOT}/users", json={"user_id": "narrow-user"}, headers=master_key_header)
     key = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "narrow-key", "user_id": "narrow-user", "allowed_models": ["openai:gpt-4o"]},
+        json={
+            "scopes": ALL_KEY_SCOPES,
+            "key_name": "narrow-key",
+            "user_id": "narrow-user",
+            "allowed_models": ["openai:gpt-4o"],
+        },
         headers=master_key_header,
     ).json()
     headers = {API_KEY_HEADER: f"Bearer {key['key']}"}
@@ -667,7 +671,7 @@ def _key_with(client: TestClient, master_key_header: dict[str, str], user: dict[
     assert client.post(f"{API_ROOT}/users", json=user, headers=master_key_header).status_code == 200
     return client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": user["user_id"], "user_id": user["user_id"], **lists},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": user["user_id"], "user_id": user["user_id"], **lists},
         headers=master_key_header,
     )
 
@@ -755,7 +759,12 @@ def test_a_key_narrows_its_users_tools(client: TestClient, master_key_header: di
     assert (
         client.post(
             f"{API_ROOT}/keys",
-            json={"key_name": "narrow", "user_id": "tool-capped", "allowed_tools": ["fake-search"]},
+            json={
+                "scopes": ALL_KEY_SCOPES,
+                "key_name": "narrow",
+                "user_id": "tool-capped",
+                "allowed_tools": ["fake-search"],
+            },
             headers=master_key_header,
         ).status_code
         == 200
@@ -791,7 +800,9 @@ def test_a_users_first_tool_list_keeps_its_narrowed_keys_where_they_were(
 
     def key(name: str, **lists: Any) -> Any:
         created = client.post(
-            f"{API_ROOT}/keys", json={"key_name": name, "user_id": "migrating", **lists}, headers=master_key_header
+            f"{API_ROOT}/keys",
+            json={"scopes": ALL_KEY_SCOPES, "key_name": name, "user_id": "migrating", **lists},
+            headers=master_key_header,
         )
         assert created.status_code == 200, created.text
         return created
@@ -1011,7 +1022,12 @@ def test_search_logs_an_allowlist_refusal(
     client.post(f"{API_ROOT}/users", json={"user_id": "denied-user"}, headers=master_key_header)
     key = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "denied-key", "user_id": "denied-user", "allowed_models": ["openai:gpt-4o"]},
+        json={
+            "scopes": ALL_KEY_SCOPES,
+            "key_name": "denied-key",
+            "user_id": "denied-user",
+            "allowed_models": ["openai:gpt-4o"],
+        },
         headers=master_key_header,
     ).json()
 
@@ -1048,6 +1064,7 @@ def test_a_budget_exempt_keys_search_refusal_still_counts_toward_budget(
     key = client.post(
         f"{API_ROOT}/keys",
         json={
+            "scopes": ALL_KEY_SCOPES,
             "key_name": "exempt-search-key",
             "user_id": "exempt-search-user",
             "allowed_models": ["openai:gpt-4o"],
@@ -1207,7 +1224,7 @@ def test_search_is_budget_enforced(
     )
     key = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "broke-key", "user_id": "broke-user"},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "broke-key", "user_id": "broke-user"},
         headers=master_key_header,
     ).json()
 
@@ -1239,7 +1256,7 @@ def test_a_config_priced_search_is_reserved_before_it_runs(
     )
     key = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "near-cap-key", "user_id": "near-cap-user"},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "near-cap-key", "user_id": "near-cap-user"},
         headers=master_key_header,
     ).json()
 
@@ -1299,6 +1316,7 @@ def test_a_service_key_bills_search_to_the_end_user_it_names(
     key = client.post(
         f"{API_ROOT}/keys",
         json={
+            "scopes": ALL_SERVICE_KEY_SCOPES,
             "key_name": "mlpa-search",
             "user_id": "mlpa-search",
             "is_service_key": True,
@@ -1380,6 +1398,7 @@ def test_a_service_key_starts_a_search_end_user_on_the_budget_it_names(
     key = client.post(
         f"{API_ROOT}/keys",
         json={
+            "scopes": ALL_SERVICE_KEY_SCOPES,
             "user_id": "mlpa-multi",
             "is_service_key": True,
             "end_user_budget_ids": ["search-default", "search-memories"],
@@ -1450,17 +1469,14 @@ def test_an_unnamed_call_runs_on_the_workspaces_own_key_priced_as_web_search(
     _add_org_search_key(client, master_key_header, "tvly-org-secret")
     _price(client, master_key_header, "otari:web_search", 5000.0)
     _price(client, master_key_header, "fake:fake-search", 9000.0)
-    keyed = AsyncMock(return_value=SearchOutcome(results=_OLD_CLIENT_HITS))
-    with patch("gateway.services.search_backend.run_keyed_search", keyed):
-        resp = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
+    seen = _provider_answers(client, _TAVILY_ANSWER)
+    resp = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
 
     assert resp.status_code == 200, resp.text
     assert resp.json()["search_tool"] == "fake-search"
-    assert resp.json()["results"][0]["snippet"] == "From the old client."
-    credential = keyed.call_args.args[0]
-    assert (credential.provider, credential.api_key) == ("tavily", "tvly-org-secret")
-    # The key changes who pays, not how long the default tool may take.
-    assert keyed.call_args.kwargs["timeout_s"] == 7
+    assert resp.json()["results"][0]["url"] == "https://example.com/tavily"
+    [request] = seen
+    assert (request.url.host, request.headers["authorization"]) == ("api.tavily.com", "Bearer tvly-org-secret")
     (row,) = _search_rows(client, master_key_header, "org-key-user")
     # The row keeps the tool's names; the cost is the otari:web_search rate, not the tool's.
     assert (row["model"], row["provider"]) == ("fake-search", "fake")
@@ -1511,26 +1527,6 @@ def test_an_unnamed_call_on_an_exa_key_runs_through_any_search_with_the_key(
     assert row["cost"] == pytest.approx(0.004)
 
 
-@pytest.mark.parametrize("field", [{"include_raw": True}, {"provider_options": {"search_depth": "advanced"}}])
-def test_the_new_fields_are_refused_on_a_call_a_tavily_key_serves(
-    default_tool_client: TestClient, master_key_header: dict[str, str], field: dict[str, Any]
-) -> None:
-    client = default_tool_client
-    headers = _keyed(client, master_key_header, "org-key-fields")
-    _add_org_search_key(client, master_key_header, "tvly-org-secret")
-    keyed = AsyncMock(return_value=SearchOutcome(results=_OLD_CLIENT_HITS))
-    with patch("gateway.services.search_backend.run_keyed_search", keyed):
-        refused = client.post(f"{API_ROOT}/search", json={**SEARCH_PAYLOAD, **field}, headers=headers)
-        defaults = client.post(
-            f"{API_ROOT}/search", json={**SEARCH_PAYLOAD, "include_raw": False, "provider_options": {}}, headers=headers
-        )
-
-    assert refused.status_code == 400
-    assert "include_raw and provider_options" in refused.json()["detail"]
-    assert defaults.status_code == 200, defaults.text
-    keyed.assert_awaited_once()
-
-
 @pytest.mark.usefixtures("_secret_key")
 def test_search_without_a_usable_key_uses_the_named_tool(
     client: TestClient, master_key_header: dict[str, str], api_key_header: dict[str, str]
@@ -1544,12 +1540,11 @@ def test_search_without_a_usable_key_uses_the_named_tool(
         headers=master_key_header,
     )
     assert turned_off.status_code == 200, turned_off.text
-    keyed = AsyncMock(return_value=SearchOutcome(results=_OLD_CLIENT_HITS))
-    with patch("gateway.services.search_backend.run_keyed_search", keyed):
-        resp = client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=api_key_header)
+    seen = _provider_answers(client, _TAVILY_ANSWER)
+    resp = client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=api_key_header)
 
     assert resp.status_code == 200, resp.text
-    keyed.assert_not_called()
+    assert seen == []
     assert resp.json()["results"][0]["snippet"] == _HIT["snippet"]
 
 
@@ -1560,17 +1555,16 @@ def test_a_named_call_runs_on_the_tools_own_key_though_the_workspace_has_one(
     client = default_tool_client
     headers = _keyed(client, master_key_header, "named-call")
     _add_org_search_key(client, master_key_header, "tvly-org-secret")
-    keyed = AsyncMock(return_value=SearchOutcome(results=_OLD_CLIENT_HITS))
-    with patch("gateway.services.search_backend.run_keyed_search", keyed):
-        by_path = client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=headers)
-        by_body = client.post(
-            f"{API_ROOT}/search", json={**SEARCH_PAYLOAD, "search_tool_name": "fake-search"}, headers=headers
-        )
+    seen = _provider_answers(client, _TAVILY_ANSWER)
+    by_path = client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=headers)
+    by_body = client.post(
+        f"{API_ROOT}/search", json={**SEARCH_PAYLOAD, "search_tool_name": "fake-search"}, headers=headers
+    )
 
     for resp in (by_path, by_body):
         assert resp.status_code == 200, resp.text
         assert resp.json()["results"][0]["snippet"] == _HIT["snippet"]
-    keyed.assert_not_called()
+    assert seen == []
     # Billed as the tool's own search, at the provider's reported cost.
     assert [row["cost"] for row in _search_rows(client, master_key_header, "named-call")] == [
         pytest.approx(0.007),
@@ -1626,17 +1620,15 @@ def test_a_workspace_key_its_provider_cannot_be_called_with_is_a_generic_502(
     """The refusal's own words describe the workspace's credential, so they stay on the usage row."""
     client = default_tool_client
     headers = _keyed(client, master_key_header, "refused-key")
-    key = WebSearchCredential(
-        provider="tavily", source=WebToolCredentialSource.ORG, api_key="tvly-k", api_base="https://tavily.example"
-    )
+    key = WebSearchCredential(provider="tavily", source=WebToolCredentialSource.ORG)
     _stub_policy(client, _policy(credential=key))
     resp = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
 
     assert resp.status_code == 502
-    assert "base URL" not in resp.json()["detail"]
+    assert "API key" not in resp.json()["detail"]
     assert not {name.lower() for name in _FAILURE_HEADERS} & set(resp.headers)
     (row,) = _search_rows(client, master_key_header, "refused-key")
-    assert "base URL" in row["error_message"]
+    assert "API key" in row["error_message"]
 
 
 @pytest.fixture
@@ -1713,14 +1705,14 @@ def test_an_unnamed_call_runs_on_the_credential_the_port_answers(
 ) -> None:
     client = default_tool_client
     headers = _keyed(client, master_key_header, "port-key")
-    credential = WebSearchCredential(provider="brave", source=WebToolCredentialSource.ORG, api_key="brave-key")
+    credential = WebSearchCredential(provider="tavily", source=WebToolCredentialSource.ORG, api_key="tavily-key")
     _stub_policy(client, _policy(credential=credential))
-    keyed = AsyncMock(return_value=SearchOutcome(results=_OLD_CLIENT_HITS))
-    with patch("gateway.services.search_backend.run_keyed_search", keyed):
-        resp = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
+    seen = _provider_answers(client, _TAVILY_ANSWER)
+    resp = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
 
     assert resp.status_code == 200, resp.text
-    assert keyed.call_args.args[0] == credential
+    [request] = seen
+    assert (request.url.host, request.headers["authorization"]) == ("api.tavily.com", "Bearer tavily-key")
 
 
 def test_a_failure_on_the_organization_key_names_the_keys_provider_in_the_headers(
@@ -1728,15 +1720,14 @@ def test_a_failure_on_the_organization_key_names_the_keys_provider_in_the_header
 ) -> None:
     client = default_tool_client
     headers = _keyed(client, master_key_header, "port-key-failure")
-    credential = WebSearchCredential(provider="brave", source=WebToolCredentialSource.ORG, api_key="brave-key")
+    credential = WebSearchCredential(provider="tavily", source=WebToolCredentialSource.ORG, api_key="tavily-key")
     _stub_policy(client, _policy(credential=credential))
-    keyed = AsyncMock(side_effect=SearchProviderError("brave answered 503", tag="http_error", status=503))
-    with patch("gateway.services.search_backend.run_keyed_search", keyed):
-        resp = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
+    _provider_answers(client, {"detail": {"error": "Unavailable."}}, status_code=503)
+    resp = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
 
     assert resp.status_code == 502
-    # Brave, not the default tool's fake provider.
-    assert tuple(resp.headers.get(name) for name in _FAILURE_HEADERS) == ("brave", "503", "http_error", "true")
+    # Tavily, not the default tool's fake provider.
+    assert tuple(resp.headers.get(name) for name in _FAILURE_HEADERS) == ("tavily", "503", "http_error", "true")
 
 
 def test_the_ceiling_the_port_answers_lowers_the_count(client: TestClient, api_key_header: dict[str, str]) -> None:
@@ -1891,7 +1882,11 @@ def _on_request_budget(client: TestClient, master_key_header: dict[str, str], us
         headers=master_key_header,
     )
     assert user.status_code == 200, user.text
-    key = client.post(f"{API_ROOT}/keys", json={"key_name": user_id, "user_id": user_id}, headers=master_key_header)
+    key = client.post(
+        f"{API_ROOT}/keys",
+        json={"scopes": ALL_KEY_SCOPES, "key_name": user_id, "user_id": user_id},
+        headers=master_key_header,
+    )
     assert key.status_code == 200, key.text
     return {API_KEY_HEADER: f"Bearer {key.json()['key']}"}
 
@@ -2034,7 +2029,12 @@ def test_a_budget_exempt_keys_unpriced_search_is_served(
     assert user.status_code == 200, user.text
     key = strict_client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "exempt-search", "user_id": "exempt-search", "exclude_from_budget": True},
+        json={
+            "scopes": ALL_KEY_SCOPES,
+            "key_name": "exempt-search",
+            "user_id": "exempt-search",
+            "exclude_from_budget": True,
+        },
         headers=master_key_header,
     )
     assert key.status_code == 200, key.text
@@ -2095,12 +2095,11 @@ def test_a_search_the_workspaces_own_key_serves_needs_the_web_search_row(
     headers = _keyed(client, master_key_header, "org-key-unpriced")
     _add_org_search_key(client, master_key_header, "tvly-org-secret")
     _price(client, master_key_header, "fake:fake-search", 9000.0)
-    keyed = AsyncMock(return_value=SearchOutcome(results=_OLD_CLIENT_HITS))
-    with patch("gateway.services.search_backend.run_keyed_search", keyed):
-        refused = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
-        keyed.assert_not_called()
-        _price(client, master_key_header, "otari:web_search", 0.0)
-        served = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
+    seen = _provider_answers(client, _TAVILY_ANSWER)
+    refused = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
+    assert seen == []
+    _price(client, master_key_header, "otari:web_search", 0.0)
+    served = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
 
     assert refused.status_code == 402, refused.text
     detail = refused.json()["detail"]
@@ -2108,7 +2107,7 @@ def test_a_search_the_workspaces_own_key_serves_needs_the_web_search_row(
     assert "Web search pricing page" in detail
     assert "Tools & Guardrails" not in detail
     assert served.status_code == 200, served.text
-    keyed.assert_awaited_once()
+    assert len(seen) == 1
 
 
 def test_a_search_is_answered_and_recorded_under_its_request_id(
@@ -2236,13 +2235,13 @@ def legacy_client(test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch) -
     yield from _client_on(test_config, **_LEGACY_TAVILY)
 
 
-def _provider_answers(client: TestClient, answer: dict[str, Any]) -> list[httpx.Request]:
+def _provider_answers(client: TestClient, answer: dict[str, Any], status_code: int = 200) -> list[httpx.Request]:
     """Route the app's web provider client to a provider that answers ``answer``, and keep what it was sent."""
     seen: list[httpx.Request] = []
 
     def respond(request: httpx.Request) -> httpx.Response:
         seen.append(request)
-        return httpx.Response(200, json=answer)
+        return httpx.Response(status_code, json=answer)
 
     async def web_provider_client() -> AsyncIterator[httpx.AsyncClient]:
         async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as answering:
@@ -2319,7 +2318,9 @@ def test_a_keys_allowed_tools_grants_the_legacy_engine_by_its_name(
     statuses: dict[str, int] = {}
     for allowed in ("tavily", "builtin_fetch"):
         created = client.post(
-            f"{API_ROOT}/keys", json={"key_name": allowed, "allowed_tools": [allowed]}, headers=master_key_header
+            f"{API_ROOT}/keys",
+            json={"key_name": allowed, "allowed_tools": [allowed], "scopes": ["web:search"]},
+            headers=master_key_header,
         )
         assert created.status_code == 200, created.text
         headers = {API_KEY_HEADER: f"Bearer {created.json()['key']}"}
@@ -2399,3 +2400,50 @@ def test_a_fetch_tool_named_like_the_legacy_engine_keeps_it_from_direct_search(
         assert named.json()["detail"].startswith("No search tools are configured.")
         assert catalog.json()["data"] == []
         assert seen == []
+
+
+_BRAVE_ANSWER = {
+    "web": {"results": [{"url": "https://example.com/brave", "title": "Brave", "description": "A snippet."}]}
+}
+
+
+def test_a_legacy_brave_pair_serves_a_direct_search_on_its_adapter(
+    test_config: GatewayConfig, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+    legacy = {"search_tools": {}, "web_search_provider": "brave", "web_search_provider_api_key": "brv-ours"}
+    for client in _client_on(test_config, **legacy):
+        headers = _keyed(client, master_key_header, "legacy-brave")
+        seen = _provider_answers(client, _BRAVE_ANSWER)
+
+        resp = client.post(
+            f"{API_ROOT}/search/brave",
+            json={**SEARCH_PAYLOAD, "include_raw": True, "provider_options": {"country": "DE"}},
+            headers=headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["search_tool"] == "brave"
+        assert resp.json()["results"][0]["url"] == "https://example.com/brave"
+        assert resp.json()["raw"] == _BRAVE_ANSWER
+        [request] = seen
+        assert (request.url.host, request.url.path) == ("api.search.brave.com", "/res/v1/web/search")
+        assert request.headers["x-subscription-token"] == "brv-ours"
+        assert (request.url.params["q"], request.url.params["country"]) == (SEARCH_PAYLOAD["query"], "DE")
+
+
+def test_an_unnamed_call_on_a_brave_organization_key_runs_on_its_adapter(
+    default_tool_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    client = default_tool_client
+    headers = _keyed(client, master_key_header, "brave-key-user")
+    credential = WebSearchCredential(provider="brave", source=WebToolCredentialSource.ORG, api_key="brave-key")
+    _stub_policy(client, _policy(credential=credential))
+    seen = _provider_answers(client, _BRAVE_ANSWER)
+
+    resp = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["results"][0]["url"] == "https://example.com/brave"
+    [request] = seen
+    assert (request.url.host, request.headers["x-subscription-token"]) == ("api.search.brave.com", "brave-key")

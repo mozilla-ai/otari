@@ -370,6 +370,7 @@ def _build_registry(uow: UnitOfWork) -> SandboxContainerRegistry | None:
         user_id="u1",
         workspace_id=uuid.uuid4(),
         port=cast(CodeExecutionPort, _StubCodeExecutionPort()),
+        may_read_stored_files=True,
     )
 
 

@@ -24,6 +24,7 @@ class OrganizationInvitation(Base):
     An accepted or canceled invitation has no row.
     ``next_send_at`` is when the invitation email is next due, and is None when no email is due.
     ``delivery_attempts`` counts the attempts to deliver the invitation email.
+    ``last_send_requested_at`` is when the invitation or its most recent resend was requested.
     """
 
     __tablename__ = "organization_invitation"
@@ -42,12 +43,15 @@ class OrganizationInvitation(Base):
     invited_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("user.id", ondelete="SET NULL"), index=True
     )
+    # NOTE: Serves three jobs at once: the accept link,
+    # a delivery worker's claim on a send in progress, and whether a send's result may still be recorded.
+    # Replacing it ends all three.
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
     workspace_assignments: Mapped[list[WorkspaceAssignment]] = mapped_column(JSON, default=list, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     declined_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
-    send_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    last_send_requested_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
+    send_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    last_send_requested_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     next_send_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
     delivery_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC), nullable=False)

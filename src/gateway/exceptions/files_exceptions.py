@@ -82,8 +82,9 @@ class ProviderAttachmentRefusedError(TenancyValidationError, ProviderAttachmentE
 class AttachedFileUnavailableError(ProviderAttachmentRefusedError):
     """The deployment holds no usable file under the ID the request attached."""
 
-    def __init__(self) -> None:
-        super().__init__("An attached file does not exist, or holds no bytes here")
+    def __init__(self, file_id: str | None = None) -> None:
+        named = f"Attached file {file_id}" if file_id else "An attached file"
+        super().__init__(f"{named} does not exist, or holds no bytes here")
 
 
 class AttachedFileExpiresTooSoonError(ProviderAttachmentRefusedError):
@@ -91,13 +92,6 @@ class AttachedFileExpiresTooSoonError(ProviderAttachmentRefusedError):
 
     def __init__(self) -> None:
         super().__init__("An attached file expires too soon to be copied to the provider")
-
-
-class AttachedFilesNotReadError(ProviderAttachmentRefusedError):
-    """The deployment does not read attached files, so it cannot resolve the one attached."""
-
-    def __init__(self) -> None:
-        super().__init__("This deployment does not read attached files")
 
 
 class ProviderUploadDisabledError(ProviderAttachmentRefusedError):

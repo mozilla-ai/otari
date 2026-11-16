@@ -32,7 +32,7 @@ from openai.types.chat.chat_completion_message_custom_tool_call import ChatCompl
 from gateway.core.usage import cache_write_1h_tokens_of, provider_web_searches_of, reasoning_tokens_of
 from gateway.log_config import logger
 from gateway.services import mcp_loop as mcp_loop_module
-from gateway.services._tool_loop import _released_tool_choice
+from gateway.services._tool_loop import _released_tool_choice, _request_chars
 from gateway.services.inference import EmptyCompletionError
 from gateway.services.mcp_loop import (
     MaxToolIterationsExceeded,
@@ -1314,6 +1314,224 @@ async def test_loop_on_first_response_fires_before_second_round_failure(
         )
     # Callback fired exactly once on round 1, even though round 2 failed.
     assert invocations == [1]
+
+
+class _RoundGate:
+    """Answers each round's hold in turn, admitting any round past its answers, and records what each was asked."""
+
+    def __init__(self, *answers: bool) -> None:
+        self._answers = list(answers)
+        self.asked: list[int] = []
+        self.written: list[int | None] = []
+
+    async def admit(self, prompt_chars: int, output_tokens: int | None) -> bool:
+        self.asked.append(prompt_chars)
+        self.written.append(output_tokens)
+        return self._answers.pop(0) if self._answers else True
+
+
+def _offers(kwargs: dict[str, Any], name: str) -> bool:
+    return any((tool.get("function") or {}).get("name") == name for tool in kwargs.get("tools") or [])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True], ids=["non-streaming", "streaming"])
+async def test_a_round_the_budget_cannot_hold_is_the_last_and_offers_no_gateway_tool(
+    monkeypatch: pytest.MonkeyPatch, stream: bool
+) -> None:
+    """Round 2 fits its hold and round 3 does not, so round 3 answers without the gateway's tools and ends the loop."""
+    sent: list[dict[str, Any]] = []
+
+    async def fake_acompletion(**kwargs: Any) -> Any:
+        sent.append(kwargs)
+        call_id = f"c{len(sent)}"
+        if stream:
+            if _offers(kwargs, "fetch_url"):
+                return _async_iter(_chunk(tool_calls=[(0, call_id, "fetch_url", "{}")]), _chunk(finish="tool_calls"))
+            return _async_iter(_chunk(content="done", finish="stop"))
+        if _offers(kwargs, "fetch_url"):
+            return _completion(finish="tool_calls", tool_calls=[(call_id, "fetch_url", "{}")])
+        return _completion(finish="stop", content="done")
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    gate = _RoundGate(True, False)
+    completion_kwargs = {"model": "fake", "messages": [{"role": "user", "content": "go"}]}
+    pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "x" * 1000})
+
+    if stream:
+        async for _ in mcp_tool_loop_stream(
+            completion_kwargs=completion_kwargs, pool=pool, max_iterations=10, round_gate=gate
+        ):
+            pass
+    else:
+        await mcp_tool_loop(completion_kwargs=completion_kwargs, pool=pool, max_iterations=10, round_gate=gate)
+
+    assert [_offers(kwargs, "fetch_url") for kwargs in sent] == [True, True, False]
+    assert len(gate.asked) == 2, "the first round rides on the request's own hold; each later one is held"
+    assert gate.asked[0] < gate.asked[1], "each round is held on its own transcript, which grows"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True], ids=["non-streaming", "streaming"])
+async def test_a_round_is_held_with_what_the_round_before_wrote(monkeypatch: pytest.MonkeyPatch, stream: bool) -> None:
+    """Round 2 is held with round 1's reported output; round 3 with None, since round 2 reported no usage."""
+    sent: list[dict[str, Any]] = []
+
+    async def fake_acompletion(**kwargs: Any) -> Any:
+        sent.append(kwargs)
+        call_id = f"c{len(sent)}"
+        usage = CompletionUsage(prompt_tokens=10, completion_tokens=700, total_tokens=710) if len(sent) == 1 else None
+        if len(sent) == 3:
+            return _async_iter(_chunk(content="done", finish="stop")) if stream else _completion(finish="stop")
+        if stream:
+            return _async_iter(
+                _chunk(tool_calls=[(0, call_id, "fetch_url", "{}")]), _chunk(finish="tool_calls", usage=usage)
+            )
+        completion = _completion(finish="tool_calls", tool_calls=[(call_id, "fetch_url", "{}")])
+        completion.usage = usage
+        return completion
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    gate = _RoundGate()
+    completion_kwargs = {"model": "fake", "messages": [{"role": "user", "content": "go"}]}
+    pool = _FakePool(tool_names=["fetch_url"])
+
+    if stream:
+        async for _ in mcp_tool_loop_stream(
+            completion_kwargs=completion_kwargs, pool=pool, max_iterations=10, round_gate=gate
+        ):
+            pass
+    else:
+        await mcp_tool_loop(completion_kwargs=completion_kwargs, pool=pool, max_iterations=10, round_gate=gate)
+
+    assert gate.written == [700, None]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True], ids=["non-streaming", "streaming"])
+async def test_a_round_the_budget_cannot_hold_ends_the_loop_even_if_the_model_calls_a_tool_anyway(
+    monkeypatch: pytest.MonkeyPatch, stream: bool
+) -> None:
+    """No round runs after the one the budget could not hold, whatever the model asks for in it."""
+    sent: list[dict[str, Any]] = []
+
+    async def fake_acompletion(**kwargs: Any) -> Any:
+        sent.append(kwargs)
+        call_id = f"c{len(sent)}"
+        if stream:
+            return _async_iter(_chunk(tool_calls=[(0, call_id, "fetch_url", "{}")]), _chunk(finish="tool_calls"))
+        return _completion(finish="tool_calls", tool_calls=[(call_id, "fetch_url", "{}")])
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    completion_kwargs = {"model": "fake", "messages": [{"role": "user", "content": "go"}]}
+    pool = _FakePool(tool_names=["fetch_url"])
+
+    with pytest.raises(MaxToolIterationsExceeded):
+        if stream:
+            async for _ in mcp_tool_loop_stream(
+                completion_kwargs=completion_kwargs, pool=pool, max_iterations=10, round_gate=_RoundGate(False)
+            ):
+                pass
+        else:
+            await mcp_tool_loop(
+                completion_kwargs=completion_kwargs, pool=pool, max_iterations=10, round_gate=_RoundGate(False)
+            )
+
+    assert len(sent) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_round_counts_an_inline_image_by_what_it_costs_not_its_encoded_length(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every round resends the image, so its megabyte of base64 would otherwise be held again on each one."""
+    sent: list[dict[str, Any]] = []
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        sent.append(kwargs)
+        if len(sent) == 1:
+            return _completion(finish="tool_calls", tool_calls=[("c1", "fetch_url", "{}")])
+        return _completion(finish="stop", content="done")
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    image = "data:image/png;base64," + "iVBORw0K" * 131_072
+    gate = _RoundGate()
+
+    await mcp_tool_loop(
+        completion_kwargs={
+            "model": "fake",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "what is this"},
+                        {"type": "image_url", "image_url": {"url": image}},
+                    ],
+                }
+            ],
+        },
+        pool=_FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"}),
+        max_iterations=5,
+        round_gate=gate,
+    )
+
+    [asked] = gate.asked
+    assert asked < 10_000 < len(image)
+
+
+_BASE64 = "iVBORw0K" * 131_072
+
+
+@pytest.mark.parametrize(
+    "part",
+    [
+        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{_BASE64}"}},
+        {"type": "input_image", "image_url": f"data:image/png;base64,{_BASE64}"},
+        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": _BASE64}},
+        {"type": "input_audio", "input_audio": {"data": _BASE64, "format": "wav"}},
+    ],
+)
+def test_an_inline_image_or_audio_part_counts_at_a_fixed_allowance(part: dict[str, Any]) -> None:
+    assert _request_chars([part]) < 10_000 < len(_BASE64)
+
+
+@pytest.mark.parametrize(
+    "part",
+    [
+        {"type": "text", "text": f"data:text/plain;base64,{_BASE64}"},
+        {"type": "file", "file": {"file_data": f"data:application/pdf;base64,{_BASE64}"}},
+        {"type": "input_file", "file_data": f"data:application/pdf;base64,{_BASE64}"},
+        {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": _BASE64}},
+    ],
+)
+def test_text_and_inline_files_count_at_their_length(part: dict[str, Any]) -> None:
+    """Text bills at its length and a PDF by its pages, which an image's allowance can understate many times over."""
+    assert _request_chars([part]) > len(_BASE64)
+
+
+@pytest.mark.asyncio
+async def test_the_last_round_max_tool_iterations_allows_is_held_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The loop's own last round resends the transcript and is billed like any other, so it is held too."""
+    sent: list[dict[str, Any]] = []
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        sent.append(kwargs)
+        if _offers(kwargs, "fetch_url"):
+            return _completion(finish="tool_calls", tool_calls=[(f"c{len(sent)}", "fetch_url", "{}")])
+        return _completion(finish="stop", content="done")
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    gate = _RoundGate()
+
+    await mcp_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+        pool=_FakePool(tool_names=["fetch_url"], results={"fetch_url": "x" * 1000}),
+        max_iterations=3,
+        round_gate=gate,
+    )
+
+    assert [_offers(kwargs, "fetch_url") for kwargs in sent] == [True, True, False]
+    assert len(gate.asked) == 2
 
 
 @pytest.mark.asyncio

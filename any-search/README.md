@@ -110,6 +110,37 @@ own response, and both together print the result with `raw` kept. `--describe PR
 provider's metadata and each native option with its type, allowed values, default and
 description, then exits without searching.
 
+## Brave
+
+`brave` calls Brave's [Web Search API](https://api-dashboard.search.brave.com/api-reference/web/search/get),
+`GET /res/v1/web/search`, with the key read from `BRAVE_API_KEY` when not passed. The key travels
+in the `X-Subscription-Token` header; the query travels in the URL, which the log filter above
+keeps out of httpx's log.
+
+| `SearchHit` | From Brave |
+|---|---|
+| `url`, `title` | `url`, `title` of each item in `web.results` |
+| `snippet` | `description`, or `""` when Brave sends none or null; Brave returns no page text, so `text` is always `None` |
+| `published` | `page_age`, an ISO 8601 date, read as UTC when it has no zone; `None` when Brave sends none or one that does not parse, which stays in `raw` |
+
+Brave reports no cost. `max_results` becomes `count`, at most 20. `time_range` becomes Brave's
+`freshness`, `pd`, `pw`, `pm` or `py`, and wins over the `freshness` option; Brave ignores a
+`freshness` value it does not know. The other native options are Brave's own query parameters,
+such as `country`, `search_lang`, `offset` and `safesearch`; `--describe brave` lists them. An
+option set to `None` is not sent. Two options trim the answer: `result_filter: web` leaves out the
+videos, news and other sections Brave adds by default, which the adapter does not read, and
+`text_decorations: false` leaves out the HTML, such as `<strong>`, that marks the query's words in
+snippets.
+
+Any status from 400 raises `ProviderError`, tagged with Brave's `error.code` in lower case, else
+`http_error`: `subscription_token_invalid` for a refused key, which comes as a 422, and
+`validation` for a parameter out of range. The rest of the body never reaches the error.
+
+Every field read from a successful answer is checked. An answer without `web`, or with `web`
+null, found nothing and has no hits. A `web` without a `results` list, a result whose `url` or `title` is missing or not a
+string, or whose `description` or `page_age` is neither a string nor null, raises `ProviderError`
+with the tag `unexpected_response`.
+
 ## DeepSeek
 
 `deepseek` calls DeepSeek's [Search API](https://api-docs.deepseek.com/api/search),
@@ -356,6 +387,36 @@ Every field read from a successful answer is checked: an answer without `results
 lacking `url` or `title`, or with either of the wrong type, or with a `text` or `published` that is
 neither a string nor null, or a `published` that does not parse, raises `ProviderError` with the
 tag `unexpected_response`. Fields the adapter does not read are ignored.
+
+## Tavily
+
+`tavily` calls Tavily's [Search API](https://docs.tavily.com/documentation/api-reference/endpoint/search),
+`POST /search`, with the key read from `TAVILY_API_KEY` when not passed. The key travels as a
+Bearer token.
+
+| `SearchHit` | From Tavily |
+|---|---|
+| `url`, `title` | `url`, `title` of each item in `results` |
+| `snippet` | `content`, the passages of the page relevant to the query |
+| `text` | `raw_content`, the page's full text, which Tavily returns only when `include_raw_content` asks for it; else `None` |
+| `published` | `published_date`, an RFC 1123 date such as `Thu, 15 Oct 2026 00:00:00 GMT`; `None` when Tavily sends none or one that does not parse, which stays in `raw` |
+
+Tavily reports credits, not dollars, so it reports no cost. `search_depth` is its cost tier:
+`basic`, `fast` and `ultra-fast` cost 1 credit a search, `advanced` 2. `auto_parameters` is not
+offered, since it always costs 2 credits. `max_results` is sent at most 20, and only when passed;
+`time_range` is Tavily's own parameter of that name. The other native options are Tavily's own,
+such as `topic`, `include_domains` and `include_published_date`; `--describe tavily` lists them.
+An option set to `None` is not sent.
+
+Tavily signals every failure with an HTTP status and a sentence, which never reaches the error.
+Any status from 400 raises `ProviderError`, tagged by its status: `unauthorized` (401),
+`rate_limited` (429), `plan_limit_exceeded` (432), `pay_as_you_go_limit_exceeded` (433), else
+`http_error`.
+
+Every field read from a successful answer is checked. An answer without a `results` list, a
+result whose `url`, `title` or `content` is missing or not a string, or whose `raw_content` or
+`published_date` is neither a string nor null, raises `ProviderError` with the tag
+`unexpected_response`.
 
 ## The fake provider
 

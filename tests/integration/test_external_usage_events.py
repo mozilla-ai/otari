@@ -23,6 +23,8 @@ from gateway.models.usage import UsageLog
 from gateway.models.users import User
 from gateway.services.tenancy.provisioning_service import BOOTSTRAP_IDENTITY_KEY
 
+from .conftest import ALL_KEY_SCOPES
+
 _SRC = "claude_code"
 _MODEL_KEY = "anthropic:claude-sonnet-4-6"
 
@@ -143,6 +145,7 @@ def _make_key(
     which is what lets a test import as an organization other than the default.
     """
     body: dict[str, Any] = {
+        "scopes": ALL_KEY_SCOPES,
         "key_name": f"importer-{user_id}",
         "user_id": user_id,
         "exclude_from_budget": exclude_from_budget,

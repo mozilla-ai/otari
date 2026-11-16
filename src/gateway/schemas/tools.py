@@ -36,7 +36,7 @@ class OrgWebSearchKeyCreateRequest(SQLModel):
         max_length=255,
         description=(
             "The provider the key is for: one the provider catalog, GET /api/v1/search-tools/providers, "
-            "lists for the key's kind, other than searxng, or tavily or brave for a search key."
+            "lists for the key's kind, other than searxng."
         ),
     )
     name: str = Field(max_length=255, description="How the organization tells this key apart from its others.")

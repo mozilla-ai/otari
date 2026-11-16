@@ -1,9 +1,9 @@
 """An organization's own web search and fetch keys: managing them, and the requests using them.
 
-The cases on the older backend go through ``/api/v1/messages`` with it patched out, so
-what is asserted is which provider and key it was built with. The cases on the
-libraries go through ``/api/v1/chat/completions`` with a scripted model, and answer the
-provider's calls through the app's web provider client.
+Some cases go through ``/api/v1/messages`` with the search backend patched out, so
+what is asserted is which search, provider and key it was built with. Others go through
+``/api/v1/chat/completions`` with a scripted model, and answer the provider's calls
+through the app's web provider client.
 """
 
 from __future__ import annotations
@@ -334,10 +334,10 @@ def test_a_workspace_with_a_key_searches_with_it(
 ) -> None:
     _add_key(client, master_key_header, api_key="tvly-org-secret", default=True)
 
-    seen = _searched_with(client, api_key_header)
+    search = _searched_with(client, api_key_header)["search"].search
 
-    assert seen["provider"] == "tavily"
-    assert seen["provider_api_key"] == "tvly-org-secret"
+    assert (search.provider, search.api_key, search.label) == ("tavily", "tvly-org-secret", "org:tavily")
+    assert search.on_credential is True
 
 
 def test_a_workspace_that_turned_its_keys_off_uses_the_deployments_search(
@@ -378,7 +378,7 @@ def test_an_archived_key_is_not_searched_with(
 ) -> None:
     serve_search_on_fake()
     key = _add_key(client, master_key_header, api_key="tvly-org-secret", default=True)
-    assert _searched_with(client, api_key_header)["provider_api_key"] == "tvly-org-secret"
+    assert _searched_with(client, api_key_header)["search"].search.api_key == "tvly-org-secret"
 
     archived = client.post(f"{_KEYS}/{key['id']}/archive", headers=master_key_header)
 
@@ -564,8 +564,7 @@ def test_a_keys_kind_is_fixed(client: TestClient, master_key_header: dict[str, s
         {"provider": "tabstack"},
         {"provider": "mojeek", "kind": "fetch"},
         {"provider": "exa", "api_key": None},
-        {"provider": "tavily", "api_base": "https://tavily.example"},
-        {"provider": "brave", "options": {"country": "de"}},
+        {"provider": "brave", "options": {"no_such_option": 1}},
         {"provider": "exa", "api_base": "http://exa.example"},
         {"provider": "exa", "options": {"no_such_option": 1}},
     ],
@@ -576,8 +575,7 @@ def test_a_keys_kind_is_fixed(client: TestClient, master_key_header: dict[str, s
         "search-on-a-fetch-provider",
         "fetch-on-a-search-provider",
         "keyless-on-a-keyed-provider",
-        "tavily-endpoint",
-        "brave-options",
+        "brave-unknown-option",
         "key-over-http",
         "unknown-option",
     ],
@@ -757,9 +755,9 @@ def test_a_tavily_key_serves_an_explicit_declaration_where_the_deployment_has_no
 ) -> None:
     _add_key(client, master_key_header, api_key="tvly-org-secret", default=True)
 
-    seen = _searched_with(client, api_key_header)
+    search = _searched_with(client, api_key_header)["search"].search
 
-    assert (seen["provider"], seen["provider_api_key"]) == ("tavily", "tvly-org-secret")
+    assert (search.provider, search.api_key) == ("tavily", "tvly-org-secret")
 
 
 def test_the_workspace_page_counts_its_key_where_the_deployment_has_no_search(
@@ -885,6 +883,50 @@ def test_a_pinned_exa_key_searches_in_the_loop_and_is_billed_as_the_organization
     line = _tool_line(db_session_factory, api_key_obj["user_id"], "web_search_calls")
     assert (line["label"], line["units"]) == ("org:exa", 1)
     assert line["cost"] == pytest.approx(billed)
+
+
+def test_a_pinned_brave_key_searches_in_the_loop_on_its_adapter(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    db_session_factory: Callable[[], Session],
+    no_search_of_its_own: None,
+) -> None:
+    workspace_id = _workspace_id(client, master_key_header)
+    key = _add_key(client, master_key_header, provider="brave", api_key="brave-org-secret")
+    client.patch(
+        f"{API_ROOT}/workspaces/{workspace_id}/web-search-keys/{key['id']}",
+        json={"is_default": True},
+        headers=master_key_header,
+    )
+    _price(client, master_key_header, "otari:web_search", 0.002)
+    seen: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        hit = {"url": "https://a.example", "title": "A", "description": "About A."}
+        return httpx.Response(200, json={"web": {"results": [hit]}})
+
+    _answer_provider_calls(client, answer)
+    with _scripted(_call("web_search", '{"query": "otari"}'), _call("", "")):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "q"}],
+                "tools": [{"type": "otari_web_search"}],
+            },
+            headers=api_key_header,
+        )
+
+    assert response.status_code == 200, response.text
+    [request] = seen
+    assert (request.url.host, request.url.path) == ("api.search.brave.com", "/res/v1/web/search")
+    assert request.headers["x-subscription-token"] == "brave-org-secret"
+    line = _tool_line(db_session_factory, api_key_obj["user_id"], "web_search_calls")
+    assert (line["label"], line["units"]) == ("org:brave", 1)
+    assert line["cost"] == pytest.approx(0.002)
 
 
 def test_a_fetch_key_serves_the_fetch_tool(

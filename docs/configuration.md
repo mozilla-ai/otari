@@ -378,6 +378,7 @@ the next start. It takes:
 | `ceiling` | Budget that caps the key as a whole, across all of its end users: a scoped budget with `scope_type: api_token` on the key. |
 | `exclude_from_budget` | Log the key's cost without enforcing any budget. |
 | `reject_user_mismatch` | Per-key override of the deployment setting. |
+| `scopes` | The endpoint groups the key may reach; see [Scopes](api-keys.md#scopes). Unset gives every scope that existed when scopes were introduced (the end-user scopes only to a service key) and never one added since. |
 
 Unknown fields are refused, so a misspelled limit stops the start rather than
 leaving a budget uncapped. A key may name a budget declared here or one that
@@ -1609,14 +1610,22 @@ OTARI_WEB_SEARCH_URL=
 A variable exported in the shell that runs Docker Compose wins over `.env`, so
 unset an exported `OTARI_WEB_SEARCH_URL` there too.
 
+### The legacy provider settings
+
+`web_search_provider` and `web_search_provider_api_key` are deprecated, and a
+coming breaking release refuses to start while they are set. They name the
+Tavily or Brave account the in-loop tool searches with when no search instance
+is its default. Replace them with a search instance named after the provider,
+with the key and a price, and name it in `web_search_default_tool`; for Tavily,
+add `include_raw_content: true` to its options to keep each page's full text.
+The startup log says the same while they are set.
+
 ### The older in-loop backend
 
-The older in-loop backend still serves some requests until it is removed: a
-search on `web_search_provider`, or on a Tavily or Brave organization key, and a
-request that declares only the fetch tool. `web_fetch_default_tool` governs every
-fetch tool call, while `web_search_max_calls` and `fetch_tool` apply only where a
-search instance serves the request: the older backend keeps its fixed limit of 10
-calls, its 422 past it, and its own enrichment through the built-in fetcher.
+The older in-loop backend still serves a request that declares only the fetch
+tool, until it is removed. `web_fetch_default_tool` governs every fetch tool call,
+while `web_search_max_calls` does not apply there: the older backend keeps its
+fixed limit of 10 calls and its 422 past it.
 
 ## Decision providers
 
@@ -1762,7 +1771,7 @@ settings, and the deployment's Web search page shows the web-search ones. Common
   `sandbox_environments` (see [Sandbox environments](#sandbox-environments))
 - `code_execution_executor`
 - `web_search_url` (deprecated, see [The legacy SearXNG settings](#the-legacy-searxng-settings))
-- `web_search_provider` and `web_search_provider_api_key`
+- `web_search_provider` and `web_search_provider_api_key` (deprecated, see [The legacy provider settings](#the-legacy-provider-settings))
 - `web_search_default_tool`, `web_fetch_default_tool` and `web_search_max_calls`
   (see [Search tools](#search-tools))
 - `guardrails_url`
