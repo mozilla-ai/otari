@@ -3,8 +3,8 @@ from typing import Any
 import pytest
 from any_llm.types.batch import BatchResultError
 
-from gateway.api.routes.batches import _public_batch_error
 from gateway.core.error_details import ProviderDetail
+from gateway.services.inference import BatchLineError
 
 _SECRET = "sk-proj-AAAAAAAAAAAAAAAAAAAAAAAA"
 
@@ -22,7 +22,7 @@ _SECRET = "sk-proj-AAAAAAAAAAAAAAAAAAAAAAAA"
 def test_caller_actionable_line_errors_pass_redacted_provider_text(code: str, message: str) -> None:
     raw = f"{message}. Request to https://provider.example failed with key {_SECRET}"
 
-    result = _public_batch_error(BatchResultError(code=code, message=raw))
+    result = BatchLineError.of(BatchResultError(code=code, message=raw))
 
     assert result.public["code"] == code
     assert message in result.public["message"]
@@ -39,7 +39,7 @@ def test_caller_actionable_line_errors_pass_redacted_provider_text(code: str, me
     ],
 )
 def test_gateway_side_line_errors_use_fixed_public_text(code: str | None, message: str | None, detail: str) -> None:
-    result = _public_batch_error(BatchResultError(code=code, message=message))  # type: ignore[arg-type]
+    result = BatchLineError.of(BatchResultError(code=code, message=message))  # type: ignore[arg-type]
 
     assert result.public["message"] == detail
 
@@ -50,7 +50,7 @@ def test_an_exhausted_provider_account_reads_as_billing_not_a_bad_request() -> N
         message="Your credit balance is too low to access the Anthropic API.",
     )
 
-    result = _public_batch_error(error)
+    result = BatchLineError.of(error)
 
     assert result.public["message"] == ProviderDetail.BILLING
 
@@ -59,7 +59,7 @@ def test_a_numeric_error_code_is_classified_as_its_http_status() -> None:
     # Bedrock reports a line's errorCode as a number, which the adapter passes through unconverted.
     code: Any = 429
 
-    result = _public_batch_error(BatchResultError(code=code, message="Too many tokens, please wait"))
+    result = BatchLineError.of(BatchResultError(code=code, message="Too many tokens, please wait"))
 
     assert result.public == {"code": "429", "message": "Too many tokens, please wait"}
     assert result.logged_status == 429

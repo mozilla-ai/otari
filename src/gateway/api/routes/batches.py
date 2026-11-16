@@ -12,7 +12,7 @@ from typing import Annotated, Any
 from any_llm import AnyLLM, LLMProvider
 from any_llm.api import acancel_batch, acreate_batch, alist_batches, aretrieve_batch, aretrieve_batch_results
 from any_llm.exceptions import AnyLLMError, BatchNotCompleteError, MissingApiKeyError
-from any_llm.types.batch import Batch, BatchResultError
+from any_llm.types.batch import Batch
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,7 +42,6 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.core.config import GatewayConfig
 from gateway.core.error_codes import INSUFFICIENT_FUNDS, MODEL_NOT_ALLOWED, error_headers
-from gateway.core.error_details import ProviderDetail
 from gateway.core.metered_pricing import allocate_rounded_total, calculate_token_cost
 from gateway.core.usage import cache_read_tokens_of
 from gateway.log_config import logger
@@ -65,6 +64,7 @@ from gateway.services.budgets import (
     reserve_budget,
 )
 from gateway.services.inference import (
+    BatchLineError,
     UpstreamFailure,
     admit_deployment_paid,
     billed_model,
@@ -90,7 +90,6 @@ from gateway.services.providers import (
     ensure_provider_country,
     serve_on_hosted_provider,
 )
-from gateway.services.upstream_redaction import redact_upstream_message
 from gateway.services.workspace_scope import (
     organization_for_workspace_id,
     resolve_workspace_id,
@@ -108,50 +107,6 @@ USAGE_ENDPOINT_RESULTS = "/v1/batches/results"
 # checked on retrieve/cancel/results. The gateway stores no batch table, so the
 # provider-side metadata is the ownership anchor.
 _OWNER_METADATA_KEY = "otari_user_id"
-# A batch line reports its failure as a provider error code rather than an HTTP
-# status. These are the codes whose status is known, so the line is classified
-# by the same rules as a synchronous failure with that status.
-_BATCH_ERROR_STATUS_BY_CODE = {
-    "invalid_argument": 400,
-    "invalid_parameter": 400,
-    "invalid_prompt": 400,
-    "invalid_request": 400,
-    "invalid_request_error": 400,
-    "invalid_value": 400,
-    "unsupported_value": 400,
-    "context_length_exceeded": 400,
-    "billing_hard_limit_reached": 400,
-    "insufficient_quota": 429,
-    "authentication_error": 401,
-    "permission_error": 403,
-    "model_not_found": 404,
-    "not_found": 404,
-    "not_found_error": 404,
-    "unprocessable_entity": 422,
-    "validation_error": 422,
-    "rate_limit": 429,
-    "rate_limit_error": 429,
-    "rate_limit_exceeded": 429,
-    "rate_limit_reached": 429,
-    "too_many_requests": 429,
-}
-
-
-class _BatchLineFailure(Exception):
-    """A failed batch line, shaped like the upstream exception a synchronous call would raise."""
-
-    def __init__(self, status_code: int | None, message: str) -> None:
-        super().__init__(message)
-        self.status_code = status_code
-        self.message = message
-
-
-@dataclass(frozen=True)
-class _BatchLineError:
-    """What the caller and the usage row see of one failed batch line."""
-
-    public: dict[str, str]
-    logged_status: int
 
 
 @dataclass(frozen=True)
@@ -162,34 +117,7 @@ class _BatchResultLine:
     total_tokens: int | None
     cache_read_tokens: int | None
     has_usage: bool
-    error: _BatchLineError | None
-
-
-def _batch_line_status(code: str) -> int | None:
-    """The HTTP status a batch error code stands for, or ``None`` when it names none."""
-    normalized = code.strip().casefold()
-    if normalized.isdigit() and 400 <= int(normalized) <= 599:
-        return int(normalized)
-    return _BATCH_ERROR_STATUS_BY_CODE.get(normalized)
-
-
-def _public_batch_error(error: BatchResultError) -> _BatchLineError:
-    """Classify one failed line with the synchronous routes' taxonomy.
-
-    Provider adapters fill ``BatchResultError`` without validation, so a numeric
-    code (Bedrock) or a missing message is coerced to text first.
-    """
-    raw_code = "" if error.code is None else str(error.code)
-    message = "" if error.message is None else str(error.message)
-    failure = UpstreamFailure(_BatchLineFailure(_batch_line_status(raw_code), message))
-    mapping = failure.mapping
-    return _BatchLineError(
-        public={
-            "code": redact_upstream_message(raw_code) or "provider_error",
-            "message": mapping.detail if mapping is not None else ProviderDetail.ERROR,
-        },
-        logged_status=failure.logged_status,
-    )
+    error: BatchLineError | None
 
 
 # ---------------------------------------------------------------------------
@@ -927,7 +855,7 @@ async def retrieve_batch_results(
                 total_tokens=line_total,
                 cache_read_tokens=line_cache_read,
                 has_usage=usage is not None,
-                error=_public_batch_error(item.error) if item.error is not None else None,
+                error=BatchLineError.of(item.error) if item.error is not None else None,
             )
         )
 
