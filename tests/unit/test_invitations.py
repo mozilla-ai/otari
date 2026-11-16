@@ -48,7 +48,7 @@ from gateway.models.tenancy import (
 )
 from gateway.ports.rate_limit_store_port import RateLimitStorePort, RateLimitWindow
 from gateway.repositories.identity import BlockedEmailRepository
-from gateway.repositories.organizations import NewInvitation, OrganizationRepositories
+from gateway.repositories.organizations import NewInvitation, OrganizationRepositories, SendRequest, SendResult
 from gateway.repositories.organizations.organization_invitation_repository import OrganizationInvitationRepository
 from gateway.repositories.tenancy import (
     OrganizationDomainRepository,
@@ -271,6 +271,28 @@ class _RepositoryThatFailsAfterWriting(OrganizationInvitationRepository):
         await super().add_many(news)
         msg = "simulated failure after the write"
         raise RuntimeError(msg)
+
+
+class _RepositoryThatRecordsItsSendRequest(OrganizationInvitationRepository):
+    """Records whether a send request's write matched, so a test can fail the commit that follows it."""
+
+    def __init__(self, db: AsyncSession | UnitOfWork) -> None:
+        super().__init__(db)
+        self.wrote = False
+
+    async def request_send(
+        self,
+        invitation_id: uuid.UUID,
+        organization_id: uuid.UUID,
+        request: SendRequest,
+        *,
+        expected_send_count: int,
+    ) -> SendResult:
+        result = await super().request_send(
+            invitation_id, organization_id, request, expected_send_count=expected_send_count
+        )
+        self.wrote = result.sent
+        return result
 
 
 @pytest_asyncio.fixture
@@ -1283,18 +1305,33 @@ async def test_every_count_comes_back_when_a_resends_commit_fails_after_its_writ
     issued = await store.invitations(policy=policy).invite(by, "ada@example.com", _offer())
     store.clock.now += timedelta(hours=2)
 
-    # request_send's own UPDATE matches, but the commit that would make it durable never runs.
-    async def commit_that_fails(self: AsyncSession) -> None:
+    invitations = _RepositoryThatRecordsItsSendRequest(store.uow)
+    service = Invitations(
+        store.uow,
+        dataclasses.replace(store.repositories, invitations=invitations),
+        clock=store.clock,
+        domains=OrganizationClaimedDomains(OrganizationDomainRepository(store.uow)),
+        mailer=Mailer(_config()),
+        policy=policy,
+        store=store.rate_limit_store,
+    )
+    real_commit = AsyncSession.commit
+
+    # The write matches, and the commit that would make it durable is the one that fails.
+    async def commit_that_fails_after_the_write(self: AsyncSession) -> None:
+        if not invitations.wrote:
+            await real_commit(self)
+            return
         msg = "simulated failure during commit, after the resend's write matched"
         raise RuntimeError(msg)
 
-    monkeypatch.setattr(AsyncSession, "commit", commit_that_fails)
-    service = store.invitations(policy=policy)
+    monkeypatch.setattr(AsyncSession, "commit", commit_that_fails_after_the_write)
 
     with pytest.raises(RuntimeError):
         await service.resend(by, issued.invitation.id)
 
     monkeypatch.undo()
+    assert invitations.wrote
 
     # The failed resend's own admission came back along with its rolled-back write, so the one
     # already spent by the invite still leaves exactly one more admission of room, not zero.
