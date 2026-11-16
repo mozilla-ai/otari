@@ -40,14 +40,11 @@ from any_search._errors import ProviderError, safe_tag
 from any_search._types import OptionSpec, ProviderMetadata, SearchHit, SearchResult, TimeRange
 
 MAX_RESULTS = 20
-"""The most web results Brave returns for one search."""
 
 _FRESHNESS = {"day": "pd", "week": "pw", "month": "pm", "year": "py"}
 
 
 class BraveProvider(AnySearch):
-    """Brave's Web Search API."""
-
     METADATA = ProviderMetadata(
         name="brave",
         doc_url="https://api-dashboard.search.brave.com/api-reference/web/search/get",
@@ -146,7 +143,6 @@ class BraveProvider(AnySearch):
     ) -> SearchResult:
         count = MAX_RESULTS if max_results is None else min(max_results, MAX_RESULTS)
         params: dict[str, Any] = {"q": query, "count": count}
-        # An option set to null is not sent.
         params.update({name: value for name, value in options.items() if value is not None})
         if time_range is not None:
             params["freshness"] = _FRESHNESS[time_range]
@@ -189,7 +185,6 @@ def _unexpected(response: httpx.Response) -> ProviderError:
 
 
 def _hit(item: Any, response: httpx.Response) -> SearchHit:
-    """One web result as a hit."""
     if not isinstance(item, dict):
         raise _unexpected(response)
     url, title, description = item.get("url"), item.get("title"), item.get("description") or ""
