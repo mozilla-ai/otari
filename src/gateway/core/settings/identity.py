@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from gateway.core.oauth_apps import parse_oauth_redirect
 from gateway.core.settings_view import OMITTED, SettingsGroup, Shown
+from gateway.types.key_scope import DEFAULT_KEY_SCOPES, KeyScope, KeyScopeSet
 
 
 class OAuthAppConfig(BaseModel):
@@ -14,6 +15,11 @@ class OAuthAppConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=100)
     redirect_uris: list[str] = Field(min_length=1, max_length=20)
+    scopes: list[KeyScope] = Field(
+        default_factory=lambda: list(DEFAULT_KEY_SCOPES),
+        min_length=1,
+        description="The scopes of each key the app is issued. An app key is never a service key.",
+    )
 
     @field_validator("redirect_uris")
     @classmethod
@@ -25,6 +31,11 @@ class OAuthAppConfig(BaseModel):
                     "without credentials, query or fragment"
                 )
         return values
+
+    @field_validator("scopes")
+    @classmethod
+    def validate_scopes(cls, values: list[KeyScope]) -> list[KeyScope]:
+        return list(KeyScopeSet.checked(values, is_service_key=False))
 
 
 class IdentitySettings(BaseModel):

@@ -34,6 +34,7 @@ from openai.types.responses.response_usage import InputTokensDetails, OutputToke
 
 from gateway.log_config import logger
 from gateway.services._tool_loop import (
+    RoundGate,
     StreamAction,
     log_tool_failure,
     run_tool_loop,
@@ -432,6 +433,9 @@ class _ResponsesToolLoopStrategy:
             "compactions": [],
         }
 
+    def output_tokens(self, acc: dict[str, Any]) -> int:
+        return int(acc["output_tokens"])
+
     def accumulate_usage(self, acc: dict[str, Any], result: Response) -> None:
         if result.usage:
             _add_round_usage(acc, result.usage)
@@ -713,6 +717,9 @@ class _ResponsesToolLoopStrategy:
         # same sequence as the events forwarded before it.
         return [self._resequenced(folded, acc)]
 
+    def stream_output_tokens(self, acc: dict[str, Any]) -> int:
+        return int(acc["output_tokens"])
+
     def accumulate_stream_usage(self, acc: dict[str, Any], state: _ResponsesStreamState) -> None:
         # All-owned continuation: keep the counts of the terminal event the loop drops.
         acc["rewritten"] = True
@@ -807,6 +814,7 @@ async def responses_tool_loop(
     on_first_response: Callable[[], None] | None = None,
     use_budget: ToolUseBudget | None = None,
     native_tools: frozenset[str] = frozenset(),
+    round_gate: RoundGate | None = None,
 ) -> Response:
     """Non-streaming OpenAI Responses tool-use loop.
 
@@ -835,6 +843,7 @@ async def responses_tool_loop(
         pool=pool,
         max_iterations=max_iterations,
         on_first_response=on_first_response,
+        round_gate=round_gate,
     )
 
 
@@ -846,6 +855,7 @@ async def responses_tool_loop_stream(
     use_budget: ToolUseBudget | None = None,
     native_tools: frozenset[str] = frozenset(),
     on_first_response: Callable[[], None] | None = None,
+    round_gate: RoundGate | None = None,
 ) -> AsyncGenerator[ResponseStreamEvent, None]:
     """Streaming OpenAI Responses tool-use loop.
 
@@ -874,6 +884,7 @@ async def responses_tool_loop_stream(
             pool=pool,
             max_iterations=max_iterations,
             on_first_response=on_first_response,
+            round_gate=round_gate,
         )
     ) as inner:
         async for event in inner:

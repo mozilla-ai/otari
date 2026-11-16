@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
-from apron_auth.pkce import generate_code_challenge
 from fastapi.testclient import TestClient
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -18,21 +17,14 @@ from gateway.models.identity import OAuthAppGrant
 from gateway.repositories.api_keys.api_key_repository import ApiKeyRepository
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
 
-from .test_oauth_apps import REDIRECT, VERIFIER, approve, code_from, redeem
+from .test_oauth_apps import REDIRECT, approve, code_from, consent_body, redeem
 from .test_oauth_apps import test_config as test_config
 from .test_organization_member_keys import _World
 from .test_organization_member_keys import world as world
 
 
-def _consent(world: _World) -> dict[str, str]:
-    return dict(
-        client_id="thunderbolt",
-        redirect_uri=REDIRECT,
-        state="s" * 43,
-        code_challenge=generate_code_challenge(VERIFIER),
-        code_challenge_method="S256",
-        workspace_id=str(world.workspaces["alpha_one"]),
-    )
+def _consent(world: _World) -> dict[str, object]:
+    return consent_body(str(world.workspaces["alpha_one"]))
 
 
 @pytest.mark.parametrize("site", ["same-site", "cross-site", None])
@@ -97,14 +89,7 @@ def test_header_authenticated_scripts_can_approve_consent(
     response = client.post(
         f"{API_ROOT}/oauth/apps/authorize",
         headers=headers,
-        json={
-            "client_id": "thunderbolt",
-            "redirect_uri": REDIRECT,
-            "state": "s" * 43,
-            "code_challenge": generate_code_challenge(VERIFIER),
-            "code_challenge_method": "S256",
-            "workspace_id": workspaces.json()["data"][0]["id"],
-        },
+        json=consent_body(workspaces.json()["data"][0]["id"]),
     )
     assert response.status_code == 200, response.text
     assert redeem(client, code_from(response)).status_code == 200

@@ -130,9 +130,9 @@ def test_bare_string_input_not_corrupted_by_normalization(
 ) -> None:
     """A bare-string ``input`` must reach the provider verbatim.
 
-    The default config enables file understanding; the normalizer used to iterate
-    ``input`` as a sequence, rewriting a plain string into a list of one-character
-    items. Regression guard: the string survives unchanged.
+    The normalizer used to iterate ``input`` as a sequence, rewriting a plain
+    string into a list of one-character items. Regression guard: the string
+    survives unchanged.
     """
     captured: dict[str, Any] = {}
 

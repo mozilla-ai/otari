@@ -619,3 +619,31 @@ def test_an_exact_id_under_a_later_provider_beats_one_in_another_case_under_an_e
     found = index.resolve("vertexaianthropic", "Model-A")
     assert found is not None
     assert (found.provider_id, found.input) == ("google-vertex", Decimal(2))
+
+
+def test_equal_rates_share_one_decimal() -> None:
+    assert parse_rate(0.25) is parse_rate(0.25)
+
+
+def test_a_shared_rate_keeps_its_spelling() -> None:
+    assert (str(parse_rate(1)), str(parse_rate(1.0))) == ("1", "1.0")
+
+
+def test_a_rate_that_is_not_a_price_is_still_refused_when_repeated() -> None:
+    assert parse_rate(-1.0) is None
+    assert parse_rate(-1.0) is None
+
+
+def test_an_unchanged_entry_is_reused_and_a_changed_one_is_not(raw: dict[str, Any]) -> None:
+    previous = ModelsDevPriceIndex.from_document(raw)
+    moved = json.loads(json.dumps(raw))
+    moved["anthropic"]["models"]["claude-sonnet-4-5"]["cost"]["input"] = 4
+
+    index = ModelsDevPriceIndex.from_document(moved, reuse=previous)
+
+    assert index.get("openai", "gpt-4o") is previous.get("openai", "gpt-4o")
+    changed = index.get("anthropic", "claude-sonnet-4-5")
+    assert changed is not None
+    assert changed is not previous.get("anthropic", "claude-sonnet-4-5")
+    assert changed.input == Decimal("4")
+    assert len(index) == len(previous)

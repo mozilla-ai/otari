@@ -17,7 +17,7 @@ from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Never, cast
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx2
 import pytest
@@ -33,7 +33,7 @@ from gateway.core.database import release_session
 from gateway.models.files import FileObject
 from gateway.services.file_extractors import ExtractionResult
 
-from .conftest import build_test_client
+from .conftest import ALL_KEY_SCOPES, ALL_SERVICE_KEY_SCOPES, build_test_client
 
 
 @pytest.fixture
@@ -132,7 +132,7 @@ def test_upload_frees_the_auth_connection_before_reading_the_body(
         events.append("form")
         return form(self, **kwargs)
 
-    monkeypatch.setattr("gateway.api.deps.release_session", recording_release)
+    monkeypatch.setattr("gateway.api.deps.auth.release_session", recording_release)
     monkeypatch.setattr(Request, "form", recording_form)
     resp = client.post(f"{API_ROOT}/files", headers=api_key_header, files={"file": ("a.txt", b"x", "text/plain")})
 
@@ -155,7 +155,9 @@ def test_files_are_user_scoped(
     # not per-key, and keys created without a user_id all share the "default" user
     # (see keys.py / get_or_create_default_user), so give this key its own owner.
     other = client.post(
-        f"{API_ROOT}/keys", json={"key_name": "other", "user_id": "other-user"}, headers=master_key_header
+        f"{API_ROOT}/keys",
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "other", "user_id": "other-user"},
+        headers=master_key_header,
     )
     # Match the fixture's auth scheme: the gateway requires a "Bearer " prefix on
     # every header form, including Otari-Key (see api_key_header / deps.py
@@ -181,7 +183,9 @@ def test_no_owner_keys_share_default_user_files(
     up = client.post(f"{API_ROOT}/files", headers=api_key_header, files={"file": ("a.txt", b"hi", "text/plain")})
     file_id = up.json()["id"]
 
-    sibling = client.post(f"{API_ROOT}/keys", json={"key_name": "sibling"}, headers=master_key_header)
+    sibling = client.post(
+        f"{API_ROOT}/keys", json={"scopes": ALL_KEY_SCOPES, "key_name": "sibling"}, headers=master_key_header
+    )
     sibling_header = {next(iter(api_key_header)): f"Bearer {sibling.json()['key']}"}
 
     assert client.get(f"{API_ROOT}/files/{file_id}", headers=sibling_header).status_code == 200
@@ -310,6 +314,208 @@ def test_file_id_extracted_reaches_provider(
     assert "report.txt" in sent
     # ...and the raw file block did not (it was replaced by a text block).
     assert "file_id" not in sent
+
+
+def test_a_key_without_files_read_cannot_hand_a_stored_file_to_a_model(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    master_key_header: dict[str, str],
+    tmp_file_store: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A model given a file can repeat it, so attaching one reads it: an inference-only key is refused.
+
+    The refusal names the scope, as every other missing-scope refusal does, rather
+    than answering without the file and leaving the caller to notice.
+    """
+
+    async def fake_extract(data: bytes, mime: str, filename: str | None) -> ExtractionResult:
+        return ExtractionResult(f"EXTRACTED::{data.decode()}", True, "ok")
+
+    monkeypatch.setattr("gateway.services.content_normalizer.extract_text_from_file", fake_extract)
+    up = client.post(
+        f"{API_ROOT}/files",
+        headers=api_key_header,
+        files={"file": ("report.txt", b"quarterly numbers", "text/plain")},
+    )
+    assert up.status_code == 200, up.text
+    narrowed = client.patch(
+        f"{API_ROOT}/keys/{api_key_obj['id']}", json={"scopes": ["inference:run"]}, headers=master_key_header
+    )
+    assert narrowed.status_code == 200, narrowed.text
+    assert client.get(f"{API_ROOT}/files/{up.json()['id']}/content", headers=api_key_header).status_code == 403
+    reached_provider = False
+
+    async def mock_acompletion(**kwargs: Any) -> Any:
+        nonlocal reached_provider
+        reached_provider = True
+        return _make_completion()
+
+    body = {
+        "model": "ollama:llama3",
+        "messages": [{"role": "user", "content": [{"type": "file", "file": {"file_id": up.json()["id"]}}]}],
+    }
+    with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
+        resp = client.post(f"{API_ROOT}/chat/completions", headers=api_key_header, json=body)
+
+    assert resp.status_code == 403, resp.text
+    assert "files:read" in resp.json()["detail"]
+    assert not reached_provider
+
+
+def test_a_key_without_files_read_still_sends_back_a_code_execution_result(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    master_key_header: dict[str, str],
+    tmp_file_store: None,
+) -> None:
+    """Otari names the files a code run produced by id, and a client echoes that turn back as history.
+
+    Those ids are output, not an attachment the model reads, so the refusal must
+    not fire on them: the second turn of a run would otherwise be refused where
+    the first succeeded.
+    """
+    narrowed = client.patch(
+        f"{API_ROOT}/keys/{api_key_obj['id']}", json={"scopes": ["inference:run"]}, headers=master_key_header
+    )
+    assert narrowed.status_code == 200, narrowed.text
+
+    async def mock_acompletion(**kwargs: Any) -> Any:
+        return _make_completion()
+
+    body = {
+        "model": "ollama:llama3",
+        "messages": [
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "code_execution_tool_result",
+                        "content": {
+                            "type": "code_execution_result",
+                            "content": [{"type": "code_execution_output", "file_id": "file_produced"}],
+                        },
+                    }
+                ],
+            },
+            {"role": "user", "content": "and now plot it"},
+        ],
+    }
+    with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
+        resp = client.post(f"{API_ROOT}/chat/completions", headers=api_key_header, json=body)
+
+    assert resp.status_code == 200, resp.text
+
+
+def _service_key(client: TestClient, master_key_header: dict[str, str], header_name: str, name: str) -> dict[str, str]:
+    created = client.post(
+        f"{API_ROOT}/keys",
+        json={"key_name": name, "user_id": name, "is_service_key": True, "scopes": ALL_SERVICE_KEY_SCOPES},
+        headers=master_key_header,
+    )
+    assert created.status_code == 200, created.text
+    return {header_name: f"Bearer {created.json()['key']}"}
+
+
+def test_a_service_key_keeps_each_end_users_files_apart(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    tmp_file_store: None,
+) -> None:
+    """A service key's ``user`` naming an end user owns the upload as that end user, on every verb."""
+    service_key = _service_key(client, master_key_header, next(iter(api_key_header)), "svc")
+    up = client.post(
+        f"{API_ROOT}/files",
+        headers=service_key,
+        files={"file": ("notes.txt", b"alice's notes", "text/plain")},
+        data={"user": "alice"},
+    )
+    assert up.status_code == 200, up.text
+    file_id = up.json()["id"]
+    bob = client.post(
+        f"{API_ROOT}/files",
+        headers=service_key,
+        files={"file": ("notes.txt", b"bob's notes", "text/plain")},
+        data={"user": "bob"},
+    )
+    assert bob.status_code == 200, bob.text
+
+    listed = client.get(f"{API_ROOT}/files", headers=service_key, params={"user": "alice"})
+    assert [f["id"] for f in listed.json()["data"]] == [file_id]
+    content = client.get(f"{API_ROOT}/files/{file_id}/content", headers=service_key, params={"user": "alice"})
+    assert content.content == b"alice's notes"
+    # Neither the key's own user, another end user nor an end user it never named reaches it.
+    assert client.get(f"{API_ROOT}/files", headers=service_key).json()["data"] == []
+    assert client.get(f"{API_ROOT}/files/{file_id}", headers=service_key, params={"user": "bob"}).status_code == 404
+    assert client.get(f"{API_ROOT}/files", headers=service_key, params={"user": "carol"}).json()["data"] == []
+    assert client.get(f"{API_ROOT}/files/{file_id}", headers=service_key, params={"user": "carol"}).status_code == 404
+
+    deleted = client.delete(f"{API_ROOT}/files/{file_id}", headers=service_key, params={"user": "alice"})
+    assert deleted.status_code == 200, deleted.text
+
+
+def test_an_end_users_upload_reaches_their_requests_and_no_one_elses(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    tmp_file_store: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A file a service key uploads for alice is read in alice's requests and refused, by ID, in bob's."""
+
+    async def fake_extract(data: bytes, mime: str, filename: str | None) -> ExtractionResult:
+        return ExtractionResult(f"EXTRACTED::{data.decode()}", True, "ok")
+
+    monkeypatch.setattr("gateway.services.content_normalizer.extract_text_from_file", fake_extract)
+    service_key = _service_key(client, master_key_header, next(iter(api_key_header)), "svc")
+    up = client.post(
+        f"{API_ROOT}/files",
+        headers=service_key,
+        files={"file": ("notes.txt", b"alice's notes", "text/plain")},
+        data={"user": "alice"},
+    )
+    assert up.status_code == 200, up.text
+    file_id = up.json()["id"]
+    mock_acompletion = AsyncMock(return_value=_make_completion())
+
+    def chat(user: str) -> Any:
+        body = {
+            "model": "ollama:llama3",
+            "user": user,
+            "messages": [{"role": "user", "content": [{"type": "file", "file": {"file_id": file_id}}]}],
+        }
+        with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
+            return client.post(f"{API_ROOT}/chat/completions", headers=service_key, json=body)
+
+    resp = chat("alice")
+    assert resp.status_code == 200, resp.text
+    assert "EXTRACTED::alice's notes" in json.dumps(mock_acompletion.call_args.kwargs["messages"])
+
+    mock_acompletion.reset_mock()
+    refused = chat("bob")
+    assert refused.status_code == 400, refused.text
+    assert file_id in refused.text
+    mock_acompletion.assert_not_called()
+
+
+def test_a_file_id_the_caller_cannot_reach_is_a_400_naming_it(
+    client: TestClient, api_key_header: dict[str, str], tmp_file_store: None
+) -> None:
+    """An unknown ``file_id`` is refused rather than forwarded to a provider that cannot read it."""
+    mock_acompletion = AsyncMock(return_value=_make_completion())
+    body = {
+        "model": "ollama:llama3",
+        "messages": [{"role": "user", "content": [{"type": "file", "file": {"file_id": "file-nope"}}]}],
+    }
+    with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
+        resp = client.post(f"{API_ROOT}/chat/completions", headers=api_key_header, json=body)
+
+    assert resp.status_code == 400, resp.text
+    assert "file-nope" in resp.text
+    mock_acompletion.assert_not_called()
 
 
 def test_budget_rejection_skips_normalization(
@@ -663,7 +869,9 @@ def test_anthropic_listing_pages_with_next_page(
 
     # A token issued to another user names a file this caller cannot see.
     other = client.post(
-        f"{API_ROOT}/keys", json={"key_name": "other", "user_id": "other-user"}, headers=master_key_header
+        f"{API_ROOT}/keys",
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "other", "user_id": "other-user"},
+        headers=master_key_header,
     )
     other_headers = {next(iter(api_key_header)): f"Bearer {other.json()['key']}", **_ANTHROPIC}
     _upload_text_files(client, other_headers, 2)

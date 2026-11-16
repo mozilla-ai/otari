@@ -205,10 +205,17 @@ def test_the_provider_pair_describes_the_synthesized_instance() -> None:
     config = GatewayConfig(web_search_provider="tavily", web_search_provider_api_key="tvly-key")
     synthesized = synthesized_search_instance(config)
     assert synthesized == SynthesizedSearchInstance(
-        provider="tavily", api_key="tvly-key", provider_defaults={"include_raw_content": True}
+        provider="tavily", api_key="tvly-key", options={"include_raw_content": True}
     )
     assert synthesized.name == "tavily"
     assert "tvly-key" not in repr(synthesized)
+
+
+def test_the_provider_pairs_key_is_stripped() -> None:
+    config = GatewayConfig(web_search_provider="tavily", web_search_provider_api_key=" tvly-key\n")
+    synthesized = synthesized_search_instance(config)
+    assert synthesized is not None
+    assert synthesized.api_key == "tvly-key"
 
 
 def test_the_provider_wins_over_the_url() -> None:
@@ -462,7 +469,6 @@ def test_instances_are_flagged_library_backed_or_not() -> None:
     instances = effective_search_instances(config)
     assert instances["exa"].library_backed is True
     assert instances["local"].library_backed is True
-    assert instances["local"].provider_defaults == {}
     assert instances["retired"].library_backed is False
 
 
@@ -481,8 +487,6 @@ def test_an_instance_is_hashable_and_cannot_change_the_configuration() -> None:
     assert hash(instance) == hash(effective_search_instances(config)["local"])
     with pytest.raises(TypeError):
         instance.options["categories"] = "it"  # type: ignore[index]
-    with pytest.raises(TypeError):
-        instance.provider_defaults["method"] = "post"  # type: ignore[index]
     assert config.search_tools["local"]["options"] == {"categories": "news"}
 
 

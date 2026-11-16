@@ -10,6 +10,7 @@ as the call: ``EXPECTED`` says what each provider must return, and a
 production provider joins it as it joins the conformance scenarios.
 """
 
+import asyncio
 import os
 from dataclasses import dataclass, field
 from typing import Any
@@ -37,9 +38,14 @@ class Expected:
     snippets: bool = False
     # The native options every live search sends.
     options: dict[str, Any] = field(default_factory=dict)
+    # The seconds to wait before each call, for a plan that limits its rate.
+    wait: float = 0.0
 
 
 EXPECTED: dict[str, Expected] = {
+    # Brave returns a snippet and no page text, and dates the hits it knows a day for.
+    # The test key's plan allows one request a second and answers a faster one with a 429.
+    "brave": Expected(dated={}, snippets=True, wait=1.1),
     # DeepSeek returns page text only on request, so the snippet is what a hit says by default.
     "deepseek": Expected(dated={}, snippets=True),
     "exa": Expected(dated={"category": "news"}),
@@ -54,6 +60,8 @@ EXPECTED: dict[str, Expected] = {
     "serply": Expected(snippets=True),
     # Synthetic returns page text and no snippet; it dates hits by default.
     "synthetic": Expected(dated={}),
+    # Tavily returns a snippet, and page text only on request; it dates every hit on topic news.
+    "tavily": Expected(dated={"topic": "news"}, snippets=True),
 }
 
 
@@ -73,6 +81,7 @@ def test_every_production_provider_says_what_it_must_return() -> None:
 @pytest.mark.parametrize("provider", PROVIDERS)
 async def test_a_live_search_returns_hits(provider: str) -> None:
     _require_key(provider)
+    await asyncio.sleep(EXPECTED[provider].wait)
     async with AnySearch.create(provider) as engine:
         result = await engine.search("latest stable python release", max_results=3, **EXPECTED[provider].options)
     assert result.error is None
@@ -90,6 +99,7 @@ async def test_a_live_search_returns_hits(provider: str) -> None:
 @pytest.mark.parametrize("provider", PROVIDERS)
 async def test_a_live_search_takes_a_time_range(provider: str) -> None:
     _require_key(provider)
+    await asyncio.sleep(EXPECTED[provider].wait)
     async with AnySearch.create(provider) as engine:
         result = await engine.search("python release", max_results=2, time_range="year", **EXPECTED[provider].options)
     assert result.error is None
@@ -103,6 +113,7 @@ async def test_a_live_search_dates_its_hits(provider: str) -> None:
     if dated is None:
         pytest.skip(f"{provider} dates no hits")
     _require_key(provider)
+    await asyncio.sleep(EXPECTED[provider].wait)
     async with AnySearch.create(provider) as engine:
         # A query for news itself, so dated hits come back whatever the week's news is.
         result = await engine.search("latest technology news", max_results=10, **EXPECTED[provider].options, **dated)

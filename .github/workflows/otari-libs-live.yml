@@ -43,11 +43,13 @@ jobs:
     env:
       # `secrets` cannot be read in a job-level `if`, so the presence check is a
       # step, and the key is exposed to the steps that need it only.
+      HAS_BRAVE_KEY: ${{ secrets.BRAVE_API_KEY != '' }}
       HAS_EXA_KEY: ${{ secrets.EXA_API_KEY != '' }}
       HAS_MOJEEK_KEY: ${{ secrets.MOJEEK_API_KEY != '' }}
       HAS_PERPLEXITY_KEY: ${{ secrets.PERPLEXITY_API_KEY != '' }}
       HAS_SERPLY_KEY: ${{ secrets.SERPLY_API_KEY != '' }}
       HAS_SYNTHETIC_KEY: ${{ secrets.SYNTHETIC_API_KEY != '' }}
+      HAS_TAVILY_KEY: ${{ secrets.TAVILY_API_KEY != '' }}
       HAS_TABSTACK_KEY: ${{ secrets.TABSTACK_API_KEY != '' }}
       HAS_DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_API_KEY != '' }}
 
@@ -60,6 +62,26 @@ jobs:
       if: env.HAS_EXA_KEY != 'true' && github.event_name != 'pull_request'
       run: |
         echo "::error::The EXA_API_KEY secret is not set, so the Exa live tests cannot run."
+        exit 1
+
+    - name: Say so when the Tavily key is absent
+      if: env.HAS_TAVILY_KEY != 'true' && github.event_name == 'pull_request'
+      run: echo "::notice::The TAVILY_API_KEY secret is not available to this run; the Tavily live tests skip."
+
+    - name: Fail a scheduled or manual run without the Tavily key
+      if: env.HAS_TAVILY_KEY != 'true' && github.event_name != 'pull_request'
+      run: |
+        echo "::error::The TAVILY_API_KEY secret is not set, so the Tavily live tests cannot run."
+        exit 1
+
+    - name: Say so when the Brave key is absent
+      if: env.HAS_BRAVE_KEY != 'true' && github.event_name == 'pull_request'
+      run: echo "::notice::The BRAVE_API_KEY secret is not available to this run; the Brave live tests skip."
+
+    - name: Fail a scheduled or manual run without the Brave key
+      if: env.HAS_BRAVE_KEY != 'true' && github.event_name != 'pull_request'
+      run: |
+        echo "::error::The BRAVE_API_KEY secret is not set, so the Brave live tests cannot run."
         exit 1
 
     - name: Say so when the Mojeek key is absent
@@ -151,12 +173,14 @@ jobs:
     - name: Live searches
       env:
         ANY_SEARCH_LIVE: "1"
+        BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
         EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
         MOJEEK_API_KEY: ${{ secrets.MOJEEK_API_KEY }}
         PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
         DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         SERPLY_API_KEY: ${{ secrets.SERPLY_API_KEY }}
         SYNTHETIC_API_KEY: ${{ secrets.SYNTHETIC_API_KEY }}
+        TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
         SEARXNG_BASE_URL: http://127.0.0.1:8080
       run: uv run pytest -v -rs any-search/tests/test_live.py
 

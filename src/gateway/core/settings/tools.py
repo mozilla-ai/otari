@@ -67,10 +67,9 @@ DEFAULT_WEB_SEARCH_MAX_CALLS = 10
 # The engines the old in-loop backend asks a SearXNG service for when
 # ``web_search_engines`` is unset; why these four is said where it uses them.
 DEFAULT_SEARXNG_ENGINES = ("duckduckgo", "mojeek", "qwant", "wikipedia")
-# What otari has always sent these providers, applied below every other option
-# layer: page text from Tavily, so its hits need no enrichment. An instance that
-# sets the key wins.
-PROVIDER_DEFAULT_OPTIONS: Mapping[str, Mapping[str, Any]] = MappingProxyType(
+# The options a search on the legacy settings sends its provider: page text from
+# Tavily, so its hits need no page fetches.
+LEGACY_SETTINGS_OPTIONS: Mapping[str, Mapping[str, Any]] = MappingProxyType(
     {
         "tavily": MappingProxyType({"include_raw_content": True}),
     }
@@ -280,10 +279,8 @@ class ToolInstance:
     ``library_backed`` is whether any-search or any-fetch serves the provider;
     ``dropped_options`` are the option keys the provider's schema does not know
     or refuses the value of, which load with a warning, for the resolver to
-    leave out of a call. ``provider_defaults`` are :data:`PROVIDER_DEFAULT_OPTIONS`' entry for
-    the provider, below every other option layer. Both option maps are read-only
-    copies, so a reader cannot change the configuration they came from, and are
-    left out of the hash.
+    leave out of a call. ``options`` is a read-only copy, so a reader cannot change
+    the configuration it came from, and is left out of the hash.
     """
 
     name: str
@@ -295,7 +292,6 @@ class ToolInstance:
     timeout: float | None = None
     options: Mapping[str, Any] = field(default=_NO_OPTIONS, repr=False, hash=False)
     dropped_options: frozenset[str] = frozenset()
-    provider_defaults: Mapping[str, Any] = field(default=_NO_OPTIONS, hash=False)
     fetch_tool: str | None = None
 
 
@@ -313,13 +309,14 @@ class SynthesizedSearchInstance:
     back to it, and on a deployment with no search instance the direct endpoint
     serves it too. Its name is its provider's,
     so a search instance of that name can later replace it unnoticed.
+    ``options`` are what the legacy settings send their provider.
     """
 
     provider: str
     api_key: str | None = field(default=None, repr=False)
     api_base: str | None = field(default=None, repr=False)
     engines: tuple[str, ...] = ()
-    provider_defaults: Mapping[str, Any] = field(default=_NO_OPTIONS, hash=False)
+    options: Mapping[str, Any] = field(default=_NO_OPTIONS, hash=False)
 
     @property
     def name(self) -> str:
@@ -378,14 +375,15 @@ class ToolSettings(BaseModel):
     web_search_provider: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
         default=None,
         description=(
-            "Licensed search API the web-search backend calls directly ('tavily' or 'brave'), "
-            "instead of the SearXNG-shaped service web_search_url names. Requires "
-            "web_search_provider_api_key. When both are set, web_search_url is not needed."
+            "Deprecated, and removed by a coming breaking release: use a search tool with provider tavily or "
+            "brave and its own api_key, named in web_search_default_tool. The licensed search API "
+            "('tavily' or 'brave') otari_web_search calls, with web_search_provider_api_key, when no search "
+            "tool is its default. When both are set, web_search_url is not needed."
         ),
     )
     web_search_provider_api_key: Annotated[str | None, SECRET] = Field(
         default=None,
-        description=("Credential for web_search_provider."),
+        description="Deprecated with web_search_provider: the key it searches with.",
     )
     web_search_purpose_hint: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
         default=None,
@@ -677,7 +675,6 @@ def _instance(kind: ToolKind, name: str, entry: Mapping[str, Any], *, library_ba
         timeout=float(timeout) if isinstance(timeout, (int, float)) and not isinstance(timeout, bool) else None,
         options=MappingProxyType(copy.deepcopy(options)),
         dropped_options=frozenset(option_problems(kind, provider, options)),
-        provider_defaults=PROVIDER_DEFAULT_OPTIONS.get(provider, _NO_OPTIONS),
         fetch_tool=fetch_tool.strip() if isinstance(fetch_tool, str) and fetch_tool.strip() else None,
     )
 
@@ -782,8 +779,9 @@ def synthesized_search_instance(settings: ToolSettings) -> SynthesizedSearchInst
         provider = settings.web_search_provider
         return SynthesizedSearchInstance(
             provider=provider,
-            api_key=settings.web_search_provider_api_key,
-            provider_defaults=PROVIDER_DEFAULT_OPTIONS.get(provider, _NO_OPTIONS),
+            # A key read from a file can end in a newline, which no HTTP header takes.
+            api_key=(settings.web_search_provider_api_key or "").strip() or None,
+            options=LEGACY_SETTINGS_OPTIONS.get(provider, _NO_OPTIONS),
         )
     url = (settings.web_search_url or otari_env("WEB_SEARCH_URL") or "").strip()
     if not url:
@@ -794,7 +792,6 @@ def synthesized_search_instance(settings: ToolSettings) -> SynthesizedSearchInst
         provider="searxng",
         api_base=url,
         engines=engines or DEFAULT_SEARXNG_ENGINES,
-        provider_defaults=_NO_OPTIONS,
     )
 
 

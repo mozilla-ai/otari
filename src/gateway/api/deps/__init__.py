@@ -1,44 +1,97 @@
-import secrets
-import time
 import uuid
-from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from decimal import Decimal
 from functools import partial
 from typing import Annotated, Any, cast
 
 import httpx
-from fastapi import BackgroundTasks, Depends, HTTPException, Query, Request, status
-from sqlalchemy import Select, select, update
+from fastapi import BackgroundTasks, Depends, HTTPException, Request, status
+from sqlalchemy import Select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.auth.models import hash_key
+from gateway.api.deps._base import (
+    ContainerDep,
+    MembershipListenerDep,
+    PortSessionDep,
+    UnitOfWorkDep,
+    get_config,
+    get_container,
+    get_enabled_features,
+    get_membership_listener,
+    get_unit_of_work,
+    reset_config,
+    set_config,
+)
+from gateway.api.deps.auth import (
+    AUTH_FAILURES,
+    SERVICE_KEY_REQUIRED_DETAIL,
+    CallingKey,
+    ServiceKey,
+    catalog_reader_operates_deployment,
+    catalog_reader_organization,
+    cookie_may_authenticate,
+    extract_credential_token,
+    federated_token_verifier,
+    get_session_identity,
+    is_valid_master_key,
+    misdirected_key_detail,
+    record_auth_failure,
+    refuse_ended_session,
+    require_deployment_operator,
+    verify_api_key,
+    verify_api_key_or_master_key,
+    verify_api_key_or_master_key_for_upload,
+    verify_catalog_reader,
+    verify_catalog_reader_or_public,
+    verify_master_key,
+    verify_service_key,
+)
+from gateway.api.deps.identity import (
+    CurrentIdentity,
+    get_current_identity,
+    require_deployment_operator_or_absent,
+)
+from gateway.api.deps.traces import (
+    TRACE_CONTENT_HEADER_INVALID_DETAIL,
+    DatabaseSessionOwners,
+    NoSessionOwners,
+    OrganizationBreakGlass,
+    PlatformBreakGlass,
+    TraceServiceDep,
+    VisibleWorkspaces,
+    VisibleWorkspacesDep,
+    asks_to_keep_trace_content,
+    build_trace_service,
+    get_organization_break_glass,
+    get_organization_trace_scope,
+    get_platform_break_glass,
+    get_trace_service,
+    get_visible_workspaces,
+    is_workspace_member,
+    require_signed_in_reader,
+    routed_trace_content,
+    workspace_keeps_trace_content,
+    workspace_members,
+    workspaces_keeping_content_for,
+)
 from gateway.container import Container
 from gateway.core.config import (
-    API_KEY_HEADER,
     API_ROOT,
     OAUTH_PROVIDERS,
-    TRACE_CONTENT_HEADER,
-    TRACE_CONTENT_KEEP,
-    X_API_KEY_HEADER,
     GatewayConfig,
 )
-from gateway.core.database import DATABASE_ERRORS, create_session, describe_database_error, get_db, release_session
-from gateway.core.feature import CoreFeature
+from gateway.core.database import get_db, release_session
 from gateway.core.settings.tools import ToolKind
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work, create_unit_of_work_with_session
-from gateway.exceptions.identity_exceptions import DeploymentAdministrationUnavailableError
 from gateway.exceptions.tools_exceptions import DirectToolCallError, FundsCheckFailedError
-from gateway.exceptions.traces_exceptions import TraceBreakGlassForbiddenError, TraceBreakGlassUnnamedError
 from gateway.inflight import track_request
 from gateway.log_config import logger
-from gateway.metrics import REGISTRY, Counter
 from gateway.models.api_keys import APIKey
-from gateway.models.tenancy import MANAGEMENT_ROLES, Workspace
+from gateway.models.tenancy import MANAGEMENT_ROLES
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
-from gateway.ports.api_key_format_port import ApiKeyFormatPort, Malformed, Misdirected
+from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import (
     BillingPort,
     InsufficientFundsError,
@@ -55,9 +108,9 @@ from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.ports.signup_invite_port import SignupInvitePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
-from gateway.ports.usage_signal_port import RecordedUsage, UsageSignalPort
+from gateway.ports.usage_signal_port import UsageSignalPort
 from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit, rate_limit_headers
-from gateway.repositories.api_keys import ApiKeyRepositories, ApiKeyRepository, FederationRuleRepository
+from gateway.repositories.api_keys import ApiKeyRepositories
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.catalog import ModelMetadataOverrideRepository
 from gateway.repositories.files import FileRepositories
@@ -107,12 +160,10 @@ from gateway.repositories.tools import (
     WorkspaceMcpServerRepository,
     WorkspaceWebSearchKeyOverrideRepository,
 )
-from gateway.repositories.traces import TracesRepositories
 from gateway.repositories.update_check import UpdateCheckStateRepository
 from gateway.repositories.usage_and_telemetry import (
     UsageLogRepository,
     new_usage_row,
-    settled_job_row,
 )
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.api_keys import (
@@ -121,22 +172,13 @@ from gateway.services.api_keys import (
     MASTER_KEY_USER_REQUIRED_DETAIL,
     USER_MISMATCH_DETAIL,
     ApiKeyDeactivationListener,
-    ApiKeyMembershipListener,
     ApiKeyService,
     FederatedTokenVerifier,
-    FederationRefusedError,
     FederationTokenExchange,
-    FederationUnavailableError,
-    is_access_token,
-    key_refusal,
-    match_federation_rules,
     names_end_user,
-    read_access_token,
     resolve_user_id,
-    unverified_issuer,
 )
 from gateway.services.budgets import (
-    BudgetMembershipListener,
     BudgetScopeRequest,
     BudgetService,
     ReservationHandle,
@@ -145,15 +187,13 @@ from gateway.services.budgets import (
     refund_reservation,
     reserve_budget,
 )
-from gateway.services.catalog import ModelMetadataOverrideService, served_context_window
+from gateway.services.catalog import ModelMetadataOverrideService
 from gateway.services.code_execution import SandboxContainerRegistry
-from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.feedback import FeedbackService
 from gateway.services.files import FileBackends, FileService, SandboxFileBridge, StagedFile
 from gateway.services.health_checks import HealthCheckService, UnavailableModelListener
 from gateway.services.identity import EmailBlocklist, IdentityService, OAuthAppService, OIDCConnectionService
 from gateway.services.inference import (
-    CompletedVideoUsage,
     DeploymentCharge,
     InferenceService,
     UnavailableModelReporter,
@@ -163,16 +203,16 @@ from gateway.services.inference import (
     admit_deployment_paid,
     describe_port_error,
 )
-from gateway.services.log_writer import LogWriter, recorded_usage
+from gateway.services.log_writer import LogWriter
 from gateway.services.mail import Mailer
 from gateway.services.maintenance_mode_service import is_maintenance_mode
-from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.mcp_catalog import McpCatalogService
 from gateway.services.model_discovery_service import DiscoveryDial, HostedDiscovery
 from gateway.services.oauth_service import provider_label, redirect_uri
 from gateway.services.organization_pricing_service import OrganizationPricingService
 from gateway.services.organizations import (
     DeliveryRule,
+    ExpiredInvitationCleanup,
     InvitationDelivery,
     InvitationFactsReader,
     InvitationMailLimit,
@@ -186,7 +226,6 @@ from gateway.services.pricing_refresh_service import ModelsDevPriceUpdates
 from gateway.services.pricing_service import (
     RequestPrices,
     ResolvedPricing,
-    pricing_provenance,
     resolve_model_pricing,
     resolve_tool_rate,
 )
@@ -209,27 +248,23 @@ from gateway.services.routing import (
     AgentRecommenderService,
     AutomaticRouter,
     RoutingService,
-    clear_router_backend_cache,
 )
 from gateway.services.secret_box import configured_secret_keys
 from gateway.services.tenancy import (
     DomainAutoJoinListener,
     InvitationClaimSettings,
-    MembershipListener,
-    MembershipListeners,
     OrganizationDomainService,
     OrganizationService,
     VerifiedDomainLookup,
     organization_guardrail_runner,
 )
-from gateway.services.tenancy.authorization import WorkspaceAccess, resolve_visible_workspace_scope
+from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess, DeploymentUserService
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService, refresh_org_provider_cache
 from gateway.services.tenancy.organization_guardrail_definition_service import (
     OrganizationGuardrailDefinitionService,
 )
 from gateway.services.tenancy.organization_guardrail_service import OrganizationGuardrailService
-from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.workspace_activation_service import WorkspaceActivationService
 from gateway.services.tenancy.workspace_mcp_server_service import (
     WorkspaceMcpConnectionEligibility,
@@ -248,7 +283,6 @@ from gateway.services.tools import (
     DirectToolService,
     DirectToolUsage,
     McpConnectionService,
-    McpGrantMembershipListener,
     McpServerLogoService,
     McpServerRequestService,
     McpSignedInServers,
@@ -263,9 +297,8 @@ from gateway.services.tools import (
     WorkspaceSearchKeys,
     web_search_configured,
 )
-from gateway.services.traces import SpanContent, TraceMembershipListener, TraceService
 from gateway.services.update_check import UpdateCheckService
-from gateway.services.usage_and_telemetry import UsageScope, UsageService
+from gateway.services.usage_and_telemetry import UsageScope, UsageService, VideoUsageWriter
 from gateway.services.workspace_scope import (
     default_workspace_id,
     organization_for_key_id,
@@ -274,782 +307,70 @@ from gateway.services.workspace_scope import (
 )
 from gateway.types.tool_charges import RateKey
 from gateway.types.traces import (
-    ContentCapture,
     ContentReader,
-    SessionOwners,
     ShareAudience,
     TraceScope,
-    WorkspaceContent,
 )
 
-# Legacy module-level fallback. Config now lives on ``app.state.config`` (set in
-# ``create_app``); ``get_config`` reads from the request's app state and only
-# falls back to this shim for callers that set it directly (see ``set_config``).
-_config: GatewayConfig | None = None
-_LAST_USED_UPDATE_INTERVAL_SECONDS = 300
-
-AUTH_FAILURES = Counter(
-    "gateway_auth_failures",
-    "Total number of authentication failures",
-    ["reason"],
-    registry=REGISTRY,
-)
-
-
-def record_auth_failure(reason: str) -> None:
-    """Record an authentication failure."""
-    AUTH_FAILURES.labels(reason=reason).inc()
-
-
-def _invalid_api_key(reason: str) -> HTTPException:
-    """Every refusal answers alike, so a caller cannot tell which check failed; ``reason`` goes to the metric."""
-    record_auth_failure(reason)
-    return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
-
-
-def _authentication_unavailable(reason: str) -> HTTPException:
-    record_auth_failure(reason)
-    return HTTPException(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail="Authentication temporarily unavailable, please retry",
-    )
-
-
-def _as_utc(value: datetime | None) -> datetime | None:
-    """Return ``value`` as a timezone-aware datetime in UTC.
-
-    SQLite stores ``DateTime(timezone=True)`` columns as naive strings and
-    returns them naive on read. PostgreSQL returns them as aware. Normalising
-    here keeps the subtraction/comparison call sites identical across both
-    backends — a naive value is *assumed* to be UTC, which matches how the
-    gateway writes them (always ``datetime.now(UTC)``).
-    """
-    if value is None or value.tzinfo is not None:
-        return value
-    return value.replace(tzinfo=UTC)
-
-
-def set_config(config: GatewayConfig) -> None:
-    """Set the legacy module-level config fallback.
-
-    Compatibility shim. Config is stored on ``app.state.config`` by
-    ``create_app``; this only updates the module-level fallback that
-    ``get_config`` consults when no request-scoped app state is available.
-    """
-    global _config  # noqa: PLW0603
-    _config = config
-
-
-async def get_config(request: Request) -> GatewayConfig:
-    """Return the config for the current app from ``request.app.state``.
-
-    Every shared resource (rate limiter, log writer, file store) lives on
-    ``app.state``; config does too, so two apps in one process no longer share
-    a single instance. Falls back to the legacy module-level shim only when the
-    app state has no config attached.
-    """
-    config: GatewayConfig | None = getattr(request.app.state, "config", None)
-    if config is None:
-        config = _config
-    if config is None:
-        msg = "Config not initialized"
-        raise RuntimeError(msg)
-    return config
-
-
-def reset_config() -> None:
-    """Reset the legacy module-level config fallback. Intended for testing only."""
-    global _config  # noqa: PLW0603
-    _config = None
-    # Router backends are cached per config signature and hold a per-process
-    # decision cache, so a test that swaps config must not inherit the previous
-    # one's trace stickiness.
-    clear_router_backend_cache()
-
-
-def get_enabled_features(request: Request) -> tuple[CoreFeature, ...]:
-    """Return the core features this app enabled when it was built."""
-    enabled: tuple[CoreFeature, ...] | None = getattr(request.app.state, "enabled_features", None)
-    if enabled is None:
-        msg = "Enabled features not initialized"
-        raise RuntimeError(msg)
-    return enabled
-
-
-def extract_credential_token(request: Request) -> str:
-    """Extract the caller's credential token from the request headers.
-
-    The canonical Otari-Key header carries the token directly. A ``Bearer ``
-    prefix is accepted and stripped for back-compat, but is not required: a header
-    named for the key holds the raw token, matching the ``x-api-key`` convention
-    and the snippet the dashboard hands out. The standard Authorization header
-    still requires the Bearer scheme. Finally the raw x-api-key header is honored
-    (Anthropic-native clients). Surrounding whitespace is stripped, and a
-    credential that is only whitespace is answered as missing rather than sent
-    on to fail verification as a token of spaces.
-    """
-    token: str | None = None
-    value = request.headers.get(API_KEY_HEADER)
-    if value:
-        # Leading whitespace comes off before the scheme check, so a padded
-        # value still has its Bearer prefix recognized rather than kept as
-        # part of the token.
-        value = value.lstrip()
-        token = value[7:] if value.startswith("Bearer ") else value
-    else:
-        auth_header = request.headers.get("Authorization")
-        if auth_header:
-            auth_header = auth_header.lstrip()
-            # A blank value is a missing credential, not a scheme violation;
-            # only a non-empty non-Bearer value is an invalid format.
-            if auth_header and not auth_header.startswith("Bearer "):
-                record_auth_failure("invalid_format")
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid header format. Expected 'Bearer <token>'",
-                )
-            token = auth_header[7:]
-        else:
-            token = request.headers.get(X_API_KEY_HEADER)
-
-    token = token.strip() if token else ""
-    if token:
-        return token
-
-    record_auth_failure("missing_credentials")
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail=f"Missing {API_KEY_HEADER}, Authorization, or {X_API_KEY_HEADER} header",
-    )
-
-
-def misdirected_key_detail(host: str) -> str:
-    """The body of a 421, naming where the presented key is served."""
-    return f"This API key belongs to {host}. Send the request there instead."
-
-
-async def _verify_and_update_api_key(db: AsyncSession, token: str, key_format: ApiKeyFormatPort) -> APIKey:
-    """Verify API key token and update last_used_at.
-
-    The bound key format says where the token is checked before anything is
-    looked up. A key another deployment minted is answered 421 naming that
-    deployment, and a key that claims this build's format and fails it is
-    answered 401; neither costs a database round trip. Everything else, which
-    for the open-source format is every key, is hashed and looked up whatever
-    its shape, so a key minted elsewhere (a migrated platform key) authenticates
-    on its hash and an unrecognized one gets the ordinary "Invalid API key" 401.
-    """
-    match key_format.route(token):
-        case Misdirected(host=host):
-            record_auth_failure("misdirected_key")
-            raise HTTPException(
-                status_code=status.HTTP_421_MISDIRECTED_REQUEST,
-                detail=misdirected_key_detail(host),
-            )
-        case Malformed():
-            raise _invalid_api_key("invalid_format")
-
-    key_hash = hash_key(token)
-
-    try:
-        result = await db.execute(select(APIKey).where(APIKey.key_hash == key_hash))
-    except DATABASE_ERRORS as e:
-        raise _authentication_unavailable("db_error") from e
-    api_key = result.scalar_one_or_none()
-
-    if not api_key:
-        raise _invalid_api_key("invalid_key")
-
-    return await _admit_api_key(api_key)
-
-
-async def _admit_api_key(api_key: APIKey) -> APIKey:
-    """The checks a key passes once found, shared so a secret, an identity token and an access token admit alike."""
-    now = datetime.now(UTC)
-    refusal = key_refusal(api_key, now)
-    if refusal is not None:
-        reason, detail = refusal
-        record_auth_failure(reason)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
-
-    last_used_at = _as_utc(api_key.last_used_at)
-    should_update_last_used = (
-        last_used_at is None or (now - last_used_at).total_seconds() >= _LAST_USED_UPDATE_INTERVAL_SECONDS
-    )
-
-    if should_update_last_used:
-        await _bump_last_used_at(api_key.id, now)
-
-    return api_key
-
-
-def _federated_token_verifier(request: Request, config: GatewayConfig) -> FederatedTokenVerifier:
-    """The app's token verifier for the configured issuers, built on first use and when they change.
-
-    Kept on the app rather than per request, because it caches each issuer's signing keys.
-    """
-    verifier: FederatedTokenVerifier | None = getattr(request.app.state, "federated_token_verifier", None)
-    if (
-        verifier is None
-        or verifier.issuers != tuple(config.federation_issuers)
-        or verifier.audiences != tuple(config.federation_audiences)
-        or verifier.allow_private_hosts != config.federation_allow_private_hosts
-        or verifier.member_issuers != config.federation_member_rules
-    ):
-        verifier = FederatedTokenVerifier(
-            config.federation_issuers,
-            audiences=config.federation_audiences,
-            allow_private_hosts=config.federation_allow_private_hosts,
-            member_issuers=config.federation_member_rules,
-        )
-        request.app.state.federated_token_verifier = verifier
-    return verifier
-
-
-async def _verify_federated_token(request: Request, db: AsyncSession, token: str, config: GatewayConfig) -> APIKey:
-    """Authenticate an identity token as the key whose federation rule it matches.
-
-    Every refusal answers the same 401 as an unknown key, so a caller cannot
-    tell which check failed; the metric records which one did. Once a rule
-    matches, the key is admitted exactly as when its secret is presented.
-    """
-    try:
-        identity = await _federated_token_verifier(request, config).verify(token)
-        match = match_federation_rules(
-            await FederationRuleRepository(db).candidates(identity.issuer, identity.audiences), identity
-        )
-        api_key = await ApiKeyRepository(db).get(match.api_key_id)
-    except FederationUnavailableError as exc:
-        raise _authentication_unavailable("federation_unavailable") from exc
-    except FederationRefusedError as exc:
-        raise _invalid_api_key(exc.reason) from exc
-    except DATABASE_ERRORS as exc:
-        raise _authentication_unavailable("db_error") from exc
-    if api_key is None:
-        raise _invalid_api_key("federation_no_rule")
-    logger.debug(
-        "Federated token from %s matched rule(s) %s of API key %s",
-        identity.issuer,
-        ",".join(match.rule_ids),
-        api_key.id,
-    )
-    return await _admit_api_key(api_key)
-
-
-async def _verify_access_token(db: AsyncSession, token: str, config: GatewayConfig) -> APIKey:
-    """Authenticate an access token from ``POST /oauth/token`` as the key of the rule it names.
-
-    The rule and the key are reloaded on every request, so deleting the rule, deactivating the key, dropping an
-    operator's rule's issuer from ``federation_issuers`` or turning ``federation_member_rules`` off for a member's rule
-    ends the token at once. Refusals answer the same 401 as an unknown key.
-    """
-    try:
-        claims = read_access_token(token, configured_secret_keys(), now=time.time())
-        rule = await FederationRuleRepository(db).get(claims.rule_id)
-        if rule is None or rule.api_key_id != claims.api_key_id:
-            raise FederationRefusedError("federation_rule_gone")
-        if rule.member_managed:
-            if not config.federation_member_rules:
-                raise FederationRefusedError("federation_member_rules_off")
-        elif all(entry.issuer != rule.issuer for entry in config.federation_issuers):
-            raise FederationRefusedError("federation_unknown_issuer")
-        api_key = await ApiKeyRepository(db).get(claims.api_key_id)
-    except FederationRefusedError as exc:
-        raise _invalid_api_key(exc.reason) from exc
-    except DATABASE_ERRORS as exc:
-        raise _authentication_unavailable("db_error") from exc
-    if api_key is None:
-        raise _invalid_api_key("federation_rule_gone")
-    return await _admit_api_key(api_key)
-
-
-async def _verify_credential(request: Request, db: AsyncSession, token: str, config: GatewayConfig) -> APIKey:
-    """Verify a presented credential as an API key.
-
-    With federation on, the prefix of an access token or the shape of a JWT routes it before anything is parsed:
-    an access token, then a raw identity token, which only an operator's rule on an allow-listed issuer can match.
-    Everything else is a key secret.
-    """
-    if config.federation_enabled:
-        if is_access_token(token):
-            return await _verify_access_token(db, token, config)
-        if config.federation_issuers and unverified_issuer(token) is not None:
-            return await _verify_federated_token(request, db, token, config)
-    return await _verify_and_update_api_key(db, token, _api_key_format(request, db))
-
-
-async def _bump_last_used_at(api_key_id: str, now: datetime) -> None:
-    """Record an API key's last use on a short-lived, separate session.
-
-    The bump runs outside the request's transaction so it never commits the
-    caller's session or leaves it in a dirty state, and a failure is logged
-    rather than swallowed. It is best-effort: throttled by
-    ``_LAST_USED_UPDATE_INTERVAL_SECONDS`` and never fails the request.
-    """
-    try:
-        async with create_session() as session:
-            await session.execute(update(APIKey).where(APIKey.id == api_key_id).values(last_used_at=now))
-            await session.commit()
-    except DATABASE_ERRORS:
-        # Widened past SQLAlchemyError for the same reason as the arms above:
-        # this one promises never to fail the request, and a connect timeout
-        # raises a bare TimeoutError.
-        # codeql[py/clear-text-logging-sensitive-data]
-        logger.warning("Failed to update last_used_at for API key %s", api_key_id, exc_info=True)
-
-
-def _header_credentials_present(request: Request) -> bool:
-    """Whether the request carries any of the header credential forms.
-
-    Header credentials always win over the dashboard session cookie: an API
-    client that sends a key gets exactly today's behavior (including failures),
-    and the cookie is only consulted for requests that present nothing else,
-    i.e. the browser-driven dashboard. ``get_session_identity`` applies that
-    rule, so a cookie is never resolved for a request that carries a header
-    credential.
-    """
-    return bool(
-        request.headers.get(API_KEY_HEADER)
-        or request.headers.get("Authorization")
-        or request.headers.get(X_API_KEY_HEADER)
-    )
-
-
-# Sec-Fetch-Site values under which a cookie may authenticate a request:
-# same-origin fetches (the dashboard itself) and non-site-initiated requests
-# ("none", e.g. a direct navigation). "same-site" is deliberately excluded, so a
-# sibling-subdomain page cannot ride the cookie; ``cookie_may_authenticate``
-# admits it only from an origin the deployment itself listed.
-_COOKIE_SAFE_FETCH_SITES = ("same-origin", "none")
-
-
-def cookie_may_authenticate(request: Request, config: GatewayConfig) -> bool:
-    """Whether the session cookie on this request may authenticate it.
-
-    A same-site request is admitted only when its ``Origin`` is one of
-    ``cors_allow_origins``: that list is where an operator names the origin an
-    edge serves the dashboard from, so a dashboard on a sibling host of this
-    process can hold a session here while every other sibling stays refused.
-    A ``*`` entry never matches, since a wildcard is not an origin and CORS
-    sends no credentials under one either.
-    """
-    fetch_site = request.headers.get("Sec-Fetch-Site")
-    if fetch_site is None or fetch_site in _COOKIE_SAFE_FETCH_SITES:
-        return True
-    if fetch_site != "same-site":
-        return False
-    origin = request.headers.get("Origin", "")
-    return bool(origin) and origin != "*" and origin in config.cors_allow_origins
-
-
-async def get_session_identity(
-    request: Request,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-) -> TenancyUser | None:
-    """The identity a valid dashboard session cookie authenticates, or None.
-
-    A session cookie *authenticates* the management API and names who is using
-    it, so this is both the credential check and the identity resolution: the
-    callers below treat a non-None result as authenticated, and
-    ``get_current_identity`` reuses the same resolved identity. It is not by
-    itself an answer to *what* the caller may do: a deployment-wide route asks
-    ``require_deployment_operator`` on top, and a tenant-scoped one asks a
-    service about the organization or workspace named. Declared as a dependency
-    rather than called directly so FastAPI's per-request cache means one lookup
-    however many of them a route pulls in.
-
-    ``SameSite=Strict`` on the cookie is the primary CSRF control; the
-    Sec-Fetch-Site check is belt-and-braces for clients that send the header.
-    """
-    if _header_credentials_present(request):
-        return None
-    token = request.cookies.get(SESSION_COOKIE_NAME)
-    if not token:
-        return None
-    if not cookie_may_authenticate(request, config):
-        record_auth_failure("cross_site_cookie")
-        return None
-    try:
-        return await resolve_dashboard_session(db, token)
-    except DATABASE_ERRORS as exc:
-        raise _authentication_unavailable("db_error") from exc
-
-
-def refuse_ended_session(request: Request, config: GatewayConfig) -> None:
-    """Refuse a request whose only credential is a session cookie that no longer authenticates.
-
-    Called once ``get_session_identity`` has answered None. Without this the caller would be told it sent no
-    API key header, which describes an API client rather than a browser whose session ended (it was revoked,
-    expired, or its account deactivated). A cookie refused for being cross-site is left to the usual answer.
-    """
-    if (
-        _header_credentials_present(request)
-        or not request.cookies.get(SESSION_COOKIE_NAME)
-        or not cookie_may_authenticate(request, config)
-    ):
-        return
-    record_auth_failure("session_ended")
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Your dashboard session has ended. Sign in again.",
-    )
-
-
-async def is_valid_master_key(token: str, config: GatewayConfig, db: AsyncSession) -> bool:
-    """Check if token matches the configured key or the current generated key."""
-    if config.master_key is not None and secrets.compare_digest(token, config.master_key):
-        return True
-    if config.master_key is not None or not is_generated_master_key(token):
-        return False
-    stored_hash = await _load_generated_master_key_hash(config, db)
-    if stored_hash is None:
-        return False
-    return secrets.compare_digest(hash_master_key(token), stored_hash)
-
-
-async def _load_generated_master_key_hash(config: GatewayConfig, db: AsyncSession) -> str | None:
-    """Load the shared generated-key hash, treating DB failures as retryable auth outages."""
-    try:
-        stored_hash = await load_master_key_hash(db)
-    except DATABASE_ERRORS as exc:
-        raise _authentication_unavailable("db_error") from exc
-    config._master_key_hash = stored_hash
-    return stored_hash
-
-
-def _api_key_format(request: Request, db: AsyncSession) -> ApiKeyFormatPort:
-    """Resolve the key format for a verify path, off the request rather than a dependency.
-
-    ``verify_api_key_or_master_key`` is called directly from routes that already
-    hold the session, not only as a dependency, so the container is read from the
-    app the request reached instead of being one more positional argument.
-    """
-    return get_container(request).resolve(ApiKeyFormatPort, db)
-
-
-async def verify_api_key(
-    request: Request,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-) -> APIKey:
-    """Verify API key from the credential headers.
-
-    ``config`` says whether an identity token may stand in for a key's secret
-    (``federation_issuers``, ``federation_member_rules``). Like its sibling ``verify_api_key_or_master_key``,
-    this is called directly (not only via ``Depends``) by downstream
-    deployments, so the three-argument shape is API.
-
-    Args:
-        request: FastAPI request object
-        db: Database session
-        config: Gateway configuration
-
-    Returns:
-        APIKey object if valid
-
-    Raises:
-        HTTPException: If key is invalid, inactive, or expired
-
-    """
-    token = extract_credential_token(request)
-    return await _verify_credential(request, db, token, config)
-
-
-async def verify_service_key(api_key: Annotated[APIKey, Depends(verify_api_key)]) -> APIKey:
-    """Verify an API key that is a service key, for the routes where it manages its own end users.
-
-    Neither the master key nor a dashboard session passes: these routes are
-    scoped by the key they authenticate with, and either of those names no key.
-    Any other valid key is refused with 403, since it is authenticated but has
-    no end users to manage.
-    """
-    if not api_key.is_service_key or not api_key.user_id:
-        record_auth_failure("not_service_key")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="This endpoint requires a service key.",
-        )
-    return api_key
-
-
-ServiceKey = Annotated[APIKey, Depends(verify_service_key)]
-
-# The API key a request authenticates with, for a route that answers for that key alone.
-CallingKey = Annotated[APIKey, Depends(verify_api_key)]
-
-
-async def verify_master_key(
-    request: Request,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
-) -> str | None:
-    """Verify master key from Otari-Key header or the dashboard session cookie.
-
-    Args:
-        request: FastAPI request object
-        db: Database session
-        config: Gateway configuration
-        session_identity: The identity behind a dashboard session cookie, if any
-
-    Returns:
-        The raw master key when header-authenticated, or None when a dashboard
-        session cookie authenticated the request (the raw key is not available).
-        Which identity that session speaks for is read with
-        ``get_current_identity``, not from this return value.
-
-    Raises:
-        HTTPException: If master key is not configured or invalid
-
-    """
-    if session_identity is not None:
-        return None
-    refuse_ended_session(request, config)
-    token = extract_credential_token(request)
-
-    if config.master_key is None:
-        stored_hash = await _load_generated_master_key_hash(config, db)
-        if stored_hash is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Master key not configured. Set OTARI_MASTER_KEY environment variable.",
-            )
-        if is_generated_master_key(token) and secrets.compare_digest(hash_master_key(token), stored_hash):
-            return token
-    elif secrets.compare_digest(token, config.master_key):
-        return token
-
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid master key",
-    )
-
-
-async def require_deployment_operator(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
-    _master_key: Annotated[str | None, Depends(verify_master_key)],
-) -> None:
-    """Refuse a deployment-wide management request from a non-operator identity.
-
-    ``verify_master_key`` answers *authenticated*, not *authorized*: a dashboard
-    session clears it for any identity still active. (Address verification is a
-    condition of minting a session, not of resolving one, so it says nothing
-    about authority either way.) That is right for the tenant-scoped routers
-    (`organizations.py`, `workspaces.py`, `org_provider_keys.py`, `admin.py`),
-    which declare it as their authentication gate and then re-check the caller's
-    role against the organization, workspace or deployment they are acting on.
-    It is wrong for the deployment-wide routers, where clearing it *is* the
-    whole authorization: `/api/v1/keys` mints a key into any workspace,
-    `/api/v1/hosted-providers` holds process-global provider secrets, and
-    `POST /api/v1/settings/master-key/rotate` replaces the deployment credential. On
-    a single-operator deployment every login is that operator and the
-    distinction is invisible; once mutually-untrusting tenants sign in to one
-    process, a member of one organization holding master-key authority is a
-    cross-organization breach (otari-ai#1880).
-
-    A **header master key** is the deployment credential itself, so it passes; it
-    names nobody, and ``get_current_identity`` resolves it to the bootstrap
-    operator. A **session** is put to
-    ``DeploymentAdministrationAccess.has_administration_access``, which `/api/v1/admin`
-    already treats as the answer to "may this caller act deployment-wide": a
-    superuser, or the bootstrap operator whatever its flag says. Reused rather
-    than re-derived so the routers guarded here and the account administration
-    that can grant the authority cannot come to disagree about who holds it.
-
-    Declared on the router rather than per route, and as a dependency rather
-    than a check inside each handler: a route added to one of those routers
-    later inherits the gate instead of being reachable with no credential at
-    all until someone notices the missing decorator. ``Depends`` caching means
-    the master-key verification underneath still runs once per request however
-    many of these a route pulls in. A module that holds an exception (a catalog
-    read, the tool-settings reader, external-event ingestion) puts it on a router
-    of its own, so admitting a non-operator is spelled at a router instead of
-    hidden in one route's decorator.
-    """
-    if session_identity is not None and not await DeploymentAdministrationAccess(db).has_administration_access(
-        session_identity
-    ):
-        record_auth_failure("not_deployment_operator")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="This endpoint requires deployment operator access.",
-        )
-
-
-async def verify_api_key_or_master_key(
-    request: Request,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-) -> tuple[APIKey | None, bool]:
-    """Verify either API key or master key from Otari-Key header.
-
-    Deliberately does **not** consult the dashboard session cookie. It used to,
-    on the same "a session grants master-key authority" premise
-    ``require_deployment_operator`` exists to retire, and here that premise was
-    worse than on the management plane: ``is_master_key`` is what makes
-    ``resolve_request_context`` bill and resolve credentials through the
-    deployment's *default* workspace, so a signed-in member of any organization
-    could spend another organization's BYO provider credential on a completion,
-    or file usage rows into a tenant they do not belong to, without holding a key
-    at all (otari-ai#1880).
-
-    A browser has no reason to reach this plane: the dashboard mentions these
-    endpoints in its copy and calls none of them. The three catalog reads it does
-    call take :func:`verify_catalog_reader` instead.
-
-    Args:
-        request: FastAPI request object
-        db: Database session
-        config: Gateway configuration
-
-    Returns:
-        Tuple of (APIKey object or None, is_master_key boolean)
-
-    Raises:
-        HTTPException: If key is invalid, inactive, or expired
-
-    """
-    token = extract_credential_token(request)
-
-    if await is_valid_master_key(token, config, db):
-        return None, True
-
-    api_key = await _verify_credential(request, db, token, config)
-    return api_key, False
-
-
-async def verify_api_key_or_master_key_for_upload(
-    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> tuple[APIKey | None, bool]:
-    """:func:`verify_api_key_or_master_key`, then free its connection before the route reads the body.
-
-    A route that parses its own upload does so after authentication, so a slow
-    client would otherwise pin the pooled connection the key lookup checked out.
-    """
-    await release_session(db)
-    return auth_result
-
-
-async def verify_catalog_reader(
-    request: Request,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
-) -> tuple[APIKey | None, bool]:
-    """As :func:`verify_api_key_or_master_key`, and a dashboard session also reads.
-
-    The narrow exception to the rule above, for the catalog reads that describe
-    the deployment rather than act on it: ``GET /api/v1/models``, ``GET /api/v1/pricing``,
-    ``GET /api/v1/tools``, ``GET /api/v1/providers/catalog`` (with their by-id
-    variants), ``GET /api/v1/tool-settings/guardrails/catalog``,
-    ``GET /api/v1/tool-settings/guardrails/profiles``,
-    ``GET /api/v1/search-tools/providers``, ``GET /api/v1/search-tools/catalog`` and
-    ``GET /api/v1/code/environments``. The
-    dashboard's Models and Pricing pages are built on these, so a session has to
-    reach them; they call no provider, write nothing, and bill nothing, so
-    reaching them deployment-wide costs a signed-in caller's own organization
-    nothing. The guardrail profiles read is the one that reaches a service, the
-    deployment's own guardrails service, and it answers from a 30 second
-    per-worker cache, so a worker sends that service at most one request in
-    that time.
-
-    The four catalogs are the reads a *tenant* rather than an operator needs. One
-    names the providers any-llm knows, which the organization provider-key form
-    offers as the BYO choices; one names the guardrails any-guardrail reaches
-    over a hosted API, which the organization guardrail form offers the same
-    way; one names the guardrail profiles the deployment serves, which any
-    caller may put in a request; and one names the providers any-search and
-    any-fetch serve, for the organization's own search keys. An owner or admin
-    who reaches no operator route still has to read all four.
-
-    Split out rather than left as a branch inside the other dependency so that
-    adding a route to this plane defaults to refusing the cookie. The seven
-    routers that serve these reads declare it on the router for the same reason,
-    so admitting a session is spelled where the route is mounted rather than in
-    one route's decorator.
-    """
-    if session_identity is not None:
-        return None, True
-    refuse_ended_session(request, config)
-    return await verify_api_key_or_master_key(request, db, config)
-
-
-async def catalog_reader_operates_deployment(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
-    auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
-) -> bool:
-    """Whether a caller :func:`verify_catalog_reader` admitted operates the deployment.
-
-    The question :func:`require_deployment_operator` asks, answered rather than
-    enforced, for a catalog read that shows its operator what it withholds from
-    everyone else. A session is put to the same
-    ``DeploymentAdministrationAccess.has_administration_access``. Without one, the caller
-    holds the master key, which operates the deployment, or an API key, which
-    does not.
-    """
-    if session_identity is not None:
-        return await DeploymentAdministrationAccess(db).has_administration_access(session_identity)
-    _, is_master_key = auth
-    return is_master_key
-
-
-async def catalog_reader_organization(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
-    auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
-) -> uuid.UUID | None:
-    """The organization whose prices a caller :func:`verify_catalog_reader` admitted is shown.
-
-    Resolved as settlement resolves it: a session's active organization, an API
-    key's workspace's, and the default workspace's for the master key.
-    """
-    if session_identity is not None:
-        return session_identity.active_organization_id
-    api_key, _ = auth
-    return await organization_for_key_id(db, api_key.id if api_key is not None else None)
-
-
-async def verify_catalog_reader_or_public(
-    request: Request,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
-) -> tuple[APIKey | None, bool] | None:
-    """As :func:`verify_catalog_reader`, and a visitor reads too while the catalog is public.
-
-    ``None`` is the anonymous caller, admitted only while ``public_catalog`` is on
-    and only when the request carries no credential at all: a credential that is
-    present and wrong is refused as it always was, never downgraded to a visitor.
-    The route is what narrows an anonymous read (the deployment's own
-    offerings, the deployment price list, no tenant rows); this only decides who is asking.
-
-    Throttled per client address on its own budget,
-    ``public_catalog_rate_limit_per_minute``, the way the public auth routes
-    are on theirs: ``rate_limit_rpm`` keys on an authenticated user and covers
-    no anonymous path, so it is not what stands between an open catalog and a
-    scraper.
-
-    Two things that throttle is not, both documented beside the setting in
-    ``docs/configuration.md``. The address is the socket's, and the CLI starts
-    uvicorn without proxy headers, so behind a reverse proxy every visitor
-    shares one bucket; a deployment that terminates TLS elsewhere throttles
-    there. And the counter is per process, so N workers serve N times the
-    configured number.
-    """
-    if session_identity is not None:
-        return None, True
-    if _header_credentials_present(request) or not config.public_catalog:
-        return await verify_api_key_or_master_key(request, db, config)
-    limiter = getattr(request.app.state, "public_catalog_rate_limiter", None)
-    if limiter is not None:
-        # The limiter raises its own 429; the key is the address, since a
-        # visitor has no other identity.
-        limiter.check(request.client.host if request.client is not None else "unknown")
-    return None
+# The names this root re-exports from the submodules it is being split into.
+__all__ = [
+    "OrganizationBreakGlass",
+    "PlatformBreakGlass",
+    "VisibleWorkspaces",
+    "VisibleWorkspacesDep",
+    "get_organization_break_glass",
+    "get_organization_trace_scope",
+    "get_platform_break_glass",
+    "get_visible_workspaces",
+    "require_signed_in_reader",
+    "CurrentIdentity",
+    "get_current_identity",
+    "require_deployment_operator_or_absent",
+    "MembershipListenerDep",
+    "get_membership_listener",
+    "DatabaseSessionOwners",
+    "NoSessionOwners",
+    "TRACE_CONTENT_HEADER_INVALID_DETAIL",
+    "TraceServiceDep",
+    "asks_to_keep_trace_content",
+    "build_trace_service",
+    "get_trace_service",
+    "is_workspace_member",
+    "routed_trace_content",
+    "workspace_keeps_trace_content",
+    "workspace_members",
+    "workspaces_keeping_content_for",
+    "AUTH_FAILURES",
+    "CallingKey",
+    "ContainerDep",
+    "PortSessionDep",
+    "SERVICE_KEY_REQUIRED_DETAIL",
+    "ServiceKey",
+    "UnitOfWorkDep",
+    "catalog_reader_operates_deployment",
+    "catalog_reader_organization",
+    "cookie_may_authenticate",
+    "extract_credential_token",
+    "get_config",
+    "get_container",
+    "get_enabled_features",
+    "get_session_identity",
+    "get_unit_of_work",
+    "is_valid_master_key",
+    "misdirected_key_detail",
+    "record_auth_failure",
+    "refuse_ended_session",
+    "require_deployment_operator",
+    "reset_config",
+    "set_config",
+    "verify_api_key",
+    "verify_api_key_or_master_key",
+    "verify_api_key_or_master_key_for_upload",
+    "verify_catalog_reader",
+    "verify_catalog_reader_or_public",
+    "verify_master_key",
+    "verify_service_key",
+]
 
 
 def build_file_service(uow: UnitOfWork, backends: FileBackends, config: GatewayConfig) -> FileService:
@@ -1059,11 +380,6 @@ def build_file_service(uow: UnitOfWork, backends: FileBackends, config: GatewayC
         raise RuntimeError("Unscoped uploads are not supported in this context; specify a workspace.")
 
     return FileService(uow, FileRepositories.on(uow), backends, config, reject_unscoped_upload)
-
-
-def build_trace_service(uow: UnitOfWork, content: SpanContent, owners: SessionOwners) -> TraceService:
-    """Build the traces operations for a request or a worker job, sealing and opening content with ``content``."""
-    return TraceService(uow, TracesRepositories.on(uow), content, owners, served_context_window)
 
 
 def _file_backends(request: Request) -> FileBackends | None:
@@ -1129,6 +445,7 @@ def build_sandbox_container_registry(
     user_id: str | None,
     workspace_id: uuid.UUID | None,
     port: CodeExecutionPort | None,
+    may_read_stored_files: bool,
 ) -> SandboxContainerRegistry | None:
     """The registry a completion request's sandbox session is held in, or ``None``.
 
@@ -1136,6 +453,9 @@ def build_sandbox_container_registry(
     deployment with no sandbox at all; and one that turned reuse off with a zero idle TTL. The
     lease is scoped to the billed user and workspace, and to the adapter this
     build runs, so a deployment that changes providers starts fresh.
+
+    NOTE: ``may_read_stored_files`` has no default, so a caller cannot drop the check by accident.
+    A container keeps what earlier runs staged into it, so re-entering one reads those files.
     """
     if user_id is None or workspace_id is None or port is None or config.sandbox_container_idle_ttl_sec <= 0:
         return None
@@ -1143,22 +463,11 @@ def build_sandbox_container_registry(
         uow=uow,
         user_id=user_id,
         workspace_id=workspace_id,
+        may_read_stored_files=may_read_stored_files,
         provider=port.label,
         idle_ttl_s=config.sandbox_container_idle_ttl_sec,
         max_lifetime_s=config.sandbox_container_max_lifetime_sec,
     )
-
-
-def get_unit_of_work(db: Annotated[AsyncSession, Depends(get_db)]) -> UnitOfWork:
-    """Return the request's Unit of Work over its session.
-
-    Gotcha: the rest of the request writes to this same session.
-    A block's commit also stores what that code staged outside a block, and its rollback discards it.
-    """
-    return UnitOfWork(db)
-
-
-UnitOfWorkDep = Annotated[UnitOfWork, Depends(get_unit_of_work)]
 
 
 def build_model_metadata_override_service(uow: UnitOfWork) -> ModelMetadataOverrideService:
@@ -1179,22 +488,6 @@ async def get_maintenance_mode(db: Annotated[AsyncSession, Depends(get_db)]) -> 
 
 
 MaintenanceModeDep = Annotated[bool, Depends(get_maintenance_mode)]
-
-
-def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
-    """Return the listener that keeps members' budget ceilings, own keys, session shares and MCP access in step.
-
-    It writes through the request's Unit of Work, so a service that changes membership must be built on the same one.
-    """
-    return MembershipListeners(
-        BudgetMembershipListener(BudgetRepositories.on(uow)),
-        ApiKeyMembershipListener(ApiKeyRepositories.on(uow)),
-        TraceMembershipListener(TracesRepositories.on(uow)),
-        McpGrantMembershipListener(uow),
-    )
-
-
-MembershipListenerDep = Annotated[MembershipListener, Depends(get_membership_listener)]
 
 
 def get_inference_service(
@@ -1319,63 +612,6 @@ def get_playground_tool_offer(config: Annotated[GatewayConfig, Depends(get_confi
 PlaygroundToolOfferDep = Annotated[PlaygroundToolOffer, Depends(get_playground_tool_offer)]
 
 
-async def get_current_identity(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
-    _master_key: Annotated[str | None, Depends(verify_master_key)],
-    uow: UnitOfWorkDep,
-    membership_listener: MembershipListenerDep,
-) -> TenancyUser:
-    """Resolve the tenancy identity acting on this request.
-
-    A dashboard session names the identity it was minted for, so a
-    cookie-authenticated request resolves that identity and, through its
-    ``active_organization_id``, the organization it is acting in. No second
-    lookup: ``verify_master_key`` already resolved it through the same cached
-    dependency to decide the cookie authenticates at all.
-
-    A header master key names nobody, so it falls back to the deployment's
-    bootstrap operator, provisioned on first use (otari-ai#1716 option A, see
-    `gateway.services.tenancy.provisioning_service`). That is also the identity
-    master-key sign-in binds a session to, so both credentials resolve to the
-    same operator; the difference matters once the per-user sign-in flows mint
-    sessions for other identities.
-
-    Depending on ``verify_master_key`` keeps the credential check exactly where
-    the rest of the management API has it, and keeps a request with no credential
-    at all from provisioning anything.
-    """
-    if session_identity is not None:
-        return session_identity
-    return await ensure_bootstrap_identity(
-        db,
-        uow=uow,
-        membership_listener=membership_listener,
-    )
-
-
-CurrentIdentity = Annotated[TenancyUser, Depends(get_current_identity)]
-
-
-async def require_deployment_operator_or_absent(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    identity: Annotated[TenancyUser, Depends(get_current_identity)],
-) -> None:
-    """Refuse a non-operator with the 404 ``/api/v1/admin`` answers, so the surface does not confirm it exists.
-
-    The same predicate as :func:`require_deployment_operator`, with the other
-    status: a deployment-wide surface that holds the deployment's own
-    credentials is one worth not confirming to a signed-in member, who gets
-    the answer an unentitled deployment gets. A header master key is the
-    deployment credential itself, resolved to the bootstrap operator, so it
-    passes. Declared on a router rather than per route, for the reason the 403
-    gate gives.
-    """
-    if not await DeploymentAdministrationAccess(db).has_administration_access(identity):
-        record_auth_failure("not_deployment_operator")
-        raise DeploymentAdministrationUnavailableError
-
-
 # =============================================================================
 # Composition root
 # =============================================================================
@@ -1383,22 +619,6 @@ async def require_deployment_operator_or_absent(
 # Every port is resolved here and nowhere else: a dependency names the port and
 # asks the container for whichever adapter this build bound to it, so no route
 # or service ever names a concrete adapter (ARCHITECTURE.md, rule 5).
-
-
-def get_container(request: Request) -> Container:
-    """Return the composition-root container this app was built with."""
-    container: Container | None = getattr(request.app.state, "container", None)
-    if container is None:
-        msg = "Composition root not initialized"
-        raise RuntimeError(msg)
-    return container
-
-
-ContainerDep = Annotated[Container, Depends(get_container)]
-# The request's own session: FastAPI caches a dependency per callable, so a port
-# resolved on this shares the session of the route that resolved it, and its
-# writes land in the commit that settles the request.
-PortSessionDep = Annotated[AsyncSession, Depends(get_db)]
 
 
 def get_agent_model_recommender_port(container: ContainerDep) -> AgentModelRecommenderPort:
@@ -1706,7 +926,7 @@ def get_federation_token_exchange(
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> FederationTokenExchange:
     """The request's token exchange."""
-    return build_federation_token_exchange(uow, config, _federated_token_verifier(request, config))
+    return build_federation_token_exchange(uow, config, federated_token_verifier(request, config))
 
 
 FederationTokenExchangeDep = Annotated[FederationTokenExchange, Depends(get_federation_token_exchange)]
@@ -2440,6 +1660,11 @@ def build_invitation_delivery(uow: UnitOfWork, config: GatewayConfig) -> Invitat
     )
 
 
+def build_invitation_cleanup(uow: UnitOfWork) -> ExpiredInvitationCleanup:
+    """Build the remover of expired invitations on a worker job's Unit of Work."""
+    return ExpiredInvitationCleanup(uow, OrganizationRepositories.on(uow))
+
+
 def build_update_check_service(uow: UnitOfWork, config: GatewayConfig) -> UpdateCheckService:
     """Build the update check service on a request's Unit of Work, or the worker's own."""
     return UpdateCheckService(uow, UpdateCheckStateRepository(uow), config)
@@ -2455,356 +1680,6 @@ def get_update_check_service(
 
 UpdateCheckServiceDep = Annotated[UpdateCheckService, Depends(get_update_check_service)]
 TelemetryStoragePortDep = Annotated[TelemetryStoragePort, Depends(get_telemetry_storage_port)]
-
-
-async def is_workspace_member(
-    db: AsyncSession, workspace_id: uuid.UUID, user_id: str | None, workspace: Workspace | None = None
-) -> bool:
-    """Whether ``user_id`` names a person who currently sees the workspace.
-
-    An active owner or admin of its organization, or an active member of the
-    workspace itself: the people whose own sessions' content they can read. A
-    billing user no dashboard identity stands behind is none of them, and nor is
-    a deactivated account, which can no longer sign in to read or manage it.
-    """
-    person = _person(user_id)
-    if person is None:
-        return False
-    if workspace is None:
-        workspace = await WorkspaceRepository(db).get(workspace_id)
-    if workspace is None:
-        return False
-    account = await UserRepository(db).get(person)
-    if account is None or not account.is_active:
-        return False
-    membership = await OrganizationMemberRepository(db).get_active_by_organization_and_user(
-        workspace.organization_id, person
-    )
-    if membership is None:
-        return False
-    if membership.role in MANAGEMENT_ROLES:
-        return True
-    member = await WorkspaceMemberRepository(db).get_by_workspace_and_user(workspace_id, person)
-    return member is not None and member.status == "active"
-
-
-def _person(user_id: str | None) -> uuid.UUID | None:
-    """The identity a trace's user id names, or None for one that names no person.
-
-    The canonical spelling only: ownership compares the id as a string, so another
-    spelling of the same id would keep content its owner could never open.
-    """
-    if user_id is None:
-        return None
-    try:
-        person = uuid.UUID(user_id)
-    except ValueError:
-        return None
-    return person if str(person) == user_id else None
-
-
-async def workspace_members(
-    db: AsyncSession, pairs: Collection[tuple[uuid.UUID, str | None]]
-) -> set[tuple[uuid.UUID, str | None]]:
-    """Which of these (workspace, user) pairs :func:`is_workspace_member` holds for, in four queries."""
-    people = {pair: person for pair in pairs if (person := _person(pair[1])) is not None}
-    if not people:
-        return set()
-    workspaces = {
-        workspace.id: workspace.organization_id
-        for workspace in await WorkspaceRepository(db).get_by_ids({workspace_id for workspace_id, _ in people})
-    }
-    active = await UserRepository(db).get_active_ids(set(people.values()))
-    candidates = {pair: person for pair, person in people.items() if pair[0] in workspaces and person in active}
-    roles = await OrganizationMemberRepository(db).get_active_roles(
-        {workspaces[workspace_id] for workspace_id, _ in candidates}, set(candidates.values())
-    )
-    by_organization = {pair: roles.get((workspaces[pair[0]], person)) for pair, person in candidates.items()}
-    explicit = await WorkspaceMemberRepository(db).get_active_pairs(
-        {workspace_id for (workspace_id, _), role in by_organization.items() if role is not None},
-        {candidates[pair] for pair, role in by_organization.items() if role is not None},
-    )
-    return {
-        pair
-        for pair, role in by_organization.items()
-        if role is not None and (role in MANAGEMENT_ROLES or (pair[0], candidates[pair]) in explicit)
-    }
-
-
-async def workspaces_keeping_content_for(
-    db: AsyncSession, pairs: Collection[tuple[uuid.UUID, str | None]]
-) -> set[tuple[uuid.UUID, str | None]]:
-    """Which of these (workspace, user) pairs may have content kept, in five queries.
-
-    A current member of a workspace that still keeps what its sessions were about.
-    The switch is read here rather than trusted from the export's admission, because
-    turning it off and moving the workspace's content generation on are two commits:
-    an export admitted between them carries a generation that is still current.
-    """
-    members = await workspace_members(db, pairs)
-    if not members:
-        return set()
-    keeping = {
-        workspace.id
-        for workspace in await WorkspaceRepository(db).get_by_ids({workspace_id for workspace_id, _ in members})
-        if workspace.trace_content_enabled
-    }
-    return {pair for pair in members if pair[0] in keeping}
-
-
-class DatabaseSessionOwners:
-    """:class:`SessionOwners` over this deployment's memberships, on the request's session."""
-
-    def __init__(self, db: AsyncSession) -> None:
-        self._db = db
-
-    async def is_member(self, workspace_id: uuid.UUID, user_id: str | None) -> bool:
-        return await is_workspace_member(self._db, workspace_id, user_id)
-
-    async def content_kept_for(
-        self, pairs: Collection[tuple[uuid.UUID, str | None]]
-    ) -> set[tuple[uuid.UUID, str | None]]:
-        return await workspaces_keeping_content_for(self._db, pairs)
-
-    async def content_kept(self, workspace_id: uuid.UUID, user_id: str | None) -> WorkspaceContent:
-        workspace = await WorkspaceRepository(self._db).get(workspace_id)
-        if workspace is None or not workspace.trace_content_enabled:
-            return WorkspaceContent()
-        if not await is_workspace_member(self._db, workspace_id, user_id, workspace):
-            return WorkspaceContent()
-        return WorkspaceContent(keeps=True, tool_output=workspace.trace_content_tool_output)
-
-    async def organization_of(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
-        workspace = await WorkspaceRepository(self._db).get(workspace_id)
-        return workspace.organization_id if workspace is not None else None
-
-
-class NoSessionOwners:
-    """:class:`SessionOwners` for work that never opens a share: nobody is anybody's member."""
-
-    async def is_member(self, workspace_id: uuid.UUID, user_id: str | None) -> bool:
-        return False
-
-    async def content_kept_for(
-        self, pairs: Collection[tuple[uuid.UUID, str | None]]
-    ) -> set[tuple[uuid.UUID, str | None]]:
-        return set()
-
-    async def content_kept(self, workspace_id: uuid.UUID, user_id: str | None) -> WorkspaceContent:
-        return WorkspaceContent()
-
-    async def organization_of(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
-        return None
-
-
-async def workspace_keeps_trace_content(
-    db: AsyncSession, config: GatewayConfig, workspace_id: uuid.UUID, user_id: str | None
-) -> bool:
-    """Whether what a span in this workspace was about is kept for this exporter.
-
-    The deployment allows it, the workspace turned it on, and the key exports for a
-    current member of the workspace: content nobody could ever read is not kept, so
-    a key with no user, or one for a billing user no person stands behind, keeps none.
-
-    Read fresh, not cached, so a workspace that turns it off keeps nothing from its next export on.
-    Fails closed: where any of it cannot be read, nothing is kept. The transaction the reads
-    open is ended at once, so no connection idles while the export's spans are handed on.
-    """
-    if not config.trace_content_enabled:
-        return False
-    try:
-        keeps = (await DatabaseSessionOwners(db).content_kept(workspace_id, user_id)).keeps
-        await release_session(db)
-    except DATABASE_ERRORS as exc:
-        logger.warning("Could not read whether a workspace keeps trace content (%s)", describe_database_error(exc))
-        return False
-    return keeps
-
-
-TRACE_CONTENT_HEADER_INVALID_DETAIL = f"{TRACE_CONTENT_HEADER} must be {TRACE_CONTENT_KEEP!r}, or be left out"
-
-
-def asks_to_keep_trace_content(request: Request) -> bool:
-    """Whether the request asks for its content to be kept, refusing a value it cannot mean.
-
-    A misspelled header is a caller mistake to report, as ``Otari-Code-Execution``'s
-    is: otherwise ``Otari-Trace-Content: true`` would keep nothing and say nothing.
-    """
-    value = request.headers.get(TRACE_CONTENT_HEADER)
-    if value is None or not value.strip():
-        return False
-    if value.strip().lower() != TRACE_CONTENT_KEEP:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=TRACE_CONTENT_HEADER_INVALID_DETAIL)
-    return True
-
-
-async def routed_trace_content(
-    request: Request,
-    uow: UnitOfWork,
-    db: AsyncSession,
-    config: GatewayConfig,
-    workspace_id: uuid.UUID,
-    user_id: str | None,
-) -> ContentCapture | None:
-    """What a routed request that asks for it (``Otari-Trace-Content: keep``) keeps of its content, or None.
-
-    The deployment has to be able to seal content, and then the traces service
-    applies the workspace's rule, on the request's own Unit of Work. Fails closed:
-    a read that fails keeps no content, and the request is served without it.
-    """
-    if not config.trace_content_enabled:
-        return None
-    content: SpanContent | None = getattr(request.app.state, "trace_content", None)
-    if content is None or not content.sealing:
-        return None
-    try:
-        return await get_trace_service(uow, request, db).routed_content(
-            workspace_id, user_id, tool_output=config.trace_content_tool_output
-        )
-    except DATABASE_ERRORS as exc:
-        logger.warning("Could not read whether a routed request keeps its content (%s)", describe_database_error(exc))
-        return None
-
-
-def get_trace_service(
-    uow: UnitOfWorkDep, request: Request, db: Annotated[AsyncSession, Depends(get_db)]
-) -> TraceService:
-    """Build the request's traces service on the request's Unit of Work, with the process's content keys."""
-    content: SpanContent = getattr(request.app.state, "trace_content", None) or SpanContent.disabled()
-    return build_trace_service(uow, content, DatabaseSessionOwners(db))
-
-
-TraceServiceDep = Annotated[TraceService, Depends(get_trace_service)]
-
-
-@dataclass(frozen=True)
-class VisibleWorkspaces:
-    """The caller's active organization, and the workspaces in it they may read."""
-
-    organization_id: uuid.UUID
-    workspace_ids: frozenset[uuid.UUID]
-    whole_organization: bool = False
-
-
-async def get_visible_workspaces(
-    identity: CurrentIdentity, db: Annotated[AsyncSession, Depends(get_db)]
-) -> VisibleWorkspaces:
-    """The workspaces of their active organization this caller may read.
-
-    The same rule the organization's usage reads use, resolved per request: an
-    owner or an admin reads every workspace in the organization, anyone else the
-    ones they actively belong to. Never taken from the request.
-    """
-    organizations = OrganizationService(db, membership_listener=None)
-    scope = await resolve_visible_workspace_scope(db, user=identity, organizations=organizations)
-    workspace_ids = (
-        await WorkspaceRepository(db).get_ids_by_organization(scope.organization.id)
-        if scope.workspace_ids is None
-        else scope.workspace_ids
-    )
-    return VisibleWorkspaces(
-        organization_id=scope.organization.id,
-        workspace_ids=frozenset(workspace_ids),
-        whole_organization=scope.workspace_ids is None,
-    )
-
-
-VisibleWorkspacesDep = Annotated[VisibleWorkspaces, Depends(get_visible_workspaces)]
-
-
-async def get_organization_trace_scope(
-    visible: VisibleWorkspacesDep,
-    identity: CurrentIdentity,
-    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
-) -> TraceScope:
-    """The workspaces of their active organization this caller may read traces in.
-
-    Each reads their own sessions' content. An owner or admin also reads what a
-    session's user shared with the organization's admins. A header master key
-    names no person to record a read against, so it reads no content at all.
-    """
-    if session_identity is None:
-        return TraceScope.workspaces(visible.workspace_ids)
-    return TraceScope.workspaces(
-        visible.workspace_ids,
-        reader=ContentReader(
-            user_id=identity.id,
-            email=identity.email or str(identity.id),
-            audiences=frozenset({"organization_admins"}) if visible.whole_organization else frozenset(),
-        ),
-    )
-
-
-async def require_signed_in_reader(
-    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
-) -> None:
-    """Refuse a break-glass opening that a header master key, which names nobody, would make.
-
-    The record has to say which person opened the content; the bootstrap operator
-    a master key falls back to is an account, not a person.
-    """
-    if session_identity is None:
-        raise TraceBreakGlassUnnamedError
-
-
-@dataclass(frozen=True)
-class OrganizationBreakGlass:
-    """An organization owner about to open a session's content without its owner's share."""
-
-    scope: TraceScope
-    organization_id: uuid.UUID
-    reader: ContentReader
-
-
-async def get_organization_break_glass(
-    visible: VisibleWorkspacesDep, identity: CurrentIdentity, db: Annotated[AsyncSession, Depends(get_db)]
-) -> OrganizationBreakGlass:
-    """The caller as an owner of their active organization, over every workspace in it.
-
-    Owners only, not admins: break-glass is kept to the smallest group that can answer for it.
-    """
-    membership = await OrganizationMemberRepository(db).get_active_by_organization_and_user(
-        visible.organization_id, identity.id
-    )
-    if membership is None or membership.role != "owner":
-        raise TraceBreakGlassForbiddenError
-    reader = ContentReader(user_id=identity.id, email=identity.email or str(identity.id))
-    return OrganizationBreakGlass(
-        scope=TraceScope.workspaces(visible.workspace_ids, reader=reader),
-        organization_id=visible.organization_id,
-        reader=reader,
-    )
-
-
-@dataclass(frozen=True)
-class PlatformBreakGlass:
-    """The deployment's operator about to open a session's content in a named workspace of any organization."""
-
-    reader: ContentReader
-    workspace_id: uuid.UUID
-    organization_id: uuid.UUID
-
-
-async def get_platform_break_glass(
-    config: Annotated[GatewayConfig, Depends(get_config)],
-    identity: CurrentIdentity,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    workspace_id: Annotated[uuid.UUID, Query(description="The workspace the session is in.")],
-) -> PlatformBreakGlass:
-    """The deployment's operator, where the deployment lets them open any organization's session content.
-
-    Answers 404 where it does not, as a path nothing serves would, and for a workspace that does not exist.
-    """
-    if not config.trace_platform_break_glass_enabled:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
-    workspace = await WorkspaceRepository(db).get(workspace_id)
-    if workspace is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
-    return PlatformBreakGlass(
-        reader=ContentReader(user_id=identity.id, email=identity.email or str(identity.id)),
-        workspace_id=workspace_id,
-        organization_id=workspace.organization_id,
-    )
 
 
 def get_request_prices(db: AsyncSession, organization_id: uuid.UUID | None) -> RequestPrices:
@@ -2910,54 +1785,6 @@ async def get_log_writer(request: Request) -> LogWriter:
     return writer
 
 
-class _VideoUsageWriter:
-    """Writes the row that settles a completed video job in the claim's own transaction.
-
-    The log writer would write it on a connection of its own, which a SQLite
-    file refuses while the claim holds the write lock, and a batching writer
-    may drop after accepting. The row is staged on the settlement's session
-    instead, and reported to the usage signal port once that commit has landed,
-    as the signaling writer reports a row it accepted.
-    """
-
-    def __init__(self, uow: UnitOfWork, signal: UsageSignalPort) -> None:
-        self._rows = UsageLogRepository(uow)
-        self._signal = signal
-        self._facts: dict[str, RecordedUsage] = {}
-
-    async def record(self, usage: CompletedVideoUsage) -> None:
-        charge = usage.charge
-        pricing = usage.pricing if charge is not None else None
-        source, reference, effective_at = pricing_provenance(pricing) if pricing is not None else (None, None, None)
-        row = settled_job_row(
-            workspace_id=usage.workspace_id,
-            api_key_id=usage.api_key_id,
-            user_id=usage.user_id,
-            model=usage.model,
-            provider=usage.provider,
-            endpoint=usage.endpoint,
-            counts_toward_budget=usage.counts_toward_budget,
-            deployment_paid=usage.deployment_paid,
-            cost=usage.cost,
-            billing_meters=dict(charge.meters) if charge is not None and charge.meters else None,
-            pricing_breakdown=charge.lines if charge is not None and charge.lines else None,
-            pricing_source=source,
-            pricing_reference=reference,
-            pricing_effective_at=effective_at,
-        )
-        self._facts[usage.video_id] = recorded_usage(row)
-        await self._rows.add(row)
-
-    async def recorded(self, usage: CompletedVideoUsage) -> None:
-        facts = self._facts.pop(usage.video_id, None)
-        if facts is None:
-            return
-        try:
-            await self._signal.usage_recorded(facts)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Usage row not signaled (%s)", type(exc).__name__)
-
-
 def _video_rate_lookup(db: AsyncSession) -> VideoRateLookup:
     """The rate a video job settles at, read on the request's session."""
 
@@ -2980,7 +1807,7 @@ def get_video_job_service(request: Request, uow: UnitOfWorkDep, db: PortSessionD
     return VideoJobService(
         uow,
         InferenceRepositories.on(uow).video_jobs,
-        usage=_VideoUsageWriter(uow, get_container(request).resolve(UsageSignalPort, db)),
+        usage=VideoUsageWriter(uow, get_container(request).resolve(UsageSignalPort, db)),
         fold_spend=partial(record_external_spend, db),
         rate=_video_rate_lookup(db),
     )
@@ -3398,6 +2225,7 @@ __all__ = [
     "get_unavailable_model_reporter",
     "UpdateCheckServiceDep",
     "build_update_check_service",
+    "build_invitation_cleanup",
     "build_invitation_delivery",
     "RequestSessionModelProviderPortDep",
     "TelemetryStoragePortDep",

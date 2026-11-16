@@ -6,6 +6,7 @@ import type {
   CreateKeyResponse,
   CreateOwnKeyRequest,
   EndUser,
+  EndUserCount,
   FederationRule,
   UpdateKeyRequest,
   UpdateOwnKeyRequest,
@@ -161,6 +162,21 @@ export function useKeyEndUsers(
     staleTime: 0,
     placeholderData: (previous, previousQuery) =>
       previousQuery?.queryKey[2] === keyId ? previous : undefined,
+  })
+}
+
+// How many end users a service key's cap counts, and the cap. Read fresh on
+// every opening for the reason `useKeyEndUsers` gives.
+export function useKeyEndUserCount(keyId: string) {
+  const scope = useKeysScope()
+  return useQuery({
+    queryKey: [KEY_END_USERS, scope.base, keyId, "count"],
+    queryFn: () =>
+      apiFetch<EndUserCount>(
+        `${scope.base}/${encodeURIComponent(keyId)}/end-user-count`,
+      ),
+    enabled: scope.isReady,
+    staleTime: 0,
   })
 }
 

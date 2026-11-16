@@ -3,7 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { EndUser } from "@/client"
+import type { EndUser, EndUserCount } from "@/client"
 import { EndUsersDialog } from "@/features/keys/EndUsersDialog"
 import { API_ROOT } from "@/shared/api/client"
 import { apiKey, organizationContext } from "@/tests/fixtures"
@@ -36,7 +36,10 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 // An owner's view of an organization's service key: the member surface.
-function mockApi(rows: EndUser[]) {
+function mockApi(
+  rows: EndUser[],
+  count: EndUserCount = { count: rows.length, max_end_users: 10000 },
+) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = new URL(String(input), "http://gateway.test")
     if (url.pathname === `${API_ROOT}/organizations/me`) {
@@ -53,6 +56,11 @@ function mockApi(rows: EndUser[]) {
         ],
         count: 1,
       })
+    }
+    if (
+      url.pathname === `${API_ROOT}/organizations/me/keys/key-1/end-user-count`
+    ) {
+      return jsonResponse(count)
     }
     if (url.pathname === END_USERS_PATH) {
       const externalId = url.searchParams.get("external_id")
@@ -152,6 +160,47 @@ describe("EndUsersDialog", () => {
         String(input).includes("skip=25&limit=26"),
       ),
     ).toBe(true)
+  })
+
+  it("shows the end users the cap counts against the cap, and when it is full", async () => {
+    mockApi([endUser(), endUser({ user_id: "svc:bob", external_id: "bob" })], {
+      count: 2,
+      max_end_users: 2,
+    })
+    renderDialog()
+
+    expect(await screen.findByText("2 of 2 end users")).toBeInTheDocument()
+    expect(screen.getByText("Full")).toBeInTheDocument()
+  })
+
+  it("says a key without a cap has none", async () => {
+    mockApi([endUser()], { count: 1, max_end_users: null })
+    renderDialog()
+
+    expect(await screen.findByText("1 end user, no cap")).toBeInTheDocument()
+    expect(screen.queryByText("Full")).not.toBeInTheDocument()
+  })
+
+  it("says the cap could not be read, and reads it again on Retry", async () => {
+    const fetchSpy = mockApi([endUser()])
+    const answer = fetchSpy.getMockImplementation()!
+    let failing = true
+    fetchSpy.mockImplementation(async (input, init) => {
+      if (failing && String(input).includes("/end-user-count")) {
+        return jsonResponse({ detail: "Database error" }, 500)
+      }
+      return answer(input, init)
+    })
+    const user = userEvent.setup()
+    renderDialog()
+
+    expect(
+      await screen.findByText("Could not read the cap"),
+    ).toBeInTheDocument()
+    failing = false
+    await user.click(screen.getByRole("button", { name: "Retry" }))
+
+    expect(await screen.findByText("1 of 10,000 end users")).toBeInTheDocument()
   })
 
   it("says when the key has no end users", async () => {

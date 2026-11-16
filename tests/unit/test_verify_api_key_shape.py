@@ -18,7 +18,7 @@ import pytest
 from fastapi import HTTPException, status
 
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
-from gateway.api.deps import _verify_and_update_api_key
+from gateway.api.deps.auth import _verify_and_update_api_key
 from gateway.metrics import REGISTRY
 
 # The open-source format routes every key locally, which is the behavior under test.

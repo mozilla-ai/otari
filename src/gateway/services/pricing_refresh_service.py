@@ -76,10 +76,10 @@ _applied_updated_at: datetime | None = None
 _catalog_applied_at: datetime | None = None
 
 
-def _parse_snapshot(raw_snapshot: str) -> ModelsDevPriceIndex:
-    """Index a stored snapshot, refusing one that carries no models."""
+def _parse_snapshot(raw_snapshot: str, reuse: ModelsDevPriceIndex | None = None) -> ModelsDevPriceIndex:
+    """Index a stored snapshot, refusing one that carries no models; entries ``reuse`` holds are shared with it."""
     try:
-        index = ModelsDevPriceIndex.from_document(json.loads(raw_snapshot))
+        index = ModelsDevPriceIndex.from_document(json.loads(raw_snapshot), reuse=reuse)
     except Exception as exc:
         raise ValueError("Invalid models.dev snapshot") from exc
     if len(index) == 0:
@@ -314,7 +314,7 @@ async def confirm_price_refresh(
         return False
     raw_snapshot = pending_row.snapshot
     try:
-        index = await asyncio.to_thread(_parse_snapshot, raw_snapshot)
+        index = await asyncio.to_thread(_parse_snapshot, raw_snapshot, current_index())
     except ValueError as exc:
         await session.rollback()
         raise PricingRefreshError("The pending models.dev data is invalid") from exc
@@ -589,11 +589,11 @@ def _build_generations(
     if active is not None and all(raw != active[1] for _, raw in rows):
         rows.append(active)
     generations: list[PriceGeneration] = []
+    reuse: ModelsDevPriceIndex | None = None
     for effective_at, raw in rows:
         try:
-            generations.append(
-                PriceGeneration(effective_at=normalize_effective_at(effective_at), index=_parse_snapshot(raw))
-            )
+            reuse = _parse_snapshot(raw, reuse)
+            generations.append(PriceGeneration(effective_at=normalize_effective_at(effective_at), index=reuse))
         except ValueError:
             logger.warning("Ignoring invalid persisted %s pricing snapshot", MODELS_DEV_SOURCE)
     return generations

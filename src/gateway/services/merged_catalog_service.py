@@ -69,6 +69,7 @@ from gateway.services.workspace_scope import (
     organization_for_key_id,
     organization_for_workspace_id,
 )
+from gateway.types.key_scope import KeyScope
 from gateway.types.models_dev import ModelsDevCatalog
 from gateway.types.price_rates import RatesDocument, stored_rates
 from gateway.types.price_unit import PriceUnit
@@ -1155,6 +1156,20 @@ async def viewer_organization(
         return None
     api_key, _ = caller
     return await organization_for_key_id(db, api_key.id if api_key is not None else None)
+
+
+def viewer_reads_usage(caller: tuple[APIKey | None, bool] | None) -> bool:
+    """Whether this viewer reads usage at all, before the organization it would read is known.
+
+    A visitor the public catalog admits reads none. An API key needs
+    ``usage:read``, the scope the usage routes require, so a key that only calls
+    models learns nothing about what its organization spends. The master key and
+    a dashboard session read. Which organization is the caller's own question.
+    """
+    if caller is None:
+        return False
+    api_key, _ = caller
+    return api_key is None or KeyScope.USAGE_READ in api_key.scopes
 
 
 @dataclass(frozen=True)

@@ -842,7 +842,7 @@ _FACTORY_SOURCE = "def get_unit_of_work(db: object) -> UnitOfWork:\n    return U
 
 
 def test_the_request_factory_may_construct_a_unit_of_work(tmp_path: Path) -> None:
-    _write(tmp_path, "gateway/api/deps.py", _FACTORY_SOURCE)
+    _write(tmp_path, "gateway/api/deps/_base.py", _FACTORY_SOURCE)
     assert check.check_unit_of_work_construction(tmp_path) == []
 
 
@@ -856,7 +856,7 @@ def test_the_unit_of_work_module_may_construct_one(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "relative_path", ["gateway/api/routes/things.py", "gateway/services/thing_service.py", "gateway/api/deps.py"]
+    "relative_path", ["gateway/api/routes/things.py", "gateway/services/thing_service.py", "gateway/api/deps/_base.py"]
 )
 def test_constructing_a_unit_of_work_elsewhere_is_flagged(tmp_path: Path, relative_path: str) -> None:
     _write(tmp_path, relative_path, "def build(db: object) -> UnitOfWork:\n    return UnitOfWork(db)\n")
@@ -866,7 +866,7 @@ def test_constructing_a_unit_of_work_elsewhere_is_flagged(tmp_path: Path, relati
 
 
 def test_a_unit_of_work_reached_through_its_module_is_flagged(tmp_path: Path) -> None:
-    _write(tmp_path, "gateway/api/deps.py", _FACTORY_SOURCE)
+    _write(tmp_path, "gateway/api/deps/_base.py", _FACTORY_SOURCE)
     _write(
         tmp_path,
         "gateway/services/thing_service.py",
@@ -878,7 +878,7 @@ def test_a_unit_of_work_reached_through_its_module_is_flagged(tmp_path: Path) ->
 
 
 def test_naming_the_unit_of_work_as_a_type_is_not_a_construction(tmp_path: Path) -> None:
-    _write(tmp_path, "gateway/api/deps.py", _FACTORY_SOURCE)
+    _write(tmp_path, "gateway/api/deps/_base.py", _FACTORY_SOURCE)
     _write(
         tmp_path,
         "gateway/services/thing_service.py",
@@ -907,16 +907,16 @@ def test_main_fails_on_a_unit_of_work_built_outside_the_factory(
 def test_only_the_module_level_factory_is_exempt(tmp_path: Path) -> None:
     _write(
         tmp_path,
-        "gateway/api/deps.py",
+        "gateway/api/deps/_base.py",
         "class Deps:\n    def get_unit_of_work(self, db: object) -> UnitOfWork:\n        return UnitOfWork(db)\n",
     )
     assert check.check_unit_of_work_construction(tmp_path) == [
-        f"gateway/api/deps.py:3 constructs a UnitOfWork; {_UNIT_OF_WORK_REMEDY}"
+        f"gateway/api/deps/_base.py:3 constructs a UnitOfWork; {_UNIT_OF_WORK_REMEDY}"
     ]
 
 
 def test_renaming_the_unit_of_work_on_import_is_flagged(tmp_path: Path) -> None:
-    _write(tmp_path, "gateway/api/deps.py", _FACTORY_SOURCE)
+    _write(tmp_path, "gateway/api/deps/_base.py", _FACTORY_SOURCE)
     _write(
         tmp_path,
         "gateway/services/thing_service.py",
@@ -930,7 +930,7 @@ def test_renaming_the_unit_of_work_on_import_is_flagged(tmp_path: Path) -> None:
 
 
 def test_importing_the_unit_of_work_under_its_own_name_is_clean(tmp_path: Path) -> None:
-    _write(tmp_path, "gateway/api/deps.py", _FACTORY_SOURCE)
+    _write(tmp_path, "gateway/api/deps/_base.py", _FACTORY_SOURCE)
     _write(
         tmp_path,
         "gateway/services/thing_service.py",
@@ -941,7 +941,7 @@ def test_importing_the_unit_of_work_under_its_own_name_is_clean(tmp_path: Path) 
 
 
 def test_renaming_the_unit_of_work_on_a_relative_import_is_flagged(tmp_path: Path) -> None:
-    _write(tmp_path, "gateway/api/deps.py", _FACTORY_SOURCE)
+    _write(tmp_path, "gateway/api/deps/_base.py", _FACTORY_SOURCE)
     _write(
         tmp_path,
         "gateway/services/thing_service.py",
@@ -1348,7 +1348,7 @@ def test_main_fails_on_a_new_module_in_a_package_on_the_domain_name_baseline(
 
 _DOMAINS = {"gadgets", "things", "widgets"}
 _REPOSITORY_REMEDY = (
-    "only the domain's own service and repository packages and the builders in gateway/api/deps.py import its "
+    "only the domain's own service and repository packages and the builders in gateway/api/deps/ import its "
     "repositories"
 )
 
@@ -1400,7 +1400,7 @@ def test_importing_another_domains_repositories_is_flagged(
     [
         ("gateway/services/things/_service.py", "from gateway.repositories.things import ThingRepository\n"),
         ("gateway/repositories/things/other_repository.py", "from .thing_repository import ThingRepository\n"),
-        ("gateway/api/deps.py", "from gateway.repositories.things import ThingRepository\n"),
+        ("gateway/api/deps/__init__.py", "from gateway.repositories.things import ThingRepository\n"),
         ("gateway/api/routes/things.py", "from gateway.repositories.base_repository import BaseRepository\n"),
         ("gateway/api/routes/things.py", "from gateway.repositories.legacy import LegacyRepository\n"),
     ],
@@ -1468,7 +1468,7 @@ def _write_things_service(src_root: Path) -> None:
             "from gateway.services.things import _store\n",
             "gateway.services.things._store",
         ),
-        ("gateway/api/deps.py", "import gateway.services.things.store\n", "gateway.services.things.store"),
+        ("gateway/api/deps/_base.py", "import gateway.services.things.store\n", "gateway.services.things.store"),
         ("gateway/services/widgets/_service.py", "from ..things.store import Store\n", "gateway.services.things.store"),
         (
             "gateway/services/thing_service.py",

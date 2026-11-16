@@ -238,6 +238,16 @@ export function SignupPage({ hash }: { hash: string }) {
     }
   }
 
+  // One checkbox holds the providers and the form alike.
+  const terms =
+    terms_url === null ? null : (
+      <TermsAcceptanceField
+        termsUrl={terms_url}
+        isAccepted={isTermsAccepted}
+        onChange={setIsTermsAccepted}
+      />
+    )
+
   return (
     <PublicAuthLayout
       isBusy={isBusy}
@@ -263,15 +273,6 @@ export function SignupPage({ hash }: { hash: string }) {
 
         {providers.length > 0 ? (
           <>
-            {terms_url !== null ? (
-              <div className="pb-3">
-                <TermsAcceptanceField
-                  termsUrl={terms_url}
-                  isAccepted={isTermsAccepted}
-                  onChange={setIsTermsAccepted}
-                />
-              </div>
-            ) : null}
             <AuthProviderRows
               providers={providers}
               layout={isFormOpen ? "two-up" : "stacked"}
@@ -336,13 +337,7 @@ export function SignupPage({ hash }: { hash: string }) {
               errorMessage={problem ?? undefined}
             />
 
-            {terms_url !== null && providers.length === 0 ? (
-              <TermsAcceptanceField
-                termsUrl={terms_url}
-                isAccepted={isTermsAccepted}
-                onChange={setIsTermsAccepted}
-              />
-            ) : null}
+            {terms}
 
             <ErrorBanner error={signup.error} />
 
@@ -379,6 +374,9 @@ export function SignupPage({ hash }: { hash: string }) {
           >
             Sign up with email
           </AuthMethodRow>
+        )}
+        {isFormOpen || terms === null ? null : (
+          <div className="pt-3">{terms}</div>
         )}
       </div>
     </PublicAuthLayout>

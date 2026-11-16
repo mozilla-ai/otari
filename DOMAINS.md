@@ -40,7 +40,7 @@ How a domain fits together:
 - **Savepoints.** A repository may open a savepoint for one purpose: to
   diagnose a refusal of its own write, by asking the database why the flush
   failed. It never opens one so that a step can continue.
-- **Builders** live in `api/deps.py`. A worker job calls the same builder with a
+- **Builders** live in `api/deps/`. A worker job calls the same builder with a
   Unit of Work over its own session. Nothing under `services/` may import
   `api/`, so the code that starts a worker passes the builder in.
 - **Imports** follow the
@@ -111,6 +111,11 @@ It also owns `models/users.py`, `repositories/users_repository.py` and
 ### api-keys
 
 The deployment's and the members' API keys, and which models a key may reach.
+
+A key's scopes say which endpoint groups it may call. They are a closed
+vocabulary several layers read, so the enum and its rules live in
+`types/key_scope.py` and the model imports them, as pricing does with
+`types/price_unit.py`.
 
 It also owns `services/model_access.py` and `services/bootstrap_service.py`.
 

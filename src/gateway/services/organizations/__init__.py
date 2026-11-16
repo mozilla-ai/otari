@@ -10,6 +10,7 @@ from gateway.services.organizations._claimed_domains import (
     ClaimedDomains,
     OrganizationClaimedDomains,
 )
+from gateway.services.organizations._cleanup import ExpiredInvitationCleanup
 from gateway.services.organizations._delivery import InvitationDelivery
 from gateway.services.organizations._delivery_rule import DeliveryRule
 from gateway.services.organizations._invitation_facts import InvitationFactsReader
@@ -24,6 +25,7 @@ __all__ = [
     "ClaimedDomain",
     "ClaimedDomains",
     "DeliveryRule",
+    "ExpiredInvitationCleanup",
     "InvitationDelivery",
     "InvitationFactsReader",
     "InvitationMailLimit",

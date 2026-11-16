@@ -2,19 +2,21 @@
 
 import uuid
 from collections.abc import Collection, Iterable
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from gateway.core.addresses import stored_address
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.budgets import Budget, ScopedBudget
 from gateway.models.tenancy import (
     Organization,
     OrganizationMember,
     OrganizationMemberCreate,
+    OrganizationMemberRole,
     OrganizationMemberUpdate,
     User,
     Workspace,
@@ -65,6 +67,23 @@ class OrganizationMemberRepository(
         )
         return result.scalars().first()
 
+    async def active_role(self, organization_id: uuid.UUID, user_id: uuid.UUID) -> OrganizationMemberRole | None:
+        """Return the role of the active membership joining a user to an organization, read from the row.
+
+        A read rather than an attribute of an instance already in hand,
+        because an in-hand instance may predate the write that changed its role,
+        and the attribute would still hold the old value.
+        """
+        result = await self.db.execute(
+            select(col(OrganizationMember.role)).where(
+                col(OrganizationMember.organization_id) == organization_id,
+                col(OrganizationMember.user_id) == user_id,
+                col(OrganizationMember.status) == "active",
+            )
+        )
+        role = result.scalar_one_or_none()
+        return cast(OrganizationMemberRole, role) if role is not None else None
+
     async def get_active_roles(
         self, organization_ids: Collection[uuid.UUID], user_ids: Collection[uuid.UUID]
     ) -> dict[tuple[uuid.UUID, uuid.UUID], str]:
@@ -81,6 +100,26 @@ class OrganizationMemberRepository(
             )
         )
         return {(organization_id, user_id): role for organization_id, user_id, role in result.tuples().all()}
+
+    async def active_member_addresses(self, organization_id: uuid.UUID, emails: Collection[str]) -> set[str]:
+        """Which of these addresses belong to an account with an active membership of the organization.
+
+        Matched case-insensitively, and against a stored address stripped of stray edge whitespace.
+        """
+        normalized = {address for email in emails if (address := stored_address(email)) is not None}
+        if not normalized:
+            return set()
+        result = await self.db.execute(
+            select(func.lower(func.trim(col(User.email))))
+            .select_from(OrganizationMember)
+            .join(User, col(OrganizationMember.user_id) == col(User.id))
+            .where(
+                col(OrganizationMember.organization_id) == organization_id,
+                col(OrganizationMember.status) == "active",
+                func.lower(func.trim(col(User.email))).in_(normalized),
+            )
+        )
+        return {address for address in result.scalars().all() if address is not None}
 
     async def get_by_id_and_organization(
         self,

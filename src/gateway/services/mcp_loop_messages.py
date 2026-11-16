@@ -31,6 +31,7 @@ from any_llm.types.messages import (
 
 from gateway.log_config import logger
 from gateway.services._tool_loop import (
+    RoundGate,
     StreamAction,
     log_tool_failure,
     run_tool_loop,
@@ -546,6 +547,9 @@ class _MessagesToolLoopStrategy:
             "native_blocks": [],
         }
 
+    def output_tokens(self, acc: _MessagesUsageAccumulator) -> int:
+        return acc["output"]
+
     def accumulate_usage(self, acc: _MessagesUsageAccumulator, result: MessageResponse) -> None:
         if result.usage:
             acc["input"] += result.usage.input_tokens or 0
@@ -808,6 +812,9 @@ class _MessagesToolLoopStrategy:
             *(_maybe_fold_message_delta(term, acc) for term in state.deferred_terminal),
         ]
 
+    def stream_output_tokens(self, acc: _MessagesStreamAccumulator) -> int:
+        return acc["output_tokens"]
+
     def accumulate_stream_usage(self, acc: _MessagesStreamAccumulator, state: _MessagesStreamState) -> None:
         for term in state.deferred_terminal:
             if getattr(term, "type", None) != "message_delta":
@@ -939,6 +946,7 @@ async def anthropic_tool_loop(
     native_tools: frozenset[str] = frozenset(),
     use_budget: ToolUseBudget | None = None,
     container: ContainerLease | None = None,
+    round_gate: RoundGate | None = None,
 ) -> MessageResponse:
     """Non-streaming Anthropic Messages tool-use loop.
 
@@ -970,6 +978,7 @@ async def anthropic_tool_loop(
         pool=pool,
         max_iterations=max_iterations,
         on_first_response=on_first_response,
+        round_gate=round_gate,
     )
 
 
@@ -983,6 +992,7 @@ async def anthropic_tool_loop_stream(
     use_budget: ToolUseBudget | None = None,
     container: ContainerLease | None = None,
     on_first_response: Callable[[], None] | None = None,
+    round_gate: RoundGate | None = None,
 ) -> AsyncGenerator[MessageStreamEvent, None]:
     """Streaming Anthropic Messages tool-use loop.
 
@@ -1025,6 +1035,7 @@ async def anthropic_tool_loop_stream(
             pool=pool,
             max_iterations=max_iterations,
             on_first_response=on_first_response,
+            round_gate=round_gate,
         )
     ) as inner:
         async for event in inner:

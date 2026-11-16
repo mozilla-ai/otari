@@ -1,0 +1,31 @@
+{
+  "status": 200,
+  "body": {
+    "query": "technology news",
+    "follow_up_questions": null,
+    "answer": null,
+    "images": [],
+    "results": [
+      {
+        "url": "https://abcnews.com/US/apple-launches-ai-health-chatbot-part-research-study/story?id=138164909",
+        "title": "Apple launches an AI health chatbot as part of a research study - ABC News",
+        "content": "## Authorities investigate 'credible' unknown device threat at Illinois plant\n\n## Microsoft apologizes for email disruption, says AI agents not responsible\n\n“We're collecting enormous amounts of personal health data through phones and wearables, but turning that information into something people can actually understand and act on remains a challenge,” Brownstein said. [...] According to a February 2026 Oxford study published in Nature Medicine, AI chatbots accurately identify medical conditions nearly 95% of the time when tested on clinical cases, yet everyday users reach the right answer less than 35% of the time when trying to understand dense guidance. Yet 35% of adults, or about half of adults under 30, are already using AI chatbots, according to the Pew Research Center. [...] Users will be able to ask the study app everyday health questions and see linked, peer-reviewed clinical citations -- showing users where the advice is coming from.\n\nApple is collaborating with OpenEvidence, an AI tool that is used by doctors and is trained on sources like medical journals that may not be available to other AI platforms.\n\nFull access to OpenEvidence is currently only available to health care professionals and returns answers in a language that they are used to.",
+        "score": 0.5535958,
+        "published_date": "Mon, 16 Nov 2026 01:30:48 GMT",
+        "raw_content": null,
+        "id": "d3edca-00"
+      },
+      {
+        "url": "https://www.sammobile.com/news/samsung-expert-raw-galaxy-s27-one-ui-9-5-redesign-features",
+        "title": "Samsung Expert RAW getting major redesign, new features for Galaxy S27 series - SamMobile",
+        "content": "\"It's first-gen\" iPhone Duo apologists make the phone look even worse\n Samsung Galaxy S26+ Design - Back Panel\n\n  Galaxy S27's biggest threat is a cheaper iPhone crashing its party\n\n Home\n News\n You are here\n\nLast updated: November 14th, 2026 at 23:08 UTC+01:00\n\nSamMobile has affiliate and sponsored partnerships, we may earn a commission.\n\n# Exclusive: Expert RAW getting major redesign, new features for Galaxy S27 and One UI 9.5\n\nExpert RAW is getting both a visual and functional upgrade. [...] Keeping Flex Mode and the Galaxy Z Fold 8 separate might've been Samsung's most inspired idea\n Gemini on the Galaxy Z Fold 8\n\n  While EU iPhone users wait for Siri AI, the Galaxy Z Fold 8 is getting things done\n Galaxy S25 Ultra review – battery life\n\n  I'm glad the Galaxy S Ultra's most predictable spec is finally changing\n Samsung Galaxy S26 Ultra Back Panel And Rear Cameras [...] ## TL;DR\n\n Samsung is redesigning Expert RAW for the Galaxy S27 and One UI 9.5 with a cleaner interface, larger controls, and customizable shortcut buttons.\n The app adds new shooting features including Burst mode, a wider Virtual Aperture range from f/1.4 to f/22, a Tint control, and photo aspect ratio options.\n Early signs also point to future video support, with settings for stabilization and resolution/frame rate visible in this build.",
+        "score": 0.5470709,
+        "published_date": "Sat, 14 Nov 2026 22:08:31 GMT",
+        "raw_content": null,
+        "id": "4977a6-01"
+      }
+    ],
+    "response_time": 0.0,
+    "request_id": "bf4bf997-569e-477c-ba18-f5e6767fa9a8"
+  }
+}

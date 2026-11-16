@@ -23,6 +23,7 @@ from gateway.api.deps import (
     require_deployment_operator,
     verify_api_key_or_master_key,
 )
+from gateway.api.key_scopes import key_scope
 from gateway.api.routes._helpers import retryable_on_database_outage
 from gateway.api.routes._request_tags import MAX_TAG_KEY_LENGTH
 from gateway.core.config import GatewayConfig
@@ -56,6 +57,7 @@ from gateway.services.usage_admin_service import (
     set_usage_price,
 )
 from gateway.services.usage_and_telemetry import UsageFilters, parse_tag_filters
+from gateway.types.key_scope import KeyScope
 
 # Two routers under one prefix, because their callers authenticate
 # differently. Reading or amending usage rows across an organization is an
@@ -83,13 +85,6 @@ SURFACE = Surface("usage")
 # a fixed cap beats a pagination knob; the response reports the true count next to
 # the capped list, and the longest-running are the ones kept.
 _MAX_IN_FLIGHT_ROWS = 50
-
-# Sessions (``source_label``) are an order of magnitude higher-cardinality than
-# models or users: one agent workload can open hundreds of them in a month, and
-# the interesting signal is a long-ish head ("which tasks burned the budget"),
-# not just the top few. Give that dimension a deeper cap so the head is not
-# swallowed by the "other" fold.
-_SESSION_BREAKDOWN_TOP_N = 250
 
 # How many request groups one call may ask for. The dashboard batches the groups
 # visible on a page of the activity log into a single lookup, so the bound tracks
@@ -272,7 +267,7 @@ async def list_usage(
     return await usage.page(filters, usage_scope, skip=skip, limit=limit)
 
 
-@key_router.post("/external-events")
+@key_router.post("/external-events", openapi_extra=key_scope(KeyScope.USAGE_WRITE))
 async def ingest_external_usage(
     request: ExternalEventsRequest,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
@@ -302,7 +297,7 @@ async def ingest_external_usage(
         )
 
 
-@key_router.get("/requests/{request_id}")
+@key_router.get("/requests/{request_id}", openapi_extra=key_scope(KeyScope.USAGE_READ))
 async def get_request_settlement(
     request_id: Annotated[str, Path(max_length=255)],
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
