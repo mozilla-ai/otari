@@ -907,11 +907,11 @@ def test_main_fails_on_a_unit_of_work_built_outside_the_factory(
 def test_only_the_module_level_factory_is_exempt(tmp_path: Path) -> None:
     _write(
         tmp_path,
-        "gateway/api/deps.py",
+        "gateway/api/deps/_base.py",
         "class Deps:\n    def get_unit_of_work(self, db: object) -> UnitOfWork:\n        return UnitOfWork(db)\n",
     )
     assert check.check_unit_of_work_construction(tmp_path) == [
-        f"gateway/api/deps.py:3 constructs a UnitOfWork; {_UNIT_OF_WORK_REMEDY}"
+        f"gateway/api/deps/_base.py:3 constructs a UnitOfWork; {_UNIT_OF_WORK_REMEDY}"
     ]
 
 
@@ -1468,7 +1468,7 @@ def _write_things_service(src_root: Path) -> None:
             "from gateway.services.things import _store\n",
             "gateway.services.things._store",
         ),
-        ("gateway/api/deps.py", "import gateway.services.things.store\n", "gateway.services.things.store"),
+        ("gateway/api/deps/_base.py", "import gateway.services.things.store\n", "gateway.services.things.store"),
         ("gateway/services/widgets/_service.py", "from ..things.store import Store\n", "gateway.services.things.store"),
         (
             "gateway/services/thing_service.py",

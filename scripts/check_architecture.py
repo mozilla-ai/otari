@@ -51,7 +51,7 @@ Enforces:
     on a baseline, and the baseline only shrinks.
     A package on it holds only the modules the baseline lists, so new code goes in its domain's package.
 20. Repository imports: only a domain's own service package, its own
-    repository package and the builders in gateway/api/deps.py import a
+    repository package and the builders in gateway/api/deps/ import a
     domain's repository package, so a domain's queries stay behind its
     service. A domain is one that DOMAINS.md gives a section. Service code
     outside every domain package is not checked, because its path does not
@@ -581,7 +581,7 @@ UNIT_OF_WORK = "gateway/core/unit_of_work.py"
 # so the list only shrinks.
 TRANSACTION_CONTROL_BASELINE = (
     "gateway/adapters/telemetry_storage_adapter.py",
-    "gateway/api/deps.py",
+    "gateway/api/deps/__init__.py",
     "gateway/api/routes/_passthrough.py",
     "gateway/api/routes/_pipeline.py",
     "gateway/api/routes/aliases.py",
@@ -690,7 +690,7 @@ def check_transaction_control(src_root: Path) -> list[str]:
 
 UNIT_OF_WORK_TYPE = "UnitOfWork"
 UNIT_OF_WORK_MODULE = "gateway.core.unit_of_work"
-UNIT_OF_WORK_FACTORY = "gateway/api/deps.py"
+UNIT_OF_WORK_FACTORY = "gateway/api/deps/__init__.py"
 UNIT_OF_WORK_FACTORY_FUNCTION = "get_unit_of_work"
 UNIT_OF_WORK_WORKER_FACTORIES = "create_unit_of_work or create_log_unit_of_work"
 
@@ -1223,7 +1223,7 @@ def check_domain_names(src_root: Path, domains: set[str]) -> list[str]:
 
 
 REPOSITORY_SCOPE = "gateway/repositories"
-SERVICE_BUILDERS = "gateway/api/deps.py"
+SERVICE_BUILDERS = "gateway/api/deps/__init__.py"
 
 
 def _domain_packages(src_root: Path, layer: str, domains: set[str]) -> set[str]:
@@ -1992,7 +1992,7 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     "gateway.models.api_keys.APIKey": {
         "repository": "gateway/repositories/api_keys/api_key_repository.py",
         "baseline": (
-            "gateway/api/deps.py",
+            "gateway/api/deps/__init__.py",
             "gateway/api/routes/batches.py",
             "gateway/api/routes/catalog.py",
             "gateway/api/routes/keys.py",
@@ -2319,7 +2319,7 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     "gateway.models.tenancy.User": {
         "repository": "gateway/repositories/tenancy/user_repository.py",
         "baseline": (
-            "gateway/api/deps.py",
+            "gateway/api/deps/__init__.py",
             "gateway/repositories/tenancy/organization_member_repository.py",
             "gateway/repositories/tenancy/workspace_repository.py",
             "gateway/services/dashboard_session_service.py",
