@@ -96,5 +96,8 @@ async def test_failed_last_used_bump_logs_warning_and_does_not_poison_request_se
     assert result is api_key
     mock_warning.assert_called_once()
     assert "key-abc123" in mock_warning.call_args.args
+    # A database error's traceback carries the statement's bound parameters, so it is described instead.
+    assert "exc_info" not in mock_warning.call_args.kwargs
+    assert "database is locked" not in " ".join(str(arg) for arg in mock_warning.call_args.args)
     db.commit.assert_not_called()
     db.rollback.assert_not_called()

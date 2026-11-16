@@ -21,7 +21,13 @@ from gateway.core.config import (
     X_API_KEY_HEADER,
     GatewayConfig,
 )
-from gateway.core.database import DATABASE_ERRORS, create_session, get_db, release_session
+from gateway.core.database import (
+    DATABASE_ERRORS,
+    create_session,
+    describe_database_error,
+    get_db,
+    release_session,
+)
 from gateway.exceptions.api_keys_exceptions import KeyScopeMissingError
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
@@ -336,12 +342,12 @@ async def _bump_last_used_at(api_key_id: str, now: datetime) -> None:
         async with create_session() as session:
             await session.execute(update(APIKey).where(APIKey.id == api_key_id).values(last_used_at=now))
             await session.commit()
-    except DATABASE_ERRORS:
+    except DATABASE_ERRORS as exc:
         # Widened past SQLAlchemyError for the same reason as the arms above:
         # this one promises never to fail the request, and a connect timeout
         # raises a bare TimeoutError.
         # codeql[py/clear-text-logging-sensitive-data]
-        logger.warning("Failed to update last_used_at for API key %s", api_key_id, exc_info=True)
+        logger.warning("Failed to update last_used_at for API key %s (%s)", api_key_id, describe_database_error(exc))
 
 
 def _header_credentials_present(request: Request) -> bool:
