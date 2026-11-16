@@ -8,11 +8,13 @@ spelling.
 """
 
 import re
+import sys
 from bisect import bisect_right
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
+from functools import lru_cache
 from typing import Any
 
 from gateway.core.metered_pricing import TIER_THRESHOLD_FIELD
@@ -54,6 +56,9 @@ _BEDROCK_VERSION_SUFFIX = re.compile(r"(?:-v\d+(?::\d+)?|:\d+)$")
 # negative or not finite is treated as a data error, not a price.
 MAX_RATE_PER_MILLION = Decimal(1_000_000)
 _RATE_PLACES = Decimal("0.00000001")
+# A catalog holds about two thousand distinct rates; the bound is for a fetched
+# document that holds far more. An evicted rate only stops being shared.
+_RATE_CACHE_SIZE = 1 << 14
 
 _TIER_FIELD_NAMES = {
     "input": "input_price_per_million",
@@ -138,8 +143,14 @@ def parse_rate(value: object) -> Decimal | None:
     """
     if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
         return None
+    return _rate_from_text(str(value))
+
+
+@lru_cache(maxsize=_RATE_CACHE_SIZE)
+def _rate_from_text(text: str) -> Decimal | None:
+    """The rate a number's spelling gives. Cached by spelling so equal rates share one ``Decimal`` across catalogs."""
     try:
-        rate = Decimal(str(value))
+        rate = Decimal(text)
         if not rate.is_finite() or rate < 0 or rate > MAX_RATE_PER_MILLION:
             return None
         rate.quantize(_RATE_PLACES)
@@ -281,31 +292,37 @@ class ModelsDevPriceIndex:
         by_canonical: dict[str, list[ModelsDevPrice]] = {}
         for entry in entries:
             by_provider.setdefault(entry.provider_id, {})[entry.model_id] = entry
-            by_model_id.setdefault(entry.model_id.casefold(), []).append(entry)
+            by_model_id.setdefault(sys.intern(entry.model_id.casefold()), []).append(entry)
             if entry.canonical_model_id:
-                by_canonical.setdefault(entry.canonical_model_id.casefold(), []).append(entry)
-                tail = entry.canonical_model_id.rpartition("/")[2].casefold()
-                if tail != entry.canonical_model_id.casefold():
+                canonical = sys.intern(entry.canonical_model_id.casefold())
+                by_canonical.setdefault(canonical, []).append(entry)
+                tail = sys.intern(entry.canonical_model_id.rpartition("/")[2].casefold())
+                if tail != canonical:
                     by_canonical.setdefault(tail, []).append(entry)
         self._by_provider = by_provider
         by_provider_folded: dict[str, dict[str, ModelsDevPrice]] = {}
         for provider_id, models in by_provider.items():
             folded = by_provider_folded[provider_id] = {}
             for model_id, entry in models.items():
-                folded.setdefault(model_id.casefold(), entry)
+                folded.setdefault(sys.intern(model_id.casefold()), entry)
         self._by_provider_folded = by_provider_folded
-        self._by_model_id = by_model_id
-        self._by_canonical = by_canonical
+        self._by_model_id = {key: tuple(found) for key, found in by_model_id.items()}
+        self._by_canonical = {key: tuple(found) for key, found in by_canonical.items()}
 
     @classmethod
-    def from_catalog(cls, catalog: ModelsDevCatalog) -> "ModelsDevPriceIndex":
-        """Build an index over every model of a typed catalog."""
-        return cls(_entry(provider, model) for provider, model in catalog.models())
+    def from_catalog(
+        cls, catalog: ModelsDevCatalog, *, reuse: "ModelsDevPriceIndex | None" = None
+    ) -> "ModelsDevPriceIndex":
+        """Build an index over every model of a typed catalog, keeping each entry ``reuse`` already holds."""
+        entries = (_entry(provider, model) for provider, model in catalog.models())
+        return cls(entries if reuse is None else map(reuse._reused, entries))
 
     @classmethod
-    def from_document(cls, raw: Mapping[str, Any]) -> "ModelsDevPriceIndex":
+    def from_document(
+        cls, raw: Mapping[str, Any], *, reuse: "ModelsDevPriceIndex | None" = None
+    ) -> "ModelsDevPriceIndex":
         """Build an index from a parsed ``api.json`` or a stored snapshot, through the one catalog parser."""
-        return cls.from_catalog(parse_catalog(raw))
+        return cls.from_catalog(parse_catalog(raw), reuse=reuse)
 
     def __len__(self) -> int:
         return sum(len(models) for models in self._by_provider.values())
@@ -358,6 +375,11 @@ class ModelsDevPriceIndex:
                     or self._agnostic(_strip_suffix(rest))
                 )
         return None
+
+    def _reused(self, entry: ModelsDevPrice) -> ModelsDevPrice:
+        """This index's own entry where it equals ``entry``, so generations share what did not change."""
+        held = self.get(entry.provider_id, entry.model_id)
+        return held if held == entry else entry
 
     def _scoped(self, provider_id: str, model: str, *, folded: bool = False) -> ModelsDevPrice | None:
         if folded:

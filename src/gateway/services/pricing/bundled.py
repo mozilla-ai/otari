@@ -12,7 +12,6 @@ BUNDLED_SNAPSHOT_NAME = "models_dev_catalog.json"
 _META_KEY = "_meta"
 
 
-@cache
 def _load() -> tuple[datetime, ModelsDevCatalog]:
     document = json.loads(resources.files("gateway").joinpath("data", BUNDLED_SNAPSHOT_NAME).read_text("utf-8"))
     generated_at = datetime.fromisoformat(document[_META_KEY]["generated_at"]).replace(tzinfo=UTC)
@@ -20,16 +19,17 @@ def _load() -> tuple[datetime, ModelsDevCatalog]:
 
 
 @cache
+def bundled_generation() -> PriceGeneration:
+    """The packaged catalog's prices as the baseline generation, effective from the day it was generated."""
+    generated_at, catalog = _load()
+    return PriceGeneration(effective_at=generated_at, index=ModelsDevPriceIndex.from_catalog(catalog), baseline=True)
+
+
 def load_bundled_index() -> ModelsDevPriceIndex:
     """The packaged catalog's price index, built once per process."""
-    return ModelsDevPriceIndex.from_catalog(_load()[1])
+    return bundled_generation().index
 
 
 def bundled_catalog() -> ModelsDevCatalog:
-    """The packaged catalog, read once per process."""
+    """The packaged catalog, read from the package on each call, so it is freed with the caller's last reference."""
     return _load()[1]
-
-
-def bundled_generation() -> PriceGeneration:
-    """The packaged catalog's prices as the baseline generation, effective from the day it was generated."""
-    return PriceGeneration(effective_at=_load()[0], index=load_bundled_index(), baseline=True)
