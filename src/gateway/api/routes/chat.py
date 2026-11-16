@@ -584,8 +584,7 @@ async def run_chat_completion(
     async def _normalize(target: NormalizationTarget) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the wire payload (extract to
         # text for text-only models, inline for natively-capable ones) before
-        # the cost estimate. A no-op when the files feature is off or the
-        # request has no attachments.
+        # the cost estimate. A no-op when the request has no attachments.
         request.messages, stats = await normalize_request_messages(
             request.messages,
             fmt="openai",

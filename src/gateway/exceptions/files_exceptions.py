@@ -94,13 +94,6 @@ class AttachedFileExpiresTooSoonError(ProviderAttachmentRefusedError):
         super().__init__("An attached file expires too soon to be copied to the provider")
 
 
-class AttachedFilesNotReadError(ProviderAttachmentRefusedError):
-    """The deployment does not read attached files, so it cannot resolve the one attached."""
-
-    def __init__(self) -> None:
-        super().__init__("This deployment does not read attached files")
-
-
 class ProviderUploadDisabledError(ProviderAttachmentRefusedError):
     """The deployment does not upload a copy of an attached file to a provider."""
 

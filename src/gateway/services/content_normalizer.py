@@ -765,7 +765,7 @@ async def normalize_messages(
         InlineAttachmentsTooLargeError: attachments pass ``inline_limit`` and could not be moved.
     """
     stats = NormalizationStats()
-    if not config.file_understanding_enabled or not isinstance(messages, list):
+    if not isinstance(messages, list):
         return messages, stats
 
     async def _block(block: Any) -> Any:

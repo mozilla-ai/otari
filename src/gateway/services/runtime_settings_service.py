@@ -55,7 +55,6 @@ MODEL_DISCOVERY_TIMEOUT_SECONDS = "model_discovery_timeout_seconds"
 MODEL_DISCOVERY_NEGATIVE_TTL_SECONDS = "model_discovery_negative_ttl_seconds"
 MODELS_DEV_METADATA = "models_dev_metadata"
 MODELS_DEV_CACHE_TTL_SECONDS = "models_dev_cache_ttl_seconds"
-FILE_UNDERSTANDING_ENABLED = "file_understanding_enabled"
 VISION_STRATEGY = "vision_strategy"
 VISION_DESCRIBE_MODEL = "vision_describe_model"
 VISION_DESCRIBE_MAX_TOKENS = "vision_describe_max_tokens"
@@ -93,7 +92,6 @@ _SPECS: dict[str, _Spec] = {
     REQUIRE_PRICING: _Spec("bool"),
     REJECT_USER_MISMATCH: _Spec("bool"),
     MODELS_DEV_METADATA: _Spec("bool"),
-    FILE_UNDERSTANDING_ENABLED: _Spec("bool"),
     MODEL_CACHE_TTL_SECONDS: _Spec("int", ge=0),
     MODELS_DEV_CACHE_TTL_SECONDS: _Spec("int", ge=0),
     VISION_DESCRIBE_MAX_TOKENS: _Spec("int", gt=0),

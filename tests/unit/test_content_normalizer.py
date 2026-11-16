@@ -193,16 +193,6 @@ async def test_file_id_resolved_and_inlined_for_native() -> None:
     assert block["image_url"]["url"].startswith("data:image/png;base64,")
 
 
-@pytest.mark.asyncio
-async def test_disabled_is_noop() -> None:
-    cfg = GatewayConfig(file_understanding_enabled=False, vision_strategy="off")
-    out, stats = await normalize_messages(
-        _image_msg(), config=cfg, caps=_TEXT_ONLY, fmt="openai", files=None, user_id="u"
-    )
-    assert out == _image_msg()
-    assert not stats.touched
-
-
 def _stored(file_id: str = "file-csv", filename: str = "data.csv", mime: str = "text/csv") -> StagedFile:
     return StagedFile(file_id=file_id, filename=filename, mime_type=mime, storage_ref=f"x/{file_id}")
 

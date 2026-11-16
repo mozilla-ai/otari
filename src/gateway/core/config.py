@@ -1330,14 +1330,6 @@ class GatewayConfig(
             "left rather than uploading the same file again."
         ),
     )
-    file_understanding_enabled: Annotated[bool, Shown(SettingsGroup.VISION)] = Field(
-        default=True,
-        description=(
-            "Normalize file/image content blocks before the provider call: pass through for "
-            "natively-capable models, extract to text for text-only models. When False, content "
-            "blocks are forwarded unchanged (legacy pass-through)."
-        ),
-    )
     vision_strategy: Annotated[str, Shown(SettingsGroup.VISION)] = Field(
         default="describe",
         description=(

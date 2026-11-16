@@ -453,8 +453,7 @@ async def create_response(
 
     async def _normalize(target: NormalizationTarget) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the Responses input payload
-        # before the cost estimate. A no-op when the files feature is off or the
-        # request has no attachments.
+        # before the cost estimate. A no-op when the request has no attachments.
         request_body.input, stats = await normalize_request_messages(
             request_body.input,
             fmt="responses",

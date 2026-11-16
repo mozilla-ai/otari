@@ -251,39 +251,6 @@ def test_a_provider_that_will_not_take_the_copy_refuses(
     assert forwarded == []
 
 
-def test_file_understanding_off_refuses_rather_than_forwarding_the_block(
-    client: TestClient,
-    api_key_header: dict[str, str],
-    tmp_file_store: None,
-    anthropic_files: _StubAnthropicFiles,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """With normalization off nothing reads the block, so it must not reach the provider."""
-    file_id = _upload_file(client, api_key_header)
-    monkeypatch.setattr(cast(Any, client.app).state.config, "file_understanding_enabled", False, raising=True)
-
-    response, forwarded = _run(client, api_key_header, file_id)
-
-    assert response.status_code == 400, response.text
-    assert forwarded == []
-    assert anthropic_files.uploads == []
-
-
-def test_file_understanding_off_still_runs_code_that_attaches_nothing(
-    client: TestClient,
-    api_key_header: dict[str, str],
-    anthropic_files: _StubAnthropicFiles,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(cast(Any, client.app).state.config, "file_understanding_enabled", False, raising=True)
-
-    response, forwarded = _run(client, api_key_header, None)
-
-    assert response.status_code == 200, response.text
-    assert forwarded[0][0]["content"] == "Compute 2 + 2."
-    assert anthropic_files.uploads == []
-
-
 @pytest.fixture
 def priced_model(client: TestClient, master_key_header: dict[str, str]) -> None:
     """A price for the model, so a request reserves a nonzero estimate against the budget."""
