@@ -112,7 +112,9 @@ metadata, the download, the delete, and the `file_id` references resolved out of
 a chat message. A user who holds keys in two workspaces reaches each
 workspace's files only through that workspace's key. Anything they cannot see
 answers 404, not 403, and a request that attaches a `file_id` it cannot see is
-refused with a 400 that names the ID, never forwarded to the provider.
+refused with a 400 that names the ID, never forwarded to the provider. That
+covers every turn the request carries, so a conversation that still attaches a
+deleted or expired file is refused until the client drops that block.
 
 A [service key](end-users.md) that sends `user` naming one of its end users acts
 as that end user on every verb: the upload is theirs, and the listing, the
@@ -205,8 +207,6 @@ request asked for code over that file:
 - 400: a file with too little left for a copy to expire no later than it does;
 - 400: `files_provider_upload_enabled` set to `false`, or
   `OTARI_PROVIDER_ACCOUNT_PEPPER` unset;
-- 400: `file_understanding_enabled` set to `false`, because nothing then reads
-  the block;
 - 400: a routing policy with no candidate whose provider can hold a copy;
 - 502: a provider that would not take the copy. A routing policy tries its next
   candidate first.
@@ -391,7 +391,6 @@ code, and how long that copy lives (see
 account a copy is in. Without it, provider copies are off whatever
 `files_provider_upload_enabled` says (see
 [Provider copies](configuration.md#provider-copies)).
-- `file_understanding_enabled`: master switch for content normalization.
 - `vision_strategy` (`describe` | `ocr` | `off`) and `vision_describe_model`:
 how images are handled for text-only models. The describe model may be a local
 vision model (e.g. `ollama:qwen2-vl`) to keep captioning free.

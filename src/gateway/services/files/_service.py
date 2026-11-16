@@ -285,8 +285,7 @@ class FileService:
         """The stored upload under ``file_id``, ready to be read or handed to a sandbox, or None.
 
         None whenever the file cannot be served to this caller, and for a row
-        whose bytes are not in the store, so that a reference to one is dropped
-        rather than failing the request that carried it.
+        whose bytes are not in the store.
 
         It answers whether or not the deployment serves the Files API, because
         it resolves a reference a request already holds rather than serving that

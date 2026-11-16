@@ -130,7 +130,6 @@ class UpdateSettingsRequest(BaseModel):
     require_pricing: bool | None = None
     reject_user_mismatch: bool | None = None
     models_dev_metadata: bool | None = None
-    file_understanding_enabled: bool | None = None
     model_cache_ttl_seconds: int | None = Field(default=None, ge=0)
     models_dev_cache_ttl_seconds: int | None = Field(default=None, ge=0)
     vision_describe_max_tokens: int | None = Field(default=None, gt=0)

@@ -27,7 +27,6 @@ from gateway.api.routes._attempts import CandidateCannotServe, PrepareKwargs
 from gateway.core.config import GatewayConfig
 from gateway.exceptions import TenancyError
 from gateway.exceptions.files_exceptions import (
-    AttachedFilesNotReadError,
     InlineAttachmentsTooLargeError,
     NoCandidateHoldsCopiesError,
     ProviderAttachmentError,
@@ -219,8 +218,8 @@ async def normalize_request_messages(
 
     An attachment the model reads does not fail the request when it cannot be
     rendered: the input is returned untouched instead, which is also the answer
-    where file understanding is off or the provider could not be parsed. A
-    ``file_id`` the caller cannot reach is refused, as the provider could not read it either.
+    where the provider could not be parsed. A ``file_id`` the caller cannot reach
+    is refused, as the provider could not read it either.
     The exception is an attachment past an inline limit that could not be moved,
     which the provider would refuse anyway, so the request is refused here first.
 
@@ -229,11 +228,7 @@ async def normalize_request_messages(
         ProviderAttachmentError: otherwise only where ``provider_container`` is set.
         InlineAttachmentsTooLargeError: the attachments pass the provider's inline limit and could not be moved.
     """
-    if provider_container and not config.file_understanding_enabled and has_container_blocks(messages, fmt):
-        # Nothing below would examine the blocks, so a `container_upload` would
-        # reach the provider naming a file of the caller's choosing.
-        raise AttachedFilesNotReadError
-    if provider is None or not config.file_understanding_enabled:
+    if provider is None:
         return messages, NormalizationStats()
     try:
         caps = resolve_capabilities(config, provider, model, instance=instance)

@@ -20848,8 +20848,6 @@ export interface components {
             budget_estimate_default_output_tokens?: number | null;
             /** Default Pricing */
             default_pricing?: boolean | null;
-            /** File Understanding Enabled */
-            file_understanding_enabled?: boolean | null;
             /** Model Cache Ttl Seconds */
             model_cache_ttl_seconds?: number | null;
             /** Model Discovery */

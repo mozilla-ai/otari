@@ -26178,17 +26178,6 @@
             ],
             "title": "Default Pricing"
           },
-          "file_understanding_enabled": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "File Understanding Enabled"
-          },
           "model_cache_ttl_seconds": {
             "anyOf": [
               {

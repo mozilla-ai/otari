@@ -979,8 +979,7 @@ async def create_message(
 
     async def _normalize(target: NormalizationTarget) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the Anthropic wire payload
-        # before the cost estimate. A no-op when the files feature is off or the
-        # request has no attachments.
+        # before the cost estimate. A no-op when the request has no attachments.
         code_execution_header = raw_request.headers.get(CODE_EXECUTION_HEADER)
         request.messages, stats = await normalize_request_messages(
             request.messages,
