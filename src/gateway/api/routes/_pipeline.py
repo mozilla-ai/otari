@@ -409,6 +409,7 @@ from gateway.services.tools import (
     admit_mcp_servers,
     admit_web_access,
     admitted_tools,
+    build_web_fetch_backend,
     build_web_search_backends,
     decide_candidate_tools,
     declare_code_execution,
@@ -3467,14 +3468,26 @@ class ToolContext:
         return bool(self.mcp_server_configs) or self.use_sandbox or self.use_web_search or self.use_web_fetch
 
     def build_web_backends(self) -> Sequence[WebSearchBackend | WebFetchBackend | WebRetrievalBackend]:
-        """Build the request's web tool backends: on the libraries where its search runs on one, else the old backend.
+        """Build the request's web tool backends: on the libraries, else the old backend for a search.
 
-        On the libraries, the search and fetch backends are two members of the
-        request's pool, sharing its call allowance. A request that declared only
-        the fetch tool keeps the old backend, which delegates its fetches.
+        The search and fetch backends are members of the request's pool, sharing
+        its call allowance. A request that declared only the fetch tool gets the
+        fetch backend alone, on the instance its admission resolved.
         """
         if self.web.in_loop_search is None:
-            return [self.build_web_retrieval_backend()]
+            if self.use_web_search or self.web.fetch is None:
+                return [self.build_web_retrieval_backend()]
+            return [
+                build_web_fetch_backend(
+                    self.web.fetch,
+                    policy=self.web_fetch_policy,
+                    trust_env_proxy=self.config.web_retrieval_trust_env_proxy,
+                    web_provider_client=self.web_provider_client,
+                    tally=self.tally,
+                    trace=self.trace,
+                    cap=self.web_call_cap,
+                )
+            ]
         search_tool_entry = self.web_search_tool_entry or {}
         return build_web_search_backends(
             self.config,

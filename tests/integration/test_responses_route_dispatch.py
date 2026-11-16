@@ -466,7 +466,7 @@ def test_managed_web_tool_dispatches_through_the_gateways_web_backend(
     with (
         patch("gateway.api.routes.responses.responses_tool_loop", new=fake_loop),
         patch("gateway.api.routes._pipeline.build_web_search_backends", return_value=[opened(search_backend)]),
-        patch("gateway.api.routes._pipeline._build_web_retrieval_backend", return_value=opened(fetch_backend)),
+        patch("gateway.api.routes._pipeline.build_web_fetch_backend", return_value=opened(fetch_backend)),
     ):
         resp = client.post(
             f"{API_ROOT}/responses",
@@ -479,7 +479,7 @@ def test_managed_web_tool_dispatches_through_the_gateways_web_backend(
         )
 
     assert resp.status_code == 200, resp.text
-    # The search runs on its instance's backend, and a fetch alone on the shared one.
+    # The search runs on its instance's backend, and a fetch alone on the fetch backend.
     served = search_backend if tool_type == "otari_web_search" else fetch_backend
     assert pool_seen == [served]
 

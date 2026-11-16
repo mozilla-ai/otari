@@ -252,7 +252,7 @@ def _fake_sandbox(seen: _Seen) -> Any:
 
 
 def _fake_web_backend(seen: _Seen) -> Any:
-    def _build(**_kwargs: Any) -> _FakeWebBackend:
+    def _build(*_args: Any, **_kwargs: Any) -> _FakeWebBackend:
         backend = _FakeWebBackend()
         seen.web_backends.append(backend)
         return backend
@@ -336,9 +336,7 @@ def _post_messages(
     )
     with ExitStack() as stack:
         stack.enter_context(patch("gateway.api.routes.messages.amessages", new=fake_amessages))
-        stack.enter_context(
-            patch("gateway.api.routes._pipeline._build_web_retrieval_backend", new=_fake_web_backend(seen))
-        )
+        stack.enter_context(patch("gateway.api.routes._pipeline.build_web_fetch_backend", new=_fake_web_backend(seen)))
         if not real_search_backends:
             stack.enter_context(
                 patch("gateway.api.routes._pipeline.build_web_search_backends", new=_fake_web_search_backends(seen))
@@ -846,7 +844,7 @@ def test_attempts_searching_on_an_instance_share_one_call_allowance(
         assert isinstance(search, WebSearchBackend) and isinstance(fetch, WebFetchBackend)
         caps |= {id(search._cap), id(fetch._cap)}
     assert len(caps) == 1, "every attempt's search and fetch draw on one allowance"
-    assert seen.web_backends == [], "the old backend served none of them"
+    assert seen.web_backends == [], "no fake backend served them"
 
 
 def test_gateway_minted_blocks_are_dropped_and_native_ones_forwarded_to_each_attempt(
@@ -906,7 +904,7 @@ def _post_responses(
     with (
         patch("gateway.api.routes.responses.aresponses", new=fake_aresponses),
         patch("gateway.api.routes.responses.responses_tool_loop", new=fake_loop),
-        patch("gateway.api.routes._pipeline._build_web_retrieval_backend", new=_fake_web_backend(seen)),
+        patch("gateway.api.routes._pipeline.build_web_fetch_backend", new=_fake_web_backend(seen)),
         patch("gateway.api.routes._pipeline.build_web_search_backends", new=_fake_web_search_backends(seen)),
     ):
         response = client.post(f"{API_ROOT}/responses", json=body, headers=headers)
