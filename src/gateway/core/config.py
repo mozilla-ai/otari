@@ -3,6 +3,7 @@ import binascii
 import json
 import os
 import re
+import secrets
 import types
 import typing
 from collections.abc import Callable, Container
@@ -1538,6 +1539,13 @@ class GatewayConfig(
     # configured, so ``verify_master_key`` can authenticate the generated key
     # without the plaintext ever living in config.
     _master_key_hash: str | None = PrivateAttr(default=None)
+
+    def is_master_key(self, token: str) -> bool:
+        """Whether ``token`` is the configured master key, in constant time.
+
+        Compared as UTF-8 bytes: ``compare_digest`` raises on a non-ASCII str, and a pasted key can hold one.
+        """
+        return self.master_key is not None and secrets.compare_digest(token.encode(), self.master_key.encode())
 
     @property
     def effective_ui_base_url(self) -> str:

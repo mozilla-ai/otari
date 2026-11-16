@@ -366,18 +366,6 @@ def get_enabled_features(request: Request) -> tuple[CoreFeature, ...]:
     return enabled
 
 
-MASKED_KEY_DETAIL = "This key contains hidden characters (•). Copy it with the Copy button, not from the screen."
-
-# The dashboard masks a key with bullets. Starlette decodes header bytes as Latin-1, so a bullet sent as UTF-8
-# arrives as three characters; the literal form is what a JSON body carries.
-_MASKED_KEY_MARKS = ("•", "•".encode().decode("latin-1"))
-
-
-def _matches_secret(presented: str, expected: str) -> bool:
-    """Constant-time equality over UTF-8 bytes, since ``compare_digest`` raises on a non-ASCII str."""
-    return secrets.compare_digest(presented.encode(), expected.encode())
-
-
 def extract_credential_token(request: Request) -> str:
     """Extract the caller's credential token from the request headers.
 
@@ -415,9 +403,6 @@ def extract_credential_token(request: Request) -> str:
             token = request.headers.get(X_API_KEY_HEADER)
 
     token = token.strip() if token else ""
-    if any(mark in token for mark in _MASKED_KEY_MARKS):
-        record_auth_failure("masked_key")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=MASKED_KEY_DETAIL)
     if token:
         return token
 
@@ -731,7 +716,7 @@ def refuse_ended_session(request: Request, config: GatewayConfig) -> None:
 
 async def is_valid_master_key(token: str, config: GatewayConfig, db: AsyncSession) -> bool:
     """Check if token matches the configured key or the current generated key."""
-    if config.master_key is not None and _matches_secret(token, config.master_key):
+    if config.is_master_key(token):
         return True
     if config.master_key is not None or not is_generated_master_key(token):
         return False
@@ -847,7 +832,7 @@ async def verify_master_key(
             )
         if is_generated_master_key(token) and secrets.compare_digest(hash_master_key(token), stored_hash):
             return token
-    elif _matches_secret(token, config.master_key):
+    elif config.is_master_key(token):
         return token
 
     raise HTTPException(
