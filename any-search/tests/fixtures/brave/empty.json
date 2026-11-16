@@ -1,0 +1,36 @@
+{
+  "status": 200,
+  "body": {
+    "type": "search",
+    "query": {
+      "original": "site:no-such-domain-zq7x.example rust",
+      "show_strict_warning": false,
+      "cleaned": "rust",
+      "is_navigational": false,
+      "is_news_breaking": false,
+      "spellcheck_off": false,
+      "country": "us",
+      "bad_results": true,
+      "should_fallback": true,
+      "postal_code": "",
+      "city": "",
+      "header_country": "",
+      "more_results_available": false,
+      "state": "",
+      "search_operators": {
+        "applied": true,
+        "cleaned_query": "rust",
+        "sites": [
+          "no-such-domain-zq7x.example"
+        ]
+      },
+      "related_queries": []
+    },
+    "mixed": {
+      "type": "mixed",
+      "main": [],
+      "top": [],
+      "side": []
+    }
+  }
+}

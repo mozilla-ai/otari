@@ -110,6 +110,37 @@ own response, and both together print the result with `raw` kept. `--describe PR
 provider's metadata and each native option with its type, allowed values, default and
 description, then exits without searching.
 
+## Brave
+
+`brave` calls Brave's [Web Search API](https://api-dashboard.search.brave.com/api-reference/web/search/get),
+`GET /res/v1/web/search`, with the key read from `BRAVE_API_KEY` when not passed. The key travels
+in the `X-Subscription-Token` header; the query travels in the URL, which the log filter above
+keeps out of httpx's log.
+
+| `SearchHit` | From Brave |
+|---|---|
+| `url`, `title` | `url`, `title` of each item in `web.results` |
+| `snippet` | `description`, or `""` when Brave sends none or null; Brave returns no page text, so `text` is always `None` |
+| `published` | `page_age`, an ISO 8601 date, read as UTC when it has no zone; `None` when Brave sends none or one that does not parse, which stays in `raw` |
+
+Brave reports no cost. `max_results` becomes `count`, at most 20. `time_range` becomes Brave's
+`freshness`, `pd`, `pw`, `pm` or `py`, and wins over the `freshness` option; Brave ignores a
+`freshness` value it does not know. The other native options are Brave's own query parameters,
+such as `country`, `search_lang`, `offset` and `safesearch`; `--describe brave` lists them. An
+option set to `None` is not sent. Two options trim the answer: `result_filter: web` leaves out the
+videos, news and other sections Brave adds by default, which the adapter does not read, and
+`text_decorations: false` leaves out the HTML, such as `<strong>`, that marks the query's words in
+snippets.
+
+Any status from 400 raises `ProviderError`, tagged with Brave's `error.code` in lower case, else
+`http_error`: `subscription_token_invalid` for a refused key, which comes as a 422, and
+`validation` for a parameter out of range. The rest of the body never reaches the error.
+
+Every field read from a successful answer is checked. An answer without `web`, or with `web`
+null, found nothing and has no hits. A `web` without a `results` list, a result whose `url` or `title` is missing or not a
+string, or whose `description` or `page_age` is neither a string nor null, raises `ProviderError`
+with the tag `unexpected_response`.
+
 ## DeepSeek
 
 `deepseek` calls DeepSeek's [Search API](https://api-docs.deepseek.com/api/search),

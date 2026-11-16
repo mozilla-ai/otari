@@ -732,8 +732,9 @@ for it works against Otari with its base URL changed. `include_raw` and
 | `provider_options` | object | Native options of the provider serving the call, under its own names, as `GET /api/v1/search-tools/providers` lists them. They win over the tool's own options; the fields above win over them. An option the provider does not take, or takes only from the deployment, is a 400 naming it. A call that names no tool may be served by an organization key on another provider, so name the tool when the options are meant for one provider. |
 | `user` | string | Who the search is billed to; see below. |
 
-Until any-search has their adapters, `include_raw` and `provider_options` are a
-400 on a call a Tavily or Brave organization key serves; `false` and `{}` pass.
+Until any-search has its adapter, `include_raw` and `provider_options` are a
+400 on a call Tavily serves, on an organization key or on `web_search_provider`;
+`false` and `{}` pass.
 
 **Response.**
 
