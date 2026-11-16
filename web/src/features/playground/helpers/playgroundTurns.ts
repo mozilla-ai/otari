@@ -146,8 +146,8 @@ export function turnError(error: unknown): TurnError {
   return {
     message: errorMessage(error),
     // 0 is the client's own "no response arrived", not a status.
-    status: refusal?.status || null,
-    code: refusal?.code || null,
+    status: refusal?.status || undefined,
+    code: refusal?.code ?? "",
   }
 }
 

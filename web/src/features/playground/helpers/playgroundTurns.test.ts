@@ -147,7 +147,7 @@ describe("patchLastAssistantTurn", () => {
 })
 
 describe("appendErrorTurn", () => {
-  const refused = { message: "Upstream refused", status: null, code: null }
+  const refused = { message: "Upstream refused", code: "" }
 
   it("attaches the failure to a partial reply, keeping what arrived", () => {
     const turns = appendErrorTurn(
@@ -189,25 +189,25 @@ describe("turnError", () => {
     })
   })
 
-  it("answers null for a refusal without a code", () => {
+  it("answers an empty code for a refusal without one", () => {
     expect(turnError(new ApiError(500, "Server error"))).toEqual({
       message: "Server error",
       status: 500,
-      code: null,
+      code: "",
     })
   })
 
-  it("answers null for a gateway that never answered", () => {
+  it("answers no status for a gateway that never answered", () => {
     expect(
       turnError(new ApiError(0, "Network error: could not reach the gateway.")),
-    ).toMatchObject({ status: null, code: null })
+    ).toMatchObject({ status: undefined, code: "" })
   })
 
-  it("answers null for both when the failure was not a refusal", () => {
+  it("answers neither when the failure was not a refusal", () => {
     expect(turnError(new Error("Upstream refused"))).toEqual({
       message: "Upstream refused",
-      status: null,
-      code: null,
+      status: undefined,
+      code: "",
     })
   })
 })

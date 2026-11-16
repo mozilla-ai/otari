@@ -20,8 +20,8 @@ import type { ReactNode } from "react"
  * is the alias key an `OVERLAY_MODULE_OVERRIDES` entry has to match.
  */
 export function PlaygroundErrorAction(_props: {
-  status: number | null
-  code: string | null
+  status?: number
+  code: string
 }): ReactNode {
   return null
 }

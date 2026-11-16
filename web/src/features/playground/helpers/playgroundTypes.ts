@@ -58,10 +58,10 @@ export interface ChatTurn {
 /** Why a turn failed, with what the gateway said when it refused the request. */
 export interface TurnError {
   message: string
-  /** The HTTP status of a refusal, or null for a fault mid-stream or no response. */
-  status: number | null
-  /** The refusal's error `code` (`insufficient_funds`, say), or null without one. */
-  code: string | null
+  /** The HTTP status of a refusal; undefined for a fault mid-stream or no response, which have none. */
+  status?: number
+  /** The refusal's error `code` (`insufficient_funds`, say), or "" without one. */
+  code: string
 }
 
 export interface PanelState {

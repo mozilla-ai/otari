@@ -671,6 +671,9 @@ export function ModelDetailView({
               {model.offering_count} on {model.provider_count}{" "}
               {model.provider_count === 1 ? "provider" : "providers"}, cheapest
               first.
+              {withUsage
+                ? " Yours, 30d is the blended input and output price you paid over 30 days."
+                : null}
             </p>
           </div>
           <div className="flex flex-col gap-3 border border-border bg-surface p-3">
