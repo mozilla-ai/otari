@@ -85,7 +85,7 @@ from gateway.models.users import User
 from gateway.ports.growth_signal_port import GrowthAction, GrowthActivationEvent
 from gateway.repositories.users_repository import add_service_key_owner, get_or_create_attribution_user
 from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
-from gateway.schemas.budgets import EndUserPublic
+from gateway.schemas.budgets import EndUserPublic, KeyEndUsersPublic
 from gateway.services.api_keys import (
     DEFAULT_ORGANIZATION_MAX_END_USERS,
     END_USER_SETTINGS,
@@ -610,6 +610,23 @@ async def list_own_key_end_users(
     return await budgets.list_end_users(
         api_key=key, external_id=external_id, budget_id=budget_id, blocked=blocked, skip=skip, limit=limit
     )
+
+
+@router.get("/{key_id}/end-user-count")
+async def get_own_key_end_user_count(
+    key_id: str,
+    identity: CurrentIdentity,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    organizations: OrganizationServiceDep,
+    budgets: BudgetServiceDep,
+) -> KeyEndUsersPublic:
+    """How many end users one of the caller's service keys counts against its ``max_end_users``, and the cap.
+
+    The same keys as listing their end users: the caller's own, or for an owner or admin the organization's.
+    """
+    organization = await organizations.get_active_organization_for_user(identity)
+    key = await _load_member_key(db, organizations, identity, organization, key_id)
+    return await budgets.end_user_seats(api_key=key)
 
 
 async def _federation_rule_key(

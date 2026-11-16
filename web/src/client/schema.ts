@@ -2567,6 +2567,26 @@ export interface paths {
         patch: operations["keys-update_key"];
         trace?: never;
     };
+    "/api/v1/keys/{key_id}/end-user-count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get End User Count
+         * @description How many end users a service key's ``max_end_users`` counts, and the cap itself.
+         */
+        get: operations["keys-get_end_user_count"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/keys/{key_id}/end-users": {
         parameters: {
             query?: never;
@@ -3722,6 +3742,28 @@ export interface paths {
          * @description Update one of the caller's own API keys, or one of the organization's service keys for an owner or admin.
          */
         patch: operations["organization-keys-update_own_key"];
+        trace?: never;
+    };
+    "/api/v1/organizations/me/keys/{key_id}/end-user-count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Own Key End User Count
+         * @description How many end users one of the caller's service keys counts against its ``max_end_users``, and the cap.
+         *
+         *     The same keys as listing their end users: the caller's own, or for an owner or admin the organization's.
+         */
+        get: operations["organization-keys-get_own_key_end_user_count"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/organizations/me/keys/{key_id}/end-users": {
@@ -26761,6 +26803,37 @@ export interface operations {
             };
         };
     };
+    "keys-get_end_user_count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KeyEndUsersPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "keys-list_end_users": {
         parameters: {
             query?: {
@@ -29050,6 +29123,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KeyInfo"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-keys-get_own_key_end_user_count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KeyEndUsersPublic"];
                 };
             };
             /** @description Validation Error */

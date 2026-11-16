@@ -448,6 +448,21 @@ def test_the_operator_lists_a_keys_end_users(client: TestClient, master_key_head
     assert unnamed.status_code == 422
 
 
+def test_the_operator_reads_a_keys_end_users_against_its_cap(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    key_id, headers = _mlpa(client, master_key_header)
+    assert _chat(client, headers, "a").status_code == 200
+    plain = client.post(f"{API_ROOT}/keys", json={"user_id": "plain"}, headers=master_key_header).json()
+
+    counted = client.get(f"{API_ROOT}/keys/{key_id}/end-user-count", headers=master_key_header)
+
+    assert counted.status_code == 200, counted.text
+    assert counted.json() == {"count": 1, "max_end_users": None}
+    assert client.get(f"{API_ROOT}/keys/{plain['id']}/end-user-count", headers=master_key_header).status_code == 400
+    assert client.get(f"{API_ROOT}/keys/no-such-key/end-user-count", headers=master_key_header).status_code == 404
+
+
 def test_a_dot_segment_is_refused_only_in_a_path(client: TestClient, master_key_header: dict[str, str]) -> None:
     key_id, headers = _mlpa(client, master_key_header)
     url = f"{API_ROOT}/keys/{key_id}/end-users"
