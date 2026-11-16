@@ -170,7 +170,7 @@ def test_a_model_no_offering_has_is_not_found_and_names_the_nearest_catalog_ids(
     body = response.json()
     detail = body["detail"] if path == "/chat/completions" else body["error"]["message"]
     assert detail == (
-        "Unknown model 'openai:gpt-oss-12'. Did you mean openai/gpt-oss-120b or openai/gpt-oss-20b? "
+        "Unknown model 'openai/gpt-oss-12'. Did you mean openai/gpt-oss-120b or openai/gpt-oss-20b? "
         f"See GET {API_ROOT}/models."
     )
 
