@@ -2137,3 +2137,32 @@ def test_a_cycle_group_holding_a_module_from_outside_the_package_is_flagged(tmp_
 
     assert len(violations) == 1
     assert "gateway.q" in violations[0]
+
+
+def test_a_dependency_alias_naming_a_model_is_not_a_use(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``Dep = Annotated[Model, Depends(...)]`` names a type, so it must not hold a module on the baseline."""
+    monkeypatch.setattr(
+        check,
+        "MODEL_ACCESS",
+        {
+            "gateway.models.things.Thing": {
+                "repository": "gateway/repositories/things/thing_repository.py",
+                "baseline": (),
+            }
+        },
+    )
+    _write(tmp_path, "gateway/models/things.py", "class Thing:\n    __tablename__ = 'thing'\n")
+    _write(tmp_path, "gateway/repositories/things/__init__.py", "")
+    _write(
+        tmp_path,
+        "gateway/repositories/things/thing_repository.py",
+        "from gateway.models.things import Thing\n\n\ndef all_things(db):\n    return db.execute(select(Thing))\n",
+    )
+    _write(
+        tmp_path,
+        "gateway/api/deps/things.py",
+        "from typing import Annotated\n\nfrom gateway.models.things import Thing\n\n"
+        "ThingDep = Annotated[Thing, Depends(get_thing)]\n",
+    )
+
+    assert check.check_model_access(tmp_path) == []

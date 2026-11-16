@@ -2061,6 +2061,17 @@ def check_import_cycles(src_root: Path) -> list[str]:
 MODELS_SCOPE = "gateway/models"
 TABLE_ATTRIBUTES = ("__table__", "__tablename__")
 TYPE_ALIAS = ("TypeAlias", "typing.TypeAlias", "typing_extensions.TypeAlias")
+ANNOTATED = ("Annotated", "typing.Annotated", "typing_extensions.Annotated")
+
+
+def _annotated_alias(node: ast.Assign) -> bool:
+    """Whether the assignment spells ``Annotated[...]``, which names a type rather than using one."""
+    if not isinstance(node.value, ast.Subscript):
+        return False
+    name = _dotted_name(node.value.value)
+    return name is not None and name in ANNOTATED
+
+
 TYPE_CHECKS = ("isinstance", "issubclass")
 TYPING_CASTS = ("typing.cast", "typing_extensions.cast")
 
@@ -2080,7 +2091,6 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     "gateway.models.api_keys.APIKey": {
         "repository": "gateway/repositories/api_keys/api_key_repository.py",
         "baseline": (
-            "gateway/api/deps/auth.py",
             "gateway/api/routes/batches.py",
             "gateway/api/routes/catalog.py",
             "gateway/api/routes/keys.py",
@@ -2407,7 +2417,6 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     "gateway.models.tenancy.User": {
         "repository": "gateway/repositories/tenancy/user_repository.py",
         "baseline": (
-            "gateway/api/deps/identity.py",
             "gateway/repositories/tenancy/organization_member_repository.py",
             "gateway/repositories/tenancy/workspace_repository.py",
             "gateway/services/dashboard_session_service.py",
@@ -2707,6 +2716,8 @@ def _type_position_nodes(tree: ast.Module, bindings: dict[str, str]) -> set[int]
         elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.returns is not None:
             positions.append(node.returns)
         elif isinstance(node, ast.TypeAlias):
+            positions.append(node.value)
+        elif isinstance(node, ast.Assign) and _annotated_alias(node):
             positions.append(node.value)
         elif isinstance(node, ast.Call):
             called = _called_name(node.func)
