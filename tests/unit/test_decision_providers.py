@@ -176,6 +176,31 @@ async def test_gemini_is_asked_in_its_own_words_with_its_own_key_header() -> Non
     }
 
 
+@pytest.mark.parametrize("criteria", [{"true": None, "false": None}, {}])
+@pytest.mark.asyncio
+async def test_gemini_is_sent_no_criteria_for_a_noul_question_that_describes_neither_side(
+    criteria: dict[str, Any],
+) -> None:
+    body = {
+        "model": "gemini-decision-1",
+        "state": "s",
+        "questions": {"urgent": {"type": "noul", "instructions": "Is this urgent?", "criteria": criteria}},
+    }
+    _, request = await _ask_gemini(body, {"answers": {}, "usage": {"total_input_tokens": 1}})
+    assert json.loads(request.content)["questions"] == {"urgent": {"type": "noul", "instructions": "Is this urgent?"}}
+
+
+@pytest.mark.asyncio
+async def test_gemini_is_sent_only_the_false_description_when_only_false_is_given() -> None:
+    body = {
+        "model": "gemini-decision-1",
+        "state": "s",
+        "questions": {"urgent": {"type": "noul", "instructions": "Urgent?", "criteria": {"false": "Routine"}}},
+    }
+    _, request = await _ask_gemini(body, {"answers": {}, "usage": {"total_input_tokens": 1}})
+    assert json.loads(request.content)["questions"]["urgent"]["criteria"] == {"false_description": "Routine"}
+
+
 @pytest.mark.asyncio
 async def test_gemini_receives_inline_images_as_image_blocks() -> None:
     body = {

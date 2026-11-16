@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
@@ -649,3 +650,24 @@ async def test_a_poll_keeps_going_after_an_error_and_logs_only_its_class(
     assert "TimeoutError" in warnings[0]
     assert "ValueError" in warnings[1]
     assert _ADDRESS not in "\n".join(warnings)
+
+
+async def test_a_poll_logs_a_database_error_by_its_classes_and_never_its_statement(
+    poll_without_a_database: list[float], logs: pytest.LogCaptureFixture
+) -> None:
+    """The statement and the driver's DETAIL both carry the invitee's address; neither reaches the log."""
+    refused = IntegrityError(
+        f"UPDATE organization_invitation SET email='{_ADDRESS}'",
+        {"email": _ADDRESS},
+        Exception(f"duplicate key value: (email)=({_ADDRESS})"),
+    )
+    delivery = _ScriptedDelivery([refused, False])
+
+    with pytest.raises(asyncio.CancelledError):
+        await _poll(lambda uow: delivery, interval=1.0)  # type: ignore[arg-type,return-value]
+
+    assert delivery.calls == 3
+    assert poll_without_a_database == [1.0, 1.0, 1.0]
+    (warning,) = _warnings(logs)
+    assert warning.startswith("Invitation email poll failed: IntegrityError")
+    assert _ADDRESS not in warning
