@@ -24,12 +24,6 @@
 
 </div>
 
-> [!NOTE]
-> **我们的 AI 黑客松 Developers Wilding（在 MozFest 举办）将持续到 11 月 11 日。**
-> 用 Otari 和开放权重模型构建项目，即有机会赢得 1000 美元奖金（另设亚军奖），
-> 并获得与我们 AI 工程师专门交流的时间。
-> [详情与提交](https://otari.ai/devs-wilding)。
-
 > 本页是 README 的简体中文译本。完整文档目前仅提供英文版，下文中的文档链接均指向英文页面。
 
 <p align="center">
