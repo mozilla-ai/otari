@@ -433,6 +433,9 @@ class _ResponsesToolLoopStrategy:
             "compactions": [],
         }
 
+    def output_tokens(self, acc: dict[str, Any]) -> int:
+        return int(acc["output_tokens"])
+
     def accumulate_usage(self, acc: dict[str, Any], result: Response) -> None:
         if result.usage:
             _add_round_usage(acc, result.usage)
@@ -713,6 +716,9 @@ class _ResponsesToolLoopStrategy:
         # The terminal event is the last thing the client sees, so it continues the
         # same sequence as the events forwarded before it.
         return [self._resequenced(folded, acc)]
+
+    def stream_output_tokens(self, acc: dict[str, Any]) -> int:
+        return int(acc["output_tokens"])
 
     def accumulate_stream_usage(self, acc: dict[str, Any], state: _ResponsesStreamState) -> None:
         # All-owned continuation: keep the counts of the terminal event the loop drops.

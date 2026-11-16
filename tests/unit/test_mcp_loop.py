@@ -1322,9 +1322,11 @@ class _RoundGate:
     def __init__(self, *answers: bool) -> None:
         self._answers = list(answers)
         self.asked: list[int] = []
+        self.written: list[int | None] = []
 
-    async def admit(self, prompt_chars: int) -> bool:
+    async def admit(self, prompt_chars: int, output_tokens: int | None) -> bool:
         self.asked.append(prompt_chars)
+        self.written.append(output_tokens)
         return self._answers.pop(0) if self._answers else True
 
 
@@ -1367,6 +1369,42 @@ async def test_a_round_the_budget_cannot_hold_is_the_last_and_offers_no_gateway_
     assert [_offers(kwargs, "fetch_url") for kwargs in sent] == [True, True, False]
     assert len(gate.asked) == 2, "the first round rides on the request's own hold; each later one is held"
     assert gate.asked[0] < gate.asked[1], "each round is held on its own transcript, which grows"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True], ids=["non-streaming", "streaming"])
+async def test_a_round_is_held_with_what_the_round_before_wrote(monkeypatch: pytest.MonkeyPatch, stream: bool) -> None:
+    """Round 2 is held with round 1's reported output; round 3 with None, since round 2 reported no usage."""
+    sent: list[dict[str, Any]] = []
+
+    async def fake_acompletion(**kwargs: Any) -> Any:
+        sent.append(kwargs)
+        call_id = f"c{len(sent)}"
+        usage = CompletionUsage(prompt_tokens=10, completion_tokens=700, total_tokens=710) if len(sent) == 1 else None
+        if len(sent) == 3:
+            return _async_iter(_chunk(content="done", finish="stop")) if stream else _completion(finish="stop")
+        if stream:
+            return _async_iter(
+                _chunk(tool_calls=[(0, call_id, "fetch_url", "{}")]), _chunk(finish="tool_calls", usage=usage)
+            )
+        completion = _completion(finish="tool_calls", tool_calls=[(call_id, "fetch_url", "{}")])
+        completion.usage = usage
+        return completion
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    gate = _RoundGate()
+    completion_kwargs = {"model": "fake", "messages": [{"role": "user", "content": "go"}]}
+    pool = _FakePool(tool_names=["fetch_url"])
+
+    if stream:
+        async for _ in mcp_tool_loop_stream(
+            completion_kwargs=completion_kwargs, pool=pool, max_iterations=10, round_gate=gate
+        ):
+            pass
+    else:
+        await mcp_tool_loop(completion_kwargs=completion_kwargs, pool=pool, max_iterations=10, round_gate=gate)
+
+    assert gate.written == [700, None]
 
 
 @pytest.mark.asyncio

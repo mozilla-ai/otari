@@ -3621,12 +3621,35 @@ async def test_a_tool_loop_round_holds_its_prompt_and_a_free_one_its_tokens_alon
 
     ctx = _round_gate_ctx(monkeypatch, rate, fake_hold)
 
-    assert await pipeline.ReservationRoundGate(ctx).admit(40_000) is True
+    assert await pipeline.ReservationRoundGate(ctx).admit(40_000, 0) is True
 
     [(amount, tokens, model_is_free)] = holds
     assert float(amount) == pytest.approx(dollars)
     assert tokens == 10_000
     assert model_is_free is (dollars == 0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("written", "output_tokens"), [(2_000, 2_000), (None, 8_000)], ids=["reported", "unreported"])
+async def test_a_tool_loop_round_holds_what_the_round_before_wrote(
+    monkeypatch: pytest.MonkeyPatch, written: int | None, output_tokens: int
+) -> None:
+    """The round before's reported output is held at the output rate; with no report, the request's output limit is."""
+    holds: list[tuple[Decimal, int]] = []
+
+    async def fake_hold(
+        db: Any, handle: Any, amount: Decimal, *, strategy: str, tokens: int = 0, model_is_free: bool = False
+    ) -> Decimal:
+        holds.append((amount, tokens))
+        return amount
+
+    ctx = _round_gate_ctx(monkeypatch, 10.0, fake_hold)
+
+    assert await pipeline.ReservationRoundGate(ctx).admit(40_000, written) is True
+
+    [(amount, tokens)] = holds
+    assert float(amount) == pytest.approx((10_000 + output_tokens) * 10 / 1_000_000)
+    assert tokens == 10_000 + output_tokens
 
 
 @pytest.mark.asyncio
@@ -3644,7 +3667,7 @@ async def test_a_tool_loop_round_grows_no_hold_without_a_ledger_row(
     ctx.reservation.reservation_id = None
     ctx.reservation.reserved = reserved
 
-    assert await pipeline.ReservationRoundGate(ctx).admit(40_000) is fits
+    assert await pipeline.ReservationRoundGate(ctx).admit(40_000, 0) is fits
     hold.assert_not_awaited()
 
 
@@ -3662,7 +3685,7 @@ async def test_a_tool_loop_round_that_cannot_be_held_is_refused(monkeypatch: pyt
 
     ctx = _round_gate_ctx(monkeypatch, 10.0, fake_hold)
 
-    assert await pipeline.ReservationRoundGate(ctx).admit(40_000) is False
+    assert await pipeline.ReservationRoundGate(ctx).admit(40_000, 0) is False
 
 
 @pytest.mark.asyncio
