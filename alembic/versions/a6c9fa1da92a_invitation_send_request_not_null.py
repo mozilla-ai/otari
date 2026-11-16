@@ -4,7 +4,7 @@ A row written before this revision may hold NULL, from before a send request sta
 Backfilled from ``created_at``, since creating an invitation is its first send request.
 
 Revision ID: a6c9fa1da92a
-Revises: 62256ffefe75
+Revises: 8171c59fe077
 Create Date: 2026-11-14
 """
 
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "a6c9fa1da92a"
-down_revision: str | Sequence[str] | None = "d4a7b2c9e510"
+down_revision: str | Sequence[str] | None = "8171c59fe077"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
