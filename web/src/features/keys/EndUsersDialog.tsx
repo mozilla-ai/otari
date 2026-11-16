@@ -39,7 +39,7 @@ export function EndUsersDialog({
   // Untrimmed: an id is any string, spaces included.
   const externalId = useDebounced(query)
   const endUsers = useKeyEndUsers(apiKey.id, page, pageSize, externalId)
-  const count = useKeyEndUserCount(apiKey.id).data
+  const count = useKeyEndUserCount(apiKey.id)
   const budgets = useEndUserBudgets(
     apiKey.is_organization_service_key ? "organization" : "deployment",
     canReadBudgets,
@@ -63,7 +63,16 @@ export function EndUsersDialog({
       description={
         <span className="inline-flex flex-wrap items-center gap-2">
           <code>{keyLabel}</code>
-          {count ? <EndUserCountLine count={count} /> : null}
+          {count.data ? (
+            <EndUserCountLine count={count.data} />
+          ) : count.isError ? (
+            <>
+              <span className="text-caption">Could not read the cap</span>
+              <Button size="sm" onPress={() => count.refetch()}>
+                Retry
+              </Button>
+            </>
+          ) : null}
         </span>
       }
       size="lg"
