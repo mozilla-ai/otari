@@ -38,7 +38,7 @@ does not commit.
 
 Completion requests follow this order:
 
-1. Extract and verify the API key or master key in `api/deps.py`.
+1. Extract and verify the API key or master key in `api/deps/`.
 2. Resolve the billed user, workspace, and organization.
 3. Compile routing into an attempt plan.
 4. Resolve pricing and reserve applicable budgets.

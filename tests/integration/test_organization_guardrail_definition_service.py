@@ -81,7 +81,7 @@ async def _member(db: AsyncSession, organization: Organization, *, role: str, fu
 
 
 def _service(db: AsyncSession) -> OrganizationGuardrailDefinitionService:
-    """The service as `api/deps.py` builds it: a Unit of Work over the request's session."""
+    """The service as `api/deps/` builds it: a Unit of Work over the request's session."""
     uow = UnitOfWork(db)
     return OrganizationGuardrailDefinitionService(
         definitions=OrganizationGuardrailDefinitionRepository(uow),

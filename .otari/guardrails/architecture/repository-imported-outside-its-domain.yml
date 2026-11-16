@@ -24,7 +24,7 @@ gates:
       or a module in services/tenancy/, is such a module. Second, any module imports a
       repository package whose name is not a domain DOMAINS.md gives a section,
       such as gateway.repositories.tenancy, and the module is neither in the service or
-      repository package of the same name nor src/gateway/api/deps.py. This is layer
+      repository package of the same name nor src/gateway/api/deps/. This is layer
       and import rule 4 in ARCHITECTURE.md, "The modular monolith". The architecture
       check covers every other import. Pass if the diff adds no such import.
     accept_warnings: [judge-gate-cap]

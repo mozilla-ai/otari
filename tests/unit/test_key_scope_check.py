@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from fastapi.routing import APIRoute
 from starlette.requests import Request
 
-from gateway.api.deps import _require_route_scope
+from gateway.api.deps.auth import _require_route_scope
 from gateway.api.key_scopes import key_scope
 from gateway.models.api_keys import APIKey
 from gateway.types.key_scope import KeyScope, KeyScopeSet

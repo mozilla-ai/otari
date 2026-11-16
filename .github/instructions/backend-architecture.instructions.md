@@ -48,7 +48,7 @@ the old shape.
 - The service receives its own domain's repositories, the Unit of Work, config,
   ports and other domains' services through its constructor. Flag a service
   that receives the session or another domain's repository.
-- A builder in `api/deps.py` builds the service. Flag a new service builder
+- A builder in `api/deps/` builds the service. Flag a new service builder
   defined anywhere else.
 - Flag a new module-level function under `services/` that takes an
   `AsyncSession`, including one added to a module already on
@@ -124,7 +124,7 @@ model, except a module on the model's baseline.
   `gateway.services.<domain>`. The check refuses an import below the root
   from outside the package, for each domain `DOMAINS.md` gives a section.
   Flag such an import into a service package that is not a domain yet.
-- Only the domain's own service and repository packages and `api/deps.py`
+- Only the domain's own service and repository packages and `api/deps/`
   import `gateway.repositories.<domain>`. The check refuses any other import of
   one, for each domain `DOMAINS.md` gives a section, except from service
   code outside every domain package, whose domain its path does not give.

@@ -21,7 +21,6 @@ from sqlalchemy import create_engine, text, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
-from gateway.api import deps
 from gateway.api.routes import auth_session as auth_session_route
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.main import create_app
@@ -641,7 +640,7 @@ def test_a_failed_revocation_leaves_the_request_session_alone(tmp_path: Path, mo
             seen.append(f"{id(db):x}")
             return await real_resolve(db, token)  # type: ignore[arg-type]
 
-        monkeypatch.setattr(deps, "resolve_dashboard_session", _capture)
+        monkeypatch.setattr("gateway.api.deps.auth.resolve_dashboard_session", _capture)
 
         assert client.get(f"{API_ROOT}/settings").status_code == 401
         assert used and seen, (used, seen)

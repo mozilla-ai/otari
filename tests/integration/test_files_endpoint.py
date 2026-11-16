@@ -132,7 +132,7 @@ def test_upload_frees_the_auth_connection_before_reading_the_body(
         events.append("form")
         return form(self, **kwargs)
 
-    monkeypatch.setattr("gateway.api.deps.release_session", recording_release)
+    monkeypatch.setattr("gateway.api.deps.auth.release_session", recording_release)
     monkeypatch.setattr(Request, "form", recording_form)
     resp = client.post(f"{API_ROOT}/files", headers=api_key_header, files={"file": ("a.txt", b"x", "text/plain")})
 

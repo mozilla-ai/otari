@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import Collection, Sequence
+from datetime import datetime
 from typing import Never
 
 from sqlalchemy import Update, case, select, update
@@ -218,6 +219,10 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         """Return the key whose secret hashes to ``key_hash``, or None."""
         result = await self.db.execute(select(APIKey).where(APIKey.key_hash == key_hash))
         return result.scalar_one_or_none()
+
+    async def touch_last_used(self, key_id: str, when: datetime) -> None:
+        """Record that the key ``key_id`` was used at ``when``."""
+        await self.db.execute(update(APIKey).where(APIKey.id == key_id).values(last_used_at=when))
 
     async def add_declared_if_absent(
         self,

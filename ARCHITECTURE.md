@@ -155,7 +155,7 @@ def _billing_adapter(session: AsyncSession | None) -> BillingPort:
 container.bind(BillingPort, _billing_adapter)
 
 
-# dependency (src/gateway/api/deps.py): names the port and the container, never an adapter
+# dependency (src/gateway/api/deps/): names the port and the container, never an adapter
 def get_billing_port(db: PortSessionDep, container: ContainerDep) -> BillingPort:
     return container.resolve(BillingPort, db)
 ```
@@ -176,7 +176,7 @@ A contributed router is the additive half of the seam, and it is gated rather th
 
 Entitlement is not authentication either, and the mount point adds none. A capability names no caller, so on an entitled deployment a contributed route is reachable by anyone unless the router says otherwise. A contribution declares the credential each of its routes needs on the route, the way Otari's own routers do; there is no router-level default to mount, because the right answer differs per route, a contributed route may be deliberately public.
 
-> **Where this lives in the tree.** The composition root is `src/gateway/container.py`; it is built once per app in `create_app` (`src/gateway/main.py`) and attached to `app.state` beside the other shared resources, so two apps in one process never share one. Ports are resolved from it through dependencies in `src/gateway/api/deps.py`, which is also where the rest of composition is still hand-wired: the container took over the ports, not every dependency, and a plain single-implementation service stays wired directly.
+> **Where this lives in the tree.** The composition root is `src/gateway/container.py`; it is built once per app in `create_app` (`src/gateway/main.py`) and attached to `app.state` beside the other shared resources, so two apps in one process never share one. Ports are resolved from it through dependencies in `src/gateway/api/deps/`, which is also where the rest of composition is still hand-wired: the container took over the ports, not every dependency, and a plain single-implementation service stays wired directly.
 
 Not every service goes through a port. Most code has a single implementation and stays plain (see [when a capability earns a port](#cardinal-rules-for-contributors)); only capabilities with a real second implementation are resolved through the container.
 
@@ -253,7 +253,7 @@ Services and repositories are one package per domain inside their layer, and a s
 1. Nothing under `services/` imports `sqlalchemy` or `sqlmodel`.
 2. Nothing under `api/routes/` imports `sqlalchemy` or `sqlmodel`.
 3. Only the Unit of Work calls `commit()` or `rollback()`, only a repository imports `session_for`, and only `get_unit_of_work` or a worker factory constructs a `UnitOfWork`. The [backend standards](.github/skills/backend-standards/SKILL.md#who-commits) say how it is used.
-4. Only a domain's own service package and the builders in `api/deps.py` import `repositories.<domain>`.
+4. Only a domain's own service package and the builders in `api/deps/` import `repositories.<domain>`.
 5. Code outside a domain imports only the package root of `services.<domain>`. A module whose name starts with `_` is private to its package.
 6. Domain service packages never import each other in a cycle.
 
