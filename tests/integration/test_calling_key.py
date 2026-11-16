@@ -204,7 +204,7 @@ def test_a_budget_exempt_key_is_not_gated(client: TestClient, master_key_header:
 
     body = client.get(f"{API_ROOT}/key/budget", headers=_auth(key)).json()
 
-    assert body == {"budgets_enforced": False, "remaining_usd": None, "limits": []}
+    assert body == {"budgets_enforced": False, "remaining_usd": None, "limits": [], "end_users": None}
 
 
 def test_only_an_api_key_may_ask(client: TestClient, master_key_header: dict[str, str]) -> None:
