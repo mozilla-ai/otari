@@ -58,9 +58,10 @@ your keys, and the end users your service keys named.
 
 What the deployment still has to count is kept, under a new id that nothing
 links back to you: your usage rows stay in their organizations' totals with
-their tokens and cost, and lose their request tags and end-user identifier. An
-organization nobody else is active in is renamed **Deleted organization** and
-its keys are revoked, so its usage and its configuration stay attached to it.
+their tokens and cost, and lose their request tags, session labels and end-user
+identifier. An organization nobody else is active in is renamed **Deleted
+organization** and its keys are revoked, so its usage and its configuration stay
+attached to it.
 In an organization other people use, you lose only your membership.
 
 Deletion is refused while you are the last active owner of an organization

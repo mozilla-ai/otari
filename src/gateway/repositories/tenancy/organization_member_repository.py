@@ -161,12 +161,21 @@ class OrganizationMemberRepository(
         )
         return result.scalars().first()
 
-    async def get_by_user(self, user_id: uuid.UUID, *, active_only: bool = False) -> list[OrganizationMember]:
-        """Return a user's memberships, oldest first."""
+    async def get_by_user(
+        self, user_id: uuid.UUID, *, active_only: bool = False, refresh: bool = False
+    ) -> list[OrganizationMember]:
+        """Return a user's memberships, oldest first.
+
+        ``refresh`` overwrites memberships this session already loaded with what is committed now,
+        for a read taken again under a lock.
+        """
         statement = select(OrganizationMember).where(col(OrganizationMember.user_id) == user_id)
         if active_only:
             statement = statement.where(col(OrganizationMember.status) == "active")
-        result = await self.db.execute(statement.order_by(col(OrganizationMember.created_at)))
+        statement = statement.order_by(col(OrganizationMember.created_at))
+        if refresh:
+            statement = statement.execution_options(populate_existing=True)
+        result = await self.db.execute(statement)
         return list(result.scalars().all())
 
     async def get_first_active_for_user(self, user_id: uuid.UUID, *, lock: bool = False) -> OrganizationMember | None:

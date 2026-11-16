@@ -4,8 +4,7 @@ import { Button } from "@/design-system/actions/Button"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { Section } from "@/design-system/layout/Section"
 import { useAuth } from "@/features/auth/AuthContext"
-import { useDeleteAccount } from "@/shared/api/auth"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import { useDeleteAccount, useSessionCaller } from "@/shared/api/auth"
 
 /**
  * Deleting the signed-in account, for good.
@@ -16,7 +15,7 @@ import { useOrganizationContext } from "@/shared/api/organizations"
  * people use, and that refusal is shown as it comes back.
  */
 export function DeleteAccountCard() {
-  const caller = useOrganizationContext().data?.caller
+  const caller = useSessionCaller()
   const { logout } = useAuth()
   const deleteAccount = useDeleteAccount()
   const [isOpen, setIsOpen] = useState(false)

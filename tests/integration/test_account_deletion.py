@@ -1,5 +1,6 @@
 """Deleting one's own account (`DELETE /api/v1/auth/account`), end to end against PostgreSQL."""
 
+import asyncio
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -13,6 +14,7 @@ from sqlalchemy.orm import Session
 from sqlmodel import col
 
 from gateway.adapters.file_storage_adapter import LocalDirFileStore
+from gateway.api.deps import get_telemetry_storage_port
 from gateway.core.config import API_ROOT
 from gateway.models.api_keys import APIKey, DisabledReason
 from gateway.models.files import FileObject
@@ -93,6 +95,7 @@ def _add_account(
             total_tokens=42,
             status="success",
             tags={"customer": "Ada"},
+            source_label="ada-laptop",
             safety_identifier="ada-at-example",
         )
         file = FileObject(
@@ -168,6 +171,7 @@ def test_deleting_an_account_erases_the_person_and_keeps_anonymous_usage(
         assert usage.total_tokens == 42
         assert usage.user_id is not None and usage.user_id != str(account.identity_id)
         assert usage.tags is None
+        assert usage.source_label is None
         assert usage.safety_identifier is None
         tombstone = session.get(BillingUser, usage.user_id)
         assert tombstone is not None
@@ -281,3 +285,60 @@ def test_the_bootstrap_operator_cannot_delete_its_account(
 
     assert response.status_code == 400, response.text
     assert "bootstrap operator" in response.json()["detail"]
+
+
+class _AddsEndUserOnFirstPurge:
+    """A telemetry store that records whom it purges, and lets a service key name a new end user during the first."""
+
+    def __init__(self, session_factory: Callable[[], Session], owner_id: str) -> None:
+        self._session_factory = session_factory
+        self._owner_id = owner_id
+        self.late_id: str | None = None
+        self.purged: list[str] = []
+        self.late_existed_when_purged: bool | None = None
+
+    async def purge_user(self, *, user_id: str) -> None:
+        self.purged.append(user_id)
+        if user_id == self.late_id:
+            self.late_existed_when_purged = await asyncio.to_thread(self._exists, user_id)
+        if self.late_id is None:
+            self.late_id = str(uuid.uuid4())
+            # On a thread of its own: the test's session is synchronous and this runs on the app's event loop.
+            await asyncio.to_thread(self._add_end_user, self.late_id)
+
+    def _exists(self, user_id: str) -> bool:
+        session = self._session_factory()
+        try:
+            return session.get(BillingUser, user_id) is not None
+        finally:
+            session.close()
+
+    def _add_end_user(self, user_id: str) -> None:
+        session = self._session_factory()
+        try:
+            session.add(BillingUser(user_id=user_id, parent_user_id=self._owner_id, external_id="customer-8"))
+            session.commit()
+        finally:
+            session.close()
+
+
+def test_an_end_user_named_during_the_erasure_is_erased_before_it_is_deleted(
+    client: TestClient, db_session_factory: Callable[[], Session]
+) -> None:
+    account = _add_account(db_session_factory)
+    telemetry = _AddsEndUserOnFirstPurge(db_session_factory, str(account.identity_id))
+    overrides = cast(Any, client.app).dependency_overrides
+    overrides[get_telemetry_storage_port] = lambda: telemetry
+    try:
+        assert _delete(client, account, current_password=PASSWORD).status_code == 204
+    finally:
+        overrides.pop(get_telemetry_storage_port, None)
+
+    assert telemetry.late_id is not None
+    assert telemetry.purged.count(telemetry.late_id) == 1
+    assert telemetry.late_existed_when_purged is True
+    session = db_session_factory()
+    try:
+        assert session.get(BillingUser, telemetry.late_id) is None
+    finally:
+        session.close()

@@ -23,12 +23,24 @@ const CALLER: CallerIdentity = {
   claims_deployment: false,
 }
 
-function mockApi(caller: CallerIdentity, refusal?: Error) {
+function mockApi(
+  caller: CallerIdentity,
+  {
+    refusal,
+    organization = true,
+  }: { refusal?: Error; organization?: boolean } = {},
+) {
   const sent: unknown[] = []
   vi.spyOn(apiClient, "apiFetch").mockImplementation(
     async (path: string, init?: RequestInit) => {
       if (path === "/organizations/me") {
+        if (!organization) {
+          throw new ApiError(404, "No organization")
+        }
         return organizationContext({ caller }) as never
+      }
+      if (path === "/auth/profile") {
+        return caller as never
       }
       if (path === "/auth/account" && init?.method === "DELETE") {
         sent.push(JSON.parse(String(init.body)))
@@ -101,6 +113,24 @@ describe("DeleteAccountCard", () => {
     ])
   })
 
+  it("is offered to an account with no organization", async () => {
+    const sent = mockApi(CALLER, { organization: false })
+    const user = await openDialog()
+    await user.type(
+      await screen.findByLabelText(/Type ada@example.com to confirm/),
+      "ada@example.com",
+    )
+    await user.type(screen.getByLabelText(/^Password/), "secret")
+    await user.click(
+      screen.getAllByRole("button", { name: "Delete account" }).at(-1)!,
+    )
+
+    await waitFor(() => expect(logout).toHaveBeenCalledOnce())
+    expect(sent).toEqual([
+      { confirm_email: "ada@example.com", current_password: "secret" },
+    ])
+  })
+
   it("asks no password of an account that has none", async () => {
     const sent = mockApi({ ...CALLER, has_password: false })
     const user = await openDialog()
@@ -119,13 +149,12 @@ describe("DeleteAccountCard", () => {
   })
 
   it("shows a refusal and stays signed in", async () => {
-    mockApi(
-      CALLER,
-      new ApiError(
+    mockApi(CALLER, {
+      refusal: new ApiError(
         409,
         "Make another member an owner of Acme before deleting your account",
       ),
-    )
+    })
     const user = await openDialog()
     await user.type(
       await screen.findByLabelText(/Type ada@example.com to confirm/),

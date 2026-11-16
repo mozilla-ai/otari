@@ -49,12 +49,20 @@ class AccountRelease:
         """The organizations nobody but this account is active in, raising for one it would leave ownerless."""
         abandoned: list[uuid.UUID] = []
         orphaned: list[str] = []
-        # Locked in one order, so two deletions sharing organizations cannot each hold what the other waits for.
-        memberships = sorted(await self._members.get_by_user(identity_id), key=lambda row: str(row.organization_id))
+        memberships = await self._members.get_by_user(identity_id)
+        if lock:
+            # Locked in one order, so two deletions sharing organizations cannot each hold what the other waits for.
+            locked = sorted({row.organization_id for row in memberships}, key=str)
+            for organization_id in locked:
+                await self._organizations.lock(organization_id)
+            # Read again under the locks: a status read before them may have changed since.
+            memberships = [
+                row
+                for row in await self._members.get_by_user(identity_id, refresh=True)
+                if row.organization_id in locked
+            ]
         for membership in memberships:
             organization_id = membership.organization_id
-            if lock:
-                await self._organizations.lock(organization_id)
             active = membership.status == "active"
             others = await self._members.count_active(organization_id) - (1 if active else 0)
             if others == 0:

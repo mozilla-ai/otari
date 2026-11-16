@@ -26,10 +26,22 @@ from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.repositories.identity import IdentityRepositories
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.files import FileService
-from gateway.services.organizations import AccountRelease, UserAccess
+from gateway.services.organizations import AccountRelease, ReleasedOrganizations, UserAccess
 from gateway.services.password_service import verify_password_async
 from gateway.services.traces import TraceService, TraceWriter
 from gateway.services.usage_and_telemetry import UsageService
+
+# How many times an end user a service key names while the account's records are erased sends the erasure round
+# again before the deletion gives up and can be retried.
+_ERASURE_ATTEMPTS = 3
+
+
+class _LateEndUsersError(Exception):
+    """The account has end users its records were not erased for, so the deletion was rolled back."""
+
+    def __init__(self, user_ids: list[str]) -> None:
+        super().__init__()
+        self.user_ids = user_ids
 
 
 @dataclass(frozen=True)
@@ -94,42 +106,55 @@ class AccountDeletionService:
             if not await verify_password_async(current_password, account.hashed_password):
                 raise CurrentPasswordIncorrectError
 
+        # Read now: a retried transaction rolls back, which expires the account's loaded attributes.
+        account_id, email = account.id, account.email
         async with self._uow:
-            await self._organizations.ensure_releasable(account.id)
-            billing_ids = await self._users.lock_with_end_users(str(account.id))
-        # Erased first and outside the transaction, as an operator's deletion of a user does: telemetry
-        # may be stored out of process, so the two cannot be atomic, and failing this way deletes nothing
-        # and can be retried, where the other order would leave records nobody could reach to erase.
-        await self._erase_records(billing_ids)
+            await self._organizations.ensure_releasable(account_id)
+            pending = await self._users.lock_with_end_users(str(account_id))
+        erased: set[str] = set()
+        for _ in range(_ERASURE_ATTEMPTS):
+            # Erased first and outside the transaction, as an operator's deletion of a user does: telemetry
+            # may be stored out of process, so the two cannot be atomic, and failing this way deletes nothing
+            # and can be retried, where the other order would leave records nobody could reach to erase.
+            await self._erase_records(sorted(set(pending) - erased))
+            erased.update(pending)
+            try:
+                released = await self._delete_rows(account_id, erased)
+            except _LateEndUsersError as late:
+                pending = late.user_ids
+                continue
+            break
+        else:
+            raise AccountErasureFailedError
+        logger.warning(
+            "Account deleted at its owner's request: account=%s organizations_released=%d",
+            account_id,
+            len(released.organization_ids),
+        )
+        return DeletedAccount(id=account_id, email=email)
 
+    async def _delete_rows(self, identity_id: uuid.UUID, erased: set[str]) -> ReleasedOrganizations:
+        """Delete the account's rows, rolling back with ``_LateEndUsersError`` if it has users not yet ``erased``.
+
+        Holding the account's billing user locked keeps its service keys from adding an end user meanwhile.
+        """
         async with self._uow:
-            released = await self._organizations.release(account.id)
+            released = await self._organizations.release(identity_id)
             await self._keys.revoke_in_workspaces(released.workspace_ids)
-            locked_ids = await self._users.lock_with_end_users(str(account.id))
+            locked_ids = await self._users.lock_with_end_users(str(identity_id))
+            if not erased.issuperset(locked_ids):
+                raise _LateEndUsersError(locked_ids)
             if locked_ids:
                 tombstone_id = await self._users.add_tombstone()
                 await self._usage.reassign_owner(locked_ids, tombstone_id)
                 if self._files is not None:
                     await self._files.release_owned(locked_ids, tombstone_id)
                 await self._users.remove(locked_ids)
-            identity = await self._identities.get_locked(account.id)
+            identity = await self._identities.get_locked(identity_id)
             if identity is not None:
                 await self._identities.delete(identity)
-            await self._erased.add(account.id)
-
-        # An end user a key of theirs named while the first erasure ran.
-        late_ids = sorted(set(locked_ids) - set(billing_ids))
-        if late_ids:
-            try:
-                await self._erase_records(late_ids)
-            except AccountErasureFailedError:
-                logger.error("Erasure of %d late end user(s) failed for deleted account %s", len(late_ids), account.id)
-        logger.warning(
-            "Account deleted at its owner's request: account=%s organizations_released=%d",
-            account.id,
-            len(released.organization_ids),
-        )
-        return DeletedAccount(id=account.id, email=account.email)
+            await self._erased.add(identity_id)
+        return released
 
     async def _erase_records(self, user_ids: list[str]) -> None:
         """Erase these users' telemetry and agent traces, raising ``AccountErasureFailedError`` if a store refuses."""
