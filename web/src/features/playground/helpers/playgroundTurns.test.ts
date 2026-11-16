@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { ApiError } from "@/shared/api/client"
 import type { ToolActivity } from "@/shared/api/playground"
 import {
   appendErrorTurn,
@@ -6,6 +7,7 @@ import {
   foldToolActivity,
   patchLastAssistantTurn,
   shouldFollowToBottom,
+  turnError,
   turnsForRegenerate,
   wireMessages,
 } from "./playgroundTurns"
@@ -145,32 +147,68 @@ describe("patchLastAssistantTurn", () => {
 })
 
 describe("appendErrorTurn", () => {
+  const refused = { message: "Upstream refused", status: null, code: null }
+
   it("attaches the failure to a partial reply, keeping what arrived", () => {
     const turns = appendErrorTurn(
       [question, { role: "assistant", content: "partial" }],
-      "Upstream refused",
+      refused,
     )
     expect(turns[1]).toEqual({
       role: "assistant",
       content: "partial",
-      errorMessage: "Upstream refused",
+      error: refused,
     })
   })
 
   it("adds a turn when nothing had streamed", () => {
-    const turns = appendErrorTurn([question], "Upstream refused")
+    const turns = appendErrorTurn([question], refused)
     expect(turns[1]).toEqual({
       role: "assistant",
       content: "",
-      errorMessage: "Upstream refused",
+      error: refused,
     })
   })
 
   it("keeps the message out of the content", () => {
     // So a saved transcript does not store a gateway refusal as if the model
     // had said it.
-    const [, errored] = appendErrorTurn([question], "Upstream refused")
+    const [, errored] = appendErrorTurn([question], refused)
     expect(errored?.content).not.toContain("Upstream refused")
+  })
+})
+
+describe("turnError", () => {
+  it("keeps a refusal's status and code", () => {
+    expect(
+      turnError(new ApiError(402, "Insufficient funds", "insufficient_funds")),
+    ).toEqual({
+      message: "Insufficient funds",
+      status: 402,
+      code: "insufficient_funds",
+    })
+  })
+
+  it("answers null for a refusal without a code", () => {
+    expect(turnError(new ApiError(500, "Server error"))).toEqual({
+      message: "Server error",
+      status: 500,
+      code: null,
+    })
+  })
+
+  it("answers null for a gateway that never answered", () => {
+    expect(
+      turnError(new ApiError(0, "Network error: could not reach the gateway.")),
+    ).toMatchObject({ status: null, code: null })
+  })
+
+  it("answers null for both when the failure was not a refusal", () => {
+    expect(turnError(new Error("Upstream refused"))).toEqual({
+      message: "Upstream refused",
+      status: null,
+      code: null,
+    })
   })
 })
 

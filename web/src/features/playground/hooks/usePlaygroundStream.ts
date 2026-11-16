@@ -1,7 +1,6 @@
 import type { Dispatch, SetStateAction } from "react"
 import { useCallback, useEffect, useRef } from "react"
 
-import { errorMessage } from "@/design-system/feedback/errorMessage"
 import {
   type StreamUsage,
   streamPlaygroundChat,
@@ -13,6 +12,7 @@ import {
   appendErrorTurn,
   appendStreamDelta,
   patchLastAssistantTurn,
+  turnError,
   wireMessages,
 } from "../helpers/playgroundTurns"
 import type {
@@ -191,7 +191,7 @@ export function usePlaygroundStream(params: {
           ...prev,
           turns: wasStopped
             ? prev.turns
-            : appendErrorTurn(prev.turns, errorMessage(error)),
+            : appendErrorTurn(prev.turns, turnError(error)),
           isAwaitingFirstToken: false,
           isStreaming: false,
         }))

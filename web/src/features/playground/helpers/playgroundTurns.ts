@@ -7,13 +7,15 @@
 // because it yanks the view down on every token. Both are unit-testable here
 // and neither is testable through a render.
 
+import { errorMessage } from "@/design-system/feedback/errorMessage"
+import { ApiError } from "@/shared/api/client"
 import type {
   PlaygroundWireMessage,
   StreamDelta,
   ToolActivity,
 } from "@/shared/api/playground"
 
-import type { ChatTurn, ToolCall } from "./playgroundTypes"
+import type { ChatTurn, ToolCall, TurnError } from "./playgroundTypes"
 
 /**
  * A copy of `turns` with its trailing assistant turn replaced by `patch(last)`.
@@ -120,22 +122,33 @@ export function foldToolActivity(
  *
  * Attached to the partial reply when one had started, so a stream that died
  * halfway shows what arrived *and* why it stopped; a fresh turn otherwise. Kept
- * out of `content` and put in `errorMessage`, which is what lets the bubble
- * render it as a refusal instead of as something the model said, and keeps it
- * out of a saved transcript's text.
+ * out of `content` and put in `error`, which is what lets the bubble render it
+ * as a refusal instead of as something the model said, and keeps it out of a
+ * saved transcript's text.
  */
 export function appendErrorTurn(
   turns: ChatTurn[],
-  errorMessage: string,
+  error: TurnError,
 ): ChatTurn[] {
   const next = turns.slice()
   const last = next[next.length - 1]
   if (last?.role === "assistant") {
-    next[next.length - 1] = { ...last, errorMessage }
+    next[next.length - 1] = { ...last, error }
     return next
   }
-  next.push({ role: "assistant", content: "", errorMessage })
+  next.push({ role: "assistant", content: "", error })
   return next
+}
+
+/** A thrown failure as a turn keeps it: the refusal's status and code survive. */
+export function turnError(error: unknown): TurnError {
+  const refusal = error instanceof ApiError ? error : null
+  return {
+    message: errorMessage(error),
+    // 0 is the client's own "no response arrived", not a status.
+    status: refusal?.status || null,
+    code: refusal?.code || null,
+  }
 }
 
 /**

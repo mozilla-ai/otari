@@ -52,7 +52,16 @@ export interface ChatTurn {
   /** Present once an assistant turn has finished and reported its usage. */
   usage?: TurnUsage
   /** Set instead of `usage` when the turn ended in a refusal or a fault. */
-  errorMessage?: string
+  error?: TurnError
+}
+
+/** Why a turn failed, with what the gateway said when it refused the request. */
+export interface TurnError {
+  message: string
+  /** The HTTP status of a refusal, or null for a fault mid-stream or no response. */
+  status: number | null
+  /** The refusal's error `code` (`insufficient_funds`, say), or null without one. */
+  code: string | null
 }
 
 export interface PanelState {
