@@ -446,11 +446,15 @@ async def test_loop_adds_every_rounds_provider_searches(monkeypatch: pytest.Monk
 
 
 @pytest.mark.asyncio
-async def test_a_tool_call_on_the_last_round_ends_as_the_answer(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A provider that declares the conversation's tools anyway (Bedrock) lets the model call one on the last round."""
+@pytest.mark.parametrize("status", ["completed", "incomplete"])
+async def test_a_tool_call_on_the_last_round_ends_as_the_answer(monkeypatch: pytest.MonkeyPatch, status: str) -> None:
+    """A provider that declares the conversation's tools anyway (Bedrock) lets the model call one on the last round.
+
+    Gemini reports a round that calls a function as ``incomplete`` with no reason, which the answer must not keep.
+    """
 
     async def fake_aresponses(**kwargs: Any) -> Response:
-        return _response(output=[_function_call("c", "fetch_url", "{}")])
+        return _response(output=[_function_call("c", "fetch_url", "{}")], status=status)
 
     monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
 
@@ -461,6 +465,7 @@ async def test_a_tool_call_on_the_last_round_ends_as_the_answer(monkeypatch: pyt
     )
 
     assert not any(getattr(item, "type", None) == "function_call" for item in out.output or [])
+    assert out.status == "completed"
 
 
 @pytest.mark.asyncio

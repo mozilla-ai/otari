@@ -499,8 +499,8 @@ class _ResponsesToolLoopStrategy:
             )
 
     def end_answer(self, result: Response) -> None:
-        """Nothing to mark: a response that holds no call already reads as an answer."""
-        del result
+        """Mark the answer complete: Gemini reports a round that called a function as incomplete."""
+        result.status = "completed"
 
     async def advance_transcript(
         self,
