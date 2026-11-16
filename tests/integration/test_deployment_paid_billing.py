@@ -49,7 +49,13 @@ from sqlalchemy.orm import Session
 from gateway.api.deps import get_web_provider_client
 from gateway.api.routes import _pipeline as pipeline
 from gateway.core.config import API_KEY_HEADER, API_ROOT, COST_USD_HEADER, PRICING_SOURCE_HEADER, GatewayConfig
-from gateway.core.error_codes import ERROR_CODE_HEADER, INSUFFICIENT_FUNDS, RATE_LIMIT_RULE_HEADER, RATE_LIMITED
+from gateway.core.error_codes import (
+    BILLING_URL_HEADER,
+    ERROR_CODE_HEADER,
+    INSUFFICIENT_FUNDS,
+    RATE_LIMIT_RULE_HEADER,
+    RATE_LIMITED,
+)
 from gateway.log_config import logger as gateway_logger
 from gateway.models.routing import RoutingConfig
 from gateway.models.usage import UsageLog
@@ -107,7 +113,7 @@ class ProbeBilling:
         if "funds" in FAULTS:
             raise RuntimeError("billing down")
         if FUNDS["available"] <= 0:
-            raise InsufficientFundsError(FUNDS["available"])
+            raise InsufficientFundsError(FUNDS["available"], action_url=FUNDS.get("action_url"))
 
     async def has_funds_on_deposit(self, *, organization_id, billed, tools, actor_user_id):
         GATES.append(("has_funds_on_deposit", str(organization_id)))
@@ -500,7 +506,7 @@ def test_a_deployment_paid_stream_is_charged_once_after_it_ends(
     assert _deployment_paid_flags(db_session_factory) == [True]
 
 
-@pytest.mark.parametrize(
+_REFUSAL_FORMATS = pytest.mark.parametrize(
     ("path", "body", "error_body"),
     [
         (
@@ -521,6 +527,9 @@ def test_a_deployment_paid_stream_is_charged_once_after_it_ends(
     ],
     ids=["chat", "messages", "responses"],
 )
+
+
+@_REFUSAL_FORMATS
 def test_an_organization_without_funds_is_refused_before_dispatch(
     billed: tuple[TestClient, ModuleType],
     db_session_factory: Callable[[], Session],
@@ -545,6 +554,8 @@ def test_an_organization_without_funds_is_refused_before_dispatch(
     payload = response.json()
     expected = error_body(detail)
     assert {name: payload.get(name) for name in expected} == expected
+    assert "billing_url" not in payload
+    assert BILLING_URL_HEADER not in response.headers
     chat_call.assert_not_called()
     responses_call.assert_not_called()
     assert probe.LEDGER == []
@@ -554,6 +565,26 @@ def test_an_organization_without_funds_is_refused_before_dispatch(
     assert [(row["status"], row["status_code"], row["provider"]) for row in rows] == [("error", 402, "openai")]
     # Refused before it was served, so nothing the deployment paid for.
     assert _deployment_paid_flags(db_session_factory) == [False]
+
+
+@_REFUSAL_FORMATS
+def test_a_refusal_for_insufficient_funds_names_where_to_add_them(
+    billed: tuple[TestClient, ModuleType], path: str, body: dict[str, Any], error_body: Any
+) -> None:
+    client, probe = billed
+    _price(client, "openai:gpt-4o")
+    key = _key(client)
+    url = "https://otari.example/billing"
+    probe.FUNDS.update(available=Decimal("0"), action_url=url)
+
+    response = client.post(f"{API_ROOT}{path}", json={"model": "openai:gpt-4o", **body}, headers=_auth(key))
+
+    assert response.status_code == status.HTTP_402_PAYMENT_REQUIRED, response.text
+    assert response.headers[BILLING_URL_HEADER] == url
+    payload = response.json()
+    detail = f"Insufficient funds ($0.00) to serve this request. Add funds at {url}."
+    expected = {**error_body(detail), "billing_url": url}
+    assert {name: payload.get(name) for name in expected} == expected
 
 
 def test_a_request_on_the_gateways_own_key_never_reaches_billing(

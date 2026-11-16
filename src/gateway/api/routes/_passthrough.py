@@ -616,7 +616,7 @@ async def run_passthrough(
                 served,
                 status.HTTP_402_PAYMENT_REQUIRED,
                 exc.public_message,
-                **error_headers(INSUFFICIENT_FUNDS),
+                **error_headers(INSUFFICIENT_FUNDS, billing_url=exc.action_url),
             ) from exc
         except Exception as exc:
             logger.error(

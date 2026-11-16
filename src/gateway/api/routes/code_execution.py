@@ -335,7 +335,7 @@ async def execute_code(
         raise await refused_after_reservation(
             unfunded_tool_detail([Tool.CODE_EXECUTION], exc.public_message, declared=False),
             status.HTTP_402_PAYMENT_REQUIRED,
-            error_headers(INSUFFICIENT_FUNDS),
+            error_headers(INSUFFICIENT_FUNDS, billing_url=exc.action_url),
         ) from exc
     except Exception as exc:
         logger.error(

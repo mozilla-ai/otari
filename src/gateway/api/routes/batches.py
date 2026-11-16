@@ -461,7 +461,7 @@ async def create_batch(
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail=exc.public_message,
-                headers=error_headers(INSUFFICIENT_FUNDS),
+                headers=error_headers(INSUFFICIENT_FUNDS, billing_url=exc.action_url),
             ) from exc
         except Exception as exc:
             logger.error(

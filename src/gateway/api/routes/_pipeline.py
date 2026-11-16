@@ -1238,7 +1238,8 @@ async def _admit_or_refuse(
         await _record_funding_refusal(
             ctx, resolved, adapter=adapter, detail=detail, status_code=status.HTTP_402_PAYMENT_REQUIRED
         )
-        raise adapter.error(402, detail, ErrorKind.INVALID_REQUEST, headers=error_headers(INSUFFICIENT_FUNDS)) from exc
+        headers = error_headers(INSUFFICIENT_FUNDS, billing_url=exc.action_url)
+        raise adapter.error(402, detail, ErrorKind.INVALID_REQUEST, headers=headers) from exc
     except Exception as exc:
         # As for a ModelProviderPort failure: a funding check is expected to read
         # a database or a service, and nothing above this catches what it raises.
@@ -1505,7 +1506,7 @@ def _hosted_candidate(
                 HTTPException(
                     status_code=status.HTTP_402_PAYMENT_REQUIRED,
                     detail=exc.public_message,
-                    headers=error_headers(INSUFFICIENT_FUNDS),
+                    headers=error_headers(INSUFFICIENT_FUNDS, billing_url=exc.action_url),
                 )
             ) from exc
         except Exception as exc:
@@ -4147,9 +4148,8 @@ async def _admit_tool_funding(
                 list(dict.fromkeys(tool.type for tool in paid)), refusal.public_message, declared=True
             )
             last_refusal = (gateway_tool_pricing_key(paid[0].name), refusal, detail)
-            unfunded[claimed] = _ToolRefusal(
-                adapter.error(402, detail, ErrorKind.INVALID_REQUEST, headers=error_headers(INSUFFICIENT_FUNDS))
-            )
+            headers = error_headers(INSUFFICIENT_FUNDS, billing_url=refusal.action_url)
+            unfunded[claimed] = _ToolRefusal(adapter.error(402, detail, ErrorKind.INVALID_REQUEST, headers=headers))
     if last_refusal is not None and len(unfunded) == len(admitted):
         tool_key, refused, detail = last_refusal
         logger.info(
@@ -4159,7 +4159,10 @@ async def _admit_tool_funding(
         )
         await _refuse_tool_funding(ctx, adapter, tool_key, detail, status.HTTP_402_PAYMENT_REQUIRED)
         raise adapter.error(
-            402, detail, ErrorKind.INVALID_REQUEST, headers=error_headers(INSUFFICIENT_FUNDS)
+            402,
+            detail,
+            ErrorKind.INVALID_REQUEST,
+            headers=error_headers(INSUFFICIENT_FUNDS, billing_url=refused.action_url),
         ) from refused
     # The commit also lands any credit admission granted, so a request whose
     # admission did not commit is not served on it, as at the model's gate.
