@@ -62,7 +62,7 @@ export function useKeys(workspaceId?: string, enabled = true) {
     meta: workspaceMeta(workspaceId),
     queryFn: () => fetchAllKeys(scope.base, workspaceId),
     enabled: scope.isReady && enabled,
-    staleTime: 60_000,
+    staleTime: 0,
   })
 }
 
