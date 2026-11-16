@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
-from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps._base import (
@@ -176,10 +175,9 @@ async def _verify_and_update_api_key(db: AsyncSession, token: str, key_format: A
     key_hash = hash_key(token)
 
     try:
-        result = await db.execute(select(APIKey).where(APIKey.key_hash == key_hash))
+        api_key = await ApiKeyRepository(db).get_by_hash(key_hash)
     except DATABASE_ERRORS as e:
         raise _authentication_unavailable("db_error") from e
-    api_key = result.scalar_one_or_none()
 
     if not api_key:
         raise _invalid_api_key("invalid_key")
@@ -340,7 +338,7 @@ async def _bump_last_used_at(api_key_id: str, now: datetime) -> None:
     """
     try:
         async with create_session() as session:
-            await session.execute(update(APIKey).where(APIKey.id == api_key_id).values(last_used_at=now))
+            await ApiKeyRepository(session).touch_last_used(api_key_id, now)
             await session.commit()
     except DATABASE_ERRORS as exc:
         # Widened past SQLAlchemyError for the same reason as the arms above:
