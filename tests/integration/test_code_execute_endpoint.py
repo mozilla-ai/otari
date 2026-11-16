@@ -231,6 +231,37 @@ def test_an_upload_the_caller_cannot_reach_is_a_400(
     assert port.opened == []
 
 
+def test_a_service_key_reads_back_what_an_end_users_run_wrote(
+    client: TestClient, port: _FakePort, master_key_header: dict[str, str], tmp_file_store: None
+) -> None:
+    """The key names the end user on the upload, the run and the download, and owns nothing of theirs itself."""
+    key = client.post(
+        f"{API_ROOT}/keys",
+        json={"key_name": "code-service", "user_id": "code-service", "is_service_key": True},
+        headers=master_key_header,
+    ).json()
+    headers = {API_KEY_HEADER: f"Bearer {key['key']}"}
+    upload = client.post(
+        f"{API_ROOT}/files",
+        headers=headers,
+        files={"file": ("data.csv", b"a,b\n1,2\n", "text/csv")},
+        data={"purpose": "user_data", "user": "fxa-123"},
+    )
+    assert upload.status_code == 200, upload.text
+    port.writes = {"chart.png": b"png-bytes"}
+
+    resp = client.post(
+        _ENDPOINT, json={"code": "print(1)", "file_ids": [upload.json()["id"]], "user": "fxa-123"}, headers=headers
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert port.seeded == {"data.csv": b"a,b\n1,2\n"}
+    (written,) = resp.json()["files"]
+    url = f"{API_ROOT}/files/{written['file_id']}/content"
+    assert client.get(url, headers=headers, params={"user": "fxa-123"}).content == b"png-bytes"
+    assert client.get(url, headers=headers).status_code == 404
+
+
 def test_auto_holds_the_sandbox_and_its_id_runs_there_again(
     client: TestClient, port: _FakePort, api_key_header: dict[str, str]
 ) -> None:

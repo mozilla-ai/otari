@@ -111,7 +111,16 @@ key belongs to. Both have to match for a request to reach it, on the listing, th
 metadata, the download, the delete, and the `file_id` references resolved out of
 a chat message. A user who holds keys in two workspaces reaches each
 workspace's files only through that workspace's key. Anything they cannot see
-answers 404, not 403.
+answers 404, not 403, and a request that attaches a `file_id` it cannot see is
+refused with a 400 that names the ID, never forwarded to the provider.
+
+A [service key](end-users.md) that sends `user` naming one of its end users acts
+as that end user on every verb: the upload is theirs, and the listing, the
+metadata, the download and the delete reach only their files. So a file uploaded
+for alice is read in the requests the key sends for alice and in no one else's,
+and the key downloads what alice's code execution runs wrote by naming her
+again. An upload names the end user into existence as a request would; any
+other verb naming one the key never used finds nothing.
 
 The workspace comes from the key, never from a header. The master key sees
 every workspace, narrowable with `GET /api/v1/files?workspace_id=<id>`, and a
