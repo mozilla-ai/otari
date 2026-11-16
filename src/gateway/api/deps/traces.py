@@ -2,14 +2,20 @@
 
 import uuid
 from collections.abc import Collection
+from dataclasses import dataclass
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps._base import (
     UnitOfWorkDep,
+    get_config,
 )
+from gateway.api.deps.auth import (
+    get_session_identity,
+)
+from gateway.api.deps.identity import CurrentIdentity
 from gateway.core.config import (
     TRACE_CONTENT_HEADER,
     TRACE_CONTENT_KEEP,
@@ -17,8 +23,13 @@ from gateway.core.config import (
 )
 from gateway.core.database import DATABASE_ERRORS, describe_database_error, get_db, release_session
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.traces_exceptions import (
+    TraceBreakGlassForbiddenError,
+    TraceBreakGlassUnnamedError,
+)
 from gateway.log_config import logger
 from gateway.models.tenancy import MANAGEMENT_ROLES, Workspace
+from gateway.models.tenancy import User as TenancyUser
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     UserRepository,
@@ -27,10 +38,14 @@ from gateway.repositories.tenancy import (
 )
 from gateway.repositories.traces import TracesRepositories
 from gateway.services.catalog import served_context_window
+from gateway.services.tenancy import OrganizationService
+from gateway.services.tenancy.authorization import resolve_visible_workspace_scope
 from gateway.services.traces import SpanContent, TraceService
 from gateway.types.traces import (
     ContentCapture,
+    ContentReader,
     SessionOwners,
+    TraceScope,
     WorkspaceContent,
 )
 
@@ -258,3 +273,133 @@ def get_trace_service(
 
 
 TraceServiceDep = Annotated[TraceService, Depends(get_trace_service)]
+
+
+@dataclass(frozen=True)
+class VisibleWorkspaces:
+    """The caller's active organization, and the workspaces in it they may read."""
+
+    organization_id: uuid.UUID
+    workspace_ids: frozenset[uuid.UUID]
+    whole_organization: bool = False
+
+
+async def get_visible_workspaces(
+    identity: CurrentIdentity, db: Annotated[AsyncSession, Depends(get_db)]
+) -> VisibleWorkspaces:
+    """The workspaces of their active organization this caller may read.
+
+    The same rule the organization's usage reads use, resolved per request: an
+    owner or an admin reads every workspace in the organization, anyone else the
+    ones they actively belong to. Never taken from the request.
+    """
+    organizations = OrganizationService(db, membership_listener=None)
+    scope = await resolve_visible_workspace_scope(db, user=identity, organizations=organizations)
+    workspace_ids = (
+        await WorkspaceRepository(db).get_ids_by_organization(scope.organization.id)
+        if scope.workspace_ids is None
+        else scope.workspace_ids
+    )
+    return VisibleWorkspaces(
+        organization_id=scope.organization.id,
+        workspace_ids=frozenset(workspace_ids),
+        whole_organization=scope.workspace_ids is None,
+    )
+
+
+VisibleWorkspacesDep = Annotated[VisibleWorkspaces, Depends(get_visible_workspaces)]
+
+
+async def get_organization_trace_scope(
+    visible: VisibleWorkspacesDep,
+    identity: CurrentIdentity,
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+) -> TraceScope:
+    """The workspaces of their active organization this caller may read traces in.
+
+    Each reads their own sessions' content. An owner or admin also reads what a
+    session's user shared with the organization's admins. A header master key
+    names no person to record a read against, so it reads no content at all.
+    """
+    if session_identity is None:
+        return TraceScope.workspaces(visible.workspace_ids)
+    return TraceScope.workspaces(
+        visible.workspace_ids,
+        reader=ContentReader(
+            user_id=identity.id,
+            email=identity.email or str(identity.id),
+            audiences=frozenset({"organization_admins"}) if visible.whole_organization else frozenset(),
+        ),
+    )
+
+
+async def require_signed_in_reader(
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+) -> None:
+    """Refuse a break-glass opening that a header master key, which names nobody, would make.
+
+    The record has to say which person opened the content; the bootstrap operator
+    a master key falls back to is an account, not a person.
+    """
+    if session_identity is None:
+        raise TraceBreakGlassUnnamedError
+
+
+@dataclass(frozen=True)
+class OrganizationBreakGlass:
+    """An organization owner about to open a session's content without its owner's share."""
+
+    scope: TraceScope
+    organization_id: uuid.UUID
+    reader: ContentReader
+
+
+async def get_organization_break_glass(
+    visible: VisibleWorkspacesDep, identity: CurrentIdentity, db: Annotated[AsyncSession, Depends(get_db)]
+) -> OrganizationBreakGlass:
+    """The caller as an owner of their active organization, over every workspace in it.
+
+    Owners only, not admins: break-glass is kept to the smallest group that can answer for it.
+    """
+    membership = await OrganizationMemberRepository(db).get_active_by_organization_and_user(
+        visible.organization_id, identity.id
+    )
+    if membership is None or membership.role != "owner":
+        raise TraceBreakGlassForbiddenError
+    reader = ContentReader(user_id=identity.id, email=identity.email or str(identity.id))
+    return OrganizationBreakGlass(
+        scope=TraceScope.workspaces(visible.workspace_ids, reader=reader),
+        organization_id=visible.organization_id,
+        reader=reader,
+    )
+
+
+@dataclass(frozen=True)
+class PlatformBreakGlass:
+    """The deployment's operator about to open a session's content in a named workspace of any organization."""
+
+    reader: ContentReader
+    workspace_id: uuid.UUID
+    organization_id: uuid.UUID
+
+
+async def get_platform_break_glass(
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    identity: CurrentIdentity,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    workspace_id: Annotated[uuid.UUID, Query(description="The workspace the session is in.")],
+) -> PlatformBreakGlass:
+    """The deployment's operator, where the deployment lets them open any organization's session content.
+
+    Answers 404 where it does not, as a path nothing serves would, and for a workspace that does not exist.
+    """
+    if not config.trace_platform_break_glass_enabled:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+    workspace = await WorkspaceRepository(db).get(workspace_id)
+    if workspace is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+    return PlatformBreakGlass(
+        reader=ContentReader(user_id=identity.id, email=identity.email or str(identity.id)),
+        workspace_id=workspace_id,
+        organization_id=workspace.organization_id,
+    )
