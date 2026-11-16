@@ -131,3 +131,17 @@ def test_every_listed_id_is_served_on_the_organizations_key(client: TestClient, 
         assert response.status_code == status.HTTP_200_OK, (model["id"], response.text)
         assert response.headers["Otari-Provider"] == _SLUG
         assert response.headers["Otari-Model"] == _MODEL
+
+
+def test_the_catalog_ids_bare_name_is_served_on_the_organizations_key(
+    client: TestClient, api_key_header: dict[str, str]
+) -> None:
+    """A client that sends a model's bare name, as Claude Code does, reaches it with no alias."""
+    bare = _CATALOG_ID.partition("/")[2]
+
+    response = _chat(client, api_key_header, bare)
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert response.headers["Otari-Provider"] == _SLUG
+    assert response.headers["Otari-Model"] == _MODEL
+    assert response.json()["model"] == bare

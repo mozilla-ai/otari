@@ -7,9 +7,9 @@ from datetime import datetime
 from typing import Protocol
 
 from gateway.models.organizations import WorkspaceAssignment
-from gateway.models.tenancy import DOMAIN_PROOF_TTL, OrganizationMemberRole
+from gateway.models.tenancy import OrganizationMemberRole
 from gateway.repositories.tenancy import OrganizationRepository, UserRepository, WorkspaceRepository
-from gateway.services.organizations._claimed_domains import ClaimedDomains
+from gateway.services.organizations._claimed_domains import ClaimedDomains, proven_domains
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -98,11 +98,7 @@ class InvitationFactsReader:
             inviter_email=inviter_email,
             inviter_name=inviter_name,
             organization_name=organization.name,
-            proven_domains=tuple(
-                claim.domain
-                for claim in claims
-                if claim.verified_at is not None and now - claim.verified_at <= DOMAIN_PROOF_TTL
-            ),
+            proven_domains=proven_domains(claims, now=now),
             role=terms.role,
             workspace_names=tuple(sorted(names, key=lambda name: (name.casefold(), name))),
         )

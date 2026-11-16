@@ -81,9 +81,12 @@ model. When budgets are small, set `CLAUDE_CODE_MAX_OUTPUT_TOKENS` lower. See
 
 ## Choosing a model
 
-Otari can serve Claude Code's requests from non-Anthropic models. Set Claude
-Code's default Opus, Sonnet and Haiku model variables when its built-in aliases
-do not exist on your deployment.
+Claude Code names its models bare (`claude-opus-5-5`), and Otari reads such a
+name as the model's [catalog id](models.md#catalog-spellings), so no alias is
+needed. An alias of the same name wins, which is how to send it elsewhere.
+
+Otari can also serve Claude Code's requests from non-Anthropic models: set
+Claude Code's default Opus, Sonnet and Haiku model variables to them.
 
 A non-Claude model may lose Anthropic-specific behavior such as extended
 thinking, prompt caching or tool semantics, and Anthropic's server-side context

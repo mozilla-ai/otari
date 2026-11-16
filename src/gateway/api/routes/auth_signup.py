@@ -38,12 +38,12 @@ from gateway.api.routes._public_auth import (
     refuse_exhausted_verification_attempts,
     throttle_public_auth,
 )
+from gateway.core.addresses import MAX_STORED_ADDRESS_LENGTH
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.identity_exceptions import VerificationTokenInvalidError
 from gateway.models.tenancy import MAX_FULL_NAME_LENGTH
 from gateway.services.mail import MailNotConfiguredError
 from gateway.services.tenancy import report_new_account
-from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH
 from gateway.services.tenancy.user_service import (
     create_user_for_signup,
     resend_verification_email,
@@ -66,7 +66,7 @@ class SignupRequest(BaseModel):
     """Set a password for an address, claiming or registering it."""
 
     email: str = Field(
-        max_length=MAX_EMAIL_LENGTH,
+        max_length=MAX_STORED_ADDRESS_LENGTH,
         description=(
             "The address to sign in with. An address an admin added or invited where this "
             "deployment keeps signup closed; any address where the bootstrap reports open_signup."
@@ -122,7 +122,9 @@ class VerifyEmailResponse(BaseModel):
 
 
 class ResendVerificationRequest(BaseModel):
-    email: str = Field(max_length=MAX_EMAIL_LENGTH, description="The address to resend a verification link to.")
+    email: str = Field(
+        max_length=MAX_STORED_ADDRESS_LENGTH, description="The address to resend a verification link to."
+    )
 
 
 class ResendVerificationResponse(BaseModel):

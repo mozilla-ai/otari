@@ -9,7 +9,7 @@ from typing import Any, Never, cast
 from sqlalchemy import ColumnElement, CursorResult, case, delete, func, literal, null, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.addresses import normalized_address
+from gateway.core.addresses import stored_address
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.organizations import OrganizationInvitation, WorkspaceAssignment
 from gateway.models.tenancy import OrganizationMemberRole
@@ -63,11 +63,11 @@ class OrganizationInvitationRepository(BaseRepository[OrganizationInvitation, Ne
     async def add(self, new: NewInvitation) -> OrganizationInvitation:
         """Save a new invitation in the current transaction and return it.
 
-        Raise ``ValueError`` when ``new.email`` is not an email address.
+        Raise ``ValueError`` when ``new.email`` is not an email address that can be stored.
         """
-        email = normalized_address(new.email)
+        email = stored_address(new.email)
         if email is None:
-            msg = "An invitation needs an email address."
+            msg = "An invitation needs an email address that can be stored."
             raise ValueError(msg)
         invitation = OrganizationInvitation(
             email=email,
@@ -182,7 +182,7 @@ class OrganizationInvitationRepository(BaseRepository[OrganizationInvitation, Ne
         self, organization_id: uuid.UUID, email: str
     ) -> OrganizationInvitation | None:
         """Return the organization's invitation for this address, or None if it has none."""
-        address = normalized_address(email)
+        address = stored_address(email)
         if address is None:
             return None
         result = await self.db.execute(

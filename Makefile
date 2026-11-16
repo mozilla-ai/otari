@@ -1,4 +1,4 @@
-.PHONY: help dev dashboard test test-unit test-integration test-libs test-frameworks lint lint-python lint-web check-architecture typecheck typecheck-python typecheck-web openapi-check changelog check-migrations railway-template-check
+.PHONY: help dev dashboard test test-unit test-integration test-libs test-frameworks lint lint-python lint-web check-architecture typecheck typecheck-python typecheck-web openapi-check changelog check-migrations
 
 help:
 	@printf "Available targets:\n"
@@ -20,7 +20,6 @@ help:
 	@printf "  typecheck-web Run tsc over the dashboard\n"
 	@printf "  openapi-check Verify the OpenAPI spec is up to date\n"
 	@printf "  changelog Preview the generated CHANGELOG.md locally (git-cliff)\n"
-	@printf "  railway-template-check Compare deploy/railway with the live Railway template\n"
 
 dev:
 	@set -a; \
@@ -135,7 +134,3 @@ homebrew-formula:
 # would instead fail on every checkout that is not sitting on one.
 	uv run python scripts/homebrew_formula.py --version "$$(ls build/homebrew/otari_agent-*.tar.gz | sed -E 's|.*/otari_agent-(.*)\.tar\.gz|\1|')" --sdist "$$(ls build/homebrew/otari_agent-*.tar.gz)" --output build/homebrew/otari.rb
 	@echo "Rendered build/homebrew/otari.rb"
-
-# Reads the live template from Railway's public API, so it needs network but no token.
-railway-template-check:
-	python3 scripts/check_railway_template.py
