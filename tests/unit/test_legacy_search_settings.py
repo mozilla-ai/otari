@@ -246,6 +246,22 @@ def test_the_provider_pair_is_refused_and_replaced_by_a_tool_named_after_its_pro
     assert "secret-key" not in logged
 
 
+def test_a_provider_pair_no_search_runs_on_is_only_to_unset(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.WARNING, logger="gateway")
+    config = GatewayConfig(
+        web_search_provider="tavily",
+        web_search_provider_api_key="secret-key",
+        search_tools={"exa": dict(_EXA)},
+        web_search_default_tool="exa",
+    )
+
+    warn_about_legacy_search_settings(config, from_file=_NONE, stored_settings={}, stored_tools_loaded=True)
+
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    assert "No search runs on it, so unset web_search_provider" in logged
+    assert "Add a search tool" not in logged
+
+
 def test_a_searxng_tool_inheriting_the_stored_values_is_kept() -> None:
     stored = LegacySearchValues(url=_URL, engines="wikinews")
     warnings = _warnings(stored=stored, stored_tools={"searxng": {"provider": "searxng"}})

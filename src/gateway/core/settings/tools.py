@@ -67,8 +67,8 @@ DEFAULT_WEB_SEARCH_MAX_CALLS = 10
 # The engines the old in-loop backend asks a SearXNG service for when
 # ``web_search_engines`` is unset; why these four is said where it uses them.
 DEFAULT_SEARXNG_ENGINES = ("duckduckgo", "mojeek", "qwant", "wikipedia")
-# The options a search on the legacy settings sends its provider, below every
-# other option layer: page text from Tavily, so its hits need no page fetches.
+# The options a search on the legacy settings sends its provider: page text from
+# Tavily, so its hits need no page fetches.
 LEGACY_SETTINGS_OPTIONS: Mapping[str, Mapping[str, Any]] = MappingProxyType(
     {
         "tavily": MappingProxyType({"include_raw_content": True}),
@@ -309,13 +309,14 @@ class SynthesizedSearchInstance:
     back to it, and on a deployment with no search instance the direct endpoint
     serves it too. Its name is its provider's,
     so a search instance of that name can later replace it unnoticed.
+    ``options`` are what the legacy settings send their provider.
     """
 
     provider: str
     api_key: str | None = field(default=None, repr=False)
     api_base: str | None = field(default=None, repr=False)
     engines: tuple[str, ...] = ()
-    provider_defaults: Mapping[str, Any] = field(default=_NO_OPTIONS, hash=False)
+    options: Mapping[str, Any] = field(default=_NO_OPTIONS, hash=False)
 
     @property
     def name(self) -> str:
@@ -778,8 +779,9 @@ def synthesized_search_instance(settings: ToolSettings) -> SynthesizedSearchInst
         provider = settings.web_search_provider
         return SynthesizedSearchInstance(
             provider=provider,
-            api_key=settings.web_search_provider_api_key,
-            provider_defaults=LEGACY_SETTINGS_OPTIONS.get(provider, _NO_OPTIONS),
+            # A key read from a file can end in a newline, which no HTTP header takes.
+            api_key=(settings.web_search_provider_api_key or "").strip() or None,
+            options=LEGACY_SETTINGS_OPTIONS.get(provider, _NO_OPTIONS),
         )
     url = (settings.web_search_url or otari_env("WEB_SEARCH_URL") or "").strip()
     if not url:
@@ -790,7 +792,6 @@ def synthesized_search_instance(settings: ToolSettings) -> SynthesizedSearchInst
         provider="searxng",
         api_base=url,
         engines=engines or DEFAULT_SEARXNG_ENGINES,
-        provider_defaults=_NO_OPTIONS,
     )
 
 

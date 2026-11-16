@@ -205,10 +205,17 @@ def test_the_provider_pair_describes_the_synthesized_instance() -> None:
     config = GatewayConfig(web_search_provider="tavily", web_search_provider_api_key="tvly-key")
     synthesized = synthesized_search_instance(config)
     assert synthesized == SynthesizedSearchInstance(
-        provider="tavily", api_key="tvly-key", provider_defaults={"include_raw_content": True}
+        provider="tavily", api_key="tvly-key", options={"include_raw_content": True}
     )
     assert synthesized.name == "tavily"
     assert "tvly-key" not in repr(synthesized)
+
+
+def test_the_provider_pairs_key_is_stripped() -> None:
+    config = GatewayConfig(web_search_provider="tavily", web_search_provider_api_key=" tvly-key\n")
+    synthesized = synthesized_search_instance(config)
+    assert synthesized is not None
+    assert synthesized.api_key == "tvly-key"
 
 
 def test_the_provider_wins_over_the_url() -> None:

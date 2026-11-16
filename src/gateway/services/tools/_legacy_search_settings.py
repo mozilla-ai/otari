@@ -72,18 +72,26 @@ class LegacySearchValues:
         )
 
 
-def provider_pair_warning(provider: str) -> str:
-    """What replaces ``web_search_provider`` and its key: a search tool named after the provider, as the default."""
+def provider_pair_warning(provider: str, *, searched: bool) -> str:
+    """What replaces ``web_search_provider`` and its key.
+
+    ``searched`` says a search runs on them: then a search tool named after the
+    provider, as the default, takes their place; else they are only unset.
+    """
+    warning = (
+        "web_search_provider is set in the configuration file or the environment (OTARI_WEB_SEARCH_PROVIDER). "
+        f"{_REMOVAL} refuses to start while it is set. "
+    )
+    if not searched:
+        return warning + "No search runs on it, so unset web_search_provider and web_search_provider_api_key."
     page_text = (
         " with include_raw_content: true in its options, so it keeps returning page text,"
         if provider == "tavily"
         else ""
     )
-    return (
-        "web_search_provider is set in the configuration file or the environment (OTARI_WEB_SEARCH_PROVIDER). "
-        f"{_REMOVAL} refuses to start while it is set. Add a search tool named {provider} with provider {provider}, "
-        f"its key{page_text} and a price, name it in web_search_default_tool, then unset web_search_provider and "
-        "web_search_provider_api_key."
+    return warning + (
+        f"Add a search tool named {provider} with provider {provider}, its key{page_text} and a price, name it in "
+        "web_search_default_tool, then unset web_search_provider and web_search_provider_api_key."
     )
 
 
@@ -366,7 +374,10 @@ def warn_about_legacy_search_settings(
     values are accounted for, since the rest depends on those tools.
     """
     if config.web_search_provider_configured() and config.web_search_provider:
-        logger.warning("%s", provider_pair_warning(config.web_search_provider))
+        searched = isinstance(in_loop_default(config), SynthesizedSearchInstance) or bool(
+            legacy_search_instance(config)
+        )
+        logger.warning("%s", provider_pair_warning(config.web_search_provider, searched=searched))
     stored = LegacySearchValues.of(stored_settings.get("web_search_url"), stored_settings.get("web_search_engines"))
     inherited = LegacySearchValues.of(config.web_search_url, config.web_search_engines)
     if not any((from_file.url, from_file.engines, stored.url, stored.engines, inherited.url, inherited.engines)):

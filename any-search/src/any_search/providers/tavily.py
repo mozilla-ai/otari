@@ -80,7 +80,7 @@ class TavilyProvider(AnySearch):
                 name="include_raw_content",
                 type="boolean",
                 default=False,
-                description="Return each page's full text: true or markdown, or text for plain text.",
+                description="Return each page's full text, as Markdown.",
             ),
             OptionSpec(
                 name="topic",

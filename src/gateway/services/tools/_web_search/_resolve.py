@@ -25,8 +25,8 @@ carries its own key and base URL, ``""`` where it has none, which the
 libraries read as passed rather than fall back to the environment, and a
 credential without a key or base URL its provider needs is refused.
 
-Options are layered lowest first: otari's defaults for the provider, the
-instance's, the credential's, the workspace's and the request's. The direct
+Options are layered lowest first: the instance's (the legacy settings' own,
+for a search on them), the credential's, the workspace's and the request's. The direct
 endpoint leaves out the workspace's, and the instance's when an organization
 key serves the call. Fetch takes no workspace layer, which holds search
 options, and a request layer on the direct endpoint alone. The count the
@@ -36,8 +36,7 @@ runs the call, each option is checked as the instance's are: a
 request's option the provider does not take, or takes only from the
 deployment, is refused, and the other layers' are dropped with a warning that
 names the layer and the key, never the value. What the old code runs takes
-the layers unchecked and without otari's defaults, which that code applies
-itself.
+the layers unchecked.
 """
 
 import functools
@@ -418,12 +417,11 @@ def _search_on_synthesized(
     timeout: float = IN_LOOP_TIMEOUT_S,
 ) -> ResolvedSearch:
     runner: Runner = "library" if synthesized.provider in any_search.AnySearch.get_supported_providers() else "old"
-    legacy = {"engines": ",".join(synthesized.engines)} if synthesized.engines else {}
+    legacy = {**synthesized.options, **({"engines": ",".join(synthesized.engines)} if synthesized.engines else {})}
     options = _layered(
         "search",
         synthesized.provider,
         checked=runner == "library",
-        defaults=synthesized.provider_defaults,
         instance=("legacy search settings", legacy, frozenset()),
         workspace=workspace,
         request=request,
@@ -618,7 +616,6 @@ def _layered(
     provider: str,
     *,
     checked: bool,
-    defaults: Mapping[str, Any] = _NO_OPTIONS,
     instance: tuple[str, Mapping[str, Any], frozenset[str]] | None = None,
     credential: tuple[str, Mapping[str, Any]] | None = None,
     workspace: Mapping[str, Any] = _NO_OPTIONS,
@@ -626,11 +623,10 @@ def _layered(
 ) -> dict[str, Any]:
     """The options a call runs with, layered lowest first.
 
-    ``defaults`` are the legacy settings' own options, below every layer.
     ``instance`` is the instance's layer with the keys its load recorded as
     breaking the rules; ``credential`` is a credential's. Unless ``checked``,
-    the layers pass as they are, without ``defaults``. Each dropped option is
-    warned about once, not on every call.
+    the layers pass as they are. Each dropped option is warned about once, not
+    on every call.
     """
     instance_name, instance_options, broken = instance or ("", _NO_OPTIONS, frozenset())
     credential_name, credential_options = credential or ("", _NO_OPTIONS)
@@ -641,7 +637,6 @@ def _layered(
         key, problem = next(iter(refused.items()))
         raise WebSearchOptionRefusedError(key, problem)
     return {
-        **defaults,
         **_kept(
             instance_options,
             instance_name,
