@@ -533,6 +533,9 @@ class _ChatToolLoopStrategy:
     def accumulate_usage(self, acc: _ChatTotals, result: ChatCompletion) -> None:
         _add_usage(acc, result.usage)
 
+    def output_tokens(self, acc: _ChatTotals) -> int:
+        return acc.completion
+
     def fold_usage(self, result: ChatCompletion, acc: _ChatTotals) -> None:
         _fold_usage(result, acc)
         # Every return path folds, so this is where the answer gains the report of
@@ -756,6 +759,9 @@ class _ChatToolLoopStrategy:
             _add_usage(totals, carrier.usage)
             _fold_usage(carrier, totals)
         return state.deferred_terminal()
+
+    def stream_output_tokens(self, acc: _ChatTotals) -> int:
+        return acc.completion
 
     def accumulate_stream_usage(self, acc: _ChatTotals, state: _ChatStreamState) -> None:
         carrier = state.usage_carrier()

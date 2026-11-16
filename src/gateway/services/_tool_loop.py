@@ -57,14 +57,20 @@ class ToolBackend(Protocol):
 class RoundGate(Protocol):
     """Holds each tool-loop round after the first on the request's budgets before the round is sent.
 
-    The request's own hold covers its first round. Every later round resends the
-    whole transcript and is billed too, so it is held on its own; a round the
-    budgets cannot hold is sent as the loop's last, without the gateway's tools,
-    so the request still ends with an answer.
+    The request's own hold covers its first round and one output limit. Every
+    later round resends the whole transcript and is billed too, so it is held on
+    its own, together with what the round before it wrote, which leaves the one
+    output limit free for the round being sent. A round the budgets cannot hold
+    is sent as the loop's last, without the gateway's tools, so the request still
+    ends with an answer.
     """
 
-    async def admit(self, prompt_chars: int) -> bool:
-        """Whether a round whose request is ``prompt_chars`` long fits the request's budgets."""
+    async def admit(self, prompt_chars: int, output_tokens: int | None) -> bool:
+        """Whether a round whose request is ``prompt_chars`` long fits the request's budgets.
+
+        ``output_tokens`` is what the round before reported writing, or None where
+        it reported no usage.
+        """
         ...
 
 
@@ -122,6 +128,8 @@ class ToolLoopStrategy(Protocol, Generic[ResultT, AccT]):
 
     def accumulate_usage(self, acc: AccT, result: ResultT) -> None: ...
 
+    def output_tokens(self, acc: AccT) -> int: ...
+
     def fold_usage(self, result: ResultT, acc: AccT) -> None: ...
 
     def exit_before_split(self, result: ResultT) -> bool: ...
@@ -175,6 +183,8 @@ class StreamToolLoopStrategy(Protocol, Generic[ChunkT, StateT, AccT]):
     def terminal_events(self, state: StateT, acc: AccT) -> list[ChunkT]: ...
 
     def accumulate_stream_usage(self, acc: AccT, state: StateT) -> None: ...
+
+    def stream_output_tokens(self, acc: AccT) -> int: ...
 
     def advance_stream_transcript(
         self,
@@ -293,9 +303,20 @@ def _request_chars(value: Any) -> int:
     return len(str(value))
 
 
-async def _round_fits(gate: RoundGate | None, iteration: int, kwargs: dict[str, Any]) -> bool:
+async def _round_fits(
+    gate: RoundGate | None, iteration: int, kwargs: dict[str, Any], output_tokens: int | None
+) -> bool:
     """Whether round ``iteration``, sent as ``kwargs``, fits the request's budgets; the first rides on its own hold."""
-    return gate is None or iteration == 1 or await gate.admit(_request_chars(kwargs))
+    return gate is None or iteration == 1 or await gate.admit(_request_chars(kwargs), output_tokens)
+
+
+def _written(before: int, after: int) -> int | None:
+    """What one round wrote, from the loop's output count before and after it.
+
+    A round the loop continues from wrote at least its tool calls, so a count that
+    did not move means the round reported no usage.
+    """
+    return after - before or None
 
 
 def _round_request(
@@ -422,13 +443,14 @@ async def run_tool_loop(
     )
     acc = strategy.new_usage_accumulator()
     first_response_signaled = False
+    written: int | None = None
 
     for iteration in range(1, max_iterations + 1):
         final = iteration == max_iterations
         kwargs = _round_request(
             strategy.transcript_key, base, merged_tools, user_tools, pool, transcript, first=iteration == 1, final=final
         )
-        if not await _round_fits(round_gate, iteration, kwargs):
+        if not await _round_fits(round_gate, iteration, kwargs, written):
             final = True
             kwargs = _round_request(
                 strategy.transcript_key,
@@ -449,7 +471,9 @@ async def run_tool_loop(
             first_response_signaled = True
             if on_first_response is not None:
                 on_first_response()
+        before = strategy.output_tokens(acc)
         strategy.accumulate_usage(acc, result)
+        written = _written(before, strategy.output_tokens(acc))
 
         stopped = strategy.exit_before_split(result)
         owned, has_foreign = strategy.split_owned(result, pool)
@@ -522,13 +546,14 @@ async def run_tool_loop_stream(
     )
     base["stream"] = True
     acc = strategy.new_stream_accumulator()
+    written: int | None = None
 
     for iteration in range(1, max_iterations + 1):
         final = iteration == max_iterations
         kwargs = _round_request(
             strategy.transcript_key, base, merged_tools, user_tools, pool, transcript, first=iteration == 1, final=final
         )
-        if not await _round_fits(round_gate, iteration, kwargs):
+        if not await _round_fits(round_gate, iteration, kwargs, written):
             final = True
             kwargs = _round_request(
                 strategy.transcript_key,
@@ -584,7 +609,9 @@ async def run_tool_loop_stream(
                 yield terminal
             return
 
+        before = strategy.stream_output_tokens(acc)
         strategy.accumulate_stream_usage(acc, state)
+        written = _written(before, strategy.stream_output_tokens(acc))
         async for activity in strategy.advance_stream_transcript(transcript, state, pool, acc):
             yield activity
         # A format with a native vocabulary for server-side tool calls announces

@@ -547,6 +547,9 @@ class _MessagesToolLoopStrategy:
             "native_blocks": [],
         }
 
+    def output_tokens(self, acc: _MessagesUsageAccumulator) -> int:
+        return acc["output"]
+
     def accumulate_usage(self, acc: _MessagesUsageAccumulator, result: MessageResponse) -> None:
         if result.usage:
             acc["input"] += result.usage.input_tokens or 0
@@ -821,6 +824,9 @@ class _MessagesToolLoopStrategy:
             *self._native_block_events(blocks, acc),
             *(_maybe_fold_message_delta(term, acc) for term in state.deferred_terminal),
         ]
+
+    def stream_output_tokens(self, acc: _MessagesStreamAccumulator) -> int:
+        return acc["output_tokens"]
 
     def accumulate_stream_usage(self, acc: _MessagesStreamAccumulator, state: _MessagesStreamState) -> None:
         for term in state.deferred_terminal:

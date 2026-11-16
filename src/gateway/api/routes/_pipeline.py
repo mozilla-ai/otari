@@ -2046,8 +2046,11 @@ class ReservationRoundGate:
     The hold taken at admission covers the request's first round and one output
     limit. Every later round resends the whole conversation and is billed too, so
     each grows the hold by its own prompt, priced at the candidate serving it as
-    admission prices the first: about four characters per token. A round's own
-    output is covered only by the one output limit admission holds. A round
+    admission prices the first: about four characters per token. It grows it by
+    what the round before wrote as well, at the output rate, so the hold stays
+    the output written so far plus one output limit for the round being sent. A
+    round before that reported no usage is held at the output allowance admission
+    holds (the request's limit, or the deployment default when it sets none). A round
     that does not fit is sent as the loop's last, without the gateway's tools
     (``RoundGate``). A round that costs nothing, on a free or an unpriced model,
     holds its tokens alone.
@@ -2062,7 +2065,7 @@ class ReservationRoundGate:
         handle = self._ctx.reservation
         return handle is not None and handle.counts_toward_budget and (handle.reserved or bool(handle.scoped_budgets))
 
-    async def admit(self, prompt_chars: int) -> bool:
+    async def admit(self, prompt_chars: int, output_tokens: int | None) -> bool:
         ctx, handle = self._ctx, self._ctx.reservation
         inputs, serving = ctx.estimate_inputs, ctx.serving
         if handle is None or not self.in_force or inputs is None or serving is None:
@@ -2077,11 +2080,13 @@ class ReservationRoundGate:
         try:
             prices = ctx.prices if ctx.prices is not None else get_request_prices(ctx.db, ctx.organization_id)
             resolved = await prices.resolve(ctx.db, instance, model, deployment_paid=deployment_paid)
+            # No usage reported is held as admission holds a round: at its limit, or the default.
+            written = output_tokens if output_tokens is not None else inputs.max_output_tokens
             cost = estimate_cost(
                 resolved.pricing if resolved is not None else None,
                 prompt_chars=prompt_chars,
-                max_output_tokens=0,
-                default_output_tokens=0,
+                max_output_tokens=written,
+                default_output_tokens=inputs.default_output_tokens,
                 cache_write_ttl=inputs.cache_write_ttl,
                 facts=inputs.facts,
             )
@@ -2091,7 +2096,11 @@ class ReservationRoundGate:
                 ctx.db,
                 handle,
                 cost,
-                tokens=estimate_tokens(prompt_chars=prompt_chars, max_output_tokens=0, default_output_tokens=0),
+                tokens=estimate_tokens(
+                    prompt_chars=prompt_chars,
+                    max_output_tokens=written,
+                    default_output_tokens=inputs.default_output_tokens,
+                ),
                 # A round that costs nothing holds its tokens alone, as a free model's request does at admission.
                 model_is_free=cost <= ZERO,
                 strategy=ctx.config.budget_strategy,
