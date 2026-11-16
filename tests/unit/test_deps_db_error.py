@@ -17,8 +17,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import OperationalError
 
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
-from gateway.api import deps
-from gateway.api.deps import _verify_and_update_api_key, is_valid_master_key
+from gateway.api.deps.auth import _verify_and_update_api_key, is_valid_master_key
 from gateway.auth.models import hash_key
 from gateway.core.config import GatewayConfig
 from gateway.services.master_key_service import generate_master_key
@@ -89,8 +88,8 @@ async def test_failed_last_used_bump_logs_warning_and_does_not_poison_request_se
             return False
 
     with (
-        patch.object(deps, "create_session", lambda: _FailingSessionCM()),
-        patch("gateway.api.deps.logger.warning") as mock_warning,
+        patch("gateway.api.deps.auth.create_session", lambda: _FailingSessionCM()),
+        patch("gateway.api.deps.auth.logger.warning") as mock_warning,
     ):
         result = await _verify_and_update_api_key(db, token, KEY_FORMAT)
 

@@ -438,7 +438,7 @@ def test_the_access_token_stops_working_when_it_expires(client: TestClient, fede
     later = time.time() + 601
     before = _failures("federation_access_token_expired")
 
-    with patch("gateway.api.deps.time.time", return_value=later):
+    with patch("gateway.api.deps.auth.time.time", return_value=later):
         refused = _chat(client, _bearer(token))
 
     assert refused.status_code == 401
