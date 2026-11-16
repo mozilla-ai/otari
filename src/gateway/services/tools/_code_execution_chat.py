@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal
 
-from gateway.services.tools._chat_tool_calls import capped, chat_entry
+from gateway.services.tools._chat_tool_calls import capped, chat_entry, refusal_error
 from gateway.services.tools._code_execution_responses import CODE_INTERPRETER_CALL_ID_PREFIX
+from gateway.services.tools._native import Refusal
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -58,9 +59,14 @@ class ChatCodeExecutionRendering:
             )
         ]
 
-    def refused(self, call: NativeCall) -> list[Any]:
-        """Nothing: code execution has no use cap, so no call of it is refused."""
-        return []
+    def refused(self, call: NativeCall, reason: Refusal) -> list[Any]:
+        """The ended entry for a run refused before it reached the sandbox.
+
+        Code execution has no use cap, so only a call whose arguments did not parse is refused.
+        """
+        if reason is not Refusal.INVALID_INPUT:
+            return []
+        return [_entry(call, "failed", error=refusal_error(reason))]
 
 
 def _entry(call: NativeCall, status: Literal["in_progress", "completed", "failed"], **fields: Any) -> dict[str, Any]:

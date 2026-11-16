@@ -32,7 +32,12 @@ from openai.types.chat.chat_completion_message_custom_tool_call import ChatCompl
 from gateway.core.usage import cache_write_1h_tokens_of, provider_web_searches_of, reasoning_tokens_of
 from gateway.log_config import logger
 from gateway.services import mcp_loop as mcp_loop_module
-from gateway.services._tool_loop import _released_tool_choice, _request_chars
+from gateway.services._tool_loop import (
+    INVALID_ARGUMENTS_ERROR,
+    _released_tool_choice,
+    _request_chars,
+    parse_tool_arguments,
+)
 from gateway.services.inference import EmptyCompletionError
 from gateway.services.mcp_loop import (
     MaxToolIterationsExceeded,
@@ -841,6 +846,80 @@ async def test_loop_tool_execution_failure_appears_as_tool_message(monkeypatch: 
     assert tool_msg["content"] == "[tool error] Gateway tool execution failed"
     assert logged == [("Gateway tool execution failed: fetch_url", {"error_type": type(raised).__name__})]
     assert "sk-live-secret" not in str(captured) + str(logged)
+
+
+@pytest.mark.parametrize(("raw", "expected"), [(None, {}), ("", {}), ("  \n", {}), ('{"u": "x"}', {"u": "x"})])
+def test_empty_or_object_arguments_parse(raw: str | None, expected: dict[str, Any]) -> None:
+    assert parse_tool_arguments("fetch_url", raw) == expected
+
+
+@pytest.mark.parametrize("raw", ['{"u": "x"', '["x"]', "null", '"x"', "1", "true"])
+def test_arguments_that_are_not_a_json_object_do_not_parse(raw: str) -> None:
+    assert parse_tool_arguments("fetch_url", raw) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("arguments", ['{"u": "x"', '["x"]', "null"])
+async def test_loop_refuses_a_call_whose_arguments_are_not_a_json_object(
+    monkeypatch: pytest.MonkeyPatch, arguments: str
+) -> None:
+    responses = iter(
+        [
+            _completion(finish="tool_calls", tool_calls=[("c", "fetch_url", arguments)]),
+            _completion(finish="stop", content="recovered"),
+        ]
+    )
+    captured: list[list[dict[str, Any]]] = []
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        captured.append(kwargs["messages"])
+        return next(responses)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    logged = _capture_warnings(monkeypatch)
+
+    pool = _FakePool(tool_names=["fetch_url"])
+    out = await mcp_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+        pool=pool,
+        max_iterations=5,
+    )
+
+    assert out.choices[0].message.content == "recovered"
+    assert pool.calls == []
+    assert captured[1][-1] == {"role": "tool", "tool_call_id": "c", "content": INVALID_ARGUMENTS_ERROR}
+    assert logged == [("Tool call arguments are not a JSON object; not running fetch_url", None)]
+
+
+@pytest.mark.asyncio
+async def test_stream_loop_refuses_a_call_whose_arguments_are_cut_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    iter_streams = iter(
+        [
+            _async_iter(
+                _chunk(tool_calls=[(0, "call_1", "fetch_url", '{"u": ')]),
+                _chunk(finish="tool_calls"),
+            ),
+            _async_iter(_chunk(content="all done", finish="stop")),
+        ]
+    )
+    captured: list[list[dict[str, Any]]] = []
+
+    async def fake_acompletion(**kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
+        captured.append(kwargs["messages"])
+        return next(iter_streams)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+    pool = _FakePool(tool_names=["fetch_url"])
+    async for _ in mcp_tool_loop_stream(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+        pool=pool,
+        max_iterations=5,
+    ):
+        pass
+
+    assert pool.calls == []
+    assert captured[1][-1] == {"role": "tool", "tool_call_id": "call_1", "content": INVALID_ARGUMENTS_ERROR}
 
 
 # ---------- streaming loop ----------
@@ -2325,6 +2404,23 @@ async def test_a_code_execution_that_exits_non_zero_is_reported_failed(monkeypat
 
     [entry] = _reported(result)
     assert (entry["status"], entry["exit_code"]) == ("failed", 1)
+
+
+@pytest.mark.asyncio
+async def test_a_native_code_call_with_unparsable_arguments_is_refused_not_reported_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = _FakeSandboxPool()
+    result = await _answer(
+        monkeypatch,
+        pool,
+        ("c1", CODE_EXECUTION_TOOL_NAME, '{"code": "print(1'),
+        native_tools=frozenset({CODE_EXECUTION_TOOL_NAME}),
+    )
+
+    assert pool.calls == []
+    [entry] = _reported(result)
+    assert (entry["status"], entry["error"]["tag"]) == ("failed", "invalid_input")
 
 
 def test_a_code_execution_the_backend_kept_nothing_for_is_reported_failed() -> None:
