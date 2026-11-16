@@ -57,7 +57,7 @@ from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.ports.signup_invite_port import SignupInvitePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
-from gateway.ports.usage_signal_port import RecordedUsage, UsageSignalPort
+from gateway.ports.usage_signal_port import UsageSignalPort
 from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit, rate_limit_headers
 from gateway.repositories.api_keys import ApiKeyRepositories, ApiKeyRepository, FederationRuleRepository
 from gateway.repositories.budgets import BudgetRepositories
@@ -108,7 +108,6 @@ from gateway.repositories.update_check import UpdateCheckStateRepository
 from gateway.repositories.usage_and_telemetry import (
     UsageLogRepository,
     new_usage_row,
-    settled_job_row,
 )
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.api_keys import (
@@ -149,7 +148,6 @@ from gateway.services.files import FileBackends, FileService, SandboxFileBridge,
 from gateway.services.health_checks import HealthCheckService, UnavailableModelListener
 from gateway.services.identity import EmailBlocklist, IdentityService, OAuthAppService, OIDCConnectionService
 from gateway.services.inference import (
-    CompletedVideoUsage,
     DeploymentCharge,
     InferenceService,
     UnavailableModelReporter,
@@ -159,7 +157,7 @@ from gateway.services.inference import (
     admit_deployment_paid,
     describe_port_error,
 )
-from gateway.services.log_writer import LogWriter, recorded_usage
+from gateway.services.log_writer import LogWriter
 from gateway.services.mail import Mailer
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
@@ -182,7 +180,6 @@ from gateway.services.pricing_refresh_service import ModelsDevPriceUpdates
 from gateway.services.pricing_service import (
     RequestPrices,
     ResolvedPricing,
-    pricing_provenance,
     resolve_model_pricing,
     resolve_tool_rate,
 )
@@ -251,7 +248,7 @@ from gateway.services.tools import (
 )
 from gateway.services.traces import SpanContent, TraceMembershipListener, TraceService
 from gateway.services.update_check import UpdateCheckService
-from gateway.services.usage_and_telemetry import UsageScope, UsageService
+from gateway.services.usage_and_telemetry import UsageScope, UsageService, VideoUsageWriter
 from gateway.services.workspace_scope import (
     default_workspace_id,
     organization_for_key_id,
@@ -2813,54 +2810,6 @@ async def get_log_writer(request: Request) -> LogWriter:
     return writer
 
 
-class _VideoUsageWriter:
-    """Writes the row that settles a completed video job in the claim's own transaction.
-
-    The log writer would write it on a connection of its own, which a SQLite
-    file refuses while the claim holds the write lock, and a batching writer
-    may drop after accepting. The row is staged on the settlement's session
-    instead, and reported to the usage signal port once that commit has landed,
-    as the signaling writer reports a row it accepted.
-    """
-
-    def __init__(self, uow: UnitOfWork, signal: UsageSignalPort) -> None:
-        self._rows = UsageLogRepository(uow)
-        self._signal = signal
-        self._facts: dict[str, RecordedUsage] = {}
-
-    async def record(self, usage: CompletedVideoUsage) -> None:
-        charge = usage.charge
-        pricing = usage.pricing if charge is not None else None
-        source, reference, effective_at = pricing_provenance(pricing) if pricing is not None else (None, None, None)
-        row = settled_job_row(
-            workspace_id=usage.workspace_id,
-            api_key_id=usage.api_key_id,
-            user_id=usage.user_id,
-            model=usage.model,
-            provider=usage.provider,
-            endpoint=usage.endpoint,
-            counts_toward_budget=usage.counts_toward_budget,
-            deployment_paid=usage.deployment_paid,
-            cost=usage.cost,
-            billing_meters=dict(charge.meters) if charge is not None and charge.meters else None,
-            pricing_breakdown=charge.lines if charge is not None and charge.lines else None,
-            pricing_source=source,
-            pricing_reference=reference,
-            pricing_effective_at=effective_at,
-        )
-        self._facts[usage.video_id] = recorded_usage(row)
-        await self._rows.add(row)
-
-    async def recorded(self, usage: CompletedVideoUsage) -> None:
-        facts = self._facts.pop(usage.video_id, None)
-        if facts is None:
-            return
-        try:
-            await self._signal.usage_recorded(facts)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Usage row not signaled (%s)", type(exc).__name__)
-
-
 def _video_rate_lookup(db: AsyncSession) -> VideoRateLookup:
     """The rate a video job settles at, read on the request's session."""
 
@@ -2883,7 +2832,7 @@ def get_video_job_service(request: Request, uow: UnitOfWorkDep, db: PortSessionD
     return VideoJobService(
         uow,
         InferenceRepositories.on(uow).video_jobs,
-        usage=_VideoUsageWriter(uow, get_container(request).resolve(UsageSignalPort, db)),
+        usage=VideoUsageWriter(uow, get_container(request).resolve(UsageSignalPort, db)),
         fold_spend=partial(record_external_spend, db),
         rate=_video_rate_lookup(db),
     )
