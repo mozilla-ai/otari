@@ -1032,12 +1032,16 @@ def _log_refresher_stop(task: asyncio.Task[None], name: str) -> None:
 
 
 def _reset_worker_cache(worker: _LifespanWorker) -> None:
-    """Clear ``worker``'s cache, logging a failure so it cannot stop the rest of shutdown."""
+    """Clear ``worker``'s cache, logging a failure so it cannot stop the rest of shutdown.
+
+    Each reset is another module's code with no shared error type, and the log
+    writer, the pooled clients and the engine still need closing after it.
+    """
     if worker.reset is None:
         return
     try:
         worker.reset()
-    except Exception:  # noqa: BLE001 - the writer, clients and engine still need closing
+    except Exception:
         logger.warning("%s cache reset failed at shutdown", worker.name, exc_info=True)
 
 
