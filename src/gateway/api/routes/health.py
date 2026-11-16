@@ -11,6 +11,10 @@ from gateway.version import __version__
 
 router = APIRouter(prefix="/health", tags=["health"])
 
+# asyncpg raises a refused or unresolvable connection as a bare OSError that
+# SQLAlchemy does not wrap.
+_UNREACHABLE_DATABASE: tuple[type[BaseException], ...] = (*DATABASE_ERRORS, OSError)
+
 
 class _DatabaseOutage:
     """Whether the last readiness check found the database unavailable.
@@ -69,7 +73,7 @@ async def health_readiness(
     try:
         await db.execute(text("SELECT 1"))
         db_status = "connected"
-    except DATABASE_ERRORS as e:
+    except _UNREACHABLE_DATABASE as e:
         log = logger.debug if _DatabaseOutage.ongoing else logger.warning
         log("Readiness check: database unavailable (%s)", describe_database_error(e))
         _DatabaseOutage.ongoing = True

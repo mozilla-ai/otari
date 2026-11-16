@@ -67,3 +67,14 @@ async def test_an_error_that_is_not_the_databases_is_not_reported_as_an_outage()
     with pytest.raises(RuntimeError):
         await _probe(db)
     assert health._DatabaseOutage.ongoing is False
+
+
+@pytest.mark.asyncio
+async def test_a_refused_connection_is_reported_as_an_outage(monkeypatch: pytest.MonkeyPatch) -> None:
+    logged = _capture(monkeypatch)
+    db = _Database()
+    db.error = ConnectionRefusedError(61, "Connect call failed ('10.0.0.5', 5432)")
+
+    assert await _probe(db) == 503
+    assert logged == [("warning", "Readiness check: database unavailable (ConnectionRefusedError)")]
+    assert "10.0.0.5" not in str(logged)
