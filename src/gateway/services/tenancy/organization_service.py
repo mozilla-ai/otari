@@ -1682,9 +1682,8 @@ class OrganizationService:
         if actor_membership.role != "owner" and request.role == "owner":
             raise MembershipUpdateError("Only organization owners can grant the owner role")
         # Before the commit, so a failed read cannot leave a committed invitation unmailed.
-        share_link = _admits_without_acceptance(
-            operator=await self.is_deployment_operator(user), open_signup=config.open_signup
-        )
+        operator = await self.is_deployment_operator(user)
+        share_link = _admits_without_acceptance(operator=operator, open_signup=config.open_signup)
 
         try:
             async with self._require_unit_of_work():
@@ -1693,6 +1692,7 @@ class OrganizationService:
                     raise BlockedEmailError(email)
                 invitation, membership, token = await self._stage_invitation(
                     user=user,
+                    operator=operator,
                     organization=organization,
                     actor_membership=actor_membership,
                     email=email,
@@ -1760,9 +1760,8 @@ class OrganizationService:
             raise MembershipUpdateError("Only organization owners can grant the owner role")
 
         # Before the commit, and once, since the emails go out concurrently on one session.
-        share_link = _admits_without_acceptance(
-            operator=await self.is_deployment_operator(user), open_signup=config.open_signup
-        )
+        operator = await self.is_deployment_operator(user)
+        share_link = _admits_without_acceptance(operator=operator, open_signup=config.open_signup)
         staged: list[tuple[Invitation, OrganizationMember, str]] = []
         failed: list[BulkInvitationFailurePublic] = []
         seen: set[str] = set()
@@ -1787,6 +1786,7 @@ class OrganizationService:
                         staged.append(
                             await self._stage_invitation(
                                 user=user,
+                                operator=operator,
                                 organization=organization,
                                 actor_membership=actor_membership,
                                 email=email,
@@ -1834,6 +1834,7 @@ class OrganizationService:
         self,
         *,
         user: User,
+        operator: bool,
         organization: Organization,
         actor_membership: OrganizationMember,
         email: str,
@@ -1844,10 +1845,10 @@ class OrganizationService:
         """Write one invitation and its ``invited`` membership, uncommitted; return them with the raw token.
 
         Refuses an address that already holds an active membership, one with
-        a still-unexpired invitation pending, and, unless the caller is a
-        deployment operator, one at a domain another organization has proven.
+        a still-unexpired invitation pending, and, unless ``operator`` (the caller
+        is a deployment operator), one at a domain another organization has proven.
         """
-        if not await self.is_deployment_operator(user):
+        if not operator:
             await self._refuse_address_at_domain_proven_elsewhere(email, organization)
         target = await self._identity_for_address(email, organization)
 

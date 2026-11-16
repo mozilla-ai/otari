@@ -143,6 +143,10 @@ GET /api/v1/provider-endpoints/{endpoint_id}        # not yet wrapped
 PATCH /api/v1/provider-endpoints/{endpoint_id}      # not yet wrapped
 DELETE /api/v1/provider-endpoints/{endpoint_id}     # not yet wrapped
 # Hosted providers (the deployment's own upstream credentials, operator-only)
+PUT /api/v1/model-overrides/{selector}               # dashboard-only
+DELETE /api/v1/model-overrides/{selector}            # dashboard-only
+PUT /api/v1/organizations/me/model-overrides/{selector}  # dashboard-only
+DELETE /api/v1/organizations/me/model-overrides/{selector}  # dashboard-only
 GET /api/v1/hosted-providers                        # dashboard-only
 POST /api/v1/hosted-providers                       # dashboard-only
 POST /api/v1/hosted-providers/catalog-update/preview  # dashboard-only
@@ -357,9 +361,11 @@ POST /api/v1/search/{search_tool_name}              # not yet wrapped
 POST /api/v1/fetch                                  # not yet wrapped
 POST /api/v1/fetch/{fetch_tool_name}                # not yet wrapped
 POST /api/v1/code/execute                           # not yet wrapped
+GET /api/v1/code/environments                       # not yet wrapped
 # Search tools (runtime search-tool management)
 GET /api/v1/search-tools                            # not yet wrapped
 GET /api/v1/search-tools/providers                  # not yet wrapped
+GET /api/v1/search-tools/catalog                    # not yet wrapped
 POST /api/v1/search-tools                           # not yet wrapped
 PATCH /api/v1/search-tools/{name}                   # not yet wrapped
 DELETE /api/v1/search-tools/{name}                  # not yet wrapped

@@ -166,7 +166,8 @@ rate a pricing tier does not override is stored as absent, so neither surface
 sends it.
 
 Each model carries its token limits, `context_window` and `max_output_tokens`,
-from models.dev's entry for the model under the provider serving it:
+from models.dev's entry for the model under the provider serving it, unless an
+override sets them (see [Overriding a model's details](#overriding-a-models-details)):
 
 - A model a vLLM or SGLang server lists, through a configured instance, a
   hosted provider or an organization's own key, reports the context length
@@ -199,7 +200,8 @@ uses:
   a reasoning model. It names only the parameters models.dev records a flag
   for, not every parameter the model takes. `response_format` is left out where
   Otari cannot send it to the provider, as on Bedrock for every model but
-  Anthropic's.
+  Anthropic's, or on MiniMax, Z.ai, Inception, SageMaker and llamafile for any
+  model.
 - `architecture`: `input_modalities` and `output_modalities`, such as
   `["text", "image"]`. models.dev gives an embedding model text output, as it
   does a chat model, so `architecture` alone does not tell them apart.
@@ -213,6 +215,26 @@ with a `reasoning` object (the efforts it accepts) adds `reasoning`.
 All three are unset for a model neither models.dev nor its server describes,
 which means unknown rather than unsupported. An alias reports its target's capabilities but
 no `name`.
+
+### Overriding a model's details
+
+Where a provider's server and models.dev say nothing about a model, or say it
+wrong, whoever holds the key that serves it can set its details on the model's
+page in the dashboard: **Edit details** on its row of offerings. The deployment
+operator sets them for the deployment's own providers, and an organization's
+owners and admins for the models its own provider keys serve, which only that
+organization's callers see.
+
+An override sets any of the context window, the maximum output tokens, whether
+the model calls tools, reasons or takes `response_format`, and what it reads.
+Each field it sets wins over the server and models.dev; a field it leaves blank
+keeps their word, and saving every field blank removes the override. It cannot
+add `response_format` where Otari cannot send it to the provider. An override
+changes what the listing says and nothing about how a request is served.
+
+Deleting a hosted provider deletes the details set for it. An organization's go
+when it deletes its last key under that prefix; archiving a key keeps them, so
+restoring it brings them back.
 
 `type` says what kind of model it is: `chat`, `embedding`, `image`, `speech`,
 `transcription`, `rerank`, `moderation`, `video`, `decision`, `realtime`, or
@@ -575,6 +597,7 @@ what was sent, and pricing, budgets and usage key on the offering reached.
   4. The other offerings, cheapest first at the caller's rates, ties in A-Z order.
 
   To make an unpriced offering lead (an organization's own key or a local model, say), give it a price, even 0.
+- A model's bare name (`claude-opus-5-5`), where exactly one catalog id ends in it (`anthropic/claude-opus-5-5`), resolves as that catalog id, so a client that sends a provider's own id with no prefix, as Claude Code does, needs no alias. A name two catalog ids end in resolves to neither, and an alias of the same name wins.
 - `instance:<catalog id>` (`nebius:deepseek/deepseek-v4.1-flash`) pins the instance and resolves to the model's first offering there by the same order, never elsewhere. This is the spelling the catalog shows as an offering's `short_selector`.
 - On an organization's own provider key, a provider's undated name (`anthropic:claude-haiku-4-5`) resolves to the dated build the key serves under it (`claude-haiku-4-5-20251001`), where exactly one serving model is that name plus a release date (`-YYYYMMDD` or `-YYYY-MM-DD`). The dated build's serving switch, price and allow-lists apply as if it had been sent. A name with two dated builds, at least one of them serving, is refused as not found (404 `model_not_found`), and the detail names both; a name whose dated builds are all switched off is refused as not serving (403 `model_not_serving`). Neither detail names the dated builds to a caller who reached the model through an alias. A selector whose prefix names a `providers:` instance is never rewritten this way, even for a caller whose organization also holds a key for that provider: the instance sends any id to the provider as written.
 

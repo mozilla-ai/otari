@@ -191,7 +191,7 @@ class AgentRecommenderCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     provider: str = Field(
-        min_length=1, max_length=32, description="The decision provider: typesafe, openrouter or llamacpp."
+        min_length=1, max_length=32, description="The decision provider: typesafe, openrouter, gemini or llamacpp."
     )
     model: str = Field(min_length=1, max_length=255, description="The decision model, as the provider names it.")
     api_base: str | None = Field(

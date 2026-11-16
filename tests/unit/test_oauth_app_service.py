@@ -1,5 +1,6 @@
 """Time is sampled once for each app grant exchange."""
 
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import cast
@@ -9,6 +10,7 @@ import pytest
 
 from gateway.core.settings.identity import OAuthAppConfig
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.identity_exceptions import OAuthAppGrantError
 from gateway.models.identity import OAuthAppGrant
 from gateway.models.tenancy import User
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
@@ -17,6 +19,36 @@ from gateway.schemas.identity.oauth_apps import AppTokenRequest
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.identity import OAuthAppService
 from gateway.services.tenancy import OrganizationService, WorkspaceService
+
+
+@pytest.mark.asyncio
+async def test_an_unregistered_client_id_is_refused_without_reaching_the_log(caplog: pytest.LogCaptureFixture) -> None:
+    grants = AsyncMock(spec=OAuthAppGrantRepository)
+    service = OAuthAppService(
+        cast(UnitOfWork, MagicMock(spec=UnitOfWork)),
+        grants,
+        AsyncMock(spec=ApiKeyService),
+        cast(ApiKeyFormatPort, Mock()),
+        AsyncMock(spec=OrganizationService),
+        cast(WorkspaceService, Mock()),
+        apps={"app": OAuthAppConfig(name="App", redirect_uris=["https://app.example/callback"])},
+        ui_link=lambda path: path,
+        issuer="https://otari.example",
+    )
+    forged = "x\nWARNING  Signed in admin [red]forged[/red]"
+    request = AppTokenRequest(
+        grant_type="authorization_code",
+        client_id=forged,
+        redirect_uri="https://app.example/callback",
+        code="c" * 43,
+        code_verifier="v" * 43,
+    )
+    with caplog.at_level(logging.WARNING, logger="gateway"), pytest.raises(OAuthAppGrantError) as refused:
+        await service.exchange(request)
+    assert refused.value.error == "invalid_client"
+    assert "reason=unknown_client" in caplog.text
+    assert "forged" not in caplog.text
+    grants.find_bound.assert_not_called()
 
 
 @pytest.mark.asyncio

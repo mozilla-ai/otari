@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.adapters.model_provider_adapter import HostedProviderModelProviderAdapter
+from gateway.api.deps import build_model_metadata_override_service
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.providers_exceptions import (
@@ -91,6 +92,7 @@ def _service(db: AsyncSession, config: GatewayConfig | None = None) -> HostedPro
         ),
         live_byo_pairs=OrgProviderKeyRepository(uow).live_provider_pairs,
         organization_exists=OrganizationRepository(uow).exists,
+        metadata_overrides=build_model_metadata_override_service(uow),
     )
 
 

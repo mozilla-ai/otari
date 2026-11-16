@@ -1343,6 +1343,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/code/environments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Code Execution Environments
+         * @description List the sandbox environments the caller's workspace may run code in, with their prices.
+         *
+         *     The code execution counterpart of ``GET /api/v1/models``: each environment's
+         *     ``name``, which ``POST /api/v1/code/execute`` takes as ``environment``, a
+         *     ``label`` and ``description``, ``price_per_run`` for the caller's
+         *     organization, and whether it is the ``default`` a run that names none gets.
+         *     A workspace whose code execution policy is off lists none, and one that
+         *     pins an environment lists that one alone. A gateway with no sandbox lists
+         *     none, as does one that names no image, whose runs go to the backend's own
+         *     default. A master key or a dashboard session belongs to no single workspace,
+         *     so it gets the deployment's whole list at the deployment's prices.
+         *     ``skip`` and ``limit`` page the list in the operator's order.
+         */
+        get: operations["code-execution-list_code_execution_environments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/code/execute": {
         parameters: {
             query?: never;
@@ -1358,12 +1389,15 @@ export interface paths {
          *
          *     The run is admitted as an ``otari_code_execution`` call is: a workspace whose
          *     code execution policy is off is refused, and its execution ceiling and pinned
-         *     image apply. It is priced under ``otari:code_execution`` and reserved against
-         *     the caller's budgets. ``file_ids`` puts uploads in the working directory, and
+         *     image apply. ``environment`` names one of the environments
+         *     ``GET /api/v1/code/environments`` lists. The run is priced under
+         *     ``otari:code_execution:<environment>``, else ``otari:code_execution``, and
+         *     reserved against the caller's budgets. ``file_ids`` puts uploads in the working directory, and
          *     each file the code writes comes back with a ``file_id``. ``container: "auto"``
          *     holds the sandbox after the run and names it in ``Otari-Container-Id``;
          *     sending that id back runs in the same sandbox, with its files and
-         *     interpreter state.
+         *     interpreter state. A priced run answers with its settled cost in
+         *     ``Otari-Cost-USD`` and the rate's source in ``Otari-Pricing-Source``.
          *
          *     Authentication modes:
          *     - Master key: the ``user`` field is required and may name any existing user.
@@ -2823,6 +2857,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/model-overrides/{selector}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Model Override
+         * @description Replace the deployment's override of a model; every field null clears it.
+         */
+        put: operations["model-overrides-set_model_override"];
+        post?: never;
+        /**
+         * Clear Model Override
+         * @description Drop the deployment's override of a model.
+         */
+        delete: operations["model-overrides-clear_model_override"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/models": {
         parameters: {
             query?: never;
@@ -3968,6 +4026,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/me/model-overrides/{selector}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Organization Model Override
+         * @description Replace the organization's override of a model one of its keys serves; every field null clears it.
+         *
+         *     Organization owners and admins only.
+         */
+        put: operations["model-overrides-set_organization_model_override"];
+        post?: never;
+        /**
+         * Clear Organization Model Override
+         * @description Drop the organization's override of a model. Organization owners and admins only.
+         */
+        delete: operations["model-overrides-clear_organization_model_override"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/pending-memberships": {
         parameters: {
             query?: never;
@@ -4198,6 +4282,8 @@ export interface paths {
         /**
          * Delete Org Provider Key
          * @description Permanently delete an archived key. Organization owners and admins only.
+         *
+         *     The model details the organization set under the key's prefix go with its last key there.
          */
         delete: operations["provider-keys-delete_org_provider_key"];
         options?: never;
@@ -6261,7 +6347,8 @@ export interface paths {
          *     The tool is taken from ``search_tool_name``, which may be omitted when the
          *     deployment's ``web_search_default_tool`` names one, or when exactly one
          *     tool is configured. Such a call runs on the workspace's organization search
-         *     key when it has one.
+         *     key when it has one. A deployment with no search tool serves the backend its
+         *     legacy search settings describe, named after its provider.
          *
          *     Authentication modes:
          *     - Master key: the ``user`` field is required and may name any existing user.
@@ -6311,6 +6398,37 @@ export interface paths {
          *     configuration file until it is cleared.
          */
         post: operations["search-tools-create_search_tool"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/search-tools/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Search Tool Catalog
+         * @description List the search tools a direct search may name, with what one search costs the caller.
+         *
+         *     Each entry is a tool ``POST /api/v1/search/{tool}`` serves, with its
+         *     provider, a display name, its price per search for the caller's
+         *     organization, and whether it is the deployment's default. Tools a direct
+         *     search cannot run on are left out, and no key, endpoint or option is
+         *     returned.
+         *
+         *     Called with an API key, a tool the key's ``allowed_tools`` does not grant is
+         *     left out, and the list is empty when its workspace does not allow web
+         *     search; ``GET /api/v1/tools`` says why. A master key or a dashboard session
+         *     gets the deployment's list.
+         */
+        get: operations["search-tools-list_search_tool_catalog"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -8850,7 +8968,7 @@ export interface components {
             output_price_per_million: number;
             /**
              * Provider
-             * @description The decision provider: typesafe, openrouter or llamacpp.
+             * @description The decision provider: typesafe, openrouter, gemini or llamacpp.
              */
             provider: string;
         };
@@ -10569,6 +10687,8 @@ export interface components {
             metadata_input_price_per_million?: number | null;
             /** Metadata Output Price Per Million */
             metadata_output_price_per_million?: number | null;
+            /** @description What whoever holds the serving key set in place of the server's and models.dev's word: the organization for an `organization` offering, the operator otherwise. Null when nothing is set. */
+            metadata_override?: components["schemas"]["ModelMetadataOverrideRequest"] | null;
             /**
              * Price Reference
              * @description For a default, the `models.dev:<provider>/<model>` entry that matched; the selector otherwise.
@@ -10862,6 +10982,11 @@ export interface components {
              */
             container?: string | null;
             /**
+             * Environment
+             * @description The sandbox environment to run in: a name GET /api/v1/code/environments lists. Omitted, the workspace's pinned environment, else the deployment's default. A held container keeps the environment it was created in.
+             */
+            environment?: string | null;
+            /**
              * File Ids
              * @description Uploads from POST /api/v1/files to put in the working directory before the code runs, each under its own filename.
              */
@@ -10902,6 +11027,57 @@ export interface components {
             stderr: string;
             /** Stdout */
             stdout: string;
+        };
+        /**
+         * CodeExecutionEnvironment
+         * @description A sandbox environment a direct code execution may name: what it contains, and what a run in it costs.
+         */
+        CodeExecutionEnvironment: {
+            /**
+             * Default
+             * @description Whether a run that names no environment runs in this one.
+             */
+            default: boolean;
+            /**
+             * Description
+             * @description What it contains and how big it is, when the operator said.
+             */
+            description: string | null;
+            /**
+             * Label
+             * @description A display name; the name itself when the operator gave none.
+             */
+            label: string;
+            /**
+             * Name
+             * @description What POST /api/v1/code/execute's environment field takes.
+             */
+            name: string;
+            /**
+             * Object
+             * @default code_execution.environment
+             * @constant
+             */
+            object: "code_execution.environment";
+            /**
+             * Price Per Run
+             * @description USD per run for the caller's organization: the environment's own price, else code execution's. Null when unpriced.
+             */
+            price_per_run: number | null;
+        };
+        /**
+         * CodeExecutionEnvironmentList
+         * @description The sandbox environments the caller's workspace may run code in.
+         */
+        CodeExecutionEnvironmentList: {
+            /** Data */
+            data: components["schemas"]["CodeExecutionEnvironment"][];
+            /**
+             * Object
+             * @default list
+             * @constant
+             */
+            object: "list";
         };
         /**
          * CodeExecutionOutputFile
@@ -14939,6 +15115,71 @@ export interface components {
             type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | null;
         };
         /**
+         * ModelMetadataOverridePublic
+         * @description An override as stored, under the selector it describes.
+         */
+        ModelMetadataOverridePublic: {
+            /** Context Window */
+            context_window?: number | null;
+            /**
+             * Input Modalities
+             * @description What the model reads; `text` unless it says otherwise.
+             */
+            input_modalities?: ("text" | "image" | "audio" | "video" | "pdf")[] | null;
+            /** Max Output Tokens */
+            max_output_tokens?: number | null;
+            /**
+             * Reasoning
+             * @description Whether the model reasons: `reasoning`.
+             */
+            reasoning?: boolean | null;
+            /**
+             * Selector
+             * @description The `provider:model` the override describes.
+             */
+            selector: string;
+            /**
+             * Structured Output
+             * @description Whether the model takes `response_format`. Never offered where Otari cannot send it.
+             */
+            structured_output?: boolean | null;
+            /**
+             * Tool Call
+             * @description Whether the model calls tools: `tools`, `tool_choice`.
+             */
+            tool_call?: boolean | null;
+        };
+        /**
+         * ModelMetadataOverrideRequest
+         * @description What to say about a model in place of its server and models.dev. A null field is not overridden.
+         */
+        ModelMetadataOverrideRequest: {
+            /** Context Window */
+            context_window?: number | null;
+            /**
+             * Input Modalities
+             * @description What the model reads; `text` unless it says otherwise.
+             */
+            input_modalities?: ("text" | "image" | "audio" | "video" | "pdf")[] | null;
+            /** Max Output Tokens */
+            max_output_tokens?: number | null;
+            /**
+             * Reasoning
+             * @description Whether the model reasons: `reasoning`.
+             */
+            reasoning?: boolean | null;
+            /**
+             * Structured Output
+             * @description Whether the model takes `response_format`. Never offered where Otari cannot send it.
+             */
+            structured_output?: boolean | null;
+            /**
+             * Tool Call
+             * @description Whether the model calls tools: `tools`, `tool_choice`.
+             */
+            tool_call?: boolean | null;
+        };
+        /**
          * ModelMetadataResponse
          * @description models.dev metadata keyed by ``provider:model``.
          */
@@ -18363,9 +18604,13 @@ export interface components {
          *     the describe call, all sharing the ``Otari-Request-ID`` the caller was sent as
          *     their ``request_group_id``, so this is the request's whole bill rather than one
          *     attempt's. ``cost_usd`` uses the inline ``usage.cost_usd`` format and is null
-         *     when no row was priced. ``status`` is ``error`` if any row is an error, and
-         *     ``incomplete`` for a stream the client abandoned before the provider reported
-         *     any usage.
+         *     when no row was priced. ``tool_cost_usd`` is the part of it that is per-call
+         *     tool charges, in the same format, for a completion (Chat Completions,
+         *     Messages, Responses); it is null where ``cost_usd`` is, for any other kind
+         *     of request, and where a priced row does not record it (written before the
+         *     gateway did, or where looking up its tools' prices failed). ``status`` is
+         *     ``error`` if any row is an error, and ``incomplete`` for a stream the client
+         *     abandoned before the provider reported any usage.
          */
         RequestSettlement: {
             /** Completion Tokens */
@@ -18383,6 +18628,8 @@ export interface components {
              * @enum {string}
              */
             status: "success" | "error" | "incomplete";
+            /** Tool Cost Usd */
+            tool_cost_usd: string | null;
             /** Total Tokens */
             total_tokens: number;
         };
@@ -19084,6 +19331,57 @@ export interface components {
             title: string;
             /** Url */
             url: string;
+        };
+        /**
+         * SearchToolCatalogEntry
+         * @description One search tool a direct search may name, as any caller may see it: never its key, endpoint or options.
+         */
+        SearchToolCatalogEntry: {
+            /**
+             * Default
+             * @description True for the deployment's default, the tool a direct search that names none runs on unless the caller's organization brings its own search key.
+             */
+            default: boolean;
+            /**
+             * Id
+             * @description The tool's name, to send as 'search_tool_name' or in /api/v1/search/{tool}.
+             */
+            id: string;
+            /**
+             * Label
+             * @description A display name for the tool: its provider's name, capitalized.
+             */
+            label: string;
+            /**
+             * Object
+             * @default search_tool
+             * @constant
+             */
+            object: "search_tool";
+            /**
+             * Price Per Call
+             * @description USD the caller's organization is charged for one search on the tool when the provider reports no cost of its own: the organization's override, else the deployment's price list. Null when no row prices it.
+             */
+            price_per_call: number | null;
+            /**
+             * Provider
+             * @description The search provider the tool runs on.
+             */
+            provider: string;
+        };
+        /**
+         * SearchToolCatalogResponse
+         * @description The search tools a direct search may name.
+         */
+        SearchToolCatalogResponse: {
+            /** Data */
+            data: components["schemas"]["SearchToolCatalogEntry"][];
+            /**
+             * Object
+             * @default list
+             * @constant
+             */
+            object: "list";
         };
         /**
          * SearchToolTestRequest
@@ -24408,6 +24706,40 @@ export interface operations {
             };
         };
     };
+    "code-execution-list_code_execution_environments": {
+        parameters: {
+            query?: {
+                /** @description Number of environments to skip */
+                skip?: number;
+                /** @description Maximum number of environments to return */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodeExecutionEnvironmentList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "code-execution-execute_code": {
         parameters: {
             query?: never;
@@ -24424,6 +24756,10 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description What the call cost, as a six-decimal USD string; absent when it was not priced */
+                    "Otari-Cost-USD"?: string;
+                    /** @description What priced it: organization, deployment or defaults (a rate), or reported (the provider's own charge); absent when it was not priced */
+                    "Otari-Pricing-Source"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -24908,6 +25244,10 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description What the call cost, as a six-decimal USD string; absent when it was not priced */
+                    "Otari-Cost-USD"?: string;
+                    /** @description What priced it: organization, deployment or defaults (a rate), or reported (the provider's own charge); absent when it was not priced */
+                    "Otari-Pricing-Source"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -24944,6 +25284,10 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description What the call cost, as a six-decimal USD string; absent when it was not priced */
+                    "Otari-Cost-USD"?: string;
+                    /** @description What priced it: organization, deployment or defaults (a rate), or reported (the provider's own charge); absent when it was not priced */
+                    "Otari-Pricing-Source"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -27168,6 +27512,70 @@ export interface operations {
             };
         };
     };
+    "model-overrides-set_model_override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                selector: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelMetadataOverrideRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelMetadataOverridePublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "model-overrides-clear_model_override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                selector: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "models-list_models": {
         parameters: {
             query?: {
@@ -29092,6 +29500,84 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["CallerOrganizationMembershipsPublic"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "model-overrides-set_organization_model_override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                selector: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelMetadataOverrideRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelMetadataOverridePublic"];
+                };
+            };
+            /** @description No key serves the prefix. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "model-overrides-clear_organization_model_override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                selector: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No key serves the prefix. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -33168,6 +33654,10 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description What the call cost, as a six-decimal USD string; absent when it was not priced */
+                    "Otari-Cost-USD"?: string;
+                    /** @description What priced it: organization, deployment or defaults (a rate), or reported (the provider's own charge); absent when it was not priced */
+                    "Otari-Pricing-Source"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -33237,6 +33727,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CreatedSearchToolSchema"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "search-tools-list_search_tool_catalog": {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchToolCatalogResponse"];
                 };
             };
             /** @description Validation Error */
@@ -33453,6 +33977,10 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description What the call cost, as a six-decimal USD string; absent when it was not priced */
+                    "Otari-Cost-USD"?: string;
+                    /** @description What priced it: organization, deployment or defaults (a rate), or reported (the provider's own charge); absent when it was not priced */
+                    "Otari-Pricing-Source"?: string;
                     [name: string]: unknown;
                 };
                 content: {

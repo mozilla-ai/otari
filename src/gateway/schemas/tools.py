@@ -389,6 +389,35 @@ class SearchToolsResponse(pydantic.BaseModel):
     config: list[ConfigSearchToolSchema]
 
 
+class SearchToolCatalogEntry(pydantic.BaseModel):
+    """One search tool a direct search may name, as any caller may see it: never its key, endpoint or options."""
+
+    id: str = pydantic.Field(description="The tool's name, to send as 'search_tool_name' or in /api/v1/search/{tool}.")
+    object: Literal["search_tool"] = "search_tool"
+    provider: str = pydantic.Field(description="The search provider the tool runs on.")
+    label: str = pydantic.Field(description="A display name for the tool: its provider's name, capitalized.")
+    price_per_call: float | None = pydantic.Field(
+        description=(
+            "USD the caller's organization is charged for one search on the tool when the provider reports no "
+            "cost of its own: the organization's override, else the deployment's price list. Null when no row "
+            "prices it."
+        )
+    )
+    default: bool = pydantic.Field(
+        description=(
+            "True for the deployment's default, the tool a direct search that names none runs on unless the "
+            "caller's organization brings its own search key."
+        )
+    )
+
+
+class SearchToolCatalogResponse(pydantic.BaseModel):
+    """The search tools a direct search may name."""
+
+    object: Literal["list"] = "list"
+    data: list[SearchToolCatalogEntry]
+
+
 class CreateSearchToolRequest(pydantic.BaseModel):
     """Create a stored search or fetch instance. ``api_key`` is write-only and requires OTARI_SECRET_KEY."""
 
@@ -702,6 +731,16 @@ class CodeExecuteRequest(pydantic.BaseModel):
             "or 60 seconds when it sets none."
         ),
     )
+    environment: str | None = pydantic.Field(
+        default=None,
+        max_length=255,
+        pattern=r"^[A-Za-z0-9._:/@-]+$",
+        description=(
+            "The sandbox environment to run in: a name GET /api/v1/code/environments lists. Omitted, the "
+            "workspace's pinned environment, else the deployment's default. A held container keeps the "
+            "environment it was created in."
+        ),
+    )
     file_ids: list[str] | None = pydantic.Field(
         default=None,
         max_length=_MAX_CODE_EXECUTION_INPUTS,
@@ -739,6 +778,27 @@ class CodeExecuteResponse(pydantic.BaseModel):
     files: list[CodeExecutionOutputFile] = pydantic.Field(
         description="The files the code wrote. Empty when it wrote none, or where the Files API is off."
     )
+
+
+class CodeExecutionEnvironment(pydantic.BaseModel):
+    """A sandbox environment a direct code execution may name: what it contains, and what a run in it costs."""
+
+    object: Literal["code_execution.environment"] = "code_execution.environment"
+    name: str = pydantic.Field(description="What POST /api/v1/code/execute's environment field takes.")
+    label: str = pydantic.Field(description="A display name; the name itself when the operator gave none.")
+    description: str | None = pydantic.Field(description="What it contains and how big it is, when the operator said.")
+    price_per_run: float | None = pydantic.Field(
+        description="USD per run for the caller's organization: the environment's own price, else code execution's. "
+        "Null when unpriced."
+    )
+    default: bool = pydantic.Field(description="Whether a run that names no environment runs in this one.")
+
+
+class CodeExecutionEnvironmentList(pydantic.BaseModel):
+    """The sandbox environments the caller's workspace may run code in."""
+
+    object: Literal["list"] = "list"
+    data: list[CodeExecutionEnvironment]
 
 
 class OtariToolCallSource(pydantic.BaseModel):

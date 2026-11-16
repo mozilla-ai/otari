@@ -453,7 +453,8 @@ def test_the_cookie_still_reads_the_catalog(tmp_path: Path) -> None:
     two are one decision and a change to either should have to look at both. The
     built-in guardrail catalog is the one an organization's own form reads rather
     than a page of the operator's, and it is on this plane for the same reasons.
-    So is the guardrail profiles read, which names what any caller may send.
+    So is the guardrail profiles read, which names what any caller may send, and
+    the sandbox environments a run may name.
     """
     with TestClient(create_app(_config(tmp_path))) as client:
         _sign_in(client)
@@ -463,6 +464,7 @@ def test_the_cookie_still_reads_the_catalog(tmp_path: Path) -> None:
         assert client.get(f"{API_ROOT}/tools").status_code == 200
         assert client.get(f"{API_ROOT}/tool-settings/guardrails/catalog").status_code == 200
         assert client.get(f"{API_ROOT}/tool-settings/guardrails/profiles").status_code == 200
+        assert client.get(f"{API_ROOT}/code/environments").status_code == 200
 
 
 def test_the_request_plane_still_refuses_anonymous_and_cross_site_callers(tmp_path: Path) -> None:

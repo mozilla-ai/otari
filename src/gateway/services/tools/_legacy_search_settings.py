@@ -32,7 +32,7 @@ from gateway.services.tools._search_tool_overlay import (
     stored_search_tool_names,
     stored_tool_names,
 )
-from gateway.services.tools._web_search import in_loop_default, unnamed_direct_search_tool
+from gateway.services.tools._web_search import in_loop_default, legacy_search_instance, unnamed_direct_search_tool
 
 # The name the breaking release gives the search tool a stored web_search_url becomes, and its provider.
 CONVERTED_TOOL = "searxng"
@@ -113,7 +113,6 @@ def legacy_search_settings_warnings(
     if stored.url:
         conversion, refused = _stored_url_conversion(
             stored,
-            inherited,
             configured_tools,
             stored_tools,
             other_tool_names,
@@ -219,7 +218,6 @@ def file_value_warnings(
 
 def _stored_url_conversion(
     stored: LegacySearchValues,
-    inherited: LegacySearchValues,
     configured_tools: Mapping[str, Mapping[str, Any]],
     stored_tools: Mapping[str, Mapping[str, Any]],
     other_tool_names: Collection[str],
@@ -392,8 +390,10 @@ def _moves_unnamed_calls(
     """Whether converting the stored web_search_url changes the tool a direct search naming none runs on.
 
     A search that had no tool to run on before is not moved: the converted
-    tool serves it after.
+    tool serves it after. Nor is one on the legacy backend, which that release removes.
     """
+    if legacy_search_instance(config) is not None:
+        return False
     before = unnamed_direct_search_tool(config)
     if before is None:
         return False

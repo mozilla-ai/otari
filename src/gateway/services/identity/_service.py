@@ -9,6 +9,7 @@ from typing import Protocol, cast
 import idna
 
 from gateway.core.email_domains import blocklist_entry, blocklist_keys
+from gateway.core.tokens import generate_shared_token, generate_token, hash_token
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
     BlockedEmailEntryNotFoundError,
@@ -38,6 +39,7 @@ from gateway.models.tenancy import Organization, OrganizationDomainRole, User
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.identity import IdentityRepositories
 from gateway.services.dashboard_session_service import hash_session_token
+from gateway.services.identity._blocklist import EmailBlocklist
 from gateway.services.identity._enforcement import (
     has_link_to_organization,
     sso_enforcement_refuses_every_membership,
@@ -47,9 +49,6 @@ from gateway.services.mail import Mailer
 from gateway.services.oauth_service import provider_label
 from gateway.services.tenancy import (
     OrganizationService,
-    generate_shared_token,
-    generate_token,
-    hash_token,
     render_password_reset_email,
     sso_blocks_membership,
     unverified_identity_is_claimable,
@@ -135,6 +134,7 @@ class IdentityService:
         """
         self._uow = uow
         self._blocked_emails = repositories.blocked_emails
+        self._blocklist = EmailBlocklist(uow, repositories.blocked_emails)
         self._connections = repositories.connections
         self._links = repositories.links
         self._passkeys = repositories.passkeys
@@ -278,19 +278,8 @@ class IdentityService:
         )
 
     async def blocked_among(self, emails: Collection[str]) -> set[str]:
-        """Return the members of ``emails`` the deployment's email blocklist matches.
-
-        Holds the blocklist lock shared until the enclosing block commits, so called inside a caller's block, no
-        block can commit between this answer and that caller's writes.
-        """
-        keys = {email: blocklist_keys(email) for email in emails}
-        wanted = {key for email_keys in keys.values() for key in email_keys}
-        if not wanted:
-            return set()
-        async with self._uow:
-            await self._blocked_emails.lock_shared()
-            found = await self._blocked_emails.patterns_among(wanted)
-        return {email for email, email_keys in keys.items() if found.intersection(email_keys)}
+        """Return the members of ``emails`` that the deployment's email blocklist matches."""
+        return await self._blocklist.blocked_among(emails)
 
     async def list_blocked_emails(self, *, skip: int, limit: int) -> tuple[list[BlockedEmail], int]:
         """Return a page of the email blocklist, newest entry first, and how many entries there are."""

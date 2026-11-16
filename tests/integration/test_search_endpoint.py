@@ -32,7 +32,15 @@ from gateway.api.deps import (
     get_web_provider_client,
     get_workspace_web_search_policies,
 )
-from gateway.core.config import API_KEY_HEADER, API_ROOT, REQUEST_ID_HEADER, GatewayConfig, RateLimitRule
+from gateway.core.config import (
+    API_KEY_HEADER,
+    API_ROOT,
+    COST_USD_HEADER,
+    PRICING_SOURCE_HEADER,
+    REQUEST_ID_HEADER,
+    GatewayConfig,
+    RateLimitRule,
+)
 from gateway.core.settings.pricing import PricingConfig
 from gateway.exceptions.tools_exceptions import (
     SearchToolNotFoundError,
@@ -136,6 +144,8 @@ def test_search_with_api_key(client: TestClient, api_key_header: dict[str, str])
         headers=api_key_header,
     )
     assert resp.status_code == 200
+    # The fake reports what the call cost, which is what it settles at.
+    assert (resp.headers[COST_USD_HEADER], resp.headers[PRICING_SOURCE_HEADER]) == ("0.007000", "reported")
     data = resp.json()
     assert data["object"] == "search"
     assert data["search_tool"] == "fake-search"
@@ -270,6 +280,7 @@ def test_an_unnamed_call_runs_on_the_organizations_key_with_no_tool_of_the_deplo
         named = client.post(f"{API_ROOT}/search/tavily", json=SEARCH_PAYLOAD, headers=headers)
 
     assert resp.status_code == 200, resp.text
+    assert (resp.headers[COST_USD_HEADER], resp.headers[PRICING_SOURCE_HEADER]) == ("0.005000", "deployment")
     assert resp.json()["search_tool"] == "web_search"
     assert resp.json()["results"][0]["snippet"] == "From the old client."
     credential = keyed.call_args.args[0]
@@ -451,6 +462,7 @@ def test_search_provider_error_is_502(client: TestClient, api_key_header: dict[s
     payload = {**SEARCH_PAYLOAD, "provider_options": {"error": "INVALID_API_KEY", "error_status": 401}}
     resp = client.post(f"{API_ROOT}/search/fake-search", json=payload, headers=api_key_header)
     assert resp.status_code == 502
+    assert COST_USD_HEADER not in resp.headers, "a failed call is refunded, so it names no cost"
     detail = resp.json()["detail"]
     assert "INVALID_API_KEY" not in detail
     assert "provider" in detail.lower()
@@ -2207,3 +2219,183 @@ def test_every_usage_row_names_its_request_its_workspace_and_counts_toward_budge
         assert row["api_key_id"] is not None
     workspaces = set(db_session.scalars(select(UsageLog.workspace_id).where(UsageLog.user_id == "row-shapes")).all())
     assert workspaces == {uuid.UUID(_default_workspace_id(client, master_key_header))}
+
+
+# A deployment that searches only through the legacy settings, as otari.ai did before it had search tools.
+_LEGACY_TAVILY = {"search_tools": {}, "web_search_provider": "tavily", "web_search_provider_api_key": "tvly-ours"}
+_TAVILY_ANSWER = {
+    "results": [
+        {"url": "https://example.com/tavily", "title": "Tavily", "content": "A snippet.", "raw_content": "The page."}
+    ]
+}
+
+
+@pytest.fixture
+def legacy_client(test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient]:
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+    yield from _client_on(test_config, **_LEGACY_TAVILY)
+
+
+def _provider_answers(client: TestClient, answer: dict[str, Any]) -> list[httpx.Request]:
+    """Route the app's web provider client to a provider that answers ``answer``, and keep what it was sent."""
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=answer)
+
+    async def web_provider_client() -> AsyncIterator[httpx.AsyncClient]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as answering:
+            yield answering
+
+    client.app.dependency_overrides[get_web_provider_client] = web_provider_client  # type: ignore[attr-defined]
+    return seen
+
+
+def test_a_deployment_with_only_the_legacy_settings_serves_unnamed_and_named_searches_on_them(
+    legacy_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    client = legacy_client
+    headers = _keyed(client, master_key_header, "legacy-user")
+    _price(client, master_key_header, "otari:web_search", 5000.0)
+    seen = _provider_answers(client, _TAVILY_ANSWER)
+
+    unnamed = client.post(f"{API_ROOT}/search", json={**SEARCH_PAYLOAD, "max_results": 3}, headers=headers)
+    by_path = client.post(f"{API_ROOT}/search/tavily", json=SEARCH_PAYLOAD, headers=headers)
+    by_body = client.post(f"{API_ROOT}/search", json={**SEARCH_PAYLOAD, "search_tool_name": "tavily"}, headers=headers)
+
+    for resp in (unnamed, by_path, by_body):
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["search_tool"] == "tavily"
+        assert resp.json()["results"][0]["url"] == "https://example.com/tavily"
+        assert (resp.headers[COST_USD_HEADER], resp.headers[PRICING_SOURCE_HEADER]) == ("0.005000", "deployment")
+    assert len(seen) == 3
+    sent = json.loads(seen[0].content)
+    assert (seen[0].url.host, seen[0].url.path) == ("api.tavily.com", "/search")
+    assert seen[0].headers["authorization"] == "Bearer tvly-ours"
+    # Page text, as the in-loop search on the same settings has always asked for.
+    assert (sent["include_raw_content"], sent["max_results"]) == (True, 3)
+    rows = _search_rows(client, master_key_header, "legacy-user")
+    assert {(row["status"], row["model"], row["provider"]) for row in rows} == {("success", "tavily", "tavily")}
+    assert [row["cost"] for row in rows] == pytest.approx([0.005] * 3)
+
+
+def test_a_legacy_only_deployment_refuses_another_name_listing_its_engine(
+    legacy_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    headers = _keyed(legacy_client, master_key_header, "legacy-unknown")
+    seen = _provider_answers(legacy_client, _TAVILY_ANSWER)
+
+    by_path = legacy_client.post(f"{API_ROOT}/search/brave", json=SEARCH_PAYLOAD, headers=headers)
+    by_body = legacy_client.post(
+        f"{API_ROOT}/search", json={**SEARCH_PAYLOAD, "search_tool_name": "web_search"}, headers=headers
+    )
+
+    for resp in (by_path, by_body):
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["detail"].endswith("Available: tavily.")
+    assert seen == []
+
+
+def test_a_legacy_search_is_refused_where_the_workspace_turned_web_access_off(
+    legacy_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    headers = _keyed(legacy_client, master_key_header, "legacy-off")
+    _stub_policy(legacy_client, _policy(enabled=False))
+    seen = _provider_answers(legacy_client, _TAVILY_ANSWER)
+
+    unnamed = legacy_client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
+    named = legacy_client.post(f"{API_ROOT}/search/tavily", json=SEARCH_PAYLOAD, headers=headers)
+
+    assert [unnamed.status_code, named.status_code] == [403, 403]
+    assert seen == []
+
+
+def test_a_keys_allowed_tools_grants_the_legacy_engine_by_its_name(
+    legacy_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    client = legacy_client
+    _provider_answers(client, _TAVILY_ANSWER)
+    statuses: dict[str, int] = {}
+    for allowed in ("tavily", "builtin_fetch"):
+        created = client.post(
+            f"{API_ROOT}/keys", json={"key_name": allowed, "allowed_tools": [allowed]}, headers=master_key_header
+        )
+        assert created.status_code == 200, created.text
+        headers = {API_KEY_HEADER: f"Bearer {created.json()['key']}"}
+        statuses[allowed] = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers).status_code
+
+    assert statuses == {"tavily": 200, "builtin_fetch": 403}
+
+
+def test_an_unpriced_legacy_search_is_refused_naming_the_web_search_row(
+    test_config: GatewayConfig, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+    for client in _client_on(test_config, require_pricing=True, **_LEGACY_TAVILY):
+        headers = _keyed(client, master_key_header, "legacy-unpriced")
+        seen = _provider_answers(client, _TAVILY_ANSWER)
+
+        resp = client.post(f"{API_ROOT}/search/tavily", json=SEARCH_PAYLOAD, headers=headers)
+
+        assert resp.status_code == 402, resp.text
+        assert resp.headers["Otari-Error-Code"] == "pricing_required"
+        assert "model_key 'otari:web_search'" in resp.json()["detail"]
+        assert seen == []
+
+
+def test_a_legacy_searxng_backend_serves_a_direct_search_through_any_search(
+    test_config: GatewayConfig, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+    for client in _client_on(test_config, search_tools={}, web_search_url="http://searxng:8080"):
+        headers = _keyed(client, master_key_header, "legacy-searxng")
+        seen = _searxng_answers(client)
+
+        resp = client.post(f"{API_ROOT}/search/searxng", json=SEARCH_PAYLOAD, headers=headers)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["search_tool"] == "searxng"
+        [request] = seen
+        assert (request.url.host, request.url.path) == ("searxng", "/search")
+        assert request.url.params["engines"] == "duckduckgo,mojeek,qwant,wikipedia"
+
+
+def test_a_deployment_with_a_search_tool_ignores_the_legacy_settings_for_direct_search(
+    test_config: GatewayConfig, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+    one_tool = {"fake-search": _search_tools()["fake-search"]}
+    legacy = {**_LEGACY_TAVILY, "search_tools": one_tool}
+    for client in _client_on(test_config, **legacy):
+        headers = _keyed(client, master_key_header, "legacy-shadowed")
+        seen = _provider_answers(client, _TAVILY_ANSWER)
+
+        named = client.post(f"{API_ROOT}/search/tavily", json=SEARCH_PAYLOAD, headers=headers)
+        unnamed = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
+
+        assert named.status_code == 400, named.text
+        assert named.json()["detail"] == "Unknown search tool 'tavily'. Available: fake-search."
+        assert unnamed.status_code == 200, unnamed.text
+        assert unnamed.json()["search_tool"] == "fake-search"
+        assert seen == []
+
+
+def test_a_fetch_tool_named_like_the_legacy_engine_keeps_it_from_direct_search(
+    test_config: GatewayConfig, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A key granted the fetch tool by name would otherwise run a deployment-paid search under the same grant."""
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+    shared_name = {**_LEGACY_TAVILY, "fetch_tools": {"tavily": {"provider": "fake"}}}
+    for client in _client_on(test_config, **shared_name):
+        headers = _keyed(client, master_key_header, "legacy-fetch-name")
+        seen = _provider_answers(client, _TAVILY_ANSWER)
+
+        named = client.post(f"{API_ROOT}/search/tavily", json=SEARCH_PAYLOAD, headers=headers)
+        unnamed = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
+        catalog = client.get(f"{API_ROOT}/search-tools/catalog", headers=headers)
+
+        assert [named.status_code, unnamed.status_code] == [400, 400]
+        assert named.json()["detail"].startswith("No search tools are configured.")
+        assert catalog.json()["data"] == []
+        assert seen == []

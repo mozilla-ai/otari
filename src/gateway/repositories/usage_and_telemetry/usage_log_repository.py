@@ -49,6 +49,7 @@ def new_usage_row(
     prompt_tokens: int | None = None,
     completion_tokens: int | None = None,
     total_tokens: int | None = None,
+    deployment_paid: bool = False,
 ) -> UsageLog:
     """A new usage row holding these values, with a fresh id and the current time."""
     return UsageLog(
@@ -70,6 +71,7 @@ def new_usage_row(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         total_tokens=total_tokens,
+        deployment_paid=deployment_paid,
     )
 
 
@@ -192,6 +194,9 @@ class RequestRows:
     served: int
     errors: int
     incomplete: int
+    tool_cost: Decimal | None
+    # Priced rows that recorded how much of their cost is tool charges.
+    tool_costed_rows: int
 
 
 # The columns a breakdown can group by, named by the summary's dimension vocabulary.
@@ -505,6 +510,8 @@ class UsageLogRepository(BaseRepository[UsageLog, Never, Never]):
             func.count(case(((UsageLog.status == "success") & UsageLog.latency_ms.is_not(None), 1))),
             func.count(case((UsageLog.status == "error", 1))),
             func.count(case((UsageLog.status == "incomplete", 1))),
+            func.sum(UsageLog.tool_cost),
+            func.count(case((UsageLog.cost.is_not(None) & UsageLog.tool_cost.is_not(None), 1))),
         ).where(*conditions)
         row = (await self.db.execute(stmt)).one()
         return RequestRows(
@@ -517,6 +524,8 @@ class UsageLogRepository(BaseRepository[UsageLog, Never, Never]):
             served=int(row[6]),
             errors=int(row[7]),
             incomplete=int(row[8]),
+            tool_cost=row[9],
+            tool_costed_rows=int(row[10]),
         )
 
     async def cost_and_requests(self, filters: UsageFilters, scope: UsageScope) -> tuple[float, int]:

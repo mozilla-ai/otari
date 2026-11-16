@@ -24,9 +24,9 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, NamedTuple, Protocol, TypeVar
 
-from gateway.core.config import END_USER_BUDGET_HEADER
+from gateway.core.config import COST_USD_HEADER, END_USER_BUDGET_HEADER, PRICING_SOURCE_HEADER
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.error_codes import INSUFFICIENT_FUNDS, PRICING_REQUIRED, WEB_ACCESS_DISABLED, error_headers
 from gateway.core.metered_pricing import quantize_cost
@@ -40,11 +40,13 @@ from gateway.exceptions.tools_exceptions import (
     WebSearchPolicyResolutionFailedError,
 )
 from gateway.log_config import logger
+from gateway.models.pricing import REPORTED_SOURCE, PriceSource, SettledSource
 from gateway.models.tools import WebTool
 from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, InsufficientFundsError, ToolUse
 from gateway.services.tools._tool_prices import unfunded_tool_detail
 from gateway.services.tools._web_access import web_access_disabled_refusal
 from gateway.services.tools._web_search import (
+    legacy_search_instance,
     organization_key_search_instance,
     pick_direct_fetch_instance,
     pick_direct_search_instance,
@@ -92,6 +94,13 @@ class DirectCaller:
     request_id: str
 
 
+class DirectToolRate(NamedTuple):
+    """The rate a direct tool call is held at and falls back to, and which step of the lookup order supplied it."""
+
+    unit_rate: Decimal
+    source: PriceSource
+
+
 @dataclass(frozen=True)
 class DirectToolOutcome(Generic[ResultT]):
     """A served call's response, and the headers it is answered with."""
@@ -134,7 +143,10 @@ class DirectToolCall(Generic[ResultT]):
 
 @dataclass(frozen=True)
 class DirectToolUsage:
-    """One usage row of a direct tool call. A served call reports zero tokens; the others report none."""
+    """One usage row of a direct tool call. A served call reports zero tokens; the others report none.
+
+    ``deployment_paid`` marks a call the organization's funds were admitted to pay for.
+    """
 
     workspace_id: uuid.UUID
     api_key_id: str | None
@@ -152,6 +164,7 @@ class DirectToolUsage:
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     total_tokens: int | None = None
+    deployment_paid: bool = False
 
 
 class DirectToolAccounts(Protocol):
@@ -198,7 +211,7 @@ class DirectToolLedger(Protocol):
         """The organization whose prices and funds apply to the key's calls."""
         ...
 
-    async def unit_rate(self, call: DirectToolCall[Any], *, organization_id: uuid.UUID | None) -> Decimal | None:
+    async def unit_rate(self, call: DirectToolCall[Any], *, organization_id: uuid.UUID | None) -> DirectToolRate | None:
         """The rate a call is held at and falls back to, or ``None`` when no row prices it."""
         ...
 
@@ -282,6 +295,13 @@ def _refusal_detail(exc: TenancyError) -> str:
     return PASSTHROUGH_PROVIDER_ERROR_DETAIL if exc.status_code >= HTTPStatus.INTERNAL_SERVER_ERROR else exc.message
 
 
+def _inline_cost_headers(cost: Decimal, source: SettledSource | None) -> dict[str, str]:
+    """The headers a served call's settled cost rides on: both when the call was priced, neither when not."""
+    if source is None:
+        return {}
+    return {COST_USD_HEADER: f"{cost:.6f}", PRICING_SOURCE_HEADER: source}
+
+
 def _elapsed_ms(started_at: float) -> int:
     return round((time.monotonic() - started_at) * 1000)
 
@@ -315,10 +335,11 @@ class DirectToolService:
         stood_in: list[ToolInstance] = []
 
         def stand_in(policy: ResolvedWebSearchConfig | None) -> ToolInstance | None:
-            """The organization's key, standing in for a tool where an unnamed call finds none to pick."""
+            """What an unnamed call with no tool to pick runs on: the organization's key, else the legacy backend."""
             if (instance := organization_key_search_instance(policy)) is not None:
                 stood_in.append(instance)
-            return instance
+                return instance
+            return legacy_search_instance(config)
 
         def resolve(tool: ToolInstance, policy: ResolvedWebSearchConfig | None) -> DirectToolCall[SearchResponse]:
             # A workspace whose organization brought its own search key searches with it on a
@@ -347,7 +368,8 @@ class DirectToolService:
             policy_tools=(WebTool.SEARCH,),
             resolve=resolve,
             # A named call means a deployment tool; an unnamed one may find none to pick, as
-            # on a deployment where every organization brings its own key.
+            # on a deployment where every organization brings its own key or only the legacy
+            # settings describe a backend.
             stand_in=stand_in if tool_name is None else None,
             stand_in_for=(SearchToolSelectionError,),
         )
@@ -565,7 +587,7 @@ class DirectToolService:
         # organization's funds pay for it.
         organization_id = await self._ledger.organization_of(api_key_id)
         rate = await self._ledger.unit_rate(call, organization_id=organization_id)
-        unit_rate = rate if rate is not None else Decimal(0)
+        unit_rate = rate.unit_rate if rate is not None else Decimal(0)
         # After the gates above, so a call they refuse is counted by no rule, and
         # before the hold, so one the rules refuse holds no budget to refund.
         await self._gates.admit_rules(
@@ -636,6 +658,7 @@ class DirectToolService:
                 endpoint=endpoint,
                 latency_ms=_elapsed_ms(started_at),
                 counts_toward_budget=not budget_exempt,
+                deployment_paid=funding is not None,
                 request_group_id=request_id,
                 **fields,
             )
@@ -705,4 +728,10 @@ class DirectToolService:
                 description=f"{tool.provider}:{tool.name}",
             )
         await self._ledger.settle(hold, cost)
-        return DirectToolOutcome(result.response, {**headers, **rate_limit_headers})
+        # The body has no ``usage`` to carry the inline cost, so it rides headers, as speech's does.
+        source: SettledSource | None = (
+            REPORTED_SOURCE if result.cost is not None else rate.source if rate is not None else None
+        )
+        return DirectToolOutcome(
+            result.response, {**headers, **rate_limit_headers, **_inline_cost_headers(cost, source)}
+        )

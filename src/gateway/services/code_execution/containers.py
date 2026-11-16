@@ -164,6 +164,8 @@ class ContainerLease:
     provider_session_id: str
     expires_at: datetime
     hard_expires_at: datetime
+    #: The image the sandbox was created in, kept across resumes; ``None`` where none was asked for or recorded.
+    image: str | None = None
 
 
 class SandboxContainers(Protocol):
@@ -177,8 +179,10 @@ class SandboxContainers(Protocol):
         """How long the provider should hold the session after this request."""
         ...
 
-    def lease(self, container_id: str, provider_session_id: str, *, resumed: ContainerLease | None) -> ContainerLease:
-        """The lease this request holds, with both clocks set from now."""
+    def lease(
+        self, container_id: str, provider_session_id: str, *, resumed: ContainerLease | None, image: str | None
+    ) -> ContainerLease:
+        """The lease this request holds, with both clocks set from now, in ``resumed``'s image or else ``image``."""
         ...
 
     async def record(self, lease: ContainerLease) -> None:
@@ -229,7 +233,9 @@ class SandboxContainerRegistry:
         remaining = (resumed.hard_expires_at - datetime.now(UTC)).total_seconds()
         return max(1.0, min(float(self._idle_ttl_s), remaining))
 
-    def lease(self, container_id: str, provider_session_id: str, *, resumed: ContainerLease | None) -> ContainerLease:
+    def lease(
+        self, container_id: str, provider_session_id: str, *, resumed: ContainerLease | None, image: str | None
+    ) -> ContainerLease:
         now = datetime.now(UTC)
         hard = resumed.hard_expires_at if resumed is not None else now + timedelta(seconds=self._max_lifetime_s)
         return ContainerLease(
@@ -238,6 +244,7 @@ class SandboxContainerRegistry:
             provider_session_id=provider_session_id,
             expires_at=min(now + timedelta(seconds=self._idle_ttl_s), hard),
             hard_expires_at=hard,
+            image=resumed.image if resumed is not None else image,
         )
 
     async def resolve(self, container_id: str) -> ContainerLease:
@@ -293,6 +300,7 @@ class SandboxContainerRegistry:
                     last_used_at=now,
                     expires_at=lease.expires_at,
                     hard_expires_at=lease.hard_expires_at,
+                    session_image=lease.image,
                 ),
             )
 
@@ -313,4 +321,5 @@ def _lease_from_row(row: SandboxContainerRow) -> ContainerLease:
         provider_session_id=row.provider_session_id,
         expires_at=row.expires_at,
         hard_expires_at=row.hard_expires_at,
+        image=row.session_image,
     )

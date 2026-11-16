@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from gateway.core.config import API_ROOT
 from gateway.exceptions import TenancyError
 from gateway.exceptions.tools_exceptions import (
     CodeExecutionContainerBusyError,
@@ -67,6 +68,25 @@ SANDBOX_TOOLS_EXCLUDED_DETAIL = (
 # it here would send an operator instruction to a data-plane caller, which is the
 # boundary ``SANDBOX_NOT_ENABLED_DETAIL`` next door already respects.
 SANDBOX_IMAGE_NOT_ALLOWED_DETAIL = "this workspace's code-execution policy pins a sandbox image that is not allowed"
+ENVIRONMENT_NOT_OFFERED_DETAIL_TEMPLATE = (
+    "Environment '{environment}' is not offered on this gateway. "
+    f"GET {API_ROOT}/code/environments lists those it offers."
+)
+ENVIRONMENT_PINNED_DETAIL_TEMPLATE = (
+    "this workspace's code-execution policy runs code in the environment '{pinned}' only; "
+    "drop environment or name that one"
+)
+CONTAINER_ENVIRONMENT_MISMATCH_DETAIL_TEMPLATE = (
+    "Container '{container_id}' runs in the environment '{held}', not '{environment}'. A held sandbox keeps the "
+    "environment it was created in: drop environment, or drop container to start a new sandbox."
+)
+# A sandbox held from before environments were recorded, or started with no image named, runs in a template the
+# gateway cannot name, so it cannot be priced as the environment a request names.
+CONTAINER_ENVIRONMENT_UNKNOWN_DETAIL_TEMPLATE = (
+    "Container '{container_id}' was created without a recorded environment, so it cannot run as '{environment}'. "
+    "A held sandbox keeps the environment it was created in: drop environment, or drop container to start a new "
+    "sandbox."
+)
 # One detail for an unknown, expired, foreign or other-provider container, so an
 # id never reveals which. The phrasing is the one clients of Anthropic's and
 # OpenAI's containers already recognize as "drop the id and start over".
@@ -240,11 +260,16 @@ class DeclaredCodeExecution:
             uniform=self.sandbox_tool_entry is not None,
         )
 
-    async def admit(self, *, claimed: bool, beside_sandbox: bool) -> AdmittedCodeExecution:
+    async def admit(
+        self, *, claimed: bool, beside_sandbox: bool, environment: str | None = None
+    ) -> AdmittedCodeExecution:
         """Admit the request's code for the candidates where Otari runs the keyword (``claimed``), or not.
 
         ``beside_sandbox`` is set where other candidates run the code on the sandbox,
         whose ``auto`` container a provider's attempt then leaves out rather than refuses.
+        ``environment`` is the image a direct run asked for: one the deployment offers
+        a workspace to pin, the workspace's own pin where it set one, and the image of
+        the held sandbox it resumes.
 
         Raises:
             CodeExecutionDeclarationError: the declaration or its container cannot be served this way.
@@ -259,9 +284,11 @@ class DeclaredCodeExecution:
                 executor = CodeExecutor.PROVIDER
             else:
                 executor = decide_code_executor(self.preference, sandbox_configured=True, native_available=False)
-        return await self._admit_executor(executor, beside_sandbox=beside_sandbox)
+        return await self._admit_executor(executor, beside_sandbox=beside_sandbox, environment=environment)
 
-    async def _admit_executor(self, executor: CodeExecutor | None, *, beside_sandbox: bool) -> AdmittedCodeExecution:
+    async def _admit_executor(
+        self, executor: CodeExecutor | None, *, beside_sandbox: bool, environment: str | None
+    ) -> AdmittedCodeExecution:
         config = self.config
         sandbox_tool_entry = self.sandbox_tool_entry
         tools_after_sandbox = self.tools_after_sandbox
@@ -315,6 +342,16 @@ class DeclaredCodeExecution:
                     if code_execution_policy.image not in config.pinnable_sandbox_images():
                         raise CodeExecutionRefusedError(SANDBOX_IMAGE_NOT_ALLOWED_DETAIL)
                     sandbox_session_image = code_execution_policy.image
+                    if environment is not None and environment != sandbox_session_image:
+                        raise CodeExecutionRefusedError(
+                            ENVIRONMENT_PINNED_DETAIL_TEMPLATE.format(pinned=sandbox_session_image)
+                        )
+            if environment is not None:
+                if environment not in config.pinnable_sandbox_images():
+                    raise CodeExecutionDeclarationError(
+                        ENVIRONMENT_NOT_OFFERED_DETAIL_TEMPLATE.format(environment=environment)
+                    )
+                sandbox_session_image = environment
 
         # A request that names no container has its sandbox released with it.
         # ``auto`` asks to hold one, and an ID asks for that one back.
@@ -328,6 +365,22 @@ class DeclaredCodeExecution:
                 sandbox_containers = None
             elif container_request != CONTAINER_AUTO:
                 sandbox_container_lease = await self._lease(container_request)
+                held = sandbox_container_lease.image
+                if environment is not None and environment != held:
+                    await self._give_back(container_request, sandbox_container_lease)
+                    template = (
+                        CONTAINER_ENVIRONMENT_UNKNOWN_DETAIL_TEMPLATE
+                        if held is None
+                        else CONTAINER_ENVIRONMENT_MISMATCH_DETAIL_TEMPLATE
+                    )
+                    raise CodeExecutionDeclarationError(
+                        template.format(
+                            container_id=sandbox_container_lease.container_id, held=held, environment=environment
+                        )
+                    )
+                # A resumed sandbox runs in the image it was created in, whatever this request would start one in.
+                if held is not None:
+                    sandbox_session_image = held
             # ``auto`` without container reuse is not an error, and the response names no container.
         else:
             # The provider runs this code, so a container ID that only this gateway mints is refused.
@@ -349,6 +402,12 @@ class DeclaredCodeExecution:
             tools_after_sandbox=tools_after_sandbox,
             use_sandbox=use_sandbox,
         )
+
+    async def _give_back(self, container_request: str, lease: ContainerLease) -> None:
+        """Release the claim on a held sandbox this request will not run in."""
+        del self._leases[container_request]
+        if self.container_registry is not None:
+            await self.container_registry.release(lease.container_id)
 
     async def _lease(self, container_request: str) -> ContainerLease:
         """The held sandbox ``container_request`` names, claimed once for every candidate that runs there.

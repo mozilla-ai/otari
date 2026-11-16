@@ -81,14 +81,6 @@ class E2BCodeExecutionAdapter(CodeExecutionPort):
         # how long the sandbox lives before it reclaims it, which has to cover
         # every execute a request makes and the file work around them.
         del timeout_s
-        if image:
-            # ``sandbox_session_image`` is a container image reference, the
-            # published protocol's vocabulary. E2B names pre-built templates
-            # instead, so honoring it here would fail every sandbox creation.
-            logger.warning(
-                "sandbox_session_image %r ignored: the e2b provider runs its own templates, not container images",
-                image,
-            )
         sdk = _sdk()
         credential: dict[str, str] = {}
         if self._api_key is not None:
@@ -104,9 +96,12 @@ class E2BCodeExecutionAdapter(CodeExecutionPort):
                 # the last one, and a paused sandbox is resumed on the way.
                 sandbox = await sdk.AsyncSandbox.connect(resume, timeout=int(session_ttl_s), **credential)
             else:
+                # E2B calls the image a template: its name or id, built in the provider's account.
+                template: dict[str, str] = {"template": image} if image else {}
                 sandbox = await sdk.AsyncSandbox.create(
                     timeout=int(session_ttl_s),
                     metadata={"otari": "code-execution"},
+                    **template,
                     **credential,
                 )
         except sdk.NotFoundException as exc:

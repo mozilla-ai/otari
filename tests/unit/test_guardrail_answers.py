@@ -12,7 +12,8 @@ from any_llm.types.messages import MessageResponse
 from fastapi import Response
 
 from gateway.api.routes._guardrail_answers import answer_parts, finish_result, guarded_stream
-from gateway.api.routes._guardrails import AnswerRefused, RequestGuardrails
+from gateway.api.routes._guardrails import RequestGuardrails
+from gateway.exceptions.guardrails_exceptions import AnswerRefused
 from gateway.models.guardrails import GuardrailConfig
 from gateway.services.guardrails import GuardrailResult, GuardrailVerdict
 

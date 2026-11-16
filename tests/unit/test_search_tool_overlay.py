@@ -33,7 +33,7 @@ from gateway.services.tools._search_tool_overlay import (
 )
 
 
-async def _no_rate(_rate_key: Any) -> None:
+async def _no_rate(_rate_key: Any, _organization_id: Any) -> None:
     """A price list that prices nothing, for a service whose tests list no tool."""
     return None
 

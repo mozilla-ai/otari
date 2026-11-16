@@ -18,6 +18,7 @@ from sqlmodel import col
 
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
 from gateway.core.config import API_ROOT, OAUTH_PROVIDERS, GatewayConfig
+from gateway.core.tokens import hash_token
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
     OIDCConnectionDisabledError,
@@ -56,7 +57,6 @@ from gateway.services.tenancy import (
     OrganizationService,
     VerifiedDomainLookup,
     forget_unproven_access,
-    hash_token,
     sso_blocks_membership,
 )
 

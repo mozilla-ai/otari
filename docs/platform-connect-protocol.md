@@ -85,6 +85,7 @@ Request body:
 |---|---|---|
 | `api_key` | string | The API key issued to this gateway. |
 | `api_base` | string | The inference root the key is for, such as `https://api.otari.ai/api/v1`. |
+| `services` | object, optional | The services besides models the operator approved, such as `{"web_search": true, "code_execution": false}`. See [The approval](#the-approval). |
 
 **The key is returned once.** A poll after the one that delivered it answers
 `expired_token`, so the gateway stores the key in the step that receives it and
@@ -108,6 +109,28 @@ to 300, before the next poll. The attempt stays pending.
 Any other answer (another status, another `error`, a body that is not JSON) is
 not an outcome. The gateway keeps the attempt pending and polls again after
 `interval`, until its own count of `expires_in` runs out.
+
+## The approval
+
+The approval page lists what the gateway will run on the platform, all billed
+to the platform's credits:
+
+- **Models**, always.
+- **Web search** and **Code execution**, each a choice the operator makes, on
+  by default.
+
+Approving a service turns it on for the workspace that holds the key, where it
+was off, so the key can use it. A service the operator leaves unchecked keeps
+the workspace's setting as it was: a key may still reach a service the
+workspace already had on. Turning a service on takes an owner or admin of that
+workspace; for anyone else the platform refuses the approval and the code stays
+open.
+
+The `services` field names what was approved, each key `true` or `false`. A
+gateway that reads no `services` field, or a key it does not know, treats the
+service as not approved. The field says what the operator chose, not whether
+the workspace can pay for or reach the service now; the platform answers that
+when the service is called.
 
 ## Limits the gateway applies
 

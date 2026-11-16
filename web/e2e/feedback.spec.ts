@@ -17,9 +17,11 @@ async function disableFeedback(page: Page) {
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() =>
-    localStorage.setItem("otari.dashboard.theme", "light"),
-  )
+  await page.addInitScript(() => {
+    localStorage.setItem("otari.dashboard.theme", "light")
+    // The phone spec signs in by hand, past the helper that retires the welcome.
+    localStorage.setItem("otari.welcome.answered", "e2e")
+  })
 })
 
 test("desktop: the top bar opens it beside Documentation, a failure keeps the draft, a retry thanks", async ({

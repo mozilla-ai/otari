@@ -1104,7 +1104,6 @@ DOMAIN_NAME_BASELINE: dict[str, tuple[str, ...]] = {
         "password_policy.py",
         "password_reset_email.py",
         "provisioning_service.py",
-        "tokens.py",
         "user_service.py",
         "verification_email.py",
         "webauthn_service.py",
@@ -1444,11 +1443,7 @@ SERVICE_ROOT_EXPORT_BASELINE: dict[str, tuple[str, ...]] = {
     ),
     "gateway/services/feedback/": ("new_feedback_rate_limiter",),
     "gateway/services/files/": ("run_file_sweeper",),
-    "gateway/services/health_checks/": (
-        "list_hosted_offerings",
-        "refusal_switches_off",
-        "run_health_check_worker",
-    ),
+    "gateway/services/health_checks/": ("run_health_check_worker",),
     "gateway/services/identity/": ("exchange_sso_code",),
     "gateway/services/inference/": (
         "CONVERSATION_CACHE_KEY_FIELD",
@@ -1487,7 +1482,6 @@ SERVICE_ROOT_EXPORT_BASELINE: dict[str, tuple[str, ...]] = {
         "image_usage",
         "is_chat_stream_cost_carrier",
         "is_empty_completion",
-        "is_model_unavailable_error",
         "is_provider_billing_error",
         "is_provider_credential_rejection",
         "is_provider_cut",
@@ -1666,9 +1660,6 @@ SERVICE_ROOT_EXPORT_BASELINE: dict[str, tuple[str, ...]] = {
         "describe_caller",
         "ensure_bootstrap_identity",
         "forget_unproven_access",
-        "generate_shared_token",
-        "generate_token",
-        "hash_token",
         "render_password_reset_email",
         "report_new_account",
         "report_sign_in",
@@ -2020,6 +2011,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/api_keys/federation_rule_repository.py",
         "baseline": (),
     },
+    "gateway.models.catalog.ModelMetadataOverride": {
+        "repository": "gateway/repositories/catalog/model_metadata_override_repository.py",
+        "baseline": (),
+    },
     "gateway.models.catalog.ServedModel": {
         "repository": "gateway/repositories/catalog/served_model_repository.py",
         "baseline": (),
@@ -2123,6 +2118,14 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     },
     "gateway.models.inference.VideoJobRecord": {
         "repository": "gateway/repositories/inference/video_job_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.organizations.OrganizationInvitation": {
+        "repository": "gateway/repositories/organizations/organization_invitation_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.organizations.OrganizationMembershipOrigin": {
+        "repository": "gateway/repositories/organizations/membership_origin_repository.py",
         "baseline": (),
     },
     "gateway.models.platform.RuntimeSetting": {

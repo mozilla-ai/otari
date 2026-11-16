@@ -148,6 +148,7 @@ _SETTING_NAMES = frozenset(
         "sandbox_allowed_session_images",
         "sandbox_container_idle_ttl_sec",
         "sandbox_container_max_lifetime_sec",
+        "sandbox_environments",
         "sandbox_provider",
         "sandbox_purpose_hint",
         "sandbox_session_image",

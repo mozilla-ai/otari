@@ -275,7 +275,7 @@ def test_messages_endpoint_rejected_param_is_a_400_naming_it(
     fix, so it is a 400 rather than the generic 500 this format falls back to.
 
     Pinned here as well as on the chat route because the classification is shared
-    (``classify_provider_error``) while the envelope is not: this format renders
+    (``UpstreamFailure.mapping``) while the envelope is not: this format renders
     the mapped status as an Anthropic ``invalid_request_error`` body, which the
     chat tests cannot show.
     """

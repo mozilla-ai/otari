@@ -18,7 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.api.deps import get_web_provider_client, get_workspace_web_search_policies
-from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, COST_USD_HEADER, PRICING_SOURCE_HEADER, GatewayConfig
 from gateway.core.error_codes import ERROR_CODE_HEADER, WEB_ACCESS_DISABLED
 from gateway.models.tools import ResolvedWebSearchConfig, WebFetchCredential, WebTool
 from gateway.services.secret_box import generate_secret_key
@@ -377,8 +377,10 @@ def test_a_key_restricted_to_models_runs_no_fetch_tool_until_one_is_named(
 def test_the_usage_row_carries_the_reported_cost_and_no_tokens(
     client: TestClient, master_key_header: dict[str, str], api_key_header: dict[str, str], api_key_obj: dict[str, Any]
 ) -> None:
-    assert client.post(f"{API_ROOT}/fetch", json=PAYLOAD, headers=api_key_header).status_code == 200
+    resp = client.post(f"{API_ROOT}/fetch", json=PAYLOAD, headers=api_key_header)
 
+    assert resp.status_code == 200, resp.text
+    assert (resp.headers[COST_USD_HEADER], resp.headers[PRICING_SOURCE_HEADER]) == ("0.002000", "reported")
     (row,) = _fetch_rows(client, master_key_header, api_key_obj["user_id"])
     assert (row["model"], row["provider"], row["endpoint"], row["status"]) == (
         "fake-fetch",
@@ -394,8 +396,10 @@ def test_a_tool_reporting_no_cost_bills_its_own_fetch_price(
     client: TestClient, master_key_header: dict[str, str], api_key_header: dict[str, str], api_key_obj: dict[str, Any]
 ) -> None:
     _price(client, master_key_header, "fake-plain", 3000.0, kind="fetch")
-    assert client.post(f"{API_ROOT}/fetch/fake-plain", json=PAYLOAD, headers=api_key_header).status_code == 200
+    resp = client.post(f"{API_ROOT}/fetch/fake-plain", json=PAYLOAD, headers=api_key_header)
 
+    assert resp.status_code == 200, resp.text
+    assert (resp.headers[COST_USD_HEADER], resp.headers[PRICING_SOURCE_HEADER]) == ("0.003000", "deployment")
     (row,) = _fetch_rows(client, master_key_header, api_key_obj["user_id"])
     assert row["cost"] == pytest.approx(0.003)
 
@@ -408,6 +412,7 @@ def test_an_unpriced_fetch_is_refused_with_402_naming_its_row(
 
     assert resp.status_code == 402, resp.text
     assert resp.headers["Otari-Error-Code"] == "pricing_required"
+    assert COST_USD_HEADER not in resp.headers, "a refused fetch was not charged"
     assert "A fetch on 'fake-plain' has no price the deployment's operator set" in resp.json()["detail"]
     assert "using kind 'fetch' and the tool's name as model_key" in resp.json()["detail"]
     assert "price_per_call" in resp.json()["detail"]
@@ -426,6 +431,7 @@ def test_a_provider_failure_is_a_502_carrying_its_safe_fields(
 
     assert resp.status_code == 502, resp.text
     assert resp.json()["detail"] == PROVIDER_ERROR_DETAIL
+    assert PRICING_SOURCE_HEADER not in resp.headers, "a failed fetch is refunded, so it names no cost"
     assert (
         resp.headers["Otari-Error-Provider"],
         resp.headers["Otari-Error-Status"],

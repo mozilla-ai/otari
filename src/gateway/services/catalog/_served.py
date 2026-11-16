@@ -30,7 +30,8 @@ from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.log_config import logger
 from gateway.models.catalog import SERVED_ENGINES, ServedModel
-from gateway.repositories.catalog import ServedModelRepository
+from gateway.repositories.catalog import ModelMetadataOverrideRepository, ServedModelRepository
+from gateway.services.catalog._overrides import overrides_generation, replace_overrides
 
 SERVED_MODEL_REFRESH_SECONDS = 60.0
 
@@ -287,11 +288,14 @@ async def _replace(uow: UnitOfWork, provider: str, columns: dict[str, dict[str, 
 
 
 async def refresh_served_models(uow: UnitOfWork) -> None:
-    """Reload every row in one query and swap the copy in one step."""
+    """Reload every row, and the metadata overrides beside them, and swap each copy in one step."""
     global _served  # noqa: PLW0603
 
+    generation = overrides_generation()
     async with uow:
         rows = await ServedModelRepository(uow).list_all()
+        overrides = await ModelMetadataOverrideRepository(uow).list_all()
+    replace_overrides(overrides, generation)
     served: dict[tuple[uuid.UUID | None, str], dict[str, ServedFacts]] = {}
     for row in rows:
         served.setdefault((row.organization_id, row.provider), {})[row.model] = _facts(row)
@@ -299,10 +303,11 @@ async def refresh_served_models(uow: UnitOfWork) -> None:
 
 
 def reset_served_models() -> None:
-    """Drop the copy so the next load starts clean (startup and tests)."""
+    """Drop the copy, and the overrides', so the next load starts clean (startup and tests)."""
     global _served  # noqa: PLW0603
 
     _served = {}
+    replace_overrides(())
 
 
 async def _refresh_on_a_session_of_its_own() -> None:

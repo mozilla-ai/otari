@@ -24,6 +24,7 @@ from pydantic import ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from _unavailable_model_support import reporter_with_null_listener
 from gateway.api.deps import ToolPorts, get_workspace_search_keys
 from gateway.api.routes import chat, messages
 from gateway.api.routes._pipeline import DeclaredTools, RequestContext, ToolBackends, prepare_gateway_tools
@@ -697,6 +698,7 @@ def _request_context(
     refused before reaching what these cases are about.
     """
     return RequestContext(
+        unavailable_model_reporter=reporter_with_null_listener(),
         config=GatewayConfig(),
         db=db,
         uow=UnitOfWork(db),

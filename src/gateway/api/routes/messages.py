@@ -37,7 +37,6 @@ from gateway.api.deps import (
 )
 from gateway.api.error_body import BodyHTTPException
 from gateway.api.routes._guardrail_targets import messages_targets
-from gateway.api.routes._guardrails import AnswerRefused
 from gateway.api.routes._helpers import routing_signal, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import (
@@ -48,15 +47,10 @@ from gateway.api.routes._normalize import (
 )
 from gateway.api.routes._pipeline import (
     DeclaredTools,
-    ErrorKind,
     ToolBackends,
     ToolContext,
-    classify_provider_error,
     domain_error,
-    error_kind_for_status,
     prepare_gateway_tools,
-    provider_error_headers,
-    provider_failure_detail,
     release_reservation,
     resolve_dispatch_provider,
     resolve_request_context,
@@ -73,11 +67,12 @@ from gateway.api.routes._request_tags import (
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
-from gateway.core.error_codes import INVALID_REQUEST, body_fields_of, error_headers
+from gateway.core.error_codes import INVALID_REQUEST, ErrorKind, body_fields_of, error_headers
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
 from gateway.exceptions import TenancyError
 from gateway.exceptions.files_exceptions import ProviderUploadFailedError
+from gateway.exceptions.guardrails_exceptions import AnswerRefused
 from gateway.log_config import logger
 from gateway.models.guardrails import RequestedGuardrails
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
@@ -87,6 +82,7 @@ from gateway.services.content_normalizer import stage_container_blocks
 from gateway.services.files import StagedFile
 from gateway.services.inference import (
     CONVERSATION_CACHE_KEY_FIELD,
+    UpstreamFailure,
     bind_upstream_user,
     call_messages,
     conversation_cache_key,
@@ -550,7 +546,7 @@ _ERR_RATE_LIMIT = "rate_limit_error"
 _ERR_REQUEST_TOO_LARGE = "request_too_large"
 
 # Every Anthropic ``error.type`` comes from this table. A bare status reaches it
-# through ``error_kind_for_status``, so one status cannot be classified two ways.
+# through ``ErrorKind.from_status``, so one status cannot be classified two ways.
 _ERROR_KIND_TO_ANTHROPIC_TYPE = {
     ErrorKind.API: _ERR_API,
     ErrorKind.AUTHENTICATION: _ERR_AUTHENTICATION,
@@ -571,7 +567,7 @@ def _ensure_anthropic_error(exc: StarletteHTTPException) -> BodyHTTPException:
     """
     if isinstance(exc, BodyHTTPException):
         return exc
-    error_type = _ERROR_KIND_TO_ANTHROPIC_TYPE[error_kind_for_status(exc.status_code)]
+    error_type = _ERROR_KIND_TO_ANTHROPIC_TYPE[ErrorKind.from_status(exc.status_code)]
     detail = exc.detail
     if isinstance(detail, dict):
         details = {key: value for key, value in detail.items() if key != "message"}
@@ -766,18 +762,19 @@ class _MessagesAdapter:
         return _anthropic_error(_ERROR_KIND_TO_ANTHROPIC_TYPE[kind], message, status_code, headers)
 
     def provider_error(self, exc: BaseException, model: str | None = None) -> HTTPException:
-        mapping = classify_provider_error(exc, model=model)
+        failure = UpstreamFailure(exc, model=model)
+        mapping = failure.mapping
         if mapping is not None:
-            error_type = _ERROR_KIND_TO_ANTHROPIC_TYPE[error_kind_for_status(mapping.status_code)]
+            error_type = _ERROR_KIND_TO_ANTHROPIC_TYPE[ErrorKind.from_status(mapping.status_code)]
             return _anthropic_error(
                 error_type,
                 mapping.detail,
                 mapping.status_code,
-                with_retry_hint(exc, mapping.status_code, provider_error_headers(exc, mapping.status_code)),
+                with_retry_hint(exc, mapping.status_code, failure.headers),
             )
         return _anthropic_error(
             _ERR_API,
-            provider_failure_detail(exc, _PROVIDER_ERROR),
+            failure.unclassified_detail(_PROVIDER_ERROR),
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             with_retry_hint(exc, status.HTTP_500_INTERNAL_SERVER_ERROR, None),
         )
@@ -829,12 +826,7 @@ class _MessagesAdapter:
             return False
         if usage is None:
             return False
-        updated = usage.model_copy(
-            update={
-                "cost_usd": settlement.cost_usd,
-                "pricing_source": settlement.pricing_source,
-            }
-        )
+        updated = usage.model_copy(update=settlement.usage_fields())
         value.usage = updated
         return True
 

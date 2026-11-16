@@ -18,7 +18,7 @@ from gateway.core.settings.tools import BUILTIN_FETCH, effective_fetch_instances
 from gateway.exceptions import TenancyError
 from gateway.exceptions.tools_exceptions import WebAccessRefusedError
 from gateway.models.tools import ResolvedWebSearchConfig
-from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
+from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, code_execution_rate_keys
 from gateway.services.tools._declarations import Tool
 from gateway.services.tools._registry import BUILTIN_TOOLS
 from gateway.services.tools._web_admission import AdmittedWebTools, DeclaredWebTools, admit_web_access, enrichment_for
@@ -68,6 +68,11 @@ def _on_its_own_row(name: str, *, deployment_paid: bool) -> PricedTool:
     return PricedTool(name, None, (gateway_tool_pricing_key(name),), deployment_paid)
 
 
+def _priced_code_execution(image: str | None) -> PricedTool:
+    """Code execution in ``image``: the environment's own row, then ``otari:code_execution``, on the deployment."""
+    return PricedTool(CODE_EXECUTION_TOOL_NAME, None, code_execution_rate_keys(image), True)
+
+
 def _priced_search(in_loop: InLoopSearch | None, *, on_credential: bool) -> PricedTool:
     """The search on the libraries under its label and rows, else on the old backend, under ``otari:web_search``.
 
@@ -97,16 +102,20 @@ def _priced_enrichment(enrichment: ResolvedFetch | None) -> PricedTool | None:
     )
 
 
-def admitted_tools(*, code_execution: bool, web: AdmittedWebTools) -> list[PricedTool]:
+def admitted_tools(
+    *, code_execution: bool, web: AdmittedWebTools, code_execution_image: str | None = None
+) -> list[PricedTool]:
     """The gateway-run tools one admitted request may call, in the registry's order, a search's pages after it.
 
-    MCP tools are not among them: they run on a caller's server, so neither the
-    deployment's prices nor its account are involved.
+    ``code_execution_image`` is the environment the sandbox runs, whose own price
+    is read before ``otari:code_execution``. MCP tools are not among them: they
+    run on a caller's server, so neither the deployment's prices nor its account
+    are involved.
     """
     used: dict[str, list[PricedTool]] = {}
     if code_execution:
         # The sandbox is the deployment's, whichever backend runs it.
-        used[CODE_EXECUTION_TOOL_NAME] = [_on_its_own_row(CODE_EXECUTION_TOOL_NAME, deployment_paid=True)]
+        used[CODE_EXECUTION_TOOL_NAME] = [_priced_code_execution(code_execution_image)]
     if web.search_tool_entry is not None:
         search = _priced_search(web.in_loop_search, on_credential=web.search_credential is not None)
         pages = _priced_enrichment(web.enrichment)
@@ -153,7 +162,12 @@ async def unfunded_tools(
 
 
 def tools_to_price(
-    *, code_execution: bool, web: AdmittedWebTools, require_pricing: bool, budget_exempt: bool
+    *,
+    code_execution: bool,
+    web: AdmittedWebTools,
+    require_pricing: bool,
+    budget_exempt: bool,
+    code_execution_image: str | None = None,
 ) -> list[PricedTool]:
     """The tools one admitted request runs that ``require_pricing`` checks, in the registry's order.
 
@@ -166,7 +180,11 @@ def tools_to_price(
     """
     if not require_pricing or budget_exempt:
         return []
-    return [tool for tool in admitted_tools(code_execution=code_execution, web=web) if tool.rate_keys]
+    return [
+        tool
+        for tool in admitted_tools(code_execution=code_execution, web=web, code_execution_image=code_execution_image)
+        if tool.rate_keys
+    ]
 
 
 def configured_tools_to_price(config: GatewayConfig) -> list[PricedTool]:
@@ -186,6 +204,8 @@ def configured_tools_to_price(config: GatewayConfig) -> list[PricedTool]:
                 priced.append(pages)
         elif tool.name == WEB_FETCH_TOOL_NAME:
             priced.append(_priced_fetch(resolve_fetch(config, None, requested=None, for_search=None)))
+        elif tool.name == CODE_EXECUTION_TOOL_NAME:
+            priced.append(_priced_code_execution(config.effective_sandbox_image()))
         else:
             priced.append(_on_its_own_row(tool.name, deployment_paid=True))
     return priced
@@ -214,12 +234,15 @@ def deployment_tool_rate_keys(config: GatewayConfig) -> list[InstanceRateKey]:
 def unpriced_tool_detail(name: str, rate_key: RateKey | None = None, *, enrichment: bool = False) -> str:
     """The refusal of a request that would run ``name`` with no price, naming ``rate_key``, the row that prices it.
 
-    With no ``rate_key``, it names the tool's ``otari:<tool>`` row. With
+    With no ``rate_key``, it names the tool's ``otari:<tool>`` row, as it does
+    for code execution, whose ``otari:code_execution`` row prices every environment. With
     ``enrichment``, the row is the fetch tool's that reads ``name``'s pages.
     ``price_per_call`` is offered for a tool a ``config.yml`` entry can declare,
     which ``builtin_fetch`` is not.
     """
-    row = describe_rate_key(rate_key if rate_key is not None else gateway_tool_pricing_key(name))
+    if rate_key is None or name == CODE_EXECUTION_TOOL_NAME:
+        rate_key = gateway_tool_pricing_key(name)
+    row = describe_rate_key(rate_key)
     page = "Code execution pricing" if name == CODE_EXECUTION_TOOL_NAME else "Web search pricing"
     where = (
         f"POST {API_ROOT}/pricing, the dashboard's {page} page, or price_per_call on its entry in config.yml"

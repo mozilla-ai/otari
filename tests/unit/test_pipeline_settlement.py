@@ -22,6 +22,7 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
+from functools import partial
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
@@ -45,6 +46,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 import gateway.api.routes._pipeline as pipeline
 import gateway.streaming as streaming
+from _unavailable_model_support import RecordingListener, background_tasks_done, reporter_with_null_listener
 from gateway.api.deps import ToolPorts
 from gateway.api.routes import chat, messages, responses
 from gateway.api.routes._pipeline import (
@@ -54,6 +56,8 @@ from gateway.api.routes._pipeline import (
     ToolBackends,
     ToolContext,
     build_streaming_response,
+    log_absorbed_attempt,
+    log_exhausted_plan,
     log_usage,
     prepare_gateway_tools,
     run_non_stream,
@@ -78,8 +82,9 @@ from gateway.services.budgets import (
     settle_abandoned_stream,
     settle_cut_stream,
 )
-from gateway.services.inference import DeploymentCharge
+from gateway.services.inference import DeploymentCharge, UnavailableModel, UnavailableModelReporter
 from gateway.services.pricing_service import ResolvedPricing
+from gateway.services.routing import CompiledPlan
 from gateway.services.tool_usage import ToolUsageTally
 from gateway.services.tools._mcp_admission import (
     MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL,
@@ -88,6 +93,7 @@ from gateway.services.tools._mcp_admission import (
 )
 from gateway.services.tools._web_admission import WEB_FETCH_NOT_ENABLED_DETAIL, WorkspaceWebExecutors
 from gateway.services.traces import SessionRef
+from gateway.types.attempt import Attempt
 
 ADAPTERS = [
     pytest.param(chat._ADAPTER, id="chat"),
@@ -176,6 +182,7 @@ def _ctx(
     organization_id: uuid.UUID | None = _ORGANIZATION_ID,
 ) -> RequestContext:
     return RequestContext(
+        unavailable_model_reporter=reporter_with_null_listener(),
         config=config,
         db=db,
         uow=cast(Any, AsyncMock()),
@@ -221,6 +228,7 @@ def test_all_settlement_callbacks_wired_for_every_format(
         yield  # unreachable; makes this a generator
 
     build_streaming_response(
+        report_refusal=lambda _exc: None,
         adapter=adapter,
         stream=_empty(),
         provider=LLMProvider.OPENAI,
@@ -273,6 +281,7 @@ def test_keepalive_interval_wired_from_config_for_every_format(
         yield  # unreachable; makes this a generator
 
     build_streaming_response(
+        report_refusal=lambda _exc: None,
         adapter=adapter,
         stream=_empty(),
         provider=LLMProvider.OPENAI,
@@ -385,6 +394,7 @@ def _build(
     prompt_chars: int | None = None,
 ) -> Any:
     return build_streaming_response(
+        report_refusal=lambda _exc: None,
         adapter=chat._ADAPTER,
         stream=stream,
         provider=LLMProvider.OPENAI,
@@ -1511,7 +1521,7 @@ async def test_a_charge_openrouter_states_settles_in_place_of_a_rate_nobody_chos
     row, logged = await _settle_openrouter(_OPENROUTER_USAGE)
 
     assert row.cost == Decimal("0.000010")
-    assert logged == LoggedUsage(Decimal("0.000010"), "reported", None)
+    assert logged == LoggedUsage(Decimal("0.000010"), "reported", None, tool_cost=Decimal(0))
     assert (row.pricing_source, row.pricing_reference, row.pricing_effective_at) == ("reported", None, None)
     assert (row.billing_meters, row.pricing_breakdown) == (None, None)
     assert row.calculated_at == row.timestamp
@@ -1770,6 +1780,7 @@ def _build_inline_stream(
 ) -> AsyncIterator[str]:
     """A stream that settles inline, so its terminal carrier waits for the cost."""
     response = build_streaming_response(
+        report_refusal=lambda _exc: None,
         adapter=chat._ADAPTER,
         stream=stream,
         provider=LLMProvider.OPENAI,
@@ -3303,6 +3314,7 @@ async def test_automatic_load_is_released_by_every_stream_terminal_callback(
 
     monkeypatch.setattr(pipeline, "streaming_generator", capture)
     build_streaming_response(
+        report_refusal=lambda _exc: None,
         adapter=adapter,
         stream=empty(),
         provider=LLMProvider.OPENAI,
@@ -3328,6 +3340,208 @@ async def test_automatic_load_is_released_by_every_stream_terminal_callback(
     assert all(health.active == 0 for health in router.health.values())
 
     assert bool(router.affinities) is (outcome in {"on_complete", "on_no_usage"})
+
+
+class _ModelNotServed(Exception):
+    status_code = 400
+
+    def __init__(self) -> None:
+        super().__init__("Unable to access non-serverless model m. Please visit the provider to start an endpoint.")
+
+
+def _refused_attempt() -> Attempt:
+    return Attempt(1, "together", LLMProvider.TOGETHER, "m", deployment_paid=True)
+
+
+def _reporting_ctx(listener: RecordingListener, *, plan: CompiledPlan | None = None) -> RequestContext:
+    ctx = _ctx(GatewayConfig(), db=object(), log_writer=object())
+    ctx.unavailable_model_reporter = UnavailableModelReporter(listener)
+    ctx.plan = plan
+    return ctx
+
+
+@pytest.mark.asyncio
+async def test_a_candidate_refusing_the_model_before_another_serves_is_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _Settlement().install(monkeypatch)
+    listener = RecordingListener()
+    refusal = _ModelNotServed()
+
+    await log_absorbed_attempt(_reporting_ctx(listener), chat._ADAPTER, _refused_attempt(), refusal)
+    await background_tasks_done()
+
+    assert listener.models == [UnavailableModel("together", "m", str(refusal), uses_deployment_credential=True)]
+
+
+@pytest.mark.asyncio
+async def test_a_plan_ending_on_a_candidate_refusing_the_model_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    _Settlement().install(monkeypatch)
+    listener = RecordingListener()
+    attempt = _refused_attempt()
+    refusal = _ModelNotServed()
+    exhausted = HTTPException(status_code=502, detail="every candidate failed")
+    exhausted.__cause__ = refusal
+
+    await log_exhausted_plan(
+        _reporting_ctx(listener, plan=CompiledPlan("model", [attempt])), chat._ADAPTER, exhausted, stopped_on=attempt
+    )
+    await background_tasks_done()
+
+    assert listener.models == [UnavailableModel("together", "m", str(refusal), uses_deployment_credential=True)]
+
+
+@pytest.mark.asyncio
+async def test_a_stream_ending_in_the_provider_refusing_the_model_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    _Settlement().install(monkeypatch)
+    listener = RecordingListener()
+    captured: dict[str, Any] = {}
+
+    async def empty() -> AsyncIterator[Any]:
+        return
+        yield
+
+    def capture(**kwargs: Any) -> AsyncIterator[Any]:
+        captured.update(kwargs)
+        return empty()
+
+    monkeypatch.setattr(pipeline, "streaming_generator", capture)
+    build_streaming_response(
+        report_refusal=partial(
+            UnavailableModelReporter(listener).report,
+            instance="together",
+            model="m",
+            uses_deployment_credential=True,
+        ),
+        adapter=chat._ADAPTER,
+        stream=empty(),
+        provider="together",
+        model="m",
+        config=GatewayConfig(),
+        db=cast(Any, object()),
+        log_writer=cast(Any, object()),
+        api_key_id=None,
+        user_id=None,
+        rate_limit_info=None,
+        reservation=None,
+    )
+    refusal = _ModelNotServed()
+
+    await captured["on_error"](refusal)
+    await background_tasks_done()
+
+    assert listener.models == [UnavailableModel("together", "m", str(refusal), uses_deployment_credential=True)]
+
+
+@pytest.mark.asyncio
+async def test_a_stream_the_provider_refuses_to_start_for_the_model_is_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _Settlement().install(monkeypatch)
+    listener = RecordingListener()
+    refusal = _ModelNotServed()
+
+    async def refusing_provider(**kwargs: Any) -> Any:
+        raise refusal
+
+    monkeypatch.setattr(chat, "acompletion", refusing_provider)
+    ctx = _reporting_ctx(listener)
+    ctx.deployment_paid = True
+
+    with pytest.raises(HTTPException):
+        await run_single_attempt_stream(
+            adapter=chat._ADAPTER,
+            ctx=ctx,
+            tool_ctx=_tool_ctx(),
+            call_kwargs={"model": "together:m", "messages": [{"role": "user", "content": "hi"}]},
+            provider=LLMProvider.TOGETHER,
+            model="m",
+        )
+    await background_tasks_done()
+
+    assert listener.models == [UnavailableModel("together", "m", str(refusal), uses_deployment_credential=True)]
+
+
+@pytest.mark.asyncio
+async def test_a_stream_refused_on_the_deployments_credential_with_nothing_to_charge_is_reported_as_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _Settlement().install(monkeypatch)
+    listener = RecordingListener()
+    captured: dict[str, Any] = {}
+
+    async def empty() -> AsyncIterator[Any]:
+        return
+        yield
+
+    async def streaming_provider(**kwargs: Any) -> Any:
+        return empty()
+
+    def capture(**kwargs: Any) -> AsyncIterator[Any]:
+        captured.update(kwargs)
+        return empty()
+
+    monkeypatch.setattr(chat, "acompletion", streaming_provider)
+    monkeypatch.setattr(pipeline, "streaming_generator", capture)
+    ctx = _reporting_ctx(listener)
+    ctx.deployment_paid = True
+    assert ctx.deployment_charge is None
+
+    await run_single_attempt_stream(
+        adapter=chat._ADAPTER,
+        ctx=ctx,
+        tool_ctx=_tool_ctx(),
+        call_kwargs={"model": "together:m", "messages": [{"role": "user", "content": "hi"}]},
+        provider=LLMProvider.TOGETHER,
+        model="m",
+    )
+    refusal = _ModelNotServed()
+    await captured["on_error"](refusal)
+    await background_tasks_done()
+
+    assert listener.models == [UnavailableModel("together", "m", str(refusal), uses_deployment_credential=True)]
+
+
+@pytest.mark.asyncio
+async def test_a_refused_stream_is_reported_with_the_credential_of_the_candidate_that_served_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _Settlement().install(monkeypatch)
+    listener = RecordingListener()
+    captured: dict[str, Any] = {}
+    own_key = Attempt(1, "openai", LLMProvider.OPENAI, "m")
+    hosted = _refused_attempt()
+
+    async def empty() -> AsyncIterator[Any]:
+        return
+        yield
+
+    async def serve_from_the_hosted_candidate(**kwargs: Any) -> tuple[Attempt, AsyncIterator[Any]]:
+        return hosted, empty()
+
+    def capture(**kwargs: Any) -> AsyncIterator[Any]:
+        captured.update(kwargs)
+        return empty()
+
+    monkeypatch.setattr(pipeline, "walk_attempts", serve_from_the_hosted_candidate)
+    monkeypatch.setattr(pipeline, "streaming_generator", capture)
+    ctx = _reporting_ctx(listener, plan=CompiledPlan("model", [own_key, hosted]))
+    assert not ctx.deployment_paid
+
+    await run_single_attempt_stream(
+        adapter=chat._ADAPTER,
+        ctx=ctx,
+        tool_ctx=_tool_ctx(),
+        call_kwargs={"model": "openai:m", "messages": [{"role": "user", "content": "hi"}]},
+        provider=LLMProvider.OPENAI,
+        model="m",
+        base_request_fields={},
+    )
+    refusal = _ModelNotServed()
+    await captured["on_error"](refusal)
+    await background_tasks_done()
+
+    assert listener.models == [UnavailableModel("together", "m", str(refusal), uses_deployment_credential=True)]
 
 
 def test_abandoned_stream_row_reads_as_incomplete_only_when_estimated() -> None:

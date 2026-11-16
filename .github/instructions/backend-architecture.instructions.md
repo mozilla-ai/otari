@@ -33,7 +33,7 @@ the old shape.
 | --- | --- | --- | --- |
 | Routes | `api/routes/<domain>.py` | Parses the request, calls one service method, returns a schema | Imports `sqlalchemy` or `sqlmodel`, builds a query, holds a business rule, defines a Pydantic model, imports a repository, or commits |
 | Schemas | `schemas/<domain>.py` | Holds Pydantic request and response models, and their mapping from ORM rows | Holds anything else |
-| Services | `services/<domain>/` | Runs use cases: business rules and orchestration | Imports `sqlalchemy` or `sqlmodel`, builds a query, takes or holds a session in a class or in a module-level function, touches HTTP, or imports another domain's repository |
+| Services | `services/<domain>/` | Runs use cases: business rules and orchestration | Imports `sqlalchemy` or `sqlmodel`, builds a query, takes or holds a session in a class or in a module-level function, reads a request or writes a response, or imports another domain's repository |
 | Repositories | `repositories/<domain>/`, modules ending in `_repository.py` | Runs every query, over `BaseRepository`, and flushes | Commits, or holds a business rule |
 | Exceptions | `exceptions/<domain>_exceptions.py` | Declares error classes, each with its own `status_code` | Handles an error |
 | Models | `models/<domain>.py` | Declares ORM tables, and the closed vocabulary of each string column that has one | Holds logic |
@@ -53,6 +53,9 @@ the old shape.
 - Flag a new module-level function under `services/` that takes an
   `AsyncSession`, including one added to a module already on
   `SERVICE_DATABASE_IMPORT_BASELINE`. The check does not catch that case.
+- A service names the status and the headers one of its own errors means, as
+  an exceptions module does. Flag a service that reads a request or writes a
+  response.
 
 ## Commits
 
@@ -132,7 +135,10 @@ model, except a module on the model's baseline.
   on it receives a listener interface by constructor injection, defined by the
   domain where the change happens.
 - Flag a listener implementation that commits or rolls back. The caller owns
-  the transaction.
+  the transaction. A listener told of something no transaction records, such
+  as a request that failed, is run in a background task by the domain that tells it, and does its
+  work on a Unit of Work of its own. Flag such a listener that starts a task
+  itself.
 - The check refuses a default on a parameter or a class field whose type name
   contains `Listener`. Flag a default on a listener whose type does not name
   it, such as a bare `Callable`.

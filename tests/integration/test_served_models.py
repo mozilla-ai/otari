@@ -7,6 +7,7 @@ import pytest
 from any_llm.types.model import Model
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.api.deps import build_model_metadata_override_service
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tenancy import User
@@ -141,6 +142,7 @@ def _org_service(db: AsyncSession) -> OrgProviderModelService:
         org_pricing=OrganizationPricingService(db, config, model_provider=None),
         models=OrgProviderKeyModelRepository(uow),
         keys=OrgProviderKeyRepository(db),
+        metadata_overrides=build_model_metadata_override_service(uow),
         refresh_overlay=lambda: refresh_org_provider_cache(db),
     )
 

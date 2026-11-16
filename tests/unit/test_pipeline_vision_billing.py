@@ -18,6 +18,7 @@ from fastapi import HTTPException, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import gateway.api.routes._pipeline as pipeline
+from _unavailable_model_support import reporter_with_null_listener
 from gateway.api.routes import chat
 from gateway.container import build_container
 from gateway.core.config import API_ROOT, GatewayConfig
@@ -117,7 +118,11 @@ async def _normalize_with_vision(target: NormalizationTarget) -> tuple[int, Comp
 
 
 async def _resolve(config: GatewayConfig) -> pipeline.RequestContext:
-    app = SimpleNamespace(state=SimpleNamespace(container=build_container(config=GatewayConfig())))
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            container=build_container(config=GatewayConfig()), unavailable_model_reporter=reporter_with_null_listener()
+        )
+    )
     request = Request(
         {
             "type": "http",

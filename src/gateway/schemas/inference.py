@@ -169,10 +169,18 @@ PRICING_SOURCE_PATTERN = r"^[a-z_]{1,32}$"
 
 
 class SettledCost(BaseModel):
-    """An attachable settlement: a priced cost and the basis for it."""
+    """An attachable settlement: a priced cost, the basis for it, and the part of it that is tool charges."""
 
     cost_usd: str = Field(pattern=SETTLED_COST_PATTERN)
     pricing_source: str = Field(pattern=PRICING_SOURCE_PATTERN)
+    tool_cost_usd: str | None = Field(default=None, pattern=SETTLED_COST_PATTERN)
+
+    def usage_fields(self) -> dict[str, str]:
+        """The fields a response's usage object carries, leaving out a tool cost that was not settled."""
+        fields = {"cost_usd": self.cost_usd, "pricing_source": self.pricing_source}
+        if self.tool_cost_usd is not None:
+            fields["tool_cost_usd"] = self.tool_cost_usd
+        return fields
 
 
 class RerankResult(BaseModel):

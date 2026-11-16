@@ -1,8 +1,9 @@
 """The direct search endpoint's old client, for the organization keys that do not run on any-search.
 
 The direct search endpoint runs on any-search (``gateway.services.tools``), except
-a search on a workspace's Tavily or Brave organization key (#2015), which
-any-search has no adapter for: it runs here, through the provider mapping the
+a search on a workspace's Tavily or Brave organization key (#2015), or on the
+legacy settings' key on a deployment with no search tool, which any-search has no
+adapter for: it runs here, through the provider mapping the
 in-loop backend uses. It reads the request in the gateway's provider-neutral terms
 (``SearchQuery``) and sends through the client its caller passes, the app's web
 provider client. It keeps its own ceiling of 20 results.
@@ -72,24 +73,33 @@ async def run_keyed_search(
     ``timeout_s`` is the named tool's, so the key changes who pays and not how long a search may take.
     The provider bills the key's owner directly, so no cost is reported.
     """
+    return await run_provider_search(
+        credential.provider, credential.api_key or "", query, timeout_s=timeout_s, client=client
+    )
+
+
+async def run_provider_search(
+    provider: str, api_key: str, query: SearchQuery, *, timeout_s: float, client: httpx.AsyncClient
+) -> SearchOutcome:
+    """Dispatch one search to Tavily or Brave on ``api_key``; the provider reports no cost."""
     limit = _result_limit(query)
     options: dict[str, Any] = {"max_results": limit}
     if query.country:
         options["country"] = query.country
     try:
         raw = await provider_search(
-            provider=credential.provider,
-            api_key=credential.api_key or "",
+            provider=provider,
+            api_key=api_key,
             query=query.query,
             options=options,
             client=client,
             timeout_s=timeout_s,
         )
     except WebSearchProviderError as exc:
-        msg = f"{credential.provider} search request failed: {exc}"
+        msg = f"{provider} search request failed: {exc}"
         raise SearchProviderError(msg, tag=exc.tag, status=exc.status) from exc
     except ValueError as exc:
-        msg = f"{credential.provider} search request failed: {exc}"
+        msg = f"{provider} search request failed: {exc}"
         raise SearchProviderError(msg) from exc
     hits = filter_hits_by_domain(_mapped_hits(raw, page_budget_chars(query)), query.domain_filter)
     return SearchOutcome(results=hits[:limit], cost_usd=None)

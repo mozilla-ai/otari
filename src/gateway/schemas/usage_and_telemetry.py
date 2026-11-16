@@ -311,14 +311,19 @@ class RequestSettlement(BaseModel):
     the describe call, all sharing the ``Otari-Request-ID`` the caller was sent as
     their ``request_group_id``, so this is the request's whole bill rather than one
     attempt's. ``cost_usd`` uses the inline ``usage.cost_usd`` format and is null
-    when no row was priced. ``status`` is ``error`` if any row is an error, and
-    ``incomplete`` for a stream the client abandoned before the provider reported
-    any usage.
+    when no row was priced. ``tool_cost_usd`` is the part of it that is per-call
+    tool charges, in the same format, for a completion (Chat Completions,
+    Messages, Responses); it is null where ``cost_usd`` is, for any other kind
+    of request, and where a priced row does not record it (written before the
+    gateway did, or where looking up its tools' prices failed). ``status`` is
+    ``error`` if any row is an error, and ``incomplete`` for a stream the client
+    abandoned before the provider reported any usage.
     """
 
     request_id: str
     status: Literal["success", "error", "incomplete"]
     cost_usd: str | None
+    tool_cost_usd: str | None
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int

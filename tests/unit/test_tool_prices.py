@@ -275,6 +275,34 @@ def test_the_code_execution_refusal_names_its_own_dashboard_page() -> None:
     assert "Code execution pricing page" in detail
 
 
+def test_code_execution_in_an_environment_reads_its_own_row_before_the_tools() -> None:
+    checked = tools_to_price(
+        code_execution=True,
+        code_execution_image="python-data",
+        web=NO_WEB_TOOLS,
+        require_pricing=True,
+        budget_exempt=False,
+    )
+
+    assert checked == [
+        PricedTool(CODE_EXECUTION_TOOL_NAME, None, ("otari:code_execution:python-data", "otari:code_execution"), True)
+    ]
+
+
+def test_the_deployments_default_environment_is_what_the_startup_check_prices() -> None:
+    priced = configured_tools_to_price(GatewayConfig(sandbox_url="http://sandbox", sandbox_session_image="python"))
+
+    assert priced == [
+        PricedTool(CODE_EXECUTION_TOOL_NAME, None, ("otari:code_execution:python", "otari:code_execution"), True)
+    ]
+
+
+def test_an_unpriced_environment_is_refused_naming_the_row_that_prices_every_environment() -> None:
+    detail = unpriced_tool_detail(CODE_EXECUTION_TOOL_NAME, "otari:code_execution:python-data")
+
+    assert "model_key 'otari:code_execution'" in detail
+
+
 def test_an_unfunded_tool_detail_names_the_tool_after_the_ports_refusal() -> None:
     detail = unfunded_tool_detail([Tool.CODE_EXECUTION], "Insufficient funds ($0.00).", declared=True)
     assert detail == (

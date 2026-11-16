@@ -48,7 +48,7 @@ comparing wording would fight that compression forever.
 ## Architecture (Big Picture)
 For the open-core OSS/enterprise seam (ports, adapters, the capability lines, and the rules for keeping the boundary), see [ARCHITECTURE.md](ARCHITECTURE.md). It is a north-star document describing the intended architecture, so ground current-state work in `src/gateway/`.
 
-Read it before adding a capability, introducing a port, or moving code across a layer. [Where new code goes](ARCHITECTURE.md#where-new-code-goes) says which kind of change lands where, and [Cardinal rules for contributors](ARCHITECTURE.md#cardinal-rules-for-contributors) holds the rules that keep the seam from eroding. Those rules are not advisory prose: the architecture check under [Lint / Typecheck](#lint--typecheck) is their mechanical half, and the [PR template](.github/pull_request_template.md) asks a change that alters a rule in `ARCHITECTURE.md` or in that script to name the rule and say why.
+Read it before adding a capability, introducing a port, or moving code across a layer. [Where new code goes](ARCHITECTURE.md#where-new-code-goes) says which kind of change lands where, and [Cardinal rules for contributors](ARCHITECTURE.md#cardinal-rules-for-contributors) holds the rules that keep the seam from eroding. Those rules are not advisory prose: the architecture check under [Lint / Typecheck](#lint--typecheck) is their mechanical half. A change that alters a rule in `ARCHITECTURE.md` or in that script names the rule in its PR description and says why.
 
 The per-request flow (auth → budget → dispatch → reconciliation) spans several files and is documented in [src/gateway/AGENTS.md](src/gateway/AGENTS.md). Read it before changing request behavior.
 

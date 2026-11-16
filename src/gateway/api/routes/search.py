@@ -34,9 +34,12 @@ it was priced under before tools had a kind; only the operator's price or
 override sets either, since the deployment pays for the call. A search a
 workspace's organization key served is priced under ``otari:web_search``, which
 the organization's own override may set, since a deployment cannot price a
-tenant's key. With ``require_pricing`` on, a search whose rate is missing is
-refused with a 402 after the budget checks, even from a provider that reports
-its own cost; a key exempt from budgets is still served.
+tenant's key. A search on the legacy settings, which a deployment with no
+search tool serves, is priced under ``otari:web_search`` too, and only the
+operator's price or override counts, since the deployment pays for it. With
+``require_pricing`` on, a search whose rate is missing is refused with a 402
+after the budget checks, even from a provider that reports its own cost; a key
+exempt from budgets is still served.
 """
 
 from typing import Annotated
@@ -44,7 +47,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path, Request, Response
 
 from gateway.api.deps import DirectToolServiceDep, verify_api_key_or_master_key
-from gateway.api.routes._helpers import answer_direct_tool_call
+from gateway.api.routes._helpers import DIRECT_TOOL_COST_HEADERS, answer_direct_tool_call
 from gateway.models.api_keys import APIKey
 from gateway.schemas.tools import SearchRequest, SearchResponse
 
@@ -53,7 +56,7 @@ router = APIRouter(tags=["search"])
 SEARCH_ENDPOINT = "/v1/search"
 
 
-@router.post("/search")
+@router.post("/search", responses={200: {"headers": DIRECT_TOOL_COST_HEADERS}})
 async def create_search(
     raw_request: Request,
     response: Response,
@@ -66,7 +69,8 @@ async def create_search(
     The tool is taken from ``search_tool_name``, which may be omitted when the
     deployment's ``web_search_default_tool`` names one, or when exactly one
     tool is configured. Such a call runs on the workspace's organization search
-    key when it has one.
+    key when it has one. A deployment with no search tool serves the backend its
+    legacy search settings describe, named after its provider.
 
     Authentication modes:
     - Master key: the ``user`` field is required and may name any existing user.
@@ -90,7 +94,7 @@ async def create_search(
     )
 
 
-@router.post("/search/{search_tool_name}")
+@router.post("/search/{search_tool_name}", responses={200: {"headers": DIRECT_TOOL_COST_HEADERS}})
 async def create_search_for_tool(
     raw_request: Request,
     response: Response,

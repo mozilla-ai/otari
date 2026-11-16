@@ -221,7 +221,7 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
     async def get_by_verification_token_hash(self, token_hash: str) -> User | None:
         """Return the identity a hashed email-verification token names, or None.
 
-        Exact match: the hash is the key `otari.services.tenancy.tokens.hash_token`
+        Exact match: the hash is the key `gateway.core.tokens.hash_token`
         produces, and it either matches the one live row that column holds or it
         does not, the same way an invitation resolves by ``token_hash``.
         """

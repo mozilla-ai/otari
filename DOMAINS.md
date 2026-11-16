@@ -17,7 +17,7 @@ with underscores (`api_keys`).
 | Layer | Path | Does | Must not |
 | --- | --- | --- | --- |
 | Routes | `api/routes/<domain>.py` | Parse the request, call one service, return a schema | Run a query, hold business rules, define schemas inline |
-| Services | `services/<domain>/`, whose `__init__.py` exports the one service and the types its public methods use | Use cases: business rules and orchestration | Run a query, hold the session, touch HTTP, import another domain's repositories |
+| Services | `services/<domain>/`, whose `__init__.py` exports the one service and the types its public methods use | Use cases: business rules and orchestration | Run a query, hold the session, read a request or write a response, import another domain's repositories |
 | Repositories | `repositories/<domain>/`, with modules that end in `_repository.py`, and the bundle a service receives in `<domain>_repositories.py` | Every query, over `BaseRepository`; flush, never commit | Hold business rules, commit |
 | Schemas | `schemas/<domain>.py` | Pydantic request and response models, and their mapping from ORM rows | Anything else |
 | Exceptions | `exceptions/<domain>_exceptions.py` | The domain's error classes, each with its HTTP status | Handle errors |
@@ -45,16 +45,21 @@ How a domain fits together:
   `api/`, so the code that starts a worker passes the builder in.
 - **Imports** follow the
   [layer and import rules](ARCHITECTURE.md#the-modular-monolith).
+- **HTTP vocabulary.** A service names the status and the headers one of its
+  own errors means, as an exceptions module does. It never reads a request or
+  writes a response.
 - **Reacting to another domain.** Dependencies between domains run one way.
   When a domain must react to a change in a domain that does not depend on it,
   the domain where the change happens defines a listener interface and receives
   an implementation by constructor injection (Observer, and the Dependency
   Inversion Principle). The listener runs inside the caller's transaction and
-  never commits. The parameter that receives it has no default, so a caller
-  cannot skip the listener by leaving it out. A listener interface's name ends
-  in `Listener`, and the architecture check finds such a parameter by a type
-  name that contains `Listener`. A package root may export a listener it
-  offers another domain.
+  never commits. A listener told of something no transaction records, such as a
+  request that failed, is run in a background task by the domain that tells it,
+  and does its work on a Unit of Work of its own. The parameter that receives
+  it has no default, so a caller cannot skip the listener by leaving it out. A
+  listener interface's name ends in `Listener`, and the architecture check
+  finds such a parameter by a type name that contains `Listener`. A package
+  root may export a listener it offers another domain.
 - **Divider comments** that cut a module into sections mean the module splits
   along them.
 - **The domain test.** A domain that cannot offer a small public API is more

@@ -29,6 +29,7 @@ from gateway.api.routes._guardrail_targets import AnswerPart, RequestTarget
 from gateway.api.routes._helpers import GUARDRAILS_RESULT_HEADER
 from gateway.core.env import otari_env
 from gateway.core.error_codes import GUARDRAIL_VIOLATION, error_headers
+from gateway.exceptions.guardrails_exceptions import AnswerRefused
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig, GuardrailDirection
 from gateway.services.guardrails import (
@@ -48,27 +49,12 @@ from gateway.services.tool_usage import TOOL_ERROR_SENTINEL
 from gateway.services.url_safety import UnsafeURLError
 
 if TYPE_CHECKING:
-    from any_llm.types.completion import CompletionUsage
-
     from gateway.core.config import GatewayConfig
     from gateway.services.traces import RequestTrace
 
 
 # How many pieces of one request are checked at a time.
 _CONCURRENT_CHECKS = 8
-
-
-class AnswerRefused(HTTPException):
-    """A guardrail refused the model's answer, after the model ran.
-
-    ``usage`` is what the provider reported for the answer, which a streamed
-    request bills on its error path; a request that is not streamed is billed
-    before this is raised.
-    """
-
-    def __init__(self, detail: dict[str, Any]) -> None:
-        super().__init__(status.HTTP_403_FORBIDDEN, detail=detail, headers=error_headers(GUARDRAIL_VIOLATION))
-        self.usage: CompletionUsage | None = None
 
 
 def _refusal(message: str, results: Sequence[GuardrailResult]) -> dict[str, Any]:

@@ -25,7 +25,7 @@ one needs them as much as an operator does.
 
 import uuid
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Annotated
@@ -54,8 +54,15 @@ from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tenancy import Workspace
 from gateway.models.usage import UsageLog
 from gateway.ports.model_provider_port import ModelProviderPort
-from gateway.schemas.catalog import CatalogCapabilities, CatalogFacets, CatalogModelSummary, CatalogQuery
+from gateway.schemas.catalog import (
+    CatalogCapabilities,
+    CatalogFacets,
+    CatalogModelSummary,
+    CatalogQuery,
+    ModelMetadataOverrideRequest,
+)
 from gateway.services.catalog import (
+    ModelMetadataOverrideService,
     ModelType,
     catalog_model_type,
     common_price_unit,
@@ -152,6 +159,15 @@ class OfferingUsage(BaseModel):
     )
 
 
+def _metadata_override(
+    selector: str, credential: CatalogCredential, organization_id: uuid.UUID | None
+) -> ModelMetadataOverrideRequest | None:
+    """The override the offering's key holder set, as the edit form reads it back."""
+    owner = organization_id if credential is CatalogCredential.ORGANIZATION else None
+    override = ModelMetadataOverrideService.current(selector, owner)
+    return ModelMetadataOverrideRequest.model_validate(asdict(override)) if override is not None else None
+
+
 class CatalogOffering(BaseModel):
     """One way this deployment can call a model: a selector on a provider."""
 
@@ -185,6 +201,13 @@ class CatalogOffering(BaseModel):
     )
     context_window: int | None = None
     max_output_tokens: int | None = None
+    metadata_override: ModelMetadataOverrideRequest | None = Field(
+        default=None,
+        description=(
+            "What whoever holds the serving key set in place of the server's and models.dev's word: the "
+            "organization for an `organization` offering, the operator otherwise. Null when nothing is set."
+        ),
+    )
     quantization: str | None = Field(default=None, description="From the provider's id, when it names one.")
     pricing: ModelPricingInfo | None = None
     price_source: PriceSource | None = Field(
@@ -421,6 +444,7 @@ async def _group(
                 # From the merged catalog, so the flat listing reports the same limits.
                 context_window=obj.context_window,
                 max_output_tokens=obj.max_output_tokens,
+                metadata_override=_metadata_override(obj.id, credential, organization_id),
                 quantization=clean_model_id(model_id).quantization,
                 pricing=pricing,
                 price_source=source,

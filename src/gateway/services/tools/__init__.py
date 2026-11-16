@@ -81,6 +81,10 @@ from gateway.services.tools._code_execution_declarations import (
     with_native_code_execution_tool,
     with_typed_code_execution_tool,
 )
+from gateway.services.tools._code_execution_environments import (
+    CodeExecutionEnvironmentPrices,
+    CodeExecutionEnvironmentService,
+)
 from gateway.services.tools._code_execution_policy import (
     WorkspaceCodeExecutionPolicies,
     WorkspaceCodeExecutionPolicyPublic,
@@ -98,6 +102,7 @@ from gateway.services.tools._direct_tool_call import (
     DirectToolGates,
     DirectToolLedger,
     DirectToolOutcome,
+    DirectToolRate,
     DirectToolResult,
     DirectToolService,
     DirectToolUsage,
@@ -137,6 +142,7 @@ from gateway.services.tools._search_tool_overlay import reset_search_tool_cache,
 from gateway.services.tools._search_tool_service import (
     ReadToolRate,
     ReadToolSettings,
+    SearchCatalogCaller,
     SearchToolService,
     StageToolSetting,
     ToolRateInForce,
@@ -236,6 +242,7 @@ __all__ = [
     "DirectToolGates",
     "DirectToolLedger",
     "DirectToolOutcome",
+    "DirectToolRate",
     "DirectToolResult",
     "DirectToolService",
     "DirectToolUsage",
@@ -243,6 +250,8 @@ __all__ = [
     "LegacySearchValues",
     "warn_about_legacy_search_settings",
     "MAX_TOOL_ITERATIONS_CAP",
+    "CodeExecutionEnvironmentPrices",
+    "CodeExecutionEnvironmentService",
     "WorkspaceCodeExecutionPolicies",
     "WorkspaceCodeExecutionPolicyPublic",
     "WorkspaceCodeExecutionPolicyService",
@@ -330,6 +339,7 @@ __all__ = [
     "search_provider_catalog",
     "ReadToolRate",
     "ReadToolSettings",
+    "SearchCatalogCaller",
     "SearchToolService",
     "StageToolSetting",
     "check_test_input",

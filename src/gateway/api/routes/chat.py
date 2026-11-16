@@ -32,26 +32,21 @@ from gateway.api.routes._idempotency import IdempotencyGuard, IdempotencyGuardDe
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
     DeclaredTools,
-    ErrorKind,
     ToolBackends,
     ToolContext,
-    classify_provider_error,
     log_usage,
     prepare_gateway_tools,
-    provider_error_headers,
-    provider_failure_detail,
     resolve_dispatch_provider,
     resolve_request_context,
     run_non_stream,
     run_single_attempt_stream,
     scope_prompt_cache_key,
-    stream_error_code,
-    stream_error_message,
 )
 from gateway.api.routes._request_tags import RequestMetadata, RequestTagsHeader, resolved_tags
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
+from gateway.core.error_codes import ErrorKind
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage, cache_write_1h_tokens_of, provider_web_searches_of, reasoning_tokens_of
 from gateway.log_config import logger
@@ -64,6 +59,7 @@ from gateway.provider_fields import surface_provider_fields
 from gateway.schemas.inference import SettledCost
 from gateway.services.files import FileService, StagedFile
 from gateway.services.inference import (
+    UpstreamFailure,
     bind_upstream_user,
     chat_user_fields,
     is_chat_stream_cost_carrier,
@@ -283,16 +279,17 @@ class _ChatAdapter:
         return HTTPException(status_code=status_code, detail=message, headers=headers)
 
     def provider_error(self, exc: BaseException, model: str | None = None) -> HTTPException:
-        mapping = classify_provider_error(exc, model=model)
+        failure = UpstreamFailure(exc, model=model)
+        mapping = failure.mapping
         if mapping is not None:
             return HTTPException(
                 status_code=mapping.status_code,
                 detail=mapping.detail,
-                headers=with_retry_hint(exc, mapping.status_code, provider_error_headers(exc, mapping.status_code)),
+                headers=with_retry_hint(exc, mapping.status_code, failure.headers),
             )
         return HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=provider_failure_detail(exc),
+            detail=failure.unclassified_detail(),
             headers=with_retry_hint(exc, status.HTTP_502_BAD_GATEWAY, None),
         )
 
@@ -301,10 +298,11 @@ class _ChatAdapter:
 
     def stream_error_payload(self, exc: BaseException, provider: str | None = None) -> str:
         failure = provider_failure(exc, provider)
+        upstream = UpstreamFailure(exc)
         return openai_error_event(
             self.stream_format,
-            stream_error_code(exc),
-            stream_error_message(exc),
+            upstream.stream_code,
+            upstream.stream_message,
             failure.as_dict() if failure is not None else None,
         )
 
@@ -347,12 +345,7 @@ class _ChatAdapter:
     ) -> bool:
         if value.usage is None:
             return False
-        value.usage = value.usage.model_copy(
-            update={
-                "cost_usd": settlement.cost_usd,
-                "pricing_source": settlement.pricing_source,
-            }
-        )
+        value.usage = value.usage.model_copy(update=settlement.usage_fields())
         return True
 
     def is_stream_cost_carrier(self, chunk: ChatCompletionChunk) -> bool:

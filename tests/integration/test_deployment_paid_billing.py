@@ -46,8 +46,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from gateway.api.deps import get_web_provider_client
 from gateway.api.routes import _pipeline as pipeline
-from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, COST_USD_HEADER, PRICING_SOURCE_HEADER, GatewayConfig
 from gateway.core.error_codes import ERROR_CODE_HEADER, INSUFFICIENT_FUNDS, RATE_LIMIT_RULE_HEADER, RATE_LIMITED
 from gateway.log_config import logger as gateway_logger
 from gateway.models.routing import RoutingConfig
@@ -205,6 +206,17 @@ def billed_in_loop_search(
     """``billed``, with the in-loop search on a search tool on the deployment's account that its own row prices."""
     tools = {FAKE_SEARCH: {"provider": "fake", "options": {"hits": [{"url": "https://otari.example"}]}}}
     yield from _billed(postgres_url, tmp_path, monkeypatch, search_tools=tools, web_search_extract=False)
+
+
+@pytest.fixture
+def billed_legacy_search(
+    postgres_url: str, clean_database: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Generator[tuple[TestClient, ModuleType]]:
+    """``billed``, searching only through the legacy settings' Tavily key, which the deployment pays for."""
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+    yield from _billed(
+        postgres_url, tmp_path, monkeypatch, web_search_provider="tavily", web_search_provider_api_key="tvly-ours"
+    )
 
 
 @pytest.fixture
@@ -920,7 +932,7 @@ def _search(client: TestClient, key: dict[str, Any]) -> Any:
 
 
 def test_a_direct_search_on_the_deployments_account_is_gated_then_charged_what_it_cost(
-    billed_search: tuple[TestClient, ModuleType],
+    billed_search: tuple[TestClient, ModuleType], db_session_factory: Callable[[], Session]
 ) -> None:
     client, probe = billed_search
     key = _key(client)
@@ -928,6 +940,8 @@ def test_a_direct_search_on_the_deployments_account_is_gated_then_charged_what_i
     response = _search(client, key)
 
     assert response.status_code == status.HTTP_200_OK, response.text
+    # What the organization was charged is what the answer says the call cost.
+    assert (response.headers[COST_USD_HEADER], response.headers[PRICING_SOURCE_HEADER]) == ("0.007000", "reported")
     assert [gate for gate, _ in probe.GATES] == ["apply_due_credit", "require_funds_on_deposit"]
     assert [(entry[0], entry[2], entry[3]) for entry in probe.LEDGER] == [
         ("charge", Decimal("0.007"), "fake:fake-search")
@@ -938,10 +952,11 @@ def test_a_direct_search_on_the_deployments_account_is_gated_then_charged_what_i
     user = _user(client)
     assert user["spend"] == pytest.approx(0.007)
     assert user["reserved"] == pytest.approx(0.0)
+    assert _deployment_paid_flags(db_session_factory) == [True]
 
 
 def test_a_direct_search_on_the_deployments_account_is_refused_without_funds(
-    billed_search: tuple[TestClient, ModuleType],
+    billed_search: tuple[TestClient, ModuleType], db_session_factory: Callable[[], Session]
 ) -> None:
     client, probe = billed_search
     key = _key(client)
@@ -952,6 +967,7 @@ def test_a_direct_search_on_the_deployments_account_is_refused_without_funds(
 
     assert response.status_code == status.HTTP_402_PAYMENT_REQUIRED, response.text
     assert response.headers[ERROR_CODE_HEADER] == INSUFFICIENT_FUNDS
+    assert COST_USD_HEADER not in response.headers
     assert response.json()["detail"] == (
         "Insufficient funds ($0.00) to serve this request. The gateway tool 'fake-search' runs on this "
         "deployment's account, which this organization's funds pay for. Add funds to run it."
@@ -961,6 +977,8 @@ def test_a_direct_search_on_the_deployments_account_is_refused_without_funds(
     assert _user(client)["reserved"] == pytest.approx(0.0)
     rows = client.get(f"{API_ROOT}/usage", params={"user_id": "billed"}, headers=MASTER).json()
     assert [(row["status"], row["status_code"], row["model"]) for row in rows] == [("error", 402, "fake-search")]
+    # Nothing was admitted, so nothing was paid for.
+    assert _deployment_paid_flags(db_session_factory) == [False]
 
 
 def test_a_direct_search_whose_funds_check_fails_is_refused_and_refunded(
@@ -983,6 +1001,54 @@ def test_a_direct_search_whose_funds_check_fails_is_refused_and_refunded(
     assert [(row["status"], row["status_code"], row["model"]) for row in rows] == [("error", 503, "fake-search")]
     errors = [r.getMessage() for r in gateway_logs.records if r.levelno == logging.ERROR]
     assert any("deployment-paid search" in message and "RuntimeError" in message for message in errors), errors
+
+
+def _tavily_answers(client: TestClient) -> None:
+    async def web_provider_client() -> AsyncIterator[httpx.AsyncClient]:
+        answer = {"results": [{"url": "https://otari.example", "title": "Otari", "content": "A snippet."}]}
+        transport = httpx.MockTransport(lambda _: httpx.Response(200, json=answer))
+        async with httpx.AsyncClient(transport=transport) as answering:
+            yield answering
+
+    client.app.dependency_overrides[get_web_provider_client] = web_provider_client  # type: ignore[attr-defined]
+
+
+def test_a_direct_search_on_the_legacy_settings_is_charged_at_the_web_search_rate(
+    billed_legacy_search: tuple[TestClient, ModuleType], db_session_factory: Callable[[], Session]
+) -> None:
+    client, probe = billed_legacy_search
+    _price(client, "otari:web_search")
+    key = _key(client)
+    _tavily_answers(client)
+
+    response = client.post(f"{API_ROOT}/search", json={"query": "otari"}, headers=_auth(key))
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert (response.headers[COST_USD_HEADER], response.headers[PRICING_SOURCE_HEADER]) == ("0.001000", "deployment")
+    assert [gate for gate, _ in probe.GATES] == ["apply_due_credit", "require_funds_on_deposit"]
+    assert [(entry[0], entry[2], entry[3]) for entry in probe.LEDGER] == [("charge", Decimal("0.001"), "tavily:tavily")]
+    assert probe.TOOLS == [{"otari:web_search": ToolUse(calls=1, amount=Decimal("0.001"))}]
+    assert _user(client)["spend"] == pytest.approx(0.001)
+    assert _deployment_paid_flags(db_session_factory) == [True]
+
+
+def test_a_direct_search_on_the_legacy_settings_is_refused_without_funds(
+    billed_legacy_search: tuple[TestClient, ModuleType], db_session_factory: Callable[[], Session]
+) -> None:
+    client, probe = billed_legacy_search
+    _price(client, "otari:web_search")
+    key = _key(client)
+    probe.FUNDS["available"] = Decimal("0")
+
+    with patch("gateway.services.tools._direct_tool_call.run_direct_search", new=AsyncMock()) as searched:
+        response = client.post(f"{API_ROOT}/search/tavily", json={"query": "otari"}, headers=_auth(key))
+
+    assert response.status_code == status.HTTP_402_PAYMENT_REQUIRED, response.text
+    assert response.headers[ERROR_CODE_HEADER] == INSUFFICIENT_FUNDS
+    searched.assert_not_called()
+    assert probe.LEDGER == []
+    assert _user(client)["reserved"] == pytest.approx(0.0)
+    assert _deployment_paid_flags(db_session_factory) == [False]
 
 
 def test_a_tool_admission_that_does_not_commit_is_not_served(

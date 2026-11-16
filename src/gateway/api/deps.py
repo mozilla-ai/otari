@@ -1,7 +1,7 @@
 import secrets
 import time
 import uuid
-from collections.abc import Awaitable, Callable, Collection, Mapping
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -59,6 +59,7 @@ from gateway.ports.usage_signal_port import RecordedUsage, UsageSignalPort
 from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit, rate_limit_headers
 from gateway.repositories.api_keys import ApiKeyRepositories, ApiKeyRepository, FederationRuleRepository
 from gateway.repositories.budgets import BudgetRepositories
+from gateway.repositories.catalog import ModelMetadataOverrideRepository
 from gateway.repositories.files import FileRepositories
 from gateway.repositories.health_checks import (
     HealthCheckRecoveryRepository,
@@ -66,7 +67,7 @@ from gateway.repositories.health_checks import (
     HealthCheckRunRepository,
     HealthCheckSettingsRepository,
 )
-from gateway.repositories.identity import IdentityRepositories, OAuthPendingStateRepository
+from gateway.repositories.identity import BlockedEmailRepository, IdentityRepositories, OAuthPendingStateRepository
 from gateway.repositories.identity.oauth_app_grant_repository import OAuthAppGrantRepository
 from gateway.repositories.inference import InferenceRepositories
 from gateway.repositories.organizations import OrganizationRepositories
@@ -138,17 +139,18 @@ from gateway.services.budgets import (
     refund_reservation,
     reserve_budget,
 )
-from gateway.services.catalog import served_context_window
+from gateway.services.catalog import ModelMetadataOverrideService, served_context_window
 from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.feedback import FeedbackService
 from gateway.services.files import FileBackends, FileService, SandboxFileBridge, StagedFile
-from gateway.services.health_checks import HealthCheckService
-from gateway.services.identity import IdentityService, OAuthAppService, OIDCConnectionService
+from gateway.services.health_checks import HealthCheckService, UnavailableModelListener
+from gateway.services.identity import EmailBlocklist, IdentityService, OAuthAppService, OIDCConnectionService
 from gateway.services.inference import (
     CompletedVideoUsage,
     DeploymentCharge,
     InferenceService,
+    UnavailableModelReporter,
     VideoJobService,
     VideoRateLookup,
     WorkspaceFunding,
@@ -162,7 +164,14 @@ from gateway.services.master_key_service import hash_master_key, is_generated_ma
 from gateway.services.model_discovery_service import DiscoveryDial, HostedDiscovery
 from gateway.services.oauth_service import provider_label, redirect_uri
 from gateway.services.organization_pricing_service import OrganizationPricingService
-from gateway.services.organizations import InvitationMailLimit, OrganizationClaimedDomains, UserAccess
+from gateway.services.organizations import (
+    DeliveryRule,
+    InvitationDelivery,
+    InvitationFactsReader,
+    InvitationMailLimit,
+    OrganizationClaimedDomains,
+    UserAccess,
+)
 from gateway.services.overview import OverviewService
 from gateway.services.playground_service import LocalToolOffer, PlaygroundToolOffer
 from gateway.services.pricing import DeploymentPricingService
@@ -220,12 +229,15 @@ from gateway.services.tenancy.workspace_service import WorkspaceService
 from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchPolicies, WorkspaceWebSearchService
 from gateway.services.tool_settings_service import load_overrides, stage_override
 from gateway.services.tools import (
+    CodeExecutionEnvironmentService,
     DirectCaller,
     DirectToolCall,
     DirectToolLedger,
+    DirectToolRate,
     DirectToolService,
     DirectToolUsage,
     McpGrantMembershipListener,
+    SearchCatalogCaller,
     SearchToolService,
     ToolRateInForce,
     WebSearchKeyService,
@@ -243,7 +255,7 @@ from gateway.services.workspace_scope import (
     organization_for_workspace_id,
     workspace_for_key_id,
 )
-from gateway.types.tool_charges import InstanceRateKey
+from gateway.types.tool_charges import RateKey
 from gateway.types.traces import (
     ContentCapture,
     ContentReader,
@@ -916,8 +928,9 @@ async def verify_catalog_reader(
     the deployment rather than act on it: ``GET /api/v1/models``, ``GET /api/v1/pricing``,
     ``GET /api/v1/tools``, ``GET /api/v1/providers/catalog`` (with their by-id
     variants), ``GET /api/v1/tool-settings/guardrails/catalog``,
-    ``GET /api/v1/tool-settings/guardrails/profiles`` and
-    ``GET /api/v1/search-tools/providers``. The
+    ``GET /api/v1/tool-settings/guardrails/profiles``,
+    ``GET /api/v1/search-tools/providers``, ``GET /api/v1/search-tools/catalog`` and
+    ``GET /api/v1/code/environments``. The
     dashboard's Models and Pricing pages are built on these, so a session has to
     reach them; they call no provider, write nothing, and bill nothing, so
     reaching them deployment-wide costs a signed-in caller's own organization
@@ -936,7 +949,7 @@ async def verify_catalog_reader(
     who reaches no operator route still has to read all four.
 
     Split out rather than left as a branch inside the other dependency so that
-    adding a route to this plane defaults to refusing the cookie. The six
+    adding a route to this plane defaults to refusing the cookie. The seven
     routers that serve these reads declare it on the router for the same reason,
     so admitting a session is spelled where the route is mounted rather than in
     one route's decorator.
@@ -965,6 +978,22 @@ async def catalog_reader_operates_deployment(
         return await DeploymentAdministrationAccess(db).has_administration_access(session_identity)
     _, is_master_key = auth
     return is_master_key
+
+
+async def catalog_reader_organization(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+    auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
+) -> uuid.UUID | None:
+    """The organization whose prices a caller :func:`verify_catalog_reader` admitted is shown.
+
+    Resolved as settlement resolves it: a session's active organization, an API
+    key's workspace's, and the default workspace's for the master key.
+    """
+    if session_identity is not None:
+        return session_identity.active_organization_id
+    api_key, _ = auth
+    return await organization_for_key_id(db, api_key.id if api_key is not None else None)
 
 
 async def verify_catalog_reader_or_public(
@@ -1115,6 +1144,18 @@ def get_unit_of_work(db: Annotated[AsyncSession, Depends(get_db)]) -> UnitOfWork
 UnitOfWorkDep = Annotated[UnitOfWork, Depends(get_unit_of_work)]
 
 
+def build_model_metadata_override_service(uow: UnitOfWork) -> ModelMetadataOverrideService:
+    """Build the model details service on ``uow``, for the request dependency and the services that compose it."""
+    return ModelMetadataOverrideService(uow, overrides=ModelMetadataOverrideRepository(uow))
+
+
+def get_model_metadata_override_service(uow: UnitOfWorkDep) -> ModelMetadataOverrideService:
+    return build_model_metadata_override_service(uow)
+
+
+ModelMetadataOverrideServiceDep = Annotated[ModelMetadataOverrideService, Depends(get_model_metadata_override_service)]
+
+
 async def get_maintenance_mode(db: Annotated[AsyncSession, Depends(get_db)]) -> bool:
     """Return whether new dashboard sign-ins are frozen right now."""
     return await is_maintenance_mode(db)
@@ -1210,6 +1251,38 @@ async def get_workspace_code_execution_policies(
 
 WorkspaceCodeExecutionPoliciesDep = Annotated[
     WorkspaceCodeExecutionPolicies, Depends(get_workspace_code_execution_policies)
+]
+
+
+class _CodeExecutionEnvironmentPrices:
+    """The environment listing's scope and price lookups, on the request's session."""
+
+    def __init__(self, db: AsyncSession) -> None:
+        self._db = db
+
+    async def workspace_of(self, api_key_id: str | None) -> uuid.UUID:
+        return await workspace_for_key_id(self._db, api_key_id)
+
+    async def organization_of(self, api_key_id: str | None) -> uuid.UUID | None:
+        return await organization_for_key_id(self._db, api_key_id)
+
+    async def unit_rate(self, rate_keys: Sequence[str], *, organization_id: uuid.UUID | None) -> Decimal | None:
+        # The sandbox is the deployment's, so a run is deployment-paid and only the operator's rate counts.
+        rate = await resolve_tool_rate(self._db, rate_keys, deployment_paid=True, organization_id=organization_id)
+        return rate.unit_rate if rate is not None else None
+
+
+def get_code_execution_environment_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    policies: WorkspaceCodeExecutionPoliciesDep,
+) -> CodeExecutionEnvironmentService:
+    """Build the sandbox environment listing on the request's session."""
+    return CodeExecutionEnvironmentService(config=config, policies=policies, prices=_CodeExecutionEnvironmentPrices(db))
+
+
+CodeExecutionEnvironmentServiceDep = Annotated[
+    CodeExecutionEnvironmentService, Depends(get_code_execution_environment_service)
 ]
 
 
@@ -1829,6 +1902,7 @@ def get_org_provider_model_service(
         org_pricing=OrganizationPricingService(db, config, model_provider=model_provider),
         models=OrgProviderKeyModelRepository(uow),
         keys=OrgProviderKeyRepository(db),
+        metadata_overrides=build_model_metadata_override_service(uow),
         refresh_overlay=lambda: refresh_org_provider_cache(db),
     )
 
@@ -1976,6 +2050,7 @@ def build_hosted_provider_service(uow: UnitOfWork, *, config: GatewayConfig) -> 
         pricing=build_deployment_pricing_service(uow),
         live_byo_pairs=OrgProviderKeyRepository(uow).live_provider_pairs,
         organization_exists=OrganizationRepository(uow).exists,
+        metadata_overrides=build_model_metadata_override_service(uow),
     )
 
 
@@ -2041,9 +2116,11 @@ def build_scheduled_catalog_update(config: GatewayConfig) -> ScheduledRun:
     return run
 
 
-async def _deployment_tool_rate(session: AsyncSession, rate_key: InstanceRateKey) -> ToolRateInForce | None:
+async def _deployment_tool_rate(
+    session: AsyncSession, rate_key: RateKey, organization_id: uuid.UUID | None
+) -> ToolRateInForce | None:
     """The rate one of the deployment's search or fetch tools settles at on its own account, as settlement reads it."""
-    rate = await resolve_tool_rate(session, [rate_key], deployment_paid=True)
+    rate = await resolve_tool_rate(session, [rate_key], deployment_paid=True, organization_id=organization_id)
     if rate is None:
         return None
     return ToolRateInForce(rate.unit_rate, under_old_key=rate.old_key)
@@ -2062,7 +2139,7 @@ def build_search_tool_service(uow: UnitOfWork, session: AsyncSession, *, config:
         tools=SearchToolRepository(uow),
         read_settings=lambda: load_overrides(session, report_invalid=False),
         stage_setting=lambda key, value: stage_override(session, key, value),
-        read_rate=lambda rate_key: _deployment_tool_rate(session, rate_key),
+        read_rate=lambda rate_key, organization_id: _deployment_tool_rate(session, rate_key, organization_id),
     )
 
 
@@ -2076,6 +2153,45 @@ def get_search_tool_service(
 
 
 SearchToolServiceDep = Annotated[SearchToolService, Depends(get_search_tool_service)]
+
+
+class _KeySearchCatalogCaller:
+    """An API key reading the search tool catalog, answered by its workspace's web policy and its tool lists."""
+
+    def __init__(
+        self,
+        config: GatewayConfig,
+        api_key: APIKey,
+        web_policies: WorkspaceWebSearchPolicies,
+        api_keys: ApiKeyService,
+    ) -> None:
+        self._config = config
+        self._api_key = api_key
+        self._web_policies = web_policies
+        self._api_keys = api_keys
+
+    async def web_search_allowed(self) -> bool:
+        allowed, _policy = await self._web_policies.access(self._api_key.workspace_id)
+        return allowed
+
+    async def tool_allowlist(self) -> list[str] | None:
+        return await self._api_keys.tool_allowlist(self._config, self._api_key)
+
+
+def get_search_catalog_caller(
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
+    web_policies: Annotated[WorkspaceWebSearchPolicies, Depends(get_workspace_web_search_policies)],
+    api_keys: Annotated[ApiKeyService, Depends(get_api_key_service)],
+) -> SearchCatalogCaller | None:
+    """The API key reading the search tool catalog, or ``None`` for the master key or a dashboard session."""
+    api_key, _ = auth
+    if api_key is None:
+        return None
+    return _KeySearchCatalogCaller(config, api_key, web_policies, api_keys)
+
+
+SearchCatalogCallerDep = Annotated[SearchCatalogCaller | None, Depends(get_search_catalog_caller)]
 
 
 async def get_search_tool_tester(
@@ -2155,6 +2271,34 @@ def get_health_check_service(
 
 
 HealthCheckServiceDep = Annotated[HealthCheckService, Depends(get_health_check_service)]
+
+
+def build_unavailable_model_reporter(config: GatewayConfig) -> UnavailableModelReporter:
+    """Build the app's reporter of models their providers refuse to serve, with the health checks listening."""
+    return UnavailableModelReporter(UnavailableModelListener(lambda uow: build_health_check_service(uow, config)))
+
+
+def get_unavailable_model_reporter(request: Request) -> UnavailableModelReporter:
+    """Return the reporter the app was built with."""
+    reporter: UnavailableModelReporter = request.app.state.unavailable_model_reporter
+    return reporter
+
+
+def build_invitation_delivery(uow: UnitOfWork, config: GatewayConfig) -> InvitationDelivery:
+    """Build the sender of due invitation emails on a worker job's Unit of Work."""
+    domains = OrganizationClaimedDomains(OrganizationDomainRepository(uow))
+    return InvitationDelivery(
+        uow,
+        OrganizationRepositories.on(uow),
+        rule=DeliveryRule(domains, EmailBlocklist(uow, BlockedEmailRepository(uow))),
+        facts=InvitationFactsReader(
+            domains=domains,
+            organizations=OrganizationRepository(uow),
+            users=UserRepository(uow),
+            workspaces=WorkspaceRepository(uow),
+        ),
+        mailer=Mailer(config),
+    )
 
 
 def build_update_check_service(uow: UnitOfWork, config: GatewayConfig) -> UpdateCheckService:
@@ -2903,7 +3047,9 @@ def _ledger_on(db: AsyncSession, config: GatewayConfig, billing: BillingPort) ->
         async def organization_of(self, api_key_id: str | None) -> uuid.UUID | None:
             return await organization_for_key_id(db, api_key_id)
 
-        async def unit_rate(self, call: DirectToolCall[Any], *, organization_id: uuid.UUID | None) -> Decimal | None:
+        async def unit_rate(
+            self, call: DirectToolCall[Any], *, organization_id: uuid.UUID | None
+        ) -> DirectToolRate | None:
             rate = await resolve_tool_rate(
                 db,
                 call.rate_keys,
@@ -2911,7 +3057,7 @@ def _ledger_on(db: AsyncSession, config: GatewayConfig, billing: BillingPort) ->
                 deployment_paid=call.deployment_paid,
                 organization_id=organization_id,
             )
-            return rate.unit_rate if rate is not None else None
+            return DirectToolRate(rate.unit_rate, rate.source) if rate is not None else None
 
         async def hold(
             self, user_id: str, amount: Decimal, *, api_key: APIKey | None, provider: str, counts_toward_budget: bool
@@ -3097,14 +3243,19 @@ __all__ = [
     "AgentRecommenderServiceDep",
     "HostedProviderServiceDep",
     "PlatformConnectServiceDep",
+    "SearchCatalogCallerDep",
     "SearchToolServiceDep",
     "SearchToolTesterDep",
     "OrgProviderModelServiceDep",
+    "ModelMetadataOverrideServiceDep",
     "RateLimitServiceDep",
     "HealthCheckServiceDep",
     "build_health_check_service",
+    "build_unavailable_model_reporter",
+    "get_unavailable_model_reporter",
     "UpdateCheckServiceDep",
     "build_update_check_service",
+    "build_invitation_delivery",
     "RequestSessionModelProviderPortDep",
     "TelemetryStoragePortDep",
     "ToolPorts",

@@ -75,7 +75,13 @@ from gateway.schemas.providers import (
     OrgProviderKeyPublic,
     OrgProviderModelsRefreshPublic,
 )
-from gateway.services.catalog import KeyOwner, offered_model_types, record_served_models
+from gateway.services.catalog import (
+    KeyOwner,
+    MetadataOverride,
+    ModelMetadataOverrideService,
+    offered_model_types,
+    record_served_models,
+)
 from gateway.services.model_catalog_service import cached_models_dev_catalog
 from gateway.services.model_discovery_service import ProviderDiscovery, test_provider_credentials
 from gateway.services.organization_pricing_service import EffectiveRate, OrganizationPricingService
@@ -266,6 +272,7 @@ class OrgProviderModelService:
         org_pricing: OrganizationPricingService,
         models: OrgProviderKeyModelRepository,
         keys: OrgProviderKeyRepository,
+        metadata_overrides: ModelMetadataOverrideService,
         refresh_overlay: Callable[[], Awaitable[None]],
     ) -> None:
         """Bind the unit of work and the collaborators this service composes.
@@ -289,6 +296,7 @@ class OrgProviderModelService:
         self.org_pricing = org_pricing
         self.models = models
         self.keys = keys
+        self.metadata_overrides = metadata_overrides
         self.refresh_overlay = refresh_overlay
 
     @property
@@ -323,6 +331,19 @@ class OrgProviderModelService:
             # is indistinguishable from one that does not exist.
             raise OrgProviderKeyNotFoundError(key_id)
         return key
+
+    async def _organization_serving(self, user: User, selector: str) -> uuid.UUID:
+        """The caller's organization, having checked they may administer it and it holds a live key under ``selector``.
+
+        Raises:
+            OrgProviderKeyNotFoundError: the organization holds no live key under the selector's prefix.
+        """
+        organization = await self.organizations.get_active_organization_for_user(user)
+        await self.organizations.require_active_organization_management_access(user=user, organization=organization)
+        prefix = selector.partition(":")[0]
+        if not await self.keys.any_under_prefix(organization.id, prefix, live=True):
+            raise OrgProviderKeyNotFoundError(prefix)
+        return organization.id
 
     # ------------------------------------------------------------------
     # Reads
@@ -472,6 +493,47 @@ class OrgProviderModelService:
             public = _model_public(row, prices.get(row.model), _kinds(key, [row.model]).get(row.model))
         await self.refresh_overlay()
         return public
+
+    async def set_metadata_override(self, *, user: User, selector: str, override: MetadataOverride) -> MetadataOverride:
+        """Replace the organization's own override of a model one of its keys serves.
+
+        Raises:
+            OrgProviderKeyNotFoundError: the organization holds no live key under the selector's prefix.
+            ValueError: ``selector`` is not in ``provider:model`` form.
+        """
+        organization_id = await self._organization_serving(user, selector)
+        return await self.metadata_overrides.set(selector, override, organization_id)
+
+    async def delete_key(self, *, user: User, key_id: uuid.UUID) -> None:
+        """Permanently delete an archived key, in one step with the model details its prefix loses.
+
+        The details go with the organization's last key under the prefix. An archived
+        key keeps them, so restoring it brings them back.
+
+        Raises:
+            OrgProviderKeyNotFoundError: no such key in the caller's organization.
+            OrgProviderKeyNotArchivedError: the key is still live.
+        """
+        async with self.uow:
+            key = await self._key_for_user(user, key_id)
+            prefix, organization_id = key.selector_prefix, key.organization_id
+            last = not await self.keys.any_under_prefix(organization_id, prefix, excluding=key.id)
+            if last:
+                await self.metadata_overrides.clear_provider(prefix, organization_id)
+            # Its commit, on this same session, also settles the rows cleared above.
+            await self.provider_keys.delete_key_for_user(user=user, key_id=key_id)
+        if last:
+            self.metadata_overrides.forget_provider(prefix, organization_id)
+
+    async def clear_metadata_override(self, *, user: User, selector: str) -> None:
+        """Drop the organization's own override of a model, leaving the server and models.dev to describe it.
+
+        Raises:
+            OrgProviderKeyNotFoundError: the organization holds no live key under the selector's prefix.
+            ValueError: ``selector`` is not in ``provider:model`` form.
+        """
+        organization_id = await self._organization_serving(user, selector)
+        await self.metadata_overrides.clear(selector, organization_id)
 
     async def remove_model(self, *, user: User, key_id: uuid.UUID, model_id: uuid.UUID) -> None:
         """Stop offering one model. Its rate and its history stay.

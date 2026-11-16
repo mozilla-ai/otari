@@ -18,13 +18,19 @@ validation is structural, matching ``/api/v1/tool-settings`` rather than the pro
 SSRF gate: the backend this most often points at is a SearXNG sidecar on a
 private address, which a deny-private gate would refuse.
 
-``/api/v1/search-tools/providers`` is the exception, on ``catalog_router``: it lists
+``/api/v1/search-tools/providers`` is an exception, on ``catalog_router``: it lists
 the providers any-search and any-fetch serve, which is a property of the build
 rather than of this deployment, so any catalog reader may see it. What it says
 about this deployment, its tools and their inherited endpoints, only an operator
 sees.
+
+``/api/v1/search-tools/catalog`` is the other, the search counterpart of
+``GET /api/v1/models``: the tools a caller may name in ``POST /api/v1/search``,
+with what a search costs the caller's organization and nothing of their
+configuration.
 """
 
+import uuid
 from collections.abc import Mapping
 from typing import Annotated, Any
 
@@ -32,10 +38,12 @@ import httpx
 from fastapi import APIRouter, Depends, Query, Request, status
 
 from gateway.api.deps import (
+    SearchCatalogCallerDep,
     SearchToolServiceDep,
     SearchToolTesterDep,
     WebProviderClientDep,
     catalog_reader_operates_deployment,
+    catalog_reader_organization,
     get_config,
     require_deployment_operator,
     verify_catalog_reader,
@@ -50,6 +58,7 @@ from gateway.schemas.tools import (
     CreateSearchToolRequest,
     ReencryptSearchToolsResponse,
     SearchProviderSchema,
+    SearchToolCatalogResponse,
     SearchToolsResponse,
     SearchToolTestRequest,
     SearchToolTestResponse,
@@ -100,6 +109,33 @@ async def list_search_providers(
     reader withholds the same from anyone else.
     """
     return search_provider_catalog(config, kind, operates=operates)
+
+
+@catalog_router.get("/catalog")
+async def list_search_tool_catalog(
+    service: SearchToolServiceDep,
+    organization_id: Annotated[uuid.UUID | None, Depends(catalog_reader_organization)],
+    caller: SearchCatalogCallerDep,
+    skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
+) -> SearchToolCatalogResponse:
+    """List the search tools a direct search may name, with what one search costs the caller.
+
+    Each entry is a tool ``POST /api/v1/search/{tool}`` serves, with its
+    provider, a display name, its price per search for the caller's
+    organization, and whether it is the deployment's default. Tools a direct
+    search cannot run on are left out, and no key, endpoint or option is
+    returned.
+
+    Called with an API key, a tool the key's ``allowed_tools`` does not grant is
+    left out, and the list is empty when its workspace does not allow web
+    search; ``GET /api/v1/tools`` says why. A master key or a dashboard session
+    gets the deployment's list.
+    """
+    try:
+        return await service.catalog(organization_id, caller, skip=skip, limit=limit)
+    except DATABASE_ERRORS as exc:
+        raise database_error("list the search tool catalog", exc) from None
 
 
 @router.get("")

@@ -41,6 +41,7 @@ from gateway.api.routes import (
     maintenance_mode,
     mcp,
     messages,
+    model_overrides,
     models,
     moderations,
     org_provider_keys,
@@ -160,6 +161,7 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     search.router,
     fetch.router,
     code_execution.router,
+    code_execution.catalog_router,
     batches.router,
     videos.router,
     # Discovery rather than dispatch, so these are not operator-gated. The
@@ -171,6 +173,9 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     # listed flat for an SDK.
     catalog.router,
     catalog.operator_router,
+    # The deployment's half of the model metadata overrides; an organization's
+    # half sits with its provider keys below.
+    model_overrides.router,
     playground.router,
     # Split from the operator router because the organization provider-key
     # form is read by a tenant's owners and admins, who operate nothing.
@@ -219,6 +224,7 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     web_search_keys.workspace_router,
     org_provider_keys.org_router,
     org_provider_keys.workspace_router,
+    model_overrides.org_router,
     workspace_hosted_providers.router,
     workspace_hosted_providers.policy_router,
     budgets.router,

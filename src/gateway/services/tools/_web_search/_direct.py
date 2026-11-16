@@ -7,7 +7,9 @@ its own allowlist, budget and usage steps.
   or in ``search_tool_name``, else the one ``web_search_default_tool`` names
   when any-search serves it, else the only one. Where a call that names none
   finds no instance to pick, :func:`organization_key_search_instance` stands
-  in for one when the workspace has an organization key.
+  in for one when the workspace has an organization key, else
+  :func:`legacy_search_instance` when the legacy settings describe a backend.
+  A deployment with no instance serves that backend under its provider's name.
 - :func:`resolve_direct_search` returns the :class:`DirectSearch`. A call that
   names its instance runs on the instance's own key. A call that names none
   runs on the organization key in the workspace's policy, when there is one,
@@ -18,7 +20,7 @@ its own allowlist, budget and usage steps.
 - :func:`unpriced_direct_search_detail` names the row ``require_pricing``
   needs, for the 402 a direct tool call answers when none prices it.
 - :func:`run_direct_search` calls the provider through any-search, or through
-  the Tavily or Brave client for an organization key on those providers.
+  the Tavily or Brave client for a key on those providers.
 
 Whichever key serves the call, the instance supplies the allowlist entry, the
 rate-limit rules, the timeout, the usage row's names and the response's
@@ -52,6 +54,7 @@ from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential
 from gateway.schemas.tools import SearchRequest, SearchResponse, SearchResultItem
 from gateway.services.tools._web_names import WEB_SEARCH_TOOL_NAME
 from gateway.services.tools._web_provider_client import web_provider_client_for
+from gateway.services.tools._web_search._default import direct_search_fallback
 from gateway.services.tools._web_search._litellm import (
     SearchQuery,
     direct_count,
@@ -60,7 +63,7 @@ from gateway.services.tools._web_search._litellm import (
 )
 from gateway.services.tools._web_search._resolve import ResolvedSearch, resolve_search, resolve_search_on_key
 from gateway.services.tools._web_tool_failure import WebToolFailure, failed_text
-from gateway.types.tool_charges import RateKey, describe_rate_key
+from gateway.types.tool_charges import InstanceRateKey, RateKey, describe_rate_key
 
 
 @dataclass(frozen=True)
@@ -96,6 +99,11 @@ def pick_direct_search_instance(config: ToolSettings, name: str | None) -> ToolI
     """
     instances = effective_search_instances(config)
     if not instances:
+        legacy = legacy_search_instance(config)
+        if legacy is not None and name is not None:
+            if name != legacy.name:
+                raise SearchToolSelectionError(f"Unknown search tool '{name}'. Available: {legacy.name}.")
+            return legacy
         # Names every way to add one, since a deployment may have no config file.
         msg = (
             "No search tools are configured. Add one on the dashboard's Tools & Guardrails page "
@@ -122,15 +130,52 @@ def _requires_key(provider: str) -> bool:
     return any_search.AnySearch.get_provider_metadata(provider).requires_api_key
 
 
-def unnamed_direct_search_tool(config: ToolSettings) -> str | None:
-    """The search instance a direct search that names none runs on, or ``None`` when that search is refused.
+def legacy_search_instance(config: ToolSettings) -> ToolInstance | None:
+    """The legacy settings' backend as the direct endpoint names it, or ``None`` where a search instance exists.
 
-    It is refused when there is no instance to pick, or when the one picked cannot run.
+    Named after its provider, so a search instance of that name can later take its place unnoticed.
+    """
+    fallback = direct_search_fallback(config)
+    if fallback is None:
+        return None
+    library_backed = fallback.provider in any_search.AnySearch.get_supported_providers()
+    return ToolInstance(name=fallback.name, kind="search", provider=fallback.provider, library_backed=library_backed)
+
+
+def unnamed_direct_search_tool(config: ToolSettings) -> str | None:
+    """The search tool a direct search that names none runs on, or ``None`` when that search is refused.
+
+    It is refused when there is no instance to pick and no legacy backend, or when the one picked cannot run.
     """
     try:
         return pick_direct_search_instance(config, None).name
-    except (SearchToolSelectionError, SearchToolMisconfiguredError):
+    except SearchToolSelectionError:
+        legacy = legacy_search_instance(config)
+        return legacy.name if legacy is not None else None
+    except SearchToolMisconfiguredError:
         return None
+
+
+def direct_search_rate_key(config: ToolSettings, name: str) -> RateKey:
+    """The price row a direct search on the servable tool ``name`` is billed under, for the deployment to pay."""
+    resolved = resolve_search(config, None, requested=name, request_options=None)
+    if resolved is None:
+        # Unreachable: a named tool resolves or raises.
+        raise SearchToolMisconfiguredError(name)
+    return resolved.rate_keys[0]
+
+
+def servable_direct_search_instances(config: ToolSettings) -> list[ToolInstance]:
+    """The search tools a direct search may name and be served on, by name."""
+    if (legacy := legacy_search_instance(config)) is not None:
+        return [legacy]
+    servable: list[ToolInstance] = []
+    for name in sorted(effective_search_instances(config)):
+        try:
+            servable.append(pick_direct_search_instance(config, name))
+        except (SearchToolSelectionError, SearchToolMisconfiguredError):
+            continue
+    return servable
 
 
 def _default_instance(config: ToolSettings, instances: dict[str, ToolInstance]) -> str:
@@ -263,22 +308,27 @@ def unpriced_direct_search_detail(search: DirectSearch) -> str:
 
     For an instance's own price, or the ``<provider>:<instance>`` row it was
     priced under before it had a kind, only the operator's price or override
-    counts, since the deployment pays for the call; for ``otari:web_search``,
-    the organization's own override counts too.
+    counts, since the deployment pays for the call. ``otari:web_search``, which
+    prices an organization key's search and the legacy backend's, is named as such.
     """
+    rate_key = search.resolved.rate_keys[0]
     return direct_unpriced_detail(
-        "search", search.instance.name, search.resolved.rate_keys[0], organization_key=search.resolved.on_credential
+        "search",
+        search.instance.name,
+        rate_key,
+        gateway_tool_row=search.resolved.on_credential or not isinstance(rate_key, InstanceRateKey),
     )
 
 
-def direct_unpriced_detail(kind: ToolKind, tool: str, rate_key: RateKey, *, organization_key: bool) -> str:
+def direct_unpriced_detail(kind: ToolKind, tool: str, rate_key: RateKey, *, gateway_tool_row: bool) -> str:
     """The 402's message: the price ``rate_key`` names for a ``kind`` call on ``tool``, and where to set it.
 
     Both can be set on the dashboard's Web search pricing page or through the
     API, and an instance declared in the configuration file by its
     ``price_per_call``, which ``builtin_fetch`` has no entry for.
+    ``gateway_tool_row`` says ``rate_key`` is an ``otari:<tool>`` row, which the message names.
     """
-    if organization_key:
+    if gateway_tool_row:
         missing = f"is priced at {describe_rate_key(rate_key)}, which has no pricing"
         how = (
             f"Set a per-request rate for it (POST {API_ROOT}/pricing, the pricing section of config.yml, "
@@ -304,8 +354,8 @@ def direct_unpriced_detail(kind: ToolKind, tool: str, rate_key: RateKey, *, orga
 async def run_direct_search(search: DirectSearch, client: httpx.AsyncClient) -> DirectSearchResult:
     """Run a direct search through the app's web provider client.
 
-    The call runs on any-search, or on the Tavily or Brave client for an
-    organization key on those providers. Raises :class:`DirectSearchFailedError`
+    The call runs on any-search, or on the Tavily or Brave client for a key
+    on those providers: an organization's, or the legacy settings'. Raises :class:`DirectSearchFailedError`
     when the provider fails the call, an error inside a successful answer
     included. Its message, for the usage row and the log, holds only the
     failure's safe fields, since the Tavily and Brave clients' own text can
@@ -355,12 +405,16 @@ async def _on_any_search(search: DirectSearch, client: httpx.AsyncClient) -> Dir
 
 async def _on_old_client(search: DirectSearch, client: httpx.AsyncClient) -> DirectSearchResult:
     # Imported here, as in run_direct_search; looked up on each call, so a test that stubs a client still reaches it.
-    from gateway.services.search_backend import run_keyed_search
+    from gateway.services.search_backend import run_keyed_search, run_provider_search
 
-    if search.credential is None:
-        # Unreachable: only an organization key on Tavily or Brave runs on the old client.
-        raise SearchToolMisconfiguredError(search.instance.name)
-    outcome = await run_keyed_search(search.credential, search.query, timeout_s=search.resolved.timeout, client=client)
+    resolved = search.resolved
+    if search.credential is not None:
+        outcome = await run_keyed_search(search.credential, search.query, timeout_s=resolved.timeout, client=client)
+    else:
+        # The legacy settings' Tavily or Brave key, which the deployment pays for.
+        outcome = await run_provider_search(
+            resolved.provider, resolved.api_key, search.query, timeout_s=resolved.timeout, client=client
+        )
     return DirectSearchResult(
         response=SearchResponse(
             search_tool=search.instance.name,

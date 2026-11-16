@@ -6,7 +6,8 @@ Search, in order:
    endpoint sets. The instance runs with its own key, unless
    ``direct_credential``, the workspace's organization key for an unnamed
    call, is given: the key's provider, key and options then serve the call,
-   and the instance keeps its name and timeout.
+   and the instance keeps its name and timeout. On a deployment with no
+   instance, ``requested`` may name the legacy backend instead.
 2. Else the policy's credential: the workspace's organization key.
 3. Else the in-loop default.
 4. Else nothing, which the caller turns into its refusal.
@@ -80,7 +81,7 @@ from gateway.models.tools import (
 )
 from gateway.services.tools._web_names import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
 from gateway.services.tools._web_search._cost_tier import refused_cost_tier
-from gateway.services.tools._web_search._default import in_loop_default
+from gateway.services.tools._web_search._default import direct_search_fallback, in_loop_default
 from gateway.services.web_retrieval_network import NETWORK_DEADLINE_SECONDS
 from gateway.types.tool_charges import (
     ORGANIZATION_KEY_LABEL_PREFIX,
@@ -208,7 +209,7 @@ def resolve_search(
     if requested is not None:
         instance = effective_search_instances(config).get(requested)
         if instance is None:
-            raise SearchToolNotFoundError(requested)
+            return _search_on_fallback(config, requested, direct_credential, request)
         timeout = instance.timeout or DIRECT_TIMEOUT_S
         if direct_credential is not None:
             on_key = _search_on_credential(
@@ -392,8 +393,31 @@ def _search_on_instance(
     )
 
 
+def _search_on_fallback(
+    config: ToolSettings,
+    requested: str,
+    direct_credential: WebSearchCredential | None,
+    request: Mapping[str, Any],
+) -> ResolvedSearch:
+    """A direct search on the legacy backend, which a deployment with no search instance serves under its name."""
+    fallback = direct_search_fallback(config)
+    if fallback is None or fallback.name != requested:
+        raise SearchToolNotFoundError(requested)
+    if direct_credential is not None:
+        on_key = _search_on_credential(
+            direct_credential, name=fallback.name, in_loop=False, timeout=DIRECT_TIMEOUT_S, request=request
+        )
+        if on_key is not None:
+            return on_key
+    return _search_on_synthesized(fallback, workspace=_NO_OPTIONS, request=request, timeout=DIRECT_TIMEOUT_S)
+
+
 def _search_on_synthesized(
-    synthesized: SynthesizedSearchInstance, *, workspace: Mapping[str, Any], request: Mapping[str, Any]
+    synthesized: SynthesizedSearchInstance,
+    *,
+    workspace: Mapping[str, Any],
+    request: Mapping[str, Any],
+    timeout: float = IN_LOOP_TIMEOUT_S,
 ) -> ResolvedSearch:
     runner: Runner = "library" if synthesized.provider in any_search.AnySearch.get_supported_providers() else "old"
     legacy = {"engines": ",".join(synthesized.engines)} if synthesized.engines else {}
@@ -415,7 +439,7 @@ def _search_on_synthesized(
         api_base=_base(synthesized.api_base),
         options=MappingProxyType(options),
         max_results=max_results,
-        timeout=IN_LOOP_TIMEOUT_S,
+        timeout=timeout,
         label=_SEARCH_FALLBACK_RATE,
         rate_keys=(_SEARCH_FALLBACK_RATE,),
     )

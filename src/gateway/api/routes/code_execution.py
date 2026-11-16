@@ -3,8 +3,9 @@
 ``otari_code_execution`` runs a model's code mid-completion. This endpoint runs
 the caller's, as ``POST /api/v1/search`` runs a query, under the same
 admission: the workspace's code execution policy (the switch, the timeout
-ceiling, the pinned image), the held-container rules, the
-``otari:code_execution`` rate and the budgets.
+ceiling, the pinned image), the held-container rules, the rate of the
+environment it runs in and the budgets. ``GET /code/environments`` lists the
+environments a caller may name.
 
 Every run that reached the sandbox is billed, whatever the code did: the
 sandbox ran it either way, and a caller here, unlike a model in the tool loop,
@@ -27,11 +28,12 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     BillingPortDep,
+    CodeExecutionEnvironmentServiceDep,
     CodeExecutionPortDep,
     OptionalFileServiceDep,
     UnitOfWorkDep,
@@ -43,8 +45,10 @@ from gateway.api.deps import (
     get_db,
     get_log_writer,
     verify_api_key_or_master_key,
+    verify_catalog_reader,
 )
 from gateway.api.request_id import set_request_id
+from gateway.api.routes._helpers import DIRECT_TOOL_COST_HEADERS
 from gateway.api.routes._passthrough import resolve_passthrough_user_id
 from gateway.api.routes._pipeline import (
     SANDBOX_UNAVAILABLE_DETAIL,
@@ -52,7 +56,7 @@ from gateway.api.routes._pipeline import (
     _elapsed_ms,
     log_gateway_rejection,
 )
-from gateway.core.config import END_USER_BUDGET_HEADER, GatewayConfig
+from gateway.core.config import COST_USD_HEADER, END_USER_BUDGET_HEADER, PRICING_SOURCE_HEADER, GatewayConfig
 from gateway.core.database import release_session
 from gateway.core.error_codes import INSUFFICIENT_FUNDS, PRICING_REQUIRED, error_headers
 from gateway.core.metered_pricing import quantize_cost
@@ -69,7 +73,12 @@ from gateway.ports.code_execution_port import (
     SandboxUnavailableError,
 )
 from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit, rate_limit_headers
-from gateway.schemas.tools import CodeExecuteRequest, CodeExecuteResponse, CodeExecutionOutputFile
+from gateway.schemas.tools import (
+    CodeExecuteRequest,
+    CodeExecuteResponse,
+    CodeExecutionEnvironmentList,
+    CodeExecutionOutputFile,
+)
 from gateway.schemas.usage_and_telemetry import TOOL_METER_NAMESPACE
 from gateway.services.api_keys import names_end_user
 from gateway.services.budgets import (
@@ -84,7 +93,12 @@ from gateway.services.files import FileScope
 from gateway.services.inference import DeploymentCharge, admit_deployment_paid, describe_port_error
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import resolve_tool_rate
-from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, DEFAULT_EXEC_TIMEOUT_S, SandboxBackend
+from gateway.services.sandbox_backend import (
+    CODE_EXECUTION_TOOL_NAME,
+    DEFAULT_EXEC_TIMEOUT_S,
+    SandboxBackend,
+    code_execution_rate_keys,
+)
 from gateway.services.tools import (
     CONTAINER_GONE_DETAIL_TEMPLATE,
     Tool,
@@ -96,6 +110,9 @@ from gateway.services.workspace_scope import organization_for_key_id, workspace_
 from gateway.types.tool_charges import GATEWAY_TOOL_PRICING_PROVIDER, gateway_tool_pricing_key
 
 router = APIRouter(prefix="/code", tags=["code-execution"])
+# The environment listing describes the deployment and bills nothing, so a dashboard session reads it as it reads
+# ``GET /models``; a run stays on the router above, which takes a key or the master key only.
+catalog_router = APIRouter(prefix="/code", tags=["code-execution"], dependencies=[Depends(verify_catalog_reader)])
 
 CODE_EXECUTE_ENDPOINT = "/v1/code/execute"
 SANDBOX_NOT_CONFIGURED_DETAIL = "code execution is not available: no sandbox is configured on this gateway"
@@ -106,7 +123,7 @@ _DECLARATION: list[dict[str, Any]] = [{"type": "otari_code_execution"}]
 _PRICING_KEY = gateway_tool_pricing_key(CODE_EXECUTION_TOOL_NAME)
 
 
-@router.post("/execute")
+@router.post("/execute", responses={200: {"headers": DIRECT_TOOL_COST_HEADERS}})
 async def execute_code(
     raw_request: Request,
     response: Response,
@@ -126,12 +143,15 @@ async def execute_code(
 
     The run is admitted as an ``otari_code_execution`` call is: a workspace whose
     code execution policy is off is refused, and its execution ceiling and pinned
-    image apply. It is priced under ``otari:code_execution`` and reserved against
-    the caller's budgets. ``file_ids`` puts uploads in the working directory, and
+    image apply. ``environment`` names one of the environments
+    ``GET /api/v1/code/environments`` lists. The run is priced under
+    ``otari:code_execution:<environment>``, else ``otari:code_execution``, and
+    reserved against the caller's budgets. ``file_ids`` puts uploads in the working directory, and
     each file the code writes comes back with a ``file_id``. ``container: "auto"``
     holds the sandbox after the run and names it in ``Otari-Container-Id``;
     sending that id back runs in the same sandbox, with its files and
-    interpreter state.
+    interpreter state. A priced run answers with its settled cost in
+    ``Otari-Cost-USD`` and the rate's source in ``Otari-Pricing-Source``.
 
     Authentication modes:
     - Master key: the ``user`` field is required and may name any existing user.
@@ -220,7 +240,7 @@ async def execute_code(
                 config=config, uow=uow, user_id=user_id, workspace_id=workspace_id, port=port
             ),
         )
-        admitted = await declared.admit(claimed=False, beside_sandbox=False)
+        admitted = await declared.admit(claimed=False, beside_sandbox=False, environment=request.environment)
     except TenancyError as exc:
         raise await refuse(exc.message, exc.status_code) from exc
 
@@ -239,7 +259,9 @@ async def execute_code(
     try:
         # The sandbox is the deployment's, so the run is deployment-paid and only the operator's rate counts.
         organization_id = await organization_for_key_id(db, api_key_id)
-        rate = await resolve_tool_rate(db, (_PRICING_KEY,), deployment_paid=True, organization_id=organization_id)
+        rate = await resolve_tool_rate(
+            db, code_execution_rate_keys(admitted.session_image), deployment_paid=True, organization_id=organization_id
+        )
         unit_rate = rate.unit_rate if rate is not None else Decimal(0)
         rate_limit_grant = await admit_rate_limit_rules(
             raw_request,
@@ -408,6 +430,9 @@ async def execute_code(
         )
     await reconcile_reservation(db, reservation, cost)
 
+    if rate is not None:
+        response.headers[COST_USD_HEADER] = f"{cost:.6f}"
+        response.headers[PRICING_SOURCE_HEADER] = rate.source
     if backend.lease is not None:
         response.headers["Otari-Container-Id"] = backend.lease.container_id
         response.headers["Otari-Container-Expires-At"] = backend.lease.expires_at.isoformat()
@@ -424,6 +449,30 @@ async def execute_code(
             for filename, file_id in execution.file_ids.items()
         ],
     )
+
+
+@catalog_router.get("/environments")
+async def list_code_execution_environments(
+    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
+    environments: CodeExecutionEnvironmentServiceDep,
+    skip: Annotated[int, Query(ge=0, description="Number of environments to skip")] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of environments to return")] = 100,
+) -> CodeExecutionEnvironmentList:
+    """List the sandbox environments the caller's workspace may run code in, with their prices.
+
+    The code execution counterpart of ``GET /api/v1/models``: each environment's
+    ``name``, which ``POST /api/v1/code/execute`` takes as ``environment``, a
+    ``label`` and ``description``, ``price_per_run`` for the caller's
+    organization, and whether it is the ``default`` a run that names none gets.
+    A workspace whose code execution policy is off lists none, and one that
+    pins an environment lists that one alone. A gateway with no sandbox lists
+    none, as does one that names no image, whose runs go to the backend's own
+    default. A master key or a dashboard session belongs to no single workspace,
+    so it gets the deployment's whole list at the deployment's prices.
+    ``skip`` and ``limit`` page the list in the operator's order.
+    """
+    api_key, _ = auth_result
+    return await environments.list_offered(api_key.id if api_key else None, skip=skip, limit=limit)
 
 
 def _tool_meters(*, billed: int, errors: int, unit_rate: Decimal | None = None) -> dict[str, Any]:

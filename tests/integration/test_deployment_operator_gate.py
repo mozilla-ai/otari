@@ -63,6 +63,9 @@ _DEPLOYMENT_WIDE_PROBES: list[tuple[str, str]] = [
     # Turns on a daily request from the deployment to otari.ai.
     ("PUT", f"{API_ROOT}/update-check"),
     ("POST", f"{API_ROOT}/pricing"),
+    # Changes what every caller is told about a deployment provider's model.
+    ("PUT", f"{API_ROOT}/model-overrides/cairn:qwen"),
+    ("DELETE", f"{API_ROOT}/model-overrides/cairn:qwen"),
 ]
 
 # The subset whose reach is worse than reading somebody else's rows: two that

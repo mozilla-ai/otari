@@ -29,7 +29,7 @@ from openresponses_types import ResponseResource
 from gateway.api.routes import chat, messages, responses
 from gateway.schemas.inference import SettledCost
 
-_SETTLEMENT = SettledCost(cost_usd="0.012345", pricing_source="managed")
+_SETTLEMENT = SettledCost(cost_usd="0.012345", pricing_source="managed", tool_cost_usd="0.010000")
 
 
 def _chat_response(*, usage: CompletionUsage | None = None) -> ChatCompletion:
@@ -165,6 +165,7 @@ def test_adapter_attaches_inline_cost(adapter: Any, value: Any, usage_getter: An
     usage = usage_getter(value)
     assert usage.cost_usd == "0.012345"
     assert usage.pricing_source == "managed"
+    assert usage.tool_cost_usd == "0.010000"
 
 
 @pytest.mark.parametrize(
@@ -182,6 +183,14 @@ def test_terminal_events_serialize_inline_cost(adapter: Any, event: Any) -> None
 
     assert '"cost_usd":"0.012345"' in chunk
     assert '"pricing_source":"managed"' in chunk
+    assert '"tool_cost_usd":"0.010000"' in chunk
+
+
+def test_a_tool_cost_that_was_not_settled_is_left_off_the_usage() -> None:
+    chunk = _chat_usage_chunk()
+    chat._ADAPTER.attach_cost(chunk, SettledCost(cost_usd="0.012345", pricing_source="managed"))
+
+    assert "tool_cost_usd" not in chat._ADAPTER.format_chunk(chunk)
 
 
 def test_format_chunk_unchanged_without_inline_cost() -> None:
@@ -310,4 +319,5 @@ def test_a_native_responses_providers_response_is_answered_with_its_cost() -> No
 
     assert usage["cost_usd"] == _SETTLEMENT.cost_usd
     assert usage["pricing_source"] == _SETTLEMENT.pricing_source
+    assert usage["tool_cost_usd"] == _SETTLEMENT.tool_cost_usd
     assert (usage["input_tokens"], usage["output_tokens"]) == (10, 7)
