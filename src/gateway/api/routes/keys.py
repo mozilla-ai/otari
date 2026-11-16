@@ -28,7 +28,7 @@ from gateway.models.tenancy import Workspace
 from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_default_user, owned_by_organization
 from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
-from gateway.schemas.budgets import EndUserPublic, EndUserPut, EndUserUpdate
+from gateway.schemas.budgets import EndUserPublic, EndUserPut, EndUserUpdate, KeyEndUsersPublic
 from gateway.services.api_keys import (
     operator_enable_refusal,
     operator_max_end_users,
@@ -735,6 +735,18 @@ async def list_end_users(
     return await budgets.list_end_users(
         api_key=key, external_id=external_id, budget_id=budget_id, blocked=blocked, skip=skip, limit=limit
     )
+
+
+@router.get("/{key_id}/end-user-count")
+async def get_end_user_count(
+    key_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
+    budgets: BudgetServiceDep,
+) -> KeyEndUsersPublic:
+    """How many end users a service key's ``max_end_users`` counts, and the cap itself."""
+    key = await _load_key_in_organization(db, key_id, organization_id)
+    return await budgets.end_user_seats(api_key=key)
 
 
 @router.put(

@@ -1353,6 +1353,12 @@ def test_an_owner_lists_its_end_users_and_nobody_else_reaches_them(
     assert code == status.HTTP_200_OK, one
     assert [(row["external_id"], row["budget_id"]) for row in one] == [("bob", budget_id)]
 
+    code, counted = _request(client, world, "alpha_owner", "GET", f"{_PREFIX}/{key['id']}/end-user-count")
+    assert code == status.HTTP_200_OK, counted
+    assert counted == {"count": 2, "max_end_users": DEFAULT_ORGANIZATION_MAX_END_USERS}
+
     for who in ("alpha_member", "beta_owner"):
         code, body = _request(client, world, who, "GET", f"{_PREFIX}/{key['id']}/end-users")
+        assert code == status.HTTP_404_NOT_FOUND, (who, body)
+        code, body = _request(client, world, who, "GET", f"{_PREFIX}/{key['id']}/end-user-count")
         assert code == status.HTTP_404_NOT_FOUND, (who, body)

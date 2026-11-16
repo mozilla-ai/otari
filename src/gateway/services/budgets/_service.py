@@ -27,6 +27,7 @@ from gateway.schemas.budgets import (
     EndUserBudgetPublic,
     EndUserPublic,
     KeyBudgetPublic,
+    KeyEndUsersPublic,
     OrganizationBudgetCreate,
     OrganizationBudgetPublic,
     OrganizationBudgetsPublic,
@@ -454,6 +455,11 @@ class BudgetService:
         """Count the key owner's end users that ``list_end_users`` lists across every page."""
         async with self._uow:
             return await self._end_users.count(api_key, external_id=external_id, budget_id=budget_id, blocked=blocked)
+
+    async def end_user_seats(self, *, api_key: APIKey) -> KeyEndUsersPublic:
+        """How many end users the service key's ``max_end_users`` counts, and the cap itself."""
+        async with self._uow:
+            return await self._end_users.seats(api_key)
 
     async def list_end_user_budgets(self, *, api_key: APIKey) -> list[EndUserBudgetPublic]:
         """Return the budgets the key may put its end users on, with how many of its owner's end users each holds."""

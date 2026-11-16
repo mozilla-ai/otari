@@ -39104,6 +39104,57 @@
         ]
       }
     },
+    "/api/v1/keys/{key_id}/end-user-count": {
+      "get": {
+        "description": "How many end users a service key's ``max_end_users`` counts, and the cap itself.",
+        "operationId": "keys-get_end_user_count",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyEndUsersPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get End User Count",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
     "/api/v1/keys/{key_id}/end-users": {
       "get": {
         "description": "List the end users of a service key, oldest first.\n\nEnd users belong to the key's user, so every service key of one user lists the same end users. A deleted end\nuser is not listed. ``external_id`` reads one end user by any id, one containing '/' included, as a list of zero\nor one.",
@@ -42963,6 +43014,57 @@
           }
         ],
         "summary": "Update Own Key",
+        "tags": [
+          "organization-keys"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/keys/{key_id}/end-user-count": {
+      "get": {
+        "description": "How many end users one of the caller's service keys counts against its ``max_end_users``, and the cap.\n\nThe same keys as listing their end users: the caller's own, or for an owner or admin the organization's.",
+        "operationId": "organization-keys-get_own_key_end_user_count",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyEndUsersPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Own Key End User Count",
         "tags": [
           "organization-keys"
         ]

@@ -164,6 +164,7 @@ class _EndUsers:
 
     async def seats(self, api_key: APIKey) -> KeyEndUsersPublic:
         """How many end users the key's ``max_end_users`` counts, and the cap itself."""
+        _require_service_key(api_key)
         counted, unbudgeted = _counted(api_key)
         live = await self._repositories.end_users.count_live_on_budgets(
             str(api_key.user_id), counted, with_unbudgeted=unbudgeted
