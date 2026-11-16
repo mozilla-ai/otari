@@ -69,12 +69,15 @@ are a company's own server for a product with a longer name.
 A new deployment starts with an empty catalog. Whoever can add MCP servers to
 the workspace sees **Load catalog** in the dialog. Loading copies the registry,
 which takes a couple of minutes, and the list fills in as it goes. Once the
-catalog is more than a day old, the dialog offers **Refresh** instead.
+catalog is more than a day old, or while no load has completed, the dialog
+offers **Refresh** instead.
 
 To keep the registry from being called over and over, a workspace admin can
 ask again only an hour after a load completes, or five minutes after one that
-failed. That limit covers the whole deployment, however many people click.
-An operator (the master key, or a deployment superuser) is not held to it.
+did not complete, partial included. That limit covers the whole deployment,
+however many people click. An operator (the master key, or a deployment
+superuser) is not held to it through the API; the dashboard keeps **Refresh**
+disabled for them too until the wait is over.
 
 ## Settings
 
@@ -88,8 +91,10 @@ Set these in `config.yml`, or as `OTARI_<NAME>` environment variables.
 
 The three sync modes:
 
-- `off`: Otari never contacts the registry. The dialog says the catalog is
-  turned off on this deployment, and a sync request is refused with a 409. Use
+- `off`: Otari never contacts the registry. While the catalog is empty, the
+  dialog says it is turned off on this deployment; once it holds servers, the
+  dialog lists them and offers neither **Load catalog** nor **Refresh**. A sync
+  request is refused with a 409. Use
   it on a deployment with no outbound access. The catalog keeps whatever it
   already holds, so a fresh deployment has an empty one.
 - `manual`: a sync runs only when someone loads or refreshes the catalog.
@@ -139,7 +144,8 @@ because the saved page may no longer be one the registry accepts. A sync that
 could not read even its first page is `failed` and leaves the catalog as it
 was.
 
-A sync stops early when the registry fails three attempts at a page, when a
+A sync stops early when a page fails three attempts with a 5xx or a network
+error, or once with any other answer than a 200, when a
 page takes more than three minutes, after 5,000 pages, or after 30 minutes. A
 gateway that shuts down mid-sync ends it as `partial` too.
 
@@ -199,17 +205,19 @@ same way: `apple-touch-icon.png`, `favicon.ico`, then the icons the home page
 declares, first on the domain the host belongs to and then on the host itself.
 
 A logo is looked for the first time someone's browser asks for it, never while
-the catalog syncs, and never while `mcp_catalog_sync` is `off`: then only the
-logos shipped with Otari and those an admin uploads show. Each replica runs at most 4 looks at once and starts at most
+the catalog syncs, and never while `mcp_catalog_sync` is `off`: then logos
+already found still show, but no new one is looked for. Each replica runs at most 4 looks at once and starts at most
 30 a minute; past that, the logo shows its first letter and is tried on a later
 view. A logo found is looked for again after a week; one not found is not
-looked for again for a week, so a page view does not keep calling out.
+looked for again for a week, so a page view does not keep calling out. A look
+that ran out of time is tried again after an hour.
 
 Each fetch is held to the rules any outside address is: https only, every
 address the name resolves to must be public, at most three redirects each
 checked the same way, 5 seconds and 256 KB, 512 KB for a home page. The image
 type is read from the bytes, not from the response headers, and an SVG with a
-document type is refused. A logo is served only to a signed-in dashboard, as
+document type is refused. A raster image, fetched or uploaded, that declares
+more than 1,048,576 pixels (1024 by 1024) is refused before it is decoded. A logo is served only to a signed-in dashboard, as
 an image that cannot run a script even when opened on its own.
 
 The gateway also measures how bright a logo is. A dark logo gets a light tile

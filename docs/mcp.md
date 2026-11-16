@@ -231,7 +231,9 @@ acts as the account it belongs to. The credential is its `authorization_token`,
 or its shared account: a workspace owner or admin starts a sign-in with
 `POST /{server_id}/shared-account`, and finishing it stores the account they
 signed in to as the server's one credential, renewed as a user's own is and
-removed with `DELETE /{server_id}/shared-account`. A server holds one of the
+removed with `DELETE /{server_id}/shared-account`. The account outlives the
+manager who signed in: it keeps serving the workspace after they leave, and once
+their user is deleted `shared_account.signed_in_by` is `null`. A server holds one of the
 two: the sign-in removes a stored token, and setting a token ends the account.
 A shared server with neither, whose server answered `401` when last reached,
 has `needs_setup: true` and is skipped at resolve as a disabled server is,
@@ -387,7 +389,7 @@ new connection.
   when the person clicks **This is me, continue**, and only that page can ask:
   a request from another site gets the page again. So a link previewer, a mail
   scanner or another site cannot start a sign-in for someone. Continuing again
-  replaces the sign-in started before.
+  with no dashboard session replaces the sign-in started before.
 - **A dashboard session is checked, and none is needed.** With no session, the
   sign-in finishes on its state alone, and the page is what tells the person
   whose link it is. A link continued in a dashboard session is bound to that
@@ -400,7 +402,8 @@ new connection.
 - **Only Otari makes the link.** It always starts with the deployment's own
   `public_base_url`, and the stand-in tool tells the model to show no sign-in
   link that came from anywhere else. A server's name reaches the model with
-  anything but letters, digits, spaces, `.`, `_` and `-` removed.
+  anything but letters, digits, spaces, `.`, `_` and `-` replaced by spaces, and
+  cut to 64 characters.
 - **A key with no user gets no link.** A server it names explicitly gets the
   stand-in, which tells the model the key belongs to nobody and to use a personal
   key. An attached one is simply left out.
@@ -417,21 +420,28 @@ the link be made only when it is wanted.
 #### Connection checks
 
 Creating a server connects to it once, lists its tools, and returns the outcome
-as `health`. So does a `PATCH` that changes the URL, the token, or
-`allowed_tools`; other edits leave `health` as it was.
+as `health`. So does a `PATCH` that changes the URL, the token, the
+`credential_mode` or `allowed_tools`, or that ends a shared account (a new
+OAuth client ID, for one); other edits leave `health` as it was.
 `POST /{server_id}/check` runs the check again on demand, with the same
-permissions as an update.
+permissions as an update. A per-user server answers it with `409`: its check
+starts with `POST /{server_id}/check/sign-in`, which returns the
+`authorization_url` to sign in at.
 
 Real requests keep `health` current after that. Whenever the gateway talks to a
 stored server for a request, to list its tools or to call one, it records the
 outcome as `health` the way a check does: `checked_at`, `status`, and the tool
 list when the request read the server's whole catalog (a server with an
 allow-list is listed only as far as the allow-list needs, so its tool list
-comes from a check). A finished sign-in, a user's own or a manager's for
-everyone, lists the server once and records it the same way. This covers a
+comes from a check). A sign-in finished through the dashboard or
+`POST /api/v1/mcp-connections/complete`, a user's own or a manager's for
+everyone, lists the server once and records it the same way; one finished from
+a conversation's link with no dashboard session does not. This covers a
 shared token, a shared account and any user's own connection,
 stores nothing about who asked, and never delays or fails the request. One
-server is written at most once every 15 minutes unless its status changes. A
+server is written at most once every 15 minutes unless its status changes, and
+each gateway process runs at most 64 such writes at once: a contact past that
+is not recorded. A
 user who has not signed in to a per-user server, or whose own token the server
 refuses, is not a server failure and records nothing. So `health.checked_at` is
 the last contact, and the manual check is for a server no request uses yet.
@@ -446,23 +456,27 @@ answered, but not as a streamable HTTP MCP server), `limits_exceeded`,
 refused with one. A passing check reports `tools`, every tool name the server
 offers whatever the allow-list says (up to 200), `tool_count`, the number of
 those the allow-list admits, and `missing_allowed_tools`, the allow-listed names
-the server does not offer.
+the server does not offer. An `allowed_tools` edit on a server whose `tools`
+reached 200 names clears `tool_count`, `tools`, `tool_descriptions` and
+`missing_allowed_tools` until the server is listed again.
 
 `POST /check` (on the collection, with no server id) checks connection details
 without storing anything, which is what the dashboard's **Test connection**
 button calls before a save. It takes `url`, `authorization_token` and
 `allowed_tools`, and answers with what `health` would say. Pass `server_id` and
 omit `authorization_token` to test with that server's stored token or shared
-account; `""` tests with none. A stored credential is only sent to a `url` on
+account; `""` tests with none. A per-user server's `server_id` is refused
+with a `400`, since it holds no token to test with. A stored credential is only sent to a `url` on
 that server's own origin (scheme, host and port): any other is refused with a
 `400`, so a test cannot carry the credential to another address. An unsafe URL
 is refused with the same `400` a create gets.
 
 `health` is `null` until a check has run or a request has reached the server.
 `tool_count` is `null` on a healthy server whose only contact was a request that
-did not list its tools. It is also `null` after a connection
-change when every check slot on the gateway was busy; `POST /{server_id}/check`
-answers `429` in that case and records nothing. The value describes the server
+did not list its tools. After a connection change other than an
+`allowed_tools` edit, when every check slot on the gateway was busy, the whole `health` stays `null` until a later check or
+request; `POST /{server_id}/check` answers `429` in that case and records
+nothing. The value describes the server
 as of `health.checked_at`; a request still checks the URL again, and nothing is
 skipped because a check once passed.
 
@@ -493,7 +507,8 @@ A tool pattern is one of:
 | `get_*` | every tool whose name starts with `get_` |
 | `@read` | the server's read tools |
 
-Any other use of `*` or `@` is refused.
+A `*` anywhere but at the end, or a pattern starting with `@` other than
+`@read`, is refused.
 
 The master key is not bound by any ACL. A dashboard session, which is what the
 Playground runs as, has no key, so it is bound as its user: the user's rule, else
@@ -615,7 +630,7 @@ one per key.
 - `mcp_server_ids` accepts at most 50 ids, which is also the most servers a workspace can have; a repeated id resolves once
 - Server names must be unique across everything one request uses, because Otari routes each tool call to its server by name:
   - two `mcp_servers` entries sharing a name: `400` naming it;
-  - an `mcp_servers` name colliding with a stored server of your workspace: `400` with a fixed detail that names neither server (rename or remove the inline entry);
+  - an `mcp_servers` name colliding with a stored server named in `mcp_server_ids`: `400` with a fixed detail that names neither server (rename or remove the inline entry). A server the workspace attaches to every request under that name is left out of the request instead;
   - two stored servers sharing a name: `500`, with the names in the log
 - A URL whose host Otari cannot read is refused as invalid with a `400` before any address check, so an IPv6 host needs brackets (`http://[2400:8901::1]:8787/mcp`) and a port has to be a number
 - MCP URLs are validated to reduce SSRF risk; by default, private, reserved and other non-public addresses (such as the `100.64.0.0/10` shared range) are blocked, loopback is allowed, and `http://` is rejected when `authorization_token` is present
@@ -664,8 +679,9 @@ Otari has two alternative MCP integration modes:
 and does not claim to.** The calling application is the authorization boundary
 and owns any human approval, argument editing, cancellation, and action history.
 What Otari enforces independently is authentication, that the stored server is
-one the authenticated workspace may reach, the stored tool allowlist, URL
-safety, and its own execution bounds.
+one the authenticated workspace may reach, the key's
+[access rule](#server-access), the stored tool allowlist, URL safety, and its
+own execution bounds.
 
 Between the two requests Otari holds nothing open (no model stream, MCP
 session, database session or worker-local state), so your application can pause
@@ -697,7 +713,8 @@ Authorization: Bearer <token>
 
 The enabled stored servers of the key's workspace whose
 [access list](#server-access) grants it something, which is what to send in
-`mcp_server_ids`. `sign_in_required` is true for a
+`mcp_server_ids`. A shared server that `needs_setup` is left out.
+`sign_in_required` is true for a
 [per-user server](#credential-mode) the key's user has not signed in to yet, and
 `sign_in_url` is then a link to the page that starts their sign-in, good for 30 minutes.
 Making the link stores nothing, so listing costs nothing. A key with no user does
@@ -735,7 +752,8 @@ a later run rediscovers.
 
 Where the stored server has an allowlist, `tools` is its intersection with the
 live catalog, so a tool the server added later is not exposed just because it
-was listed. Where it has none, the whole live catalog is returned, the same
+was listed. Either way, `tools` holds only the tools the key's
+[access rule](#server-access) allows. Where it has none, the whole live catalog is returned, the same
 meaning the column already carries in the managed loop. An explicit empty
 allowlist is a deny-all: `tools` is empty and Otari opens no connection.
 
@@ -788,8 +806,8 @@ Content-Type: application/json
 }
 ```
 
-Otari resolves the stored server, applies its allowlist to `tool_name`, compares
-`server_revision`, validates the resolved URL, and then calls that one tool
+Otari resolves the stored server, applies its allowlist and the key's access
+rule to `tool_name`, compares `server_revision`, validates the resolved URL, and then calls that one tool
 directly. It never calls `tools/list` here: MCP permits calling a known tool, and
 what authorizes the call is the stored allowlist and the authenticated workspace,
 not a live catalog.
@@ -814,6 +832,12 @@ credential, enabled state and allowlist, so a configuration change between your
 authorization decision and this request is refused with
 `409 mcp_server_changed`. It is not an approval credential.
 
+A per-user server's revision does not change when a user signs in again or a
+token is renewed, and a shared account's changes only with a new sign-in, not a
+renewal. The access list, `everyone_tools` and `read_tools` are not part of it
+either: they are checked on every execution, so a rule revoked since discovery
+gets the `403` or `404` it would get anyway, not `409 mcp_server_changed`.
+
 It detects Otari-side configuration changes only. A remote server that changes
 its own catalog, or a tool's behavior, behind an unchanged URL does not change
 it. The calling application is responsible for binding the server id, revision,
@@ -823,7 +847,7 @@ remote tool name, and final arguments to its authorization or approval record.
 your service and Otari. It is not proof of approval and **not an idempotency
 key.**
 
-Each execution is recorded in the workspace's [sessions](sessions.md) as a
+While `trace_capture_enabled` is on, each execution is recorded in the workspace's [sessions](sessions.md) as a
 step with one tool span: the tool, its server, whether it ran, and which rule
 decided the call (the key's rule, its user's rule, the server's default policy,
 or the server's own tool list). A call the rules refuse is recorded too, as a
@@ -890,7 +914,7 @@ exception text.
 | Authenticated request rate exceeded | 429 | `rate_limit_exceeded` | `not_started` |
 | Server inaccessible to caller (including one whose ACL denies the key), or disabled | 404 | `mcp_server_not_found` | `not_started` |
 | Per-user server the key's user has not signed in to (the body adds `sign_in_url`) | 403 | `mcp_sign_in_required` | `not_started` |
-| That user's sign-in has expired and cannot be renewed right now | 503 | `mcp_credentials_unavailable` | `not_started` |
+| A per-user or shared-account token has expired and cannot be renewed right now, or was signed in for another server URL than the one stored now | 503 | `mcp_credentials_unavailable` | `not_started` |
 | Stored server revision changed | 409 | `mcp_server_changed` | `not_started` |
 | Tool absent from stored allowlist, or outside the server's ACL for the key | 403 | `mcp_tool_not_allowed` | `not_started` |
 | Unsafe resolved URL | 400 | `unsafe_mcp_url` | `not_started` |
@@ -920,6 +944,7 @@ Gateway-owned ceilings, not caller-controlled request fields:
 | Discovery | live descriptors examined | 1,000 |
 | Discovery | returned tools, counted after the caller's access list | 200 |
 | Discovery | per description / schema / annotations | 4 KiB / 64 KiB at depth 32 / 16 KiB |
+| Discovery | properties per schema | 1,000 |
 | Discovery | serialized response | 1 MiB |
 | Discovery | total request, concurrency, admission wait | 15 s, 4 per process, 5 s |
 | Both | connection plus initialization | 5 s |

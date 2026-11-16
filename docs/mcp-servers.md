@@ -51,6 +51,9 @@ ways to give it one:
   Sign in with the account the whole workspace should use. The page then reads
   **Signed in by** your name and the date, with **Reconnect** and
   **Disconnect**. Otari renews this sign-in on its own, as it does a member's.
+  Where the provider gives no way to renew it, the page says **This sign-in
+  cannot renew itself. Reconnect when it expires.** The account keeps working
+  after you leave the workspace.
 - **Paste a token.** Opens **Settings** and puts the cursor in its
   **Authorization token** field.
 
@@ -82,9 +85,11 @@ Two columns say how each server signs in and what stands behind that:
   **Personal accounts**, each member's own.
 - **Connections** depends on which. A shared server reads **Set up**, **Not set
   up**, **No account needed** when its last check got an answer without one, or
-  **No account set up** while no check has. A personal server
+  **No account set up** while no check has, or the last one failed for another
+  reason. A personal server
   reads how many members connected their own account, such as **3 members** or
-  **No one yet**, and ends in **including you** when you are one of them.
+  **No one yet**, and ends in **including you** when you are one of them, or
+  reads **You** when you are the only one.
 
 ## Answer members' requests
 
@@ -106,7 +111,7 @@ servers, the list pages.
 Adding the server any other way answers the requests too: a request is
 approved when the workspace stores a server at the URL it named. Where the
 deployment sends mail, the workspace's owners and admins and the
-organization's are emailed each new request, and the member is emailed the
+organization's, at most 20 of them, are emailed each new request, and the member is emailed the
 answer. Without mail, **Requests** is where a request shows. The block needs
 the catalog: a deployment with `mcp_catalog_enabled` set to `false` has none.
 
@@ -125,9 +130,12 @@ A sign-in counts too: when a member connects their account, or a manager signs
 in for everyone, Otari lists the server's tools once with that sign-in and
 records the result. A server in use
 therefore stays green on its own, and amber means nobody has used it for a week.
+While a server keeps answering the same way, Otari records it at most every 15
+minutes; see [Connection checks](mcp.md#connection-checks).
 A member who has not signed in to a **Personal** server does not turn it red.
 
-For a server nobody uses yet, click **Check** on its row, or **Check** under
+For a server nobody uses yet, click the check icon on its row (its tooltip
+reads **Check this server**), or **Check** under
 **Exposed tools** on its page. A **Shared** server is checked with its token or
 its shared account. A
 **Personal** server holds no token, so its check opens the server's sign-in in a
@@ -138,9 +146,12 @@ yourself, click **Connect your account** at the top of its page instead.
 
 Once a server's tools are known, from a check or from a request, the editors for
 **Exposed tools**, **Read tools** and the tools of an access rule list its tools, each with the first line of its
-description, to search and pick from. You can still type a pattern such as
-`create_*`; the editor says how many of the known tools it matches and flags an
-entry that matches none.
+description, to search and pick from. They list at most the first 200 tools a
+server offers; on a server with that many, saving a change to **Exposed tools**
+clears the known tools until the server is checked again. In an access rule's
+editor you can still type a pattern such as `create_*`; the editor says how many
+of the known tools it matches and flags an entry that matches none. **Exposed
+tools** and **Read tools** take whole tool names only.
 
 ## Add servers from the catalog
 
@@ -188,7 +199,8 @@ The default policy applies to every key that no rule names.
 
 1. Under **Access rules**, find the **Default policy** row and click **Edit**.
 2. Under **Action**, choose **Allow any tool** to keep the server open, or
-   **Deny** to close it to every key you do not name in a rule.
+   **Deny** to close it to every key you do not name in a rule. **Read tools
+   only** and **Allow specific tools…** open part of it, as in a rule.
 3. Click **Save rule**.
 
 ### Add a rule for a key or a user

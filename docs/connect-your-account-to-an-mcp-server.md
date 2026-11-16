@@ -76,9 +76,11 @@ not save an unchanged client ID. Approve the new sign-in server through the API
 instead: send the same client ID again,
 `PATCH /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}` with
 `{"oauth_client_id": "<the client ID>"}`. Otari keeps each member's
-connection, since it is the same client. Whether those connections still work
-is up to the new sign-in server: if it does not accept what the old one issued,
-a member is asked to connect again the next time their token is renewed.
+connection, since it is the same client, and keeps renewing it at the address
+its sign-in recorded. A member is asked to connect again only when that address
+answers that the grant is gone (`invalid_grant`). If it cannot be reached, the
+connection stays, and once its token expires calls fail with
+`mcp_credentials_unavailable` until the member clicks **Reconnect**.
 
 After you save a client secret again, Otari renews no one's sign-in on that
 server until somebody signs in once more, which records the sign-in server the
@@ -93,11 +95,11 @@ members signs in again when their sign-in expires.
 Anyone who can see the workspace can do this.
 
 1. Go to **Tools**, then **MCP servers**. Click **Connect a server** and pick
-   the server, or click a server you already use and, under **Your account**,
-   click **Connect your account**. An owner or admin has no **Your account**
-   section: click **Connect your account** at the top of the server's page.
-   Once connected it reads **Your account: connected**, and opens **Reconnect**
-   and **Disconnect**.
+   the server. An owner or admin can also open the server's page and click
+   **Connect your account** at the top. Once you are connected, the server's
+   page offers **Reconnect** and **Disconnect**: under **Your account** for a
+   member, and behind **Your account: connected** at the top for an owner or
+   admin.
 2. The server's own sign-in opens in a small window. Sign in and approve the
    access it asks for.
 
@@ -115,7 +117,7 @@ only the ones that read. A Shared server an admin has not set up yet is not
 listed. Click a card to open the
 server's page.
 
-The server's page lists **Your tools**: the tools the access rules let you use
+For a member, the server's page lists **Your tools**: the tools the access rules let you use
 on it, with a line about each where the server describes it, a **Read-only**
 mark on the tools that only read, and a search over both.
 
@@ -124,8 +126,8 @@ Connecting does not change who may use the server. Its
 access list denies is told the server does not exist, whether or not you have
 connected.
 
-The link you are sent to works once, for ten minutes, and only in the browser
-session that started it.
+The link you are sent to works once, for ten minutes, and only for the person
+who started it.
 
 A manager checks the server and chooses its tools apart from any connection: on
 the server's page, click **Check** under **Exposed tools**. See
@@ -175,13 +177,19 @@ instead of getting a generic failure:
 - Tool discovery and execution answer `403` with the code
   `mcp_sign_in_required` and the same `sign_in_url`.
 
+Once you have connected, a token that has expired and cannot be renewed right
+now gets no sign-in link: discovery and execution answer `503`
+[`mcp_credentials_unavailable`](mcp.md#errors), and a model is told to try again
+in a few minutes. Clicking **Reconnect** on the server's page fixes it at once.
+
 A key created without a user cannot use a server set up this way. Listing does
 not show it to such a key, and a model request that names it is told the key
 belongs to nobody. Create the key for a user instead.
 
 ## Ask for a server
 
-**Connect a server** lists the servers the workspace already has. For one it
+**Connect a server** lists the workspace's personal servers you have not
+connected yet, leaving out any that are switched off. For one the workspace
 does not have, ask its admins:
 
 1. Go to **Tools**, then **MCP servers**. Click **Connect a server**, then
