@@ -16045,7 +16045,7 @@ export interface components {
             } | null;
             /**
              * Provider
-             * @description The provider the key is for: one the provider catalog, GET /api/v1/search-tools/providers, lists for the key's kind, other than searxng, or tavily for a search key.
+             * @description The provider the key is for: one the provider catalog, GET /api/v1/search-tools/providers, lists for the key's kind, other than searxng.
              */
             provider: string;
         };

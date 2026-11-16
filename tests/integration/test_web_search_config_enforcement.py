@@ -465,7 +465,7 @@ def test_a_search_on_the_legacy_provider_pair_is_narrowed_by_the_workspace_row(
     monkeypatch: pytest.MonkeyPatch,
     test_config: GatewayConfig,
 ) -> None:
-    """The ceiling and the block list reach the old backend, which serves the legacy Tavily pair."""
+    """The ceiling and the block list reach the search backend the legacy Tavily pair runs on."""
     monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
     monkeypatch.setattr(test_config, "web_search_provider", "tavily")
     monkeypatch.setattr(test_config, "web_search_provider_api_key", "tvly-key")
@@ -473,25 +473,22 @@ def test_a_search_on_the_legacy_provider_pair_is_narrowed_by_the_workspace_row(
     _set_config(
         client, master_key_header, workspace_id, enabled=True, max_results=2, blocked_domains=["banned.example"]
     )
-    built: dict[str, Any] = {}
+    pools: list[Any] = []
 
-    def fake_backend(**kwargs: Any) -> Any:
-        built.update(kwargs)
-        backend = AsyncMock()
-        backend.purpose_hints = lambda: []
-        return AsyncMock(__aenter__=AsyncMock(return_value=backend), __aexit__=AsyncMock(return_value=None))
+    async def fake_loop(*, completion_kwargs: Any, pool: Any, max_iterations: int, **_extra: Any) -> MessageResponse:
+        pools.append(pool)
+        return _text_response("via-search-loop")
 
     tool = {"type": "otari_web_search", "max_results": 15, "blocked_domains": ["noise.example"]}
-    with (
-        patch("gateway.api.routes.messages.anthropic_tool_loop", new=AsyncMock(return_value=_text_response())),
-        patch("gateway.api.routes._tools.WebRetrievalBackend", new=fake_backend),
-    ):
+    with patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop):
         response = client.post(f"{API_ROOT}/messages", json={**_REQUEST, "tools": [tool]}, headers=api_key_header)
 
     assert response.status_code == 200, response.text
-    assert built["provider"] == "tavily"
-    assert built["max_results"] == 2
-    assert set(built["blocked_domains"]) == {"noise.example", "banned.example"}
+    [search] = pools
+    assert isinstance(search, WebSearchBackend)
+    assert search._search.provider == "tavily"
+    assert search._max_results == 2
+    assert search._policy.blocked == canonicalize_domain_rules(["noise.example", "banned.example"])
 
 
 def test_a_request_allow_list_is_intersected_with_the_workspace_one(

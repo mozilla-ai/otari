@@ -462,7 +462,6 @@ def test_instances_are_flagged_library_backed_or_not() -> None:
     instances = effective_search_instances(config)
     assert instances["exa"].library_backed is True
     assert instances["local"].library_backed is True
-    assert instances["local"].provider_defaults == {}
     assert instances["retired"].library_backed is False
 
 
@@ -481,8 +480,6 @@ def test_an_instance_is_hashable_and_cannot_change_the_configuration() -> None:
     assert hash(instance) == hash(effective_search_instances(config)["local"])
     with pytest.raises(TypeError):
         instance.options["categories"] = "it"  # type: ignore[index]
-    with pytest.raises(TypeError):
-        instance.provider_defaults["method"] = "post"  # type: ignore[index]
     assert config.search_tools["local"]["options"] == {"categories": "news"}
 
 

@@ -6,11 +6,13 @@ These tests assert ``users.spend`` and not only the usage row.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+import json
+from collections.abc import AsyncIterator, Callable, Iterator
 from decimal import Decimal
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 from any_llm.types.completion import (
     ChatCompletion,
@@ -25,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from any_fetch.providers.fake import FakeProvider as FakeFetchProvider
+from gateway.api.deps import get_optional_web_provider_client
 from gateway.api.routes.chat import log_usage
 from gateway.core.config import API_KEY_HEADER, API_ROOT, REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.settings.pricing import PricingConfig
@@ -38,7 +41,6 @@ from gateway.services.pricing_service import configure_default_pricing
 from gateway.services.tool_usage import ToolUsageTally
 from gateway.services.web_fetch_service import WebFetchResult, WebFetchService
 from gateway.services.web_retrieval_policy import canonicalize_web_url
-from gateway.services.web_search_providers import WebSearchProviderError
 
 from .conftest import (
     ALL_KEY_SCOPES,
@@ -60,8 +62,10 @@ _SEARCH_RATE_PER_MILLION = 10_000.0
 _SEARCH_UNIT_COST = 0.01
 # A hit that comes with its page text, so a search shows it without reading its page.
 _HIT_WITH_TEXT = {"url": "https://otari.example", "title": "Otari", "text": "Otari is a gateway."}
-# The same hit as the legacy pair's provider answers it, its page text included.
-_PROVIDER_HIT = {"url": "https://otari.example", "title": "Otari", "content": "Otari.", "extracted_content": "Otari."}
+# The same hit as Tavily answers it for the legacy pair, its page text included.
+_TAVILY_ANSWER = {
+    "results": [{"url": "https://otari.example", "title": "Otari", "content": "Otari.", "raw_content": "Otari."}]
+}
 
 
 def _completion(
@@ -440,21 +444,32 @@ async def test_a_search_with_no_hits_is_billed_at_the_rate(
 
 
 def _serve_search_on_the_legacy_provider_pair(monkeypatch: pytest.MonkeyPatch, config: GatewayConfig) -> None:
-    """Serve in-loop search on the legacy Tavily pair, which the old backend runs."""
+    """Serve in-loop search on the legacy Tavily pair."""
     monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
     monkeypatch.setattr(config, "web_search_provider", "tavily")
     monkeypatch.setattr(config, "web_search_provider_api_key", "tvly-key")
 
 
 def _search_on_the_legacy_provider_pair(
-    client: TestClient, headers: dict[str, str], found: AsyncMock, *, searches: int = 1
-) -> None:
-    """One chat request whose model searches ``searches`` times on the legacy pair, whose provider answers ``found``."""
+    client: TestClient, headers: dict[str, str], answer: dict[str, Any], *, status_code: int = 200, searches: int = 1
+) -> list[httpx.Request]:
+    """One chat request whose model searches ``searches`` times on the legacy pair, Tavily answering ``answer``.
+
+    Returns the requests Tavily was sent.
+    """
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(status_code, json=answer)
+
+    async def web_provider_client() -> AsyncIterator[httpx.AsyncClient]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as answering:
+            yield answering
+
+    client.app.dependency_overrides[get_optional_web_provider_client] = web_provider_client  # type: ignore[attr-defined]
     responses = [_completion(tool_call=True)] * searches + [_completion(tool_call=False)]
-    with (
-        patch("gateway.services.mcp_loop.acompletion", new=AsyncMock(side_effect=responses)),
-        patch("gateway.services.web_retrieval_backend.provider_search", new=found),
-    ):
+    with patch("gateway.services.mcp_loop.acompletion", new=AsyncMock(side_effect=responses)):
         response = client.post(
             f"{API_ROOT}/chat/completions",
             json={
@@ -466,6 +481,7 @@ def _search_on_the_legacy_provider_pair(
             headers=headers,
         )
     assert response.status_code == 200, response.text
+    return seen
 
 
 @pytest.mark.asyncio
@@ -479,15 +495,15 @@ async def test_a_search_on_the_legacy_provider_pair_is_metered_priced_and_spent(
     monkeypatch: pytest.MonkeyPatch,
     test_config: GatewayConfig,
 ) -> None:
-    """The old backend records the search under ``otari:web_search``, on the deployment's account, and it is spent."""
+    """The search is recorded under ``otari:web_search``, on the deployment's account, and it is spent."""
     _serve_search_on_the_legacy_provider_pair(monkeypatch, test_config)
     user_id = api_key_obj["user_id"]
     before = _spend(db_session_factory, user_id)
-    found = AsyncMock(return_value=[_PROVIDER_HIT])
 
-    _search_on_the_legacy_provider_pair(client, api_key_header, found)
+    [request] = _search_on_the_legacy_provider_pair(client, api_key_header, _TAVILY_ANSWER)
 
-    found.assert_awaited_once()
+    assert (request.url.host, request.headers["authorization"]) == ("api.tavily.com", "Bearer tvly-key")
+    assert json.loads(request.content)["include_raw_content"] is True
     row = _latest_row(db_session_factory, user_id)
     assert (row.billing_meters or {})[TOOL_METER_NAMESPACE]["web_search"]["billed"] == 1
     line = next(entry for entry in (row.pricing_breakdown or []) if entry["meter"] == "web_search_calls")
@@ -518,11 +534,9 @@ async def test_a_failed_search_on_the_legacy_provider_pair_is_counted_but_never_
     _serve_search_on_the_legacy_provider_pair(monkeypatch, test_config)
     user_id = api_key_obj["user_id"]
     before = _spend(db_session_factory, user_id)
-    failed = AsyncMock(side_effect=WebSearchProviderError("unreachable", tag="http_error", status=503))
+    seen = _search_on_the_legacy_provider_pair(client, api_key_header, {}, status_code=503)
 
-    _search_on_the_legacy_provider_pair(client, api_key_header, failed)
-
-    failed.assert_awaited_once()
+    assert len(seen) == 1
     row = _latest_row(db_session_factory, user_id)
     assert (row.billing_meters or {})[TOOL_METER_NAMESPACE]["web_search"] == {"billed": 0, "errors": 1}
     assert not any(entry["meter"] == "web_search_calls" for entry in (row.pricing_breakdown or []))
@@ -542,14 +556,13 @@ async def test_a_search_on_the_legacy_provider_pair_that_would_pass_the_budget_i
     monkeypatch: pytest.MonkeyPatch,
     test_config: GatewayConfig,
 ) -> None:
-    """The old backend holds each search before it runs, so three on a $0.025 budget run two and settle under it."""
+    """Each search is held before it runs, so three on a $0.025 budget run two and settle under it."""
     _serve_search_on_the_legacy_provider_pair(monkeypatch, test_config)
     key = _key_on_budget(client, master_key_header, "legacy-capped-user", 0.025)
-    found = AsyncMock(return_value=[_PROVIDER_HIT])
 
-    _search_on_the_legacy_provider_pair(client, {API_KEY_HEADER: f"Bearer {key}"}, found, searches=3)
+    seen = _search_on_the_legacy_provider_pair(client, {API_KEY_HEADER: f"Bearer {key}"}, _TAVILY_ANSWER, searches=3)
 
-    assert found.await_count == 2, "the third search reached the provider"
+    assert len(seen) == 2, "the third search reached the provider"
     row = _latest_row(db_session_factory, "legacy-capped-user")
     assert (row.billing_meters or {})[TOOL_METER_NAMESPACE]["web_search"] == {
         "billed": 2,

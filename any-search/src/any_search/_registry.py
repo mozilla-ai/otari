@@ -24,6 +24,7 @@ def _providers() -> dict[str, type["AnySearch"]]:
     from any_search.providers.searxng import SearxngProvider
     from any_search.providers.serply import SerplyProvider
     from any_search.providers.synthetic import SyntheticProvider
+    from any_search.providers.tavily import TavilyProvider
 
     return {
         provider.METADATA.name: provider
@@ -37,6 +38,7 @@ def _providers() -> dict[str, type["AnySearch"]]:
             SearxngProvider,
             SerplyProvider,
             SyntheticProvider,
+            TavilyProvider,
         )
     }
 

@@ -52,7 +52,6 @@ from gateway.core.settings.tools import (
     BUILTIN_FETCH,
     BUILTIN_FETCH_INSTANCE,
     BUILTIN_FETCH_PROVIDER,
-    PROVIDER_DEFAULT_OPTIONS,
     WEB_SEARCH_PROVIDERS,
     SynthesizedSearchInstance,
     ToolInstance,
@@ -360,7 +359,6 @@ def _search_on_instance(
         "search",
         instance.provider,
         checked=runner == "library",
-        defaults=instance.provider_defaults,
         instance=(f"search instance '{instance.name}'", own, instance.dropped_options),
         workspace=workspace,
         request=request,
@@ -463,7 +461,7 @@ def _search_on_credential(
         requires_key, default_base = metadata.requires_api_key, metadata.default_api_base
         requires_base = metadata.requires_api_base and not default_base
     elif provider in WEB_SEARCH_PROVIDERS:
-        # Tavily, which any-search has no adapter for.
+        # A provider of the old search code that any-search does not serve.
         runner = "old"
         requires_key, default_base, requires_base = True, None, False
     else:
@@ -471,7 +469,7 @@ def _search_on_credential(
         return None
     _check(credential, requires_key=requires_key, requires_base=requires_base)
     if runner == "old" and _base(credential.api_base):
-        # The old code calls Tavily at its public endpoint, where the key would go instead.
+        # The old code calls the provider's public endpoint, where the key would go instead.
         raise WebSearchCredentialRefusedError(
             provider, f"names a base URL, which this gateway's {provider} client cannot use"
         )
@@ -479,7 +477,6 @@ def _search_on_credential(
         "search",
         provider,
         checked=runner == "library",
-        defaults=PROVIDER_DEFAULT_OPTIONS.get(provider, _NO_OPTIONS),
         credential=(_CREDENTIAL_LAYER, credential.options),
         workspace=workspace,
         request=request,
@@ -522,7 +519,6 @@ def _fetch_on_instance(
         "fetch",
         instance.provider,
         checked=True,
-        defaults=instance.provider_defaults,
         instance=(f"fetch instance '{instance.name}'", instance.options, instance.dropped_options),
         request=request,
     )
@@ -574,7 +570,6 @@ def _fetch_on_credential(
         "fetch",
         provider,
         checked=True,
-        defaults=PROVIDER_DEFAULT_OPTIONS.get(provider, _NO_OPTIONS),
         credential=(_CREDENTIAL_LAYER, credential.options),
         request=request,
     )
@@ -623,7 +618,7 @@ def _layered(
     provider: str,
     *,
     checked: bool,
-    defaults: Mapping[str, Any],
+    defaults: Mapping[str, Any] = _NO_OPTIONS,
     instance: tuple[str, Mapping[str, Any], frozenset[str]] | None = None,
     credential: tuple[str, Mapping[str, Any]] | None = None,
     workspace: Mapping[str, Any] = _NO_OPTIONS,
@@ -631,10 +626,11 @@ def _layered(
 ) -> dict[str, Any]:
     """The options a call runs with, layered lowest first.
 
+    ``defaults`` are the legacy settings' own options, below every layer.
     ``instance`` is the instance's layer with the keys its load recorded as
     breaking the rules; ``credential`` is a credential's. Unless ``checked``,
-    the layers pass as they are, without otari's defaults. Each dropped option
-    is warned about once, not on every call.
+    the layers pass as they are, without ``defaults``. Each dropped option is
+    warned about once, not on every call.
     """
     instance_name, instance_options, broken = instance or ("", _NO_OPTIONS, frozenset())
     credential_name, credential_options = credential or ("", _NO_OPTIONS)

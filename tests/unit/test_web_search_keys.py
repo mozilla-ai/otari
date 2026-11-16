@@ -472,21 +472,10 @@ async def test_an_internal_endpoint_is_refused_whatever_the_deployment_allows(
 
 
 @pytest.mark.asyncio
-async def test_a_key_on_the_old_search_code_takes_no_endpoint_or_options() -> None:
-    with pytest.raises(WebSearchKeySettingRefusedError, match="neither api_base nor options"):
-        await _web_search_keys._check_settings(
-            "search", "tavily", has_key=True, api_base="https://search.example", options=None
-        )
-    with pytest.raises(WebSearchKeySettingRefusedError, match="neither api_base nor options"):
-        await _web_search_keys._check_settings(
-            "search", "tavily", has_key=True, api_base=None, options={"topic": "news"}
-        )
-
-
-@pytest.mark.asyncio
 async def test_a_keys_options_are_checked_against_its_provider() -> None:
     await _web_search_keys._check_settings("search", "exa", has_key=True, api_base=None, options={"type": "fast"})
     await _web_search_keys._check_settings("search", "brave", has_key=True, api_base=None, options={"country": "DE"})
+    await _web_search_keys._check_settings("search", "tavily", has_key=True, api_base=None, options={"topic": "news"})
     await _web_search_keys._check_settings("fetch", "tabstack", has_key=True, api_base=None, options={"effort": "max"})
 
     with pytest.raises(WebSearchKeySettingRefusedError, match="not one the provider knows"):

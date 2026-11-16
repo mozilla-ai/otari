@@ -414,3 +414,28 @@ The first provider that replaced old gateway code for a provider otari's own set
   leave a long one that it validates itself (`country`) to the provider.
 - Fixture recipes: `normal` with `--max-results 2` and `result_filter=web` keeps it small; `empty`
   with `site:` set to a domain that does not exist; `error` with a made-up key.
+
+### 2026-11-16, Tavily (any-search)
+
+The provider otari.ai searched with through otari's own settings, moved without changing what it gets.
+
+- A host default the adapter does not send belongs to the host, and only where it was promised.
+  otari's old client always asked Tavily for page text; the adapter sends Tavily's own default
+  (no page text), the legacy settings keep asking (otari's side, until they go), and the stored
+  keys that relied on it got the option written into their own options by a data migration, so
+  each owner sees it and can turn it off.
+- An error body can hold only a sentence: Tavily answers `{"detail": {"error": "Unauthorized:
+  ..."}}`, a 422 with pydantic's list that quotes the input, or its own statuses 432 and 433 for
+  plan limits. With no code to read, tag by the status the provider documents.
+- A provider can report what a call cost in its own unit: Tavily's `usage.credits`, when
+  `include_usage` asks, is credits whose dollar price depends on the plan. That is not a reported
+  cost; `reports_cost` stays false and the tier option carries the price difference.
+- An option can raise the price by choosing a tier itself: `auto_parameters` costs 2 credits and
+  may pick `advanced`. Leave such an option out until the host can lock it.
+- Page text can be very large: one `raw_content` was 946,000 characters. The host cuts what
+  reaches a model; the adapter passes it as it came.
+- Dates can be RFC 1123 (`Thu, 15 Oct 2026 00:00:00 GMT`); `email.utils.parsedate_to_datetime`
+  reads them.
+- Fixture recipes: `normal` with `--max-results 2 -o topic=news`, which dates every hit; `empty`
+  with `include_domains=["example.com"]` and words no page there holds (a domain that does not
+  exist is a 400); `error` with a made-up `tvly-` key.
