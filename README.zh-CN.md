@@ -120,8 +120,6 @@ docker compose --profile code-exec --profile web-search up -d
 控制台地址为 `http://localhost:8000/`。如需在 PostgreSQL 上通过控制台保存提供商密钥，请将 `OTARI_SECRET_KEY` 设置为由
 `otari gen-secret-key` 生成的 Fernet 密钥。
 
-[Railway](deploy/railway/README.md) 提供一键部署模板。
-
 ## API 与控制台
 
 核心的补全路由有：

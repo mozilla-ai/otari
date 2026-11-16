@@ -286,7 +286,8 @@ MAX_MCP_TOOL_PATTERN_LENGTH = 256
 McpAccessSource = Literal["key", "user", "everyone"]
 
 MCP_READ_PRESET = "@read"
-"""The tool pattern naming a server's read tools: the ones its managers labeled read, never the server's own hints."""
+"""The tool pattern naming a server's read tools: the ones its managers labeled read, or, until they edit that
+list, the ones the server's own read-only hints name."""
 
 
 def is_mcp_tool_allowed(patterns: Sequence[str], tool: str) -> bool:

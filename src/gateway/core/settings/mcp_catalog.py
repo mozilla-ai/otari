@@ -11,8 +11,8 @@ class McpCatalogSettings(BaseModel):
     mcp_catalog_enabled: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
         default=True,
         description=(
-            "Offer the MCP server catalog: Browse catalog on the MCP servers page, and the logos it knows. "
-            "Off removes them, their routes and the sync worker. Requires restart."
+            "Offer the MCP server catalog: Browse catalog on the MCP servers page. "
+            "Off removes it, its routes and the sync worker; servers keep their logos. Requires restart."
         ),
     )
     mcp_catalog_sync: Annotated[Literal["off", "manual", "scheduled"], Shown(SettingsGroup.TOOLS)] = Field(

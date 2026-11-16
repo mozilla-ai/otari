@@ -119,7 +119,7 @@ OTLP_ROOT = "/otlp"
 # OTARI_PORT), which is also the native pydantic prefix below.
 OTARI_ENV_PREFIX = "OTARI_"
 # Full structured config supplied through the environment, for PaaS platforms
-# (Railway, Render, Fly.io, Kubernetes) where mounting a config.yml is awkward.
+# (Render, Fly.io, Kubernetes) where mounting a config.yml is awkward.
 # These carry the entire YAML schema (providers, pricing, etc.), not just the
 # scalar fields reachable via OTARI_<FIELD>. Raw YAML wins when both are set.
 # Instance names a ``providers:`` entry may not take. ``otari`` is the reserved
@@ -177,13 +177,14 @@ VISION_STRATEGIES = ("describe", "ocr", "off")
 # even when it is. See GatewayConfig.mail_transport.
 MAIL_TRANSPORT_SETTINGS = ("auto", "smtp", "console", "none")
 
-# Upstreams POST /api/v1/decisions can dispatch to. All take TypeSafe's
+# Upstreams POST /api/v1/decisions can dispatch to. All answer TypeSafe's
 # question-and-answer shape, which OpenRouter's alpha Decisions API and
-# llama-server's /v1/systemone adopted, and none is an any-llm provider, so they
+# llama-server's /v1/systemone adopted and Gemini's Decisions API is translated
+# to and from, and none is an any-llm provider, so they
 # are declared under ``decision_providers`` rather than ``providers``. Declared
 # here, as the search providers are in ``core/settings/tools.py``, so startup
 # validation needs no service module.
-DECISION_PROVIDERS = ("typesafe", "openrouter", "llamacpp")
+DECISION_PROVIDERS = ("typesafe", "openrouter", "gemini", "llamacpp")
 # Self-hosted servers: no endpoint of their own to default to, and normally no key.
 DECISION_PROVIDERS_SELF_HOSTED = ("llamacpp",)
 
@@ -657,7 +658,7 @@ class GatewayConfig(
             "X-Forwarded-Proto headers `otari serve` trusts, or '*' for any peer. The per-IP sign-in "
             "and public-catalog limits key on the address these headers resolve to, so behind a "
             "proxy that is not listed every visitor shares the proxy's address. Use '*' only where "
-            "the proxy is the sole path to the server, as on Railway. Unset leaves it to uvicorn: "
+            "the proxy is the sole path to the server. Unset leaves it to uvicorn: "
             "FORWARDED_ALLOW_IPS if set, otherwise 127.0.0.1."
         ),
     )
@@ -1061,7 +1062,7 @@ class GatewayConfig(
         description=(
             "Upstreams served by POST /api/v1/decisions, keyed by the selector prefix callers "
             "write ('typesafe:jev-latest'). Each entry may declare a 'provider' (one of: typesafe, "
-            "openrouter, llamacpp; defaults to the key), an 'api_key' (required except for llamacpp), "
+            "openrouter, gemini, llamacpp; defaults to the key), an 'api_key' (required except for llamacpp), "
             "an 'api_base' (required for llamacpp; https whenever a key is set), and a 'timeout' "
             "in seconds."
         ),

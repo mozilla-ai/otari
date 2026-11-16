@@ -23,10 +23,10 @@ from gateway.api.deps import (
     get_db,
 )
 from gateway.api.routes._public_auth import mail_unavailable, throttle_public_auth
+from gateway.core.addresses import MAX_STORED_ADDRESS_LENGTH
 from gateway.core.config import GatewayConfig
 from gateway.services.mail import MailNotConfiguredError
 from gateway.services.tenancy import report_new_account
-from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH
 from gateway.services.tenancy.user_service import request_password_reset, reset_password
 
 router = APIRouter(prefix="/auth/password", tags=["auth"])
@@ -45,7 +45,7 @@ _RESET_REQUEST_MESSAGE = (
 
 
 class RequestPasswordResetRequest(BaseModel):
-    email: str = Field(max_length=MAX_EMAIL_LENGTH, description="The address to send a reset link to.")
+    email: str = Field(max_length=MAX_STORED_ADDRESS_LENGTH, description="The address to send a reset link to.")
 
 
 class RequestPasswordResetResponse(BaseModel):

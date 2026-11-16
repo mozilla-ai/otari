@@ -34,4 +34,21 @@ def normalized_address(value: str) -> str | None:
     return candidate
 
 
-__all__ = ["normalized_address"]
+# This is how long a normalized address may be and still fit in the column it is stored in.
+# NOTE: "İ" (U+0130) lower-cases to two codepoints, so a 255-character address ending in one
+# normalizes to 256, over width. Checked after normalization, because that is the value actually stored.
+MAX_STORED_ADDRESS_LENGTH = 255
+
+
+def stored_address(value: str) -> str | None:
+    """Return ``value`` normalized as it will be stored, or ``None`` when it cannot be stored.
+
+    Refuses on shape, through ``normalized_address``, and on stored length.
+    """
+    candidate = normalized_address(value)
+    if candidate is None or len(candidate) > MAX_STORED_ADDRESS_LENGTH:
+        return None
+    return candidate
+
+
+__all__ = ["MAX_STORED_ADDRESS_LENGTH", "normalized_address", "stored_address"]
