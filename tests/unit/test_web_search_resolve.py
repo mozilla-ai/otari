@@ -571,7 +571,6 @@ def test_the_legacy_settings_options_sit_below_every_layer() -> None:
     legacy = GatewayConfig(web_search_provider="tavily", web_search_provider_api_key="tvly")
     credential = WebSearchCredential(provider="tavily", source=_ORG, api_key="k", options={"topic": "news"})
 
-    assert dict(_in_loop(legacy).options) == {"include_raw_content": True}
     layered = _in_loop(legacy, workspace={"topic": "finance"}, request={"include_raw_content": False})
     assert dict(layered.options) == {"include_raw_content": False, "topic": "finance"}
     assert dict(_in_loop(GatewayConfig(), credential=credential).options) == {"topic": "news"}

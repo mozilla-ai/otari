@@ -71,12 +71,6 @@ _HIT = {
 }
 _PAGE_HIT = {"url": "https://example.org/page", "title": "Page", "snippet": "short", "text": "The page text."}
 
-_TAVILY_ANSWER = {
-    "results": [
-        {"url": "https://example.com/tavily", "title": "Tavily", "content": "A snippet.", "raw_content": "The page."}
-    ]
-}
-
 
 def _search_tools() -> dict[str, dict[str, Any]]:
     return {
@@ -134,22 +128,6 @@ def _reached_the_provider(resp: Any) -> dict[str, Any]:
     assert resp.status_code == 200, resp.text
     request: dict[str, Any] = resp.json()["raw"]["request"]
     return request
-
-
-def _provider_answers(client: TestClient, answer: dict[str, Any], status_code: int = 200) -> list[httpx.Request]:
-    """Route the app's web provider client to a provider answering ``answer``, and keep what it was sent."""
-    seen: list[httpx.Request] = []
-
-    def respond(request: httpx.Request) -> httpx.Response:
-        seen.append(request)
-        return httpx.Response(status_code, json=answer)
-
-    async def web_provider_client() -> AsyncIterator[httpx.AsyncClient]:
-        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as answering:
-            yield answering
-
-    client.app.dependency_overrides[get_web_provider_client] = web_provider_client  # type: ignore[attr-defined]
-    return seen
 
 
 def test_search_requires_auth(client: TestClient) -> None:
@@ -2244,12 +2222,33 @@ def test_every_usage_row_names_its_request_its_workspace_and_counts_toward_budge
 
 # A deployment that searches only through the legacy settings, as otari.ai did before it had search tools.
 _LEGACY_TAVILY = {"search_tools": {}, "web_search_provider": "tavily", "web_search_provider_api_key": "tvly-ours"}
+_TAVILY_ANSWER = {
+    "results": [
+        {"url": "https://example.com/tavily", "title": "Tavily", "content": "A snippet.", "raw_content": "The page."}
+    ]
+}
 
 
 @pytest.fixture
 def legacy_client(test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient]:
     monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
     yield from _client_on(test_config, **_LEGACY_TAVILY)
+
+
+def _provider_answers(client: TestClient, answer: dict[str, Any], status_code: int = 200) -> list[httpx.Request]:
+    """Route the app's web provider client to a provider that answers ``answer``, and keep what it was sent."""
+    seen: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(status_code, json=answer)
+
+    async def web_provider_client() -> AsyncIterator[httpx.AsyncClient]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as answering:
+            yield answering
+
+    client.app.dependency_overrides[get_web_provider_client] = web_provider_client  # type: ignore[attr-defined]
+    return seen
 
 
 def test_a_deployment_with_only_the_legacy_settings_serves_unnamed_and_named_searches_on_them(

@@ -417,19 +417,19 @@ The first provider that replaced old gateway code for a provider otari's own set
 
 ### 2026-11-16, Tavily (any-search)
 
-The provider otari.ai searched with through otari's own settings, moved without changing what it gets.
+The first provider whose old gateway client sent an option the provider leaves off by default.
 
-- A host default the adapter does not send belongs to the host, and only where it was promised.
-  otari's old client always asked Tavily for page text; the adapter sends Tavily's own default
-  (no page text), the legacy settings keep asking (otari's side, until they go), and the stored
-  keys that relied on it got the option written into their own options by a data migration, so
-  each owner sees it and can turn it off.
+- When the host's old client sent an option the provider's own default leaves out, the adapter
+  sends the provider's default, and the host keeps the option where its callers rely on it.
+  otari's old client always asked Tavily for page text (`include_raw_content`). The adapter does
+  not: otari's legacy settings add the option themselves, and a data migration wrote it into each
+  stored key's options, where the key's owner sees it and can turn it off.
 - An error body can hold only a sentence: Tavily answers `{"detail": {"error": "Unauthorized:
   ..."}}`, a 422 with pydantic's list that quotes the input, or its own statuses 432 and 433 for
   plan limits. With no code to read, tag by the status the provider documents.
-- A provider can report what a call cost in its own unit: Tavily's `usage.credits`, when
-  `include_usage` asks, is credits whose dollar price depends on the plan. That is not a reported
-  cost; `reports_cost` stays false and the tier option carries the price difference.
+- A provider can report what a call cost in its own unit: Tavily's `usage.credits`, sent when
+  `include_usage` asks, counts credits, whose dollar price depends on the plan. That is not a
+  reported cost: `reports_cost` stays false, and the host prices each tier (`search_depth`).
 - An option can raise the price by choosing a tier itself: `auto_parameters` costs 2 credits and
   may pick `advanced`. Leave such an option out until the host can lock it.
 - Page text can be very large: one `raw_content` was 946,000 characters. The host cuts what

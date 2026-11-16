@@ -1302,11 +1302,11 @@ already searches with either:
   rather than a `502` for the whole request, and the call limit is
   `web_search_max_calls`, with a `[tool error]` past it, rather than a fixed 10
   and a `422`.
-- `web_search_provider: tavily` keeps asking Tavily for each page's full text,
-  as do the organization Tavily keys that existed before the upgrade, which it
-  gives `include_raw_content: true` in their options. A Tavily key or search
-  tool added later uses Tavily's own default, snippets only, unless its options
-  set `include_raw_content`.
+- `web_search_provider: tavily` keeps asking Tavily for each page's full text.
+  So do the organization Tavily keys that exist at the upgrade, which adds
+  `include_raw_content: true` to their options. A Tavily key or search tool
+  added later gets snippets only, Tavily's own default, unless its options set
+  `include_raw_content`.
 - Hits without page text, Brave's always and Tavily's without
   `include_raw_content`, have their pages read through the fetch tool and
   billed as fetches, as for any search tool (see
@@ -1317,7 +1317,7 @@ already searches with either:
   startup log names it while it has no price. `web_search_extract: false` reads
   no pages. This holds for `web_search_provider: tavily` too: Tavily returns page
   text for nearly every hit, but the check runs before the search, so the fetch
-  tool needs a price, `0` included.
+  tool needs a price, which can be `0`.
 - An organization key's in-loop searches are labeled `org:brave` or
   `org:tavily`, where they were labeled `otari:web_search`, and are still priced
   under `otari:web_search`. A key may carry its own `api_base` and its

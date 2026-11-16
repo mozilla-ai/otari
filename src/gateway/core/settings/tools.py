@@ -375,9 +375,9 @@ class ToolSettings(BaseModel):
         default=None,
         description=(
             "Deprecated, and removed by a coming breaking release: use a search tool with provider tavily or "
-            "brave and its own api_key, named in web_search_default_tool. The provider otari_web_search "
-            "searches with web_search_provider_api_key when no search tool is its default ('tavily' or "
-            "'brave'). When both are set, web_search_url is not needed."
+            "brave and its own api_key, named in web_search_default_tool. The licensed search API "
+            "('tavily' or 'brave') otari_web_search calls, with web_search_provider_api_key, when no search "
+            "tool is its default. When both are set, web_search_url is not needed."
         ),
     )
     web_search_provider_api_key: Annotated[str | None, SECRET] = Field(

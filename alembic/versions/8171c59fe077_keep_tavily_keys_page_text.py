@@ -1,11 +1,12 @@
 """Set include_raw_content on organization Tavily search keys, so they keep returning page text.
 
-Every Tavily search on such a key asked for each page's full text. Its calls
-send the key's own options, and Tavily returns no page text unless asked, so
-each key, archived ones included, gets ``include_raw_content: true`` unless it
-sets the option already. The organization can turn it off by editing the key.
+A key's searches send only the key's own options, and Tavily returns page text
+only when ``include_raw_content`` asks for it. Each Tavily search key, archived
+ones included, gets ``include_raw_content: true`` unless it sets the option
+already. The organization can turn it off by editing the key.
 
-The downgrade leaves the option in place: it is a valid option either way.
+The downgrade leaves the option in place: the previous release's Tavily client
+ignores it and asks for page text anyway.
 
 Revision ID: 8171c59fe077
 Revises: d4a7b2c9e510

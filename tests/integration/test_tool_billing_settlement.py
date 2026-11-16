@@ -444,7 +444,6 @@ async def test_a_search_with_no_hits_is_billed_at_the_rate(
 
 
 def _serve_search_on_the_legacy_provider_pair(monkeypatch: pytest.MonkeyPatch, config: GatewayConfig) -> None:
-    """Serve in-loop search on the legacy Tavily pair."""
     monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
     monkeypatch.setattr(config, "web_search_provider", "tavily")
     monkeypatch.setattr(config, "web_search_provider_api_key", "tvly-key")
@@ -453,9 +452,9 @@ def _serve_search_on_the_legacy_provider_pair(monkeypatch: pytest.MonkeyPatch, c
 def _search_on_the_legacy_provider_pair(
     client: TestClient, headers: dict[str, str], answer: dict[str, Any], *, status_code: int = 200, searches: int = 1
 ) -> list[httpx.Request]:
-    """One chat request whose model searches ``searches`` times on the legacy pair, Tavily answering ``answer``.
+    """Send a chat request whose model searches ``searches`` times on the legacy pair, and return what Tavily was sent.
 
-    Returns the requests Tavily was sent.
+    Tavily answers every search with ``answer``.
     """
     seen: list[httpx.Request] = []
 

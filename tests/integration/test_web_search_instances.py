@@ -250,7 +250,7 @@ def test_a_request_option_the_provider_does_not_take_is_refused_before_the_model
 
 
 class _PolicyWithKey:
-    """A workspace policy that hands the search a Tavily key with no API key, which Tavily requires."""
+    """A workspace policy that hands the search a Tavily credential without the API key Tavily requires."""
 
     async def resolve(self, workspace_id: Any, requested_tools: Any) -> ResolvedWebSearchConfig:
         del workspace_id, requested_tools

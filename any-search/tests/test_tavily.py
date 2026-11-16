@@ -50,7 +50,7 @@ def test_metadata() -> None:
     (tier,) = [option for option in metadata.options if option.cost_tier]
     assert (tier.name, tier.default) == ("search_depth", "basic")
     names = {option.name for option in metadata.options}
-    # The query and the count are the adapter's to set; auto_parameters can pick a dearer depth.
+    # The query and the count are the adapter's to set; auto_parameters can pick a more expensive depth.
     assert not {"query", "max_results", "time_range", "auto_parameters"} & names
 
 

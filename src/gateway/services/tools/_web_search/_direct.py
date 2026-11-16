@@ -357,9 +357,9 @@ async def run_direct_search(search: DirectSearch, client: httpx.AsyncClient) -> 
     The call runs on any-search, or on the old search client for a key on a
     provider any-search does not serve: an organization's, or the legacy
     settings'. Raises :class:`DirectSearchFailedError` when the provider fails
-    the call, an error inside a successful answer included. Its message, for the usage row and the log, holds only the
-    failure's safe fields, since the old client's own text can
-    quote the upstream body.
+    the call, an error inside a successful answer included. Its message, for
+    the usage row and the log, holds only the failure's safe fields, since the
+    old client's own text can quote the upstream body.
     """
     # Imported here: the old clients' module imports this package's root.
     from gateway.services.search_backend import SearchProviderError

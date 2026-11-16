@@ -185,6 +185,6 @@ def _published(value: str | None) -> datetime | None:
         return None
     try:
         published = parsedate_to_datetime(value)
-    except (TypeError, ValueError):
+    except ValueError:
         return None
     return published if published.tzinfo is not None else published.replace(tzinfo=UTC)
