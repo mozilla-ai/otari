@@ -24,6 +24,8 @@ from array import array
 from collections.abc import Sequence
 from typing import Literal
 
+import numpy as np
+import numpy.typing as npt
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -105,6 +107,17 @@ def pack_embedding(vector: Sequence[float]) -> bytes:
     if sys.byteorder != "little":
         packed.byteswap()
     return packed.tobytes()
+
+
+def unpack_embedding_array(data: bytes) -> npt.NDArray[np.float32]:
+    """The vector :func:`pack_embedding` made, as a float32 array over ``data``, read only.
+
+    Raises:
+        SealedValueError: the bytes are not a whole number of float32 values.
+    """
+    if len(data) % 4:
+        raise SealedValueError("not a packed embedding")
+    return np.frombuffer(data, dtype="<f4").astype(np.float32, copy=False)
 
 
 def unpack_embedding(data: bytes) -> tuple[float, ...]:

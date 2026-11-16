@@ -30974,6 +30974,18 @@
             "title": "Recall Rerank",
             "type": "boolean"
           },
+          "recall_rerank_skip_similarity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where relevance is checked: when the most alike entry is at least this alike, 0.3-0.99, hand over by similarity without the rerank model's call. Null checks every turn.",
+            "title": "Recall Rerank Skip Similarity"
+          },
           "rerank_available": {
             "description": "Whether the deployment names a rerank model, without which relevance is not checked.",
             "title": "Rerank Available",
@@ -31027,6 +31039,7 @@
           "recall_max_entries",
           "recall_rerank",
           "recall_min_relevance",
+          "recall_rerank_skip_similarity",
           "rerank_available",
           "experiment_holdout_percent",
           "experiment_started_at",
@@ -31093,6 +31106,19 @@
             "default": false,
             "title": "Recall Rerank",
             "type": "boolean"
+          },
+          "recall_rerank_skip_similarity": {
+            "anyOf": [
+              {
+                "maximum": 0.99,
+                "minimum": 0.3,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recall Rerank Skip Similarity"
           },
           "retention_days": {
             "anyOf": [

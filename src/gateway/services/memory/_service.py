@@ -78,6 +78,7 @@ from gateway.services.memory._store import (
     ProposalDraft,
     Provenance,
 )
+from gateway.services.memory._timing import RERANK_SKIPPED, timed
 
 SEARCH_LIMIT_MAX = 10
 HISTORY_LIMIT = 20
@@ -238,6 +239,7 @@ class WorkspaceMemory:
     recall_max_entries: int
     recall_rerank: bool
     recall_min_relevance: float
+    recall_rerank_skip_similarity: float | None
     # The running experiment's holdout, zero while none runs; the last one's window is kept once it stops.
     experiment_holdout_percent: int
     experiment_started_at: datetime | None
@@ -276,6 +278,8 @@ class SwitchChange:
     # Checked only where the deployment names a rerank model; kept either way, so naming one later honours it.
     recall_rerank: bool = False
     recall_min_relevance: float = DEFAULT_RECALL_MIN_RELEVANCE
+    # Where the most alike entry is at least this alike, hand over by similarity and skip the rerank model's call.
+    recall_rerank_skip_similarity: float | None = None
     experiment_holdout_percent: int = 0
 
 
@@ -358,18 +362,20 @@ class MemoryService:
         """
         async with self._uow:
             switches = await self._switches(caller.workspace_id)
-        [vector] = await self._embed([query], caller.workspace_id, caller.api_key_id)
+        with timed("embed"):
+            [vector] = await self._embed([query], caller.workspace_id, caller.api_key_id)
         model = self._models.embedding_model
         if model is None:
             return []
-        async with self._uow:
-            candidates = await self._store.recallable_refs(
-                caller.workspace_id,
-                member_id=caller.member_id,
-                include_workspace=switches.workspace_scope,
-                include_external=not switches.hide_external,
-                embedding_model=model,
-            )
+        with timed("list"):
+            async with self._uow:
+                candidates = await self._store.recallable_refs(
+                    caller.workspace_id,
+                    member_id=caller.member_id,
+                    include_workspace=switches.workspace_scope,
+                    include_external=not switches.hide_external,
+                    embedding_model=model,
+                )
         best = await self._rank(
             caller.workspace_id,
             candidates,
@@ -377,14 +383,15 @@ class MemoryService:
             order="relevance",
             keep_top=max(1, min(limit, SEARCH_LIMIT_MAX)),
         )
-        async with self._uow:
-            opened = await self._store.opened(caller.workspace_id, [ranked.id for ranked in best])
-            found = [
-                Recalled(opened[ranked.id], relevance(ranked.similarity, ranked.confidence))
-                for ranked in best
-                if ranked.id in opened
-            ]
-            await self._record_read(caller, "memory_search", [recalled.entry.id for recalled in found])
+        with timed("hand_over"):
+            async with self._uow:
+                opened = await self._store.opened(caller.workspace_id, [ranked.id for ranked in best])
+                found = [
+                    Recalled(opened[ranked.id], relevance(ranked.similarity, ranked.confidence))
+                    for ranked in best
+                    if ranked.id in opened
+                ]
+                await self._record_read(caller, "memory_search", [recalled.entry.id for recalled in found])
         return found
 
     async def get(self, caller: MemoryCaller, entry_id: uuid.UUID) -> EntryWithHistory:
@@ -528,19 +535,22 @@ class MemoryService:
                 return []
             floor, most = settings.recall_min_similarity, settings.recall_max_entries
             min_relevance = settings.recall_min_relevance if settings.recall_rerank else None
+            sure = settings.recall_rerank_skip_similarity if settings.recall_rerank else None
         texts = [query] if not context else [query, f"{context}\n\n{query}"]
-        vectors = await self._embed(texts, caller.workspace_id, caller.api_key_id, endpoint=RECALL_ENDPOINT)
+        with timed("embed"):
+            vectors = await self._embed(texts, caller.workspace_id, caller.api_key_id, endpoint=RECALL_ENDPOINT)
         model = self._models.embedding_model
         if model is None:
             return []
-        async with self._uow:
-            candidates = await self._store.recallable_refs(
-                caller.workspace_id,
-                member_id=caller.member_id,
-                include_workspace=switches.workspace_scope,
-                include_external=not switches.hide_external,
-                embedding_model=model,
-            )
+        with timed("list"):
+            async with self._uow:
+                candidates = await self._store.recallable_refs(
+                    caller.workspace_id,
+                    member_id=caller.member_id,
+                    include_workspace=switches.workspace_scope,
+                    include_external=not switches.hide_external,
+                    embedding_model=model,
+                )
         # The most alike, which the rerank model checks, and every other alike enough to be handed over without it.
         alike = await self._rank(
             caller.workspace_id, candidates, vectors, order="similarity", keep_top=RERANK_CANDIDATES, keep_above=floor
@@ -549,14 +559,20 @@ class MemoryService:
         # is handed over.
         kept: list[tuple[float, uuid.UUID, float]] | None = None
         opened: dict[uuid.UUID, OpenedEntry] = {}
-        if min_relevance is not None and self._models.can_rerank:
-            asked = query if not context else f"{query}\n(Said earlier in the conversation: {context})"
-            checked = [candidate.id for candidate in alike[:RERANK_CANDIDATES]]
-            async with self._uow:
-                opened = await self._store.opened(caller.workspace_id, checked)
-            relevant = await self._relevant(
-                caller, asked, [opened[entry_id] for entry_id in checked if entry_id in opened]
-            )
+        # Where the workspace says how alike is alike enough to need no check, an entry that alike is handed over
+        # by similarity, without the rerank model's call.
+        unmistakable = sure is not None and bool(alike) and alike[0].similarity >= sure
+        if unmistakable:
+            RERANK_SKIPPED.inc()
+        if min_relevance is not None and self._models.can_rerank and not unmistakable:
+            with timed("rerank"):
+                asked = query if not context else f"{query}\n(Said earlier in the conversation: {context})"
+                checked = [candidate.id for candidate in alike[:RERANK_CANDIDATES]]
+                async with self._uow:
+                    opened = await self._store.opened(caller.workspace_id, checked)
+                relevant = await self._relevant(
+                    caller, asked, [opened[entry_id] for entry_id in checked if entry_id in opened]
+                )
             if relevant is not None:
                 kept = [(score, entry.id, entry.confidence) for score, entry in relevant if score >= min_relevance]
         if kept is None:
@@ -569,17 +585,18 @@ class MemoryService:
         chosen = sorted(kept, key=lambda scored: relevance(scored[0], scored[2]), reverse=True)[:most]
         if not chosen:
             return []
-        async with self._uow:
-            unopened = [entry_id for _, entry_id, _ in chosen if entry_id not in opened]
-            if unopened:
-                opened.update(await self._store.opened(caller.workspace_id, unopened))
-            ranked = [
-                Recalled(opened[entry_id], relevance(score, confidence))
-                for score, entry_id, confidence in chosen
-                if entry_id in opened
-            ]
-            if ranked:
-                await self._record_read(caller, RECALL_TOOL, [recalled.entry.id for recalled in ranked])
+        with timed("hand_over"):
+            async with self._uow:
+                unopened = [entry_id for _, entry_id, _ in chosen if entry_id not in opened]
+                if unopened:
+                    opened.update(await self._store.opened(caller.workspace_id, unopened))
+                ranked = [
+                    Recalled(opened[entry_id], relevance(score, confidence))
+                    for score, entry_id, confidence in chosen
+                    if entry_id in opened
+                ]
+                if ranked:
+                    await self._record_read(caller, RECALL_TOOL, [recalled.entry.id for recalled in ranked])
         return ranked
 
     async def _rank(
@@ -593,9 +610,10 @@ class MemoryService:
         keep_above: float | None = None,
     ) -> list[RankedCandidate]:
         try:
-            return await self._ranking.rank(
-                workspace_id, candidates, queries, order=order, keep_top=keep_top, keep_above=keep_above
-            )
+            with timed("rank"):
+                return await self._ranking.rank(
+                    workspace_id, candidates, queries, order=order, keep_top=keep_top, keep_above=keep_above
+                )
         except MemoryRankingError as exc:
             logger.warning("Memory could not rank what a member may recall: %s", exc)
             raise MemoryRankingUnavailableError from exc
@@ -685,7 +703,7 @@ class MemoryService:
                 auto_recall=change.auto_recall,
                 recall_min_similarity=change.recall_min_similarity,
                 recall_max_entries=change.recall_max_entries,
-                rerank=(change.recall_rerank, change.recall_min_relevance),
+                rerank=(change.recall_rerank, change.recall_min_relevance, change.recall_rerank_skip_similarity),
                 experiment=self._experiment_after(current, change.experiment_holdout_percent),
             )
             return await self._workspace_memory(workspace_id, organization_id)
@@ -864,6 +882,7 @@ class MemoryService:
             ),
             recall_max_entries=settings.recall_max_entries if settings is not None else DEFAULT_RECALL_MAX_ENTRIES,
             recall_rerank=settings is not None and settings.recall_rerank,
+            recall_rerank_skip_similarity=settings.recall_rerank_skip_similarity if settings is not None else None,
             recall_min_relevance=(
                 settings.recall_min_relevance if settings is not None else DEFAULT_RECALL_MIN_RELEVANCE
             ),

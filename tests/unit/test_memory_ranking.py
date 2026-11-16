@@ -177,3 +177,31 @@ def test_only_the_memory_service_mounts_its_routes() -> None:
     service = FEATURE.routers(_config(memory_engine=True, memory_service_token=TOKEN))
 
     assert len(service) == len(gateway) + 1
+
+
+def test_the_matrix_ranking_orders_as_the_cosine_of_each_entry_does() -> None:
+    import random
+
+    from gateway.services.memory._scoring import cosine, relevance
+
+    rng = random.Random(7)
+    candidates = [RankCandidate(uuid.UUID(int=n + 10), rng.uniform(0.1, 1.0)) for n in range(300)]
+    vectors = {candidate.id: [rng.gauss(0, 1) for _ in range(64)] for candidate in candidates}
+    queries = [[rng.gauss(0, 1) for _ in range(64)] for _ in range(2)]
+
+    for order in ("similarity", "relevance"):
+        ranked = rank_vectors(candidates, vectors, queries, order=order, keep_top=25, keep_above=None)
+        expected = sorted(
+            candidates,
+            key=lambda candidate: (
+                max(cosine(query, vectors[candidate.id]) for query in queries)
+                if order == "similarity"
+                else relevance(max(cosine(query, vectors[candidate.id]) for query in queries), candidate.confidence)
+            ),
+            reverse=True,
+        )[:25]
+        assert _ids(ranked) == [candidate.id for candidate in expected]
+        for entry in ranked:
+            assert entry.similarity == pytest.approx(
+                max(cosine(query, vectors[entry.id]) for query in queries), abs=1e-5
+            )

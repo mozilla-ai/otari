@@ -24,8 +24,9 @@ cd demo/agent-memory/bench
 python3 bench.py seed
 
 # 2. Evaluate. Modes: similarity (0.65, the default), broad (0.60), rerank (0.8, the default), or with a
-#    threshold: rerank:0.9
+#    threshold: rerank:0.9. rerank-skip:0.85 checks relevance unless the most alike entry is that alike.
 python3 bench.py eval similarity broad rerank rerank:0.9
+python3 bench.py eval rerank rerank-skip:0.8 rerank-skip:0.85 rerank-skip:0.9
 
 # 3. A crowded memory: 1,000 entries about made-up services, and evaluate again
 python3 bench.py filler 1000

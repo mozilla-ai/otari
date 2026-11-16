@@ -106,6 +106,9 @@ dependencies = [
     # process rather than through a binary such as ffmpeg.
     "tinytag>=2.3.2",
     "webauthn>=2.5.0",
+    # Agent memory's recall ranks a workspace's embeddings as one matrix product,
+    # off the event loop, rather than one Python loop per entry.
+    "numpy>=2.5.4",
 ]
 
 [project.optional-dependencies]

@@ -4,7 +4,8 @@
     bench.py eval [MODE ...]         run dataset.CASES in each mode and score what recall handed over
     bench.py filler N                add N entries about made-up services, to see recall in a crowded memory
 
-Modes: similarity (0.65 floor, the default), broad (0.60), rerank (the deployment's rerank model, 0.8, the default).
+Modes: similarity (0.65 floor, the default), broad (0.60), rerank (the deployment's rerank model, 0.8, the default),
+and rerank-skip:SIMILARITY (rerank at 0.8, skipped where the most alike entry reaches SIMILARITY).
 Seed with the local consolidation model off (see README.md), so every entry is kept exactly as written.
 """
 
@@ -90,7 +91,7 @@ def switches(**changes: object) -> None:
     base = {"enabled": True, "workspace_scope_enabled": True, "write_policy": "auto", "offer_to_every_request": False,
             "hide_external": False, "retention_days": None, "auto_recall": False, "recall_min_similarity": 0.65,
             "recall_max_entries": 3, "recall_rerank": False, "recall_min_relevance": 0.8,
-            "experiment_holdout_percent": 0}
+            "recall_rerank_skip_similarity": None, "experiment_holdout_percent": 0}
     admin("PUT", f"/workspaces/{WS}/memory", {**base, **changes})
 
 
@@ -225,10 +226,12 @@ def latencies(since: str) -> dict[str, tuple[int, float, float]]:
 
 
 def mode_switches(mode: str) -> dict:
-    """A named mode, or rerank:SCORE and similarity:FLOOR for other thresholds."""
+    """A named mode, or rerank:SCORE, rerank-skip:SIMILARITY and similarity:FLOOR for other thresholds."""
     name, _, threshold = mode.partition(":")
     if not threshold:
         return MODES[name]
+    if name == "rerank-skip":
+        return {"recall_rerank": True, "recall_min_relevance": 0.8, "recall_rerank_skip_similarity": float(threshold)}
     if name == "rerank":
         return {"recall_rerank": True, "recall_min_relevance": float(threshold)}
     return {"recall_min_similarity": float(threshold)}

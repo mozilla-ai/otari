@@ -204,6 +204,31 @@ def test_checking_relevance_hands_over_what_the_reranker_scores_relevant_whateve
     assert _rerank_calls(db_session_factory) == [True, True], "each check is metered as memory's own call"
 
 
+def test_an_entry_alike_enough_is_handed_over_without_the_rerank_call_where_the_workspace_says_so(
+    reranking_client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    headers = _key(reranking_client, master_key_header, db_session_factory)
+    _both_remembered(reranking_client, headers)
+    switches = {"auto_recall": True, "recall_rerank": True}
+
+    _switches(reranking_client, db_session_factory, master_key_header, **switches, recall_rerank_skip_similarity=0.3)
+    with _provider(_completion(None)) as sent:
+        sure = _chat(reranking_client, headers, messages=[{"role": "user", "content": ASK}])
+    _switches(reranking_client, db_session_factory, master_key_header, **switches, recall_rerank_skip_similarity=0.99)
+    with _provider(_completion(None)):
+        checked = _chat(reranking_client, headers, messages=[{"role": "user", "content": ASK}])
+
+    # Handed over by similarity, as without the check: the deploy entry and the one alike to it within the margin.
+    assert sure.headers["Otari-Memory-Recalled"] == "2"
+    assert DEPLOY in _last_user_text(sent[0]) and NEARBY in _last_user_text(sent[0])
+    assert checked.headers["Otari-Memory-Recalled"] == "0", "not alike enough to skip it, so checked: not relevant"
+    assert _rerank_calls(db_session_factory) == [True], "only the second turn called the rerank model"
+    memory = reranking_client.get(
+        f"{API_ROOT}/workspaces/{_workspace_id(db_session_factory)}/memory", headers=master_key_header
+    ).json()
+    assert memory["recall_rerank_skip_similarity"] == 0.99
+
+
 def test_the_reranker_reads_the_turn_first_and_the_conversation_after_it(
     reranking_client: TestClient,
     master_key_header: dict[str, str],

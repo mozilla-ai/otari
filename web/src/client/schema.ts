@@ -22912,6 +22912,11 @@ export interface components {
              */
             recall_rerank: boolean;
             /**
+             * Recall Rerank Skip Similarity
+             * @description Where relevance is checked: when the most alike entry is at least this alike, 0.3-0.99, hand over by similarity without the rerank model's call. Null checks every turn.
+             */
+            recall_rerank_skip_similarity: number | null;
+            /**
              * Rerank Available
              * @description Whether the deployment names a rerank model, without which relevance is not checked.
              */
@@ -22983,6 +22988,8 @@ export interface components {
              * @default false
              */
             recall_rerank: boolean;
+            /** Recall Rerank Skip Similarity */
+            recall_rerank_skip_similarity?: number | null;
             /** Retention Days */
             retention_days?: number | null;
             /**

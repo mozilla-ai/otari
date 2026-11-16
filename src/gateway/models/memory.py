@@ -281,6 +281,10 @@ class MemoryWorkspaceSettings(Base):
         CheckConstraint("recall_min_similarity BETWEEN 0.3 AND 0.99", name="check_memory_settings_recall_similarity"),
         CheckConstraint("recall_max_entries BETWEEN 1 AND 5", name="check_memory_settings_recall_entries"),
         CheckConstraint("recall_min_relevance BETWEEN 0.05 AND 0.99", name="check_memory_settings_recall_relevance"),
+        CheckConstraint(
+            "recall_rerank_skip_similarity IS NULL OR recall_rerank_skip_similarity BETWEEN 0.3 AND 0.99",
+            name="check_memory_settings_rerank_skip",
+        ),
         CheckConstraint("experiment_holdout_percent BETWEEN 0 AND 50", name="check_memory_settings_experiment_holdout"),
     )
 
@@ -310,6 +314,9 @@ class MemoryWorkspaceSettings(Base):
     # reach ``recall_min_relevance``; the similarity floor then no longer applies.
     recall_rerank: Mapped[bool] = mapped_column(default=False, server_default=false())
     recall_min_relevance: Mapped[float] = mapped_column(default=0.8, server_default="0.8")
+    # Where the most alike entry is at least this alike, hand over by similarity without the rerank model's call.
+    # Null checks every turn.
+    recall_rerank_skip_similarity: Mapped[float | None] = mapped_column()
     # The share of sessions the last experiment served without memory, to measure what it saves; zero is none ever.
     experiment_holdout_percent: Mapped[int] = mapped_column(default=0, server_default="0")
     # When it began, which deals the sessions, and when it stopped; it runs while it has begun and not stopped.

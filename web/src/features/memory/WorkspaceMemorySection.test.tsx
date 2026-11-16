@@ -32,6 +32,7 @@ function memory(overrides: Partial<WorkspaceMemory> = {}): WorkspaceMemory {
     recall_max_entries: 3,
     recall_rerank: false,
     recall_min_relevance: 0.8,
+    recall_rerank_skip_similarity: null,
     rerank_available: true,
     experiment_holdout_percent: 0,
     experiment_started_at: null,
@@ -176,6 +177,7 @@ describe("WorkspaceMemorySection", () => {
         recall_max_entries: 3,
         recall_rerank: false,
         recall_min_relevance: 0.8,
+        recall_rerank_skip_similarity: null,
         experiment_holdout_percent: 0,
       },
     })
@@ -198,6 +200,7 @@ describe("WorkspaceMemorySection", () => {
         auto_recall: true,
         recall_rerank: true,
         recall_min_relevance: 0.8,
+        recall_rerank_skip_similarity: null,
         recall_min_similarity: 0.65,
       }),
     })
@@ -205,6 +208,41 @@ describe("WorkspaceMemorySection", () => {
       await screen.findByLabelText("How relevant an entry must be"),
     ).toBeInTheDocument()
     expect(screen.queryByLabelText("How alike an entry must be")).toBeNull()
+  })
+
+  it("skips the relevance check for an entry alike enough, and goes back to checking every message", async () => {
+    const sent = await renderSection(
+      memory({ auto_recall: true, recall_rerank: true }),
+    )
+    const user = userEvent.setup()
+
+    await user.click(
+      screen.getByRole("button", {
+        name: /Skip the check when an entry is this alike/,
+      }),
+    )
+    await user.click(
+      await screen.findByRole("option", { name: "Nearly the same (0.85)" }),
+    )
+
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(sent[0]).toEqual({
+      method: "PUT",
+      body: expect.objectContaining({
+        recall_rerank: true,
+        recall_rerank_skip_similarity: 0.85,
+      }),
+    })
+  })
+
+  it("asks nothing about skipping the check while relevance is not checked", async () => {
+    await renderSection(memory({ auto_recall: true }))
+
+    expect(
+      screen.queryByRole("button", {
+        name: /Skip the check when an entry is this alike/,
+      }),
+    ).toBeNull()
   })
 
   it("says when the deployment has no rerank model to check relevance with", async () => {

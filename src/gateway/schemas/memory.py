@@ -124,6 +124,10 @@ class WorkspaceMemoryPublic(BaseModel):
         "those relevant enough; the similarity floor then no longer applies."
     )
     recall_min_relevance: float = Field(description="The score an entry must reach where relevance is checked.")
+    recall_rerank_skip_similarity: float | None = Field(
+        description="Where relevance is checked: when the most alike entry is at least this alike, 0.3-0.99, hand "
+        "over by similarity without the rerank model's call. Null checks every turn."
+    )
     rerank_available: bool = Field(
         description="Whether the deployment names a rerank model, without which relevance is not checked."
     )
@@ -153,6 +157,7 @@ class WorkspaceMemoryUpdate(BaseModel):
     recall_max_entries: int = Field(default=3, ge=1, le=5)
     recall_rerank: bool = False
     recall_min_relevance: float = Field(default=0.8, ge=0.05, le=0.99)
+    recall_rerank_skip_similarity: float | None = Field(default=None, ge=0.3, le=0.99)
     experiment_holdout_percent: int = Field(
         default=0,
         ge=0,

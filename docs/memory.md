@@ -174,6 +174,17 @@ need another.
   are to the embedding model's.
 - Where the deployment names no rerank model, the switch is kept but recall goes
   by similarity; the dashboard says so.
+- **Skip the check when an entry is this alike** (0.3 to 0.99, never by default)
+  saves the call where the answer is plain: when the most alike entry reaches
+  it, recall goes by similarity for that message. Each skip is counted in
+  `gateway_memory_rerank_skipped_total`. It trades the check for speed: an entry
+  only alike in its words can then be added. Set it from the recall bench
+  (`demo/agent-memory/bench`, `rerank-skip:` modes) for your embedding model.
+
+How long each step of a recall takes is in the
+`gateway_memory_recall_stage_seconds` histogram, by stage: `embed`, `list`,
+`rank` (with `open` and `score`, wherever ranking runs), `rerank` and
+`hand_over`.
 
 ## Measure what memory saves
 

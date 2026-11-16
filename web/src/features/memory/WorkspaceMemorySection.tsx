@@ -29,6 +29,7 @@ const AUTO_RECALL_LABEL = "Recall automatically"
 const SIMILARITY_LABEL = "How alike an entry must be"
 const RERANK_LABEL = "Check relevance"
 const RELEVANCE_LABEL = "How relevant an entry must be"
+const SKIP_LABEL = "Skip the check when an entry is this alike"
 const MOST_LABEL = "Entries added at most"
 
 const SIMILARITY_OPTIONS = [
@@ -40,6 +41,13 @@ const RELEVANCE_OPTIONS = [
   { value: "0.50", label: "Broad (0.50)" },
   { value: "0.80", label: "Balanced (0.80)" },
   { value: "0.90", label: "Strict (0.90)" },
+]
+const NEVER = "never"
+const SKIP_OPTIONS = [
+  { value: NEVER, label: "Never (check every message)" },
+  { value: "0.80", label: "Very alike (0.80)" },
+  { value: "0.85", label: "Nearly the same (0.85)" },
+  { value: "0.90", label: "The same (0.90)" },
 ]
 const MOST_OPTIONS = [1, 2, 3, 4, 5].map((count) => ({
   value: String(count),
@@ -69,6 +77,7 @@ function switches(memory: WorkspaceMemory): UpdateWorkspaceMemoryRequest {
     recall_max_entries: memory.recall_max_entries,
     recall_rerank: memory.recall_rerank,
     recall_min_relevance: memory.recall_min_relevance,
+    recall_rerank_skip_similarity: memory.recall_rerank_skip_similarity,
     experiment_holdout_percent: memory.experiment_holdout_percent,
   }
 }
@@ -273,6 +282,32 @@ export function WorkspaceMemorySection({
               }
             />
             <div className="flex flex-col gap-2 md:flex-row">
+              {checksRelevance ? (
+                <Select
+                  label={SKIP_LABEL}
+                  value={
+                    current.recall_rerank_skip_similarity === null
+                      ? NEVER
+                      : current.recall_rerank_skip_similarity.toFixed(2)
+                  }
+                  onChange={(value) =>
+                    change({
+                      recall_rerank_skip_similarity:
+                        value === NEVER ? null : Number(value),
+                    })
+                  }
+                  options={
+                    current.recall_rerank_skip_similarity === null
+                      ? SKIP_OPTIONS
+                      : thresholdOptions(
+                          SKIP_OPTIONS,
+                          current.recall_rerank_skip_similarity,
+                        )
+                  }
+                  description="Hand over an entry this alike to the message without the rerank call: faster and cheaper, at some risk of adding one only alike in its words."
+                  isDisabled={locked || !current.enabled}
+                />
+              ) : null}
               {checksRelevance ? (
                 <Select
                   label={RELEVANCE_LABEL}

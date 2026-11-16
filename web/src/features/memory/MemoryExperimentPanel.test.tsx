@@ -27,6 +27,7 @@ function memory(overrides: Partial<WorkspaceMemory> = {}): WorkspaceMemory {
     recall_max_entries: 3,
     recall_rerank: false,
     recall_min_relevance: 0.8,
+    recall_rerank_skip_similarity: null,
     rerank_available: false,
     experiment_holdout_percent: 0,
     experiment_started_at: null,

@@ -10,12 +10,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
+import numpy as np
+import numpy.typing as npt
+
 from gateway.metrics import REGISTRY, Counter
 from gateway.models.memory import MemoryEntry, MemoryKind, MemoryProposal, MemoryReviewReason, MemoryScope, MemoryTrust
 from gateway.ports.memory_ranking_port import RankCandidate
 from gateway.repositories.memory import MemoryRepositories, NewEntry, NewProposal, parse_review_reason
 from gateway.services.memory._keys import WorkspaceKeys
-from gateway.services.memory._recall_vectors import RecallVectors
 from gateway.services.memory._sealing import (
     SealedField,
     SealedValueError,
@@ -24,6 +26,7 @@ from gateway.services.memory._sealing import (
     pack_embedding,
     seal,
     unpack_embedding,
+    unpack_embedding_array,
 )
 
 UNOPENED_ROWS = Counter(
@@ -238,24 +241,33 @@ class EntryStore:
         )
         return [RankCandidate(ref.id, ref.confidence) for ref in refs]
 
-    async def embeddings(
-        self, workspace_id: uuid.UUID, entry_ids: Sequence[uuid.UUID], held: RecallVectors | None
-    ) -> dict[uuid.UUID, Sequence[float]]:
-        """These entries' embeddings, opened, by id: from ``held`` where it holds them, the rest opened and kept in it.
+    async def open_embeddings(
+        self, workspace_id: uuid.UUID, entry_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, npt.NDArray[np.float32]]:
+        """These entries' embeddings, opened, by id. Texts are left sealed: :meth:`opened` opens the few handed over.
 
-        Texts are left sealed: :meth:`opened` opens the few handed over. An id the workspace does not hold, or whose
-        embedding does not open, is left out.
+        An id the workspace does not hold, or whose embedding does not open, is left out.
         """
-        vectors: dict[uuid.UUID, Sequence[float]] = {}
-        if held is not None:
-            vectors.update(held.take(workspace_id, entry_ids))
-        missing = [entry_id for entry_id in entry_ids if entry_id not in vectors]
-        if missing:
-            opened = await self._open_embeddings(workspace_id, missing)
-            if held is not None:
-                held.keep(workspace_id, opened)
-            vectors.update(opened)
-        return vectors
+        rows = await self._repos.entries.sealed_embeddings(workspace_id, entry_ids)
+        keys = await self._keys.for_opening(self._repos.keys, workspace_id, {row.key_id for row in rows})
+        opened: dict[uuid.UUID, npt.NDArray[np.float32]] = {}
+        for row in rows:
+            key = keys.get(row.key_id)
+            aad = associated_data(
+                workspace_id=workspace_id,
+                scope=row.scope,
+                owner_user_id=row.owner_user_id,
+                record="entry",
+                record_id=row.id,
+                field="embedding",
+            )
+            try:
+                if key is None:
+                    raise SealedValueError("its key is gone")
+                opened[row.id] = unpack_embedding_array(open_sealed(key, row.embedding_sealed, aad))
+            except SealedValueError:
+                UNOPENED_ROWS.labels(table="memory_entries").inc()
+        return opened
 
     async def opened(self, workspace_id: uuid.UUID, entry_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, OpenedEntry]:
         """These entries of the workspace, opened, by id; any that does not open is left out."""
@@ -334,30 +346,6 @@ class EntryStore:
                 UNOPENED_ROWS.labels(table="memory_entries").inc()
                 continue
             opened.append(entry)
-        return opened
-
-    async def _open_embeddings(
-        self, workspace_id: uuid.UUID, entry_ids: Sequence[uuid.UUID]
-    ) -> dict[uuid.UUID, tuple[float, ...]]:
-        rows = await self._repos.entries.sealed_embeddings(workspace_id, entry_ids)
-        keys = await self._keys.for_opening(self._repos.keys, workspace_id, {row.key_id for row in rows})
-        opened: dict[uuid.UUID, tuple[float, ...]] = {}
-        for row in rows:
-            key = keys.get(row.key_id)
-            aad = associated_data(
-                workspace_id=workspace_id,
-                scope=row.scope,
-                owner_user_id=row.owner_user_id,
-                record="entry",
-                record_id=row.id,
-                field="embedding",
-            )
-            try:
-                if key is None:
-                    raise SealedValueError("its key is gone")
-                opened[row.id] = unpack_embedding(open_sealed(key, row.embedding_sealed, aad))
-            except SealedValueError:
-                UNOPENED_ROWS.labels(table="memory_entries").inc()
         return opened
 
 
