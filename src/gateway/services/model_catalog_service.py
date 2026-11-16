@@ -173,6 +173,12 @@ def _fallback() -> ModelsDevCatalog | None:
     return _bundled
 
 
+def load_bundled_fallback() -> None:
+    """Read the bundled catalog before a request needs it, unless another serves; run it off the loop."""
+    if _cache.data is None:
+        _fallback()
+
+
 def _served() -> ModelsDevCatalog | None:
     return _cache.data if _cache.data is not None else _fallback()
 

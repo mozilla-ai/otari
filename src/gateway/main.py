@@ -113,7 +113,7 @@ from gateway.services.log_writer import (
     create_log_writer,
 )
 from gateway.services.master_key_service import ensure_master_key, load_master_key_hash, startup_notice
-from gateway.services.model_catalog_service import configure_models_dev_base_url
+from gateway.services.model_catalog_service import configure_models_dev_base_url, load_bundled_fallback
 from gateway.services.model_discovery_service import (
     reset_discovery_cache,
     run_discovery_refresher,
@@ -1142,14 +1142,16 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # Persisted dashboard overrides win over config/env; apply them
             # before pricing init so default-pricing behavior is consistent.
             await apply_overrides_from_db(config, session)
-            # The bundled catalog is several MB of JSON: read it here, off the
-            # event loop, so no request waits on it.
+            # The bundled catalog is several MB of JSON: build its prices here,
+            # off the event loop, so no request waits on them.
             await asyncio.to_thread(load_bundled_index)
             # After the overrides, so it sees the copy setting this process serves.
             _validate_provider_account_pepper(config, advisory_level)
             await load_persisted_price_snapshot(session)
             # So the first request after a restart lists the stored model facts.
             await load_stored_models_dev_catalog(session)
+            # Its model facts too, off the loop, unless a stored catalog serves them.
+            await asyncio.to_thread(load_bundled_fallback)
             # Persisted tool overrides win over config/env too, so the worker
             # reflects a prior run's dashboard change. The legacy search values
             # are read first, to tell a file value from a stored one.

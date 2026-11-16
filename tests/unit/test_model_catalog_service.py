@@ -285,6 +285,16 @@ def test_the_fallback_is_the_bundled_catalog() -> None:
     assert catalog.model_for("openai", "gpt-4o") is not None
 
 
+def test_the_bundled_fallback_is_read_ahead_only_when_nothing_else_serves() -> None:
+    mcs.load_bundled_fallback()
+    assert mcs._bundled is not None
+
+    mcs.serve_catalog(EMPTY, datetime.now(UTC), mcs.models_dev_base_url())
+    mcs.load_bundled_fallback()
+
+    assert mcs._bundled is None
+
+
 def test_serving_a_catalog_releases_the_bundled_one() -> None:
     bundled = mcs._fallback()
     assert mcs._fallback() is bundled
