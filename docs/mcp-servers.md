@@ -18,7 +18,7 @@ There are two ways in: add a server by its URL, or pick servers from the catalog
 10. Under **Availability**, choose who gets the server:
     - **Off**: nobody can use it. You can turn it on later without setting it up again.
     - **On request**: available to people building things, invisible to coding agents. Only requests that ask for it by its id get it; the **Server ID** is at the top of the server's page, and goes in `mcp_server_ids`.
-    - **Every request**: available everywhere. It is added to every model request made with the workspace's keys, including coding agents such as Claude Code that never name a server. See [Attached to every request](mcp.md#attached-to-every-request).
+    - **Every request**: available everywhere. It is added to every model request made with a workspace key that holds the `mcp:execute` scope, including coding agents such as Claude Code that never name a server. See [Attached to every request](mcp.md#attached-to-every-request).
 11. Under **Default policy**, choose **Allow** to let every key in the workspace use the server, or **Deny** to let none use it until you add rules for them.
 12. Click **Add MCP server** to save it.
 

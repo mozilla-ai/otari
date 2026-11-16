@@ -84,8 +84,9 @@ model. When budgets are small, set `CLAUDE_CODE_MAX_OUTPUT_TOKENS` lower. See
 Claude Code does not name Otari's MCP servers in its requests, so Otari adds
 them itself: a server a workspace manager has set to
 [attach to every request](mcp.md#attached-to-every-request) is offered to Claude
-Code beside its own tools, and Otari runs that server's tools for it. Nothing
-changes in your Claude Code setup.
+Code beside its own tools, and Otari runs that server's tools for it. Your key
+needs the [`mcp:execute` scope](api-keys.md#scopes); nothing else changes in
+your Claude Code setup.
 
 When the server uses each person's own account and you have not signed in yet:
 
