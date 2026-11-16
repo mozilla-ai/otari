@@ -1,5 +1,6 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { play, unlock } from "cuelume"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { CallerIdentity } from "@/client"
@@ -9,6 +10,9 @@ import { AppProviders } from "@/tests/providers"
 
 import { AvatarCard } from "./AvatarCard"
 import { defaultFaceFor } from "./faces"
+
+// The audio boundary: cuelume synthesizes through Web Audio, which jsdom lacks.
+vi.mock("cuelume", () => ({ play: vi.fn(), unlock: vi.fn() }))
 
 const ADA = "33333333-3333-3333-3333-333333333333"
 
@@ -55,6 +59,8 @@ function mockApi({
 // jsdom has no Web Animations; the bloom, ripple and pulse are decoration.
 beforeEach(() => {
   Element.prototype.animate = vi.fn() as unknown as Element["animate"]
+  vi.mocked(play).mockClear()
+  vi.mocked(unlock).mockReset().mockResolvedValue(true)
 })
 
 afterEach(() => {
@@ -139,5 +145,99 @@ describe("AvatarCard", () => {
     )
     expect(written).toHaveLength(1)
     expect(await cardFace()).toBe(1234)
+  })
+})
+
+describe("AvatarCard sounds", () => {
+  // `play`'s overloads type the mock's calls as the retired 0.2 names, so
+  // compare the cue as a string.
+  const cues = () => vi.mocked(play).mock.calls.map(([cue]) => String(cue))
+
+  it("starts audio and plays the open cue in the press that opens the picker", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    renderCard()
+
+    await user.click(await screen.findByRole("button", { name: /currently/ }))
+
+    expect(unlock).toHaveBeenCalledOnce()
+    expect(play).toHaveBeenCalledWith("open", {
+      theme: "bubble",
+      emphasis: "subtle",
+      volume: 0.8,
+      direction: undefined,
+    })
+  })
+
+  it("plays a select toward the arrow key's side", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    renderCard()
+
+    await openAndMove(user)
+    await user.keyboard("{ArrowLeft}")
+
+    const steps = vi
+      .mocked(play)
+      .mock.calls.filter(([cue]) => String(cue) === "select")
+      .map(([, options]) => options?.direction)
+    expect(steps).toEqual(["forward", "back"])
+  })
+
+  it("plays navigate on Shuffle", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    renderCard()
+
+    const dialog = await openAndMove(user)
+    await user.click(dialog.getByRole("button", { name: "Shuffle" }))
+
+    expect(cues().at(-1)).toBe("navigate")
+  })
+
+  it("plays success on Save, and not the close cue", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    renderCard()
+
+    const dialog = await openAndMove(user)
+    await user.click(dialog.getByRole("button", { name: "Save" }))
+
+    expect(cues()).toContain("success")
+    expect(cues()).not.toContain("close")
+  })
+
+  it.each([
+    [
+      "Cancel",
+      (user: ReturnType<typeof userEvent.setup>) =>
+        user.click(screen.getByRole("button", { name: "Cancel" })),
+    ],
+    [
+      "Escape",
+      (user: ReturnType<typeof userEvent.setup>) => user.keyboard("{Escape}"),
+    ],
+  ])("plays close when %s leaves the picker", async (_, leave) => {
+    mockApi()
+    const user = userEvent.setup()
+    renderCard()
+
+    await openAndMove(user)
+    await leave(user)
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(cues().filter((cue) => cue === "close")).toHaveLength(1)
+  })
+
+  it("still opens and saves when the browser blocks audio", async () => {
+    vi.mocked(unlock).mockResolvedValue(false)
+    const written = mockApi()
+    const user = userEvent.setup()
+    renderCard()
+
+    const dialog = await openAndMove(user)
+    await user.click(dialog.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => expect(written).toHaveLength(1))
   })
 })

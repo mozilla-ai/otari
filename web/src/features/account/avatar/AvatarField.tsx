@@ -20,6 +20,7 @@ import {
   springEasing,
   step,
 } from "./motion"
+import { playPickerSound } from "./sounds"
 
 /**
  * A honeycomb of faces behind an oval window, read like a picker wheel: a
@@ -182,6 +183,8 @@ export function AvatarField({
   const shownRef = useRef(shown)
   shownRef.current = shown
   const centerId = useRef(value)
+  // The cell last reported in the frame, so a tick can say which way it moved.
+  const lastCell = useRef<Cell | null>(null)
   // While a tapped face glides into the frame, the faces it passes over are
   // not choices: the tap already chose.
   const gliding = useRef(false)
@@ -211,14 +214,28 @@ export function AvatarField({
     })
   }
 
-  // Report the face in the frame whenever it changes during a drag or a coast.
-  const reportCenter = () => {
+  // Report the face in the frame whenever it changes during a drag or a coast,
+  // with a tick as it passes. The face a landing settles on gets the landing's
+  // sound instead, so `isLanding` keeps this one quiet.
+  const reportCenter = (isLanding = false) => {
     if (gliding.current) return
-    const id = idAt(centeredCell())
+    const cell = centeredCell()
+    const id = idAt(cell)
     if (id === centerId.current) return
+    const previous = lastCell.current
+    lastCell.current = cell
     centerId.current = id
     onChangeRef.current(id, "drag")
     if (drag.current?.pointerType === "touch") haptic()
+    if (isLanding) return
+    const step = previous ? cell.c - previous.c || cell.r - previous.r : 1
+    playPickerSound("pass", step >= 0 ? "forward" : "back")
+  }
+
+  const settle = () => {
+    reportCenter(true)
+    lastCell.current = centeredCell()
+    playPickerSound("land")
   }
 
   const run = () => {
@@ -236,7 +253,7 @@ export function AvatarField({
           o.y = axis(o.y.target)
           o.isLanding = false
           gliding.current = false
-          reportCenter()
+          settle()
           pulse()
           haptic()
         } else {
@@ -271,7 +288,7 @@ export function AvatarField({
       o.y = axis(-y)
       o.isLanding = false
       gliding.current = false
-      reportCenter()
+      settle()
       setFrame((n) => n + 1)
       return
     }
@@ -362,6 +379,7 @@ export function AvatarField({
   // biome-ignore lint/correctness/useExhaustiveDependencies: once, on mount
   useEffect(() => {
     jumpTo(nearestCell(value))
+    lastCell.current = centeredCell()
     const done = window.setTimeout(() => {
       hasBloomed.current = true
     }, 120)
@@ -570,9 +588,11 @@ export function AvatarField({
     const next = { r: now.r + move.r, c: now.c + move.c }
     // No motion on a key press: it lands as fast as the key repeats.
     jumpTo(next)
+    lastCell.current = next
     const id = idAt(next)
     centerId.current = id
     onChange(id, "key")
+    playPickerSound("key", move.r + move.c > 0 ? "forward" : "back")
   }
 
   // The cells that can fall inside the window, with one cell of margin so
