@@ -1984,12 +1984,43 @@ def check_service_root_exports(src_root: Path) -> list[str]:
 IMPORT_CYCLE_SCOPE = "gateway"
 
 
+TYPE_CHECKING_NAMES = ("TYPE_CHECKING", "typing.TYPE_CHECKING")
+
+
+def _guards_type_checking(test: ast.expr) -> bool:
+    """Whether an if guards a block that only a type checker reads."""
+    return _dotted_name(test) in TYPE_CHECKING_NAMES
+
+
+def _executed_imports(tree: ast.Module) -> Iterator[ast.Import | ast.ImportFrom]:
+    """Every import that runs when the module is imported.
+
+    Descends into the blocks that run as the module body does, an if, a try, a with or a loop,
+    and not into a function or class body, which runs when it is called, nor into a
+    ``TYPE_CHECKING`` guard, which never runs. Deferring an import is how a cycle is broken,
+    so reading a deferred one as a dependency would refuse the fix.
+    """
+    pending: list[ast.stmt] = list(tree.body)
+    while pending:
+        node = pending.pop()
+        if isinstance(node, ast.Import | ast.ImportFrom):
+            yield node
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            continue
+        elif isinstance(node, ast.If) and _guards_type_checking(node.test):
+            pending.extend(node.orelse)
+        else:
+            pending.extend(getattr(node, "body", []))
+            pending.extend(getattr(node, "orelse", []))
+            pending.extend(getattr(node, "finalbody", []))
+            pending.extend(statement for handler in getattr(node, "handlers", []) for statement in handler.body)
+
+
 def _import_graph(src_root: Path) -> dict[str, set[str]]:
     """Each module under the scope and the modules it imports when it is itself imported.
 
-    NOTE: only statements at module scope are read, so an import inside a function or under
-    ``if TYPE_CHECKING`` is skipped because it does not run at import time. An import in a
-    module-level ``try`` block is skipped too, which can hide a cycle but never invents one.
+    NOTE: only the imports that run when the module is imported are read, which
+    :func:`_executed_imports` decides.
     """
     files = [f for f in sorted((src_root / IMPORT_CYCLE_SCOPE).rglob("*.py")) if "__pycache__" not in f.parts]
     modules = {_module_name(f.relative_to(src_root).as_posix()) for f in files}
@@ -2001,9 +2032,7 @@ def _import_graph(src_root: Path) -> dict[str, set[str]]:
         except SyntaxError:
             continue
         imported: set[str] = set()
-        for node in tree.body:
-            if not isinstance(node, ast.Import | ast.ImportFrom):
-                continue
+        for node in _executed_imports(tree):
             for module in _imported_modules(node, file_path, src_root):
                 # Importing a.b.c runs a, then a.b, then a.b.c, so each package above it is an edge too.
                 parts = module.split(".")
@@ -2064,12 +2093,22 @@ TYPE_ALIAS = ("TypeAlias", "typing.TypeAlias", "typing_extensions.TypeAlias")
 ANNOTATED = ("Annotated", "typing.Annotated", "typing_extensions.Annotated")
 
 
-def _annotated_alias(node: ast.Assign) -> bool:
-    """Whether the assignment spells ``Annotated[...]``, which names a type rather than using one."""
+def _annotated_type(node: ast.Assign, bindings: dict[str, str]) -> ast.expr | None:
+    """The type ``Annotated[T, ...]`` names in an assignment, or None where the value is not one.
+
+    NOTE: only the type is returned. The metadata beside it runs when the module loads, so it
+    stays subject to every rule a type position is exempt from.
+    """
     if not isinstance(node.value, ast.Subscript):
-        return False
-    name = _dotted_name(node.value.value)
-    return name is not None and name in ANNOTATED
+        return None
+    dotted = _dotted_name(node.value.value) or ""
+    head, _, rest = dotted.partition(".")
+    target = bindings.get(head)
+    resolved = (f"{target}.{rest}" if rest else target) if target is not None else dotted
+    if resolved not in ANNOTATED:
+        return None
+    arguments = node.value.slice
+    return arguments.elts[0] if isinstance(arguments, ast.Tuple) and arguments.elts else arguments
 
 
 TYPE_CHECKS = ("isinstance", "issubclass")
@@ -2717,8 +2756,8 @@ def _type_position_nodes(tree: ast.Module, bindings: dict[str, str]) -> set[int]
             positions.append(node.returns)
         elif isinstance(node, ast.TypeAlias):
             positions.append(node.value)
-        elif isinstance(node, ast.Assign) and _annotated_alias(node):
-            positions.append(node.value)
+        elif isinstance(node, ast.Assign) and (annotated := _annotated_type(node, bindings)) is not None:
+            positions.append(annotated)
         elif isinstance(node, ast.Call):
             called = _called_name(node.func)
             dotted = _dotted_name(node.func) or ""

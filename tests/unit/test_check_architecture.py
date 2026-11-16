@@ -2166,3 +2166,84 @@ def test_a_dependency_alias_naming_a_model_is_not_a_use(tmp_path: Path, monkeypa
     )
 
     assert check.check_model_access(tmp_path) == []
+
+
+def test_an_import_in_a_module_level_block_is_a_cycle(tmp_path: Path) -> None:
+    """An if, a try or a loop at module level runs as the body does, so an import inside one counts."""
+    _write(tmp_path, "gateway/__init__.py", "")
+    _write(tmp_path, "gateway/a.py", "if True:\n    from gateway.b import B\n\nA = 1\n")
+    _write(tmp_path, "gateway/b.py", "from gateway.a import A\n\nB = 2\n")
+
+    violations = check.check_import_cycles(tmp_path)
+
+    assert len(violations) == 1
+    assert "gateway.a, gateway.b" in violations[0]
+
+
+def test_an_import_in_a_function_body_is_not_a_cycle(tmp_path: Path) -> None:
+    """Deferring an import is how a cycle is broken, so reading one as an edge would refuse the fix."""
+    _write(tmp_path, "gateway/__init__.py", "")
+    _write(tmp_path, "gateway/a.py", "def later():\n    from gateway.b import B\n\n    return B\n")
+    _write(tmp_path, "gateway/b.py", "from gateway.a import later\n\nB = 2\n")
+
+    assert check.check_import_cycles(tmp_path) == []
+
+
+def test_a_model_built_in_annotated_metadata_is_still_a_use(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only the type in ``Annotated[T, ...]`` names a type; the metadata beside it runs on import."""
+    monkeypatch.setattr(
+        check,
+        "MODEL_ACCESS",
+        {
+            "gateway.models.things.Thing": {
+                "repository": "gateway/repositories/things/thing_repository.py",
+                "baseline": (),
+            }
+        },
+    )
+    _write(tmp_path, "gateway/models/things.py", "class Thing:\n    __tablename__ = 'thing'\n")
+    _write(tmp_path, "gateway/repositories/things/__init__.py", "")
+    _write(
+        tmp_path,
+        "gateway/repositories/things/thing_repository.py",
+        "from gateway.models.things import Thing\n\n\ndef all_things(db):\n    return db.execute(select(Thing))\n",
+    )
+    _write(
+        tmp_path,
+        "gateway/api/deps/things.py",
+        "from typing import Annotated\n\nfrom gateway.models.things import Thing\n\nAlias = Annotated[str, Thing()]\n",
+    )
+
+    violations = check.check_model_access(tmp_path)
+
+    assert len(violations) == 1
+    assert "gateway/api/deps/things.py" in violations[0]
+
+
+def test_a_renamed_annotated_import_still_names_a_type(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``Annotated`` resolves through the module's bindings, so an alias for it is recognized."""
+    monkeypatch.setattr(
+        check,
+        "MODEL_ACCESS",
+        {
+            "gateway.models.things.Thing": {
+                "repository": "gateway/repositories/things/thing_repository.py",
+                "baseline": (),
+            }
+        },
+    )
+    _write(tmp_path, "gateway/models/things.py", "class Thing:\n    __tablename__ = 'thing'\n")
+    _write(tmp_path, "gateway/repositories/things/__init__.py", "")
+    _write(
+        tmp_path,
+        "gateway/repositories/things/thing_repository.py",
+        "from gateway.models.things import Thing\n\n\ndef all_things(db):\n    return db.execute(select(Thing))\n",
+    )
+    _write(
+        tmp_path,
+        "gateway/api/deps/things.py",
+        "from typing import Annotated as Ann\n\nfrom gateway.models.things import Thing\n\n"
+        "ThingDep = Ann[Thing, Depends(get_thing)]\n",
+    )
+
+    assert check.check_model_access(tmp_path) == []
