@@ -261,6 +261,11 @@ def _billed(
                         "select": [{"default": "anthropic:claude-opus-4"}],
                         "on_failure": ["openai:gpt-4o"],
                     },
+                    # Fleet candidates only.
+                    "fleet_only": {
+                        "select": [{"default": "openai:gpt-4o"}],
+                        "on_failure": ["openai:gpt-4o-mini"],
+                    },
                 }
             }
         ),
@@ -691,6 +696,26 @@ def test_a_policy_skips_a_deployment_paid_candidate_its_organization_cannot_fund
     with db_session_factory() as db:
         served = db.scalars(select(UsageLog.deployment_paid).where(UsageLog.status == "success")).all()
     assert served == [False]
+
+
+def test_a_policy_its_organization_cannot_fund_anywhere_is_refused_once_against_its_first_model(
+    billed: tuple[TestClient, ModuleType],
+) -> None:
+    client, probe = billed
+    _price(client, "openai:gpt-4o")
+    _price(client, "openai:gpt-4o-mini")
+    key = _key(client)
+    probe.FUNDS.update(available=Decimal("0"), action_url="https://otari.example/billing")
+
+    response, provider = _routed(client, key, "fleet_only", failing="none")
+
+    assert response.status_code == status.HTTP_402_PAYMENT_REQUIRED, response.text
+    assert response.headers[ERROR_CODE_HEADER] == INSUFFICIENT_FUNDS
+    assert response.json()["billing_url"] == "https://otari.example/billing"
+    provider.assert_not_called()
+    rows = client.get(f"{API_ROOT}/usage", params={"user_id": "billed"}, headers=MASTER).json()
+    assert [(row["status_code"], row["model"]) for row in rows] == [(402, "gpt-4o")]
+    assert _user(client)["reserved"] == pytest.approx(0.0)
 
 
 def test_a_policy_skips_a_deployment_paid_candidate_with_no_free_slot(

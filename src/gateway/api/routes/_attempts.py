@@ -28,6 +28,7 @@ from gateway.api.routes._helpers import with_retry_hint
 from gateway.core.error_codes import (
     ALL_CANDIDATES_REJECTED,
     CONTEXT_LENGTH_EXCEEDED,
+    INSUFFICIENT_FUNDS,
     PROVIDER_CREDENTIAL_REJECTED,
     REQUEST_TOO_LARGE,
     STRUCTURED_OUTPUT_FAILED,
@@ -268,6 +269,17 @@ def _soonest_refusal(refusals: Sequence[tuple[Attempt, HTTPException]]) -> tuple
     return min(reversed(refusals), key=_retry_after)
 
 
+def _refusal_to_answer(refusals: Sequence[tuple[Attempt, HTTPException]]) -> tuple[Attempt, HTTPException]:
+    """The candidate and refusal a walk that served nothing answers with.
+
+    Insufficient funds refuses the organization rather than a candidate, so
+    when it refused every one the first is named, which is the model asked for.
+    """
+    if all(error_code_of(refusal.headers) == INSUFFICIENT_FUNDS for _, refusal in refusals):
+        return refusals[0]
+    return _soonest_refusal(refusals)
+
+
 async def walk_attempts(
     *,
     attempts: Sequence[Attempt],
@@ -322,7 +334,8 @@ async def walk_attempts(
     It may raise :class:`CandidateCannotServe`, which skips the candidate without
     counting it as a provider failure and without reordering the plan. When no
     candidate is left, the request is answered with the refusal whose
-    ``Retry-After`` is soonest, or the last one's when none sets it.
+    ``Retry-After`` is soonest, or the last one's when none sets it; a walk
+    refused insufficient funds at every candidate answers with the first's.
 
     ``admit_attempt`` admits the candidate before ``prepare_kwargs`` runs, so a
     full model is not prepared for (a ``per: model`` rate limit with no room
@@ -485,7 +498,7 @@ async def walk_attempts(
         return attempt, result
 
     if cannot_serve is not None and not failures:
-        refused_on, refusal = _soonest_refusal(refusals)
+        refused_on, refusal = _refusal_to_answer(refusals)
         if on_terminal is not None:
             on_terminal(refused_on)
         raise refusal
