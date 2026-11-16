@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
@@ -155,18 +156,23 @@ class _Store:
         if organization_id is None:
             organization_id = await self.organization()
         async with self.uow:
-            row = await self.invitations.add(
-                NewInvitation(
-                    email=email,
-                    expires_at=expires_at,
-                    invited_by_user_id=None,
-                    next_send_at=_NOW,
-                    organization_id=organization_id,
-                    role="member",
-                    token_hash=f"{_SEED_HASH_PREFIX}{uuid.uuid4().hex}",
-                    workspace_assignments=[],
-                )
+            rows = await self.invitations.add_many(
+                [
+                    NewInvitation(
+                        created_at=_NOW,
+                        email=email,
+                        expires_at=expires_at,
+                        invited_by_user_id=None,
+                        next_send_at=_NOW,
+                        organization_id=organization_id,
+                        role="member",
+                        token_hash=f"{_SEED_HASH_PREFIX}{uuid.uuid4().hex}",
+                        workspace_assignments=[],
+                    )
+                ]
             )
+            assert rows
+            row = rows[0]
             row.declined_at = declined_at
             await self._session.flush()
             return row.id
@@ -229,7 +235,7 @@ def _assert_send_is_finished(row: OrganizationInvitation | None, *, attempts: in
     assert row.next_send_at is None
     assert row.delivery_attempts == attempts
     assert not row.token_hash.startswith(_SEED_HASH_PREFIX)
-    assert (row.send_count, row.last_send_requested_at) == (0, None)
+    assert (row.send_count, row.last_send_requested_at) == (1, _NOW)
 
 
 def _assert_logs_hold_no_send_values(
@@ -649,3 +655,24 @@ async def test_a_poll_keeps_going_after_an_error_and_logs_only_its_class(
     assert "TimeoutError" in warnings[0]
     assert "ValueError" in warnings[1]
     assert _ADDRESS not in "\n".join(warnings)
+
+
+async def test_a_poll_logs_a_database_error_by_its_classes_and_never_its_statement(
+    poll_without_a_database: list[float], logs: pytest.LogCaptureFixture
+) -> None:
+    """The statement and the driver's DETAIL both carry the invitee's address; neither reaches the log."""
+    refused = IntegrityError(
+        f"UPDATE organization_invitation SET email='{_ADDRESS}'",
+        {"email": _ADDRESS},
+        Exception(f"duplicate key value: (email)=({_ADDRESS})"),
+    )
+    delivery = _ScriptedDelivery([refused, False])
+
+    with pytest.raises(asyncio.CancelledError):
+        await _poll(lambda uow: delivery, interval=1.0)  # type: ignore[arg-type,return-value]
+
+    assert delivery.calls == 3
+    assert poll_without_a_database == [1.0, 1.0, 1.0]
+    (warning,) = _warnings(logs)
+    assert warning.startswith("Invitation email poll failed: IntegrityError")
+    assert _ADDRESS not in warning

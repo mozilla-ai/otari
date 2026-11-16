@@ -228,6 +228,7 @@ POST /api/v1/keys/{key_id}/rotate                   # not yet wrapped
 GET /api/v1/budgets/{budget_id}/reset-logs          # not yet wrapped
 PUT /api/v1/budgets/{budget_id}                     # not yet wrapped
 GET /api/v1/keys/{key_id}/end-users                 # not yet wrapped
+GET /api/v1/keys/{key_id}/end-user-count            # not yet wrapped
 PUT /api/v1/keys/{key_id}/end-users                 # not yet wrapped
 PATCH /api/v1/keys/{key_id}/end-users               # not yet wrapped
 GET /api/v1/keys/{key_id}/end-users/{external_id}   # not yet wrapped
@@ -454,6 +455,7 @@ POST /api/v1/organizations/me/keys/{key_id}/federation-rules    # dashboard-only
 GET /api/v1/organizations/me/keys/{key_id}/federation-rules     # dashboard-only
 DELETE /api/v1/organizations/me/keys/{key_id}/federation-rules/{rule_id}  # dashboard-only
 GET /api/v1/organizations/me/keys/{key_id}/end-users            # dashboard-only
+GET /api/v1/organizations/me/keys/{key_id}/end-user-count       # dashboard-only
 # The organization's own budgets and the ceilings enforcing them
 # (otari-ai#1943), excluded for the same reason as the keys above: the
 # organization is resolved from the caller's dashboard session rather than named

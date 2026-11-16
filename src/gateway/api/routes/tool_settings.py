@@ -51,6 +51,7 @@ from gateway.api.deps import (
     verify_catalog_reader,
     verify_master_key,
 )
+from gateway.api.key_scopes import key_scope
 from gateway.api.routes._helpers import database_error
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
@@ -267,7 +268,7 @@ async def get_tool_settings(
     return _current_fields(config, include_urls=include_urls)
 
 
-@catalog_router.get("/guardrails/profiles")
+@catalog_router.get("/guardrails/profiles", openapi_extra=key_scope(None))
 async def list_guardrail_profiles(
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> GuardrailCatalog:
@@ -298,7 +299,7 @@ async def list_guardrail_profiles(
     return await cached_guardrail_catalog(cast("str | None", effective_value(config, GUARDRAILS_URL)))
 
 
-@catalog_router.get("/guardrails/catalog")
+@catalog_router.get("/guardrails/catalog", openapi_extra=key_scope(None))
 async def list_builtin_guardrails() -> BuiltInGuardrailCatalog:
     """List the guardrails this gateway can run itself, for the form that defines one.
 

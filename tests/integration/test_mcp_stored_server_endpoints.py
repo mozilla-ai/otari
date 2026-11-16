@@ -36,7 +36,7 @@ from gateway.models.users import User
 from gateway.services import mcp_stateless
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 
-from .conftest import build_test_client
+from .conftest import ALL_KEY_SCOPES, build_test_client
 
 PUBLIC_URL = "https://93.184.216.34/mcp"
 # The same public host over cleartext, for the credential rule rather than the
@@ -290,7 +290,9 @@ def test_the_authenticated_principal_is_rate_limited_before_any_outbound_access(
     config = test_config.model_copy(update={"rate_limit_rpm": 1})
     for rate_limited_client in build_test_client(config):
         master = {"Otari-Key": f"Bearer {config.master_key}"}
-        key = rate_limited_client.post(f"{API_ROOT}/keys", json={"key_name": "rl"}, headers=master).json()
+        key = rate_limited_client.post(
+            f"{API_ROOT}/keys", json={"scopes": ALL_KEY_SCOPES, "key_name": "rl"}, headers=master
+        ).json()
         header = {"Otari-Key": f"Bearer {key['key']}"}
         with Session(create_engine(postgres_url)) as db:
             row = _store_server(db, _workspace_id(db, key["id"]))

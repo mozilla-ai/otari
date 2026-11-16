@@ -9,7 +9,8 @@ from typing import Any
 from sqlalchemy import JSON, Enum, ForeignKey, Index, String, Text, UniqueConstraint, Uuid, func, true
 from sqlalchemy.orm import Mapped, mapped_column
 
-from gateway.models.base import Base, UtcDateTime
+from gateway.models.base import Base, KeyScopeColumn, UtcDateTime
+from gateway.types.key_scope import KeyScopeSet
 
 MAX_EMAIL_LENGTH = 255
 MAX_PROVIDER_LENGTH = 255
@@ -243,4 +244,8 @@ class OAuthAppGrant(Base):
     challenge: Mapped[str] = mapped_column(String(43))
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("user.id", ondelete="CASCADE"), index=True)
     workspace_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), index=True)
+    # The scopes the app's registration held when the person approved it. No
+    # default, so a grant cannot be written without them and redeem to a key
+    # that reaches nothing.
+    scopes: Mapped[KeyScopeSet] = mapped_column(KeyScopeColumn, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(UtcDateTime(), index=True)

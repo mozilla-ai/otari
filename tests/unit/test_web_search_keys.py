@@ -182,7 +182,7 @@ def test_a_key_stored_without_a_key_is_never_completed_from_the_environment(monk
 
 
 def test_the_workspace_key_wins_over_the_deployments_provider() -> None:
-    config = GatewayConfig(web_search_provider="brave", web_search_provider_api_key="deployment-key")
+    config = GatewayConfig(web_search_provider="tavily", web_search_provider_api_key="deployment-key")
 
     backend = _build_web_retrieval_backend(
         base_url="http://searxng:8080",
@@ -195,11 +195,11 @@ def test_the_workspace_key_wins_over_the_deployments_provider() -> None:
 
 
 def test_without_a_workspace_key_the_deployments_provider_is_used() -> None:
-    config = GatewayConfig(web_search_provider="brave", web_search_provider_api_key="deployment-key")
+    config = GatewayConfig(web_search_provider="tavily", web_search_provider_api_key="deployment-key")
 
     backend = _build_web_retrieval_backend(base_url=None, search_tool_entry={}, config=config)
 
-    assert (backend._provider, backend._provider_api_key) == ("brave", "deployment-key")
+    assert (backend._provider, backend._provider_api_key) == ("tavily", "deployment-key")
 
 
 @pytest.mark.parametrize(
@@ -472,21 +472,10 @@ async def test_an_internal_endpoint_is_refused_whatever_the_deployment_allows(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("provider", ["tavily", "brave"])
-async def test_a_key_on_the_old_search_code_takes_no_endpoint_or_options(provider: str) -> None:
-    with pytest.raises(WebSearchKeySettingRefusedError, match="neither api_base nor options"):
-        await _web_search_keys._check_settings(
-            "search", provider, has_key=True, api_base="https://search.example", options=None
-        )
-    with pytest.raises(WebSearchKeySettingRefusedError, match="neither api_base nor options"):
-        await _web_search_keys._check_settings(
-            "search", provider, has_key=True, api_base=None, options={"topic": "news"}
-        )
-
-
-@pytest.mark.asyncio
 async def test_a_keys_options_are_checked_against_its_provider() -> None:
     await _web_search_keys._check_settings("search", "exa", has_key=True, api_base=None, options={"type": "fast"})
+    await _web_search_keys._check_settings("search", "brave", has_key=True, api_base=None, options={"country": "DE"})
+    await _web_search_keys._check_settings("search", "tavily", has_key=True, api_base=None, options={"topic": "news"})
     await _web_search_keys._check_settings("fetch", "tabstack", has_key=True, api_base=None, options={"effort": "max"})
 
     with pytest.raises(WebSearchKeySettingRefusedError, match="not one the provider knows"):

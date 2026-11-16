@@ -1,5 +1,8 @@
 """Errors the organization and workspace surfaces raise, and the HTTP status each carries."""
 
+from datetime import UTC, datetime
+from enum import StrEnum
+
 from fastapi import status
 
 from gateway.exceptions import (
@@ -404,6 +407,92 @@ class InvitationPasswordNotAcceptedError(TenancyValidationError):
         super().__init__(f"This link cannot set a password for this address. Accept without one, then {way_in}.")
 
 
+class AddressAlreadyInvitedError(TenancyConflictError):
+    """This organization already holds an invitation for the address.
+
+    Raised whether or not the invitee has declined it.
+    A decline is recorded quietly, so this refusal must not be how an admin learns one happened.
+    """
+
+    def __init__(self, email: str) -> None:
+        super().__init__(
+            f"{email} already has an invitation to this organization. "
+            "Resend it, or cancel it to invite with other terms."
+        )
+
+
+class DuplicateInvitationAddressError(TenancyValidationError):
+    """One invitation request named the same address more than once."""
+
+    def __init__(self, email: str) -> None:
+        super().__init__(f"{email} is listed more than once")
+
+
+class InvitationsNeedSsoError(TenancyForbiddenError):
+    """The organization requires single sign-on, so its admins do not hand out invitations."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "This organization requires single sign-on (SSO). People join it by signing in through its connection."
+        )
+
+
+class InvitationLimitCeiling(StrEnum):
+    """Which daily ceiling on inviting an address was reached.
+
+    ADDRESS is the narrower cap on inviting one particular address in a day.
+    DAILY is the organization's or the inviting account's overall cap for the day.
+    """
+
+    ADDRESS = "address"
+    DAILY = "daily"
+
+
+class InvitationLimitError(TenancyError):
+    """An organization, an inviting account, or one address has reached its daily invitation ceiling."""
+
+    status_code = status.HTTP_429_TOO_MANY_REQUESTS
+
+    def __init__(self, ceiling: InvitationLimitCeiling) -> None:
+        detail = (
+            "This address has already been invited the most times allowed today."
+            if ceiling is InvitationLimitCeiling.ADDRESS
+            else "Too many invitations were asked for today. Try again tomorrow."
+        )
+        super().__init__(detail)
+
+
+class InvitationResendLimitError(TenancyConflictError):
+    """An invitation has already been resent the most times the deployment's settings allow."""
+
+    def __init__(self) -> None:
+        super().__init__("This invitation has been resent the most times allowed.")
+
+
+class InvitationResendTooSoonError(TenancyConflictError):
+    """A resend was asked for before the deployment's wait since the invitation's last send had passed."""
+
+    def __init__(self, available_at: datetime) -> None:
+        shown = available_at.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        super().__init__(f"This invitation can be resent at {shown} UTC.")
+
+
+class InvitationRequestTooLargeError(TenancyValidationError):
+    """One invitation request named more addresses or workspaces than it may, or named a workspace twice."""
+
+    @classmethod
+    def too_many_addresses(cls, limit: int) -> "InvitationRequestTooLargeError":
+        return cls(f"A single request may invite at most {limit} addresses")
+
+    @classmethod
+    def too_many_workspaces(cls, limit: int) -> "InvitationRequestTooLargeError":
+        return cls(f"A single request may offer at most {limit} workspaces")
+
+    @classmethod
+    def duplicate_workspace(cls, workspace_id: object) -> "InvitationRequestTooLargeError":
+        return cls(f"Workspace {workspace_id} is offered more than once")
+
+
 class WorkspaceActivationUnavailableError(TenancyConflictError):
     """The first-request setup guide is not on offer for this workspace.
 
@@ -433,16 +522,24 @@ class SignupRegistrationUnresolvedError(TenancyError):
 
 
 __all__ = [
+    "AddressAlreadyInvitedError",
     "DefaultOrganizationDeletionError",
     "DirectMemberAddUnavailableError",
+    "DuplicateInvitationAddressError",
     "ForeignTenancyError",
     "InvalidRoleError",
     "InvitationAlreadyPendingError",
     "InvitationAlreadyUsedError",
     "InvitationClosedError",
     "InvitationExpiredError",
+    "InvitationLimitCeiling",
+    "InvitationLimitError",
     "InvitationNotFoundError",
     "InvitationPasswordNotAcceptedError",
+    "InvitationRequestTooLargeError",
+    "InvitationResendLimitError",
+    "InvitationResendTooSoonError",
+    "InvitationsNeedSsoError",
     "LastOrganizationError",
     "LastWorkspaceError",
     "MembershipActivationNeedsAcceptanceError",

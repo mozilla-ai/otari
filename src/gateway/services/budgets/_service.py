@@ -27,6 +27,7 @@ from gateway.schemas.budgets import (
     EndUserBudgetPublic,
     EndUserPublic,
     KeyBudgetPublic,
+    KeyEndUsersPublic,
     OrganizationBudgetCreate,
     OrganizationBudgetPublic,
     OrganizationBudgetsPublic,
@@ -322,11 +323,17 @@ class BudgetService:
         return listed
 
     async def key_budget(self, api_key: APIKey, *, strategy: str | None) -> KeyBudgetPublic:
-        """What a key may still spend, and every cap that decides it; none when no budget gates the key."""
-        if api_key.exclude_from_budget or _normalize_strategy(strategy) == "disabled":
-            return KeyBudgetPublic(budgets_enforced=False, remaining_usd=None, limits=[])
+        """What a key may still spend, and every cap that decides it; none when no budget gates the key.
+
+        A service key's end-user cap holds whether or not budgets do, so it is reported either way.
+        """
         async with self._uow:
-            return await self._key_limits.read(api_key)
+            end_users = await self._end_users.seats(api_key) if api_key.is_service_key else None
+            if api_key.exclude_from_budget or _normalize_strategy(strategy) == "disabled":
+                found = KeyBudgetPublic(budgets_enforced=False, remaining_usd=None, limits=[])
+            else:
+                found = await self._key_limits.read(api_key)
+        return found.model_copy(update={"end_users": end_users})
 
     async def minute_limits(self, user_id: str, *, strategy: str | None) -> BudgetMinuteLimits | None:
         """The user's own budget and its per-minute limits, or None when the user is on none or budgets are disabled."""
@@ -448,6 +455,11 @@ class BudgetService:
         """Count the key owner's end users that ``list_end_users`` lists across every page."""
         async with self._uow:
             return await self._end_users.count(api_key, external_id=external_id, budget_id=budget_id, blocked=blocked)
+
+    async def end_user_seats(self, *, api_key: APIKey) -> KeyEndUsersPublic:
+        """How many end users the service key's ``max_end_users`` counts, and the cap itself."""
+        async with self._uow:
+            return await self._end_users.seats(api_key)
 
     async def list_end_user_budgets(self, *, api_key: APIKey) -> list[EndUserBudgetPublic]:
         """Return the budgets the key may put its end users on, with how many of its owner's end users each holds."""

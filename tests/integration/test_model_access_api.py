@@ -12,6 +12,8 @@ from fastapi.testclient import TestClient
 
 from gateway.core.config import API_ROOT
 
+from .conftest import ALL_KEY_SCOPES
+
 DENIED = "gemini:gemini-2.5-flash"
 ALLOWED = "openai:gpt-4o"
 # The catalog ids GET /models lists the two under.
@@ -21,7 +23,7 @@ CATALOG_ID = {DENIED: "google/gemini-2.5-flash", ALLOWED: "openai/gpt-4o"}
 def _make_key(client: TestClient, headers: dict[str, str], allowed_models: Any) -> dict[str, str]:
     resp = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "scoped", "allowed_models": allowed_models},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "scoped", "allowed_models": allowed_models},
         headers=headers,
     )
     assert resp.status_code == 200, resp.text
@@ -43,7 +45,7 @@ def _seed_pricing(client: TestClient, headers: dict[str, str], model_key: str) -
 def test_create_and_get_key_round_trips_allowed_models(client: TestClient, master_key_header: dict[str, str]) -> None:
     resp = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "k", "allowed_models": ["openai:*", "anthropic:claude-3*"]},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "k", "allowed_models": ["openai:*", "anthropic:claude-3*"]},
         headers=master_key_header,
     )
     assert resp.status_code == 200
@@ -57,7 +59,7 @@ def test_create_and_get_key_round_trips_allowed_models(client: TestClient, maste
 def test_create_key_rejects_non_canonical_entry(client: TestClient, master_key_header: dict[str, str]) -> None:
     resp = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "bad", "allowed_models": ["gpt-4o"]},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "bad", "allowed_models": ["gpt-4o"]},
         headers=master_key_header,
     )
     assert resp.status_code == 400
@@ -67,7 +69,7 @@ def test_create_key_rejects_non_canonical_entry(client: TestClient, master_key_h
 def test_patch_tri_state(client: TestClient, master_key_header: dict[str, str]) -> None:
     key_id = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "t", "allowed_models": ["openai:*"]},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "t", "allowed_models": ["openai:*"]},
         headers=master_key_header,
     ).json()["id"]
 

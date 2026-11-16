@@ -36,6 +36,7 @@ from gateway.api.deps import (
     verify_api_key_or_master_key,
 )
 from gateway.api.error_body import BodyHTTPException
+from gateway.api.key_scopes import key_scope, may_read_files
 from gateway.api.routes._guardrail_targets import messages_targets
 from gateway.api.routes._helpers import routing_signal, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
@@ -94,7 +95,7 @@ from gateway.services.inference import (
     with_upstream_user,
 )
 from gateway.services.log_writer import LogWriter
-from gateway.services.mcp_loop import ToolBackend
+from gateway.services.mcp_loop import RoundGate, ToolBackend
 from gateway.services.mcp_loop_messages import (
     MAX_TOOL_ITERATIONS_CAP,
     MCP_ACTIVITY_ID_PREFIX,
@@ -120,6 +121,7 @@ from gateway.services.tools import (
 from gateway.services.traces import read_context, read_turn
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT, IncompleteStreamError, StreamFormat
 from gateway.types.attempt import Attempt
+from gateway.types.key_scope import KeyScope
 from gateway.types.normalization_target import NormalizationTarget
 
 
@@ -854,6 +856,7 @@ class _MessagesAdapter:
         *,
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
+        round_gate: RoundGate | None = None,
         container: ContainerLease | None = None,
     ) -> MessageResponse:
         # Only pass the lock-in callback when given, so test fakes can mirror each call shape.
@@ -862,6 +865,8 @@ class _MessagesAdapter:
             extra["on_first_response"] = on_first_response
         if use_budget is not None:
             extra["use_budget"] = use_budget
+        if round_gate is not None:
+            extra["round_gate"] = round_gate
         if native_tools:
             extra["native_tools"] = native_tools
         if container is not None:
@@ -882,6 +887,7 @@ class _MessagesAdapter:
         *,
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
+        round_gate: RoundGate | None = None,
         container: ContainerLease | None = None,
         on_first_response: Callable[[], None] | None = None,
     ) -> AsyncIterator[MessageStreamEvent]:
@@ -893,6 +899,8 @@ class _MessagesAdapter:
             extra["emit_native_mcp"] = True
         if use_budget is not None:
             extra["use_budget"] = use_budget
+        if round_gate is not None:
+            extra["round_gate"] = round_gate
         if native_tools:
             extra["native_tools"] = native_tools
         if container is not None:
@@ -934,7 +942,12 @@ def _adapter_for(config: GatewayConfig) -> _MessagesAdapter:
     return _MessagesAdapter(instances) if instances else _ADAPTER
 
 
-@router.post("/messages", response_model=None, responses=_ANTHROPIC_ERROR_RESPONSES)
+@router.post(
+    "/messages",
+    response_model=None,
+    responses=_ANTHROPIC_ERROR_RESPONSES,
+    openapi_extra=key_scope(KeyScope.INFERENCE_RUN),
+)
 async def create_message(
     raw_request: Request,
     response: Response,
@@ -979,8 +992,7 @@ async def create_message(
 
     async def _normalize(target: NormalizationTarget) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the Anthropic wire payload
-        # before the cost estimate. A no-op when the files feature is off or the
-        # request has no attachments.
+        # before the cost estimate. A no-op when the request has no attachments.
         code_execution_header = raw_request.headers.get(CODE_EXECUTION_HEADER)
         request.messages, stats = await normalize_request_messages(
             request.messages,
@@ -989,7 +1001,8 @@ async def create_message(
             provider=target.provider,
             model=target.model,
             files=files,
-            user_id=target.user_id,
+            user_id=target.file_user_id,
+            may_read_files=target.may_read_files,
             instance=target.instance,
             workspace_id=target.file_workspace_id,
             candidates=target.candidate_providers,
@@ -1018,6 +1031,23 @@ async def create_message(
         sandbox_inputs.extend(stats.sandbox_inputs)
         return len(str(request.messages)) + len(str(request.system or "")), stats.vision_usage()
 
+    declared = DeclaredTools(
+        guardrails=request.guardrails,
+        guardrail_targets=lambda: messages_targets(request),
+        tools=request.tools,
+        mcp_servers=request.mcp_servers,
+        mcp_server_ids=request.mcp_server_ids,
+        max_tool_iterations=request.max_tool_iterations,
+        tools_header=request.tools_header,
+        code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
+        web_fetch_header=raw_request.headers.get(WEB_FETCH_HEADER),
+        web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
+        # Anthropic's own field, which is where an Anthropic SDK puts the id it
+        # read off the last response. Resolved at admission against this caller's
+        # leases; the provider never sees it when the sandbox runs the code.
+        container_id=request.container,
+    )
+
     try:
         ctx = await resolve_request_context(
             adapter=adapter,
@@ -1043,7 +1073,7 @@ async def create_message(
             streaming=bool(request.stream),
             routing_signal=lambda: routing_signal(raw_request),
             normalize_messages=_normalize,
-            tools=request.tools,
+            declared=declared,
             code_execution_policies=tool_ports.code_execution_policy,
             model_provider=model_provider,
             idempotency=None if request.stream else idempotency,
@@ -1059,22 +1089,7 @@ async def create_message(
         adapter=adapter,
         ctx=ctx,
         response=response,
-        declared=DeclaredTools(
-            guardrails=request.guardrails,
-            guardrail_targets=lambda: messages_targets(request),
-            tools=request.tools,
-            mcp_servers=request.mcp_servers,
-            mcp_server_ids=request.mcp_server_ids,
-            max_tool_iterations=request.max_tool_iterations,
-            tools_header=request.tools_header,
-            code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
-            web_fetch_header=raw_request.headers.get(WEB_FETCH_HEADER),
-            web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
-            # Anthropic's own field, which is where an Anthropic SDK puts the id it
-            # read off the last response. Resolved at admission against this caller's
-            # leases; the provider never sees it when the sandbox runs the code.
-            container_id=request.container,
-        ),
+        declared=declared,
         backends=ToolBackends(
             ports=tool_ports,
             sandbox_containers=build_sandbox_container_registry(
@@ -1083,6 +1098,7 @@ async def create_message(
                 user_id=ctx.user_id,
                 workspace_id=ctx.workspace_id,
                 port=tool_ports.code_execution,
+                may_read_stored_files=may_read_files(ctx.api_key),
             ),
             sandbox_files=build_sandbox_file_bridge(
                 raw_request=raw_request,
@@ -1219,7 +1235,9 @@ def _estimate_input_tokens(request: CountTokensRequest) -> int:
     return max(1, math.ceil(chars / _CHARS_PER_TOKEN))
 
 
-@router.post("/messages/count_tokens", responses=_ANTHROPIC_ERROR_RESPONSES)
+@router.post(
+    "/messages/count_tokens", responses=_ANTHROPIC_ERROR_RESPONSES, openapi_extra=key_scope(KeyScope.INFERENCE_RUN)
+)
 async def count_message_tokens(
     raw_request: Request,
     request: CountTokensRequest,

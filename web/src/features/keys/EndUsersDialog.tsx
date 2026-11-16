@@ -1,5 +1,5 @@
 import { useState } from "react"
-import type { ApiKey } from "@/client"
+import type { ApiKey, EndUserCount } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { TablePagination } from "@/design-system/data/TablePagination"
 import { Dialog, DialogSection } from "@/design-system/feedback/Dialog"
@@ -9,7 +9,7 @@ import { Skeleton } from "@/design-system/feedback/Skeleton"
 import { SearchField } from "@/design-system/forms/SearchField"
 import { Badge } from "@/design-system/indicators/Badge"
 import { budgetLabeler } from "@/features/budgets/budgetLabel"
-import { useKeyEndUsers } from "@/shared/api/apiKeys"
+import { useKeyEndUserCount, useKeyEndUsers } from "@/shared/api/apiKeys"
 import { formatDateTimeMinutes, formatSpend } from "@/shared/helpers/format"
 import { useDebounced } from "@/shared/hooks/useDebounced"
 import { useEndUserBudgets } from "./ServiceKeyFields"
@@ -39,6 +39,7 @@ export function EndUsersDialog({
   // Untrimmed: an id is any string, spaces included.
   const externalId = useDebounced(query)
   const endUsers = useKeyEndUsers(apiKey.id, page, pageSize, externalId)
+  const count = useKeyEndUserCount(apiKey.id)
   const budgets = useEndUserBudgets(
     apiKey.is_organization_service_key ? "organization" : "deployment",
     canReadBudgets,
@@ -59,7 +60,21 @@ export function EndUsersDialog({
         if (!open) onClose()
       }}
       title="End users"
-      description={<code>{keyLabel}</code>}
+      description={
+        <span className="inline-flex flex-wrap items-center gap-2">
+          <code>{keyLabel}</code>
+          {count.data ? (
+            <EndUserCountLine count={count.data} />
+          ) : count.isError ? (
+            <>
+              <span className="text-caption">Could not read the cap</span>
+              <Button size="sm" onPress={() => count.refetch()}>
+                Retry
+              </Button>
+            </>
+          ) : null}
+        </span>
+      }
       size="lg"
       actions={<Button onPress={onClose}>Close</Button>}
     >
@@ -127,5 +142,29 @@ export function EndUsersDialog({
         )}
       </DialogSection>
     </Dialog>
+  )
+}
+
+/**
+ * The end users the key's cap counts, against the cap. Those on budgets the key
+ * does not assign are listed below but take no place, so the two can differ.
+ */
+function EndUserCountLine({ count }: { count: EndUserCount }) {
+  const used = count.count.toLocaleString("en-US")
+  if (count.max_end_users === null) {
+    return (
+      <span className="text-caption">
+        {used} {count.count === 1 ? "end user" : "end users"}, no cap
+      </span>
+    )
+  }
+  const isFull = count.count >= count.max_end_users
+  return (
+    <>
+      <span className="text-caption">
+        {used} of {count.max_end_users.toLocaleString("en-US")} end users
+      </span>
+      {isFull ? <Badge tone="warn">Full</Badge> : null}
+    </>
   )
 }

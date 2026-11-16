@@ -210,6 +210,7 @@ def _no_background_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("gateway.services.mcp_catalog.McpCatalogService.poll", _noop)
     monkeypatch.setattr("gateway.services.update_check.UpdateCheckService.poll", _noop)
     monkeypatch.setattr("gateway.services.organizations.InvitationDelivery.poll", _noop)
+    monkeypatch.setattr("gateway.services.organizations.ExpiredInvitationCleanup.poll", _noop)
 
 
 @pytest.fixture(autouse=True)

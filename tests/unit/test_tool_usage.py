@@ -5,8 +5,9 @@ from decimal import Decimal
 import pytest
 
 from gateway.models.money import MAX_USD_COST
-from gateway.services.tool_usage import MAX_TOOL_NAMES, OVERFLOW_TOOL_NAME, ToolUsageTally
-from gateway.types.tool_charges import LabelCalls
+from gateway.services.pricing import tool_rate_lookup
+from gateway.services.tool_usage import MAX_TOOL_NAME_CHARS, MAX_TOOL_NAMES, OVERFLOW_TOOL_NAME, ToolUsageTally
+from gateway.types.tool_charges import LabelCalls, gateway_tool_pricing_key
 
 _EXA = "exa:exa-search"
 _EXA_KEYS = (_EXA, "otari:web_search")
@@ -143,6 +144,42 @@ def test_a_tool_past_the_name_cap_records_its_label_under_the_overflow_meter() -
     assert tally.overflowed
 
 
+_LONG_TOOL = "mcp__acme_analytics_platform__reporting__generate_quarterly_revenue_pdf"
+
+
+def test_a_tool_name_past_the_cap_is_still_priced_under_its_full_name() -> None:
+    """The meter name is capped, but the operator prices ``otari:<full name>``."""
+    assert len(_LONG_TOOL) > MAX_TOOL_NAME_CHARS
+    tally = ToolUsageTally()
+    tally.record_success(_LONG_TOOL)
+
+    entry = _only(tally)
+    assert entry.tool == _LONG_TOOL[:MAX_TOOL_NAME_CHARS]
+    lookup = tool_rate_lookup(entry)
+    assert lookup is not None
+    assert lookup.rate_keys == (gateway_tool_pricing_key(_LONG_TOOL),)
+
+
+def test_a_tool_name_at_the_cap_and_explicit_rate_keys_are_recorded_as_before() -> None:
+    at_cap = "t" * MAX_TOOL_NAME_CHARS
+    tally = ToolUsageTally()
+    tally.record_success(at_cap)
+    tally.record_success(_LONG_TOOL, label="mcp:acme", rate_keys=("mcp:acme",))
+
+    by_tool = {entry.tool: entry for entry in tally.label_calls()}
+    assert by_tool[at_cap].rate_keys is None
+    assert by_tool[_LONG_TOOL[:MAX_TOOL_NAME_CHARS]].rate_keys == ("mcp:acme",)
+
+
+def test_two_tools_that_share_a_capped_prefix_keep_their_own_rate_keys() -> None:
+    tally = ToolUsageTally()
+    tally.record_success(_LONG_TOOL + "_a")
+    tally.record_success(_LONG_TOOL + "_b")
+
+    keys = {key for entry in tally.label_calls() if (lookup := tool_rate_lookup(entry)) for key in lookup.rate_keys}
+    assert keys == {gateway_tool_pricing_key(_LONG_TOOL + "_a"), gateway_tool_pricing_key(_LONG_TOOL + "_b")}
+
+
 class _Gate:
     def __init__(self, *, fits: bool) -> None:
         self.fits = fits
@@ -151,6 +188,18 @@ class _Gate:
     async def admit(self, call: LabelCalls) -> bool:
         self.asked.append(call)
         return self.fits
+
+
+@pytest.mark.asyncio
+async def test_the_spend_gate_prices_a_long_tool_name_under_its_full_name() -> None:
+    tally = ToolUsageTally()
+    tally.spend_gate = gate = _Gate(fits=True)
+    await tally.admit(_LONG_TOOL)
+
+    [asked] = gate.asked
+    lookup = tool_rate_lookup(asked)
+    assert lookup is not None
+    assert lookup.rate_keys == (gateway_tool_pricing_key(_LONG_TOOL),)
 
 
 @pytest.mark.asyncio

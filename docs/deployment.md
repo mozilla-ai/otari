@@ -112,8 +112,8 @@ docker compose --profile object-storage up -d
 
 - `object-storage` runs an S3-compatible store for uploaded files; see
   [Object storage with Docker Compose](files.md#object-storage-with-docker-compose).
-- Web search needs no container when `web_search_provider` names a licensed API
-  (`tavily` or `brave`) and `web_search_provider_api_key` holds its key.
+- Web search needs no container when a search tool names a licensed API, such
+  as `tavily` or `brave`, with its key; see [Search tools](configuration.md#search-tools).
 
 A request that needs a backend you have not configured fails; ordinary
 inference is unaffected. See [Built-in tools](tools.md) and

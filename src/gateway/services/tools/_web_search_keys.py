@@ -537,8 +537,8 @@ def _key_providers(kind: ToolKind) -> tuple[str, ...]:
     """The providers a key of ``kind`` may name, sorted.
 
     The libraries' providers for the kind, other than the ones that exist only for
-    tests and, for fetch, ``builtin``; and, for search, ``tavily`` and ``brave``,
-    which run on the old search code.
+    tests and, for fetch, ``builtin``; and, for search, those of
+    :data:`WEB_SEARCH_PROVIDERS` any-search does not serve, which run on the old search code.
     """
     if kind == "fetch":
         served: tuple[str, ...] = supported_fetch_providers()
@@ -559,7 +559,7 @@ def _validated_provider(kind: ToolKind, provider: str) -> str:
 def _requirements(kind: ToolKind, provider: str) -> tuple[bool, bool, bool]:
     """Whether the old search code runs the provider, and whether a key on it needs an API key and an endpoint.
 
-    The old search code calls Tavily and Brave at their public endpoints, with no options of a key's.
+    The old search code calls its providers at their public endpoints, with no options of a key's.
     """
     if (
         kind == "search"

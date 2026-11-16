@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import HTTPException, status
 
-from gateway.api.deps import _verify_and_update_api_key, misdirected_key_detail
+from gateway.api.deps.auth import _verify_and_update_api_key, misdirected_key_detail
 from gateway.metrics import REGISTRY
 from gateway.ports.api_key_format_port import KeyRoute, Local, Malformed, Misdirected
 

@@ -91,7 +91,7 @@ def test_transcription_frees_the_auth_connection_before_reading_the_body(
         events.append("form")
         return form(self, **kwargs)
 
-    monkeypatch.setattr("gateway.api.deps.release_session", recording_release)
+    monkeypatch.setattr("gateway.api.deps.auth.release_session", recording_release)
     monkeypatch.setattr(Request, "form", recording_form)
     with patch(
         "gateway.api.routes.audio.atranscription", new_callable=AsyncMock, return_value=_mock_transcription_response()

@@ -679,6 +679,19 @@ class KeyLimitPublic(BaseModel):
     remaining_requests: int | None = None
 
 
+class KeyEndUsersPublic(BaseModel):
+    """How many end users a service key has, against its ``max_end_users``."""
+
+    count: int = Field(
+        description="The live end users the cap counts: those on the budgets the key assigns, and those on none "
+        "when the key has a list and no default. A key that assigns no budget counts every live end user of its user"
+    )
+    max_end_users: int | None = Field(
+        description="The key's cap; null when it has none. A request naming a new end user is refused with "
+        "end_user_limit_reached once count reaches it"
+    )
+
+
 class KeyBudgetPublic(BaseModel):
     """What the calling key may still spend, and every cap that decides it."""
 
@@ -693,10 +706,14 @@ class KeyBudgetPublic(BaseModel):
     limits: list[KeyLimitPublic] = Field(
         description="The key's user's budget first, then each spend ceiling, the most specific first"
     )
+    end_users: KeyEndUsersPublic | None = Field(
+        default=None, description="A service key's end users against its cap; null for any other key"
+    )
 
 
 __all__ = [
     "KeyBudgetPublic",
+    "KeyEndUsersPublic",
     "KeyLimitPublic",
     "BUDGET_ID_PATTERN",
     "BudgetResetLogResponse",
