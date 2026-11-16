@@ -8,6 +8,7 @@ import pytest
 from gateway.core.config import GatewayConfig
 from gateway.core.error_codes import INVALID_MODEL, MODEL_NOT_ALLOWED, MODEL_NOT_FOUND, MODEL_NOT_SERVING
 from gateway.core.settings.tools import ALL_SEARCH_TOOLS
+from gateway.services.catalog import OfferingRow, build_selector_index, reset_selector_index, set_selector_index
 from gateway.services.model_access import (
     effective_allowlist,
     effective_tool_allowlist,
@@ -18,6 +19,7 @@ from gateway.services.model_access import (
     is_tool_allowlist_subset,
     key_model_refusal,
     legacy_tool_grants,
+    misspelled_model_suggestions,
     org_model_refusal,
     tool_not_allowed_detail,
     tools_within_user,
@@ -442,3 +444,28 @@ def test_intersect_allowlists_permits_exactly_what_both_permit(
 
 def test_intersect_allowlists_of_two_unrestricted_lists_is_unrestricted() -> None:
     assert intersect_allowlists(None, None) is None
+
+
+@pytest.fixture
+def gpt_oss_catalog() -> Iterator[None]:
+    """Two gpt-oss models offered on groq."""
+    offerings = {"openai/gpt-oss-120b": "groq:openai/gpt-oss-120b", "openai/gpt-oss-20b": "groq:openai/gpt-oss-20b"}
+    rows = [OfferingRow(selector, "groq", "groq", 0.15) for selector in offerings.values()]
+    models = {model: (model, (selector,)) for model, selector in offerings.items()}
+    set_selector_index(build_selector_index(rows, models))
+    yield
+    reset_selector_index()
+
+
+@pytest.mark.usefixtures("gpt_oss_catalog")
+@pytest.mark.parametrize(
+    ("instance", "model", "expected"),
+    [
+        ("openai", "gpt-oss-12", ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]),
+        ("openai", "gpt-oss-120b", None),
+        ("mistral", "no-such-model", None),
+    ],
+    ids=["a typo under a catalog vendor", "a model the catalog has", "a prefix the catalog has nothing under"],
+)
+def test_misspelled_model_suggestions(instance: str, model: str, expected: list[str] | None) -> None:
+    assert misspelled_model_suggestions(None, instance=instance, provider=instance, model=model) == expected

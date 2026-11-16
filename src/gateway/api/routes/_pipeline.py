@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import difflib
 import hashlib
 import json
 import operator
@@ -252,7 +251,7 @@ from gateway.services.budgets import (
     settle_cut_stream,
     user_subject,
 )
-from gateway.services.catalog import catalog_models, metadata_entry, not_chat_detail, organization_offerings
+from gateway.services.catalog import metadata_entry, not_chat_detail, organization_offerings
 from gateway.services.code_execution import (
     ContainerLease,
     SandboxContainerRegistry,
@@ -295,6 +294,7 @@ from gateway.services.mcp_stateless import failure_class
 from gateway.services.model_access import (
     McpAccess,
     key_model_refusal,
+    misspelled_model_suggestions,
     model_not_allowed_detail,
     organization_key_refusal,
     owned_endpoint_refusal,
@@ -1186,21 +1186,11 @@ async def _refuse_if_model_unknown(
     """
     if resolved.alias is not None:
         return
-    models = catalog_models(organization_id=ctx.organization_id)
-    prefix, wanted = resolved.instance.lower(), resolved.model.lower()
-    known_prefix = False
-    for model in models:
-        vendor, _, name = model.id.lower().rpartition("/")
-        offered = [offering.lower().partition(":") for offering in model.offerings]
-        if wanted == name or any(wanted == offered_model for _, _, offered_model in offered):
-            return
-        known_prefix = known_prefix or prefix == vendor or any(prefix == instance for instance, _, _ in offered)
-    if not known_prefix:
+    nearest = misspelled_model_suggestions(
+        ctx.organization_id, instance=resolved.instance, provider=resolved.provider.value, model=resolved.model
+    )
+    if nearest is None:
         return
-    if metadata_entry(cached_models_dev_catalog(), resolved.provider.value, resolved.model) is not None:
-        return
-    spelled = f"{resolved.instance}/{resolved.model}".lower()
-    nearest = difflib.get_close_matches(spelled, [model.id for model in models], n=2)
     detail = unknown_model_detail(model_selector, nearest)
     await release_reservation(ctx)
     await log_gateway_rejection(
