@@ -312,14 +312,16 @@ access that can be removed. The bootstrap operator differs in that:
   master key, including tenant management in its active organization;
 - its password is the one that retires master-key sign-in, and the only one the
   master key can reset;
-- only it, or the master key, can be sent a password link for it;
+- only the master key can get a password link for it, so a session cannot set
+  its password without the current one;
 - it cannot be deactivated, lose operator access, or have its address blocked.
 
 `POST /api/v1/admin/users/{user_id}/bootstrap-operator` hands the role to another
 account ([how to](run-the-dashboard.md#hand-over-the-bootstrap-operator)). Only the
 bootstrap operator or the master key may call it, so no other operator can take
 the role for themselves. From a dashboard session it takes the caller's
-`current_password`, as a password change does. It is refused with 400 for a
+`current_password`, as a password change does, and a session whose account has
+no password is refused: set one first, or use the master key. It is refused with 400 for a
 target that is not an active operator with a verified, unblocked email address
 and a password, which is what keeps master-key sign-in retired.
 
@@ -327,6 +329,8 @@ After a handover:
 
 - the previous bootstrap operator stays an operator, which the new one can
   remove from **Accounts**;
+- a password link issued to the new bootstrap operator before the handover no
+  longer works;
 - sessions the previous one already holds stay theirs, so a session opened with
   the master key before the handover keeps acting as the previous account;
 - the master key acts as the new bootstrap operator, so whoever holds it can
@@ -346,7 +350,7 @@ from a forgotten password on a deployment without mail.
   for, not proven, like an [invitation](members.md#invitations) link.
 - It is refused for a deactivated account, one with no address, one with no
   password that signs in with a provider or passkey, the bootstrap operator's
-  account unless the caller is that account or the master key, and, with `open_signup`
+  account unless the request carries the master key, and, with `open_signup`
   disabled, an unverified address no organization still has as a member or
   invitee. With `open_signup` enabled, such an address gets a link, and the
   password chosen through it gives the account its own organization and

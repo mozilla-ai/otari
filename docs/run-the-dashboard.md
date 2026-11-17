@@ -100,7 +100,8 @@ someone else:
 2. On **Accounts**, click **Make operator** on their row if they are not an
    operator yet.
 3. Signed in as the bootstrap operator, click **Make bootstrap operator** on
-   their row, enter your current password if your account has one, and confirm.
+   their row, enter your current password, and confirm. An account with no
+   password sets one in **Account settings** first, or uses the command below.
 
    Or, wherever the master key is at hand, run:
 
