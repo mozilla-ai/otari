@@ -29,6 +29,12 @@ from gateway.api.deps._caller import (
     CallerWorkspaceQuery,
     CallerWorkspaces,
 )
+from gateway.api.deps.api_keys import (
+    ApiKeyFormatPortDep,
+    ApiKeyServiceDep,
+    FederationTokenExchangeDep,
+    get_api_key_service,
+)
 from gateway.api.deps.auth import (
     AUTH_FAILURES,
     SERVICE_KEY_REQUIRED_DETAIL,
@@ -38,7 +44,6 @@ from gateway.api.deps.auth import (
     catalog_reader_organization,
     cookie_may_authenticate,
     extract_credential_token,
-    federated_token_verifier,
     get_session_identity,
     is_valid_master_key,
     misdirected_key_detail,
@@ -97,7 +102,6 @@ from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import MANAGEMENT_ROLES
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
-from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import (
     BillingPort,
     InsufficientFundsError,
@@ -171,8 +175,6 @@ from gateway.services.api_keys import (
     USER_MISMATCH_DETAIL,
     ApiKeyDeactivationListener,
     ApiKeyService,
-    FederatedTokenVerifier,
-    FederationTokenExchange,
     names_end_user,
     resolve_user_id,
 )
@@ -247,7 +249,6 @@ from gateway.services.routing import (
     AutomaticRouter,
     RoutingService,
 )
-from gateway.services.secret_box import configured_secret_keys
 from gateway.services.tenancy import (
     DomainAutoJoinListener,
     InvitationClaimSettings,
@@ -553,11 +554,6 @@ def get_agent_model_recommender_port(container: ContainerDep) -> AgentModelRecom
 AgentModelRecommenderPortDep = Annotated[AgentModelRecommenderPort, Depends(get_agent_model_recommender_port)]
 
 
-def get_api_key_format_port(db: PortSessionDep, container: ContainerDep) -> ApiKeyFormatPort:
-    """Resolve the key-format adapter this build bound at startup."""
-    return container.resolve(ApiKeyFormatPort, db)
-
-
 async def get_code_execution_port(
     config: Annotated[GatewayConfig, Depends(get_config)],
     container: ContainerDep,
@@ -807,46 +803,6 @@ def get_invitation_mail_limit(
 InvitationMailLimitDep = Annotated[InvitationMailLimit, Depends(get_invitation_mail_limit)]
 
 
-def get_api_key_service(uow: Annotated[UnitOfWork, Depends(get_unit_of_work)]) -> ApiKeyService:
-    """Build the request's API key service on the request's Unit of Work; key owners' lists come from organizations."""
-    return ApiKeyService(uow, ApiKeyRepositories.on(uow), users=get_user_access(uow))
-
-
-ApiKeyServiceDep = Annotated[ApiKeyService, Depends(get_api_key_service)]
-
-
-def build_federation_token_exchange(
-    uow: UnitOfWork, config: GatewayConfig, verifier: FederatedTokenVerifier
-) -> FederationTokenExchange:
-    """Build the token exchange on a Unit of Work; the key's organization is read through the same one."""
-    workspaces = WorkspaceRepository(uow)
-
-    async def organization_of_workspace(workspace_id: uuid.UUID) -> uuid.UUID | None:
-        workspace = await workspaces.get(workspace_id)
-        return None if workspace is None else workspace.organization_id
-
-    return FederationTokenExchange(
-        uow,
-        ApiKeyRepositories.on(uow),
-        verifier=verifier,
-        organization_of_workspace=organization_of_workspace,
-        ttl_seconds=config.federation_access_token_ttl_sec,
-        secrets=configured_secret_keys(),
-    )
-
-
-def get_federation_token_exchange(
-    request: Request,
-    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-) -> FederationTokenExchange:
-    """The request's token exchange."""
-    return build_federation_token_exchange(uow, config, federated_token_verifier(request, config))
-
-
-FederationTokenExchangeDep = Annotated[FederationTokenExchange, Depends(get_federation_token_exchange)]
-
-
 def get_budget_service(
     uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -905,7 +861,6 @@ OrganizationGuardrailDefinitionServiceDep = Annotated[
     OrganizationGuardrailDefinitionService, Depends(get_organization_guardrail_definition_service)
 ]
 
-ApiKeyFormatPortDep = Annotated[ApiKeyFormatPort, Depends(get_api_key_format_port)]
 BillingPortDep = Annotated[BillingPort, Depends(get_billing_port)]
 RequestSessionBillingPortDep = Annotated[BillingPort, Depends(get_request_session_billing_port)]
 
@@ -1956,6 +1911,8 @@ __all__ = [
     "AUTH_FAILURES",
     "AgentModelRecommenderPortDep",
     "AgentRecommenderServiceDep",
+    "ApiKeyFormatPortDep",
+    "ApiKeyServiceDep",
     "BatchResultsServiceDep",
     "BillingPortDep",
     "CallerOrganization",
@@ -1968,6 +1925,7 @@ __all__ = [
     "DatabaseSessionOwners",
     "DirectToolServiceDep",
     "EntitlementPortDep",
+    "FederationTokenExchangeDep",
     "FileServiceDep",
     "GrowthSignalPortDep",
     "HealthCheckServiceDep",
@@ -2025,6 +1983,7 @@ __all__ = [
     "cookie_may_authenticate",
     "extract_credential_token",
     "get_agent_model_recommender_port",
+    "get_api_key_service",
     "get_config",
     "get_container",
     "get_current_identity",
