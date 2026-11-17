@@ -19,6 +19,7 @@ from gateway.api.deps._base import (
     get_enabled_features,
     get_membership_listener,
     get_unit_of_work,
+    get_user_access,
     reset_config,
     set_config,
 )
@@ -215,7 +216,6 @@ from gateway.services.organizations import (
     InvitationFactsReader,
     InvitationMailLimit,
     OrganizationClaimedDomains,
-    UserAccess,
 )
 from gateway.services.overview import OverviewService
 from gateway.services.playground_service import LocalToolOffer, PlaygroundToolOffer
@@ -805,11 +805,6 @@ def get_invitation_mail_limit(
 
 
 InvitationMailLimitDep = Annotated[InvitationMailLimit, Depends(get_invitation_mail_limit)]
-
-
-def get_user_access(uow: Annotated[UnitOfWork, Depends(get_unit_of_work)]) -> UserAccess:
-    """Build the organizations domain's read of users' access lists on the request's Unit of Work."""
-    return UserAccess(OrganizationRepositories.on(uow))
 
 
 def get_api_key_service(uow: Annotated[UnitOfWork, Depends(get_unit_of_work)]) -> ApiKeyService:
@@ -2051,6 +2046,7 @@ __all__ = [
     "get_trace_service",
     "get_unavailable_model_reporter",
     "get_unit_of_work",
+    "get_user_access",
     "get_visible_workspaces",
     "is_valid_master_key",
     "is_workspace_member",
