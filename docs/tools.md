@@ -43,7 +43,8 @@ Web search and web fetch also carry `direct_available`: whether
 caller. That is a separate question from `available`, which is about declaring
 the tool in a model request. A direct call also needs the API key to hold the
 `web:search` or `web:fetch` [scope](api-keys.md#scopes), and the key's tool list
-to allow the tool the call runs on. Code execution has no direct endpoint here,
+to allow the tool the call runs on. Pricing and budgets still apply to the call
+itself, so an admitted call can still be refused for those. Code execution has no direct endpoint here,
 so its `direct_available` is `null`.
 
 ## Who runs a tool

@@ -15553,7 +15553,7 @@ export interface components {
             description: string;
             /**
              * Direct Available
-             * @description For web search and web fetch, whether `POST /api/v1/search` or `POST /api/v1/fetch` naming no tool would run for this caller: something is set up to run it, the workspace allows web access, and for an API key, the key holds the `web:search` or `web:fetch` scope and its tool list allows the instance the call would run on. It can differ from `available`, which is about declaring the tool in a model request. `null` for the other tools, which have no direct endpoint here.
+             * @description For web search and web fetch, whether `POST /api/v1/search` or `POST /api/v1/fetch` naming no tool would be admitted for this caller: something is set up to run it, the workspace allows web access, the organization can pay for a call on the deployment's account, and for an API key, the key holds the `web:search` or `web:fetch` scope and its tool list allows the instance the call would run on. Pricing and budgets still apply to the call itself. It can differ from `available`, which is about declaring the tool in a model request. `null` for the other tools, which have no direct endpoint here.
              */
             direct_available?: boolean | null;
             /**

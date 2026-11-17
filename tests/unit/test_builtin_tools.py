@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from gateway.adapters.code_execution_adapter import ProtocolCodeExecutionAdapter
-from gateway.api.routes.tools import _managed_tools, _WorkspaceSwitches
+from gateway.api.routes.tools import _DirectAvailability, _managed_tools, _WorkspaceSwitches
 from gateway.core.config import GatewayConfig
 from gateway.schemas.usage_and_telemetry import GATEWAY_TOOL_NAMES
 from gateway.services._tool_loop import ToolBackend
@@ -216,7 +216,7 @@ def test_configured_agrees_with_what_the_tools_endpoint_reports(
     for name, value in env.items():
         monkeypatch.setenv(name, value)
 
-    reported = {tool.id: tool.available for tool in _managed_tools(config, _WorkspaceSwitches())}
+    reported = {tool.id: tool.available for tool in _managed_tools(config, _WorkspaceSwitches(), _DirectAvailability())}
 
     assert reported == {f"otari_{tool.name}": tool.configured(config) for tool in BUILTIN_TOOLS}
 

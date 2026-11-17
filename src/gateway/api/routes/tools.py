@@ -102,11 +102,12 @@ class ManagedTool(BaseModel):
         default=None,
         description=(
             "For web search and web fetch, whether `POST /api/v1/search` or `POST /api/v1/fetch` "
-            "naming no tool would run for this caller: something is set up to run it, the "
-            "workspace allows web access, and for an API key, the key holds the `web:search` or "
-            "`web:fetch` scope and its tool list allows the instance the call would run on. "
-            "It can differ from `available`, which is about declaring the tool in a model request. "
-            "`null` for the other tools, which have no direct endpoint here."
+            "naming no tool would be admitted for this caller: something is set up to run it, the "
+            "workspace allows web access, the organization can pay for a call on the deployment's "
+            "account, and for an API key, the key holds the `web:search` or `web:fetch` scope and "
+            "its tool list allows the instance the call would run on. Pricing and budgets still "
+            "apply to the call itself. It can differ from `available`, which is about declaring "
+            "the tool in a model request. `null` for the other tools, which have no direct endpoint here."
         ),
     )
     input_schema: dict[str, Any] = Field(
@@ -176,12 +177,13 @@ class _DirectAvailability:
 async def _direct_availability(
     api_key: APIKey | None, switches: _WorkspaceSwitches, availability: DirectToolAvailabilityDep
 ) -> _DirectAvailability:
-    """The direct endpoints' answer: the workspace's web switch and funds, then the service's own checks."""
+    """The direct endpoints' answer: the workspace's web switch, then the service's own checks."""
     if not switches.web:
         return _DirectAvailability()
+    unfunded = switches.unfunded
     return _DirectAvailability(
-        search=Tool.WEB_SEARCH not in switches.unfunded and await availability.search(api_key, switches.search_policy),
-        fetch=Tool.WEB_FETCH not in switches.unfunded and await availability.fetch(api_key),
+        search=await availability.search(api_key, switches.search_policy, funded=Tool.WEB_SEARCH not in unfunded),
+        fetch=await availability.fetch(api_key, funded=Tool.WEB_FETCH not in unfunded),
     )
 
 
