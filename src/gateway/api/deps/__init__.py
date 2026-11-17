@@ -2007,7 +2007,6 @@ def get_oauth_app_service(
 OAuthAppServiceDep = Annotated[OAuthAppService, Depends(get_oauth_app_service)]
 
 
-# The package's whole public surface, including every name re-exported from a submodule.
 __all__ = [
     "AUTH_FAILURES",
     "AgentModelRecommenderPortDep",
