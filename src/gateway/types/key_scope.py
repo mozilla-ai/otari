@@ -48,6 +48,10 @@ class KeyScope(StrEnum):
 # what most keys are for.
 DEFAULT_KEY_SCOPES: tuple[KeyScope, ...] = (KeyScope.INFERENCE_RUN,)
 
+# What the setup guide's key is given: a coding agent declares web tools on its
+# first calls, and a key without them answers that with a 403.
+AGENT_KEY_SCOPES: tuple[KeyScope, ...] = (KeyScope.INFERENCE_RUN, KeyScope.WEB_SEARCH, KeyScope.WEB_FETCH)
+
 # Only a service key has end users, so only a service key may hold these.
 END_USER_SCOPES: frozenset[KeyScope] = frozenset(
     {KeyScope.END_USERS_READ, KeyScope.END_USERS_WRITE, KeyScope.END_USERS_DELETE}

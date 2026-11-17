@@ -63,7 +63,7 @@ from gateway.ports.growth_signal_port import GrowthAction, GrowthSignalPort
 from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.types.key_scope import DEFAULT_KEY_SCOPES, KeyScopeSet
+from gateway.types.key_scope import AGENT_KEY_SCOPES, KeyScopeSet
 
 # What the guide calls the key it mints, as the Keys page shows it. One name for
 # every deployment, so an operator who finds it there can tell where it came
@@ -318,8 +318,7 @@ class WorkspaceActivationService:
                 key_suffix=key_suffix(plaintext),
                 key_name=ACTIVATION_KEY_NAME,
                 user_id=owner.user_id,
-                # The guide's one job is a first model call.
-                scopes=KeyScopeSet.checked(DEFAULT_KEY_SCOPES, is_service_key=False),
+                scopes=KeyScopeSet.checked(AGENT_KEY_SCOPES, is_service_key=False),
             )
             self.db.add(record)
         else:

@@ -19,11 +19,13 @@ accepted headers are in [Base URL](api-reference.md#base-url) and
    before you close the dialog.
 
 **Access** sets what the key may call: one checkbox per scope, grouped by
-area (Models, Files, Batches, Tools, Coding agents, Usage, and End users on a
-service key). A group's own box checks or clears the whole group. A new key
-starts with **Call models** alone, the `inference:run` scope; the Claude Code
-plugin's hooks, routing and telemetry need the **Coding agents** group too. See
-[Scopes](#scopes). Edit a key to change its access later.
+area. Models and Tools are shown; Files, Batches, MCP, Coding agents, Usage,
+and End users on a service key are under **Advanced scopes**, which opens by
+itself on a key that holds one of them. A group's own box checks or clears the
+whole group. A new key starts with **Call models** alone, the `inference:run`
+scope; the Claude Code plugin's hooks, routing and telemetry need the
+**Coding agents** group too. See [Scopes](#scopes). Edit a key to change its
+access later.
 
 ![The New key dialog, with a name and an owner filled in.](assets/screenshots/api-keys-create.png)
 
@@ -196,8 +198,9 @@ scopes. No scope lets a key create or manage keys: that takes a dashboard
 session or the master key, so revoking a key always ends what it can do.
 
 A key created through the API or the dashboard without naming any scopes gets
-`inference:run` alone. (A key declared in the config file has a
-[different default](configuration.md#budgets-and-api-keys-in-config).) Name
+`inference:run` alone, and the setup guide's key holds `web:search` and
+`web:fetch` too, since a coding agent declares web tools on its first calls. (A
+key declared in the config file has a [different default](configuration.md#budgets-and-api-keys-in-config).) Name
 them in `scopes` when you create the key, through `POST /api/v1/keys` or
 `POST /api/v1/organizations/me/keys`:
 
