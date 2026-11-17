@@ -142,6 +142,36 @@ async def insert_ignoring_duplicates(
     return list((await db.execute(statement, values)).scalars().all())
 
 
+async def insert_replacing_duplicates(
+    db: AsyncSession,
+    rows: Sequence[Any],
+    *,
+    conflict: Sequence[Any],
+    replace: Sequence[str],
+) -> None:
+    """Insert ORM instances in one statement, replacing ``replace`` on any whose ``conflict`` key exists.
+
+    ``ON CONFLICT DO UPDATE`` rather than a read and then a write: an insert of the
+    same key that another transaction has not committed is waited for and then
+    replaced, where a read would have missed it and collided. Does not commit.
+    """
+    if not rows:
+        return
+    model = type(rows[0])
+    columns = {attr.key for attr in sa_inspect(model).column_attrs}
+    # Only the attributes the caller set, so a column it left out gets its default.
+    values = [{key: value for key, value in sa_inspect(row).dict.items() if key in columns} for row in rows]
+    insert = postgresql_insert if dialect_name(db) == "postgresql" else sqlite_insert
+    statement = insert(model)
+    await db.execute(
+        statement.on_conflict_do_update(
+            index_elements=list(conflict),
+            set_={name: getattr(statement.excluded, name) for name in replace},
+        ),
+        values,
+    )
+
+
 def bucket_expr(dialect: str, bucket: BucketGrain, column: Any) -> Any:
     """A SQL expression that truncates ``column`` to the bucket start, in UTC.
 
