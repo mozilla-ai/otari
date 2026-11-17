@@ -19,6 +19,7 @@ import {
 import { publicProvidersHref } from "@/features/providers/publicProviders"
 import { useCatalogProviders } from "@/shared/api/models"
 import { ProviderMark } from "@/shared/components/marks/BrandMark"
+import { followInAppLink } from "@/shared/helpers/appLocation"
 import { formatNumber } from "@/shared/helpers/format"
 import { useUrlState } from "@/shared/helpers/urlState"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
@@ -29,7 +30,7 @@ import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 //
 // `ProvidersView` takes `publicView` and its page state the way
 // `ModelCatalogView` does, so the same page renders ahead of a session
-// (`PublicProvidersPage`), where links are hash paths because there is no
+// (`PublicProvidersPage`), where links are plain anchors because there is no
 // router and the page lives in component state.
 
 export function modelCountLabel(count: number): string {
@@ -56,7 +57,11 @@ function ProviderCard({
           label={provider.display_name}
         />
         {publicView ? (
-          <a href={publicProvidersHref(provider.name)} className={titleClass}>
+          <a
+            href={publicProvidersHref(provider.name)}
+            onClick={followInAppLink}
+            className={titleClass}
+          >
             {provider.display_name}
           </a>
         ) : (

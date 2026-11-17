@@ -9,6 +9,7 @@ import {
   rememberSignInAddress,
 } from "@/features/auth/signInAddress"
 import { apiFetch } from "@/shared/api/client"
+import { currentRoute } from "@/shared/helpers/appLocation"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { ThemeProvider } from "@/shared/hooks/useTheme"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
@@ -49,12 +50,12 @@ beforeEach(() => {
   vi.clearAllMocks()
   window.sessionStorage.clear()
   resetTelemetrySpy()
-  window.location.hash = ""
+  window.history.replaceState(null, "", "/")
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
-  window.location.hash = ""
+  window.history.replaceState(null, "", "/")
 })
 
 vi.mock("@/features/auth/overlayPublicAuthFields", () => ({
@@ -81,7 +82,7 @@ describe("ResendVerificationPage", () => {
     await user.click(screen.getByRole("button", { name: "Send link" }))
 
     await vi.waitFor(() => {
-      expect(window.location.hash).toBe("#/check-email?type=resend")
+      expect(currentRoute()).toBe("/check-email?type=resend")
     })
     expect(vi.mocked(apiFetch).mock.calls[0]?.[0]).toBe(
       "/auth/resend-verification",
@@ -100,7 +101,7 @@ describe("ResendVerificationPage", () => {
     await user.click(screen.getByRole("button", { name: "Send link" }))
 
     await vi.waitFor(() => {
-      expect(window.location.hash).toBe("#/check-email?type=resend")
+      expect(currentRoute()).toBe("/check-email?type=resend")
     })
     expect(readSignInAddress()).toBe("grace@example.com")
   })

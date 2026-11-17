@@ -51,14 +51,14 @@ describe("ErrorBoundary", () => {
     vi.spyOn(console, "error").mockImplementation(() => {})
 
     const { rerender } = render(
-      <ErrorBoundary resetKey="#/verify-email">
+      <ErrorBoundary resetKey="/verify-email">
         <Thrower />
       </ErrorBoundary>,
     )
     expect(screen.getByRole("alert")).toBeInTheDocument()
 
     rerender(
-      <ErrorBoundary resetKey="#/reset-password">
+      <ErrorBoundary resetKey="/reset-password">
         <p>the next link</p>
       </ErrorBoundary>,
     )
@@ -71,12 +71,12 @@ describe("ErrorBoundary", () => {
     vi.spyOn(console, "error").mockImplementation(() => {})
 
     const { rerender } = render(
-      <ErrorBoundary resetKey="#/verify-email">
+      <ErrorBoundary resetKey="/verify-email">
         <Thrower />
       </ErrorBoundary>,
     )
     rerender(
-      <ErrorBoundary resetKey="#/verify-email">
+      <ErrorBoundary resetKey="/verify-email">
         <p>never reached</p>
       </ErrorBoundary>,
     )

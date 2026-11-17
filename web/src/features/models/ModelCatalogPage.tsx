@@ -60,6 +60,7 @@ import {
   MakerMark,
   ProviderMark,
 } from "@/shared/components/marks/BrandMark"
+import { followInAppLink } from "@/shared/helpers/appLocation"
 import {
   formatContext,
   formatNumber,
@@ -492,6 +493,7 @@ function ModelCard({
       {publicView ? (
         <a
           href={publicCatalogHref(model.id)}
+          onClick={followInAppLink}
           aria-label={title}
           className={cardClass}
         >
@@ -629,7 +631,7 @@ export function ModelCatalogView({
   /** History state a card's link carries to the model's page. */
   openState?: HistoryState
   /**
-   * Ahead of a session: no organization to price for, and plain hash links
+   * Ahead of a session: no organization to price for, and plain anchors
    * because there is no router to link through.
    */
   publicView?: boolean

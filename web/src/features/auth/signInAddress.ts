@@ -5,7 +5,7 @@
  * check-email page and on to another resend, and a finished verification,
  * recovery request or invitation back to sign-in.
  *
- * Session storage rather than the URL: the hash is the address bar the router
+ * Session storage rather than the URL: the address bar is what the router
  * reads after sign-in, and an address in it would ride along into the
  * dashboard. Only ever an address the visitor typed or a link proved, never a
  * password. Read without being removed, because React may run a state

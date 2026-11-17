@@ -147,7 +147,7 @@ function providers(ui: ReactElement) {
 describe("ProvidersPage", () => {
   afterEach(() => {
     vi.restoreAllMocks()
-    window.location.hash = ""
+    window.history.replaceState(null, "", "/")
   })
 
   it("lists each provider with its model count and links to its page", async () => {
@@ -352,14 +352,14 @@ describe("PublicProvidersPage", () => {
     const list = await screen.findByRole("list", { name: "Providers" })
     expect(
       within(list).getByRole("link", { name: "Fireworks AI" }),
-    ).toHaveAttribute("href", "#/providers/fireworks")
+    ).toHaveAttribute("href", "/providers/fireworks")
     const site = screen.getByRole("navigation", { name: "Site" })
     expect(
       within(site).getAllByRole("link", { name: "Providers" })[0],
     ).toHaveAttribute("aria-current", "page")
     expect(
       within(site).getAllByRole("link", { name: "Models" })[0],
-    ).toHaveAttribute("href", "#/models")
+    ).toHaveAttribute("href", "/models")
   })
 
   it("links a provider's models to the public catalog", async () => {
@@ -371,10 +371,10 @@ describe("PublicProvidersPage", () => {
     })
     expect(
       within(table).getByRole("link", { name: "GLM-5.3" }),
-    ).toHaveAttribute("href", "#/models/z-ai/glm-5.3")
+    ).toHaveAttribute("href", "/models/z-ai/glm-5.3")
     expect(screen.getByRole("link", { name: "← Providers" })).toHaveAttribute(
       "href",
-      "#/providers",
+      "/providers",
     )
   })
 

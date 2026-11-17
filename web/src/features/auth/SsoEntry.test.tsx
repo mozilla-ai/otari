@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { SsoAuthorizeResponse, SsoLookupResponse } from "@/client"
 import { SsoEntry } from "@/features/auth/SsoEntry"
+import { routeLocation } from "@/tests/location"
 import { AppProviders } from "@/tests/providers"
 
 vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
@@ -28,11 +29,11 @@ function renderEntry() {
 
 const realLocation = window.location
 
-function stubNavigation(hash = "") {
+function stubNavigation(route = "/") {
   const assign = vi.fn()
   Object.defineProperty(window, "location", {
     configurable: true,
-    value: { ...window.location, assign, hash },
+    value: { ...window.location, ...routeLocation(route), assign },
   })
   return assign
 }

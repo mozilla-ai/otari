@@ -24,7 +24,7 @@ vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
   return { useTelemetry: vi.fn(() => telemetrySpy) }
 })
 
-function renderPage(hash: string) {
+function renderPage(route: string) {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false } },
   })
@@ -32,7 +32,7 @@ function renderPage(hash: string) {
     <DeploymentProvider value={bootstrap()}>
       <ThemeProvider>
         <QueryClientProvider client={client}>
-          <VerifyEmailPage hash={hash} />
+          <VerifyEmailPage route={route} />
         </QueryClientProvider>
       </ThemeProvider>
     </DeploymentProvider>,
@@ -71,7 +71,7 @@ describe("VerifyEmailPage", () => {
   it("asks for the signup password rather than verifying on arrival", async () => {
     // Someone who did not sign up can receive this link; a click alone must
     // not activate whatever password a stranger chose for the address.
-    renderPage("#/verify-email?token=abc123")
+    renderPage("/verify-email?token=abc123")
 
     expect(await screen.findByLabelText("Password")).toBeInTheDocument()
     expect(vi.mocked(apiFetch).mock.calls[0]?.[0]).toBe(VALIDATE_PATH)
@@ -80,13 +80,13 @@ describe("VerifyEmailPage", () => {
       screen.getByRole("link", {
         name: "Forgot that password, or didn't sign up? Set a new one",
       }),
-    ).toHaveAttribute("href", "#/recover-password")
+    ).toHaveAttribute("href", "/recover-password")
   })
 
   // Only the first signup's password verifies, so someone who signed up twice
   // has to be told which one to type.
   it("tells someone who signed up twice which password verifies", async () => {
-    renderPage("#/verify-email?token=abc123")
+    renderPage("/verify-email?token=abc123")
 
     expect(
       await screen.findByText(
@@ -102,7 +102,7 @@ describe("VerifyEmailPage", () => {
     "says a %s link cannot be used before asking for a password",
     async (status, title) => {
       linkStatus = status
-      renderPage("#/verify-email?token=spent")
+      renderPage("/verify-email?token=spent")
 
       expect(
         await screen.findByRole("heading", { name: title }),
@@ -110,13 +110,13 @@ describe("VerifyEmailPage", () => {
       expect(screen.queryByLabelText("Password")).toBeNull()
       expect(
         screen.getByRole("link", { name: "Send a new verification link" }),
-      ).toHaveAttribute("href", "#/resend-verification")
+      ).toHaveAttribute("href", "/resend-verification")
     },
   )
 
   it("hands the confirmed address to the sign-in screen", async () => {
     redeem.mockResolvedValue({ email: "ada@example.com" })
-    renderPage("#/verify-email?token=abc123")
+    renderPage("/verify-email?token=abc123")
 
     await verifyWith("correct-horse")
 
@@ -126,7 +126,7 @@ describe("VerifyEmailPage", () => {
 
   it("sends the token with the password and names the confirmed address", async () => {
     redeem.mockResolvedValue({ email: "ada@example.com" } as never)
-    renderPage("#/verify-email?token=abc123")
+    renderPage("/verify-email?token=abc123")
 
     await verifyWith("correct-horse")
 
@@ -149,7 +149,7 @@ describe("VerifyEmailPage", () => {
         'That is not the password chosen when signing up. This link still works, so try again, or choose a new password with "Forgot your password?".',
       ),
     )
-    renderPage("#/verify-email?token=abc123")
+    renderPage("/verify-email?token=abc123")
 
     await verifyWith("a-typo")
 
@@ -159,13 +159,13 @@ describe("VerifyEmailPage", () => {
     expect(screen.getByLabelText("Password")).toBeInTheDocument()
     expect(
       screen.getByRole("link", { name: "Send a new verification link" }),
-    ).toHaveAttribute("href", "#/resend-verification")
+    ).toHaveAttribute("href", "/resend-verification")
   })
 
-  it.each(["#/verify-email", "#/verify-email?token="])(
+  it.each(["/verify-email", "/verify-email?token="])(
     "asks the gateway nothing when %s carries no token",
-    (hash) => {
-      renderPage(hash)
+    (route) => {
+      renderPage(route)
 
       expect(
         screen.getByText(/missing its verification token/),
@@ -178,7 +178,7 @@ describe("VerifyEmailPage", () => {
 describe("the telemetry the verification page records", () => {
   it("records a confirmed address", async () => {
     redeem.mockResolvedValue({ email: "ada@example.com" } as never)
-    renderPage("#/verify-email?token=abc123")
+    renderPage("/verify-email?token=abc123")
 
     await verifyWith("correct-horse")
 
@@ -193,7 +193,7 @@ describe("the telemetry the verification page records", () => {
     redeem.mockRejectedValue(
       new ApiError(400, "This verification link has expired."),
     )
-    renderPage("#/verify-email?token=spent")
+    renderPage("/verify-email?token=spent")
 
     await verifyWith("correct-horse")
 
@@ -205,7 +205,7 @@ describe("the telemetry the verification page records", () => {
   })
 
   it("records nothing for a link that carries no token", async () => {
-    renderPage("#/verify-email")
+    renderPage("/verify-email")
 
     await screen.findByRole("heading", { name: "Verify your email" })
     expect(recordEvent).not.toHaveBeenCalled()

@@ -78,7 +78,12 @@ from gateway.core.error_codes import (
 )
 from gateway.core.feature import CoreFeature, Worker
 from gateway.core.unit_of_work import create_unit_of_work, create_unit_of_work_with_session
-from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
+from gateway.dashboard import (
+    DASHBOARD_PACKAGE_PATH,
+    dashboard_fallback,
+    get_dashboard_build_id,
+    get_dashboard_dir,
+)
 from gateway.exceptions import TenancyError
 from gateway.exceptions.tools_exceptions import DirectToolCallError
 from gateway.inflight import InFlightMiddleware, InFlightRegistry
@@ -1573,12 +1578,10 @@ def create_app(config: GatewayConfig) -> FastAPI:
     async def oauth_callback_landing(provider: str, request: Request) -> RedirectResponse:
         """Bounce a provider's redirect into the dashboard page that finishes it.
 
-        This path exists because a redirect URI may not carry a fragment
-        (RFC 6749; Google rejects one outright) and every dashboard page in
-        front of a session is a hash route. So the provider is given an
-        ordinary path, and this turns it into the hash route
-        ``DeploymentRoot`` renders ahead of the auth gate, carrying the
-        query the provider appended.
+        The provider is given a path this process always answers, because the
+        dashboard may be served from another origin or path prefix than the
+        gateway. This sends the browser to the page ``DeploymentRoot`` renders
+        ahead of the auth gate, carrying the query the provider appended.
 
         It holds no credential and decides nothing: the code in that query
         is spent by ``POST /api/v1/auth/oauth/{provider}/callback``, which the
@@ -1614,8 +1617,8 @@ def create_app(config: GatewayConfig) -> FastAPI:
         )
 
     # The page reads /api/v1/bootstrap to learn which surfaces exist here. The dashboard is a
-    # single-page app, so a static mount for /assets plus an index.html at / is
-    # all it needs (navigation is client-side).
+    # single-page app, so a static mount for /assets plus its index.html at / and
+    # at each of its own paths is all it needs (navigation is client-side).
     dashboard_dir = get_dashboard_dir()
     if dashboard_dir is not None:
         index_file = dashboard_dir / "index.html"
@@ -1652,6 +1655,10 @@ def create_app(config: GatewayConfig) -> FastAPI:
         @app.get("/dashboard-build.json", include_in_schema=False)
         async def dashboard_build() -> dict[str, str]:
             return {"build": get_dashboard_build_id(dashboard_dir), "version": __version__}
+
+        # Every other page of the dashboard is the same index.html, answered only
+        # once no route or mount has taken the path.
+        app.router.default = dashboard_fallback(index_file, app.router.not_found)
     else:
         # A missing bundle means nobody built it, which is the ordinary state of a
         # source checkout now that the bundle is gitignored rather than committed.

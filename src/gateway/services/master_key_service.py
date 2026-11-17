@@ -139,7 +139,7 @@ def setup_link(config: GatewayConfig, token: str) -> str:
     no server, access log or ``Referer`` header. The page takes it from there and
     asks only for the password that claims the deployment.
     """
-    path = f"/#/setup?key={token}"
+    path = f"/setup#key={token}"
     if config.effective_ui_base_url:
         return config.ui_link(path)
     return f"{interface_url(config)}{path}"

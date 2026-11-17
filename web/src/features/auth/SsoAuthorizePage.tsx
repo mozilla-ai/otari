@@ -65,7 +65,7 @@ export function SsoAuthorizePage({ slug }: { slug: string }) {
     return (
       <PublicAuthLayout
         title="That sign-in is not available"
-        footer={<PublicAuthLink to="#/">Back to sign in</PublicAuthLink>}
+        footer={<PublicAuthLink to="/">Back to sign in</PublicAuthLink>}
       >
         <p className="text-center text-body">
           Sign in with one of the options on the sign-in screen instead.
@@ -77,7 +77,7 @@ export function SsoAuthorizePage({ slug }: { slug: string }) {
   return (
     <PublicAuthLayout
       title="Sign in with your company"
-      footer={<PublicAuthLink to="#/">Not your company?</PublicAuthLink>}
+      footer={<PublicAuthLink to="/">Not your company?</PublicAuthLink>}
     >
       <div className="flex flex-col gap-3">
         <p className="text-center text-body">

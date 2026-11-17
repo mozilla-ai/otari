@@ -71,7 +71,7 @@ def test_hash_master_key_is_plain_sha256() -> None:
 def test_setup_link_carries_the_key_in_the_fragment() -> None:
     link = setup_link(GatewayConfig(host="0.0.0.0", port=8000), "otari-mk-abc")
 
-    assert link == "http://localhost:8000/#/setup?key=otari-mk-abc"
+    assert link == "http://localhost:8000/setup#key=otari-mk-abc"
     # Everything from the "#" on stays in the browser, so the key is in no request.
     assert "otari-mk-abc" not in link.split("#", 1)[0]
 
@@ -79,7 +79,7 @@ def test_setup_link_carries_the_key_in_the_fragment() -> None:
 def test_setup_link_uses_the_interface_address_when_one_is_set() -> None:
     config = GatewayConfig(public_base_url="https://otari.example.com/ui/")
 
-    assert setup_link(config, "otari-mk-abc") == "https://otari.example.com/ui/#/setup?key=otari-mk-abc"
+    assert setup_link(config, "otari-mk-abc") == "https://otari.example.com/ui/setup#key=otari-mk-abc"
 
 
 def _startup_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
@@ -111,7 +111,7 @@ def test_a_first_start_prints_only_where_it_runs_and_the_setup_link(
     printed = _start(config, monkeypatch, caplog)
 
     link = printed[5]
-    assert link.startswith("http://localhost:8000/#/setup?key=otari-mk-")
+    assert link.startswith("http://localhost:8000/setup#key=otari-mk-")
     assert printed == [
         "",
         "Otari 1.2.3 is running at http://localhost:8000",

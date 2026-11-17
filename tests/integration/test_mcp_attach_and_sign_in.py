@@ -529,7 +529,7 @@ def test_a_link_confirmed_in_its_own_users_dashboard_session_is_bound_to_it(
         f"{API_ROOT}/mcp-connections/callback", params={"state": state, "code": "c"}, follow_redirects=False
     )
     assert landed.status_code == 303
-    assert landed.headers["location"].startswith(f"{ORIGIN}/#/mcp-connections/callback?")
+    assert landed.headers["location"].startswith(f"{ORIGIN}/mcp-connections/callback?")
     assert test_db.execute(select(McpUserConnection)).first() is None
 
 

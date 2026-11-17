@@ -1,18 +1,18 @@
+import { BASE_PATH } from "@/shared/helpers/appLocation"
+
 /**
  * A link the server built into this dashboard, made absolute so it can be
  * pasted into a chat or an email.
  *
  * The server can only make it absolute when it knows its public address; without
- * one it answers `/#/...`. That is resolved against the page the operator is on
- * rather than against the origin, because the dashboard may be served under a
- * path prefix, and every dashboard route lives in the hash.
+ * one it answers the dashboard route alone (`/accept-invitation#token=…`). That
+ * is resolved against this page's origin and the base the dashboard is served
+ * under, which the server does not know.
  */
 export function absoluteDashboardLink(
   link: string,
-  location: Pick<Location, "origin" | "pathname"> = window.location,
+  origin: string = window.location.origin,
 ): string {
   if (/^https?:\/\//i.test(link)) return link
-  const hash = link.indexOf("#")
-  if (hash === -1) return new URL(link, location.origin).href
-  return `${location.origin}${location.pathname}${link.slice(hash)}`
+  return `${origin}${BASE_PATH}${link}`
 }

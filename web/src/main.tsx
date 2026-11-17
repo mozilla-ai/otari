@@ -8,6 +8,7 @@ import { Provider } from "@/app/provider"
 import { captureSetupKey } from "@/features/auth/setupKey"
 import { apiFetch } from "@/shared/api/client"
 import { prepareRequests } from "@/shared/api/overlayRequestPolicy"
+import { currentRoute } from "@/shared/helpers/appLocation"
 import type { WireBootstrap } from "@/shared/helpers/bootstrap"
 import "@/styles/globals.css"
 
@@ -15,7 +16,7 @@ reloadOnStaleChunk()
 
 // Before anything is fetched or rendered, so a first-run setup link's key
 // leaves the address bar at once rather than after the bootstrap answers.
-captureSetupKey(window.location.hash)
+captureSetupKey(currentRoute())
 
 const container = document.getElementById("root")
 if (!container) {

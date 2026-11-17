@@ -95,8 +95,8 @@ export function OnboardingPanel({
           API key (the one printed in the server logs on first start will do).
           See the{" "}
           {/* /welcome is served by the gateway itself, not by a client route, so this
-                stays a plain path anchor: a router Link would resolve to /#/welcome, which
-                the catch-all route sends back to the overview. It leaves the SPA, so open a
+                stays a plain path anchor: a router Link would stay inside the dashboard, whose
+                catch-all route sends it back to the overview. It leaves the SPA, so open a
                 new tab and the operator keeps the dashboard (as the guide's links do).
                 Where the deployment configures docs_url, the href is that instead. */}
           <a

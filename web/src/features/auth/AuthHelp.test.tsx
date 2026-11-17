@@ -23,7 +23,7 @@ it("offers password recovery beside the master-key box, where no password field 
 
   expect(
     screen.getByRole("link", { name: /Forgot your password/ }),
-  ).toHaveAttribute("href", "#/recover-password")
+  ).toHaveAttribute("href", "/recover-password")
 })
 
 // `Login` renders recovery next to the password field itself, so a second copy

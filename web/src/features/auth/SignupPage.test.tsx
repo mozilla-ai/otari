@@ -6,6 +6,7 @@ import { AuthProvider } from "@/features/auth/AuthContext"
 import { SignupPage } from "@/features/auth/SignupPage"
 import { readSignInAddress } from "@/features/auth/signInAddress"
 import { ApiError, apiFetch } from "@/shared/api/client"
+import { currentRoute } from "@/shared/helpers/appLocation"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { ThemeProvider } from "@/shared/hooks/useTheme"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
@@ -27,14 +28,14 @@ vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
   return { useTelemetry: vi.fn(() => telemetrySpy) }
 })
 
-// `PublicAuthPage` passes the whole hash down, so the plain page is the one
+// `PublicAuthPage` passes the whole route down, so the plain page is the one
 // reached from the sign-in screen and a `?email=` one is the accept page's
 // handoff (otari#835).
 // The page reads `open_signup`, `terms_url` and `privacy_url` off the bootstrap, so every
 // render goes through a DeploymentProvider. Closed signup and no published
 // terms is the default, matching a deployment that configured neither.
 function renderPage(
-  hash = "#/signup",
+  route = "/signup",
   deployment: {
     openSignup?: boolean
     termsUrl?: string | null
@@ -57,7 +58,7 @@ function renderPage(
       >
         <ThemeProvider>
           <AuthProvider>
-            <SignupPage hash={hash} />
+            <SignupPage route={route} />
           </AuthProvider>
         </ThemeProvider>
       </DeploymentProvider>
@@ -68,13 +69,13 @@ function renderPage(
 beforeEach(() => {
   vi.clearAllMocks()
   resetTelemetrySpy()
-  window.location.hash = ""
+  window.history.replaceState(null, "", "/")
   window.sessionStorage.clear()
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
-  window.location.hash = ""
+  window.history.replaceState(null, "", "/")
 })
 
 vi.mock("@/features/auth/overlayPublicAuthFields", () => ({
@@ -100,7 +101,7 @@ describe("SignupPage", () => {
     await user.click(screen.getByRole("button", { name: "Claim account" }))
 
     await vi.waitFor(() => {
-      expect(window.location.hash).toBe("#/check-email?type=signup")
+      expect(currentRoute()).toBe("/check-email?type=signup")
     })
     const [path, init] = vi.mocked(apiFetch).mock.calls[0] ?? []
     expect(path).toBe("/auth/signup")
@@ -124,14 +125,14 @@ describe("SignupPage", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response("{}", { status: 200 }))
     const user = userEvent.setup()
-    renderPage("#/signup?email=ada%40example.com&invite=tok")
+    renderPage("/signup?email=ada%40example.com&invite=tok")
 
     expect(screen.getByLabelText("Email")).toHaveValue("ada@example.com")
     await user.type(screen.getByLabelText("Password"), "correct-horse")
     await user.click(screen.getByRole("button", { name: "Claim account" }))
 
     await vi.waitFor(() => {
-      expect(window.location.hash).toBe("#/")
+      expect(currentRoute()).toBe("/")
     })
     const [, init] = vi.mocked(apiFetch).mock.calls[0] ?? []
     expect(JSON.parse(String(init?.body))).toMatchObject({
@@ -151,13 +152,13 @@ describe("SignupPage", () => {
       .spyOn(globalThis, "fetch")
       .mockRejectedValue(new TypeError("offline"))
     const user = userEvent.setup()
-    renderPage("#/signup?email=ada%40example.com&invite=tok")
+    renderPage("/signup?email=ada%40example.com&invite=tok")
 
     await user.type(screen.getByLabelText("Password"), "correct-horse")
     await user.click(screen.getByRole("button", { name: "Claim account" }))
 
     await vi.waitFor(() => {
-      expect(window.location.hash).toBe("#/")
+      expect(currentRoute()).toBe("/")
     })
     expect(readSignInAddress()).toBe("ada@example.com")
     expect(
@@ -178,7 +179,7 @@ describe("SignupPage", () => {
   it("reads as registration where signup is open", async () => {
     vi.mocked(apiFetch).mockResolvedValue({ message: "…" } as never)
     const user = userEvent.setup()
-    renderPage("#/signup", { openSignup: true })
+    renderPage("/signup", { openSignup: true })
 
     expect(
       screen.getByRole("heading", { name: "Create your account" }),
@@ -189,7 +190,7 @@ describe("SignupPage", () => {
     await user.click(screen.getByRole("button", { name: "Create account" }))
 
     await vi.waitFor(() => {
-      expect(window.location.hash).toBe("#/check-email?type=signup")
+      expect(currentRoute()).toBe("/check-email?type=signup")
     })
   })
 
@@ -200,7 +201,7 @@ describe("SignupPage", () => {
   })
 
   it("links no privacy policy on a deployment that published only terms", () => {
-    renderPage("#/signup", { termsUrl: "https://otari.example.com/terms" })
+    renderPage("/signup", { termsUrl: "https://otari.example.com/terms" })
 
     expect(
       screen.getByRole("checkbox", { name: "I accept the Terms of Service" }),
@@ -211,7 +212,7 @@ describe("SignupPage", () => {
   it("requires the published terms, and records the acceptance", async () => {
     vi.mocked(apiFetch).mockResolvedValue({ message: "…" } as never)
     const user = userEvent.setup()
-    renderPage("#/signup", { termsUrl: "https://otari.example.com/terms" })
+    renderPage("/signup", { termsUrl: "https://otari.example.com/terms" })
 
     await user.type(screen.getByLabelText("Email"), "ada@example.com")
     await user.type(screen.getByLabelText("Password"), "correct-horse")
@@ -235,7 +236,7 @@ describe("SignupPage", () => {
   it("links the privacy policy beside the terms where both are published", async () => {
     const opened = vi.spyOn(window, "open").mockReturnValue(null)
     const user = userEvent.setup()
-    renderPage("#/signup", {
+    renderPage("/signup", {
       termsUrl: "https://otari.example.com/terms",
       privacyUrl: "https://otari.example.com/privacy",
     })
@@ -261,7 +262,7 @@ describe("SignupPage", () => {
     // them (otari-ai#2146).
     const opened = vi.spyOn(window, "open").mockReturnValue(null)
     const user = userEvent.setup()
-    renderPage("#/signup", { termsUrl: "https://otari.example.com/terms" })
+    renderPage("/signup", { termsUrl: "https://otari.example.com/terms" })
 
     await user.click(screen.getByRole("link", { name: "Terms of Service" }))
 
@@ -348,7 +349,7 @@ describe("SignupPage", () => {
       ),
     ).toBeInTheDocument()
     // No navigation: the page only leaves for #/check-email on a success.
-    expect(window.location.hash).toBe("")
+    expect(currentRoute()).toBe("/")
   })
 })
 
@@ -415,7 +416,7 @@ describe("the telemetry the signup page records", () => {
     // sentence either way, so an editable field would fail silently.
     vi.mocked(apiFetch).mockResolvedValue({ message: "…" } as never)
     const user = userEvent.setup()
-    renderPage("#/signup?email=ada%40example.com")
+    renderPage("/signup?email=ada%40example.com")
 
     const emailField = screen.getByLabelText("Email")
     expect(emailField).toHaveValue("ada@example.com")
@@ -425,7 +426,7 @@ describe("the telemetry the signup page records", () => {
     await user.click(screen.getByRole("button", { name: "Claim account" }))
 
     await vi.waitFor(() => {
-      expect(window.location.hash).toBe("#/check-email?type=signup")
+      expect(currentRoute()).toBe("/check-email?type=signup")
     })
     const [, init] = vi.mocked(apiFetch).mock.calls[0] ?? []
     expect(JSON.parse(String(init?.body)).email).toBe("ada@example.com")
@@ -434,11 +435,11 @@ describe("the telemetry the signup page records", () => {
   it("offers the plain form to anyone who needs another address", () => {
     // The way out of the read-only field, so a prefill that is wrong for this
     // visitor is not a dead end of its own.
-    renderPage("#/signup?email=ada%40example.com")
+    renderPage("/signup?email=ada%40example.com")
 
     expect(
       screen.getByRole("link", { name: "Claim a different address instead" }),
-    ).toHaveAttribute("href", "#/signup")
+    ).toHaveAttribute("href", "/signup")
   })
 
   it("asks for the address when the link carries none", () => {
@@ -483,7 +484,7 @@ describe("OAuth first", () => {
   })
 
   it("folds the address form behind a row while a provider is offered", () => {
-    renderPage("#/signup", open)
+    renderPage("/signup", open)
 
     expect(
       screen.getByRole("button", { name: "Sign up with GitHub" }),
@@ -500,7 +501,7 @@ describe("OAuth first", () => {
 
   it("opens the form in place, keeps the providers, and focuses the address", async () => {
     const user = userEvent.setup()
-    renderPage("#/signup", open)
+    renderPage("/signup", open)
 
     await user.click(screen.getByRole("button", { name: "Sign up with email" }))
 
@@ -519,14 +520,14 @@ describe("OAuth first", () => {
   it("offers neither the folded row nor a provider on a closed deployment", () => {
     // OAuth on a closed deployment only admits an address already on the
     // roster, so it is not a way to sign up and the page is the plain form.
-    renderPage("#/signup", { oauthProviders: ["github", "google"] })
+    renderPage("/signup", { oauthProviders: ["github", "google"] })
 
     expect(screen.queryByRole("button", { name: /Sign up with/ })).toBeNull()
     expect(screen.getByLabelText("Email")).toBeInTheDocument()
   })
 
   it("shows the form straight away when no provider is configured", () => {
-    renderPage("#/signup", { openSignup: true })
+    renderPage("/signup", { openSignup: true })
 
     expect(screen.queryByRole("button", { name: /Sign up with/ })).toBeNull()
     expect(screen.getByLabelText("Email")).toBeInTheDocument()
@@ -534,7 +535,7 @@ describe("OAuth first", () => {
   })
 
   it("opens the form for a link that names an invited address", () => {
-    renderPage("#/signup?email=ada%40example.com", open)
+    renderPage("/signup?email=ada%40example.com", open)
 
     expect(screen.getByLabelText("Email")).toHaveValue("ada@example.com")
     expect(screen.getByLabelText("Email")).not.toHaveFocus()
@@ -549,7 +550,7 @@ describe("OAuth first", () => {
       }),
     )
     const user = userEvent.setup()
-    renderPage("#/signup", open)
+    renderPage("/signup", open)
 
     await user.click(
       screen.getByRole("button", { name: "Sign up with GitHub" }),
@@ -561,7 +562,7 @@ describe("OAuth first", () => {
     )
     expect(window.sessionStorage.getItem("otari.oauth.state")).toBe("the-state")
     // Home, not back to this form: a model chosen on the catalog reopens there.
-    expect(window.sessionStorage.getItem("otari.oauth.return-hash")).toBe("#/")
+    expect(window.sessionStorage.getItem("otari.oauth.return-route")).toBe("/")
     expect(assign).toHaveBeenCalledWith(
       "https://github.com/login/oauth/authorize?x=1",
     )
@@ -580,7 +581,7 @@ describe("OAuth first", () => {
     // needs the same acceptance (the gateway refuses one without it).
     const fetchMock = vi.spyOn(globalThis, "fetch")
     const user = userEvent.setup()
-    renderPage("#/signup", {
+    renderPage("/signup", {
       ...open,
       termsUrl: "https://otari.example.com/terms",
     })
@@ -630,7 +631,7 @@ describe("OAuth first", () => {
       }),
     )
     const user = userEvent.setup()
-    renderPage("#/signup", {
+    renderPage("/signup", {
       ...open,
       termsUrl: "https://otari.example.com/terms",
     })
@@ -659,7 +660,7 @@ describe("OAuth first", () => {
       }),
     )
     const user = userEvent.setup()
-    renderPage("#/signup", open)
+    renderPage("/signup", open)
 
     await user.click(
       screen.getByRole("button", { name: "Sign up with Google" }),
@@ -678,7 +679,7 @@ describe("OAuth first", () => {
       jsonResponse({ detail: "Google sign-in is not configured." }, 503),
     )
     const user = userEvent.setup()
-    renderPage("#/signup", open)
+    renderPage("/signup", open)
 
     await user.click(
       screen.getByRole("button", { name: "Sign up with Google" }),

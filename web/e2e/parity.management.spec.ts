@@ -509,12 +509,12 @@ test.describe("legacy routes", () => {
     // Aliases were folded into Routing, which lists them as the one-target
     // policies they are; the old path is a bookmark that still has to land.
     await gotoRoute(page, "/aliases")
-    await expect(page).toHaveURL(/#\/routing$/)
+    await expect(page).toHaveURL(/\/routing$/)
     await expect(pageHeading(page, "Routing")).toBeVisible()
 
     // An unrecognised path is a stale link from a route that has since moved,
     // so it lands on the overview rather than a dead end.
     await gotoRoute(page, "/no-such-page")
-    await expect(page).toHaveURL(/#\/$/)
+    await expect(page).toHaveURL(/:\d+\/$/)
   })
 })

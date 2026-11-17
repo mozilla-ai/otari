@@ -58,7 +58,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks()
   window.sessionStorage.clear()
-  window.location.hash = ""
+  window.history.replaceState(null, "", "/")
   Object.defineProperty(window, "location", {
     configurable: true,
     value: realLocation,

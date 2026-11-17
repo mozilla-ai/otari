@@ -278,7 +278,7 @@ def _invitation_accept_path(token: str) -> str:
     anything outside a browser, which is why sending it by email is gated on
     ``Mailer.can_send_links`` rather than on this.
     """
-    return f"/#/accept-invitation?token={token}"
+    return f"/accept-invitation#token={token}"
 
 
 # Everything a slug may not carry, collapsed to one separator. Lowercase ASCII

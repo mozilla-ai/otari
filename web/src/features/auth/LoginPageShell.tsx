@@ -4,6 +4,7 @@ import { IconButton } from "@/design-system/actions/IconButton"
 import { ProductLockup } from "@/design-system/ProductMark"
 import { AuthShellSlot } from "@/features/auth/overlayAuthShellSlot"
 import { siteHomeHref } from "@/features/models/publicCatalog"
+import { currentRoute } from "@/shared/helpers/appLocation"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { useTheme } from "@/shared/hooks/useTheme"
 import { authShellPage } from "./authShellSlot"
@@ -47,10 +48,7 @@ export function LoginPageShell({
         {/* No `md:` step down: the header is `min-h-14`, so a 44px target fits
             inside it at every width without moving the row. */}
         <div className="flex items-center gap-1">
-          <AuthShellSlot
-            page={authShellPage(window.location.hash)}
-            isBusy={isBusy}
-          />
+          <AuthShellSlot page={authShellPage(currentRoute())} isBusy={isBusy} />
           <IconButton
             variant="ghost"
             isIconOnly

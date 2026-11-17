@@ -45,8 +45,8 @@ RECOVERY_RETENTION = timedelta(days=90)
 # A run unfinished after this long belongs to a replica that died mid-run.
 ABANDONED_AFTER = timedelta(hours=1)
 # Where an alert links to, the dashboard route of the Health page.
-HEALTH_PAGE = "/#/health-checks"
-HOSTED_PROVIDERS_PAGE = "/#/admin/hosted-providers"
+HEALTH_PAGE = "/health-checks"
+HOSTED_PROVIDERS_PAGE = "/admin/hosted-providers"
 
 
 ListOfferings = Callable[[], Awaitable[Sequence[HealthCheckOffering]]]

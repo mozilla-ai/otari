@@ -115,7 +115,7 @@ test("a tap on a wrapped terms link opens it rather than ticking the box", async
   await context.route("https://example.com/**", (route) =>
     route.fulfill({ body: "" }),
   )
-  await page.goto("/#/signup")
+  await page.goto("/signup")
   const box = page.getByRole("checkbox", {
     name: "I accept the Terms of Service and the Privacy Policy",
   })

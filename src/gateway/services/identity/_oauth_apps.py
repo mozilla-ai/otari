@@ -73,7 +73,7 @@ class OAuthAppService:
     def authorization_url(self, request: AppAuthorizationParameters) -> str:
         """Continue through the dashboard's existing sign-in and consent gate."""
         self.require_registered_redirect(request.client_id, request.redirect_uri)
-        return self.ui_link("/#/oauth/authorize?" + urlencode(request.model_dump()))
+        return self.ui_link("/oauth/authorize?" + urlencode(request.model_dump()))
 
     async def authorize(self, user: User, request: AppAuthorizationRequest) -> str:
         """Record explicit consent, for the scopes the screen showed that the registration still names.

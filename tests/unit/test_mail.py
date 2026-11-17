@@ -613,14 +613,14 @@ def test_the_console_transport_keeps_its_link_past_the_credential_mask(
                 message=MailMessage(
                     subject="Join",
                     html="<p>Join</p>",
-                    text="Accept: https://otari.example.com/#/accept-invitation?token=abc123",
+                    text="Accept: https://otari.example.com/accept-invitation#token=abc123",
                 ),
             )
         )
     finally:
         gateway_logs.handler.removeFilter(mask)
 
-    assert "accept-invitation?token=abc123" in gateway_logs.text
+    assert "accept-invitation#token=abc123" in gateway_logs.text
 
 
 def test_require_ready_refuses_and_names_what_is_missing() -> None:
@@ -678,10 +678,10 @@ def test_each_transport_states_whether_it_delivers_to_recipients() -> None:
 
 
 def test_link_is_absolute_when_the_deployment_knows_its_address_and_relative_otherwise() -> None:
-    assert Mailer(_ready()).link("/#/accept-invitation?token=abc") == (
-        "https://otari.example.com/#/accept-invitation?token=abc"
+    assert Mailer(_ready()).link("/accept-invitation#token=abc") == (
+        "https://otari.example.com/accept-invitation#token=abc"
     )
-    assert Mailer(GatewayConfig()).link("/#/accept-invitation?token=abc") == "/#/accept-invitation?token=abc"
+    assert Mailer(GatewayConfig()).link("/accept-invitation#token=abc") == "/accept-invitation#token=abc"
 
 
 def test_link_names_the_interface_when_an_edge_serves_it_elsewhere() -> None:
@@ -689,7 +689,7 @@ def test_link_names_the_interface_when_an_edge_serves_it_elsewhere() -> None:
     # the interface is reached, not the address this process answers on.
     mailer = Mailer(_ready(ui_base_url="https://app.example.com/ui"))
 
-    assert mailer.link("/#/verify-email?token=abc") == "https://app.example.com/ui/#/verify-email?token=abc"
+    assert mailer.link("/verify-email#token=abc") == "https://app.example.com/ui/verify-email#token=abc"
 
 
 def test_whatever_can_send_links_permits_is_followable_from_an_inbox() -> None:
@@ -699,16 +699,16 @@ def test_whatever_can_send_links_permits_is_followable_from_an_inbox() -> None:
     mailer = Mailer(_ready(ui_base_url="https://app.example.com/ui"))
 
     assert mailer.can_send_links is True
-    assert mailer.link("/#/verify-email?token=t") == "https://app.example.com/ui/#/verify-email?token=t"
+    assert mailer.link("/verify-email#token=t") == "https://app.example.com/ui/verify-email#token=t"
 
 
-def test_a_query_on_the_interface_address_travels_ahead_of_the_hash_route() -> None:
+def test_a_query_on_the_interface_address_travels_ahead_of_the_fragment() -> None:
     # An edge serving one interface for several deployments needs each link to
-    # say which one built it. Placed before the hash so the page's own location
-    # carries it, where the route's query would only reach the route.
+    # say which one built it. Joined to the page's own query, ahead of the
+    # fragment, so the request the browser sends carries it.
     mailer = Mailer(_ready(ui_base_url="https://app.example.com/ui/?edge=eu"))
 
-    assert mailer.link("/#/verify-email?token=abc") == "https://app.example.com/ui/?edge=eu#/verify-email?token=abc"
+    assert mailer.link("/verify-email#token=abc") == "https://app.example.com/ui/verify-email?edge=eu#token=abc"
     assert mailer.link("/x") == "https://app.example.com/ui/x?edge=eu"
     assert mailer.link("/x?y=1") == "https://app.example.com/ui/x?y=1&edge=eu"
 
@@ -716,7 +716,7 @@ def test_a_query_on_the_interface_address_travels_ahead_of_the_hash_route() -> N
 def test_a_trailing_slash_inside_a_query_value_survives_the_link() -> None:
     mailer = Mailer(_ready(ui_base_url="https://app.example.com/ui/?edge=team/"))
 
-    assert mailer.link("/#/verify-email?token=abc") == "https://app.example.com/ui/?edge=team/#/verify-email?token=abc"
+    assert mailer.link("/verify-email#token=abc") == "https://app.example.com/ui/verify-email?edge=team/#token=abc"
 
 
 def test_asset_root_is_the_interface_address_without_its_query() -> None:
@@ -770,7 +770,7 @@ def test_every_body_template_is_a_run_of_card_rows() -> None:
             inviter_name="Ada",
             inviter_email="ada@example.com",
             role="member",
-            accept_link="https://otari.example.com/#/accept-invitation?token=t",
+            accept_link="https://otari.example.com/accept-invitation#token=t",
             expiry_hours=168,
             asset_root=root,
         ),

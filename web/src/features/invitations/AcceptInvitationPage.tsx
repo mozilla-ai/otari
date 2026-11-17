@@ -1,5 +1,5 @@
 /**
- * The page an accept link lands on: `#/accept-invitation?token=...`.
+ * The page an accept link lands on: `/accept-invitation#token=...`.
  *
  * Deliberately not one of `src/routes/`'s files. Every route there lives
  * behind `App.tsx`'s auth gate (`DeploymentRoot` renders `<Login/>` instead
@@ -45,9 +45,9 @@ import {
   useAcceptInvitation,
   useValidateInvitation,
 } from "@/shared/api/organizations"
-import { tokenFromHash } from "@/shared/helpers/hashParams"
+import { currentRoute } from "@/shared/helpers/appLocation"
+import { tokenFromRoute } from "@/shared/helpers/routeParams"
 import { useDeployment } from "@/shared/hooks/useDeployment"
-
 import { ClaimForm } from "./ClaimForm"
 import { waysInSentence } from "./waysIn"
 
@@ -93,13 +93,13 @@ function sessionStanding(
 }
 
 export function AcceptInvitationPage() {
-  // Read once, safely: App.tsx renders this keyed on the hash
-  // (`<AcceptInvitationPage key={hash} />`), so a *different* invitation link
+  // Read once, safely: App.tsx renders this keyed on the route
+  // (`<AcceptInvitationPage key={route} />`), so a *different* invitation link
   // opened in the same tab remounts a fresh instance of this component rather
   // than re-rendering this one with a stale token frozen in its initial
-  // state. Without that key, a same-type re-render on hashchange would keep
+  // state. Without that key, a same-type re-render on a route change would keep
   // this state (and its token) exactly as it was.
-  const [token] = useState(() => tokenFromHash(window.location.hash))
+  const [token] = useState(() => tokenFromRoute(currentRoute()))
   const preview = useValidateInvitation(token ?? "")
   const accept = useAcceptInvitation()
   const { isAuthenticated, logout } = useAuth()
@@ -130,7 +130,7 @@ export function AcceptInvitationPage() {
             }
           />
           {/* A refusal still owes a door: Back onto a spent token lands here. */}
-          <PublicAuthLink to="#/">Back to sign in</PublicAuthLink>
+          <PublicAuthLink to="/">Back to sign in</PublicAuthLink>
         </>
       ) : accept.isSuccess ? (
         // Ahead of the preview's own branches, because the preview refuses a
@@ -153,7 +153,7 @@ export function AcceptInvitationPage() {
               <Button
                 variant="primary"
                 fullWidth
-                onPress={() => goToPublicAuthPage("#/")}
+                onPress={() => goToPublicAuthPage("/")}
               >
                 Go to the dashboard
               </Button>
@@ -190,21 +190,21 @@ export function AcceptInvitationPage() {
                 fullWidth
                 onPress={() => {
                   if (invitedEmail) rememberSignInAddress(invitedEmail)
-                  goToPublicAuthPage("#/")
+                  goToPublicAuthPage("/")
                 }}
               >
                 Go to sign in
               </Button>
               {accept.data.can_sign_in === false &&
               accept.data.ways_in?.includes("password_reset") ? (
-                <PublicAuthLink to="#/recover-password">
+                <PublicAuthLink to="/recover-password">
                   Choose a password
                 </PublicAuthLink>
               ) : null}
               {/* Whoever signed up may not be this invitee, who then takes the
                   address back by choosing a password through the mailbox. */}
               {accept.data.verification_pending ? (
-                <PublicAuthLink to="#/recover-password">
+                <PublicAuthLink to="/recover-password">
                   Didn't sign up? Set a password instead
                 </PublicAuthLink>
               ) : null}
@@ -216,7 +216,7 @@ export function AcceptInvitationPage() {
       ) : preview.error ? (
         <>
           <ErrorBanner error={preview.error} />
-          <PublicAuthLink to="#/">Back to sign in</PublicAuthLink>
+          <PublicAuthLink to="/">Back to sign in</PublicAuthLink>
         </>
       ) : preview.data ? (
         <>

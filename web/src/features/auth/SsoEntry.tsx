@@ -3,6 +3,7 @@ import { useState } from "react"
 import { FiBriefcase } from "react-icons/fi"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { ApiError, lookupSso } from "@/shared/api/client"
+import { currentRoute } from "@/shared/helpers/appLocation"
 import { useBackForwardCacheRestore } from "@/shared/hooks/useBackForwardCacheRestore"
 import {
   analyticsErrorCode,
@@ -10,7 +11,6 @@ import {
 } from "@/shared/telemetry/errorCode"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
-
 import { AuthMethodRow } from "./AuthProviderButtons"
 import {
   forgetRememberedCompany,
@@ -57,7 +57,7 @@ export function SsoEntry({ isDisabled = false }: { isDisabled?: boolean }) {
     try {
       const started = await leaveForSsoConnection(slug, {
         organizationName,
-        returnHash: window.location.hash,
+        returnRoute: currentRoute(),
       })
       if (!started.isOk) {
         recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {

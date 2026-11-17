@@ -678,7 +678,7 @@ class IdentityService:
 
 
 def _reset_path(token: str) -> str:
-    return f"/#/reset-password?token={token}"
+    return f"/reset-password#token={token}"
 
 
 def _link_status(account: User | None, expires_at: datetime | None) -> MailedLinkStatus:

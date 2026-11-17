@@ -511,7 +511,7 @@ async def create_user_for_signup(
         mailer.send,
         to=address,
         message=render_verification_email(
-            verify_link=mailer.link(f"/#/verify-email?token={token}"),
+            verify_link=mailer.link(f"/verify-email#token={token}"),
             expiry_hours=config.email_verification_expiry_hours,
             asset_root=mailer.asset_root,
         ),
@@ -659,7 +659,7 @@ async def resend_verification_email(
         mailer.send,
         to=address,
         message=render_verification_email(
-            verify_link=mailer.link(f"/#/verify-email?token={token}"),
+            verify_link=mailer.link(f"/verify-email#token={token}"),
             expiry_hours=config.email_verification_expiry_hours,
             asset_root=mailer.asset_root,
         ),
@@ -724,7 +724,7 @@ async def request_password_reset(
         mailer.send,
         to=address,
         message=render_password_reset_email(
-            reset_link=mailer.link(f"/#/reset-password?token={token}"),
+            reset_link=mailer.link(f"/reset-password#token={token}"),
             expiry_hours=config.password_reset_expiry_hours,
             asset_root=mailer.asset_root,
         ),

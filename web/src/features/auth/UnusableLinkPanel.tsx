@@ -33,7 +33,7 @@ export function UnusableLinkPanel({
       footer={
         <>
           <PublicAuthLink to={renew.to}>{renew.label}</PublicAuthLink>
-          <PublicAuthLink to="#/">Back to sign in</PublicAuthLink>
+          <PublicAuthLink to="/">Back to sign in</PublicAuthLink>
         </>
       }
     >

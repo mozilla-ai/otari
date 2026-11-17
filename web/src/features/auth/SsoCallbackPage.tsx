@@ -4,6 +4,7 @@ import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { errorMessage } from "@/design-system/feedback/errorMessage"
 import { useAuth } from "@/features/auth/AuthContext"
 import { ApiError, completeSsoSignIn } from "@/shared/api/client"
+import { routeSearchParams } from "@/shared/helpers/appLocation"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import {
   analyticsErrorCode,
@@ -11,7 +12,6 @@ import {
 } from "@/shared/telemetry/errorCode"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
-
 import {
   PublicAuthLayout,
   PublicAuthLink,
@@ -20,7 +20,7 @@ import {
 import { rememberCompany } from "./rememberedCompany"
 import {
   leaveForSsoConnection,
-  takeSsoReturnHash,
+  takeSsoReturnRoute,
   takeSsoState,
 } from "./ssoRoundTrip"
 import { TermsAcceptanceField } from "./TermsAcceptanceField"
@@ -43,7 +43,7 @@ const AUTHENTICATION_METHOD = "sso"
  * publishing terms and arrived without their acceptance, which asks for them
  * here and starts a fresh round trip through the same connection.
  */
-export function SsoCallbackPage({ hash }: { hash: string }) {
+export function SsoCallbackPage({ route }: { route: string }) {
   const { isAuthenticated, login } = useAuth()
   const { recordEvent } = useTelemetry()
   const { terms_url } = useDeployment()
@@ -51,11 +51,11 @@ export function SsoCallbackPage({ hash }: { hash: string }) {
   const [organizationName, setOrganizationName] = useState<string>()
   const [failure, setFailure] = useState<{
     message: string
-    returnHash: string
+    returnRoute: string
   }>()
   const [needsTerms, setNeedsTerms] = useState(false)
   const [passwordRemoved, setPasswordRemoved] = useState<{
-    returnHash: string
+    returnRoute: string
   }>()
   // React's development StrictMode mounts an effect twice on purpose, and a
   // code is single-use, so the second run would post a code the first already
@@ -68,9 +68,9 @@ export function SsoCallbackPage({ hash }: { hash: string }) {
     }
     startedRef.current = true
 
-    const params = new URLSearchParams(hash.split("?")[1] ?? "")
+    const params = routeSearchParams(route)
     const stored = takeSsoState()
-    const returnHash = takeSsoReturnHash()
+    const returnRoute = takeSsoReturnRoute()
     setSlug(stored.slug)
     setOrganizationName(stored.organizationName ?? undefined)
     const providerError = params.get("error")
@@ -78,7 +78,7 @@ export function SsoCallbackPage({ hash }: { hash: string }) {
     const code = params.get("code")
     const iss = params.get("iss")
 
-    const fail = (message: string) => setFailure({ message, returnHash })
+    const fail = (message: string) => setFailure({ message, returnRoute })
     const refuse = (message: string, errorCode: string) => {
       recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {
         authentication_method: AUTHENTICATION_METHOD,
@@ -99,7 +99,7 @@ export function SsoCallbackPage({ hash }: { hash: string }) {
       // already taken. Nothing is spent, and the session this tab holds is the
       // one that callback started, so the dashboard is where it belongs.
       if (isAuthenticated) {
-        replacePublicAuthPage("#/")
+        replacePublicAuthPage("/")
         return
       }
       refuse(
@@ -139,10 +139,10 @@ export function SsoCallbackPage({ hash }: { hash: string }) {
           }
           login()
           if (result.passwordRemoved) {
-            setPasswordRemoved({ returnHash })
+            setPasswordRemoved({ returnRoute })
             return
           }
-          replacePublicAuthPage(returnHash)
+          replacePublicAuthPage(returnRoute)
           return
         }
         recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {
@@ -162,7 +162,7 @@ export function SsoCallbackPage({ hash }: { hash: string }) {
         fail(errorMessage(caught))
       }
     })()
-  }, [hash, isAuthenticated, login, recordEvent])
+  }, [route, isAuthenticated, login, recordEvent])
 
   if (passwordRemoved) {
     return (
@@ -170,8 +170,8 @@ export function SsoCallbackPage({ hash }: { hash: string }) {
         title="You're signed in"
         footer={
           <>
-            <PublicAuthLink to="#/account">Set a new password</PublicAuthLink>
-            <PublicAuthLink to={passwordRemoved.returnHash}>
+            <PublicAuthLink to="/account">Set a new password</PublicAuthLink>
+            <PublicAuthLink to={passwordRemoved.returnRoute}>
               Continue
             </PublicAuthLink>
           </>
@@ -213,7 +213,7 @@ export function SsoCallbackPage({ hash }: { hash: string }) {
         slug={slug}
         organizationName={organizationName}
         termsUrl={terms_url}
-        returnHash={failure.returnHash}
+        returnRoute={failure.returnRoute}
       />
     )
   }
@@ -222,7 +222,9 @@ export function SsoCallbackPage({ hash }: { hash: string }) {
     <PublicAuthLayout
       title="That sign-in did not complete"
       footer={
-        <PublicAuthLink to={failure.returnHash}>Back to sign in</PublicAuthLink>
+        <PublicAuthLink to={failure.returnRoute}>
+          Back to sign in
+        </PublicAuthLink>
       }
     >
       <p className="text-center text-body">{failure.message}</p>
@@ -241,14 +243,14 @@ function SsoTermsStep({
   slug,
   organizationName,
   termsUrl,
-  returnHash,
+  returnRoute,
 }: {
   slug: string
   /** Carried from the refused attempt, so the second one still remembers the company by name. */
   organizationName: string | undefined
   termsUrl: string
   /** The page the refused sign-in started from, which the second attempt keeps. */
-  returnHash: string
+  returnRoute: string
 }) {
   const { recordEvent } = useTelemetry()
   const [isAccepted, setIsAccepted] = useState(false)
@@ -264,7 +266,7 @@ function SsoTermsStep({
     try {
       const started = await leaveForSsoConnection(slug, {
         termsAccepted: true,
-        returnHash,
+        returnRoute,
         organizationName,
       })
       if (!started.isOk) {
@@ -294,7 +296,7 @@ function SsoTermsStep({
     <PublicAuthLayout
       title="Accept the terms to continue"
       description="Signing in through your company's connection sets up your account here, which needs its terms of service accepted first."
-      footer={<PublicAuthLink to={returnHash}>Back to sign in</PublicAuthLink>}
+      footer={<PublicAuthLink to={returnRoute}>Back to sign in</PublicAuthLink>}
     >
       <div className="flex flex-col gap-3">
         <TermsAcceptanceField

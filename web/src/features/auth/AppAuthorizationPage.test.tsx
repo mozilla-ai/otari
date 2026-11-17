@@ -6,6 +6,7 @@ import { apiFetch } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { ThemeProvider } from "@/shared/hooks/useTheme"
 import { bootstrap } from "@/tests/fixtures"
+import { routeLocation } from "@/tests/location"
 import { AppAuthorizationPage } from "./AppAuthorizationPage"
 
 vi.mock("@/shared/api/client", async (importOriginal) => {
@@ -63,7 +64,11 @@ beforeEach(() => {
   vi.clearAllMocks()
   Object.defineProperty(window, "location", {
     configurable: true,
-    value: { ...realLocation, hash: `#/oauth/authorize?${request}`, assign },
+    value: {
+      ...realLocation,
+      ...routeLocation(`/oauth/authorize?${request}`),
+      assign,
+    },
   })
 })
 afterEach(() => {
@@ -305,7 +310,14 @@ it("passes slash-containing client ids as query parameters and preserves omitted
   const params = new URLSearchParams(request)
   params.set("client_id", "team/thunderbolt")
   params.delete("response_type")
-  window.location.hash = `#/oauth/authorize?${params}`
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: {
+      ...realLocation,
+      ...routeLocation(`/oauth/authorize?${params}`),
+      assign,
+    },
+  })
   renderPage()
   await userEvent.click(
     await screen.findByRole("button", { name: "Allow access" }),

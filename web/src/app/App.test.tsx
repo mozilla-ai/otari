@@ -7,6 +7,7 @@ import {
   takeRememberedModel,
 } from "@/features/models/publicCatalog"
 import { API_ROOT, apiFetch, siteFetch } from "@/shared/api/client"
+import { currentRoute } from "@/shared/helpers/appLocation"
 import { bootstrap } from "@/tests/fixtures"
 
 vi.mock("@/shared/api/client", async (importOriginal) => {
@@ -32,7 +33,7 @@ describe("App", () => {
     vi.restoreAllMocks()
     window.localStorage.clear()
     window.sessionStorage.clear()
-    window.location.hash = ""
+    window.history.replaceState(null, "", "/")
   })
 
   it("shows a loading state while the current route loads", async () => {
@@ -66,13 +67,10 @@ describe("App", () => {
     } as never)
     vi.mocked(apiFetch).mockResolvedValue([] as never)
     rememberModel("z-ai/glm-5.3")
-    window.location.hash = "#/"
-
+    window.history.replaceState(null, "", "/")
     renderApp(bootstrap())
 
-    await waitFor(() =>
-      expect(window.location.hash).toBe("#/models/z-ai/glm-5.3"),
-    )
+    await waitFor(() => expect(currentRoute()).toBe("/models/z-ai/glm-5.3"))
     expect(takeRememberedModel()).toBeNull()
   })
 
@@ -84,12 +82,11 @@ describe("App", () => {
     } as never)
     vi.mocked(apiFetch).mockResolvedValue([] as never)
     rememberModel("z-ai/glm-5.3")
-    window.location.hash = "#/keys"
-
+    window.history.replaceState(null, "", "/keys")
     renderApp(bootstrap())
 
     // Decided on the first render, before the router mounts.
-    expect(window.location.hash).toBe("#/keys")
+    expect(currentRoute()).toBe("/keys")
     // Forgotten all the same: it was this session's to use or lose.
     expect(takeRememberedModel()).toBeNull()
   })
@@ -132,8 +129,11 @@ describe("App", () => {
       }
       return [] as never
     })
-    window.location.hash = "#/accept-invitation?token=first-token"
-
+    window.history.replaceState(
+      null,
+      "",
+      "/accept-invitation?token=first-token",
+    )
     renderApp(bootstrap())
 
     // Not the sign-in screen, even though no session marker is stored: the
@@ -157,8 +157,7 @@ describe("App", () => {
       }
       return [] as never
     })
-    window.location.hash = "#/models"
-
+    window.history.replaceState(null, "", "/models")
     renderApp(bootstrap({ public_catalog: true }))
 
     expect(
@@ -170,8 +169,7 @@ describe("App", () => {
   })
 
   it("keeps the catalog behind the sign-in screen by default", () => {
-    window.location.hash = "#/models"
-
+    window.history.replaceState(null, "", "/models")
     renderApp(bootstrap())
 
     expect(
@@ -187,8 +185,7 @@ describe("App", () => {
       }
       return [] as never
     })
-    window.location.hash = "#/providers"
-
+    window.history.replaceState(null, "", "/providers")
     renderApp(bootstrap({ public_catalog: true }))
 
     expect(
@@ -210,8 +207,7 @@ describe("App", () => {
       privacy_url: null,
       models: [],
     } as never)
-    window.location.hash = "#/providers/fireworks"
-
+    window.history.replaceState(null, "", "/providers/fireworks")
     renderApp(bootstrap({ public_catalog: true }))
 
     expect(
@@ -221,8 +217,7 @@ describe("App", () => {
   })
 
   it("keeps the providers page behind the sign-in screen by default", () => {
-    window.location.hash = "#/providers"
-
+    window.history.replaceState(null, "", "/providers")
     renderApp(bootstrap())
 
     expect(
@@ -232,8 +227,7 @@ describe("App", () => {
   })
 
   it("renders a public auth page ahead of the sign-in screen", async () => {
-    window.location.hash = "#/verify-email?token=abc123"
-
+    window.history.replaceState(null, "", "/verify-email?token=abc123")
     renderApp(bootstrap())
 
     // No session marker is stored, and the emailed token is this visitor's
@@ -248,9 +242,9 @@ describe("App", () => {
 
   it("sends a completed OAuth sign-in on to the dashboard rather than leaving it on the callback page", async () => {
     // The ordering this file's own "ahead of the sign-in screen" test pins is
-    // what makes this a hazard: `publicAuthPath(hash)` is matched *before* the
+    // what makes this a hazard: `publicAuthPath(route)` is matched *before* the
     // auth gate, so signing in does not by itself stop the callback page from
-    // being the thing that renders. The page has to change the hash, the way
+    // being the thing that renders. The page has to change the route, the way
     // `AcceptInvitationPage` does when it is finished. Without that the person
     // is signed in and stuck on "Checking with the gateway…", which has no way
     // out, and a reload then reports a state mismatch because the stored state
@@ -267,15 +261,17 @@ describe("App", () => {
         headers: { "Content-Type": "application/json" },
       }),
     )
-    window.location.hash =
-      "#/auth/google/callback?code=the-code&state=the-state"
-
+    window.history.replaceState(
+      null,
+      "",
+      "/sign-in/google/callback?code=the-code&state=the-state",
+    )
     renderApp(bootstrap({ oauth_providers: ["google"] }))
 
     expect(
       await screen.findByText("Lazy overview", undefined, { timeout: 3000 }),
     ).toBeInTheDocument()
-    expect(window.location.hash).toBe("#/")
+    expect(currentRoute()).toBe("/")
     expect(screen.queryByText("Checking with the gateway…")).toBeNull()
   })
 
@@ -283,9 +279,9 @@ describe("App", () => {
     // What `Login` and `SignupPage` store before leaving for the provider, then
     // the provider's redirect back, through the real tree: whether the page or
     // a model remembered on the catalog wins is decided by `SignedInRoot`.
-    function returnFromProvider(returnHash: string) {
+    function returnFromProvider(returnRoute: string) {
       window.sessionStorage.setItem("otari.oauth.state", "the-state")
-      window.sessionStorage.setItem("otari.oauth.return-hash", returnHash)
+      window.sessionStorage.setItem("otari.oauth.return-route", returnRoute)
       vi.mocked(siteFetch).mockResolvedValue({
         build: "test-build",
         version: "1.0.0",
@@ -297,15 +293,18 @@ describe("App", () => {
           headers: { "Content-Type": "application/json" },
         }),
       )
-      window.location.hash =
-        "#/auth/google/callback?code=the-code&state=the-state"
+      window.history.replaceState(
+        null,
+        "",
+        "/sign-in/google/callback?code=the-code&state=the-state",
+      )
       renderApp(bootstrap({ oauth_providers: ["google"] }))
     }
 
     it("lands on that page, ahead of a model remembered on the catalog", async () => {
       rememberModel("z-ai/glm-5.3")
 
-      returnFromProvider("#/keys")
+      returnFromProvider("/keys")
 
       // `SignedInRoot` forgets the model on its first render, so this is the
       // moment the choice between the two has been made.
@@ -314,7 +313,7 @@ describe("App", () => {
           window.localStorage.getItem("otari.catalog.remembered-model"),
         ).toBeNull(),
       )
-      expect(window.location.hash).toBe("#/keys")
+      expect(currentRoute()).toBe("/keys")
       // The shell titles the tab from the route it resolved, so this is the
       // router on that page rather than only the address bar.
       await waitFor(() => expect(document.title).toBe("API keys · Otari"))
@@ -324,19 +323,16 @@ describe("App", () => {
       // A sign-up begun from the catalog's "use this model" returns home.
       rememberModel("z-ai/glm-5.3")
 
-      returnFromProvider("#/")
+      returnFromProvider("/")
 
-      await waitFor(() =>
-        expect(window.location.hash).toBe("#/models/z-ai/glm-5.3"),
-      )
+      await waitFor(() => expect(currentRoute()).toBe("/models/z-ai/glm-5.3"))
     })
   })
 
   it("answers a mail-gated public auth path with a panel, not a form", () => {
     // The default fixture reports mail_ready: false, which is what hides the
     // link on the sign-in screen; the URL is still reachable from a bookmark.
-    window.location.hash = "#/signup"
-
+    window.history.replaceState(null, "", "/signup")
     renderApp(bootstrap())
 
     expect(
@@ -364,27 +360,26 @@ describe("App", () => {
       }
       return [] as never
     })
-    window.location.hash = "#/"
+    window.history.replaceState(null, "", "/")
     renderApp(bootstrap())
     expect(await screen.findByText("Lazy overview")).toBeInTheDocument()
 
-    // The router hears the hash change too, and its catch-all must not send
+    // The router hears the route change too, and its catch-all must not send
     // the path to the overview before the page above it can read it.
-    window.location.hash = "#/accept-invitation?token=abc123"
-
+    window.history.replaceState(null, "", "/accept-invitation?token=abc123")
     expect(await screen.findByText("ada@example.com")).toBeInTheDocument()
-    expect(window.location.hash).toBe("#/accept-invitation?token=abc123")
+    expect(currentRoute()).toBe("/accept-invitation?token=abc123")
   })
 
   it("titles closed signup after its heading", () => {
-    window.location.hash = "#/signup"
+    window.history.replaceState(null, "", "/signup")
     renderApp(bootstrap({ mail_ready: true, open_signup: false }))
 
     expect(document.title).toBe("Claim account · Otari")
   })
 
   it("remounts with a fresh token when a different invitation link opens in the same tab", async () => {
-    // App.tsx keys the accept-invitation branch on the hash for exactly this:
+    // App.tsx keys the accept-invitation branch on the route for exactly this:
     // without it, a same-type re-render on hashchange would keep the first
     // link's token frozen in the page's own initial state, and a second link
     // pasted into the address bar would silently validate/accept the first.
@@ -406,12 +401,19 @@ describe("App", () => {
       }
       return [] as never
     })
-    window.location.hash = "#/accept-invitation?token=first-token"
+    window.history.replaceState(
+      null,
+      "",
+      "/accept-invitation?token=first-token",
+    )
     renderApp(bootstrap())
     expect(await screen.findByText("ada@example.com")).toBeInTheDocument()
 
-    window.location.hash = "#/accept-invitation?token=second-token"
-
+    window.history.replaceState(
+      null,
+      "",
+      "/accept-invitation?token=second-token",
+    )
     expect(await screen.findByText("bob@example.com")).toBeInTheDocument()
     expect(screen.queryByText("ada@example.com")).toBeNull()
   })
@@ -425,7 +427,7 @@ describe("a bootstrap from an older gateway", () => {
   afterEach(() => {
     vi.restoreAllMocks()
     window.localStorage.clear()
-    window.location.hash = ""
+    window.history.replaceState(null, "", "/")
   })
 
   // Deleting from the current fixture rather than writing a literal: the case
@@ -464,8 +466,7 @@ describe("a bootstrap from an older gateway", () => {
 
   it("still renders the invitation page, which reads the same field", () => {
     vi.mocked(apiFetch).mockImplementation(async () => [] as never)
-    window.location.hash = "#/accept-invitation?token=some-token"
-
+    window.history.replaceState(null, "", "/accept-invitation?token=some-token")
     const { container } = renderApp(older("oauth_providers"))
 
     expect(container).not.toBeEmptyDOMElement()
@@ -491,8 +492,7 @@ describe("a bootstrap from an older gateway", () => {
   })
 
   it("still renders a public auth page, which reads it on the no-mail path", () => {
-    window.location.hash = "#/recover-password"
-
+    window.history.replaceState(null, "", "/recover-password")
     const { container } = renderApp(older("oauth_providers", "mail_ready"))
 
     expect(container).not.toBeEmptyDOMElement()

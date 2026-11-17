@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import App from "@/app/App"
 import { Provider } from "@/app/provider"
 import { apiFetch } from "@/shared/api/client"
+import { currentRoute } from "@/shared/helpers/appLocation"
 import { bootstrap } from "@/tests/fixtures"
 
 vi.mock("@/shared/api/client", async (importOriginal) => {
@@ -21,7 +22,7 @@ const params = new URLSearchParams({
   code_challenge: "challenge-value",
   code_challenge_method: "S256",
 })
-const consentHash = `#/oauth/authorize?${params}`
+const consentHash = `/oauth/authorize?${params}`
 
 function renderApp() {
   return render(
@@ -39,17 +40,20 @@ beforeEach(() => {
     configurable: true,
     value: {
       ...realLocation,
+      get pathname() {
+        return realLocation.pathname
+      },
+      get search() {
+        return realLocation.search
+      },
       get hash() {
         return realLocation.hash
-      },
-      set hash(value: string) {
-        realLocation.hash = value
       },
       assign,
       replace: (url: string) => realLocation.replace(url),
     },
   })
-  window.location.hash = consentHash
+  window.history.replaceState(null, "", consentHash)
   vi.mocked(apiFetch).mockImplementation(async (path) => {
     if (path.startsWith("/oauth/apps/clients?"))
       return {
@@ -85,7 +89,7 @@ afterEach(() => {
     configurable: true,
     value: realLocation,
   })
-  window.location.hash = ""
+  window.history.replaceState(null, "", "/")
   window.localStorage.clear()
   window.sessionStorage.clear()
   vi.restoreAllMocks()
@@ -95,9 +99,9 @@ async function approveOriginalRequest() {
   expect(
     await screen.findByRole("heading", { name: "Connect to Thunderbolt" }),
   ).toBeVisible()
-  expect(
-    new URLSearchParams(window.location.hash.split("?")[1]).toString(),
-  ).toBe(params.toString())
+  expect(new URLSearchParams(currentRoute().split("?")[1]).toString()).toBe(
+    params.toString(),
+  )
   await userEvent.click(
     await screen.findByRole("button", { name: "Allow access" }),
   )
@@ -137,12 +141,15 @@ it("preserves the complete app request across provider sign-in and reload", asyn
       "https://accounts.google.com/authorize",
     ),
   )
-  expect(window.sessionStorage.getItem("otari.oauth.return-hash")).toBe(
+  expect(window.sessionStorage.getItem("otari.oauth.return-route")).toBe(
     consentHash,
   )
   first.unmount()
-  window.location.hash =
-    "#/auth/google/callback?code=provider-code&state=provider-state"
+  window.history.replaceState(
+    null,
+    "",
+    "/sign-in/google/callback?code=provider-code&state=provider-state",
+  )
   renderApp()
   await approveOriginalRequest()
 })
