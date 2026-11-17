@@ -362,6 +362,11 @@ class AdmittedWebTools:
     enrichment: ResolvedFetch | None = None
     fetch: ResolvedFetch | None = None
 
+    @property
+    def on_old_backend(self) -> bool:
+        """Whether the old backend serves the request: a search declared with nothing on the libraries to run it."""
+        return self.search_tool_entry is not None and self.in_loop_search is None
+
 
 NO_WEB_TOOLS = AdmittedWebTools(search_tool_entry=None, fetch_tool_entry=None, fetch_policy=DomainPolicy())
 

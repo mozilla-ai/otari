@@ -776,12 +776,6 @@ search's results does not. A call past it gets
 which the model can recover from, and a Chat Completions client sees the call in
 `otari_tool_calls` as `failed` with the tag `call_limit`.
 
-A request that declares Fetch alone keeps a fixed limit of 10 instead, since the
-older backend serves it. There, an eleventh call aborts the tool
-loop rather than returning a `[tool error]`. Non-streaming requests return HTTP
-`422`; a response that is already streaming emits an error event and ends
-without a completed answer.
-
 Successful Fetch calls are billed as [Pricing a gateway-run
 tool](#pricing-a-gateway-run-tool) says: at the price of the fetch instance that
 served them, or at `otari:web_fetch` on an organization's fetch key. Ordinary
@@ -1300,6 +1294,15 @@ The request, the response and the errors are in the
 ## Upgrading
 
 Each note applies when upgrading from the release it names to a later one.
+
+### From 0.48: a request that declares only Fetch
+
+A request that declares `otari_web_fetch` without `otari_web_search` draws on
+`web_search_max_calls`, as every other request does, and a call past it gets a
+`[tool error]` the model can recover from. It had a fixed limit of 10 calls,
+and an eleventh failed the whole request with `422`, or ended a stream with an
+error event. Its fetches are labeled, priced and checked by `require_pricing`
+as before.
 
 ### From 0.47: Brave and Tavily search on any-search
 

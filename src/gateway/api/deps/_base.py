@@ -15,16 +15,8 @@ from gateway.core.config import GatewayConfig
 from gateway.core.database import get_db
 from gateway.core.feature import CoreFeature
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.repositories.api_keys import ApiKeyRepositories
-from gateway.repositories.budgets import BudgetRepositories
-from gateway.repositories.traces import TracesRepositories
-from gateway.services.api_keys import ApiKeyMembershipListener
-from gateway.services.budgets import BudgetMembershipListener
 from gateway.services.log_writer import LogWriter
 from gateway.services.routing import clear_router_backend_cache
-from gateway.services.tenancy import MembershipListener, MembershipListeners
-from gateway.services.tools import McpGrantMembershipListener
-from gateway.services.traces import TraceMembershipListener
 
 # Legacy module-level fallback. Config now lives on ``app.state.config`` (set in
 # ``create_app``); ``get_config`` reads from the request's app state and only
@@ -105,22 +97,6 @@ def get_unit_of_work(db: Annotated[AsyncSession, Depends(get_db)]) -> UnitOfWork
 
 
 UnitOfWorkDep = Annotated[UnitOfWork, Depends(get_unit_of_work)]
-
-
-def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
-    """Return the listener that keeps members' budget ceilings, own keys, session shares and MCP access in step.
-
-    It writes through the request's Unit of Work, so a service that changes membership must be built on the same one.
-    """
-    return MembershipListeners(
-        BudgetMembershipListener(BudgetRepositories.on(uow)),
-        ApiKeyMembershipListener(ApiKeyRepositories.on(uow)),
-        TraceMembershipListener(TracesRepositories.on(uow)),
-        McpGrantMembershipListener(uow),
-    )
-
-
-MembershipListenerDep = Annotated[MembershipListener, Depends(get_membership_listener)]
 
 
 async def get_log_writer(request: Request) -> LogWriter:

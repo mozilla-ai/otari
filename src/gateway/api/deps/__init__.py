@@ -8,14 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps._base import (
     ContainerDep,
-    MembershipListenerDep,
     PortSessionDep,
     UnitOfWorkDep,
     get_config,
     get_container,
     get_enabled_features,
     get_log_writer,
-    get_membership_listener,
     get_unit_of_work,
     reset_config,
     set_config,
@@ -67,7 +65,29 @@ from gateway.api.deps.identity import (
     get_current_identity,
     require_deployment_operator_or_absent,
 )
-from gateway.api.deps.organizations import get_user_access
+from gateway.api.deps.organizations import (
+    InvitationClaimSettingsDep,
+    InvitationMailLimitDep,
+    MembershipListenerDep,
+    MembershipOrganizationServiceDep,
+    OrganizationDomainServiceDep,
+    OrganizationServiceDep,
+    WorkspaceAccessDep,
+    WorkspaceActivationServiceDep,
+    WorkspaceServiceDep,
+    build_invitation_cleanup,
+    build_invitation_delivery,
+    get_invitation_claim_settings,
+    get_invitation_mail_limit,
+    get_membership_listener,
+    get_membership_organization_service,
+    get_organization_domain_service,
+    get_organization_service,
+    get_user_access,
+    get_workspace_access,
+    get_workspace_activation_service,
+    get_workspace_service,
+)
 from gateway.api.deps.ports import (
     AgentModelRecommenderPortDep,
     BillingPortDep,
@@ -172,7 +192,6 @@ from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.model_provider_port import HostedModels
 from gateway.ports.provider_file_port import ProviderFilePort
-from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.ports.usage_signal_port import UsageSignalPort
 from gateway.repositories.api_keys import ApiKeyRepositories
 from gateway.repositories.catalog import ModelMetadataOverrideRepository
@@ -183,11 +202,10 @@ from gateway.repositories.health_checks import (
     HealthCheckRunRepository,
     HealthCheckSettingsRepository,
 )
-from gateway.repositories.identity import BlockedEmailRepository, IdentityRepositories, OAuthPendingStateRepository
+from gateway.repositories.identity import IdentityRepositories, OAuthPendingStateRepository
 from gateway.repositories.identity.oauth_app_grant_repository import OAuthAppGrantRepository
 from gateway.repositories.inference import InferenceRepositories
 from gateway.repositories.mcp_catalog import McpCatalogServerRepository, McpCatalogSyncStateRepository
-from gateway.repositories.organizations import OrganizationRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
 from gateway.repositories.pricing import ModelPricingRepository, OrganizationModelPricingRepository
 from gateway.repositories.providers import (
@@ -229,7 +247,7 @@ from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.feedback import FeedbackService
 from gateway.services.files import FileBackends, FileService, SandboxFileBridge, StagedFile
 from gateway.services.health_checks import HealthCheckService, UnavailableModelListener
-from gateway.services.identity import EmailBlocklist, IdentityService, OAuthAppService, OIDCConnectionService
+from gateway.services.identity import IdentityService, OAuthAppService, OIDCConnectionService
 from gateway.services.inference import (
     BatchResultsService,
     InferenceService,
@@ -242,16 +260,9 @@ from gateway.services.mail import Mailer
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.mcp_catalog import McpCatalogService
 from gateway.services.model_discovery_service import DiscoveryDial, HostedDiscovery
-from gateway.services.oauth_service import provider_label, redirect_uri
+from gateway.services.oauth_service import redirect_uri
 from gateway.services.organization_pricing_service import OrganizationPricingService
-from gateway.services.organizations import (
-    DeliveryRule,
-    ExpiredInvitationCleanup,
-    InvitationDelivery,
-    InvitationFactsReader,
-    InvitationMailLimit,
-    OrganizationClaimedDomains,
-)
+from gateway.services.organizations import OrganizationClaimedDomains
 from gateway.services.overview import OverviewService
 from gateway.services.pricing import DeploymentPricingService
 from gateway.services.pricing_refresh_service import ModelsDevPriceUpdates
@@ -278,8 +289,6 @@ from gateway.services.routing import (
 )
 from gateway.services.tenancy import (
     DomainAutoJoinListener,
-    InvitationClaimSettings,
-    OrganizationDomainService,
     OrganizationService,
     VerifiedDomainLookup,
     organization_guardrail_runner,
@@ -291,7 +300,6 @@ from gateway.services.tenancy.organization_guardrail_definition_service import (
     OrganizationGuardrailDefinitionService,
 )
 from gateway.services.tenancy.organization_guardrail_service import OrganizationGuardrailService
-from gateway.services.tenancy.workspace_activation_service import WorkspaceActivationService
 from gateway.services.tenancy.workspace_mcp_server_service import (
     WorkspaceMcpConnectionEligibility,
     WorkspaceMcpServerService,
@@ -481,17 +489,6 @@ def get_overview_service(
 OverviewServiceDep = Annotated[OverviewService, Depends(get_overview_service)]
 
 
-def get_organization_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OrganizationService:
-    """Build the request's organization service.
-
-    It reads only. A membership write needs the listener this pairing leaves unset.
-    """
-    return OrganizationService(db, membership_listener=None)
-
-
-OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]
-
-
 def get_deployment_user_service(
     db: Annotated[AsyncSession, Depends(get_db)], uow: UnitOfWorkDep
 ) -> DeploymentUserService:
@@ -512,56 +509,6 @@ def get_deployment_administration_access(
 DeploymentAdministrationAccessDep = Annotated[
     DeploymentAdministrationAccess, Depends(get_deployment_administration_access)
 ]
-
-
-def get_membership_organization_service(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    uow: UnitOfWorkDep,
-    membership_listener: MembershipListenerDep,
-) -> OrganizationService:
-    """Build the request's organization service for writing memberships and creating workspaces."""
-    return OrganizationService(db, membership_listener=membership_listener, uow=uow)
-
-
-MembershipOrganizationServiceDep = Annotated[OrganizationService, Depends(get_membership_organization_service)]
-
-
-def get_organization_domain_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OrganizationDomainService:
-    """Build the email-domain service on the request's session."""
-    return OrganizationDomainService(db)
-
-
-OrganizationDomainServiceDep = Annotated[OrganizationDomainService, Depends(get_organization_domain_service)]
-
-
-def get_invitation_claim_settings(config: Annotated[GatewayConfig, Depends(get_config)]) -> InvitationClaimSettings:
-    """Return what this deployment asks of, and offers, an invitee who chooses a first password from an invitation link.
-
-    The terms it publishes, and the ways in a refusal can offer instead: its sign-in providers by display name,
-    and a reset link where mail can send one.
-    """
-    return InvitationClaimSettings(
-        terms_url=config.terms_url,
-        sign_in_providers=tuple(provider_label(name) for name in config.oauth_providers),
-        can_send_links=Mailer(config).can_send_links,
-    )
-
-
-InvitationClaimSettingsDep = Annotated[InvitationClaimSettings, Depends(get_invitation_claim_settings)]
-
-
-def get_invitation_mail_limit(
-    config: Annotated[GatewayConfig, Depends(get_config)], container: ContainerDep
-) -> InvitationMailLimit:
-    """Return the invitation mail limits, counted in the rate-limit store this build bound."""
-    return InvitationMailLimit(
-        container.resolve(RateLimitStorePort, None),
-        per_organization=config.invitation_mail_limit_per_organization,
-        per_address=config.invitation_mail_limit_per_address,
-    )
-
-
-InvitationMailLimitDep = Annotated[InvitationMailLimit, Depends(get_invitation_mail_limit)]
 
 
 def get_organization_guardrail_definition_service(
@@ -605,28 +552,6 @@ def get_workspace_funding(db: PortSessionDep, billing: BillingPortDep) -> Worksp
 
 
 WorkspaceFundingDep = Annotated[WorkspaceFunding, Depends(get_workspace_funding)]
-
-
-def get_workspace_service(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    uow: UnitOfWorkDep,
-    membership_listener: MembershipListenerDep,
-) -> WorkspaceService:
-    return WorkspaceService(db, uow=uow, membership_listener=membership_listener)
-
-
-WorkspaceServiceDep = Annotated[WorkspaceService, Depends(get_workspace_service)]
-
-
-def get_workspace_activation_service(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-    key_format: ApiKeyFormatPortDep,
-) -> WorkspaceActivationService:
-    return WorkspaceActivationService(db, config, key_format)
-
-
-WorkspaceActivationServiceDep = Annotated[WorkspaceActivationService, Depends(get_workspace_activation_service)]
 
 
 def get_mcp_connection_service(
@@ -792,17 +717,6 @@ def get_provider_endpoint_service(
 
 
 ProviderEndpointServiceDep = Annotated[ProviderEndpointService, Depends(get_provider_endpoint_service)]
-
-
-def get_workspace_access(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    organizations: OrganizationServiceDep,
-) -> WorkspaceAccess:
-    """Build the workspace visibility and management checks on the request's session."""
-    return WorkspaceAccess(db, organizations)
-
-
-WorkspaceAccessDep = Annotated[WorkspaceAccess, Depends(get_workspace_access)]
 
 
 def get_workspace_hosted_access_service(
@@ -1094,28 +1008,6 @@ def get_unavailable_model_reporter(request: Request) -> UnavailableModelReporter
     return reporter
 
 
-def build_invitation_delivery(uow: UnitOfWork, config: GatewayConfig) -> InvitationDelivery:
-    """Build the sender of due invitation emails on a worker job's Unit of Work."""
-    domains = OrganizationClaimedDomains(OrganizationDomainRepository(uow))
-    return InvitationDelivery(
-        uow,
-        OrganizationRepositories.on(uow),
-        rule=DeliveryRule(domains, EmailBlocklist(uow, BlockedEmailRepository(uow))),
-        facts=InvitationFactsReader(
-            domains=domains,
-            organizations=OrganizationRepository(uow),
-            users=UserRepository(uow),
-            workspaces=WorkspaceRepository(uow),
-        ),
-        mailer=Mailer(config),
-    )
-
-
-def build_invitation_cleanup(uow: UnitOfWork) -> ExpiredInvitationCleanup:
-    """Build the remover of expired invitations on a worker job's Unit of Work."""
-    return ExpiredInvitationCleanup(uow, OrganizationRepositories.on(uow))
-
-
 def build_update_check_service(uow: UnitOfWork, config: GatewayConfig) -> UpdateCheckService:
     """Build the update check service on a request's Unit of Work, or the worker's own."""
     return UpdateCheckService(uow, UpdateCheckStateRepository(uow), config)
@@ -1376,10 +1268,13 @@ __all__ = [
     "IdentityProviderPortDep",
     "IdentityServiceDep",
     "InferenceServiceDep",
+    "InvitationClaimSettingsDep",
+    "InvitationMailLimitDep",
     "MaintenanceModeDep",
     "McpCatalogServiceDep",
     "McpServerRequestServiceDep",
     "MembershipListenerDep",
+    "MembershipOrganizationServiceDep",
     "ModelMetadataOverrideServiceDep",
     "ModelProviderPortDep",
     "NoSessionOwners",
@@ -1390,6 +1285,8 @@ __all__ = [
     "OptionalWebProviderClientDep",
     "OrgProviderModelServiceDep",
     "OrganizationBreakGlass",
+    "OrganizationDomainServiceDep",
+    "OrganizationServiceDep",
     "OverviewServiceDep",
     "PersonGrowthSignalPortDep",
     "PlatformBreakGlass",
@@ -1418,10 +1315,13 @@ __all__ = [
     "VisibleWorkspacesDep",
     "WebProviderClientDep",
     "WebSearchKeyServiceDep",
+    "WorkspaceAccessDep",
+    "WorkspaceActivationServiceDep",
     "WorkspaceCodeExecutionPoliciesDep",
     "WorkspaceCodeExecutionPolicyServiceDep",
     "WorkspaceMcpServerServiceDep",
     "WorkspaceMcpServersDep",
+    "WorkspaceServiceDep",
     "WorkspaceWebSearchPoliciesDep",
     "WorkspaceWebSearchServiceDep",
     "asks_to_keep_trace_content",
@@ -1461,12 +1361,17 @@ __all__ = [
     "get_file_store",
     "get_growth_signal_port",
     "get_identity_provider_port",
+    "get_invitation_claim_settings",
+    "get_invitation_mail_limit",
     "get_log_writer",
     "get_membership_listener",
+    "get_membership_organization_service",
     "get_model_provider_port",
     "get_oauth_app_service",
     "get_optional_web_provider_client",
     "get_organization_break_glass",
+    "get_organization_domain_service",
+    "get_organization_service",
     "get_organization_trace_scope",
     "get_person_growth_signal_port",
     "get_platform_break_glass",
@@ -1488,11 +1393,14 @@ __all__ = [
     "get_visible_workspaces",
     "get_web_provider_client",
     "get_web_search_key_service",
+    "get_workspace_access",
+    "get_workspace_activation_service",
     "get_workspace_code_execution_policies",
     "get_workspace_code_execution_policy_service",
     "get_workspace_mcp_server_service",
     "get_workspace_mcp_servers",
     "get_workspace_search_keys",
+    "get_workspace_service",
     "get_workspace_web_search_policies",
     "get_workspace_web_search_service",
     "is_valid_master_key",
