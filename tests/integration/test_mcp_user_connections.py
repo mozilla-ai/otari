@@ -2942,6 +2942,29 @@ async def test_a_link_whose_sign_in_could_not_start_is_not_spent(
     assert len(await _link_uses(async_db)) == 1
 
 
+async def test_a_link_is_unspent_again_when_storing_its_sign_in_fails(
+    async_db: AsyncSession, config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The claim and the pending sign-in commit together or not at all."""
+    world = await _world(async_db, config)
+    async_db.add(BillingUser(user_id="alice"))
+    await async_db.commit()
+    connections = _connections(async_db, config)
+    ticket = _link_ticket(config, world.server.id)
+
+    async def fails(*args: object, **kwargs: object) -> None:
+        raise McpConnectionFlowError("stored nothing")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(McpOAuthFlowRepository, "add", fails)
+        with pytest.raises(McpConnectionFlowError):
+            await connections.start_from_link(ticket)
+    assert await _link_uses(async_db) == []
+
+    await connections.start_from_link(ticket)
+    assert len(await _link_uses(async_db)) == 1
+
+
 async def test_two_tabs_pressing_continue_on_one_link_start_one_sign_in(
     async_db: AsyncSession, config: GatewayConfig, postgres_url: str
 ) -> None:
