@@ -15325,7 +15325,7 @@ export interface components {
             name: string;
             /**
              * Publisher Kind
-             * @description `vendor` when the server is its maker's own: the endpoint lives on a domain the publisher owns, the server is named for that domain and nothing else, and the domain is not a hosting platform's. A few makers' servers the rule cannot recognize are listed by hand. `community` for every other, such as a gateway to another company's API. The rule reads names and vouches for nothing.
+             * @description `vendor` when the server is its maker's own: the endpoint lives on the domain the registry verified for the publisher's namespace, the server is named for that domain and nothing else, and the domain is not a hosting platform's. A website or title the publisher writes never earns it, and neither does a GitHub namespace. A few makers' servers the rule cannot recognize are listed by hand. `community` for every other, such as a gateway to another company's API.
              * @enum {string}
              */
             publisher_kind: "vendor" | "community";
@@ -23379,7 +23379,7 @@ export interface components {
             missing_allowed_tools?: string[];
             /**
              * Read Only Hinted Tools
-             * @description Those of tools the server annotates readOnlyHint: untrusted, and what read_tools follows until a manager edits the labels
+             * @description Those of tools the server annotates readOnlyHint in this listing: untrusted, and never what '@read' stands for after the server's first listing
              */
             read_only_hinted_tools?: string[];
             /**
@@ -23589,12 +23589,12 @@ export interface components {
             purpose_hint: string | null;
             /**
              * Read Tools
-             * @description The tool names '@read' stands for: a manager's labels, or until one edits them the tools the server marks readOnlyHint, as last listed
+             * @description The tool names '@read' stands for: a manager's labels, or until one edits them the tools the server marked readOnlyHint when its tools were first listed. A later listing never adds to them
              */
             read_tools: string[];
             /**
              * Read Tools From Server
-             * @description True while no manager has edited read_tools, so they follow the server's own readOnlyHint
+             * @description True while no manager has edited read_tools, so they are the readOnlyHint of the server's first listing
              */
             read_tools_from_server: boolean;
             /** @description On a shared server: the account a manager signed in to for everyone, which every call carries in place of a token; null when it has none */
@@ -28516,6 +28516,8 @@ export interface operations {
             query?: {
                 /** @description A workspace the caller can see. The servers it already has are left out. */
                 workspace_id?: string | null;
+                /** @description Catalog names to leave out, such as the servers a caller has already picked. At most 50. The count leaves them out too, so it pages the same rows the caller sees. */
+                exclude?: string[] | null;
             };
             header?: never;
             path?: never;
@@ -28554,6 +28556,8 @@ export interface operations {
                 limit?: number;
                 /** @description A workspace the caller can see. The servers it already has are left out. */
                 workspace_id?: string | null;
+                /** @description Catalog names to leave out, such as the servers a caller has already picked. At most 50. The count leaves them out too, so it pages the same rows the caller sees. */
+                exclude?: string[] | null;
             };
             header?: never;
             path?: never;

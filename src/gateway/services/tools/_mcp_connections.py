@@ -16,6 +16,7 @@ The wire half is in ``_mcp_oauth``. No token, code, verifier or state is logged 
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import ipaddress
 import json
@@ -91,6 +92,7 @@ SIGN_IN_LINK_PATH = "/mcp-connections/sign-in"
 # How long a sign-in link handed to a conversation can be clicked. Nothing is stored until it is.
 SIGN_IN_LINK_LIFETIME = timedelta(minutes=30)
 _SIGN_IN_LINK_PURPOSE = "mcp-sign-in"
+_LINK_FLOW_STATE_PURPOSE = b"otari-mcp-link-flow:"
 # The gateway's own path its client ID metadata document is read at, under the API root.
 CLIENT_METADATA_PATH = "/mcp-connections/client-metadata"
 # Where a manager supplies a client, said wherever a sign-in cannot start without one.
@@ -374,6 +376,21 @@ def _state_hash(state: str) -> str:
     return hashlib.sha256(state.encode()).hexdigest()
 
 
+def _link_flow_state(browser_token: str) -> str:
+    """The state of a sign-in a link started outside a dashboard session, derived from its browser token.
+
+    The state travels through the authorization server and back; the token stays in the cookie of the
+    browser that pressed Continue. Only that browser can show a token the state was derived from.
+    """
+    digest = hashlib.sha256(_LINK_FLOW_STATE_PURPOSE + browser_token.encode()).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+
+
+def _holds_flow(browser_token: str | None, state: str) -> bool:
+    """Whether ``browser_token`` is the one ``state`` was derived from."""
+    return browser_token is not None and secrets.compare_digest(_link_flow_state(browser_token), state)
+
+
 def _expiry(tokens: McpOAuthTokens, now: datetime) -> datetime | None:
     return now + timedelta(seconds=tokens.expires_in) if tokens.expires_in is not None else None
 
@@ -451,6 +468,20 @@ class SignInLinkTarget:
     user_id: str
     # The user's alias, when their row has one.
     user_alias: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class LinkSignIn:
+    """A sign-in a link started: where to send the browser, and what it must hold to finish it.
+
+    ``state`` and ``browser_token`` are set when no dashboard session started the sign-in. The token
+    belongs in an HttpOnly cookie named for the state, and the callback finishes the sign-in only for
+    a browser holding it.
+    """
+
+    url: str
+    state: str | None = field(default=None, repr=False)
+    browser_token: str | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -746,6 +777,7 @@ class McpConnectionService:
         identity_id: uuid.UUID | None = None,
         for_check: bool = False,
         for_shared: bool = False,
+        browser_token: str | None = None,
     ) -> str:
         """Start a user's sign-in to a per-user server, and return the URL to send their browser to.
 
@@ -758,8 +790,9 @@ class McpConnectionService:
         and the caller has already decided that this user may sign in to this server.
         ``return_to`` is a dashboard path to land on afterwards. ``identity_id`` is the dashboard
         identity asking, when one is: the sign-in then finishes only in that identity's session,
-        so a link handed to somebody else connects nothing. Without it the sign-in finishes on the
-        strength of its state alone, for a link minted outside a dashboard session.
+        so a link handed to somebody else connects nothing. Without it, ``browser_token`` is the
+        token of the browser that started it, and the sign-in finishes only for a callback that
+        browser brings back.
 
         The state is single-use and expires after ``FLOW_LIFETIME``.
 
@@ -777,6 +810,8 @@ class McpConnectionService:
             raise McpConnectionSetupError("The shared default user stands for keys with no owner and cannot sign in")
         if (for_check or for_shared) and identity_id is None:
             raise McpConnectionSetupError("This sign-in is finished in the dashboard session that started it")
+        if (identity_id is None) == (browser_token is None):
+            raise McpConnectionSetupError("A sign-in is bound to a dashboard session or to a browser, and only one")
         mode = McpCredentialMode.SHARED if for_shared else McpCredentialMode.PER_USER
         redirect_uri = callback_url(self._config)
         return_to = checked_return_to(return_to)
@@ -800,7 +835,8 @@ class McpConnectionService:
         except McpOAuthDiscoveryError as exc:
             raise McpConnectionUpstreamError(f"Could not start the sign-in: {exc}") from None
 
-        state, verifier = secrets.token_urlsafe(32), _mcp_oauth.new_code_verifier()
+        state = _link_flow_state(browser_token) if browser_token is not None else secrets.token_urlsafe(32)
+        verifier = _mcp_oauth.new_code_verifier()
         now = datetime.now(UTC)
         async with self._uow:
             # Discovery took seconds. The row is locked and read again, so a sign-in found for the
@@ -861,14 +897,15 @@ class McpConnectionService:
                 user_alias=alias,
             )
 
-    async def start_from_link(self, ticket: str, *, opened_by: uuid.UUID | None = None) -> str:
-        """Start the sign-in a link from :func:`sign_in_link` names, and return the authorization URL.
+    async def start_from_link(self, ticket: str, *, opened_by: uuid.UUID | None = None) -> LinkSignIn:
+        """Start the sign-in a link from :func:`sign_in_link` names.
 
         ``opened_by`` is the dashboard identity whose session the link was confirmed in, when there
         is one. It must be the user the link was made for, and the sign-in then finishes only in
-        that identity's session. With none, the person need not have a dashboard session: the
-        sign-in finishes on its state alone and lands on a page telling them to go back to their
-        conversation, so the caller has shown them whose link it is and they have confirmed it.
+        that identity's session. With none, the sign-in is bound to the browser that confirmed it
+        instead: the result carries a browser token for that browser to hold, and the callback
+        finishes the sign-in only where it is shown, landing on a page telling the person to go
+        back to their conversation. The caller has shown them whose link it is and they confirmed.
 
         Raises:
             McpConnectionFlowError: the link is forged, altered or older than ``SIGN_IN_LINK_LIFETIME``.
@@ -882,7 +919,11 @@ class McpConnectionService:
         if opened_by is not None and not sign_in_link_is_for(user_id, opened_by):
             logger.warning("MCP sign-in link refused reason=other_identity server_id=%s", server_id)
             raise McpSignInLinkOtherUserError
-        return await self.start(server_id=server_id, user_id=user_id, identity_id=opened_by)
+        browser_token = secrets.token_urlsafe(32) if opened_by is None else None
+        url = await self.start(server_id=server_id, user_id=user_id, identity_id=opened_by, browser_token=browser_token)
+        if browser_token is None:
+            return LinkSignIn(url=url)
+        return LinkSignIn(url=url, state=_link_flow_state(browser_token), browser_token=browser_token)
 
     @staticmethod
     def _named_by(ticket: str) -> tuple[uuid.UUID, str]:
@@ -970,18 +1011,29 @@ class McpConnectionService:
         return registered
 
     async def receive_callback(
-        self, *, state: str | None, code: str | None, error: str | None, iss: str | None = None
+        self,
+        *,
+        state: str | None,
+        code: str | None,
+        error: str | None,
+        iss: str | None = None,
+        browser_token: str | None = None,
     ) -> CallbackOutcome:
         """Decide what an authorization server's redirect comes to. It carries no credential of ours.
 
         A sign-in a dashboard session started is finished by that session's own dashboard, so its
         code is passed on and nothing is spent here. One started outside a session is finished
-        here, on its state alone. A redirect that reports a refusal drops the sign-in it names.
+        here, and only for the browser that started it: ``browser_token`` is what its flow cookie
+        holds for ``state``. A redirect any other browser brings back spends nothing and leaves the
+        sign-in pending. A redirect that reports a refusal drops the sign-in it names.
         """
         if not state:
             return CallbackOutcome(error="invalid_request")
         landing = await self.landing(state)
         conversation = landing.known and not landing.needs_dashboard
+        if conversation and not _holds_flow(browser_token, state):
+            logger.warning("MCP sign-in callback refused reason=other_browser")
+            return CallbackOutcome(error="sign_in_failed", conversation=True)
         if error or not code:
             await self.abandon(state)
             # A short code the authorization server chose; anything else is not passed on.

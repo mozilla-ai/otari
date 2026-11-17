@@ -19,7 +19,7 @@ from mcp.types import BlobResourceContents, CallToolResult, EmbeddedResource, Te
 
 from conftest import TaskGroupMcpTransport
 from gateway.exceptions.tools_exceptions import McpSessionsInterruptedError
-from gateway.models.mcp import McpServerConfig
+from gateway.models.mcp import AttachedTimeBudget, McpServerConfig
 from gateway.services.mcp_client import (
     MCP_RESULT_MAX_CHARS,
     MCPClientPool,
@@ -892,6 +892,27 @@ async def test_attached_servers_share_one_time_budget(
         assert pool.openai_tools == []
 
     assert asyncio.get_running_loop().time() - started < 0.8, "five hung servers cost one budget, not five deadlines"
+
+
+@pytest.mark.asyncio
+async def test_the_connection_gets_only_what_a_renewal_left_of_the_one_budget(
+    transport: TaskGroupMcpTransport, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Renewing, checking the URL and connecting draw on one budget, so a hang in each costs it once."""
+    monkeypatch.setattr("gateway.services.mcp_client.ClientSession", _HangingSession)
+    monkeypatch.setattr("gateway.services.mcp_client.ATTACHED_CONNECT_DEADLINE_S", 5.0)
+    budget = AttachedTimeBudget(0.3)
+    with pytest.raises(TimeoutError):
+        async with budget.spend():
+            await asyncio.sleep(0.25)
+            await asyncio.Event().wait()
+    started = asyncio.get_running_loop().time()
+
+    async with asyncio.timeout(5), MCPClientPool([_ATTACHED.model_copy(update={"attached_budget": budget})]) as pool:
+        assert pool.openai_tools == []
+
+    assert asyncio.get_running_loop().time() - started < 0.2
+    assert budget.left() == 0
 
 
 @pytest.mark.asyncio

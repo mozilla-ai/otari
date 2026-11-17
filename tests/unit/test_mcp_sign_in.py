@@ -228,16 +228,27 @@ HOSTILE = '"><script>alert(1)</script><img src=x onerror=alert(1)>'
 
 def test_the_confirmation_page_names_the_user_and_the_server_and_escapes_every_value() -> None:
     plain = confirm_page(
-        ticket="abc", server_name="Jira", server_host="mcp.jira.example", user_label="bob@example.com", opened_as=None
+        ticket="abc",
+        server_name="Jira",
+        server_host="mcp.jira.example",
+        user_label="bob@example.com",
+        opened_as=None,
+        needs_session=True,
     )
     hostile = confirm_page(
-        ticket=HOSTILE, server_name=HOSTILE, server_host=HOSTILE, user_label=HOSTILE, opened_as=HOSTILE
+        ticket=HOSTILE,
+        server_name=HOSTILE,
+        server_host=HOSTILE,
+        user_label=HOSTILE,
+        opened_as=HOSTILE,
+        needs_session=True,
     )
 
     text = bytes(plain.body).decode()
     assert plain.status_code == 200
     assert "sign in to Jira (mcp.jira.example)" in text and "this Otari user: bob@example.com" in text
     assert "Continue only if bob@example.com is you and you asked for this link yourself" in text
+    assert "bob@example.com is an Otari dashboard account, so this continues only in a browser signed in" in text
     assert '<form method="post"><input type="hidden" name="ticket" value="abc">' in text
     csp = plain.headers["content-security-policy"]
     assert csp.startswith("default-src 'none'") and "form-action 'self'" in csp and "frame-ancestors 'none'" in csp

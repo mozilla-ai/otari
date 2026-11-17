@@ -19,6 +19,7 @@ class SignInPage(StrEnum):
     FAILED = "failed"
     LINK_EXPIRED = "link_expired"
     CANNOT_START = "cannot_start"
+    NEEDS_SESSION = "needs_session"
 
 
 _TEXT: dict[SignInPage, tuple[str, str]] = {
@@ -37,6 +38,11 @@ _TEXT: dict[SignInPage, tuple[str, str]] = {
     SignInPage.CANNOT_START: (
         "The sign-in could not start",
         "Try again in a few minutes. If it keeps happening, tell your Otari administrator.",
+    ),
+    SignInPage.NEEDS_SESSION: (
+        "Sign in to Otari first",
+        "This link is for an Otari dashboard account, so it continues only in a browser signed in to the "
+        "dashboard as that account. Sign in to the Otari dashboard in this browser, then open the link again.",
     ),
 }
 
@@ -99,7 +105,7 @@ def conversation_page(page: SignInPage, *, server_name: str | None = None) -> HT
 
 
 def confirm_page(
-    *, ticket: str, server_name: str, server_host: str, user_label: str, opened_as: str | None
+    *, ticket: str, server_name: str, server_host: str, user_label: str, opened_as: str | None, needs_session: bool
 ) -> HTMLResponse:
     """Ask before a link's sign-in starts: which server, and which Otari user the account will be attached to.
 
@@ -118,6 +124,14 @@ def confirm_page(
             css_class="warning",
         )
         + (_paragraph(f"You are signed in to Otari as {opened_as}.") if opened_as else "")
+        + (
+            _paragraph(
+                f"{user_label} is an Otari dashboard account, so this continues only in a browser signed in to "
+                "the Otari dashboard as that account."
+            )
+            if needs_session and not opened_as
+            else ""
+        )
         + f'<form method="post"><input type="hidden" name="ticket" value="{escape(ticket)}">'
         + '<button type="submit">This is me, continue</button></form>'
     )

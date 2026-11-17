@@ -95,15 +95,29 @@ async def _safe_attached(servers: list[McpServerConfig], workspace_id: uuid.UUID
     """The attached servers whose URL passes its safety check; one that fails is left out of the request.
 
     An attached server joins every request of its workspace, so a host that stops resolving to a public
-    address must not refuse them all. Why it was left out goes to the log, as a named one's refusal does.
+    address must not refuse them all, and one whose name takes too long to resolve draws on the attached
+    servers' shared budget and is left out once it is spent. Why it was left out goes to the log, as a
+    named one's refusal does.
     """
-    checks = await asyncio.gather(
-        *(validate_mcp_url(server.url, has_authorization_token=bool(server.authorization_token)) for server in servers),
-        return_exceptions=True,
-    )
+
+    async def check(server: McpServerConfig) -> None:
+        validating = validate_mcp_url(server.url, has_authorization_token=bool(server.authorization_token))
+        if server.attached_budget is None:
+            await validating
+            return
+        async with server.attached_budget.spend():
+            await validating
+
+    checks = await asyncio.gather(*(check(server) for server in servers), return_exceptions=True)
     safe: list[McpServerConfig] = []
     for server, outcome in zip(servers, checks, strict=True):
-        if isinstance(outcome, UnsafeURLError):
+        if isinstance(outcome, TimeoutError):
+            logger.warning(
+                "Attached MCP server left out for workspace %s server_id=%s: its URL check ran past the budget",
+                workspace_id,
+                server.stored_server_id,
+            )
+        elif isinstance(outcome, UnsafeURLError):
             logger.warning(
                 "Attached MCP server left out for workspace %s server_id=%s: %s",
                 workspace_id,

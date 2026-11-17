@@ -287,7 +287,7 @@ McpAccessSource = Literal["key", "user", "everyone"]
 
 MCP_READ_PRESET = "@read"
 """The tool pattern naming a server's read tools: the ones its managers labeled read, or, until they edit that
-list, the ones the server's own read-only hints name."""
+list, the ones the server marked read-only when its tools were first listed. A later listing never adds to them."""
 
 
 def is_mcp_tool_allowed(patterns: Sequence[str], tool: str) -> bool:
@@ -309,16 +309,16 @@ def expand_mcp_tool_patterns(patterns: Sequence[str], read_tools: Sequence[str])
     return expanded + [name for name in read_tools if name not in expanded]
 
 
-def mcp_read_tools(labeled: Sequence[str] | None, health: Mapping[str, object] | None) -> list[str]:
-    """A server's read tools: a manager's labels once they set them, else the tools the server marks read-only.
+def mcp_read_tools(labeled: Sequence[str] | None, hinted: Sequence[object] | None) -> list[str]:
+    """A server's read tools: a manager's labels once they set them, else the tools the server marked read-only.
 
-    ``labeled`` is the stored labels, ``None`` until a manager edits them. Until then the answer follows
-    ``health``, the server's last recorded tool listing, and names only whole tool names it offered.
+    ``labeled`` is the stored labels, ``None`` until a manager edits them. Until then the answer is
+    ``hinted``, the read-only hints of the server's first tool listing, kept from then on, and names
+    only whole tool names.
     """
     if labeled is not None:
         return list(labeled)
-    hinted = health.get("read_only_hinted_tools") if health else None
-    if not isinstance(hinted, list):
+    if hinted is None:
         return []
     names = [
         name

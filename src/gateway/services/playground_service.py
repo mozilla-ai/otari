@@ -324,7 +324,9 @@ async def resolve_tool_availability(
                 sign_in_required=server.id in per_user and server.id not in connected,
             )
             for server in servers
-            if access.patterns_for(server.id, server.everyone_tools, mcp_read_tools(server.read_tools, server.health))
+            if access.patterns_for(
+                server.id, server.everyone_tools, mcp_read_tools(server.read_tools, server.read_tools_hinted)
+            )
         ],
     )
 

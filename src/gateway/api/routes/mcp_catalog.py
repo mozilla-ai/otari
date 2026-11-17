@@ -12,6 +12,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
+from pydantic import StringConstraints
 
 from gateway.api.deps import (
     CurrentIdentity,
@@ -36,6 +37,21 @@ _WorkspaceId = Annotated[
     Query(description="A workspace the caller can see. The servers it already has are left out."),
 ]
 
+# A workspace holds at most fifty servers, so a caller never has a reason to set more than that many aside.
+_MAX_EXCLUDED = 50
+# The longest name a sync stores.
+_MAX_NAME_LENGTH = 255
+_Exclude = Annotated[
+    list[Annotated[str, StringConstraints(max_length=_MAX_NAME_LENGTH)]] | None,
+    Query(
+        max_length=_MAX_EXCLUDED,
+        description=(
+            f"Catalog names to leave out, such as the servers a caller has already picked. At most {_MAX_EXCLUDED}. "
+            "The count leaves them out too, so it pages the same rows the caller sees."
+        ),
+    ),
+]
+
 router = APIRouter(prefix="/mcp-catalog", tags=["mcp-catalog"], dependencies=[Depends(verify_master_key)])
 
 
@@ -47,6 +63,7 @@ async def search_mcp_catalog(
     skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
     limit: Annotated[int, Query(ge=1, le=100, description="Maximum number of records to return")] = 25,
     workspace_id: _WorkspaceId = None,
+    exclude: _Exclude = None,
 ) -> McpCatalogServersPublic:
     """Search the catalog of remote MCP servers, or page through all of it with no `q`.
 
@@ -57,18 +74,23 @@ async def search_mcp_catalog(
     `mcp_catalog_sync` is `off`. Listing a server here permits nothing: a
     workspace reaches a server only once it is added to that workspace.
     """
-    return await service.search(query=q, skip=skip, limit=limit, user=current_identity, workspace_id=workspace_id)
+    return await service.search(
+        query=q, skip=skip, limit=limit, user=current_identity, workspace_id=workspace_id, exclude_names=exclude or ()
+    )
 
 
 @router.get("/popular")
 async def list_popular_mcp_servers(
-    service: McpCatalogServiceDep, current_identity: CurrentIdentity, workspace_id: _WorkspaceId = None
+    service: McpCatalogServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: _WorkspaceId = None,
+    exclude: _Exclude = None,
 ) -> McpCatalogServersPublic:
     """Well-known remote MCP servers, from a list bundled with Otari, that the catalog holds now.
 
     Each is matched to the catalog by its URL, so the list is empty until a sync has run.
     """
-    return await service.popular(user=current_identity, workspace_id=workspace_id)
+    return await service.popular(user=current_identity, workspace_id=workspace_id, exclude_names=exclude or ())
 
 
 @router.get("/logos/{name:path}", include_in_schema=False, responses=LOGO_RESPONSES)

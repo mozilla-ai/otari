@@ -443,9 +443,11 @@ def test_a_link_that_is_forged_or_altered_starts_nothing(client: TestClient) -> 
             assert answer.headers["content-security-policy"].startswith("default-src 'none'")
 
 
-def _per_user_link(client: TestClient, master: dict[str, str], test_db: Session, user_id: str = "alice") -> str:
+def _per_user_link(
+    client: TestClient, master: dict[str, str], test_db: Session, user_id: str = "alice", server: str = "jira"
+) -> str:
     key = _key(client, master, user_id)
-    _server(client, master, _workspace(test_db, key), "jira", credential_mode="per_user", attach_by_default=True)
+    _server(client, master, _workspace(test_db, key), server, credential_mode="per_user", attach_by_default=True)
     link: str = client.get(f"{API_ROOT}/mcp/servers", headers=_bearer(key)).json()["servers"][0]["sign_in_url"]
     return link
 
@@ -506,6 +508,65 @@ def test_a_link_confirmed_in_its_own_users_dashboard_session_is_bound_to_it(
     assert landed.status_code == 303
     assert landed.headers["location"].startswith(f"{ORIGIN}/#/mcp-connections/callback?")
     assert test_db.execute(select(McpUserConnection)).first() is None
+
+
+def _flow_cookies(client: TestClient) -> dict[str, str]:
+    return {name: value for name, value in client.cookies.items() if name.startswith("otari_mcp_flow_")}
+
+
+def test_a_link_sign_in_finishes_only_in_the_browser_that_pressed_continue(
+    client: TestClient, master_key_header: dict[str, str], test_db: Session
+) -> None:
+    """Mallory presses Continue on her own link and sends Bob the authorization URL; Bob's sign-in is not hers."""
+    link = _per_user_link(client, master_key_header, test_db, "mallory")
+    state = parse_qs(urlsplit(_sent_on_to(_confirm(client, link))).query)["state"][0]
+    [(cookie_name, mallorys_token)] = _flow_cookies(client).items()
+    assert mallorys_token not in state
+    client.cookies.clear()
+
+    bob = client.get(f"{API_ROOT}/mcp-connections/callback", params={"state": state, "code": "bobs-code"})
+
+    assert bob.status_code == 400 and "The sign-in did not finish" in bob.text
+    test_db.expire_all()
+    assert test_db.execute(select(McpUserConnection)).first() is None
+    assert test_db.execute(select(McpOAuthFlow)).scalar_one().user_id == "mallory", "nothing was spent"
+
+    # A token for another flow, sent under this flow's name, is not this flow's.
+    other_link = _per_user_link(client, master_key_header, test_db, "bob", server="linear")
+    _sent_on_to(_confirm(client, other_link))
+    [bobs_token] = _flow_cookies(client).values()
+    client.cookies.clear()
+    client.cookies.set(cookie_name, bobs_token)
+    forged = client.get(f"{API_ROOT}/mcp-connections/callback", params={"state": state, "code": "bobs-code"})
+    assert forged.status_code == 400 and "The sign-in did not finish" in forged.text
+    test_db.expire_all()
+    assert test_db.execute(select(McpUserConnection)).first() is None
+
+    # Mallory's own browser still finishes it, and gives the cookie back.
+    client.cookies.clear()
+    client.cookies.set(cookie_name, mallorys_token)
+    landed = client.get(f"{API_ROOT}/mcp-connections/callback", params={"state": state, "code": "c"})
+    assert landed.status_code == 200 and "You're signed in" in landed.text
+    assert cookie_name in landed.headers["set-cookie"] and "Max-Age=0" in landed.headers["set-cookie"]
+
+
+def test_a_link_for_a_dashboard_account_needs_that_accounts_session(
+    client: TestClient, master_key_header: dict[str, str], test_db: Session
+) -> None:
+    """Whoever holds Bob's link cannot attach their own account to Bob's user without Bob's session."""
+    identity = _dashboard_session(client, master_key_header, test_db, "bob@example.com")
+    link = _per_user_link(client, master_key_header, test_db, str(identity.id))
+    client.cookies.clear()
+
+    opened = client.get(link.removeprefix(ORIGIN))
+    assert opened.status_code == 200, opened.text
+    assert "continues only in a browser signed in to the Otari dashboard as that account" in opened.text
+    confirmed = _confirm(client, link)
+
+    assert confirmed.status_code == 400
+    assert "Sign in to Otari first" in confirmed.text and "http-equiv" not in confirmed.text
+    assert test_db.execute(select(McpOAuthFlow)).first() is None
+    assert _flow_cookies(client) == {}
 
 
 def test_a_failed_sign_in_from_a_link_ends_on_the_plain_page(

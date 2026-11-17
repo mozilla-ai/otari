@@ -151,9 +151,12 @@ class WorkspaceMcpServer(Base):
         JSON, default=lambda: ["*"], server_default='["*"]', nullable=False
     )
     # The tools a manager labeled read, which an access rule's '@read' stands for.
-    # Null until a manager edits them: the labels then follow the tools the server
-    # marks read-only in ``health`` (``mcp_read_tools`` reads either).
+    # Null until a manager edits them: '@read' then stands for ``read_tools_hinted``.
     read_tools: Mapped[list[str] | None] = mapped_column(JSON(none_as_null=True), default=None)
+    # The tools the server marked read-only the first time its tools were listed, kept as they were then:
+    # a later listing never changes them, so a server relabeling a tool cannot widen '@read'.
+    # Null until that first listing.
+    read_tools_hinted: Mapped[list[str] | None] = mapped_column(JSON(none_as_null=True), default=None)
     # Whose credential a call carries: the workspace's one token, or the calling user's own connection.
     credential_mode: Mapped[str] = mapped_column(
         String, default=McpCredentialMode.SHARED, server_default=McpCredentialMode.SHARED, nullable=False

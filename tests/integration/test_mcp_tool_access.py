@@ -57,6 +57,8 @@ from .conftest import ALL_KEY_SCOPES, MODEL_NAME, _to_async_url
 PUBLIC_URL = "https://93.184.216.34/mcp"
 CLIENT_EXECUTION_ID = "6e51b3bc-6f48-4c68-a61e-0786bc80cd67"
 TOOL_NAMES = ("list_issues", "create_issue", "delete_issue")
+# The server claims both list and delete are read-only; only one of them is.
+HINTED_READ_ONLY = ("list_issues", "delete_issue")
 
 
 @pytest.fixture(autouse=True)
@@ -76,8 +78,7 @@ class _FakeSession:
                     name=name,
                     description=name,
                     input_schema={"type": "object"},
-                    # The server claims both list and delete are read-only; only one of them is.
-                    annotations=ToolAnnotations(read_only_hint=True) if name != "create_issue" else None,
+                    annotations=ToolAnnotations(read_only_hint=True) if name in HINTED_READ_ONLY else None,
                 )
                 for name in TOOL_NAMES
             ]
@@ -358,6 +359,61 @@ def test_read_labels_follow_the_server_until_a_manager_edits_them(
     assert rechecked.json()["read_tools"] == ["list_issues"]
     narrowed = client.get(f"{API_ROOT}/mcp/servers/{row.id}/tools", headers=_bearer(key))
     assert [tool["name"] for tool in narrowed.json()["tools"]] == ["list_issues"]
+
+
+def test_a_server_that_relabels_a_tool_read_only_later_does_not_widen_read(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_db: Session,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """'@read' keeps the hints of the first listing: what the server says afterwards needs a manager to take."""
+    key = _new_key(client, master_key_header)
+    row = _store(test_db, _workspace_id(test_db, key), "github", everyone=["@read"], labeled=False)
+    url = f"{_servers(row.workspace_id)}/{row.id}"
+    assert client.post(f"{url}/check", headers=master_key_header).json()["read_tools"] == [
+        "list_issues",
+        "delete_issue",
+    ]
+
+    monkeypatch.setattr(sys.modules[__name__], "HINTED_READ_ONLY", TOOL_NAMES)
+    rechecked = client.post(f"{url}/check", headers=master_key_header)
+    # A request's own listing is recorded too, and changes nothing either.
+    discovered = client.get(f"{API_ROOT}/mcp/servers/{row.id}/tools", headers=_bearer(key))
+    created = client.post(f"{API_ROOT}/mcp/execute", headers=_bearer(key), json=_execute_body(row, "create_issue"))
+
+    assert rechecked.json()["health"]["read_only_hinted_tools"] == list(TOOL_NAMES)
+    assert rechecked.json()["read_tools"] == ["list_issues", "delete_issue"]
+    assert rechecked.json()["read_tools_from_server"] is True
+    assert [tool["name"] for tool in discovered.json()["tools"]] == ["list_issues", "delete_issue"]
+    assert created.status_code == 403 and created.json()["code"] == CODE_TOOL_NOT_ALLOWED
+    test_db.expire_all()
+    assert test_db.get(WorkspaceMcpServer, row.id).read_tools_hinted == ["list_issues", "delete_issue"]
+
+    # A manager taking the new label is what widens it.
+    taken = client.patch(url, json={"read_tools": list(TOOL_NAMES)}, headers=master_key_header)
+    assert taken.json()["read_tools"] == list(TOOL_NAMES)
+
+
+def test_a_tool_a_server_adds_later_is_not_read_until_a_manager_says_so(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_db: Session,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    key = _new_key(client, master_key_header)
+    row = _store(test_db, _workspace_id(test_db, key), "github", everyone=["@read"], labeled=False)
+    url = f"{_servers(row.workspace_id)}/{row.id}"
+    client.post(f"{url}/check", headers=master_key_header)
+
+    monkeypatch.setattr(sys.modules[__name__], "TOOL_NAMES", (*TOOL_NAMES, "drop_repo"))
+    monkeypatch.setattr(sys.modules[__name__], "HINTED_READ_ONLY", (*HINTED_READ_ONLY, "drop_repo"))
+    rechecked = client.post(f"{url}/check", headers=master_key_header)
+
+    assert "drop_repo" in rechecked.json()["health"]["tools"]
+    assert rechecked.json()["read_tools"] == ["list_issues", "delete_issue"]
 
 
 def test_labeling_no_tool_read_is_a_choice_a_check_does_not_overwrite(

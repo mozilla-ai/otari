@@ -35,10 +35,10 @@ configuration rather than a narrowing of one.
 
 from __future__ import annotations
 
-import asyncio
 import dataclasses
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
+from contextlib import AbstractAsyncContextManager
 from functools import partial
 from typing import TYPE_CHECKING, Annotated, Literal
 from urllib.parse import urlsplit
@@ -60,6 +60,7 @@ from gateway.exceptions.tools_exceptions import (
     McpConnectionFlowError,
     McpConnectionSetupError,
     McpConnectionUnavailableError,
+    McpSignInLinkNeedsSessionError,
     McpSignInRequiredError,
     WorkspaceMcpServerAccessDeniedError,
     WorkspaceMcpServerAlreadyExistsError,
@@ -73,7 +74,7 @@ from gateway.exceptions.tools_exceptions import (
     WorkspaceMcpServerUnsafeUrlError,
 )
 from gateway.log_config import logger
-from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
+from gateway.models.mcp import AttachedTimeBudget, McpServerConfig, ResolvedMcpServer
 from gateway.models.tenancy import MANAGEMENT_ROLES, User
 from gateway.models.tools import (
     McpCredentialMode,
@@ -127,6 +128,7 @@ from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.tools import (
     CompletedConnection,
+    LinkSignIn,
     McpConnectionService,
     McpRevocation,
     McpServerRef,
@@ -387,10 +389,11 @@ class WorkspaceMcpServerPublic(BaseModel):
     everyone_tools: list[str] = Field(description="What every key of the workspace may call; [] denies everyone")
     read_tools: list[str] = Field(
         description="The tool names '@read' stands for: a manager's labels, or until one edits them the tools "
-        "the server marks readOnlyHint, as last listed"
+        "the server marked readOnlyHint when its tools were first listed. A later listing never adds to them"
     )
     read_tools_from_server: bool = Field(
-        description="True while no manager has edited read_tools, so they follow the server's own readOnlyHint"
+        description="True while no manager has edited read_tools, so they are the readOnlyHint of the "
+        "server's first listing"
     )
     has_token: bool
     credential_mode: McpCredentialMode = Field(
@@ -695,6 +698,8 @@ class McpSignInLinkPreview:
     opened_as: str | None
     # That account is not the user the link was made for, so the sign-in is not offered.
     other_user: bool
+    # The user is a dashboard account, so the sign-in continues only in a session of that account.
+    needs_session: bool = False
 
 
 class WorkspaceMcpConnectionEligibility:
@@ -784,8 +789,8 @@ async def _validate_url(url: str, *, has_token: bool) -> None:
 
 
 def _read_tools(server: WorkspaceMcpServer) -> list[str]:
-    """The tools ``@read`` stands for on a server: its labels, or the server's own until a manager sets them."""
-    return mcp_read_tools(server.read_tools, server.health)
+    """The tools ``@read`` stands for: a manager's labels, or the hints of the server's first listing."""
+    return mcp_read_tools(server.read_tools, server.read_tools_hinted)
 
 
 def _encrypted(token: str) -> str:
@@ -932,7 +937,14 @@ async def _resolve_for_request(
         for row in rows
         if row.attach_by_default and row.id not in named and patterns[row.id] and not _needs_a_user(row, access)
     ]
+    cooling = [server_id for server_id in attached if WorkspaceMcpServerHealth.cooling_down(by_id[server_id].health)]
+    for server_id in cooling:
+        logger.info("Attached MCP server left out while it cools down after failing server_id=%s", server_id)
+    attached = [server_id for server_id in attached if server_id not in cooling]
 
+    # One budget for every phase of every attached server: a renewal here, then the URL check and the
+    # connection, which draw on what it leaves.
+    budget = AttachedTimeBudget(ATTACHED_CONNECT_BUDGET_S)
     # Every row is read before any token is: reading one may release the session, and a release
     # whose commit fails rolls back, which expires the rows still to come.
     planned: list[tuple[McpServerConfig, McpServerRef | None, McpSignInNeeded]] = []
@@ -965,6 +977,7 @@ async def _resolve_for_request(
             caller_access_source=f"mcp_{access.decide(row.id, row.everyone_tools)[0]}",
             stored_server_id=str(row.id),
             attached=server_id not in named,
+            attached_budget=budget if server_id not in named else None,
         )
         need = McpSignInNeeded(
             server_id=row.id,
@@ -977,15 +990,10 @@ async def _resolve_for_request(
         planned.append((config, McpServerRef.of(row) if per_user else None, need))
 
     resolved = RequestMcpServers()
-    # The attached servers' renewals share the budget their connections get, from the first of
-    # them: an expired token on several attached servers cannot hold a completion past it.
-    loop = asyncio.get_running_loop()
-    attached_by: float | None = None
     for config, ref, need in planned:
-        bound: asyncio.Timeout | None = None
+        bound: AbstractAsyncContextManager[None] | None = None
         if config.attached and (ref is not None or need.server_id in accounts):
-            attached_by = attached_by or loop.time() + ATTACHED_CONNECT_BUDGET_S
-            bound = asyncio.timeout_at(attached_by)
+            bound = budget.spend()
         if ref is not None:
             try:
                 if access.user_id is None:
@@ -996,7 +1004,7 @@ async def _resolve_for_request(
                     async with bound:
                         config.authorization_token = await tokens.token_for(ref, access.user_id)
             except TimeoutError:
-                if bound is None or not bound.expired():
+                if bound is None:
                     raise
                 resolved.sign_in.append(dataclasses.replace(need, reason=McpSignInReason.RENEWAL_FAILED))
                 continue
@@ -1024,7 +1032,7 @@ async def _resolve_for_request(
                     async with bound:
                         account = await tokens.shared_account_for(shared_ref)
             except TimeoutError:
-                if bound is None or not bound.expired():
+                if bound is None:
                     raise
                 logger.warning(
                     "Attached MCP server left out: its token was not renewed in time server_id=%s", need.server_id
@@ -1281,7 +1289,8 @@ class WorkspaceMcpServers:
         request cannot open does not fail it: it comes back in ``sign_in``, with why. A server marked
         ``attach_by_default`` that the request did not name is added as if it had been, after the named
         ones, and is silently left out where the caller's access grants nothing on it, where the caller
-        has no user to sign in as, or where it is disabled.
+        has no user to sign in as, where it is disabled, or while it cools down after a request found it
+        unreachable. The attached servers share one ``AttachedTimeBudget`` for every phase.
 
         Raises:
             WorkspaceMcpServerNotFoundError: a named ID is unknown or grants the caller nothing.
@@ -1479,6 +1488,7 @@ class WorkspaceMcpServerService:
             previous = WorkspaceMcpServerHealth.model_validate(server.health)
             health = health.model_copy(update={"read_only_hinted_tools": previous.read_only_hinted_tools})
         server.health = health.model_dump(mode="json")
+        WorkspaceMcpServerHealth.keep_first_read_hints(server)
         await self.db.commit()
         await self.db.refresh(server)
         logger.info("MCP server checked server_id=%s outcome=%s", server.id, check.failure or "ok")
@@ -1754,6 +1764,9 @@ class WorkspaceMcpServerService:
             McpConnectionService.unpin_client(server)
         for field, value in fields.items():
             setattr(server, field, value)
+        if url_changed:
+            # Another address is another server: its first listing is the one whose hints '@read' keeps.
+            server.read_tools_hinted = None
         if connection_changed:
             # An edit of the allow-list alone keeps the server and its credentials: what it last found
             # still stands, read against the new list, as a per-user server's check cannot list it again.
@@ -2351,42 +2364,58 @@ class WorkspaceMcpServerService:
             McpConnectionModeError: the server no longer takes each user's own sign-in.
         """
         target = await self._connection_service().read_link(ticket)
+        identity = await self._dashboard_account(target.user_id)
         return McpSignInLinkPreview(
             server_name=target.server_name,
             server_host=target.server_host,
-            user_label=await self._sign_in_user_label(target),
+            user_label=self._sign_in_user_label(target, identity),
             opened_as=(opened_by.email or opened_by.full_name or str(opened_by.id)) if opened_by is not None else None,
             other_user=opened_by is not None
             and not McpConnectionService.sign_in_link_is_for(target.user_id, opened_by.id),
+            needs_session=identity is not None,
         )
 
-    async def _sign_in_user_label(self, target: SignInLinkTarget) -> str:
-        """A dashboard account's email, which it cannot choose freely; else a chosen name beside the user's ID."""
+    async def _dashboard_account(self, user_id: str) -> User | None:
+        """The dashboard account a request-plane user is, when it is one."""
         try:
-            parsed = uuid.UUID(target.user_id)
+            parsed = uuid.UUID(user_id)
         except ValueError:
-            parsed = None
+            return None
         # Only the canonical spelling names a dashboard account, as ``may_connect`` reads it.
-        if parsed is not None and str(parsed) == target.user_id:
-            identities = await UserRepository(self.db).get_by_ids([parsed])
-            if identities and identities[0].email:
-                return identities[0].email
-            if identities and identities[0].full_name:
-                return f"{identities[0].full_name} (user ID {target.user_id})"
+        if str(parsed) != user_id:
+            return None
+        identities = await UserRepository(self.db).get_by_ids([parsed])
+        return identities[0] if identities else None
+
+    @staticmethod
+    def _sign_in_user_label(target: SignInLinkTarget, identity: User | None) -> str:
+        """A dashboard account's email, which it cannot choose freely; else a chosen name beside the user's ID."""
+        if identity is not None and identity.email:
+            return identity.email
+        if identity is not None and identity.full_name:
+            return f"{identity.full_name} (user ID {target.user_id})"
         if target.user_alias and target.user_alias != target.user_id:
             return f"{target.user_alias} (user ID {target.user_id})"
         return target.user_id
 
-    async def start_from_sign_in_link(self, *, ticket: str, opened_by: User | None) -> str:
+    async def start_from_sign_in_link(self, *, ticket: str, opened_by: User | None) -> LinkSignIn:
         """Start the sign-in a conversation's link names, once the person confirmed it, and return where to send them.
 
         A link confirmed inside a dashboard session is bound to it: it must be that identity's own, and
-        the sign-in finishes only in that session.
+        the sign-in finishes only in that session. A link made for a dashboard account continues only
+        in such a session, so whoever holds the link cannot choose the account behind it. A link for a
+        user with no dashboard login is bound to the browser that confirmed it instead.
 
         Raises:
             McpConnectionFlowError: the link is forged, altered or expired.
             McpSignInLinkOtherUserError: ``opened_by`` is not the user the link was made for.
+            McpSignInLinkNeedsSessionError: the link's user is a dashboard account and ``opened_by`` is None.
         """
+        if opened_by is None:
+            target = await self._connection_service().read_link(ticket)
+            if await self._dashboard_account(target.user_id) is not None:
+                logger.warning("MCP sign-in link refused reason=no_session server_id=%s", target.server_id)
+                raise McpSignInLinkNeedsSessionError
         return await self._connection_service().start_from_link(
             ticket, opened_by=opened_by.id if opened_by is not None else None
         )

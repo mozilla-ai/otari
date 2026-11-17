@@ -287,6 +287,13 @@ OFFICIAL_ENDPOINTS: frozenset[tuple[str, str]] = frozenset(
         # On atlassian.com under Atlassian's own namespace; only its title ("Atlassian Rovo MCP Server") says
         # more than the domain's name. Checked 2026-11-12.
         ("com.atlassian/atlassian-mcp-server", "mcp.atlassian.com"),
+        # Popular entries published under a GitHub account or on a domain other than their namespace's. Each is
+        # recorded on the Popular list as the maker's own server as the registry listed it on 2026-11-12.
+        ("io.github.getsentry/sentry-mcp", "mcp.sentry.dev"),
+        ("io.github.upstash/context7", "mcp.context7.com"),
+        ("io.github.grafana/mcp-grafana", "mcp.grafana.com"),
+        ("io.github.PostHog/mcp", "mcp.posthog.com"),
+        ("com.neon/mcp", "mcp.neon.tech"),
     }
 )
 # Words a title may add to the maker's name and still be the maker's name.
@@ -307,11 +314,6 @@ def registrable_domain(url_or_host: str | None) -> str | None:
         if len(labels) > size and ".".join(labels[-size:]) in _SHARED_SUFFIXES:
             return ".".join(labels[-size - 1 :])
     return ".".join(labels[-2:]) if len(labels) >= 2 else None
-
-
-def _owner_label(url_or_host: str | None) -> str | None:
-    domain = registrable_domain(url_or_host)
-    return domain.split(".")[0] if domain else None
 
 
 def _github_owner(name: str) -> str | None:
@@ -351,35 +353,28 @@ def _is_named(title: str, domain: str) -> bool:
     return "".join(words) == _letters(label)
 
 
-def publisher_kind(name: str, title: str, url: str, website_url: str | None) -> PublisherKind:
+def publisher_kind(name: str, title: str, url: str) -> PublisherKind:
     """``vendor`` when the server is its maker's own, on the maker's own domain, else ``community``.
 
-    Vendor means three things hold. The domain the endpoint lives on belongs to the publisher: its
-    registry namespace, its GitHub organization or its website. That domain is not a hosting
-    platform's, where anyone can take a name. And the server's title is that domain's name and no
-    more, so "Stripe" on stripe.com is Stripe's, while "Fudge for Shopify" on fudge.ai is nobody's
-    official Shopify server and ``io.github.pipeworx-io/intercom`` on pipeworx.io is not Intercom's.
-    A server on ``OFFICIAL_ENDPOINTS`` is vendor without the rule.
-
-    This reads names. It cannot tell a maker from someone who registered the maker's name under
-    another ending, so a dashboard that shows it should show the endpoint's host beside it.
+    Only the registry namespace is checked by the registry (a reverse-DNS namespace by proving the
+    domain), so it is the only field this trusts: the endpoint must sit on the namespace's own
+    registered domain, which is not a hosting platform's, and the title must be that domain's name
+    and no more ("Fudge for Shopify" on fudge.ai is nobody's official Shopify server). A website or
+    title the publisher writes never earns the badge, and neither does an ``io.github`` namespace,
+    which proves a GitHub account and no domain. A server on ``OFFICIAL_ENDPOINTS`` is vendor without
+    the rule.
     """
     if (name, _host(url)) in OFFICIAL_ENDPOINTS:
         return "vendor"
+    if _github_owner(name) is not None:
+        return "community"
     domain = registrable_domain(url)
-    if not domain:
+    if not domain or domain != registrable_domain(publisher_from_name(name)):
         return "community"
     label, _, suffix = domain.partition(".")
     if len(label) < 3 or suffix in _HOSTING_SUFFIXES:
         return "community"
-    owned = {_owner_label(website_url)}
-    github_owner = _github_owner(name)
-    if github_owner is not None:
-        if label in _letters(github_owner):
-            owned.add(label)
-    else:
-        owned.add(_owner_label(publisher_from_name(name)))
-    return "vendor" if label in owned and _is_named(title, domain) else "community"
+    return "vendor" if _is_named(title, domain) else "community"
 
 
 def _site_icons(host: str) -> list[str]:

@@ -100,6 +100,7 @@ from gateway.services.tools._mcp_oauth import (
     McpOAuthTokenError,
     McpOAuthTokens,
 )
+from gateway.services.tools._mcp_server_health import ATTACHED_COOLDOWN_S
 
 from .conftest import _to_async_url
 
@@ -108,6 +109,8 @@ pytestmark = pytest.mark.asyncio
 PUBLIC_URL = "https://93.184.216.34/mcp"
 OTHER_PUBLIC_URL = "https://93.184.216.35/mcp"
 ISSUER = "https://93.184.216.36"
+# The token a browser holds for a sign-in it started outside a dashboard session.
+BROWSER = "browser-token"
 ORIGIN = "https://otari.example.com"
 CALLBACK = f"{ORIGIN}{API_ROOT}/mcp-connections/callback"
 
@@ -493,7 +496,8 @@ async def test_a_failed_listing_after_one_users_sign_in_keeps_the_read_hints_for
                 "tools": ["list_files", "delete_file"],
                 "read_only_hinted_tools": ["list_files"],
                 "tool_count": 2,
-            }
+            },
+            read_tools_hinted=["list_files"],
         )
     )
     await async_db.commit()
@@ -525,7 +529,8 @@ async def test_an_allow_list_edit_keeps_the_read_hints_a_check_cannot_list_again
                 "tools": ["list_files", "delete_file"],
                 "read_only_hinted_tools": ["list_files"],
                 "tool_count": 2,
-            }
+            },
+            read_tools_hinted=["list_files"],
         )
     )
     await async_db.commit()
@@ -541,7 +546,7 @@ async def test_an_allow_list_edit_keeps_the_read_hints_a_check_cannot_list_again
     assert row.read_tools is None and row.health is not None
     assert (row.health["read_only_hinted_tools"], row.health["checked_at"]) == (["list_files"], checked_at)
     assert (row.health["tool_count"], row.health["missing_allowed_tools"]) == (1, ["rename_file"])
-    assert mcp_read_tools(row.read_tools, row.health) == ["list_files"]
+    assert mcp_read_tools(row.read_tools, row.read_tools_hinted) == ["list_files"]
 
     # Another URL is another server: what the old one offered says nothing about it.
     await _service(async_db, config).update_server(
@@ -550,7 +555,8 @@ async def test_an_allow_list_edit_keeps_the_read_hints_a_check_cannot_list_again
         server_id=world.server.id,
         request=WorkspaceMcpServerUpdate(url=PUBLIC_URL + "/v2"),
     )
-    assert (await _row(async_db, world.server.id)).health is None
+    moved = await _row(async_db, world.server.id)
+    assert (moved.health, moved.read_tools_hinted) == (None, None)
 
 
 async def test_a_check_sign_in_never_becomes_a_connection(
@@ -1350,22 +1356,26 @@ async def test_a_request_plane_user_whose_id_is_a_uuid_but_no_dashboard_account_
     await async_db.commit()
     connections = _connections(async_db, config)
 
-    url = await connections.start(server_id=world.server.id, user_id=user_id)
+    url = await connections.start(server_id=world.server.id, user_id=user_id, browser_token=BROWSER)
     await connections.complete(state=_state(url), code="code")
 
     assert await _connection(async_db, world.server.id, user_id) is not None
 
 
-async def test_a_sign_in_started_outside_a_session_finishes_on_its_state_alone(
+async def test_a_sign_in_started_outside_a_session_is_bound_to_a_browser_instead(
     async_db: AsyncSession, config: GatewayConfig
 ) -> None:
-    """The entry point a later change mints a sign-in link through: a user, a server, and nothing of a session."""
+    """The entry point a sign-in link starts through: a user, a server, and the browser that confirmed it."""
     world = await _world(async_db, config)
     async_db.add(BillingUser(user_id="alice"))
     await async_db.commit()
     connections = _connections(async_db, config)
+    with pytest.raises(McpConnectionSetupError, match="only one"):
+        await connections.start(server_id=world.server.id, user_id="alice")
 
-    url = await connections.start(server_id=world.server.id, user_id="alice", return_to="/playground")
+    url = await connections.start(
+        server_id=world.server.id, user_id="alice", return_to="/playground", browser_token=BROWSER
+    )
     landing = await connections.landing(_state(url))
     done = await connections.complete(state=_state(url), code="code")
 
@@ -1810,7 +1820,7 @@ async def test_a_manager_sees_who_is_connected_and_removes_one(
     async_db.add(BillingUser(user_id="service-user"))
     await async_db.commit()
     connections = _connections(async_db, config)
-    url = await connections.start(server_id=world.server.id, user_id="service-user")
+    url = await connections.start(server_id=world.server.id, user_id="service-user", browser_token=BROWSER)
     await connections.complete(state=_state(url), code="code")
     service = _service(async_db, config)
 
@@ -2520,9 +2530,11 @@ async def test_the_public_callback_checks_iss_for_a_sign_in_with_no_dashboard_se
     async_db.add(BillingUser(user_id="alice"))
     await async_db.commit()
     connections = _connections(async_db, config)
-    url = await connections.start(server_id=world.server.id, user_id="alice")
+    url = await connections.start(server_id=world.server.id, user_id="alice", browser_token=BROWSER)
 
-    outcome = await connections.receive_callback(state=_state(url), code="code", error=None, iss=iss)
+    outcome = await connections.receive_callback(
+        state=_state(url), code="code", error=None, iss=iss, browser_token=BROWSER
+    )
 
     assert (outcome.connected == world.server.id) is connects
     assert (outcome.error == "sign_in_failed") is not connects
@@ -2653,7 +2665,7 @@ async def test_a_user_spelled_like_an_account_is_not_shown_as_that_account(
     async_db.add(BillingUser(user_id=lookalike))
     await async_db.commit()
     connections = _connections(async_db, config)
-    url = await connections.start(server_id=world.server.id, user_id=lookalike)
+    url = await connections.start(server_id=world.server.id, user_id=lookalike, browser_token=BROWSER)
     await connections.complete(state=_state(url), code="code")
 
     listed = await _service(async_db, config).server_connections(
@@ -2750,6 +2762,35 @@ async def test_a_request_gets_the_attached_servers_after_the_named_ones_and_neve
         await servers.resolve_for_request(world.workspace.id, [uuid.uuid4()], member, attach=True)
 
 
+async def test_an_attached_server_that_keeps_failing_is_left_out_until_its_cooldown_ends(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, tokens: McpUserTokens
+) -> None:
+    """Every worker reads the same health, so a server one request found down costs the others nothing for a while."""
+    world = await _world(async_db, config, attach_by_default=True)
+    await _sign_in(async_db, config, world, world.member)
+    servers = WorkspaceMcpServers(async_db, tokens)
+    member = _access(str(world.member.id))
+
+    async def failed(seconds_ago: float) -> None:
+        checked_at = (datetime.now(UTC) - timedelta(seconds=seconds_ago)).isoformat()
+        await async_db.execute(
+            update(WorkspaceMcpServer)
+            .where(col(WorkspaceMcpServer.id) == world.server.id)
+            .values(health={"status": "failing", "checked_at": checked_at, "error": "timeout"})
+        )
+        await async_db.commit()
+
+    await failed(5)
+    cooling = await servers.resolve_for_request(world.workspace.id, [], member, attach=True)
+    named = await servers.resolve_for_request(world.workspace.id, [world.server.id], member, attach=True)
+    await failed(ATTACHED_COOLDOWN_S + 1)
+    retried = await servers.resolve_for_request(world.workspace.id, [], member, attach=True)
+
+    assert (cooling.servers, cooling.sign_in) == ([], [])
+    assert [server.name for server in named.servers] == ["drive"], "a request that names it still tries it"
+    assert [server.name for server in retried.servers] == ["drive"]
+
+
 async def test_attached_renewals_share_the_attached_budget(
     async_db: AsyncSession, config: GatewayConfig, wire: _Wire, tokens: McpUserTokens, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2817,7 +2858,12 @@ async def test_a_link_opened_again_replaces_its_pending_sign_in_and_a_dashboard_
     assert sorted((flow.user_id, flow.identity_id is None) for flow in flows) == sorted(
         [("alice", True), (str(world.member.id), False)]
     )
-    outcome = await connections.receive_callback(state=_state(second), code="code", error=None)
+    assert second.state == _state(second.url) and second.browser_token is not None
+    elsewhere = await connections.receive_callback(state=second.state, code="code", error=None)
+    assert (elsewhere.conversation, elsewhere.connected, elsewhere.error) == (True, None, "sign_in_failed")
+    outcome = await connections.receive_callback(
+        state=second.state, code="code", error=None, browser_token=second.browser_token
+    )
     assert (outcome.conversation, outcome.connected, outcome.server_name) == (True, world.server.id, "drive")
     assert outcome.query() == {"connected": str(world.server.id)}
     with pytest.raises(McpConnectionFlowError):

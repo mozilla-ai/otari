@@ -204,7 +204,7 @@ def _server_public(row: McpCatalogServer, logo: LogoRef) -> McpCatalogServerPubl
         icon_url=row.icon_url,
         logo_url=logo.url(catalog_logo_path(row.name)),
         logo_tone=logo_tone(logo.luminance),
-        publisher_kind=publisher_kind(row.name, row.title, row.url, row.website_url),
+        publisher_kind=publisher_kind(row.name, row.title, row.url),
         version=row.version,
         source=row.source,
     )
@@ -212,7 +212,7 @@ def _server_public(row: McpCatalogServer, logo: LogoRef) -> McpCatalogServerPubl
 
 def _judged(entry: McpCatalogEntry) -> McpCatalogEntry:
     """``entry`` marked as its maker's own server or not, which is what a search lists first."""
-    kind = publisher_kind(entry.name, entry.title, entry.url, entry.website_url)
+    kind = publisher_kind(entry.name, entry.title, entry.url)
     return entry.model_copy(update={"is_official": kind == "vendor"})
 
 
@@ -276,26 +276,37 @@ class McpCatalogService:
         self._clock = clock
 
     async def search(
-        self, *, query: str, skip: int, limit: int, user: User | None = None, workspace_id: uuid.UUID | None = None
+        self,
+        *,
+        query: str,
+        skip: int,
+        limit: int,
+        user: User | None = None,
+        workspace_id: uuid.UUID | None = None,
+        exclude_names: Sequence[str] = (),
     ) -> McpCatalogServersPublic:
         """A page of the catalog. An empty query pages through all of it.
 
-        With a workspace ``user`` can see, the servers that workspace already has are left out.
+        With a workspace ``user`` can see, the servers that workspace already has are left out, and so
+        is every server named in ``exclude_names``; the count leaves them out too.
         """
         workspace_id = await self._visible(user, workspace_id)
         async with self._uow:
             added = await self._added_urls(workspace_id)
-            rows, count = await self._servers.search(query, skip=skip, limit=limit, exclude_urls=added)
+            rows, count = await self._servers.search(
+                query, skip=skip, limit=limit, exclude_urls=added, exclude_names=exclude_names
+            )
             refs = await self._catalog_refs(rows)
         return McpCatalogServersPublic(data=[_server_public(row, refs[row.name]) for row in rows], count=count)
 
     async def popular(
-        self, *, user: User | None = None, workspace_id: uuid.UUID | None = None
+        self, *, user: User | None = None, workspace_id: uuid.UUID | None = None, exclude_names: Sequence[str] = ()
     ) -> McpCatalogServersPublic:
         """The hand-maintained Popular servers the catalog holds now, in the list's order.
 
         Matched by URL. Where several entries list one URL, the one under the expected name is shown.
-        With a workspace ``user`` can see, the servers that workspace already has are left out.
+        With a workspace ``user`` can see, the servers that workspace already has are left out, and so
+        is every server named in ``exclude_names``.
         """
         workspace_id = await self._visible(user, workspace_id)
         async with self._uow:
@@ -304,7 +315,12 @@ class McpCatalogService:
             by_url: dict[str, list[McpCatalogServer]] = {}
             for row in rows:
                 by_url.setdefault(row.url, []).append(row)
-            picked = [_pick(by_url[entry.url], entry.name) for entry in POPULAR_SERVERS if entry.url in by_url]
+            excluded = set(exclude_names)
+            picked = [
+                row
+                for row in (_pick(by_url[entry.url], entry.name) for entry in POPULAR_SERVERS if entry.url in by_url)
+                if row.name not in excluded
+            ]
             refs = await self._catalog_refs(picked)
         shelf = [_server_public(row, refs[row.name]) for row in picked]
         return McpCatalogServersPublic(data=shelf, count=len(shelf))
