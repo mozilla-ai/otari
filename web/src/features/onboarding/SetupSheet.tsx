@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router"
 import { useRef, useState } from "react"
 
-import type { ActivationAttempt } from "@/client"
+import type { ActivationAttempt, ActivationIssuedKey } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import {
   CONCEALED_SECRET,
@@ -52,6 +52,9 @@ export function SetupSheet({
   apiKey,
   keyPrefix,
   keySuffix,
+  issuedKey,
+  isUsingIssuedKey,
+  onUseIssuedKey,
   baseUrl,
   model,
   failure,
@@ -74,6 +77,11 @@ export function SetupSheet({
   /** The fingerprint the server stored for the issued key, shown while it is concealed. */
   keyPrefix?: string
   keySuffix?: string
+  /** The setup key this workspace already holds, when this visit has not minted one. */
+  issuedKey?: ActivationIssuedKey
+  /** Whether the caller chose to keep `issuedKey` rather than replace it. */
+  isUsingIssuedKey: boolean
+  onUseIssuedKey: () => void
   /** Where a request belongs. */
   baseUrl: string
   /** The first model the gateway can serve, when it can serve one. */
@@ -112,6 +120,11 @@ export function SetupSheet({
     apiKey === undefined
       ? CONCEALED_SECRET
       : concealedFingerprint(keyPrefix, keySuffix)
+  // A kept key's plaintext is gone, so the examples read the variable it was
+  // exported as, and a copy of them still runs.
+  const keyInUse =
+    apiKey ??
+    (issuedKey && isUsingIssuedKey ? `$${SNIPPET_KEY_ENV_VAR}` : undefined)
 
   const instruction = SETUP_TABS.find(({ id }) => id === tab)?.instruction ?? ""
   // Built from the stand-in whenever the key is not on screen, which includes
@@ -120,16 +133,21 @@ export function SetupSheet({
   // the mint lands. Only the copy waits for the real thing.
   const shown = buildSetupSnippets({
     baseUrl,
-    apiKey: isRevealed && apiKey !== undefined ? apiKey : concealedKey,
+    apiKey:
+      apiKey === undefined
+        ? (keyInUse ?? concealedKey)
+        : isRevealed
+          ? apiKey
+          : concealedKey,
     model,
   })
   // What a copy yields, always the real key: an operator who copies without
   // revealing still gets something that runs. Undefined until there is a key,
   // and `CodeBlock` then offers no copy control rather than a dead one.
   const copied =
-    apiKey === undefined
+    keyInUse === undefined
       ? undefined
-      : buildSetupSnippets({ baseUrl, apiKey, model })
+      : buildSetupSnippets({ baseUrl, apiKey: keyInUse, model })
 
   // The same `Dialog` in the same place, so the frame stays open across faces.
   if (showsSuccess && landed) {
@@ -204,7 +222,23 @@ export function SetupSheet({
       <DialogSection>
         <ErrorBanner error={keyError} />
         <ErrorBanner error={skipError} />
-        {apiKey === undefined ? (
+        {apiKey !== undefined ? (
+          <CopyField
+            label="Your API key"
+            value={apiKey}
+            concealed={concealedKey}
+            isRevealed={isRevealed}
+            onRevealChange={setIsRevealed}
+          />
+        ) : issuedKey ? (
+          <IssuedKey
+            issuedKey={issuedKey}
+            isUsing={isUsingIssuedKey}
+            isReplacing={isCreatingKey}
+            onUse={onUseIssuedKey}
+            onReplace={onCreateKey}
+          />
+        ) : (
           // Not a `CopyField` holding an empty string: every credential field
           // here conceals, so an empty one would show the same run of bullets a
           // real key does and invite a copy that yields nothing. The field
@@ -219,18 +253,19 @@ export function SetupSheet({
               Create API key
             </Button>
           </div>
-        ) : (
-          <CopyField
-            label="Your API key"
-            value={apiKey}
-            concealed={concealedKey}
-            isRevealed={isRevealed}
-            onRevealChange={setIsRevealed}
-          />
         )}
         <p className="text-caption text-subtle">
-          Shown once. Reveal it to read it, or copy it without. Set it as{" "}
-          <code>{SNIPPET_KEY_ENV_VAR}</code> in your environment.
+          {apiKey === undefined && issuedKey ? (
+            <>
+              The examples read it from <code>{SNIPPET_KEY_ENV_VAR}</code> in
+              your environment.
+            </>
+          ) : (
+            <>
+              Shown once. Reveal it to read it, or copy it without. Set it as{" "}
+              <code>{SNIPPET_KEY_ENV_VAR}</code> in your environment.
+            </>
+          )}
         </p>
       </DialogSection>
 
@@ -279,5 +314,54 @@ export function SetupSheet({
         ) : null}
       </DialogSection>
     </Dialog>
+  )
+}
+
+/**
+ * The setup key a previous visit issued. Its plaintext was shown once and is
+ * gone, and replacing it rotates the row, so keeping it is the default and the
+ * replacement says what it costs.
+ */
+function IssuedKey({
+  issuedKey,
+  isUsing,
+  isReplacing,
+  onUse,
+  onReplace,
+}: {
+  issuedKey: ActivationIssuedKey
+  isUsing: boolean
+  isReplacing: boolean
+  onUse: () => void
+  onReplace: () => void
+}) {
+  const ending = issuedKey.key_suffix ? (
+    <>
+      {" "}
+      ending <code>••{issuedKey.key_suffix}</code>
+    </>
+  ) : null
+  return (
+    <div className="flex flex-col items-start gap-2">
+      <span className="text-emphasis">Your API key</span>
+      <p className="text-body">
+        {isUsing ? "Using your setup key" : "You already have a setup key"}
+        {ending}.
+      </p>
+      {isUsing ? null : (
+        <Button variant="primary" onPress={onUse}>
+          Use it
+        </Button>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-caption text-subtle">Lost it?</span>
+        <Button size="sm" isPending={isReplacing} onPress={onReplace}>
+          Replace it
+        </Button>
+        <span className="text-caption text-subtle">
+          The old key stops working.
+        </span>
+      </div>
+    </div>
   )
 }

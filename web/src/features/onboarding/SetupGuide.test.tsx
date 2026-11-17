@@ -624,6 +624,61 @@ describe("SetupGuide", () => {
     expect(screen.queryByDisplayValue(KEY)).not.toBeInTheDocument()
   })
 
+  describe("return after step 2", () => {
+    const issued = {
+      key_id: "88888888-8888-8888-8888-888888888888",
+      key_prefix: "gw-setup-g",
+      key_suffix: "JYnT",
+    }
+
+    it("offers the key already issued and keeps it without minting", async () => {
+      const fetchMock = mockApi({
+        activation: workspaceActivation({ issued_key: issued }),
+      })
+      const user = userEvent.setup()
+      await renderGuide()
+
+      expect(
+        await screen.findByText(/You already have a setup key/),
+      ).toHaveTextContent("You already have a setup key ending ••JYnT.")
+      expect(
+        screen.queryByRole("button", { name: "Create API key" }),
+      ).not.toBeInTheDocument()
+      expect(screen.getByText("The old key stops working.")).toBeVisible()
+
+      await user.click(screen.getByRole("button", { name: "Use it" }))
+
+      expect(await screen.findByText(/Using your setup key/)).toHaveTextContent(
+        "Using your setup key ending ••JYnT.",
+      )
+      expect(screen.getByText("Listening for your first request")).toBeVisible()
+      await user.click(screen.getByRole("button", { name: "cURL" }))
+      expect(snippet("curl")).toHaveTextContent("Bearer $OTARI_API_KEY")
+      expect(snippet("curl")).not.toHaveTextContent("export OTARI_API_KEY")
+      expect(mintCalls(fetchMock)).toHaveLength(0)
+    })
+
+    it("replaces the key only when asked, and shows the new one", async () => {
+      const fetchMock = mockApi({
+        activation: workspaceActivation({ issued_key: issued }),
+      })
+      const user = userEvent.setup()
+      await renderGuide()
+
+      await user.click(
+        await screen.findByRole("button", { name: "Replace it" }),
+      )
+
+      expect(await screen.findByLabelText("Your API key")).toHaveValue(
+        CONCEALED_KEY,
+      )
+      expect(mintCalls(fetchMock)).toHaveLength(1)
+      expect(
+        screen.queryByText(/You already have a setup key/),
+      ).not.toBeInTheDocument()
+    })
+  })
+
   it("skipping retires the guide for the workspace and takes the sheet away", async () => {
     const fetchMock = mockApi()
     const user = userEvent.setup()

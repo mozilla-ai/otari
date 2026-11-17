@@ -364,6 +364,61 @@ async def test_a_key_deleted_from_the_keys_page_is_replaced_rather_than_resurrec
     assert state.api_key_id == reissued.key_id
 
 
+async def test_a_reopened_guide_is_told_about_the_key_it_already_issued(async_db: AsyncSession) -> None:
+    owner, workspace = await _setup(async_db, slug="acme-issued-key")
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
+
+    before = await service.get_status(user=owner, workspace_id=workspace.id)
+    assert before.issued_key is None
+
+    issued = await service.issue_api_key(user=owner, workspace_id=workspace.id)
+    status = await service.get_status(user=owner, workspace_id=workspace.id)
+
+    assert status.issued_key is not None
+    assert status.issued_key.key_id == issued.key_id
+    assert status.issued_key.key_prefix == issued.key_prefix
+    assert status.issued_key.key_suffix == issued.key_suffix
+    dumped = status.model_dump_json()
+    assert issued.key not in dumped
+    assert hash_key(issued.key) not in dumped
+
+
+async def test_a_revoked_or_expired_setup_key_is_not_offered_back(async_db: AsyncSession) -> None:
+    owner, workspace = await _setup(async_db, slug="acme-issued-revoked")
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
+    issued = await service.issue_api_key(user=owner, workspace_id=workspace.id)
+    key = await async_db.get(APIKey, issued.key_id)
+    assert key is not None
+
+    key.is_active = False
+    await async_db.commit()
+    assert (await service.get_status(user=owner, workspace_id=workspace.id)).issued_key is None
+
+    key.is_active = True
+    key.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+    await async_db.commit()
+    assert (await service.get_status(user=owner, workspace_id=workspace.id)).issued_key is None
+
+    await async_db.delete(key)
+    await async_db.commit()
+    assert (await service.get_status(user=owner, workspace_id=workspace.id)).issued_key is None
+
+
+async def test_the_issued_key_is_only_described_to_whoever_is_offered_the_guide(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db, slug="acme-issued-viewer")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    viewer = await _member(async_db, organization, role="member", full_name="Viewer")
+    workspace = await _workspace(async_db, organization, name="Engineering", owner=owner)
+    await WorkspaceMemberRepository(async_db).create(workspace_id=workspace.id, user_id=viewer.id, role="member")
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
+    await service.issue_api_key(user=owner, workspace_id=workspace.id)
+
+    assert (await service.get_status(user=viewer, workspace_id=workspace.id)).issued_key is None
+
+    await service.dismiss(user=owner, workspace_id=workspace.id)
+    assert (await service.get_status(user=owner, workspace_id=workspace.id)).issued_key is None
+
+
 # ----------------------------------------------------------------------
 # Dismissal
 # ----------------------------------------------------------------------

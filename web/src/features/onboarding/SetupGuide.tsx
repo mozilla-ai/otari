@@ -109,6 +109,10 @@ function SetupFlow({
   // Only a press somebody made, never the background poll: `isFetching` would
   // put the control in its pending state every few seconds on its own.
   const [isChecking, setIsChecking] = useState(false)
+  // Someone who left after taking a key and came back keeps it unless they ask
+  // for a new one: minting rotates it, and the old one may already be pasted
+  // somewhere.
+  const [isUsingIssuedKey, setIsUsingIssuedKey] = useState(false)
   // The flow only celebrates a first request it was present for. Without this
   // latch, somebody who never opened the guide would be congratulated on the
   // traffic they already had, on the next page load after it arrived.
@@ -190,6 +194,11 @@ function SetupFlow({
       apiKey={createKey.data?.key}
       keyPrefix={createKey.data?.key_prefix ?? undefined}
       keySuffix={createKey.data?.key_suffix ?? undefined}
+      // The mint refreshes this state, so a key minted here is described by
+      // both; the plaintext in hand is the one to show.
+      issuedKey={createKey.data ? undefined : (data.issued_key ?? undefined)}
+      isUsingIssuedKey={isUsingIssuedKey}
+      onUseIssuedKey={() => setIsUsingIssuedKey(true)}
       baseUrl={baseUrl}
       // The first model the gateway can serve, so the examples are runnable as
       // pasted. With none the placeholder stands and the sheet says what to do.

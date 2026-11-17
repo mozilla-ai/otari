@@ -49,7 +49,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
-from gateway.core.sql import utc_iso
+from gateway.core.sql import utc_bound, utc_iso
 from gateway.exceptions.organizations_exceptions import (
     WorkspaceActivationUnavailableError,
     WorkspaceAlreadyActivatedError,
@@ -166,6 +166,14 @@ class ActivationAttemptPublic(BaseModel):
     latency_ms: int | None = None
 
 
+class ActivationIssuedKeyPublic(BaseModel):
+    """The setup key the guide already issued, identified as the Keys page lists it. Never its plaintext."""
+
+    key_id: str
+    key_prefix: str | None
+    key_suffix: str | None
+
+
 class WorkspaceActivationPublic(BaseModel):
     """Where a workspace stands on its first successful request."""
 
@@ -191,6 +199,14 @@ class WorkspaceActivationPublic(BaseModel):
         )
     )
     dismissed: bool = Field(description="Whether someone skipped the guide for this workspace.")
+    issued_key: ActivationIssuedKeyPublic | None = Field(
+        default=None,
+        description=(
+            "The setup key the guide already issued, so a reopened guide can offer it instead of "
+            "rotating it. Null until one is issued, once it is revoked, deleted or expired, and "
+            "whenever the guide is not offered to this caller."
+        ),
+    )
 
 
 class ActivationApiKeyPublic(BaseModel):
@@ -250,11 +266,13 @@ class WorkspaceActivationService:
             )
 
         latest = await self._latest_request(workspace.id)
+        eligible = await self._is_eligible(user=user, workspace=workspace, dismissed=dismissed)
         return WorkspaceActivationPublic(
             status="failed" if latest is not None else "waiting",
             latest_attempt=_attempt_public(latest) if latest is not None else None,
-            experience_eligible=await self._is_eligible(user=user, workspace=workspace, dismissed=dismissed),
+            experience_eligible=eligible,
             dismissed=dismissed,
+            issued_key=await self._usable_issued_key(state) if eligible else None,
         )
 
     # ------------------------------------------------------------------
@@ -471,6 +489,16 @@ class WorkspaceActivationService:
         if state is None or state.api_key_id is None:
             return None
         return await self.db.get(APIKey, state.api_key_id)
+
+    async def _usable_issued_key(self, state: WorkspaceActivationState | None) -> ActivationIssuedKeyPublic | None:
+        """The issued key while it still authenticates, which is the only one worth offering back."""
+        record = await self._existing_key(state)
+        if record is None or not record.is_active:
+            return None
+        expires_at = utc_bound(record.expires_at)
+        if expires_at is not None and expires_at <= datetime.now(UTC):
+            return None
+        return ActivationIssuedKeyPublic(key_id=record.id, key_prefix=record.key_prefix, key_suffix=record.key_suffix)
 
     async def _first_successful_request(self, workspace_id: uuid.UUID) -> UsageLog | None:
         """The oldest successful gateway request in the workspace, which is the activation.

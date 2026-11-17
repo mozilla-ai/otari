@@ -9361,6 +9361,18 @@ export interface components {
             status: "success" | "failed";
         };
         /**
+         * ActivationIssuedKeyPublic
+         * @description The setup key the guide already issued, identified as the Keys page lists it. Never its plaintext.
+         */
+        ActivationIssuedKeyPublic: {
+            /** Key Id */
+            key_id: string;
+            /** Key Prefix */
+            key_prefix: string | null;
+            /** Key Suffix */
+            key_suffix: string | null;
+        };
+        /**
          * ActiveOrganizationMemberCreateRequest
          * @description Add someone to the caller's organization, optionally into workspaces at once.
          */
@@ -23292,6 +23304,8 @@ export interface components {
              * @description Whether the dashboard should offer the guide to this caller right now: the deployment has it enabled, the workspace is classified for it, nobody dismissed it, no request has succeeded yet, and the caller may manage the workspace.
              */
             experience_eligible: boolean;
+            /** @description The setup key the guide already issued, so a reopened guide can offer it instead of rotating it. Null until one is issued, once it is revoked, deleted or expired, and whenever the guide is not offered to this caller. */
+            issued_key?: components["schemas"]["ActivationIssuedKeyPublic"] | null;
             /** @description The most recent request, so a failure can be reported while the guide keeps waiting. */
             latest_attempt?: components["schemas"]["ActivationAttemptPublic"] | null;
             /**
