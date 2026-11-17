@@ -51,7 +51,7 @@ class InvitationLink(SignupInvitePort):
             return None
         return invitation
 
-    async def proof_for(self, token: str, claimed_address: str) -> AddressProof | None:
+    async def proof_for(self, token: str, *, claimed_address: str) -> AddressProof | None:
         """Which proof of ``claimed_address`` this token carries, or None where it carries none.
 
         A link this deployment would refuse proves nothing, which is what keeps a signup from

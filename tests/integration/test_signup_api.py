@@ -148,7 +148,7 @@ def test_signup_on_an_untouched_address_is_enumeration_safe(
 class _Invites:
     """An invitation ``tok`` emailed to ada@example.com."""
 
-    async def proof_for(self, token: str, claimed_address: str) -> AddressProof | None:
+    async def proof_for(self, token: str, *, claimed_address: str) -> AddressProof | None:
         if token != "tok" or not same_address("ada@example.com", claimed_address):
             return None
         return AddressProof.MAILBOX

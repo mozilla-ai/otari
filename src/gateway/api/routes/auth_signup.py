@@ -170,7 +170,7 @@ async def signup(
     verification email would prove nothing more. Only the token's holder learns that.
     """
     throttle_public_auth(request)
-    proof = await invites.proof_for(body.invite, body.email) if body.invite else None
+    proof = await invites.proof_for(body.invite, claimed_address=body.email) if body.invite else None
     try:
         claimed = await create_user_for_signup(
             db,

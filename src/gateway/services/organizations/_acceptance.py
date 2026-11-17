@@ -113,6 +113,10 @@ class InvitationAcceptance:
             InvitationAddressMismatchError: the account accepting does not hold the invited address.
             InvitationNoLongerValidError: the link was never one, or it expired, was declined,
                 cancelled, blocked, or already used.
+
+        NOTE: This method owns its transaction. Its refusals are raised inside the block, which
+        rolls back whatever that block holds even where a caller catches them, and its lock order
+        is stated against this transaction alone. Callers must not call it inside one of their own.
         """
         now = self._clock()
         async with self._uow:
