@@ -289,6 +289,33 @@ def test_a_key_does_not_read_a_sibling_keys_series(
     assert [group["key"] for group in response.json()["groups"]] == [mine["id"]]
 
 
+def test_a_key_reads_its_own_user_without_a_label(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    """The owner's alias can be the account email; an end user keeps the label its service gave it."""
+    key = _key(client, master_key_header, user_id="labeled-owner")
+    with db_session_factory() as db:
+        workspace_id = seed_workspace_id(db)
+        db.execute(update(User).where(User.user_id == "labeled-owner").values(alias="owner@example.com"))
+        db.add(User(user_id="end-user-1", alias="customer-42", parent_user_id="labeled-owner"))
+        own = _row(workspace_id, key["id"], "0.10", "jury")
+        own.user_id = "labeled-owner"
+        end_user = _row(workspace_id, key["id"], "0.20", "jury")
+        end_user.user_id = "end-user-1"
+        db.add_all([own, end_user])
+        db.commit()
+
+    summary = client.get(f"{API_ROOT}/key/usage/summary", params={"dimensions": "user"}, headers=_auth(key))
+    series = client.get(f"{API_ROOT}/key/usage/series", params={"group_by": "user_id"}, headers=_auth(key))
+
+    assert summary.status_code == 200, summary.text
+    assert series.status_code == 200, series.text
+    expected = {"labeled-owner": None, "end-user-1": "customer-42"}
+    assert {row["key"]: row["label"] for row in summary.json()["by_user"]} == expected
+    assert {group["key"]: group["label"] for group in series.json()["groups"]} == expected
+    assert "owner@example.com" not in summary.text + series.text
+
+
 def test_a_malformed_tag_filter_is_refused(client: TestClient, master_key_header: dict[str, str]) -> None:
     key = _key(client, master_key_header, user_id="tags")
 
