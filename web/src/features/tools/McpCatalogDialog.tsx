@@ -175,8 +175,11 @@ export function McpCatalogDialog({
     cannotSignIn(index, draft)
       ? { mode: "shared" as const, reason: "" }
       : rawSuggestionFor(index, draft)
-  const modeOf = (index: number, draft: Draft): McpCredentialMode =>
-    draft.mode ?? suggestionFor(index, draft).mode
+  const modeOf = (index: number, draft: Draft): McpCredentialMode => {
+    const chosen = draft.mode ?? suggestionFor(index, draft).mode
+    // A choice made before the deployment said it cannot sign anyone in does not stand.
+    return signInUnavailable && chosen === "per_user" ? "shared" : chosen
+  }
 
   const names = drafts.map((draft) => draft.name.trim())
   const findNameProblem = (draft: Draft): string | undefined => {
@@ -308,6 +311,11 @@ export function McpCatalogDialog({
           </>
         }
       >
+        {signInUnavailable ? (
+          <DialogSection>
+            <InfoBanner>{signInUnavailable}</InfoBanner>
+          </DialogSection>
+        ) : null}
         {drafts.map((draft, index) => {
           const problem = findNameProblem(draft)
           const mode = modeOf(index, draft)
@@ -340,7 +348,7 @@ export function McpCatalogDialog({
                 />
                 {cannotSignIn(index, draft) ? (
                   <InfoBanner tone="warning">
-                    {`${draft.pick.title} asks each person to sign in. ${signInUnavailable}`}
+                    {`${draft.pick.title} asks each person to sign in, which this deployment cannot do yet.`}
                   </InfoBanner>
                 ) : null}
                 <RadioGroup

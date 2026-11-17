@@ -103,6 +103,7 @@ from gateway.schemas.tools import (
     McpConnectionStarted,
     McpServerConnectionPublic,
     McpServerConnectionsPublic,
+    McpServerLeftOut,
 )
 
 # The module as well as the names, so the check is looked up at call time and a
@@ -635,18 +636,6 @@ class McpServerSummary(BaseModel):
         description="With sign_in_required: a link that starts this key's user's own sign-in to the server, "
         "working for 30 minutes",
     )
-
-
-class McpServerLeftOut(BaseModel):
-    """A server the key's access list grants and that is still not listed, and why."""
-
-    id: uuid.UUID
-    name: str
-    reason: Literal["key_has_no_user"] = Field(
-        description="`key_has_no_user`: the server signs each person in with their own account, and this key "
-        "belongs to no person, so there is nobody to sign in as"
-    )
-    detail: str = Field(description="The reason in a sentence, for a person reading the response")
 
 
 _NO_USER_DETAIL = (
@@ -1222,38 +1211,6 @@ async def resolve_workspace_mcp_server(
     return resolved
 
 
-async def _enabled_servers(db: AsyncSession, workspace_id: uuid.UUID) -> Sequence[WorkspaceMcpServer]:
-    """A workspace's enabled stored servers, oldest first."""
-    return (
-        (
-            await db.execute(
-                select(WorkspaceMcpServer)
-                .where(WorkspaceMcpServer.workspace_id == workspace_id, WorkspaceMcpServer.enabled.is_(True))
-                .order_by(WorkspaceMcpServer.created_at, WorkspaceMcpServer.id)
-            )
-        )
-        .scalars()
-        .all()
-    )
-
-
-async def list_mcp_servers_needing_a_user(
-    db: AsyncSession, *, workspace_id: uuid.UUID, access: McpAccess
-) -> list[McpServerLeftOut]:
-    """The enabled per-user servers the caller's access grants but :func:`list_reachable_mcp_servers` leaves out.
-
-    Empty for a caller with a user. A caller with none (a key made with no user, which bills to the
-    shared default user) cannot sign in, so it reaches none of these; this names them so it can say why.
-    """
-    if access.user_id is not None:
-        return []
-    return [
-        McpServerLeftOut(id=row.id, name=row.name, reason="key_has_no_user", detail=_NO_USER_DETAIL)
-        for row in await _enabled_servers(db, workspace_id)
-        if _needs_a_user(row, access) and access.patterns_for(row.id, row.everyone_tools, _read_tools(row))
-    ]
-
-
 async def list_reachable_mcp_servers(
     db: AsyncSession, *, workspace_id: uuid.UUID, access: McpAccess, tokens: McpUserTokens | None = None
 ) -> list[McpServerSummary]:
@@ -1262,7 +1219,7 @@ async def list_reachable_mcp_servers(
     A per-user server is left out for a caller with no user, and marked ``sign_in_required`` for
     one whose user has not signed in to it. A shared server that still needs a credential is left out.
     """
-    rows = await _enabled_servers(db, workspace_id)
+    rows = await WorkspaceMcpServerRepository(db).enabled_in_workspace(workspace_id)
     reachable = [
         row
         for row in rows
@@ -1361,8 +1318,18 @@ class WorkspaceMcpServers:
         return await list_reachable_mcp_servers(self._db, workspace_id=workspace_id, access=access, tokens=self._tokens)
 
     async def list_needing_a_user(self, workspace_id: uuid.UUID, access: McpAccess) -> list[McpServerLeftOut]:
-        """See :func:`list_mcp_servers_needing_a_user`."""
-        return await list_mcp_servers_needing_a_user(self._db, workspace_id=workspace_id, access=access)
+        """The enabled per-user servers the caller's access grants but :meth:`list_reachable` leaves out.
+
+        Empty for a caller with a user. A caller with none (a key made with no user, which bills to the
+        shared default user) cannot sign in, so it reaches none of these; this names them so it can say why.
+        """
+        if access.user_id is not None:
+            return []
+        return [
+            McpServerLeftOut(id=row.id, name=row.name, reason="key_has_no_user", detail=_NO_USER_DETAIL)
+            for row in await WorkspaceMcpServerRepository(self._db).enabled_in_workspace(workspace_id)
+            if _needs_a_user(row, access) and access.patterns_for(row.id, row.everyone_tools, _read_tools(row))
+        ]
 
     async def resolve_one(
         self, workspace_id: uuid.UUID, server_id: uuid.UUID, access: McpAccess | None = None
@@ -2570,7 +2537,6 @@ __all__ = [
     "MAX_ALLOWED_TOOLS",
     "MAX_MCP_SERVERS_PER_WORKSPACE",
     "MAX_GRANTS_PER_SERVER",
-    "McpServerLeftOut",
     "McpServerSummary",
     "McpSharedAccountPublic",
     "McpSignInLinkPreview",
@@ -2591,7 +2557,6 @@ __all__ = [
     "WorkspaceMcpServerUpdate",
     "WorkspaceMcpServers",
     "WorkspaceMcpServersPublic",
-    "list_mcp_servers_needing_a_user",
     "list_reachable_mcp_servers",
     "resolve_workspace_mcp_server",
     "resolve_workspace_mcp_servers",

@@ -86,6 +86,15 @@ class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Nev
         )
         return list((await self.db.execute(query)).scalars().all())
 
+    async def enabled_in_workspace(self, workspace_id: uuid.UUID) -> list[WorkspaceMcpServer]:
+        """A workspace's enabled servers, oldest first."""
+        query = (
+            select(WorkspaceMcpServer)
+            .where(WorkspaceMcpServer.workspace_id == workspace_id, WorkspaceMcpServer.enabled.is_(True))
+            .order_by(WorkspaceMcpServer.created_at, WorkspaceMcpServer.id)
+        )
+        return list((await self.db.execute(query)).scalars().all())
+
     async def any_attached(self, workspace_id: uuid.UUID) -> bool:
         """Whether a workspace has an enabled server attached by default."""
         found = await self.db.execute(

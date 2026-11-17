@@ -68,6 +68,7 @@ from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.rate_limit import check_rate_limit
 from gateway.repositories.users_repository import get_active_user
+from gateway.schemas.tools import McpServerLeftOut
 
 # The module as well as the names below, so the whole-request deadline is read
 # off it at call time and stays tunable in the one place that owns the ceilings.
@@ -111,11 +112,7 @@ from gateway.services.model_access import (
     resolve_request_mcp_access,
 )
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
-from gateway.services.tenancy.workspace_mcp_server_service import (
-    McpServerLeftOut,
-    McpServerSummary,
-    WorkspaceMcpServers,
-)
+from gateway.services.tenancy.workspace_mcp_server_service import McpServerSummary, WorkspaceMcpServers
 from gateway.services.tools import McpConnectionService, mcp_server_contacts
 from gateway.services.traces import RequestTrace, harness_of, resolve_session
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url

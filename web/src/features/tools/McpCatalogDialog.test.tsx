@@ -583,10 +583,12 @@ describe("McpCatalogDialog", () => {
     await user.click(screen.getByRole("checkbox", { name: "Select Sentry" }))
     await user.click(screen.getByRole("button", { name: "Add 2 servers" }))
 
+    // Said once more on the review step, then marked on the server that needs it.
+    expect(screen.getByText(reason)).toBeInTheDocument()
     const linear = screen.getByRole("region", { name: "Linear" })
     expect(
       await within(linear).findByText(
-        `Linear asks each person to sign in. ${reason}`,
+        "Linear asks each person to sign in, which this deployment cannot do yet.",
       ),
     ).toBeInTheDocument()
     expect(
@@ -605,6 +607,59 @@ describe("McpCatalogDialog", () => {
       "shared",
       "shared",
     ])
+  })
+
+  it("explains the turned-off choice when it opens straight on a pick, and drops a Personal choice made before", async () => {
+    const reason =
+      "Signing in to MCP servers is not set up on this Otari deployment yet."
+    const calls = mockApi()
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const dialog = (signInUnavailable?: string) => (
+      <QueryClientProvider client={client}>
+        <McpCatalogDialog
+          isOpen
+          onOpenChange={() => {}}
+          workspaceId={WORKSPACE}
+          workspaceName="Alpha"
+          existing={[]}
+          initialPicks={[
+            {
+              name: SENTRY.name,
+              title: SENTRY.title,
+              description: "",
+              url: SENTRY.url,
+              requiresToken: false,
+              logoUrl: "",
+              logoTone: null,
+              isOfficial: true,
+            },
+          ]}
+          signInUnavailable={signInUnavailable}
+        />
+      </QueryClientProvider>
+    )
+    const user = userEvent.setup()
+    // The workspace's server list, which carries the reason, has not answered yet.
+    const { rerender } = render(dialog())
+    const sentry = screen.getByRole("region", { name: "Sentry" })
+    await user.click(
+      within(sentry).getByRole("radio", { name: "Personal accounts" }),
+    )
+
+    rerender(dialog(reason))
+
+    expect(screen.getByText(reason)).toBeInTheDocument()
+    expect(
+      within(sentry).getByRole("radio", { name: "Personal accounts" }),
+    ).toBeDisabled()
+    expect(
+      within(sentry).getByRole("radio", { name: "Shared account" }),
+    ).toBeChecked()
+    await user.click(screen.getByRole("button", { name: "Confirm" }))
+    await screen.findByRole("list", { name: "What was added" })
+    expect(creates(calls)[0].body?.credential_mode).toBe("shared")
   })
 
   it("will not add two servers under one name", async () => {
