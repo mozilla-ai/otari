@@ -1,8 +1,8 @@
 # Buttons
 
 Use a `Button` for an action. Navigation that looks like a button is a `Link`.
-An action inside a table row is a `RowAction`, not a `Button`, and it wears a
-glyph rather than its word (see [A row's actions are glyphs](#a-rows-actions-are-glyphs)).
+An action inside a table row is a `RowAction`, not a `Button`, and a row's
+actions open from one three-dot menu (see [A row's actions are a menu](#a-rows-actions-are-a-menu)).
 
 ## Three variants. Nothing else exists.
 
@@ -158,34 +158,51 @@ written the same way.
 control *is*, not where it sits: `CopyButton` renders in tables, panels, banners and
 bare pages, so no container can reach it.
 
-## A row's actions are glyphs
+## A row's actions are a menu
 
-**Pass `icon` and `label` to a `RowAction`.** A lane of words is prose the reader
-has to parse before they can act, and it repeats on every row: four words per row
-is four words to re-read down the length of the table (otari-ai#2123). Four shapes
-are recognized instead.
-
-`label` is not optional beside an icon, and it is not a caption either: it is the
-accessible name *and* the tooltip, so the word is still read aloud, still matched
-by speech input, and still spelled out on hover. A glyph with no name is anonymous
-to a screen reader and unreachable by voice.
+**Put a row's actions in a `RowActionRow`, and it draws them as one three-dot
+menu.** Every table does, so a reader learns one place to look. A lane of glyphs
+asked the reader to decode a shape per action, four of them repeated down every
+row; a menu spells each action out once it is opened, with its glyph beside the
+word.
 
 ```tsx
 // Correct
 <RowActionRow>
   <RowAction icon={FiClock} label="History" onPress={toggleHistory} />
-  <RowAction icon={FiEdit2} label="Edit" onPress={openEdit} />
-  <RowAction icon={FiTrash2} label="Delete" onPress={() => setPendingDelete(row)} />
+  <RowAction icon={FiEdit2} label="Edit…" onPress={openEdit} />
+  <RowAction icon={FiTrash2} label="Delete…" isDestructive onPress={() => setPendingDelete(row)} />
 </RowActionRow>
 
-// Incorrect: the glyph is named nowhere, so the control has no name at all
+// Incorrect: the glyph is named nowhere, so the item has no name at all
 <RowAction icon={FiTrash2} ariaLabel="" onPress={remove} />
 ```
 
-Where the text form is still right: **the armed half of a confirm**, whose whole
-job is to name the consequence of the next press, and a lane whose actions have
-no convention to borrow. A lane does not go half words and half glyphs, so if one
-action in it has no glyph, ask whether the lane wants words.
+**Write the label as the menu shows it.** It ends in an ellipsis when the action
+asks for more before anything happens (a form, a confirmation): `Edit…`,
+`Delete…`. An action that takes effect on the press has none. `ariaLabel`, when
+given, is the item's accessible name, and is how it says which row it acts on.
+
+**`isDestructive` marks an action that is hard to undo**: delete, remove, revoke,
+deactivate. Its item wears the danger ink and is listed after a rule. List those
+last. It is not `isDanger`, which is still the armed half of a confirm and never
+at rest: a menu is closed until somebody opens it, so its red is never on the row. A toggle carries its state in its label and glyph (`Pause` and `Resume`).
+
+**A refused action stays in the menu, disabled, with its reason.** Pass the
+reason as `ariaLabel` with `isDisabled`: the item shows it under its label, and
+the trigger's own name carries it too ("Row actions. Remove… This is the last
+active owner."), because a disabled item takes no focus and a keyboard would
+otherwise never reach it.
+
+A plain element in the lane, rather than a `RowAction`, is a note and not an
+action: it stays on the row beside the trigger (the "Default" mark on a routing
+policy). A lane with no actions draws no trigger.
+
+`RowMenu` is the same trigger and menu built from data (`actions`, each with a
+`hint` under its label), for a row whose menu wants a heading or a sentence under
+each action. A `RowAction` outside a `RowActionRow` is still a 32px glyph with a
+44px target, for the rare control on a row that is not one of its actions (a
+disclosure chevron).
 
 The glyphs, so the same act does not arrive as two shapes on two pages:
 
@@ -205,39 +222,20 @@ Two splits in there are the vocabulary rather than a coincidence, and both are
 worth keeping: **an X takes something away, a strike turns something off.** So
 removing operator access is `FiUserX` while deactivating the account is `FiSlash`,
 and `FiSlash` then means the same thing on Accounts (Deactivate) as it does on the
-roster (Block). A toggle carries its state in the glyph, not only in the label,
-which is what lets a reader see which rows are stopped without reading a lane.
-
-**The geometry is 32px of visual and 44px of target**, the pair `CopyButton`
-already uses in these rows: the `before:` bleed is the device
-[motion-and-access.md](motion-and-access.md) names for keeping a small glyph
-reachable, and 6px each way is under half `RowActionRow`'s 16px pitch, so no two
-targets overlap. `RowAction` owns both, and the glyph's size with them, so a lane
-cannot be built out of step with the next one.
-
-**A disabled glyph gets a native `title` as well as its name.** A disabled control
-takes neither hover nor focus, so react-aria's tooltip never opens on one, and the
-pointer is the one reader an `aria-label` does not reach. `RowAction` adds it for
-the disabled case only: on a pressable action the browser's tooltip and the
-product's would open on the same hover and say the same thing.
-
-An `actions` column's width is the widest lane it can reach, and for a lane with a
-two-step confirm in it that is the **armed** state rather than the glyphs: arming
-one row must not reflow the table. `.otari-provider-keys-table` is the one sized
-that way.
+roster (Block).
 
 ## Deleting a record: a dialog, never an in-place confirm
 
 **Every delete of a record goes through `ConfirmDialog`** (otari-ai#2110), whether
-it deletes one row or a selection of them. The trigger is a plain `RowAction` or a
-ghost `Button` that only opens the dialog, and the dialog carries the danger
-confirm. A confirmation that armed inside the row read as part of the table rather
+it deletes one row or a selection of them. The trigger is a `RowAction` in the
+row's menu or a ghost `Button` that only opens the dialog, and the dialog carries
+the danger confirm. A confirmation that armed inside the row read as part of the table rather
 than as a decision, and it had nowhere to put the consequence: the sentence that
 says what the deletion costs does not fit on a row action.
 
 ```tsx
-// Correct: a neutral trigger, and the decision in the dialog
-<RowAction onPress={() => setPendingDelete(row)}>Delete</RowAction>
+// Correct: a menu item that only opens the dialog, and the decision in it
+<RowAction icon={FiTrash2} label="Delete…" isDestructive onPress={() => setPendingDelete(row)} />
 …
 <ConfirmDialog
   isOpen={pendingDelete !== undefined}
@@ -283,8 +281,10 @@ The resting trigger is **neutral** and the armed confirm is danger. The first cl
 is safe, so spending the loudest signal in the product on it wastes it; the danger
 hue marks the irreversible step.
 
-In a row the trigger is a glyph and the armed half is words, which makes the
-escalation structural before it is chromatic: a shape becomes a sentence.
+In a row's menu there is no row to arm, so a `ConfirmRowAction` there is an item
+(its label with an ellipsis) that asks in a dialog once the menu has closed.
+Alone on a row, its trigger is a glyph and the armed half is words, which makes
+the escalation structural before it is chromatic: a shape becomes a sentence.
 
 Label the two steps differently: the trigger names the object, the armed confirm
 names the consequence.
@@ -310,11 +310,12 @@ hides.
 
 | Component | Props | Use for |
 | --- | --- | --- |
-| `RowAction` | `icon` + `label`, or children; `onPress`, `isDanger?`, `isDisabled?`, `ariaLabel?` | An action in a table row. A glyph by default, not a `Button` |
-| `RowActionRow` | children | The trailing lane those sit in. **Use this one** |
+| `RowAction` | `icon` + `label`, or children; `onPress`, `isDestructive?`, `isDanger?`, `isDisabled?`, `ariaLabel?` | An action in a table row: an item of the row's menu inside a `RowActionRow`, a glyph outside one. Not a `Button` |
+| `RowActionRow` | children | A row's actions, drawn as its three-dot menu. **Use this one** |
+| `RowMenu` | `label`, `actions`, `head?`, `foot?` | The same menu from data, each action with a `hint` under its label |
 | `RowActions` | children | A near-duplicate with a tighter gap, on 2 call sites. Do not reach for it in new code |
 | `ConfirmButton` | `confirmLabel`, `onConfirm`, `isPending?`, children | The page-level two-step confirm, for a destructive action that deletes nothing |
-| `ConfirmRowAction` | `confirmLabel`, `onConfirm`, `isPending?`, and `icon` + `label` or children | The same two-step inside a row. Its trigger takes a glyph; its armed half stays words. It supplies its own `isDanger` and its own Cancel. Not for a delete |
+| `ConfirmRowAction` | `confirmLabel`, `onConfirm`, `isPending?`, and `icon` + `label` or children | The same two-step inside a row. In a row's menu it asks in a dialog; alone, its trigger takes a glyph and its armed half stays words. Not for a delete |
 | `RefreshButton` | `onRefresh`, `isFetching?`, `updatedAt?`, `label?` | A refetch, with its own freshness caption. Pass `updatedAt` or the caption reads nothing |
 | `CopyButton` | `value`, `label` | Copy one value. Icon-only, 44x44 hit area |
 | `CopyField` | `label`, `value`, `multiline?`, `concealed?`, `action?` | A readonly field of a value to paste elsewhere. `concealed` is what it shows until the operator asks for the value, for a credential: Copy copies the real one either way, so a key is handed over without being read off the screen |

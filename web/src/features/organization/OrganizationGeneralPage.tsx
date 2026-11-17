@@ -147,11 +147,7 @@ export function OrganizationGeneralPage() {
 
   return (
     <div className="flex flex-col">
-      <PageIntro title="Organization">
-        The organization you are acting in, and what this page renames. The
-        first one is provisioned on first boot; the switcher above the rail is
-        where you create another or move between them. Your role here is {role}.
-      </PageIntro>
+      <PageIntro title="Organization" />
 
       {canEdit ? null : (
         <InfoBanner>

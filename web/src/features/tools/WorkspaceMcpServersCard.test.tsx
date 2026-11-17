@@ -28,6 +28,7 @@ import {
   workspaceMcpServer,
 } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
+import { pressRowAction } from "@/tests/rowMenu"
 
 const ALPHA = "11111111-1111-1111-1111-111111111111"
 
@@ -240,8 +241,8 @@ describe("WorkspaceMcpServersCard", () => {
   })
 
   it("opens the page it is the whole of, heading and register control", async () => {
-    // `variant="page"` is what renders /tools/mcp-servers: its h1, the
-    // description under it, and the register control in that heading row. The
+    // `variant="page"` is what renders /tools/mcp-servers: its h1 and the
+    // register control in that heading row. The
     // page component is a one-line wrapper with no test of its own, so without
     // this the page's only h1 could be dropped silently.
     mockApi()
@@ -250,7 +251,6 @@ describe("WorkspaceMcpServersCard", () => {
     expect(
       await screen.findByRole("heading", { level: 1, name: "MCP servers" }),
     ).toBeInTheDocument()
-    expect(screen.getByText(/tools of remote MCP servers/)).toBeInTheDocument()
     expect(
       await screen.findByRole("button", { name: "Add MCP server" }),
     ).toBeInTheDocument()
@@ -588,7 +588,7 @@ describe("WorkspaceMcpServersCard", () => {
     const user = userEvent.setup()
     await renderLoaded(servers)
 
-    await user.click(screen.getByRole("button", { name: "Delete" }))
+    await pressRowAction(user, "Delete…")
     const dialog = await screen.findByRole("alertdialog")
     expect(
       within(dialog).getByText(
@@ -976,7 +976,7 @@ describe("WorkspaceMcpServersCard", () => {
     const user = userEvent.setup()
     await renderLoaded(servers)
 
-    await user.click(screen.getByRole("button", { name: "Check github" }))
+    await pressRowAction(user, "Check github")
 
     await waitFor(() =>
       expect(
@@ -997,7 +997,7 @@ describe("WorkspaceMcpServersCard", () => {
 
     // Nothing is announced before a check, and a check that works adds no line either.
     expect(screen.queryByRole("status")).not.toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "Check github" }))
+    await pressRowAction(user, "Check github")
 
     const notice = await screen.findByRole("status")
     await user.click(within(notice).getByRole("button", { name: "Dismiss" }))
@@ -1023,7 +1023,7 @@ describe("WorkspaceMcpServersCard", () => {
     expect(
       screen.getByRole("img", { name: /^notion: Not checked/ }),
     ).toBeVisible()
-    await user.click(screen.getByRole("button", { name: "Check notion" }))
+    await pressRowAction(user, "Check notion")
 
     await waitFor(() =>
       expect(popup.location.href).toBe(
@@ -1078,7 +1078,7 @@ describe("WorkspaceMcpServersCard", () => {
     const user = userEvent.setup()
     await renderLoaded(servers)
 
-    await user.click(screen.getByRole("button", { name: "Manage github" }))
+    await pressRowAction(user, "Manage github")
 
     expect(
       await screen.findByText(`Server page ${servers[0].id}`),

@@ -36,7 +36,6 @@ import {
   useSetOrgWebSearchKeyDefault,
   useUnsetOrgWebSearchKeyDefault,
 } from "@/shared/api/webSearchKeys"
-import { docsSourceHref } from "@/shared/helpers/docs"
 import { formatNumber, formatRelative } from "@/shared/helpers/format"
 
 import { WebSearchKeyDialog } from "./WebSearchKeyDialog"
@@ -172,7 +171,8 @@ function KeysTable({
               {/* The API deletes an archived key only. */}
               <RowAction
                 icon={FiTrash2}
-                label="Delete"
+                label="Delete…"
+                isDestructive
                 ariaLabel={`Delete ${row.name}`}
                 onPress={() => onDelete(row)}
               />
@@ -200,7 +200,7 @@ function KeysTable({
               />
               <RowAction
                 icon={FiEdit2}
-                label="Edit"
+                label="Edit…"
                 ariaLabel={`Edit ${row.name}`}
                 isDisabled={!catalogLoaded}
                 onPress={() => onEdit(row)}
@@ -307,15 +307,7 @@ export function OrganizationWebSearchKeysPage() {
 
   return (
     <div className="flex flex-col gap-10 pb-10">
-      <PageIntro
-        title="Web search providers"
-        docsHref={docsSourceHref("tools.md", "organization-search-keys")}
-      >
-        Your organization&rsquo;s own keys for web search and fetch. A workspace
-        uses the key its admins pinned, else the workspace default, else this
-        deployment&rsquo;s own tool. Keys are encrypted at rest and never shown
-        again.
-      </PageIntro>
+      <PageIntro title="Web search providers" />
 
       <ErrorBanner
         error={

@@ -471,10 +471,7 @@ export function HealthChecksPage() {
             </Button>
           ) : null
         }
-      >
-        Whether every model your providers serve answers, checked with one small
-        request each.
-      </PageIntro>
+      />
       <ErrorBanner error={status.error ?? run.error ?? disable.error} />
       {data ? (
         <>

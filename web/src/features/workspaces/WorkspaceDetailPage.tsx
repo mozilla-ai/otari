@@ -84,10 +84,7 @@ export function WorkspaceDetailPage({ workspaceId }: { workspaceId: string }) {
   return (
     <div className="flex flex-col gap-6">
       {back}
-      <PageIntro title={workspace.name}>
-        {workspace.description ||
-          "Settings, and the providers and models this workspace can use."}
-      </PageIntro>
+      <PageIntro title={workspace.name} />
       <TabRow>
         {TABS.map((entry) => (
           <Tab

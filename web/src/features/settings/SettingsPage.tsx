@@ -661,11 +661,7 @@ export function SettingsPage() {
 
   return (
     <div className="flex flex-col">
-      <PageIntro title="Settings">
-        Every effective gateway setting. Settable fields apply immediately and
-        persist across restarts; startup-only fields are shown for reference and
-        change only via config.yml or environment variables (then a restart).
-      </PageIntro>
+      <PageIntro title="Settings" />
 
       <ErrorBanner error={settings.error ?? updateSettings.error} />
 

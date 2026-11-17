@@ -41,7 +41,6 @@ import {
   useWorkspaceMcpServers,
 } from "@/shared/api/tools"
 import { useWorkspace } from "@/shared/api/workspaces"
-import { docsSourceHref } from "@/shared/helpers/docs"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useSurfaces } from "@/shared/hooks/useDeployment"
 
@@ -62,12 +61,6 @@ import { useSurfaces } from "@/shared/hooks/useDeployment"
 // workspace lock. Restating it here would be a second copy to go stale, so the
 // 51st Add is left to earn the server's own refusal, which names the real
 // number and lands in the dialog's error banner.
-
-/** The page's own opening line, which the `/tools` card does not carry. */
-const PAGE_DESCRIPTION =
-  "Give this workspace's requests the tools of remote MCP servers."
-
-const DOCS_HREF = docsSourceHref("mcp-servers.md")
 
 /**
  * How many tools a server exposes, never their names: the allow-list's length
@@ -213,9 +206,7 @@ export function WorkspaceMcpServersCard({
     return (
       <section className="flex flex-col gap-2">
         {isPage ? (
-          <PageIntro title="MCP servers" docsHref={DOCS_HREF}>
-            {PAGE_DESCRIPTION}
-          </PageIntro>
+          <PageIntro title="MCP servers" />
         ) : (
           <h2 className="text-title">MCP servers</h2>
         )}
@@ -355,7 +346,8 @@ export function WorkspaceMcpServersCard({
           />
           <RowAction
             icon={FiTrash2}
-            label="Delete"
+            label="Delete…"
+            isDestructive
             onPress={() => openDelete(row)}
           />
         </RowActionRow>
@@ -377,9 +369,7 @@ export function WorkspaceMcpServersCard({
   return (
     <section className="flex flex-col gap-2">
       {isPage ? (
-        <PageIntro title="MCP servers" action={addButton} docsHref={DOCS_HREF}>
-          {PAGE_DESCRIPTION}
-        </PageIntro>
+        <PageIntro title="MCP servers" action={addButton} />
       ) : (
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-title">MCP servers</h2>

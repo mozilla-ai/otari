@@ -310,21 +310,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
 
   return (
     <div className="flex flex-col gap-10 pb-10">
-      <PageIntro
-        title={narrowed?.label ?? "Tools & Guardrails"}
-        docsHref={toolsDocs(narrowed?.docsAnchor)}
-      >
-        {/* Two readings: an operator configures the service endpoints, and a
-            caller who does not is told what the deployment's tools do to their
-            requests instead of how to configure a backend they cannot reach.
-            A narrowed service's intro says only what its tools do, so it reads
-            the same to both. */}
-        {narrowed
-          ? narrowed.intro
-          : isOperator
-            ? "Configure the built-in tool and guardrail service endpoints without a restart. Changes apply immediately and persist."
-            : "How this deployment's built-in tools behave on your requests, what your workspace may use of them, and what your organization mandates."}
-      </PageIntro>
+      <PageIntro title={narrowed?.label ?? "Tools & Guardrails"} />
 
       <ErrorBanner error={query.error} />
 

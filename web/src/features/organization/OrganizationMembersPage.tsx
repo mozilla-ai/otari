@@ -1145,6 +1145,7 @@ export function OrganizationMembersPage() {
                 <RowAction
                   icon={FiXCircle}
                   label="Revoke"
+                  isDestructive
                   isDisabled={!manages}
                   onPress={() => setRevoking(member)}
                 />
@@ -1162,7 +1163,7 @@ export function OrganizationMembersPage() {
               {manages ? (
                 <RowAction
                   icon={FiEdit2}
-                  label="Edit"
+                  label="Edit…"
                   onPress={() => setEditingMember(memberRowKey(member))}
                 />
               ) : null}
@@ -1181,7 +1182,8 @@ export function OrganizationMembersPage() {
               ) : null}
               <RowAction
                 icon={FiUserMinus}
-                label="Remove"
+                label="Remove…"
+                isDestructive
                 // See the Role cell: the reason has to be in the name, not only
                 // in the tooltip, to reach anything but a pointer. `RowAction`
                 // puts the same name on a `title` while the action is refused,
@@ -1235,15 +1237,7 @@ export function OrganizationMembersPage() {
             </Button>
           ) : null
         }
-      >
-        {/* The trailing sentences are about the model access shown under a
-            member's name and the Spend column, neither of which a caller who
-            does not operate the deployment is shown, so they are only told to
-            one. */}
-        Who belongs to this organization and what each of them may do. Owners
-        and admins manage it; members and viewers read the workspaces they
-        belong to.
-      </PageIntro>
+      />
 
       <div className="-mt-2 mb-4 max-w-[38.75rem]">
         <Disclosure heading="How roles work">

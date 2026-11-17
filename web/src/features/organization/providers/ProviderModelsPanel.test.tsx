@@ -9,6 +9,7 @@ import type { ServingFilter } from "@/features/models/OfferedModelFilters"
 import type { KindFilter } from "@/features/models/offeredKinds"
 import { orgProviderKey, orgProviderModel } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
+import { findRowMenuItem, pressRowAction } from "@/tests/rowMenu"
 
 import { ProviderModelsPanel } from "./ProviderModelsPanel"
 
@@ -582,9 +583,8 @@ describe("ProviderModelsPanel", () => {
     const user = userEvent.setup()
     await renderPanel(true, onEditRate)
 
-    await user.click(
-      await screen.findByRole("button", { name: "Set your rate for gpt-4o" }),
-    )
+    await screen.findByText("gpt-4o")
+    await pressRowAction(user, "Set your rate for gpt-4o")
 
     expect(onEditRate).toHaveBeenCalledWith(
       expect.objectContaining({ model: "gpt-4o" }),
@@ -615,17 +615,18 @@ describe("ProviderModelsPanel", () => {
 
     await screen.findByRole("grid", { name: "Models on Production" })
     expect(
-      screen.queryByRole("button", {
-        name: "Use the default rate for priced-by-default",
-      }),
+      await findRowMenuItem(
+        user,
+        "Use the default rate for priced-by-default…",
+      ),
     ).toBeNull()
 
+    await pressRowAction(user, "Use the default rate for priced-by-us…")
     await user.click(
-      screen.getByRole("button", {
-        name: "Use the default rate for priced-by-us",
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Use default",
       }),
     )
-    await user.click(screen.getByRole("button", { name: "Use default" }))
 
     await waitFor(() => {
       expect(
@@ -645,9 +646,8 @@ describe("ProviderModelsPanel", () => {
     const user = userEvent.setup()
     await renderPanel()
 
-    await user.click(
-      await screen.findByRole("button", { name: "Stop offering gpt-4o" }),
-    )
+    await screen.findByText("gpt-4o")
+    await pressRowAction(user, "Stop offering gpt-4o")
 
     // `alertdialog`, which is what `ConfirmDialog` renders: it interrupts to ask
     // rather than opening a form.

@@ -189,11 +189,14 @@ export function McpConnectionCallbackPage({
   if (inPopup) {
     // Seen only when the browser keeps the window open after `window.close()`.
     return (
-      <PageIntro title={reported ? "You can close this window" : "Signing in…"}>
-        {reported
-          ? "The page you started from has been updated."
-          : "Finishing the sign-in…"}
-      </PageIntro>
+      <PageIntro
+        title={reported ? "You can close this window" : "Signing in…"}
+        detail={
+          reported
+            ? "The page you started from has been updated."
+            : "Finishing the sign-in…"
+        }
+      />
     )
   }
   if (refusal === undefined && !complete.error) {
@@ -201,11 +204,14 @@ export function McpConnectionCallbackPage({
   }
   return (
     <>
-      <PageIntro title="Connect your account">
-        <Link to={LIST} className="text-link hover:text-link-hover">
-          ← MCP servers
-        </Link>
-      </PageIntro>
+      <PageIntro
+        title="Connect your account"
+        detail={
+          <Link to={LIST} className="text-link hover:text-link-hover">
+            ← MCP servers
+          </Link>
+        }
+      />
       {refusal ? <InfoBanner tone="warning">{refusal}</InfoBanner> : null}
       {complete.error ? (
         <InfoBanner tone="warning">

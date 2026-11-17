@@ -9,6 +9,7 @@ import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
+import { pressRowAction } from "@/tests/rowMenu"
 
 interface Request {
   url: string
@@ -219,9 +220,7 @@ describe("AgentRecommendersPage", () => {
     const requests = mockApi()
     await renderPage()
 
-    await user.click(
-      await screen.findByRole("button", { name: "Remove stored-decider" }),
-    )
+    await pressRowAction(user, "Remove stored-decider")
     const dialog = await screen.findByRole("alertdialog")
     expect(dialog).toHaveTextContent(
       "stored-decider and its stored key are deleted",
@@ -320,9 +319,7 @@ describe("AgentRecommendersPage", () => {
     const requests = mockApi()
     await renderPage()
 
-    await user.click(
-      await screen.findByRole("button", { name: "Edit stored-decider" }),
-    )
+    await pressRowAction(user, "Edit stored-decider")
     const dialog = await screen.findByRole("dialog", { name: "Edit router" })
     expect(within(dialog).getByLabelText("API key")).toHaveAttribute(
       "placeholder",

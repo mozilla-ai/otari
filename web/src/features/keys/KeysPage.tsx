@@ -1700,11 +1700,7 @@ export function KeysPage() {
             </Button>
           )
         }
-      >
-        {isDeploymentWide
-          ? "Issue and revoke the keys that authenticate callers to this gateway. Secrets are shown once at creation."
-          : "Create and manage your own keys for calling this gateway. Secrets are shown once at creation."}
-      </PageIntro>
+      />
 
       {/* Not the deletes: each reports inside its own confirm dialog. */}
       <ErrorBanner error={keys.error ?? updateKey.error} />

@@ -222,7 +222,6 @@ describe("ProvidersPage", () => {
     const user = userEvent.setup()
 
     await screen.findByRole("link", { name: "Provider 1" })
-    expect(screen.getByText(/26 providers serve/)).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: /next/i }))
 
     expect(
@@ -328,7 +327,6 @@ describe("ProviderDetailPage", () => {
       name: "Models from Fireworks AI",
     })
     expect(within(table).getByRole("link", { name: "Model 1" })).toBeVisible()
-    expect(screen.getByText(/26 models/)).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: /next/i }))
 
     expect(

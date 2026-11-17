@@ -122,7 +122,7 @@ export function McpGrantsTable({
             <RowActionRow>
               <RowAction
                 icon={FiEdit2}
-                label="Edit"
+                label="Edit…"
                 ariaLabel="Edit the default policy"
                 onPress={onEditDefault}
               />
@@ -134,13 +134,14 @@ export function McpGrantsTable({
           <RowActionRow>
             <RowAction
               icon={FiEdit2}
-              label="Edit"
+              label="Edit…"
               ariaLabel={`Edit the rule for ${name}`}
               onPress={() => onEdit(row.grant)}
             />
             <RowAction
               icon={FiX}
-              label="Delete"
+              label="Delete…"
+              isDestructive
               ariaLabel={`Delete the rule for ${name}`}
               onPress={() => onRemove(row.grant)}
             />

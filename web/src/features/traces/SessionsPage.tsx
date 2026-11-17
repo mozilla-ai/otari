@@ -230,6 +230,19 @@ interface TimeWindow {
 
 const iso = (ms: number) => new Date(ms).toISOString()
 
+/**
+ * The count the chart's header reads out: the server's count of the window.
+ * One that could not be read leaves the header to the bars, rather than to
+ * skeletons that never resolve.
+ */
+export function windowTotals(count: {
+  data?: { count: number }
+  isError: boolean
+}): { count: number; failed: null } | null | undefined {
+  if (count.data) return { count: count.data.count, failed: null }
+  return count.isError ? undefined : null
+}
+
 /** Inside the Overview the page waits for its scope, so it never fetches the wrong one. */
 export function SessionsPage({ embedded = false }: { embedded?: boolean }) {
   const { isResolved } = useObserveScope(embedded)
@@ -513,12 +526,7 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
       {/* Below md the panel covers the page, which then takes no focus or
           presses until it closes. */}
       <div className="flex flex-col" inert={open !== null && isMobile}>
-        {embedded ? null : (
-          <PageIntro title="Sessions">
-            Every agent session the gateway recorded: the turns, model requests
-            and tools behind each one. No model response is stored.
-          </PageIntro>
-        )}
+        {embedded ? null : <PageIntro title="Sessions" />}
         {keepsContent ? (
           <InfoBanner>
             {workspace ? "This workspace keeps" : "Your workspaces keep"} what
@@ -567,6 +575,13 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
             loading={seriesQuery.isPending}
             ariaLabel="Sessions active over the selected window"
             unitLabel="Active sessions"
+            // A session spans buckets, so the bars are never summed; the
+            // window's count is the one that sizes the list. No failed figure:
+            // the series counts sessions with a failing error, and the
+            // `has_error` filter counts any error, so a count with it would not
+            // match the failed marks.
+            additive={false}
+            totals={windowTotals(count)}
           />
           <div className="otari-toolbar flex flex-wrap items-center gap-2">
             <SearchField

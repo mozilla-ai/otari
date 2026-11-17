@@ -740,3 +740,61 @@ main:has(.otari-bulk-bar)::after {
     width: 100vw;
   }
 }
+
+/* A row's three-dot menu (`actions/RowMenu`, and `actions/RowAction`'s lane,
+ * which draws the same one). HeroUI has no prop for the trigger's size or the
+ * menu's density, and each item holds a glyph, a label and a sentence under it.
+ * Destructive items come last, set apart by a rule. */
+.otari-row-menu-trigger {
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+@media (hover: hover) {
+  .otari-row-menu-trigger:hover {
+    color: var(--color-text);
+    background: var(--color-surface-muted);
+  }
+}
+/* Inset, because the trigger ends the row, where an outward ring would be
+   clipped by the table's own overflow. */
+.otari-row-menu-trigger[data-focus-visible],
+.otari-row-menu-trigger[aria-expanded="true"] {
+  outline: 2px solid var(--focus-ring-ink, var(--color-focus));
+  outline-offset: -2px;
+}
+@media (min-width: 48rem) and (pointer: fine) {
+  .otari-row-menu-trigger {
+    width: 2rem;
+    height: 2rem;
+  }
+}
+.otari-row-menu {
+  width: 19rem;
+  max-width: calc(100vw - 2rem);
+}
+.otari-row-menu .dropdown__menu {
+  padding: 0;
+}
+.otari-row-menu .menu-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  min-height: 2.75rem;
+  padding: 0.625rem 0.75rem;
+  color: var(--color-text-muted);
+}
+.otari-row-menu .menu-item[data-focused],
+.otari-row-menu .menu-item[data-hovered] {
+  background: var(--color-surface-muted);
+}
+.otari-row-menu
+  .menu-item:not(.otari-row-menu-danger)
+  + .otari-row-menu-danger {
+  border-top: 1px solid var(--color-border-subtle);
+}

@@ -1337,14 +1337,7 @@ function UsagePageContent({
         <PageIntro
           title={orgWide ? "Organization usage" : "Usage & analytics"}
           action={introAction}
-        >
-          {/* The drill-in clause is in the workspace arm only: organization
-            scope passes `onDrill={undefined}` to all three breakdowns, so
-            promising a clickable row is exactly wrong for this caller. */}
-          {orgWide
-            ? "Spend, tokens, cache use, and request volume over time across every workspace in this organization. Group the chart by model, user, key, or source."
-            : "Spend, tokens, cache use, and request volume over time. Group the chart by model, user, key, or source, and click a breakdown row to drill into the request log."}
-        </PageIntro>
+        />
       )}
 
       <ErrorBanner

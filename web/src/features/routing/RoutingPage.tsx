@@ -123,14 +123,15 @@ export function RoutingPage() {
             ) : null}
             <RowAction
               icon={canOpenToEdit ? FiEdit2 : FiEye}
-              label={canOpenToEdit ? "Edit" : "View"}
+              label={canOpenToEdit ? "Edit…" : "View"}
               ariaLabel={`${canOpenToEdit ? "Edit" : "View"} ${policy.name}`}
               onPress={() => openPolicy(policy)}
             />
             {isConfig ? null : (
               <RowAction
                 icon={FiTrash2}
-                label="Delete"
+                label="Delete…"
+                isDestructive
                 ariaLabel={`Delete ${policy.name}`}
                 onPress={() => setPendingDelete(policy)}
               />
@@ -179,22 +180,7 @@ export function RoutingPage() {
             </Button>
           ) : undefined
         }
-      >
-        {/* Three readings of the same page, because what a caller may do here
-            differs: an operator sees the deployment-wide capabilities, an
-            admin sees what their own workspace writes reach, and a member is
-            told who manages these rather than offered a control they would
-            be refused. */}
-        Model names your callers send as{" "}
-        <code className="font-mono text-caption">model</code>. Each policy picks
-        the model that serves a request and the backups tried, in order, when it
-        fails.{" "}
-        {isOperator
-          ? null
-          : canEdit
-            ? "What you create here applies in the selected workspace, and can name any model your organization has a provider key for."
-            : "These are the ones in force in your workspaces; your organization's admins manage them."}
-      </PageIntro>
+      />
 
       {/* The reads only. Every delete on this page reports inside its own
           confirm dialog, which is where the operator is looking. */}

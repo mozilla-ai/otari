@@ -582,7 +582,6 @@ describe("PolicyDetailPage", () => {
     expect(
       await screen.findByRole("combobox", { name: /model 1/i }),
     ).toHaveValue("openai:gpt-5-nano")
-    expect(screen.getByText("u-bob")).toBeInTheDocument()
   })
 
   it("says so when the policy is not there", async () => {

@@ -10,6 +10,7 @@ import {
 } from "@/features/keys/FederationRulesDialog"
 import { API_ROOT } from "@/shared/api/client"
 import { apiKey, organizationContext } from "@/tests/fixtures"
+import { pressRowAction } from "@/tests/rowMenu"
 
 const RULES_URL = `${API_ROOT}/organizations/me/keys/key-1/federation-rules`
 
@@ -113,11 +114,8 @@ describe("FederationRulesDialog", () => {
     const user = userEvent.setup()
     renderDialog()
 
-    await user.click(
-      await screen.findByRole("button", {
-        name: "Show setup for old@example.com",
-      }),
-    )
+    await screen.findByText("old@example.com")
+    await pressRowAction(user, "Show setup for old@example.com")
 
     expect(
       screen.getByRole("region", { name: "Environment code" }),
@@ -159,10 +157,9 @@ describe("FederationRulesDialog", () => {
     const user = userEvent.setup()
     renderDialog()
 
-    await user.click(
-      await screen.findByRole("button", {
-        name: "Delete rule for hackbot@my-project.iam.gserviceaccount.com",
-      }),
+    await pressRowAction(
+      user,
+      "Delete rule for hackbot@my-project.iam.gserviceaccount.com",
     )
     const confirm = await screen.findByRole("alertdialog")
     await user.click(

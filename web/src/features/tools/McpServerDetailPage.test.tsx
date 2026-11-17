@@ -15,6 +15,11 @@ import {
   renderMcpServerPage,
   WORKSPACE,
 } from "@/tests/mcpServer"
+import {
+  findRowMenuItem,
+  getRowMenuItem,
+  pressRowAction,
+} from "@/tests/rowMenu"
 import { pickOption } from "@/tests/select"
 
 const SERVER = workspaceMcpServer({
@@ -130,9 +135,7 @@ describe("McpServerDetailPage, Access", () => {
     const user = userEvent.setup()
     await openPage()
 
-    await user.click(
-      await screen.findByRole("button", { name: "Edit the default policy" }),
-    )
+    await pressRowAction(user, "Edit the default policy")
     const dialog = await screen.findByRole("dialog", {
       name: "Edit the default policy",
     })
@@ -168,9 +171,7 @@ describe("McpServerDetailPage, Access", () => {
     const user = userEvent.setup()
     await openPage()
 
-    await user.click(
-      await screen.findByRole("button", { name: "Edit the default policy" }),
-    )
+    await pressRowAction(user, "Edit the default policy")
     const dialog = await screen.findByRole("dialog", {
       name: "Edit the default policy",
     })
@@ -197,9 +198,7 @@ describe("McpServerDetailPage, Access", () => {
     const user = userEvent.setup()
     await openPage()
 
-    await user.click(
-      await screen.findByRole("button", { name: "Edit the default policy" }),
-    )
+    await pressRowAction(user, "Edit the default policy")
     const dialog = await screen.findByRole("dialog", {
       name: "Edit the default policy",
     })
@@ -396,9 +395,7 @@ describe("McpServerDetailPage, Access", () => {
     const user = userEvent.setup()
     await openPage()
 
-    await user.click(
-      await screen.findByRole("button", { name: "Edit the rule for ci-bot" }),
-    )
+    await pressRowAction(user, "Edit the rule for ci-bot")
     const dialog = await screen.findByRole("dialog", { name: "Edit ci-bot" })
     await user.click(within(dialog).getByRole("radio", { name: "Deny" }))
     await user.click(within(dialog).getByRole("button", { name: "Save rule" }))
@@ -423,11 +420,7 @@ describe("McpServerDetailPage, Access", () => {
     const user = userEvent.setup()
     await openPage()
 
-    await user.click(
-      await screen.findByRole("button", {
-        name: "Delete the rule for ci-bot",
-      }),
-    )
+    await pressRowAction(user, "Delete the rule for ci-bot")
     const confirm = await screen.findByRole("alertdialog")
     expect(
       within(confirm).getByText(/matches the rule for its owner/),
@@ -599,6 +592,7 @@ describe("McpServerDetailPage, Access", () => {
       workspaceRole: "member",
       deploymentOperator: false,
     })
+    const user = userEvent.setup()
     await openPage()
 
     expect(
@@ -610,9 +604,10 @@ describe("McpServerDetailPage, Access", () => {
     expect(
       await screen.findByText(/don't let you use any tool on this server/),
     ).toBeVisible()
-    for (const name of ["Check", "Add rule", "Edit the default policy"]) {
+    for (const name of ["Check", "Add rule"]) {
       expect(screen.queryByRole("button", { name })).not.toBeInTheDocument()
     }
+    expect(await findRowMenuItem(user, "Edit the default policy")).toBeNull()
     // The access list is a manager's read, so it is not asked for at all.
     expect(calls.some((call) => call.url.includes("/access"))).toBe(false)
   })
@@ -762,7 +757,8 @@ describe("McpServerDetailPage, Access", () => {
       name: "Users connected to github",
     })
     // Wait for the rules, so the click finds Bo's.
-    await screen.findByRole("button", { name: "Edit the rule for Bo" })
+    await getRowMenuItem(user, "Edit the rule for Bo")
+    await user.keyboard("{Escape}")
     await user.click(within(table).getByText("Bo"))
 
     expect(await screen.findByRole("dialog", { name: "Edit Bo" })).toBeVisible()

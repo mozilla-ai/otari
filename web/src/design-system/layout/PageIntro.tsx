@@ -1,10 +1,13 @@
 import type { ReactNode } from "react"
 
-import { DocsLink } from "../navigation/DocsLink"
-
 /**
- * A page's opening: its title, the paragraph under it, and the one action that
- * belongs beside rather than below them.
+ * A page's opening: its title and the one action that belongs beside it.
+ *
+ * No sentence under the title explains the page. A page says what it is by its
+ * title and its content; a fixed paragraph above every table was read once and
+ * then scrolled past on every visit after. `detail` is the exception, for a
+ * line that is not an explanation: a record's own facts, a warning about this
+ * record, or the page's only content (a not-found, a sign-in finishing).
  *
  * Shared so the type of a page title is decided once rather than respelled on
  * every page. The title is `text-display`, the scale's 28/34 semibold step; the
@@ -22,20 +25,14 @@ export function PageIntro({
   title,
   leading,
   action,
-  docsHref,
-  children,
+  detail,
 }: {
   title: string
   /** A mark at the title's leading edge, such as a record's logo. Decorative: the title names it. */
   leading?: ReactNode
   action?: ReactNode
-  /**
-   * Trails the description rather than sitting in `action`: a link to the
-   * manual is not the one thing the page exists to do, and putting it in the
-   * action slot is how a page ends up with two things competing to be that.
-   */
-  docsHref?: string
-  children?: ReactNode
+  /** The line under the title, for what this page is about rather than what it is for. */
+  detail?: ReactNode
 }) {
   return (
     <header className="flex flex-col gap-4 pb-5 sm:flex-row sm:items-start sm:justify-between">
@@ -48,17 +45,7 @@ export function PageIntro({
         ) : (
           <h1 className="text-display">{title}</h1>
         )}
-        {children || docsHref ? (
-          <p className="mt-1 text-sm text-muted">
-            {children}
-            {docsHref ? (
-              <>
-                {children ? " " : null}
-                <DocsLink href={docsHref} />
-              </>
-            ) : null}
-          </p>
-        ) : null}
+        {detail ? <p className="mt-1 text-sm text-muted">{detail}</p> : null}
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}
     </header>

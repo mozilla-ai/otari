@@ -8,6 +8,7 @@ import {
   expectOk,
   login,
   openNested,
+  pressRowAction,
 } from "../helpers"
 import { call, docScreenshot, listed } from "./fixtures"
 
@@ -94,7 +95,7 @@ test("configure an MCP server", async ({ page }) => {
     await expect(
       page.getByRole("heading", { name: "Access rules" }),
     ).toBeVisible()
-    await page.getByRole("button", { name: "Edit the default policy" }).click()
+    await pressRowAction(page.getByRole("main"), "Edit the default policy")
     let rule = page.getByRole("dialog")
     let action = rule.getByRole("radiogroup", { name: "Action" })
     // The input is visually hidden under its label, which takes the press.

@@ -16,7 +16,6 @@ import {
   useToolSettings,
   useUpdateToolSettings,
 } from "@/shared/api/tools"
-import { docsSourceHref } from "@/shared/helpers/docs"
 
 import { RemoveWebToolDialog } from "./RemoveWebToolDialog"
 import { WebSearchSettings } from "./WebSearchSettings"
@@ -177,16 +176,7 @@ export function WebSearchPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <PageIntro
-        title="Web search"
-        docsHref={docsSourceHref("tools.md", "web-search")}
-      >
-        The search and fetch tools this deployment runs for every workspace,
-        what each call costs, and which tool the model uses. A call is billed at
-        its tool&rsquo;s own rate, and a tool with none is unpriced. Each
-        table&rsquo;s last row prices a call on an organization&rsquo;s own key,
-        and the search table&rsquo;s a search on the legacy settings too.
-      </PageIntro>
+      <PageIntro title="Web search" />
 
       <ErrorBanner
         error={searchCatalog.error ?? fetchCatalog.error ?? setDefault.error}

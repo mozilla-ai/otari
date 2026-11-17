@@ -12,6 +12,7 @@ import {
   providerInfo,
   renderHosted,
 } from "@/tests/hostedProviders"
+import { getRowMenuItem, pressRowAction } from "@/tests/rowMenu"
 
 function renderProviderPage(
   name: string,
@@ -907,11 +908,10 @@ describe("HostedProviderPage", () => {
       expect(
         screen.getByRole("switch", { name: "Serve deepseek-ai/DeepSeek-V3.2" }),
       ).toBeDisabled()
+      // A model's price stays editable while its vendor is off.
       expect(
-        screen.getByRole("button", {
-          name: "Edit deepseek-ai/DeepSeek-V3.2 price",
-        }),
-      ).toBeEnabled()
+        await getRowMenuItem(user, "Edit deepseek-ai/DeepSeek-V3.2 price"),
+      ).not.toHaveAttribute("aria-disabled", "true")
     })
 
     it("serves every priced model of a vendor from its menu, saying what it skipped", async () => {
@@ -953,10 +953,9 @@ describe("HostedProviderPage", () => {
       expect(
         await screen.findByText(/models\.dev \$0\.035 in/),
       ).toBeInTheDocument()
-      await user.click(
-        screen.getByRole("button", {
-          name: "Use the default price for Qwen/Qwen-Image-2.0",
-        }),
+      await pressRowAction(
+        user,
+        "Use the default price for Qwen/Qwen-Image-2.0",
       )
 
       await waitFor(() =>

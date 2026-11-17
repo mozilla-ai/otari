@@ -19,6 +19,11 @@ import {
   orgProviderModel,
 } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
+import {
+  findRowMenuItem,
+  pressRowAction,
+  rowMenuTriggers,
+} from "@/tests/rowMenu"
 
 const KEY_ID = "66666666-6666-6666-6666-666666666666"
 
@@ -643,7 +648,7 @@ describe("OrganizationProvidersPage", () => {
     const user = userEvent.setup()
     await renderPage(<OrganizationProvidersPage />)
 
-    await user.click(await screen.findByRole("button", { name: "Edit" }))
+    await pressRowAction(user, "Edit…")
     expect(
       await screen.findByRole("textbox", { name: /AWS region/ }),
     ).toHaveValue("us-east-1")
@@ -690,7 +695,7 @@ describe("OrganizationProvidersPage", () => {
     const user = userEvent.setup()
     await renderPage(<OrganizationProvidersPage />)
 
-    await user.click(await screen.findByRole("button", { name: "Edit" }))
+    await pressRowAction(user, "Edit…")
     await user.click(await screen.findByRole("button", { name: "Save" }))
 
     await waitFor(() => {
@@ -708,7 +713,7 @@ describe("OrganizationProvidersPage", () => {
     await renderPage(<OrganizationProvidersPage />)
 
     expect(await screen.findByText("ZERO DATA RETENTION")).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "Edit" }))
+    await pressRowAction(user, "Edit…")
     const box = await screen.findByRole("checkbox", {
       name: "Zero data retention",
     })
@@ -728,9 +733,7 @@ describe("OrganizationProvidersPage", () => {
     const user = userEvent.setup()
     await renderPage(<OrganizationProvidersPage />)
 
-    await user.click(
-      await screen.findByRole("button", { name: "Make default provider" }),
-    )
+    await pressRowAction(user, "Make default provider")
 
     await waitFor(() => {
       expect(requests.some((request) => request.url.endsWith("/default"))).toBe(
@@ -749,12 +752,11 @@ describe("OrganizationProvidersPage", () => {
         }),
       ],
     })
+    const user = userEvent.setup()
     await renderPage(<OrganizationProvidersPage />)
 
     expect(await screen.findByText("synthetic:")).toBeInTheDocument()
-    expect(
-      screen.queryByRole("button", { name: "Make default provider" }),
-    ).toBeNull()
+    expect(await findRowMenuItem(user, "Make default provider")).toBeNull()
   })
 
   it("removes the organization default from the key that holds it", async () => {
@@ -764,11 +766,7 @@ describe("OrganizationProvidersPage", () => {
     const user = userEvent.setup()
     await renderPage(<OrganizationProvidersPage />)
 
-    await user.click(
-      await screen.findByRole("button", {
-        name: "Default provider, click to remove",
-      }),
-    )
+    await pressRowAction(user, "Default provider, click to remove")
 
     await waitFor(() => {
       expect(
@@ -798,13 +796,14 @@ describe("OrganizationProvidersPage", () => {
     expect(screen.queryByText("Retired")).toBeNull()
     // Delete is permanent and the API accepts it for an archived key alone, so
     // it is never offered beside a live one.
-    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull()
+    expect(await findRowMenuItem(user, "Delete…")).toBeNull()
 
     await user.click(screen.getByText("Show archived (1)"))
 
     expect(await screen.findByText("Retired")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Restore" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument()
+    expect(await findRowMenuItem(user, "Restore")).toBeInTheDocument()
+    await user.keyboard("{Escape}")
+    expect(await findRowMenuItem(user, "Delete…")).toBeInTheDocument()
   })
 
   it("deletes an archived key only through the confirm dialog", async () => {
@@ -823,7 +822,7 @@ describe("OrganizationProvidersPage", () => {
     await renderPage(<OrganizationProvidersPage />)
 
     await user.click(await screen.findByText("Show archived (1)"))
-    await user.click(screen.getByRole("button", { name: "Delete" }))
+    await pressRowAction(user, "Delete…")
 
     const dialog = await screen.findByRole("alertdialog")
     expect(within(dialog).getByText(/Retired and its stored/)).toBeVisible()
@@ -873,7 +872,7 @@ describe("OrganizationProvidersPage", () => {
     expect(
       screen.queryByRole("button", { name: "Add provider key" }),
     ).toBeNull()
-    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull()
+    expect(rowMenuTriggers()).toHaveLength(0)
     expect(
       requests.some((request) =>
         request.url.includes(`${API_ROOT}/organizations/me/provider-keys`),
@@ -1031,11 +1030,7 @@ describe("OrganizationProvidersPage", () => {
     await user.keyboard("{Escape}")
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
 
-    await user.click(
-      await screen.findByRole("button", {
-        name: "Set your rate for gpt-4o-mini",
-      }),
-    )
+    await pressRowAction(user, "Set your rate for gpt-4o-mini")
 
     const second = await screen.findByRole("dialog")
     await waitFor(() =>
@@ -1065,11 +1060,8 @@ describe("OrganizationProvidersPage", () => {
       <OrganizationProvidersPage />,
       `/organization/provider-keys?provider=${KEY_ID}`,
     )
-    await user.click(
-      await screen.findByRole("button", {
-        name: "Set your rate for hf:Qwen/Qwen3.8-27B",
-      }),
-    )
+    await screen.findByText("hf:Qwen/Qwen3.8-27B")
+    await pressRowAction(user, "Set your rate for hf:Qwen/Qwen3.8-27B")
 
     const dialog = await screen.findByRole("dialog")
     expect(
@@ -1102,10 +1094,9 @@ describe("OrganizationProvidersPage", () => {
       models: [orgProviderModel({ model: "gpt-4o" })],
     })
 
+    const user = userEvent.setup()
     await renderPage(<OrganizationProvidersPage />)
-    await userEvent.click(
-      await screen.findByRole("button", { name: "Models on Production" }),
-    )
+    await pressRowAction(user, "Models on Production")
 
     const panel = await screen.findByRole("region", {
       name: "Models on Production",
@@ -1124,9 +1115,7 @@ describe("OrganizationProvidersPage", () => {
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy()
 
-    await userEvent.click(
-      screen.getByRole("button", { name: "Models on Production" }),
-    )
+    await pressRowAction(user, "Models on Production")
     await waitFor(() =>
       expect(
         screen.queryByRole("region", { name: "Models on Production" }),

@@ -261,24 +261,25 @@ export function HostedProviderPage({ name }: { name: string }) {
               )}
             </div>
           }
-        >
-          <span className="inline-flex flex-wrap items-center gap-2">
-            {provider.name === provider.provider ? null : (
-              <span>{provider.provider}</span>
-            )}
-            {/* No pill before a check has run: its placeholder dash reads
+          detail={
+            <span className="inline-flex flex-wrap items-center gap-2">
+              {provider.name === provider.provider ? null : (
+                <span>{provider.provider}</span>
+              )}
+              {/* No pill before a check has run: its placeholder dash reads
                 as a stray mark under a title, where a table cell needs one. */}
-            {!provider.enabled ? (
-              <span>Switched off</span>
-            ) : healthRow ? (
-              <HealthPill health={healthRow} />
-            ) : null}
-            {isConfig ? <Badge tone="muted">config.yml</Badge> : null}
-            {provider.shadows_config ? (
-              <Badge tone="muted">Overrides config.yml</Badge>
-            ) : null}
-          </span>
-        </PageIntro>
+              {!provider.enabled ? (
+                <span>Switched off</span>
+              ) : healthRow ? (
+                <HealthPill health={healthRow} />
+              ) : null}
+              {isConfig ? <Badge tone="muted">config.yml</Badge> : null}
+              {provider.shadows_config ? (
+                <Badge tone="muted">Overrides config.yml</Badge>
+              ) : null}
+            </span>
+          }
+        />
         <ConnectionTestRowResult
           isPending={test.isPending}
           data={test.data}

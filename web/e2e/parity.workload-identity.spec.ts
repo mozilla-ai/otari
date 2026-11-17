@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 import { API_ROOT } from "@/shared/api/client"
-import { authHeaders, expectOk, gotoRoute } from "./helpers"
+import { authHeaders, expectOk, gotoRoute, pressRowAction } from "./helpers"
 
 // An organization admin, not the operator: federation_member_rules (on in
 // e2e/otari.yml) is what lets an owner or admin give their own key a rule
@@ -74,11 +74,10 @@ test("an organization admin gives their own key a federation rule and reads its 
     `ANTHROPIC_BASE_URL="${new URL(memberPage.url()).origin}/api"`,
   )
 
-  await dialog
-    .getByRole("button", {
-      name: "Delete rule for hackbot@my-project.iam.gserviceaccount.com",
-    })
-    .click()
+  await pressRowAction(
+    dialog,
+    "Delete rule for hackbot@my-project.iam.gserviceaccount.com",
+  )
   await memberPage
     .getByRole("alertdialog")
     .getByRole("button", { name: "Delete rule" })

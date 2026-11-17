@@ -479,7 +479,8 @@ export function WorkspacesPage() {
                 tech, and `RowAction` repeats it on a `title` for the pointer. */}
             <RowAction
               icon={FiTrash2}
-              label="Delete"
+              label="Delete…"
+              isDestructive
               ariaLabel={
                 isOnlyWorkspace
                   ? `Delete ${workspace.name} (${LAST_WORKSPACE_REASON})`
@@ -521,10 +522,7 @@ export function WorkspacesPage() {
             </Button>
           )
         }
-      >
-        The scopes inside this organization that work is grouped into. Each one
-        carries its own members and roles.
-      </PageIntro>
+      />
 
       {/* `remove.error` is deliberately absent: the confirm dialog renders that
           mutation's error itself, and listing it here too paints the same

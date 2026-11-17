@@ -11,6 +11,7 @@ import {
   openNested,
   openOrganization,
   pageHeading,
+  pressRowAction,
   tableRows,
 } from "./helpers"
 import { PARITY } from "./parity-data"
@@ -198,9 +199,7 @@ test.describe("subagent router setup", () => {
 
     // The edit names the stored key by its tail, and no part of the page
     // carries the key back.
-    await routerRow(page, ROUTER_A)
-      .getByRole("button", { name: `Edit ${ROUTER_A}` })
-      .click()
+    await pressRowAction(routerRow(page, ROUTER_A), `Edit ${ROUTER_A}`)
     const editRouter = page.getByRole("dialog", { name: "Edit router" })
     await expect(
       editRouter.getByLabel("API key", { exact: true }),
@@ -213,9 +212,7 @@ test.describe("subagent router setup", () => {
     await expect(page.locator("body")).not.toContainText(DECISION_KEY)
 
     for (const model of [ROUTER_A, ROUTER_B]) {
-      await routerRow(page, model)
-        .getByRole("button", { name: `Remove ${model}` })
-        .click()
+      await pressRowAction(routerRow(page, model), `Remove ${model}`)
       const confirmRouter = page.getByRole("alertdialog")
       await expect(confirmRouter).toContainText(model)
       await confirmRouter.getByRole("button", { name: "Remove router" }).click()
@@ -401,7 +398,7 @@ test.describe("budgets", () => {
     // assigned" into a real spend-against-allocation reading.
     await expect(budget).not.toContainText("No users assigned")
 
-    await budget.getByRole("button", { name: "Edit" }).click()
+    await pressRowAction(budget, "Edit")
     const editDialog = page.getByRole("dialog")
     await editDialog.getByLabel("Spending limit (USD)").fill("50")
     await editDialog.getByRole("button", { name: "Save" }).click()
@@ -409,18 +406,14 @@ test.describe("budgets", () => {
 
     // Reset history is a per-budget panel, not a page: it opens under the table
     // and names the budget it belongs to.
-    await row(page, "Budgets", BUDGET)
-      .getByRole("button", { name: "History" })
-      .click()
+    await pressRowAction(row(page, "Budgets", BUDGET), "History")
     await expect(page.getByText(`Reset history — ${BUDGET}`)).toBeVisible()
     await page.getByRole("button", { name: "Close" }).click()
 
     // The confirmation names the budget it is about to drop rather than asking
     // in the abstract, which is half of why it is a modal: the row it names is
     // behind the backdrop.
-    await row(page, "Budgets", BUDGET)
-      .getByRole("button", { name: "Delete", exact: true })
-      .click()
+    await pressRowAction(row(page, "Budgets", BUDGET), "Delete")
     const confirmBudget = page.getByRole("alertdialog")
     await expect(confirmBudget).toContainText(BUDGET)
     await confirmBudget
@@ -467,7 +460,7 @@ test.describe("fallback routing", () => {
     // Shrinking has to be possible too: a chain that could only grow would strand
     // an operator who added a candidate by mistake. Edit opens the policy's own
     // page, where the chain is a section with its own Save.
-    await policy.getByRole("button", { name: "Edit" }).click()
+    await pressRowAction(policy, "Edit")
     await expect(pageHeading(page, POLICY)).toBeVisible()
     const fallbackTwo = page.getByRole("combobox", { name: /^Backup 2/ })
     await expect(fallbackTwo).toBeVisible()
@@ -485,9 +478,7 @@ test.describe("fallback routing", () => {
         .getByRole("listitem"),
     ).toHaveText(["claude-3-5-haiku-latest · Anthropic"])
 
-    await row(page, "Routing policies", POLICY)
-      .getByRole("button", { name: "Delete" })
-      .click()
+    await pressRowAction(row(page, "Routing policies", POLICY), "Delete")
     const confirmPolicy = page.getByRole("alertdialog")
     await expect(confirmPolicy).toContainText(POLICY)
     await confirmPolicy.getByRole("button", { name: "Delete policy" }).click()

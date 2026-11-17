@@ -37,7 +37,7 @@ For naming conventions and team patterns, see [How teams use workspaces](workspa
 ## Delete a workspace
 
 1. From the main dashboard, click **Organization** in the bottom-left corner, then **Workspaces**.
-2. Find the workspace you want to delete, click **Delete** (the bin icon), and confirm the deletion.
+2. Open the menu at the end of the workspace you want to delete, choose **Delete**, and confirm the deletion.
 
 ![The Workspaces page, listing the organization's workspaces with a Delete action on each.](assets/screenshots/manage-workspaces-list.png)
 

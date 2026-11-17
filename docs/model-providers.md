@@ -42,7 +42,7 @@ The prefix is made from the key's name unless you enter one, and never changes o
 If you have multiple keys for the same provider, mark one as the default so workspaces inherit it automatically.
 
 1. On **Inference**, find the keys for the provider.
-2. Click **Make default provider** (the star icon) on the key you want workspaces to inherit.
+2. Open the menu at the end of the key you want workspaces to inherit, and choose **Make default provider**.
 
 ![Two OpenAI keys on the Inference page, production marked as the default.](assets/screenshots/manage-provider-keys-list.png)
 
@@ -82,7 +82,7 @@ Rotate a key when it has been compromised, or you suspect it has; when your orga
 1. Create a new API key in your provider's dashboard. Do not revoke the existing key yet.
 2. In otari.ai, select **Organization**, then **Providers**, then **Inference**.
 3. Click **Add provider key**. Select the same provider, enter a distinct **Name**, and paste the new API key.
-4. Set the new key as the provider's default by clicking **Make default provider** (its star icon).
+4. Set the new key as the provider's default: choose **Make default provider** from its row's menu.
 5. For each workspace that pins the old key, open it on **Workspaces**, select its **Providers** tab, and choose **Always use this key** from the new key's **More** menu.
 6. Send a test request from each affected workspace. Confirm it completes successfully, and not on a fallback, in the workspace's **Overview**, on its **Requests** tab.
 
@@ -91,7 +91,7 @@ Rotate a key when it has been compromised, or you suspect it has; when your orga
 Once requests are flowing through the new key, revoke the old key in the upstream provider dashboard.
 
 1. Return to **Organization** → **Providers** → **Inference** in Otari.
-2. **Archive** the old provider key. An archived key can then be deleted.
+2. Choose **Archive** from the old provider key's menu, and confirm. An archived key can then be deleted.
 
 Update every workspace that pins the old key before revoking it, and every workspace that has the new key switched off: switch it on or pin it there. A workspace can continue using a pinned key even after you change the organization default.
 

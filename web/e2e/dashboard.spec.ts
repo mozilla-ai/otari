@@ -11,6 +11,7 @@ import {
   openNested,
   openOrganization,
   pageHeading,
+  pressRowAction,
 } from "./helpers"
 
 // One shared gateway + DB, so the flows build on each other and must run in order.
@@ -214,7 +215,7 @@ test.describe("dashboard core flows", () => {
     await openOrganization(page)
     await nav(page).getByRole("link", { name: "Spend & budgets" }).click()
     const budgetRow = page.getByRole("row", { name: /e2e-budget/ })
-    await budgetRow.getByRole("button", { name: "Edit" }).click()
+    await pressRowAction(budgetRow, "Edit")
     // The field's visible label is its accessible name now: the picker used to
     // carry a hidden "Add a person" beside a heading that labeled nothing, so
     // one control had two names.
@@ -400,7 +401,7 @@ test.describe("dashboard core flows", () => {
     const chained = page
       .getByRole("row")
       .filter({ has: page.getByRole("rowheader", { name: "chained" }) })
-    await chained.getByRole("button", { name: "Edit" }).click()
+    await pressRowAction(chained, "Edit")
     // Edit opens the policy's own page, where the name is a section of its own.
     await expect(pageHeading(page, "chained")).toBeVisible()
     await page.getByRole("textbox", { name: /^Name/ }).fill("renamed")

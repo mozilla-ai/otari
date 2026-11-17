@@ -1,7 +1,7 @@
-import { type ReactNode, useState } from "react"
+import { type ReactNode, use, useState } from "react"
 import type { IconType } from "react-icons"
 import { useConfirmationFocus } from "@/design-system/hooks/useConfirmationFocus"
-import { RowAction } from "./RowAction"
+import { RowAction, RowMenuContext } from "./RowAction"
 
 export type ConfirmRowActionProps = {
   confirmLabel: string
@@ -23,7 +23,11 @@ export type ConfirmRowActionProps = {
 )
 
 /**
- * A destructive row action that asks twice, in text rather than in buttons.
+ * A row action that asks twice. In a row's menu, which is where a table's
+ * actions go, there is no row to arm, so its item opens a dialog that asks
+ * instead; the rest of this describes it alone on a row.
+ *
+ * Alone, it asks in text rather than in buttons.
  *
  * Armed, the label becomes the confirmation in danger ink with a plain Cancel
  * beside it. It replaces `ConfirmButton` on a table row for the same reason the
@@ -47,6 +51,7 @@ export function ConfirmRowAction({
   label,
   children,
 }: ConfirmRowActionProps) {
+  const menu = use(RowMenuContext)
   const [armed, setArmed] = useState(false)
   // Cancelling unmounts the focused Cancel button, which has no counterpart at
   // rest, and focus lands on `<body>`: the way out of a destructive action
@@ -54,6 +59,24 @@ export function ConfirmRowAction({
   // only by accident, because React reuses the trigger's own node as Confirm;
   // the hook covers both so the accident stops being load-bearing.
   const { triggerRef, confirmRef } = useConfirmationFocus(armed)
+  if (menu) {
+    const name =
+      label ?? (typeof children === "string" ? children : confirmLabel)
+    const ask = () => menu({ heading: name, confirmLabel, onConfirm })
+    // The ellipsis says a question follows, as on every other menu here.
+    return icon ? (
+      <RowAction
+        icon={icon}
+        label={`${name}…`}
+        isDisabled={isPending}
+        onPress={ask}
+      />
+    ) : (
+      <RowAction isDisabled={isPending} onPress={ask}>
+        {name}…
+      </RowAction>
+    )
+  }
   if (armed) {
     return (
       <>

@@ -809,12 +809,7 @@ function ActivityPageContent({
         inert={openEntry !== undefined && isMobile}
       >
         {/* Inside the Overview the layout owns the heading. */}
-        {embedded ? null : (
-          <PageIntro title="Activity">
-            A per-request log of what the gateway served: tokens, cost, latency,
-            and failures. No request or response content is stored.
-          </PageIntro>
-        )}
+        {embedded ? null : <PageIntro title="Activity" />}
 
         {/* The timeline's summary error is included so a failed series request
           reads as a failure, not as an empty "No activity in this range" strip. */}

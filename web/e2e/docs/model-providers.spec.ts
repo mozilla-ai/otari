@@ -1,6 +1,12 @@
 import { expect, type Page, test } from "@playwright/test"
 
-import { dismissComboBoxInDialog, gotoRoute, login, nav } from "../helpers"
+import {
+  dismissComboBoxInDialog,
+  gotoRoute,
+  login,
+  nav,
+  pressRowAction,
+} from "../helpers"
 import { call, docScreenshot, listed } from "./fixtures"
 
 const KEYS = ["production", "backup"] as const
@@ -64,13 +70,9 @@ test("add, choose and rotate provider keys", async ({ page }) => {
     // Pressed once both rows have landed: a press during the list's refetch is
     // dropped with the row it was delivered to.
     await expect(page.getByRole("row", { name: /backup/ })).toBeVisible()
-    await page
-      .getByRole("row", { name: /production/ })
-      .getByRole("button", { name: "Make default provider" })
-      .click()
-    await expect(
-      page.getByRole("button", { name: "Default provider, click to remove" }),
-    ).toBeVisible()
+    const production = page.getByRole("row", { name: /production/ })
+    await pressRowAction(production, "Make default provider")
+    await expect(production).toContainText("DEFAULT")
     await docScreenshot(page, "manage-provider-keys-list")
 
     await nav(page).getByRole("link", { name: "Workspaces" }).click()
@@ -101,8 +103,12 @@ test("add, choose and rotate provider keys", async ({ page }) => {
     await page.getByRole("link", { name: "Requests", exact: true }).click()
     await openProviders(page)
     const old = page.getByRole("row", { name: /production/ })
-    await old.getByRole("button", { name: "Archive" }).click()
-    await old.getByRole("button", { name: "Archive" }).click()
+    // Archive asks first, in a dialog once the row's menu has closed.
+    await pressRowAction(old, "Archive")
+    await page
+      .getByRole("alertdialog", { name: "Archive?" })
+      .getByRole("button", { name: "Archive" })
+      .click()
     await expect(old).toBeHidden()
   } finally {
     await cleanUp(page)

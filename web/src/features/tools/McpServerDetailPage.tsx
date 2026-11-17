@@ -236,45 +236,50 @@ export function McpServerDetailPage({
             ) : null}
           </div>
         }
-      >
-        {/* A label, not a control: the mode is changed in Settings. */}
-        <span className="mb-1 block">
-          <McpModeLabel mode={server.credential_mode} isCaps />
-        </span>
-        {/* Separate lines: the hint is the admin's own words and has no
-            trailing space or period to lean on. */}
-        {server.purpose_hint ? (
-          <span className="block break-words">{server.purpose_hint}</span>
-        ) : null}
-        <span className="mt-1 block text-caption">
-          {canManage ? null : (
-            <span className="font-medium">
-              {AVAILABILITY[availability].label}:{" "}
+        // The server's own facts: how it signs in, what its admin says it is
+        // for, who may use it, and the id a request names it by.
+        detail={
+          <>
+            {/* A label, not a control: the mode is changed in Settings. */}
+            <span className="mb-1 block">
+              <McpModeLabel mode={server.credential_mode} isCaps />
             </span>
-          )}
-          {AVAILABILITY[availability].help}
-        </span>
-        {/* One line at every width: the id is cut with an ellipsis before it
-            wraps, and the copy control stays beside it. `w-0 min-w-full` takes
-            the column's width without asking for the id's own, so a line that
-            cannot wrap does not push the heading's controls off the page. */}
-        <span className="mt-2 flex w-0 min-w-full items-center gap-x-2 text-caption whitespace-nowrap">
-          <span className="shrink-0">Server ID</span>
-          <CopyableValue
-            value={server.id}
-            label={`id for ${server.name}`}
-            isTruncated
-          >
-            <code className="font-mono text-sm">{server.id}</code>
-          </CopyableValue>
-        </span>
-        {availability === "on_request" ? (
-          <span className="block text-caption">
-            Add this id to <code className="font-mono">mcp_server_ids</code> in
-            your request.
-          </span>
-        ) : null}
-      </PageIntro>
+            {/* Separate lines: the hint is the admin's own words and has no
+              trailing space or period to lean on. */}
+            {server.purpose_hint ? (
+              <span className="block break-words">{server.purpose_hint}</span>
+            ) : null}
+            <span className="mt-1 block text-caption">
+              {canManage ? null : (
+                <span className="font-medium">
+                  {AVAILABILITY[availability].label}:{" "}
+                </span>
+              )}
+              {AVAILABILITY[availability].help}
+            </span>
+            {/* One line at every width: the id is cut with an ellipsis before it
+              wraps, and the copy control stays beside it. `w-0 min-w-full` takes
+              the column's width without asking for the id's own, so a line that
+              cannot wrap does not push the heading's controls off the page. */}
+            <span className="mt-2 flex w-0 min-w-full items-center gap-x-2 text-caption whitespace-nowrap">
+              <span className="shrink-0">Server ID</span>
+              <CopyableValue
+                value={server.id}
+                label={`id for ${server.name}`}
+                isTruncated
+              >
+                <code className="font-mono text-sm">{server.id}</code>
+              </CopyableValue>
+            </span>
+            {availability === "on_request" ? (
+              <span className="block text-caption">
+                Add this id to <code className="font-mono">mcp_server_ids</code>{" "}
+                in your request.
+              </span>
+            ) : null}
+          </>
+        }
+      />
       <ErrorBanner error={update.error} />
       {unchecked ? (
         <McpNotice

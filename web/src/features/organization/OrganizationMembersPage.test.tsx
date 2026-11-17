@@ -27,6 +27,11 @@ import {
   workspace,
   workspaceMember,
 } from "@/tests/fixtures"
+import {
+  findRowMenuItem,
+  getRowMenuItem,
+  pressRowAction,
+} from "@/tests/rowMenu"
 import { pickOption, selectTrigger } from "@/tests/select"
 
 interface Request {
@@ -315,6 +320,7 @@ describe("OrganizationMembersPage", () => {
 
   it("locks the last active owner's membership rather than letting it be cleared", async () => {
     mockApi({ members: [OWNER, ANALYST] })
+    const user = userEvent.setup()
     renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Operator")
@@ -329,11 +335,16 @@ describe("OrganizationMembersPage", () => {
         /Role for Operator \(This is the last active owner/,
       ),
     ).toBeDisabled()
+    expect(await getRowMenuItem(user, /^Remove…/, owner)).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    )
+    await user.keyboard("{Escape}")
     expect(
       within(owner).getByRole("button", {
-        name: /Remove Operator \(This is the last active owner/,
+        name: /^Row actions.*This is the last active owner/,
       }),
-    ).toBeDisabled()
+    ).toBeInTheDocument()
     expect(within(owner).getByText("ACTIVE")).toBeInTheDocument()
   })
 
@@ -343,9 +354,7 @@ describe("OrganizationMembersPage", () => {
     renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
-    await user.click(
-      within(rowFor("Analyst")).getByRole("button", { name: "Remove" }),
-    )
+    await pressRowAction(user, "Remove…", rowFor("Analyst"))
     expect(
       screen.getByText(/suspended rather than\s+deleted/),
     ).toBeInTheDocument()
@@ -553,6 +562,7 @@ describe("OrganizationMembersPage", () => {
       context: organizationContext({ role: "viewer" }),
       members: [OWNER, ANALYST],
     })
+    const user = userEvent.setup()
     renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
@@ -562,11 +572,16 @@ describe("OrganizationMembersPage", () => {
         /Role for Analyst \(Only organization owners and admins/,
       ),
     ).toBeDisabled()
+    expect(await getRowMenuItem(user, /^Remove…/, analyst)).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    )
+    await user.keyboard("{Escape}")
     expect(
       within(analyst).getByRole("button", {
-        name: /Remove Analyst \(Only organization owners and admins/,
+        name: /^Row actions.*Only organization owners and admins/,
       }),
-    ).toBeDisabled()
+    ).toBeInTheDocument()
     expect(
       screen.getByText(/Only organization owners and admins/),
     ).toBeInTheDocument()
@@ -903,8 +918,8 @@ describe("OrganizationMembersPage", () => {
 
     await screen.findByText("pending@example.com")
     const row = rowFor("pending@example.com")
-    expect(within(row).queryByRole("button", { name: "Remove" })).toBeNull()
-    await user.click(within(row).getByRole("button", { name: "Revoke" }))
+    expect(await findRowMenuItem(user, /^Remove/, row)).toBeNull()
+    await pressRowAction(user, "Revoke", row)
     await user.click(screen.getByRole("button", { name: "Revoke invitation" }))
 
     const revoke = requests.find((request) => request.method === "DELETE")
@@ -930,10 +945,10 @@ describe("OrganizationMembersPage", () => {
     await screen.findByText("pending@example.com")
     const row = rowFor("pending@example.com")
     expect(within(row).getByText("INVITED")).toBeInTheDocument()
-    await user.click(
-      within(row).getByRole("button", {
-        name: "Reissue the invitation to pending@example.com",
-      }),
+    await pressRowAction(
+      user,
+      "Reissue the invitation to pending@example.com",
+      row,
     )
 
     const reissue = requests.find((request) => request.method === "POST")
@@ -963,18 +978,26 @@ describe("OrganizationMembersPage", () => {
       invitation_expires_at: "2020-01-01T00:00:00+00:00",
     })
     mockApi({ members: [OWNER, expired] })
+    const user = userEvent.setup()
     renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("late@example.com")
     const row = rowFor("late@example.com")
     expect(within(row).getByText("INVITE EXPIRED")).toBeInTheDocument()
-    expect(within(row).getByRole("button", { name: "Revoke" })).toBeEnabled()
+    expect(await getRowMenuItem(user, "Revoke", row)).not.toHaveAttribute(
+      "aria-disabled",
+      "true",
+    )
+    await user.keyboard("{Escape}")
     expect(
-      within(row).getByRole("button", {
-        name: "Reissue the invitation to late@example.com",
-      }),
-    ).toBeEnabled()
-    expect(within(row).queryByRole("button", { name: "Edit" })).toBeNull()
+      await getRowMenuItem(
+        user,
+        "Reissue the invitation to late@example.com",
+        row,
+      ),
+    ).not.toHaveAttribute("aria-disabled", "true")
+    await user.keyboard("{Escape}")
+    expect(await findRowMenuItem(user, /^Edit/, row)).toBeNull()
   })
 
   it("says when the email was held back by the invitation mail limit", async () => {
@@ -1223,14 +1246,13 @@ describe("OrganizationMembersPage", () => {
       ],
       users: [],
     })
+    const user = userEvent.setup()
     renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Pending")
     const row = rowFor("Pending")
     expect(within(row).queryByText("All models")).not.toBeInTheDocument()
-    expect(
-      within(row).queryByRole("button", { name: "Block" }),
-    ).not.toBeInTheDocument()
+    expect(await findRowMenuItem(user, "Block", row)).toBeNull()
   })
 
   it("blocks a member through their spend row, not their membership", async () => {
@@ -1251,10 +1273,7 @@ describe("OrganizationMembersPage", () => {
     await screen.findByText("Analyst")
     // Block lives in the Actions column but reads the spend row, so like the
     // two operator-only columns it arrives with the organization context.
-    const block = await within(rowFor("Analyst")).findByRole("button", {
-      name: "Block",
-    })
-    await actor.click(block)
+    await pressRowAction(actor, "Block", rowFor("Analyst"))
 
     const patch = requests.find(
       (r) => r.method === "PATCH" && r.url.includes(`${API_ROOT}/users/`),
@@ -1268,9 +1287,7 @@ describe("OrganizationMembersPage", () => {
     renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
-    await actor.click(
-      within(rowFor("Analyst")).getByRole("button", { name: "Edit" }),
-    )
+    await pressRowAction(actor, "Edit…", rowFor("Analyst"))
 
     // A dialog rather than a band above the roster: the row keeps its place,
     // and the page under it does not shift by the height of a form
@@ -1320,7 +1337,7 @@ describe("OrganizationMembersPage", () => {
 
     await screen.findByText("Analyst")
     const row = rowFor("Analyst")
-    await actor.click(within(row).getByRole("button", { name: "Edit" }))
+    await pressRowAction(actor, "Edit…", row)
     await screen.findByText("Workspace access")
 
     // Already in Default Workspace on the Small budget; move to Large and join
@@ -1400,9 +1417,7 @@ describe("OrganizationMembersPage", () => {
     renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
-    await actor.click(
-      within(rowFor("Analyst")).getByRole("button", { name: "Edit" }),
-    )
+    await pressRowAction(actor, "Edit…", rowFor("Analyst"))
     await screen.findByText("Workspace access")
     await pickOption(actor, "Budget in Default Workspace", "Large")
     await actor.click(screen.getByRole("button", { name: "Save" }))
@@ -1545,9 +1560,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
-    await actor.click(
-      within(rowFor("Analyst")).getByRole("button", { name: "Edit" }),
-    )
+    await pressRowAction(actor, "Edit…", rowFor("Analyst"))
     await screen.findByText("Workspace access")
     await pickOption(actor, "Budget in Default Workspace", "Team cap")
     await actor.click(screen.getByRole("button", { name: "Save" }))
@@ -1600,9 +1613,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
-    await actor.click(
-      within(rowFor("Analyst")).getByRole("button", { name: "Edit" }),
-    )
+    await pressRowAction(actor, "Edit…", rowFor("Analyst"))
     await screen.findByText("Workspace access")
     expect(selectTrigger("Budget in Default Workspace")).toHaveTextContent(
       "Set by the deployment",
@@ -1623,9 +1634,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
-    await actor.click(
-      within(rowFor("Analyst")).getByRole("button", { name: "Edit" }),
-    )
+    await pressRowAction(actor, "Edit…", rowFor("Analyst"))
     await screen.findByText("Workspace access")
 
     expect(screen.queryByText(/Model access/)).not.toBeInTheDocument()
@@ -1643,9 +1652,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
-    await actor.click(
-      within(rowFor("Analyst")).getByRole("button", { name: "Edit" }),
-    )
+    await pressRowAction(actor, "Edit…", rowFor("Analyst"))
     await screen.findByText("Workspace access")
 
     expect(screen.getByText(/Model access/)).toBeInTheDocument()
@@ -1665,9 +1672,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
-    await actor.click(
-      within(rowFor("Analyst")).getByRole("button", { name: "Edit" }),
-    )
+    await pressRowAction(actor, "Edit…", rowFor("Analyst"))
     await screen.findByText("Workspace access")
 
     await actor.click(screen.getByRole("button", { name: "No tool" }))
@@ -1693,10 +1698,9 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     const user = userEvent.setup()
     renderPage(<OrganizationMembersPage />, { mail_ready: true })
 
-    expect(
-      await screen.findByText(/Owners and admins manage it/),
-    ).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "How roles work" }))
+    await user.click(
+      await screen.findByRole("button", { name: "How roles work" }),
+    )
     expect(screen.getByText(/Roles are fixed\./)).toBeInTheDocument()
     expect(screen.getByText(/Settings and Accounts/)).toBeInTheDocument()
   })

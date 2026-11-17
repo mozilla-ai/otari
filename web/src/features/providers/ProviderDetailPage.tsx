@@ -11,7 +11,6 @@ import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { formatPricedRate } from "@/features/models/pricingUnit"
 import { publicCatalogHref } from "@/features/models/publicCatalog"
 import { ProviderPolicyLinks } from "@/features/providers/ProviderPolicyLinks"
-import { modelCountLabel } from "@/features/providers/ProvidersPage"
 import {
   catalogPage,
   needsPager,
@@ -175,9 +174,12 @@ export function ProviderDetailView({
       return (
         <div className="flex flex-col gap-6">
           <BackLink publicView={publicView} />
-          <PageIntro title="Provider not found">
-            No provider named {name} serves models on this deployment.
-          </PageIntro>
+          <PageIntro
+            title="Provider not found"
+            detail={
+              <>No provider named {name} serves models on this deployment.</>
+            }
+          />
         </div>
       )
     }
@@ -198,10 +200,7 @@ export function ProviderDetailView({
               label={provider.display_name}
             />
           }
-        >
-          {modelCountLabel(provider.model_count)}. Token prices are per million
-          tokens.
-        </PageIntro>
+        />
         <ProviderPolicyLinks provider={provider} />
       </div>
       <section

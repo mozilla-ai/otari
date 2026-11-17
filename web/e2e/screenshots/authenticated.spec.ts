@@ -2,7 +2,13 @@ import { expect, type Page } from "@playwright/test"
 
 import { API_ROOT } from "@/shared/api/client"
 
-import { authHeaders, expectOk, gotoRoute, login } from "../helpers"
+import {
+  authHeaders,
+  expectOk,
+  gotoRoute,
+  login,
+  pressRowAction,
+} from "../helpers"
 import { captureScreenshot, test } from "./fixtures"
 
 /**
@@ -343,9 +349,7 @@ test.describe("organization rail", () => {
     await login(page)
     await ensureOrgProviderKey(page)
     await gotoRoute(page, "/organization/provider-keys")
-    const models = page.getByRole("button", { name: /^Models on / }).first()
-    await expect(models).toBeVisible()
-    await models.click()
+    await pressRowAction(page.getByRole("main"), /^Models on /)
     await expect(
       page.getByRole("heading", { name: /^Models on / }),
     ).toBeVisible()

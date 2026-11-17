@@ -105,11 +105,7 @@ export function ProvidersView({
 
   return (
     <div className="flex flex-col gap-5">
-      <PageIntro title="Providers">
-        {count !== undefined
-          ? `${formatNumber(count)} ${count === 1 ? "provider serves" : "providers serve"} the models on this deployment.`
-          : "The providers that serve the models on this deployment."}
-      </PageIntro>
+      <PageIntro title="Providers" />
       {providers.isError ? <ErrorBanner error={providers.error} /> : null}
       {!rows ? (
         providers.isError ? null : (

@@ -194,7 +194,7 @@ export function DeploymentAccountsPage() {
               ) : null}
               <RowAction
                 icon={FiKey}
-                label="Password link"
+                label="Password link…"
                 isDisabled={linkBlocked !== undefined}
                 ariaLabel={`Send ${accountLabel(account)} a password link${linkBlocked ? ` (${linkBlocked})` : ""}`}
                 onPress={() => setLinkFor(account)}
@@ -215,6 +215,7 @@ export function DeploymentAccountsPage() {
                 label={
                   account.is_superuser ? "Remove operator" : "Make operator"
                 }
+                isDestructive={account.is_superuser}
                 isDisabled={
                   (account.is_superuser && blocked !== undefined) ||
                   update.isPending
@@ -236,7 +237,8 @@ export function DeploymentAccountsPage() {
                 // the same act: this person's access stops, their record
                 // stays.
                 icon={account.is_active ? FiSlash : FiCheckCircle}
-                label={account.is_active ? "Deactivate" : "Reactivate"}
+                label={account.is_active ? "Deactivate…" : "Reactivate"}
+                isDestructive={account.is_active}
                 isDisabled={
                   (account.is_active && blocked !== undefined) ||
                   update.isPending
@@ -303,13 +305,7 @@ export function DeploymentAccountsPage() {
 
   return (
     <div className="flex flex-col">
-      <PageIntro title="Accounts">
-        Every account on this deployment, across all its organizations.
-        Deactivating one ends its dashboard sessions immediately; operator
-        access is what reaches this page. A password link lets someone who
-        forgot their password back in, including where this deployment sends no
-        mail.
-      </PageIntro>
+      <PageIntro title="Accounts" />
 
       <ErrorBanner error={accounts.error ?? update.error} />
 

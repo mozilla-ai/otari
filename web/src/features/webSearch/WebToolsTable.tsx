@@ -192,13 +192,14 @@ function ToolActions({
           <>
             <RowAction
               icon={FiEdit2}
-              label="Edit"
+              label="Edit…"
               ariaLabel={`Edit ${tool.name}`}
               onPress={onEdit}
             />
             <RowAction
               icon={FiTrash2}
-              label="Remove"
+              label="Remove…"
+              isDestructive
               ariaLabel={`Remove ${tool.name}`}
               onPress={onRemove}
             />
@@ -206,7 +207,7 @@ function ToolActions({
         ) : isPriceFromConfig ? null : (
           <RowAction
             icon={FiEdit2}
-            label="Edit price"
+            label="Edit price…"
             ariaLabel={`Edit the price of ${tool.name}`}
             isDisabled={price.state === "pending" || price.state === "error"}
             onPress={onEditPrice}
@@ -446,7 +447,7 @@ export function WebToolsTable({
           <RowActionRow>
             <RowAction
               icon={FiEdit2}
-              label="Edit price"
+              label="Edit price…"
               ariaLabel={`Edit the price of ${ORGANIZATION_KEY_ROW[kind].label}`}
               isDisabled={
                 row.price.state === "pending" || row.price.state === "error"
