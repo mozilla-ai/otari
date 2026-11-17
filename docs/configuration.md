@@ -7,10 +7,13 @@ configuration and which values can be changed without a restart.
 
 ## Config file
 
-Pass a file explicitly:
+Pass a file explicitly, or name it in `OTARI_CONFIG_PATH`, which a container or
+service manager can set without changing the command. `--config` wins when both
+are given.
 
 ```bash
 otari serve --config config.yml
+OTARI_CONFIG_PATH=config.yml otari serve
 ```
 
 A small configuration looks like this:

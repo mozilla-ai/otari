@@ -72,6 +72,8 @@ def cli() -> None:
     "--config",
     "-c",
     type=click.Path(exists=True, dir_okay=False),
+    envvar="OTARI_CONFIG_PATH",
+    show_envvar=True,
     help="Path to config YAML file",
     default=None,
 )
@@ -167,7 +169,14 @@ def serve(
 
 
 @cli.command()
-@click.option("--config", "-c", type=click.Path(exists=True), help="Path to config YAML file")
+@click.option(
+    "--config",
+    "-c",
+    type=click.Path(exists=True),
+    envvar="OTARI_CONFIG_PATH",
+    show_envvar=True,
+    help="Path to config YAML file",
+)
 @click.option("--database-url", envvar="DATABASE_URL", help="Database connection URL")
 def init_db(config: str | None, database_url: str | None) -> None:
     """Initialize the database schema."""
@@ -186,7 +195,14 @@ def init_db(config: str | None, database_url: str | None) -> None:
 
 
 @cli.command()
-@click.option("--config", "-c", type=click.Path(exists=True), help="Path to config YAML file")
+@click.option(
+    "--config",
+    "-c",
+    type=click.Path(exists=True),
+    envvar="OTARI_CONFIG_PATH",
+    show_envvar=True,
+    help="Path to config YAML file",
+)
 @click.option("--database-url", envvar="DATABASE_URL", help="Database connection URL")
 @click.option("--revision", default="head", help="Target revision (default: head)")
 def migrate(config: str | None, database_url: str | None, revision: str) -> None:
@@ -262,6 +278,8 @@ def routing() -> None:
     "--config",
     "-c",
     type=click.Path(exists=True, dir_okay=False),
+    envvar="OTARI_CONFIG_PATH",
+    show_envvar=True,
     help="Path to config YAML file",
     default=None,
 )
