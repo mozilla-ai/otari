@@ -552,39 +552,6 @@ def unresolvable_model_detail(model_selector: str) -> str:
     )
 
 
-def misspelled_model_suggestions(
-    organization_id: uuid.UUID | None, *, instance: str, provider: str, model: str
-) -> list[str] | None:
-    """The nearest catalog ids when ``model`` looks misspelled, else None.
-
-    It looks misspelled when ``instance`` is a vendor or instance the
-    organization's catalog has models under, and neither the catalog nor
-    models.dev knows ``model``: most often a typo of a catalog id
-    (``openai/gpt-oss-12``). A known model, and a prefix the catalog has nothing
-    under, such as an undeclared local provider, are None.
-    """
-    models = catalog_models(organization_id=organization_id)
-    prefix, wanted = instance.lower(), model.lower()
-    known_prefix = False
-    for entry in models:
-        vendor, _, name = entry.id.lower().rpartition("/")
-        offered = [offering.lower().partition(":") for offering in entry.offerings]
-        if wanted == name or any(wanted == offered_model for _, _, offered_model in offered):
-            return None
-        known_prefix = known_prefix or prefix == vendor or any(prefix == served_by for served_by, _, _ in offered)
-    if not known_prefix:
-        return None
-    if metadata_entry(cached_models_dev_catalog(), provider, model) is not None:
-        return None
-    return difflib.get_close_matches(f"{instance}/{model}".lower(), [entry.id for entry in models], n=2)
-
-
-def unknown_model_detail(model_selector: str, nearest: Sequence[str]) -> str:
-    """404 detail for a model no offering of the deployment has, naming the ``nearest`` catalog ids."""
-    suggestion = f" Did you mean {' or '.join(nearest)}?" if nearest else ""
-    return f"Unknown model {model_selector!r}.{suggestion} See GET {API_ROOT}/models."
-
-
 def _quoted(names: tuple[str, ...]) -> str:
     return ", ".join(f"'{name}'" for name in names)
 
@@ -618,6 +585,40 @@ class ModelRefusal:
     code: str
     status_code: int
     detail: str
+
+
+def misspelled_model_refusal(
+    organization_id: uuid.UUID | None, *, instance: str, provider: str, model: str, selector: str
+) -> ModelRefusal | None:
+    """A 404 naming the nearest catalog ids when ``model`` looks misspelled, else None.
+
+    It looks misspelled when ``instance`` is a vendor or instance the
+    organization's catalog has models under, and neither the catalog nor
+    models.dev knows ``model``: most often a typo of a catalog id
+    (``openai/gpt-oss-12``). A known model, and a prefix the catalog has nothing
+    under, such as an undeclared local provider, are None. The detail echoes
+    ``selector``, the model as the caller sent it.
+    """
+    models = catalog_models(organization_id=organization_id)
+    prefix, wanted = instance.lower(), model.lower()
+    known_prefix = False
+    for entry in models:
+        vendor, _, name = entry.id.lower().rpartition("/")
+        offered = [offering.lower().partition(":") for offering in entry.offerings]
+        if wanted == name or any(wanted == offered_model for _, _, offered_model in offered):
+            return None
+        known_prefix = known_prefix or prefix == vendor or any(prefix == served_by for served_by, _, _ in offered)
+    if not known_prefix:
+        return None
+    if metadata_entry(cached_models_dev_catalog(), provider, model) is not None:
+        return None
+    nearest = difflib.get_close_matches(f"{instance}/{model}".lower(), [entry.id for entry in models], n=2)
+    suggestion = f" Did you mean {' or '.join(nearest)}?" if nearest else ""
+    return ModelRefusal(
+        code=MODEL_NOT_FOUND,
+        status_code=HTTPStatus.NOT_FOUND,
+        detail=f"Unknown model {selector!r}.{suggestion} See GET {API_ROOT}/models.",
+    )
 
 
 def unresolved_model_refusal(resolved_instance: str | None, *, selector: str) -> ModelRefusal | None:

@@ -19,7 +19,7 @@ from gateway.services.model_access import (
     is_tool_allowlist_subset,
     key_model_refusal,
     legacy_tool_grants,
-    misspelled_model_suggestions,
+    misspelled_model_refusal,
     org_model_refusal,
     tool_not_allowed_detail,
     tools_within_user,
@@ -458,14 +458,24 @@ def gpt_oss_catalog() -> Iterator[None]:
 
 
 @pytest.mark.usefixtures("gpt_oss_catalog")
+def test_a_misspelled_model_is_refused_naming_the_nearest_ids() -> None:
+    refusal = misspelled_model_refusal(
+        None, instance="openai", provider="openai", model="gpt-oss-12", selector="OpenAI/gpt-oss-12"
+    )
+
+    assert refusal is not None
+    assert (refusal.code, refusal.status_code) == (MODEL_NOT_FOUND, 404)
+    assert refusal.detail == (
+        "Unknown model 'OpenAI/gpt-oss-12'. Did you mean openai/gpt-oss-120b or openai/gpt-oss-20b?"
+        " See GET /api/v1/models."
+    )
+
+
+@pytest.mark.usefixtures("gpt_oss_catalog")
 @pytest.mark.parametrize(
-    ("instance", "model", "expected"),
-    [
-        ("openai", "gpt-oss-12", ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]),
-        ("openai", "gpt-oss-120b", None),
-        ("mistral", "no-such-model", None),
-    ],
-    ids=["a typo under a catalog vendor", "a model the catalog has", "a prefix the catalog has nothing under"],
+    ("instance", "model"),
+    [("openai", "gpt-oss-120b"), ("mistral", "no-such-model")],
+    ids=["a model the catalog has", "a prefix the catalog has nothing under"],
 )
-def test_misspelled_model_suggestions(instance: str, model: str, expected: list[str] | None) -> None:
-    assert misspelled_model_suggestions(None, instance=instance, provider=instance, model=model) == expected
+def test_a_model_that_does_not_look_misspelled_is_not_refused(instance: str, model: str) -> None:
+    assert misspelled_model_refusal(None, instance=instance, provider=instance, model=model, selector=model) is None

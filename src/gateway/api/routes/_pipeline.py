@@ -133,7 +133,6 @@ from gateway.core.error_codes import (
     COUNTRY_NOT_SUPPORTED,
     INSUFFICIENT_FUNDS,
     INVALID_MODEL,
-    MODEL_NOT_FOUND,
     PRICING_REQUIRED,
     PROVIDER_NOT_CONFIGURED,
     USER_BLOCKED,
@@ -294,13 +293,12 @@ from gateway.services.mcp_stateless import failure_class
 from gateway.services.model_access import (
     McpAccess,
     key_model_refusal,
-    misspelled_model_suggestions,
+    misspelled_model_refusal,
     model_not_allowed_detail,
     organization_key_refusal,
     owned_endpoint_refusal,
     resolve_request_allowlist,
     resolve_request_mcp_access,
-    unknown_model_detail,
     unresolvable_model_detail,
     unresolved_model_refusal,
 )
@@ -1186,12 +1184,15 @@ async def _refuse_if_model_unknown(
     """
     if resolved.alias is not None:
         return
-    nearest = misspelled_model_suggestions(
-        ctx.organization_id, instance=resolved.instance, provider=resolved.provider.value, model=resolved.model
+    refusal = misspelled_model_refusal(
+        ctx.organization_id,
+        instance=resolved.instance,
+        provider=resolved.provider.value,
+        model=resolved.model,
+        selector=model_selector,
     )
-    if nearest is None:
+    if refusal is None:
         return
-    detail = unknown_model_detail(model_selector, nearest)
     await release_reservation(ctx)
     await log_gateway_rejection(
         db=ctx.db,
@@ -1201,14 +1202,19 @@ async def _refuse_if_model_unknown(
         model=resolved.model,
         provider=resolved.instance,
         endpoint=adapter.endpoint,
-        detail=detail,
-        status_code=status.HTTP_404_NOT_FOUND,
+        detail=refusal.detail,
+        status_code=refusal.status_code,
         started_at=ctx.started_at,
         request_id=ctx.request_id,
         tags=ctx.tags,
         safety_identifier=ctx.upstream_user,
     )
-    raise adapter.error(status.HTTP_404_NOT_FOUND, detail, ErrorKind.NOT_FOUND, headers=error_headers(MODEL_NOT_FOUND))
+    raise adapter.error(
+        refusal.status_code,
+        refusal.detail,
+        ErrorKind.from_status(refusal.status_code),
+        headers=error_headers(refusal.code),
+    )
 
 
 async def _hold_at_deployment_paid_rate(
