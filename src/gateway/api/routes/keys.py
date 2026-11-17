@@ -22,6 +22,7 @@ from gateway.api.routes.users import TOTAL_COUNT_HEADER
 from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
+from gateway.core.sql import utc_iso
 from gateway.core.surface import Surface
 from gateway.models.api_keys import MAX_END_USER_BUDGETS, APIKey, DisabledReason
 from gateway.models.tenancy import Workspace
@@ -273,9 +274,9 @@ class KeyInfo(BaseModel):
             key_suffix=str(key.key_suffix) if key.key_suffix else None,
             key_name=str(key.key_name) if key.key_name else None,
             user_id=str(key.user_id) if key.user_id else None,
-            created_at=key.created_at.isoformat(),
-            last_used_at=key.last_used_at.isoformat() if key.last_used_at else None,
-            expires_at=key.expires_at.isoformat() if key.expires_at else None,
+            created_at=utc_iso(key.created_at),
+            last_used_at=utc_iso(key.last_used_at) if key.last_used_at else None,
+            expires_at=utc_iso(key.expires_at) if key.expires_at else None,
             is_active=bool(key.is_active),
             disabled_reason=key.disabled_reason,
             operator_can_enable=operator_enable_refusal(key) is None,
