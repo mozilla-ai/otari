@@ -21,8 +21,22 @@ test.describe("dashboard addresses", () => {
     page,
   }) => {
     await login(page)
+    await page.goto("/budgets")
+    await expect(pageHeading(page, "Budgets")).toBeVisible()
+    // A page load: the script runs ahead of the bundle.
     await page.goto("/#/routing")
-    await expect(page).toHaveURL(/\/routing$/)
+    await expect(page).toHaveURL(/:\d+\/routing$/)
+    await expect(pageHeading(page, "Routing")).toBeVisible()
+  })
+
+  test("an old link opened in a tab already on the dashboard moves too", async ({
+    page,
+  }) => {
+    await login(page)
+    // `login` lands on the root, so this changes only the fragment and loads
+    // nothing, which is the case the script's `hashchange` listener covers.
+    await page.goto("/#/routing")
+    await expect(page).toHaveURL(/:\d+\/routing$/)
     await expect(pageHeading(page, "Routing")).toBeVisible()
   })
 

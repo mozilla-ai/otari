@@ -144,7 +144,7 @@ test.describe("tenancy", () => {
       inviteDialog.getByText(/Otari did not send the email/),
     ).toBeVisible()
     const link = await inviteDialog
-      .getByText(/^http:\/\/.+#\/accept-invitation\?token=/)
+      .getByText(/^http:\/\/.+\/accept-invitation#token=/)
       .textContent()
     expect(link).toBeTruthy()
     await inviteDialog.getByRole("button", { name: "Done" }).click()
