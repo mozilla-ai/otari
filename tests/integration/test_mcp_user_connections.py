@@ -495,7 +495,8 @@ async def test_a_failed_listing_after_one_users_sign_in_keeps_the_read_hints_for
                 "tools": ["list_files", "delete_file"],
                 "read_only_hinted_tools": ["list_files"],
                 "tool_count": 2,
-            }
+            },
+            read_tools_hinted=["list_files"],
         )
     )
     await async_db.commit()
@@ -527,7 +528,8 @@ async def test_an_allow_list_edit_keeps_the_read_hints_a_check_cannot_list_again
                 "tools": ["list_files", "delete_file"],
                 "read_only_hinted_tools": ["list_files"],
                 "tool_count": 2,
-            }
+            },
+            read_tools_hinted=["list_files"],
         )
     )
     await async_db.commit()
@@ -543,7 +545,7 @@ async def test_an_allow_list_edit_keeps_the_read_hints_a_check_cannot_list_again
     assert row.read_tools is None and row.health is not None
     assert (row.health["read_only_hinted_tools"], row.health["checked_at"]) == (["list_files"], checked_at)
     assert (row.health["tool_count"], row.health["missing_allowed_tools"]) == (1, ["rename_file"])
-    assert mcp_read_tools(row.read_tools, row.health) == ["list_files"]
+    assert mcp_read_tools(row.read_tools, row.read_tools_hinted) == ["list_files"]
 
     # Another URL is another server: what the old one offered says nothing about it.
     await _service(async_db, config).update_server(
@@ -552,7 +554,8 @@ async def test_an_allow_list_edit_keeps_the_read_hints_a_check_cannot_list_again
         server_id=world.server.id,
         request=WorkspaceMcpServerUpdate(url=PUBLIC_URL + "/v2"),
     )
-    assert (await _row(async_db, world.server.id)).health is None
+    moved = await _row(async_db, world.server.id)
+    assert (moved.health, moved.read_tools_hinted) == (None, None)
 
 
 async def test_a_check_sign_in_never_becomes_a_connection(

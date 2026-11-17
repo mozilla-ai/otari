@@ -389,10 +389,11 @@ class WorkspaceMcpServerPublic(BaseModel):
     everyone_tools: list[str] = Field(description="What every key of the workspace may call; [] denies everyone")
     read_tools: list[str] = Field(
         description="The tool names '@read' stands for: a manager's labels, or until one edits them the tools "
-        "the server marks readOnlyHint, as last listed"
+        "the server marked readOnlyHint when its tools were first listed. A later listing never adds to them"
     )
     read_tools_from_server: bool = Field(
-        description="True while no manager has edited read_tools, so they follow the server's own readOnlyHint"
+        description="True while no manager has edited read_tools, so they are the readOnlyHint of the "
+        "server's first listing"
     )
     has_token: bool
     credential_mode: McpCredentialMode = Field(
@@ -788,8 +789,8 @@ async def _validate_url(url: str, *, has_token: bool) -> None:
 
 
 def _read_tools(server: WorkspaceMcpServer) -> list[str]:
-    """The tools ``@read`` stands for on a server: its labels, or the server's own until a manager sets them."""
-    return mcp_read_tools(server.read_tools, server.health)
+    """The tools ``@read`` stands for: a manager's labels, or the hints of the server's first listing."""
+    return mcp_read_tools(server.read_tools, server.read_tools_hinted)
 
 
 def _encrypted(token: str) -> str:
@@ -1483,6 +1484,7 @@ class WorkspaceMcpServerService:
             previous = WorkspaceMcpServerHealth.model_validate(server.health)
             health = health.model_copy(update={"read_only_hinted_tools": previous.read_only_hinted_tools})
         server.health = health.model_dump(mode="json")
+        WorkspaceMcpServerHealth.keep_first_read_hints(server)
         await self.db.commit()
         await self.db.refresh(server)
         logger.info("MCP server checked server_id=%s outcome=%s", server.id, check.failure or "ok")
@@ -1758,6 +1760,9 @@ class WorkspaceMcpServerService:
             McpConnectionService.unpin_client(server)
         for field, value in fields.items():
             setattr(server, field, value)
+        if url_changed:
+            # Another address is another server: its first listing is the one whose hints '@read' keeps.
+            server.read_tools_hinted = None
         if connection_changed:
             # An edit of the allow-list alone keeps the server and its credentials: what it last found
             # still stands, read against the new list, as a per-user server's check cannot list it again.

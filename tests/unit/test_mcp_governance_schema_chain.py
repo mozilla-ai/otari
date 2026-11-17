@@ -150,3 +150,38 @@ def test_empty_read_labels_stay_empty_where_a_rule_uses_read_and_the_chain_round
     command.upgrade(config, _REVISION)
     with engine.connect() as connection:
         assert read_labels(connection) == EXPECTED_AFTER_UPGRADE
+
+
+_HINTS = sa.table(
+    "workspace_mcp_servers",
+    sa.column("name", sa.String()),
+    sa.column("health", sa.JSON()),
+    sa.column("read_tools_hinted", sa.JSON()),
+)
+
+
+def test_the_hints_a_server_already_listed_are_kept_and_one_never_listed_waits(
+    sqlite_before: tuple[Config, Engine],
+) -> None:
+    config, engine = sqlite_before
+    with engine.begin() as connection:
+        workspace_id = connection.execute(sa.text("SELECT id FROM workspace")).scalars().first()
+        seed_servers(connection, uuid.UUID(hex=workspace_id))
+    command.upgrade(config, _REVISION)
+    listed = {"status": "healthy", "tool_count": 2, "read_only_hinted_tools": ["list_issues"]}
+    failing = {"status": "failing", "tool_count": None, "read_only_hinted_tools": ["list_issues"]}
+    with engine.begin() as connection:
+        connection.execute(_HINTS.update().where(_HINTS.c.name == "no-rules").values(health=listed))
+        connection.execute(_HINTS.update().where(_HINTS.c.name == "granted-other").values(health=failing))
+
+    command.upgrade(config, "d4a8e1f6b3c9")
+    with engine.connect() as connection:
+        hinted = dict(connection.execute(sa.select(_HINTS.c.name, _HINTS.c.read_tools_hinted)).all())
+    assert hinted["no-rules"] == ["list_issues"]
+    assert hinted["granted-other"] is None, "a health with no listing in it is not a first listing"
+    assert hinted["labeled"] is None
+
+    command.downgrade(config, _REVISION)
+    assert "read_tools_hinted" not in {
+        column["name"] for column in inspect(engine).get_columns("workspace_mcp_servers")
+    }

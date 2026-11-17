@@ -23379,7 +23379,7 @@ export interface components {
             missing_allowed_tools?: string[];
             /**
              * Read Only Hinted Tools
-             * @description Those of tools the server annotates readOnlyHint: untrusted, and what read_tools follows until a manager edits the labels
+             * @description Those of tools the server annotates readOnlyHint in this listing: untrusted, and never what '@read' stands for after the server's first listing
              */
             read_only_hinted_tools?: string[];
             /**
@@ -23589,12 +23589,12 @@ export interface components {
             purpose_hint: string | null;
             /**
              * Read Tools
-             * @description The tool names '@read' stands for: a manager's labels, or until one edits them the tools the server marks readOnlyHint, as last listed
+             * @description The tool names '@read' stands for: a manager's labels, or until one edits them the tools the server marked readOnlyHint when its tools were first listed. A later listing never adds to them
              */
             read_tools: string[];
             /**
              * Read Tools From Server
-             * @description True while no manager has edited read_tools, so they follow the server's own readOnlyHint
+             * @description True while no manager has edited read_tools, so they are the readOnlyHint of the server's first listing
              */
             read_tools_from_server: boolean;
             /** @description On a shared server: the account a manager signed in to for everyone, which every call carries in place of a token; null when it has none */

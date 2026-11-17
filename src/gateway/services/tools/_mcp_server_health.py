@@ -22,7 +22,7 @@ from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.exceptions.tools_exceptions import McpConnectionUnavailableError, McpSignInRequiredError
 from gateway.log_config import logger
-from gateway.models.tools import McpCredentialMode
+from gateway.models.tools import McpCredentialMode, WorkspaceMcpServer
 from gateway.repositories.tools import WorkspaceMcpServerRepository
 from gateway.services.mcp_stateless import (
     CheckFailure,
@@ -75,8 +75,8 @@ class WorkspaceMcpServerHealth(BaseModel):
     )
     read_only_hinted_tools: list[str] = Field(
         default_factory=list,
-        description="Those of tools the server annotates readOnlyHint: untrusted, and what read_tools "
-        "follows until a manager edits the labels",
+        description="Those of tools the server annotates readOnlyHint in this listing: untrusted, and "
+        "never what '@read' stands for after the server's first listing",
     )
     tool_descriptions: dict[str, str] = Field(
         default_factory=dict,
@@ -95,6 +95,19 @@ class WorkspaceMcpServerHealth(BaseModel):
     def _literal_names(cls, names: list[str]) -> list[str]:
         """Drop a name a rule would read as a pattern, from a fresh check and from one stored before this screen."""
         return [name for name in names if not reads_as_pattern(name)]
+
+    @staticmethod
+    def keep_first_read_hints(server: WorkspaceMcpServer) -> None:
+        """Record on ``server`` the read-only hints of its first tool listing, once that listing is in its health.
+
+        Only the first: a listing after it changes nothing, so a server that relabels a tool read-only
+        later cannot widen what '@read' stands for. Only a manager's labels change that.
+        """
+        if server.read_tools_hinted is not None or server.health is None:
+            return
+        health = WorkspaceMcpServerHealth.model_validate(server.health)
+        if health.status == "healthy" and health.tool_count is not None:
+            server.read_tools_hinted = list(health.read_only_hinted_tools)
 
     @staticmethod
     def from_check(allowed_tools: list[str] | None, check: ServerCheck) -> WorkspaceMcpServerHealth:
@@ -373,6 +386,7 @@ class McpServerContacts:
             if health is None:
                 return "decided"
             server.health = health
+            WorkspaceMcpServerHealth.keep_first_read_hints(server)
         logger.info("MCP server contact recorded server_id=%s outcome=%s", contact.server_id, contact.failure or "ok")
         return "decided"
 

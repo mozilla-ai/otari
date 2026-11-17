@@ -15,10 +15,11 @@ from mcp.types import Tool as MCPTool
 
 from gateway.exceptions.tools_exceptions import McpSignInRequiredError
 from gateway.models.mcp import McpServerConfig
+from gateway.models.tools import WorkspaceMcpServer
 from gateway.services.mcp_client import MCPClientPool
 from gateway.services.mcp_stateless import CheckFailure, ServerCheck
 from gateway.services.model_access import mcp_read_tools
-from gateway.services.tools import McpServerContact, McpServerContacts
+from gateway.services.tools import McpServerContact, McpServerContacts, WorkspaceMcpServerHealth
 from gateway.services.tools._mcp_server_health import (
     _MAX_PENDING_WRITES,
     CONTACT_WRITE_INTERVAL_S,
@@ -93,18 +94,17 @@ def test_a_change_is_written_at_once() -> None:
     assert recovered is not None and recovered["status"] == "healthy"
 
 
-def test_a_failed_contact_keeps_the_read_hints_that_read_labels_follow() -> None:
-    """``@read`` follows these hints until a manager labels tools, so one failure must not empty it."""
+def test_a_failed_contact_keeps_the_read_hints_on_record() -> None:
     fresh = server_health(None, LISTING).model_dump(mode="json")
 
     failed = _after(fresh, McpServerContact(SERVER, URL, failure=CheckFailure.UNREACHABLE))
     assert failed is not None and failed["status"] == "failing"
     assert failed["tools"] == [] and failed["tool_count"] is None
-    assert mcp_read_tools(None, failed) == ["list_issues"]
+    assert failed["read_only_hinted_tools"] == ["list_issues"]
 
     answered = _after(failed, McpServerContact(SERVER, URL))
     assert answered is not None and answered["status"] == "healthy"
-    assert mcp_read_tools(None, answered) == ["list_issues"]
+    assert answered["read_only_hinted_tools"] == ["list_issues"]
 
 
 def test_an_old_answer_is_refreshed() -> None:
@@ -155,7 +155,7 @@ def test_an_allow_list_edit_does_not_call_a_tool_past_the_stored_preview_missing
 
     assert (health.tool_count, health.missing_allowed_tools) == (None, [])
     assert health.read_only_hinted_tools == ["tool_0", names[-1]]
-    assert mcp_read_tools(None, health.model_dump(mode="json")) == ["tool_0", names[-1]]
+    assert mcp_read_tools(None, health.read_only_hinted_tools) == ["tool_0", names[-1]]
 
 
 class _Recorder(McpServerContacts):
@@ -344,13 +344,32 @@ async def test_a_write_that_fails_never_reaches_the_request() -> None:
     await recorder.drain()
 
 
-def test_unset_read_labels_follow_the_tools_the_server_marks_read_only() -> None:
-    health = {"read_only_hinted_tools": ["list_issues", "*", " @read", "a,b", "list_issues"]}
+def test_unset_read_labels_are_the_hints_of_the_first_listing() -> None:
+    hinted = ["list_issues", "*", " @read", "a,b", "list_issues"]
 
-    assert mcp_read_tools(None, health) == ["list_issues"]
+    assert mcp_read_tools(None, hinted) == ["list_issues"]
     assert mcp_read_tools(None, None) == []
-    assert mcp_read_tools([], health) == []
-    assert mcp_read_tools(["get_issue"], health) == ["get_issue"]
+    assert mcp_read_tools([], hinted) == []
+    assert mcp_read_tools(["get_issue"], hinted) == ["get_issue"]
+
+
+def test_only_the_first_listing_s_hints_are_kept() -> None:
+    server = WorkspaceMcpServer(workspace_id=uuid.uuid4(), name="s", url=URL)
+    server.health = WorkspaceMcpServerHealth(status="healthy", checked_at="2026-01-01T00:00:00+00:00").model_dump(
+        mode="json"
+    )
+    WorkspaceMcpServerHealth.keep_first_read_hints(server)
+    assert server.read_tools_hinted is None, "an answer that listed nothing is not a listing"
+
+    server.health = server_health(None, LISTING).model_dump(mode="json")
+    WorkspaceMcpServerHealth.keep_first_read_hints(server)
+    assert server.read_tools_hinted == ["list_issues"]
+
+    both = ["list_issues", "create_issue"]
+    relabeled = ServerCheck(tool_names=both, read_only_hinted=both)
+    server.health = server_health(None, relabeled).model_dump(mode="json")
+    WorkspaceMcpServerHealth.keep_first_read_hints(server)
+    assert server.read_tools_hinted == ["list_issues"]
 
 
 class _Heard:
