@@ -437,6 +437,13 @@ class UsageLogRepository(BaseRepository[UsageLog, Never, Never]):
         self.db.add(row)
         await self.db.flush()
 
+    async def add_many(self, rows: list[UsageLog]) -> None:
+        """Stage usage rows together in the current transaction."""
+        if not rows:
+            return
+        self.db.add_all(rows)
+        await self.db.flush()
+
     async def served_traffic(self, *, workspace_ids: Collection[uuid.UUID], since: datetime) -> list[ServedTraffic]:
         """The requests served here since ``since`` in these workspaces, by name sent, offering reached and key.
 

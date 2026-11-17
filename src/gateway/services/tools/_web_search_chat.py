@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Literal
 
 from gateway.schemas.tools import OtariToolCallError, OtariToolCallSource
-from gateway.services.tools._chat_tool_calls import call_limit_error, chat_entry
+from gateway.services.tools._chat_tool_calls import chat_entry, refusal_error
 from gateway.services.tools._web_display import hits_to_show, search_query, take_last_hits
 from gateway.services.tools._web_names import WEB_RETRIEVAL_RESULT_MAX_BYTES
 from gateway.services.tools._web_search_responses import WEB_SEARCH_CALL_ID_PREFIX
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
     from any_search import SearchHit
     from gateway.services._tool_loop import ToolBackend
-    from gateway.services.tools._native import NativeCall
+    from gateway.services.tools._native import NativeCall, Refusal
 
 
 class ChatWebSearchRendering:
@@ -49,9 +49,9 @@ class ChatWebSearchRendering:
             return [_entry(call, "failed", error=error)]
         return [_entry(call, "completed", sources=_sources(take_last_hits(pool) or []))]
 
-    def refused(self, call: NativeCall) -> list[Any]:
-        """The ended entry for a search the use cap refused before it ran."""
-        return [_entry(call, "failed", error=call_limit_error())]
+    def refused(self, call: NativeCall, reason: Refusal) -> list[Any]:
+        """The ended entry for a search refused before it ran."""
+        return [_entry(call, "failed", error=refusal_error(reason))]
 
 
 def _entry(

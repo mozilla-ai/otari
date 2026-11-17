@@ -143,8 +143,8 @@ model, except a module on the model's baseline.
   contains `Listener`. Flag a default on a listener whose type does not name
   it, such as a bare `Callable`.
 
-The boundary check does not enforce the cycle rule yet, so review is the only
-gate for it.
+The boundary check enforces the cycle rule, so a diff that adds one fails
+before review sees it.
 
 ## Errors
 

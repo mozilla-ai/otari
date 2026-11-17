@@ -18,6 +18,7 @@ from gateway.services.tools import (
     CombinedToolBackend,
     Dialect,
     NativeCall,
+    Refusal,
     WebToolCallCap,
     build_web_search_backends,
     native_rendering,
@@ -100,12 +101,16 @@ def test_a_pool_that_kept_no_results_is_not_the_gateway_search_backend() -> None
     assert _rendering(Dialect.MESSAGES).ran(_call(), _McpPoolLike()) == []
 
 
-def test_a_refused_search_is_reported_in_the_anthropic_error_shape() -> None:
-    use, result = _rendering(Dialect.MESSAGES).refused(_call())
+@pytest.mark.parametrize(
+    ("reason", "error_code"),
+    [(Refusal.CALL_LIMIT, "max_uses_exceeded"), (Refusal.INVALID_INPUT, "invalid_tool_input")],
+)
+def test_a_refused_search_is_reported_in_the_anthropic_error_shape(reason: Refusal, error_code: str) -> None:
+    use, result = _rendering(Dialect.MESSAGES).refused(_call(), reason)
 
     assert use.input == {"query": "what is the latest python?"}
     assert result.tool_use_id == use.id
-    assert result.content.error_code == "max_uses_exceeded"
+    assert result.content.error_code == error_code
 
 
 def test_the_responses_item_carries_the_query_and_an_id_the_gateway_minted() -> None:
@@ -118,9 +123,10 @@ def test_the_responses_item_carries_the_query_and_an_id_the_gateway_minted() -> 
     assert item.status == "completed"
 
 
-def test_a_refused_search_is_invisible_in_the_responses_vocabulary() -> None:
+@pytest.mark.parametrize("reason", list(Refusal))
+def test_a_refused_search_is_invisible_in_the_responses_vocabulary(reason: Refusal) -> None:
     """No search ran, so there is nothing to announce."""
-    assert _rendering(Dialect.RESPONSES).refused(_call()) == []
+    assert _rendering(Dialect.RESPONSES).refused(_call(), reason) == []
 
 
 @pytest.mark.parametrize("tool_entry", [{"type": "otari_web_search"}, {"type": "web_search_20250305"}, None])
@@ -189,12 +195,15 @@ def test_a_failed_chat_search_on_the_old_backend_has_no_error() -> None:
     assert "sources" not in ended
 
 
-def test_a_refused_chat_search_fails_with_the_call_limit_tag() -> None:
-    [ended] = _rendering(Dialect.CHAT).refused(_call())
+@pytest.mark.parametrize(
+    ("reason", "tag"), [(Refusal.CALL_LIMIT, "call_limit"), (Refusal.INVALID_INPUT, "invalid_input")]
+)
+def test_a_refused_chat_search_fails_with_the_refusal_tag(reason: Refusal, tag: str) -> None:
+    [ended] = _rendering(Dialect.CHAT).refused(_call(), reason)
 
     assert ended["status"] == "failed"
     assert ended["query"] == "what is the latest python?"
-    assert ended["error"] == {"provider": None, "status": None, "tag": "call_limit", "retryable": False}
+    assert ended["error"] == {"provider": None, "status": None, "tag": tag, "retryable": False}
 
 
 @pytest.mark.parametrize("dialect", [Dialect.MESSAGES, Dialect.RESPONSES])

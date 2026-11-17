@@ -19,7 +19,7 @@ import gateway.models  # noqa: F401  (registers every table on the metadata)
 from gateway.adapters.rate_limit_store_adapter import InMemoryRateLimitStore
 from gateway.core.config import GatewayConfig
 from gateway.core.tokens import hash_token, is_shared_token
-from gateway.core.unit_of_work import UnitOfWork
+from gateway.core.unit_of_work import InsideUnitOfWorkError, UnitOfWork
 from gateway.exceptions.identity_exceptions import InvalidEmailError
 from gateway.exceptions.organizations_exceptions import (
     AddressAlreadyInvitedError,
@@ -48,7 +48,7 @@ from gateway.models.tenancy import (
 )
 from gateway.ports.rate_limit_store_port import RateLimitStorePort, RateLimitWindow
 from gateway.repositories.identity import BlockedEmailRepository
-from gateway.repositories.organizations import NewInvitation, OrganizationRepositories
+from gateway.repositories.organizations import NewInvitation, OrganizationRepositories, SendRequest, SendResult
 from gateway.repositories.organizations.organization_invitation_repository import OrganizationInvitationRepository
 from gateway.repositories.tenancy import (
     OrganizationDomainRepository,
@@ -241,14 +241,17 @@ class _RecordingMailer(Mailer):
 
 
 class _SpyRateLimitStore:
-    """Wraps a real store and counts calls to ``hit``, to prove a refused caller's addresses were never admitted."""
+    """Wraps a real store and records each call to ``hit``: how many, and whether a transaction was open."""
 
-    def __init__(self, inner: RateLimitStorePort) -> None:
+    def __init__(self, inner: RateLimitStorePort, session: AsyncSession) -> None:
         self._inner = inner
+        self._session = session
         self.hit_calls = 0
+        self.in_transaction_at_hit: list[bool] = []
 
     async def hit(self, key: str, limit: int, window_sec: float, cost: int = 1) -> RateLimitWindow:
         self.hit_calls += 1
+        self.in_transaction_at_hit.append(self._session.in_transaction())
         return await self._inner.hit(key, limit, window_sec, cost)
 
     async def settle(self, key: str, handle: str, cost: int) -> None:
@@ -271,6 +274,28 @@ class _RepositoryThatFailsAfterWriting(OrganizationInvitationRepository):
         await super().add_many(news)
         msg = "simulated failure after the write"
         raise RuntimeError(msg)
+
+
+class _RepositoryThatRecordsItsSendRequest(OrganizationInvitationRepository):
+    """Records whether a send request's write matched, so a test can fail the commit that follows it."""
+
+    def __init__(self, db: AsyncSession | UnitOfWork) -> None:
+        super().__init__(db)
+        self.wrote = False
+
+    async def request_send(
+        self,
+        invitation_id: uuid.UUID,
+        organization_id: uuid.UUID,
+        request: SendRequest,
+        *,
+        expected_send_count: int,
+    ) -> SendResult:
+        result = await super().request_send(
+            invitation_id, organization_id, request, expected_send_count=expected_send_count
+        )
+        self.wrote = result.sent
+        return result
 
 
 @pytest_asyncio.fixture
@@ -723,7 +748,7 @@ async def test_every_count_comes_back_when_the_write_fails_after_inserting(store
 async def test_a_viewers_bulk_call_never_touches_the_rate_limit_store(store: _Store) -> None:
     organization_id = await store.organization()
     viewer = await store.actor(organization_id, role="viewer")
-    spy_store = _SpyRateLimitStore(store.rate_limit_store)
+    spy_store = _SpyRateLimitStore(store.rate_limit_store, store._session)
     service = Invitations(
         store.uow,
         store.repositories,
@@ -743,7 +768,7 @@ async def test_a_viewers_bulk_call_never_touches_the_rate_limit_store(store: _St
 async def test_the_owner_role_offered_by_a_non_owner_is_never_counted(store: _Store) -> None:
     organization_id = await store.organization()
     admin = await store.actor(organization_id, role="admin")
-    spy_store = _SpyRateLimitStore(store.rate_limit_store)
+    spy_store = _SpyRateLimitStore(store.rate_limit_store, store._session)
     service = Invitations(
         store.uow,
         store.repositories,
@@ -762,10 +787,99 @@ async def test_the_owner_role_offered_by_a_non_owner_is_never_counted(store: _St
     assert spy_store.hit_calls == 0
 
 
+async def test_invite_many_counts_outside_its_transaction(store: _Store) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id)
+    spy_store = _SpyRateLimitStore(store.rate_limit_store, store._session)
+    service = Invitations(
+        store.uow,
+        store.repositories,
+        clock=store.clock,
+        domains=OrganizationClaimedDomains(OrganizationDomainRepository(store.uow)),
+        mailer=Mailer(_config()),
+        policy=_policy(per_day=100, per_address_per_day=100),
+        store=spy_store,
+    )
+
+    result = await service.invite_many(by, ["ada@example.com", "grace@example.com"], _offer())
+
+    assert len(result.issued) == 2
+    assert spy_store.in_transaction_at_hit == [False] * 8
+
+
+async def test_invite_many_refuses_a_caller_that_holds_a_block_open(store: _Store) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id)
+    spy_store = _SpyRateLimitStore(store.rate_limit_store, store._session)
+    service = Invitations(
+        store.uow,
+        store.repositories,
+        clock=store.clock,
+        domains=OrganizationClaimedDomains(OrganizationDomainRepository(store.uow)),
+        mailer=Mailer(_config()),
+        policy=_policy(),
+        store=spy_store,
+    )
+
+    with pytest.raises(InsideUnitOfWorkError):
+        async with store.uow:
+            await service.invite_many(by, ["ada@example.com"], _offer())
+
+    assert spy_store.hit_calls == 0
+
+
+async def test_resend_refuses_a_caller_that_holds_a_block_open(store: _Store) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id)
+    policy = _policy(resend_wait=timedelta(hours=1))
+    spy_store = _SpyRateLimitStore(store.rate_limit_store, store._session)
+    service = Invitations(
+        store.uow,
+        store.repositories,
+        clock=store.clock,
+        domains=OrganizationClaimedDomains(OrganizationDomainRepository(store.uow)),
+        mailer=Mailer(_config()),
+        policy=policy,
+        store=spy_store,
+    )
+    issued = await service.invite(by, "ada@example.com", _offer())
+    store.clock.now += policy.resend_wait
+    spy_store.hit_calls = 0
+
+    with pytest.raises(InsideUnitOfWorkError):
+        async with store.uow:
+            await service.resend(by, issued.invitation.id)
+
+    assert spy_store.hit_calls == 0
+
+
+async def test_resend_counts_outside_its_transaction(store: _Store) -> None:
+    organization_id = await store.organization()
+    by = await store.actor(organization_id)
+    policy = _policy(resend_wait=timedelta(hours=1), per_day=100, per_address_per_day=100)
+    spy_store = _SpyRateLimitStore(store.rate_limit_store, store._session)
+    service = Invitations(
+        store.uow,
+        store.repositories,
+        clock=store.clock,
+        domains=OrganizationClaimedDomains(OrganizationDomainRepository(store.uow)),
+        mailer=Mailer(_config()),
+        policy=policy,
+        store=spy_store,
+    )
+    issued = await service.invite(by, "ada@example.com", _offer())
+    store.clock.now += policy.resend_wait
+    spy_store.in_transaction_at_hit.clear()
+
+    await service.resend(by, issued.invitation.id)
+
+    assert spy_store.in_transaction_at_hit == [False] * 4
+
+
 async def test_an_already_a_member_or_already_invited_refusal_is_never_counted(store: _Store) -> None:
     organization_id = await store.organization()
     by = await store.actor(organization_id)
-    spy_store = _SpyRateLimitStore(store.rate_limit_store)
+    spy_store = _SpyRateLimitStore(store.rate_limit_store, store._session)
     service = Invitations(
         store.uow,
         store.repositories,
@@ -812,7 +926,7 @@ async def test_an_already_a_member_or_already_invited_refusal_is_never_counted(s
 async def test_a_bulk_call_refused_by_sso_is_never_counted(store: _Store) -> None:
     organization_id = await store.organization(sso_required=True)
     by = await store.actor(organization_id)
-    spy_store = _SpyRateLimitStore(store.rate_limit_store)
+    spy_store = _SpyRateLimitStore(store.rate_limit_store, store._session)
     service = Invitations(
         store.uow,
         store.repositories,
@@ -834,7 +948,7 @@ async def test_a_bulk_call_refused_by_a_missing_workspace_is_never_counted(store
     by = await store.actor(organization_id)
     other_organization_id = await store.organization("Other")
     foreign_workspace_id = await store.workspace(other_organization_id, by.user_id)
-    spy_store = _SpyRateLimitStore(store.rate_limit_store)
+    spy_store = _SpyRateLimitStore(store.rate_limit_store, store._session)
     service = Invitations(
         store.uow,
         store.repositories,
@@ -1229,7 +1343,7 @@ async def test_resend_waits_and_stops_at_the_limit(store: _Store) -> None:
     organization_id = await store.organization()
     by = await store.actor(organization_id)
     policy = _policy(resend_limit=2, resend_wait=timedelta(hours=1), per_day=100, per_address_per_day=100)
-    spy_store = _SpyRateLimitStore(store.rate_limit_store)
+    spy_store = _SpyRateLimitStore(store.rate_limit_store, store._session)
     service = Invitations(
         store.uow,
         store.repositories,
@@ -1283,18 +1397,33 @@ async def test_every_count_comes_back_when_a_resends_commit_fails_after_its_writ
     issued = await store.invitations(policy=policy).invite(by, "ada@example.com", _offer())
     store.clock.now += timedelta(hours=2)
 
-    # request_send's own UPDATE matches, but the commit that would make it durable never runs.
-    async def commit_that_fails(self: AsyncSession) -> None:
+    invitations = _RepositoryThatRecordsItsSendRequest(store.uow)
+    service = Invitations(
+        store.uow,
+        dataclasses.replace(store.repositories, invitations=invitations),
+        clock=store.clock,
+        domains=OrganizationClaimedDomains(OrganizationDomainRepository(store.uow)),
+        mailer=Mailer(_config()),
+        policy=policy,
+        store=store.rate_limit_store,
+    )
+    real_commit = AsyncSession.commit
+
+    # The write matches, and the commit that would make it durable is the one that fails.
+    async def commit_that_fails_after_the_write(self: AsyncSession) -> None:
+        if not invitations.wrote:
+            await real_commit(self)
+            return
         msg = "simulated failure during commit, after the resend's write matched"
         raise RuntimeError(msg)
 
-    monkeypatch.setattr(AsyncSession, "commit", commit_that_fails)
-    service = store.invitations(policy=policy)
+    monkeypatch.setattr(AsyncSession, "commit", commit_that_fails_after_the_write)
 
     with pytest.raises(RuntimeError):
         await service.resend(by, issued.invitation.id)
 
     monkeypatch.undo()
+    assert invitations.wrote
 
     # The failed resend's own admission came back along with its rolled-back write, so the one
     # already spent by the invite still leaves exactly one more admission of room, not zero.
