@@ -108,6 +108,8 @@ pytestmark = pytest.mark.asyncio
 PUBLIC_URL = "https://93.184.216.34/mcp"
 OTHER_PUBLIC_URL = "https://93.184.216.35/mcp"
 ISSUER = "https://93.184.216.36"
+# The token a browser holds for a sign-in it started outside a dashboard session.
+BROWSER = "browser-token"
 ORIGIN = "https://otari.example.com"
 CALLBACK = f"{ORIGIN}{API_ROOT}/mcp-connections/callback"
 
@@ -1350,22 +1352,26 @@ async def test_a_request_plane_user_whose_id_is_a_uuid_but_no_dashboard_account_
     await async_db.commit()
     connections = _connections(async_db, config)
 
-    url = await connections.start(server_id=world.server.id, user_id=user_id)
+    url = await connections.start(server_id=world.server.id, user_id=user_id, browser_token=BROWSER)
     await connections.complete(state=_state(url), code="code")
 
     assert await _connection(async_db, world.server.id, user_id) is not None
 
 
-async def test_a_sign_in_started_outside_a_session_finishes_on_its_state_alone(
+async def test_a_sign_in_started_outside_a_session_is_bound_to_a_browser_instead(
     async_db: AsyncSession, config: GatewayConfig
 ) -> None:
-    """The entry point a later change mints a sign-in link through: a user, a server, and nothing of a session."""
+    """The entry point a sign-in link starts through: a user, a server, and the browser that confirmed it."""
     world = await _world(async_db, config)
     async_db.add(BillingUser(user_id="alice"))
     await async_db.commit()
     connections = _connections(async_db, config)
+    with pytest.raises(McpConnectionSetupError, match="only one"):
+        await connections.start(server_id=world.server.id, user_id="alice")
 
-    url = await connections.start(server_id=world.server.id, user_id="alice", return_to="/playground")
+    url = await connections.start(
+        server_id=world.server.id, user_id="alice", return_to="/playground", browser_token=BROWSER
+    )
     landing = await connections.landing(_state(url))
     done = await connections.complete(state=_state(url), code="code")
 
@@ -1810,7 +1816,7 @@ async def test_a_manager_sees_who_is_connected_and_removes_one(
     async_db.add(BillingUser(user_id="service-user"))
     await async_db.commit()
     connections = _connections(async_db, config)
-    url = await connections.start(server_id=world.server.id, user_id="service-user")
+    url = await connections.start(server_id=world.server.id, user_id="service-user", browser_token=BROWSER)
     await connections.complete(state=_state(url), code="code")
     service = _service(async_db, config)
 
@@ -2520,9 +2526,11 @@ async def test_the_public_callback_checks_iss_for_a_sign_in_with_no_dashboard_se
     async_db.add(BillingUser(user_id="alice"))
     await async_db.commit()
     connections = _connections(async_db, config)
-    url = await connections.start(server_id=world.server.id, user_id="alice")
+    url = await connections.start(server_id=world.server.id, user_id="alice", browser_token=BROWSER)
 
-    outcome = await connections.receive_callback(state=_state(url), code="code", error=None, iss=iss)
+    outcome = await connections.receive_callback(
+        state=_state(url), code="code", error=None, iss=iss, browser_token=BROWSER
+    )
 
     assert (outcome.connected == world.server.id) is connects
     assert (outcome.error == "sign_in_failed") is not connects
@@ -2653,7 +2661,7 @@ async def test_a_user_spelled_like_an_account_is_not_shown_as_that_account(
     async_db.add(BillingUser(user_id=lookalike))
     await async_db.commit()
     connections = _connections(async_db, config)
-    url = await connections.start(server_id=world.server.id, user_id=lookalike)
+    url = await connections.start(server_id=world.server.id, user_id=lookalike, browser_token=BROWSER)
     await connections.complete(state=_state(url), code="code")
 
     listed = await _service(async_db, config).server_connections(
@@ -2817,7 +2825,12 @@ async def test_a_link_opened_again_replaces_its_pending_sign_in_and_a_dashboard_
     assert sorted((flow.user_id, flow.identity_id is None) for flow in flows) == sorted(
         [("alice", True), (str(world.member.id), False)]
     )
-    outcome = await connections.receive_callback(state=_state(second), code="code", error=None)
+    assert second.state == _state(second.url) and second.browser_token is not None
+    elsewhere = await connections.receive_callback(state=second.state, code="code", error=None)
+    assert (elsewhere.conversation, elsewhere.connected, elsewhere.error) == (True, None, "sign_in_failed")
+    outcome = await connections.receive_callback(
+        state=second.state, code="code", error=None, browser_token=second.browser_token
+    )
     assert (outcome.conversation, outcome.connected, outcome.server_name) == (True, world.server.id, "drive")
     assert outcome.query() == {"connected": str(world.server.id)}
     with pytest.raises(McpConnectionFlowError):
