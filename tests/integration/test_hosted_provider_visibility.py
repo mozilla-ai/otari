@@ -202,6 +202,31 @@ def test_a_visitor_to_the_public_catalog_never_sees_a_provider_restricted_to_one
     assert RESTRICTED_MODEL in _catalog_selectors(_as(client, world, "alpha_member", "/catalog/models"))
 
 
+def _catalog_providers(response: Any) -> set[str]:
+    return {provider["name"] for provider in _ok(response)["providers"]}
+
+
+def test_a_visitor_to_the_public_providers_page_never_sees_a_provider_restricted_to_one_organization(
+    client: TestClient, world: _World
+) -> None:
+    assert _catalog_providers(_as(client, world, None, "/catalog/providers")) == {"openai"}
+    detail = _as(client, world, None, "/catalog/providers/deepseek")
+    assert detail.status_code == status.HTTP_404_NOT_FOUND, detail.text
+    assert _ok(_as(client, world, None, "/catalog/providers/openai"))["model_count"] == 1
+
+
+@pytest.mark.parametrize("who", ["alpha_owner", "alpha_member", "beta_owner", "beta_member"])
+def test_each_member_is_shown_the_providers_its_organization_reaches(
+    client: TestClient, world: _World, who: str
+) -> None:
+    alpha = who.startswith("alpha")
+    assert ("deepseek" in _catalog_providers(_as(client, world, who, "/catalog/providers"))) is alpha
+    detail = _as(client, world, who, "/catalog/providers/deepseek")
+    assert detail.status_code == (status.HTTP_200_OK if alpha else status.HTTP_404_NOT_FOUND), detail.text
+    if alpha:
+        assert [model["id"] for model in detail.json()["models"]] == [RESTRICTED_ID]
+
+
 def _api_key(client: TestClient, world: _World, owner: str) -> dict[str, str]:
     client.cookies.set(SESSION_COOKIE_NAME, world.sessions[owner])
     try:

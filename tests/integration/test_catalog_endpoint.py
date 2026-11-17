@@ -912,3 +912,135 @@ def test_invalid_filter_values_return_validation_errors(
 ) -> None:
     response = priced.get(f"{API_ROOT}/catalog/models", headers=master_header, params=params)
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+
+
+# ---------------------------------------------------------------------------
+# The providers
+# ---------------------------------------------------------------------------
+
+
+def test_each_provider_is_listed_with_the_models_the_catalog_shows_for_it(
+    priced: TestClient, master_header: dict[str, str]
+) -> None:
+    body = _get(priced, f"{API_ROOT}/catalog/providers", headers=master_header)
+
+    assert body["providers"] == [
+        {
+            "name": "fireworks",
+            "provider": "fireworks",
+            "display_name": "Fireworks",
+            "model_count": 1,
+            "terms_url": None,
+            "privacy_url": None,
+        },
+        {
+            "name": "nebius",
+            "provider": "nebius",
+            "display_name": "Nebius",
+            "model_count": 2,
+            "terms_url": None,
+            "privacy_url": None,
+        },
+    ]
+    for provider in body["providers"]:
+        listed = _get(
+            priced, f"{API_ROOT}/catalog/models", headers=master_header, params={"provider": provider["name"]}
+        )
+        detail = _get(priced, f"{API_ROOT}/catalog/providers/{provider['name']}", headers=master_header)
+        assert provider["model_count"] == listed["count"]
+        assert {model["id"] for model in detail["models"]} == {model["id"] for model in listed["models"]}
+        assert {key: detail[key] for key in provider} == provider
+
+
+def test_a_providers_models_carry_its_own_price_rather_than_the_cheapest(
+    priced: TestClient, master_header: dict[str, str]
+) -> None:
+    detail = _get(priced, f"{API_ROOT}/catalog/providers/fireworks", headers=master_header)
+
+    assert detail["models"] == [
+        {
+            "id": "z-ai/glm-5.3",
+            "name": "GLM 5.3",
+            "vendor": "Z.ai",
+            "price_unit": "token",
+            "input_price": 0.7,
+            "output_price": 2.5,
+            "context_length": 131072,
+        }
+    ]
+    nebius = _get(priced, f"{API_ROOT}/catalog/providers/nebius", headers=master_header)
+    assert [(model["id"], model["input_price"]) for model in nebius["models"]] == [
+        ("z-ai/glm-5.3", 0.5),
+        ("moonshotai/kimi-k2.6", 0.6),
+    ]
+
+
+def test_an_unknown_provider_is_404(priced: TestClient, master_header: dict[str, str]) -> None:
+    with patch.object(mcs, "_fallback", return_value=parse_catalog(CATALOG)):
+        response = priced.get(f"{API_ROOT}/catalog/providers/no-such-provider", headers=master_header)
+    assert response.status_code == status.HTTP_404_NOT_FOUND, response.text
+
+
+def test_a_configured_provider_offering_nothing_priced_is_not_listed(
+    catalog_client: TestClient, master_header: dict[str, str]
+) -> None:
+    _price(catalog_client, master_header, _NEBIUS_GLM, 0.5, 2.0)
+
+    body = _get(catalog_client, f"{API_ROOT}/catalog/providers", headers=master_header)
+    assert [provider["name"] for provider in body["providers"]] == ["nebius"]
+    with patch.object(mcs, "_fallback", return_value=parse_catalog(CATALOG)):
+        response = catalog_client.get(f"{API_ROOT}/catalog/providers/fireworks", headers=master_header)
+    assert response.status_code == status.HTTP_404_NOT_FOUND, response.text
+
+
+def test_a_visitor_reads_the_providers_only_while_the_catalog_is_public(
+    catalog_client: TestClient, public_client: TestClient, master_header: dict[str, str]
+) -> None:
+    for path in ("/catalog/providers", "/catalog/providers/nebius"):
+        refused = catalog_client.get(f"{API_ROOT}{path}")
+        assert refused.status_code == status.HTTP_401_UNAUTHORIZED, refused.text
+
+    _price(public_client, master_header, _NEBIUS_GLM, 0.5, 2.0)
+    body = _get(public_client, f"{API_ROOT}/catalog/providers")
+    assert [(provider["name"], provider["model_count"]) for provider in body["providers"]] == [("nebius", 1)]
+    detail = _get(public_client, f"{API_ROOT}/catalog/providers/nebius")
+    assert [model["id"] for model in detail["models"]] == ["z-ai/glm-5.3"]
+
+
+@pytest.fixture
+def linked_hosted_client(postgres_url: str, clean_database: None) -> Generator[TestClient]:
+    mcs.clear_catalog_cache()
+    hosted = {
+        "groq-eu": {
+            "provider": "groq",
+            "api_key": "sk-fake",
+            "models": ["glm-5.3"],
+            "terms_url": "https://groq.com/terms",
+            "privacy_url": "https://groq.com/privacy",
+        }
+    }
+    try:
+        yield from build_test_client(_config(postgres_url, public_catalog=True, hosted_providers=hosted))
+    finally:
+        mcs.clear_catalog_cache()
+
+
+def test_a_hosted_provider_carries_its_policy_links_to_a_visitor(
+    linked_hosted_client: TestClient, master_header: dict[str, str]
+) -> None:
+    bind_model_provider(linked_hosted_client, HostedModelProvider("groq-eu", models={"groq-eu": ["glm-5.3"]}))
+    _price(linked_hosted_client, master_header, "groq-eu:glm-5.3", 0.4, 1.6)
+    _price(linked_hosted_client, master_header, _NEBIUS_GLM, 0.5, 2.0)
+
+    body = _get(linked_hosted_client, f"{API_ROOT}/catalog/providers")
+    by_name = {provider["name"]: provider for provider in body["providers"]}
+    assert by_name["groq-eu"]["provider"] == "groq"
+    assert by_name["groq-eu"]["display_name"] == "Groq (groq-eu)"
+    assert (by_name["groq-eu"]["terms_url"], by_name["groq-eu"]["privacy_url"]) == (
+        "https://groq.com/terms",
+        "https://groq.com/privacy",
+    )
+    assert (by_name["nebius"]["terms_url"], by_name["nebius"]["privacy_url"]) == (None, None)
+    detail = _get(linked_hosted_client, f"{API_ROOT}/catalog/providers/groq-eu")
+    assert detail["terms_url"] == "https://groq.com/terms"
+    assert [(model["id"], model["input_price"]) for model in detail["models"]] == [("z-ai/glm-5.3", 0.4)]

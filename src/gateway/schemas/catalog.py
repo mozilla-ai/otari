@@ -215,3 +215,52 @@ class ModelMetadataOverridePublic(ModelMetadataOverrideRequest):
     """An override as stored, under the selector it describes."""
 
     selector: str = Field(description="The `provider:model` the override describes.")
+
+
+class CatalogProviderSummary(BaseModel):
+    """One provider instance offering at least one model the caller may see."""
+
+    name: str = Field(description="The instance name a selector starts with, such as `fireworks` or `openai-eu`.")
+    provider: str = Field(description="The any-llm implementation behind the instance.")
+    display_name: str = Field(
+        description=(
+            "models.dev's name for the implementation, with the instance name after it where the two differ; "
+            "the instance name where models.dev does not know it."
+        )
+    )
+    model_count: int = Field(description="Catalog models the caller may see that this instance offers.")
+    terms_url: str | None = Field(default=None, description="The provider's terms of service; null where none is set.")
+    privacy_url: str | None = Field(default=None, description="The provider's privacy policy; null where none is set.")
+
+
+class CatalogProvidersResponse(BaseModel):
+    providers: list[CatalogProviderSummary] = Field(description="Sorted by display name.")
+
+
+class CatalogProviderModel(BaseModel):
+    """One catalog model as one provider instance offers it."""
+
+    id: str = Field(description="The catalog id, the one `GET /catalog/models/{id}` takes.")
+    name: str
+    vendor: str | None
+    price_unit: PriceUnit | None = Field(
+        default=None,
+        description="What the prices are per. Null where nothing on this instance prices the model.",
+    )
+    input_price: float | None = Field(
+        default=None,
+        description=(
+            "This instance's input rate for the caller, in USD per million of `price_unit`, as the catalog's "
+            "`min_input_price_per_million` is. The cheapest where the instance offers the model more than once."
+        ),
+    )
+    output_price: float | None = Field(
+        default=None, description="This instance's output rate for the caller, in the same unit as `input_price`."
+    )
+    context_length: int | None = Field(default=None, description="The largest context window this instance serves.")
+
+
+class CatalogProviderDetail(CatalogProviderSummary):
+    """One provider instance and every model it offers the caller, sorted by name."""
+
+    models: list[CatalogProviderModel]

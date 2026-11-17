@@ -1134,6 +1134,15 @@ override, key-scoped allow-list, or usage. A caller who sends a credential is
 served as that caller, valid or not. The setting is off by default and can be
 changed at runtime.
 
+The same setting publishes the Providers pages: `GET /api/v1/catalog/providers`
+lists every provider instance offering a model the caller may see, with how many,
+and `GET /api/v1/catalog/providers/{name}` lists that instance's models at its own
+rates for the caller. Both are read from the Models catalog, so a provider is
+listed exactly when one of its models is, and an instance the caller may not see
+answers 404. A hosted provider links its own terms of service and privacy policy
+there through its `terms_url` and `privacy_url`, each an absolute `http` or `https`
+address with no username or password; a `providers:` instance has neither.
+
 Anonymous reads are throttled per client address by
 `public_catalog_rate_limit_per_minute`, sixty a minute by default and its own
 budget: `rate_limit_rpm` keys on an authenticated user and covers no anonymous
