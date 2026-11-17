@@ -10,6 +10,7 @@ import {
   openAccountMenu,
   openNested,
   openOrganization,
+  openTab,
   pageHeading,
   pressRowAction,
 } from "./helpers"
@@ -124,16 +125,18 @@ test.describe("dashboard core flows", () => {
     await nav(page).getByRole("link", { name: "Models", exact: true }).click()
     await expect(pageHeading(page, "Models")).toBeVisible()
 
-    // Routing and Tools nest their pages, so each is reached through its group.
-    await openNested(page, "Routing", "Policies")
-    // Routing is a tab of Rules, which titles the page.
+    // Routing is a tab of Rules, which titles the page, and each tool a view
+    // of Tools.
+    await openTab(page, "Rules", "Routing")
     await expect(pageHeading(page, "Rules")).toBeVisible()
-    await openNested(page, "Tools", "Web search")
-    await expect(pageHeading(page, "Web search")).toBeVisible()
-    // The one Tools child that is not a filtered view of the page above, so
+    await openTab(page, "Tools", "Web search")
+    await expect(pageHeading(page, "Tools")).toBeVisible()
+    // The one Tools view that is not a filtered view of the settings page, so
     // reaching it proves its own route resolves rather than that the filter did.
-    await openNested(page, "Tools", "MCP servers")
-    await expect(pageHeading(page, "MCP servers")).toBeVisible()
+    await openTab(page, "Tools", "MCP servers")
+    await expect(
+      page.getByRole("button", { name: "Add MCP server" }),
+    ).toBeVisible()
 
     await openOrganization(page)
     await openNested(page, "Providers", "Inference")
@@ -273,7 +276,7 @@ test.describe("dashboard core flows", () => {
 
   test("create a routing policy", async ({ page }) => {
     await login(page)
-    await openNested(page, "Routing", "Policies")
+    await openTab(page, "Rules", "Routing")
     // `.first()` is the heading's action. An empty routing list also offers
     // the same words from its empty state, and a press has to name which.
     await page.getByRole("button", { name: "Create policy" }).first().click()
@@ -302,7 +305,7 @@ test.describe("dashboard core flows", () => {
 
   test("grows a policy a fallback chain", async ({ page }) => {
     await login(page)
-    await openNested(page, "Routing", "Policies")
+    await openTab(page, "Rules", "Routing")
     // `.first()` is the heading's action. An empty routing list also offers
     // the same words from its empty state, and a press has to name which.
     await page.getByRole("button", { name: "Create policy" }).first().click()
@@ -349,7 +352,7 @@ test.describe("dashboard core flows", () => {
     expect([204, 404]).toContain(dropped.status())
 
     await login(page)
-    await openNested(page, "Routing", "Policies")
+    await openTab(page, "Rules", "Routing")
 
     const chained = page
       .getByRole("row")

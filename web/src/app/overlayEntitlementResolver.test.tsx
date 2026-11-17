@@ -58,7 +58,7 @@ vi.mock("@/app/nav/overlayNavItems", async () => {
   return {
     OVERLAY_NAV_ITEMS: [
       {
-        sectionId: "access",
+        sectionId: "index",
         items: [
           {
             // Any real route the registry does not already declare: what is

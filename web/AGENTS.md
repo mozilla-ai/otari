@@ -80,8 +80,12 @@ through the explicit overlay seams.
 - `surface`, the deployment topology
 - `capability`, the installed or entitled feature
 - `operatorOnly`, deployment-wide authority
+- `requires`, an organization owner or admin (`manager`), someone who may
+  run things in the selected workspace (`contributor`), or either a manager or
+  the deployment's operator (`manager-or-operator`, Spend & budgets); a row on
+  the organization rail is a manager's without saying so
 - `reachableWithoutOrganization`, an opt-in for the few rows a signed-in
-  caller with no organization can use (Overview today); every other row,
+  caller with no organization can use (Home today); every other row,
   overlay rows included, is hidden from that caller, and from every caller
   until `GET /v1/organizations/me` has answered
 
@@ -89,9 +93,24 @@ These gates combine with AND, and the top bar and the account menu gate their
 Playground link through the same predicate. Organization and workspace
 authorization still comes from server responses.
 
+The same declarations decide whether a page opens, with two outcomes. A page
+the caller may not use goes Home (`useRouteAccess` in
+`app/nav/useNavVisibility.ts`), once their role is known; a failed read opens
+it. A page this deployment does not serve shows the shell's "not available
+here" panel instead. One route asks less than its row: a workspace's own page
+under Workspaces also opens to that workspace's owner or admin. A route the
+registry does not govern, such as a build's own redirect under a gated path,
+declares who may open it in `staticData.access`. A link to a
+page the caller may not open is not drawn; a feature asks
+`useIsOrganizationManager` for the manager's pages, since it cannot import the
+shell.
+
 The workspace and organization rails have separate registries. A sidebar item
-points to a real page, never a redirect. `/playground`, `/account`, and `/invitations` are
-chrome destinations and do not belong in a rail.
+points to a real page, never a redirect. A few destinations have no row of
+their own (`OFF_RAIL_ITEMS`) and select the row that stands for them: Routing
+and the workspace's guardrails select Rules, and the workspace roster People.
+`/playground`, `/account`, and `/invitations` are chrome destinations and do
+not belong in a rail.
 
 Overlay navigation uses the empty seam modules under `src/app/nav/` for new
 sections, items inserted into base sections, and label overrides. Keep their

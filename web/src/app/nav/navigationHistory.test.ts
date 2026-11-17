@@ -37,21 +37,37 @@ describe("rail location memory", () => {
   })
 
   it("remembers a nested destination, not just a top-level one", () => {
-    // "Including its subpage" is the part the shell used to lose: it sent you to
-    // the rail's landing page however deep you had been.
-    rememberLocation("/tools/web-search", showsEverything)
+    // A group's row, so coming back to the rail reopens it rather than the
+    // rail's landing page.
+    rememberLocation("/organization/web-search-keys", showsEverything)
+
+    expect(lastLocation("organization", showsEverything)).toEqual({
+      to: "/organization/web-search-keys",
+    })
+  })
+
+  it.each(["/people", "/rules"])("returns to %s", (path) => {
+    rememberLocation(path, showsEverything)
+
+    expect(lastLocation("workspace", showsEverything)).toEqual({ to: path })
+  })
+
+  it("remembers a destination with no row under the workspace rail", () => {
+    // Routing opens from Rules and has no row, but it is a page of its own to
+    // come back to.
+    rememberLocation("/routing", showsEverything)
 
     expect(lastLocation("workspace", showsEverything)).toEqual({
-      to: "/tools/web-search",
+      to: "/routing",
     })
   })
 
   it("remembers which tab of a destination was open", () => {
-    // The Overview is one row with a URL per tab: coming back reopens the tab.
-    rememberLocation("/sessions", showsEverything)
+    // Sessions is one row with a URL per view: coming back reopens the view.
+    rememberLocation("/requests", showsEverything)
 
     expect(lastLocation("workspace", showsEverything)).toEqual({
-      to: "/sessions",
+      to: "/requests",
     })
   })
 
@@ -76,10 +92,10 @@ describe("rail location memory", () => {
     })
   })
 
-  it("ignores a nested destination whose own surface is gated off", () => {
+  it("ignores a destination with no row whose own surface is gated off", () => {
     rememberLocation("/routing", showsEverything)
-    // Guardrails is grouped under Routing and served by the tools surface, so
-    // the child's surface is the one that has to be consulted, not its parent's.
+    // The workspace's guardrails open from Rules and are served by the tools
+    // surface, so that surface is the one consulted, not the row's.
     rememberLocation("/tools/guardrails", withoutSurface("tools"))
 
     expect(lastLocation("workspace", showsEverything)).toEqual({

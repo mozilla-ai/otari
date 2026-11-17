@@ -14,7 +14,6 @@ import {
   FiLogIn,
   FiMessageSquare,
   FiRepeat,
-  FiServer,
   FiShield,
   FiShuffle,
   FiSliders,
@@ -33,21 +32,20 @@ import type {
   NavItem,
   NavItemContribution,
   NavLabelOverride,
+  NavPath,
   NavSection,
 } from "./types"
 
 /**
- * The sidebar the base build ships, and the only place a destination is
- * declared.
+ * The workspace rail, and the only place its destinations are declared.
  *
- * Sections render in this order. The index leads, alone and unlabeled, because
- * it is the rail's destination rather than a member of a category: it is where
- * the sidebar puts you back, not one of the places you go from it, and it is
- * also where you look (usage, requests and sessions are its tabs). The two
- * below it are the design's: "Build" is what the gateway serves (models, the
- * policies that route over them, and the tools it can call; the roles matrix's
- * name for the section, otari-ai#1942), and "Access" is who may call it (keys
- * and the workspace's roster). "Observe" stays declared, empty, for overlays.
+ * One section, headingless: every row is a place in the selected workspace,
+ * and none of them is a category. Three destinations are registered without a
+ * row (`OFF_RAIL_ITEMS`): Routing and the workspace's Guardrails, which open
+ * from Rules, and `/members`, the workspace roster, which opens from People.
+ *
+ * Each thing exists once: Billing, Providers and Email domains are
+ * organization pages, reached from the footer's Organization row.
  *
  * Each entry declares its own gating, and the two axes are independent:
  * `surface` (does this deployment host it) and `capability` (is it entitled).
@@ -57,10 +55,6 @@ import type {
  */
 const BASE_NAV_SECTIONS = [
   {
-    // Headingless on purpose, and the one section in this rail that is. A label
-    // over a single row would read as a category with one member, and the index
-    // is not a category: it is the row every other row is a departure from. The
-    // gap the shell already puts between sections is what separates it.
     id: "index",
     items: [
       // Ungated on every axis: the index is the deployment's own front page and
@@ -72,130 +66,34 @@ const BASE_NAV_SECTIONS = [
         icon: FiHome,
         reachableWithoutOrganization: true,
       },
-      // Agent sessions and the requests behind them, two views under one
-      // title. Each gates itself inside the page, on `traces` and `usage`, and
-      // neither is `operatorOnly` (otari#837): for a caller who does not
-      // operate the deployment they read `/organizations/me/...`.
       {
         to: "/sessions",
         label: "Sessions",
         icon: FiList,
         views: ["/requests"],
       },
-    ],
-  },
-  {
-    // No base rows. Kept for the rows an overlay contributes by this id;
-    // empty, it renders nothing
-    // (`visibleNavSections`).
-    id: "observe",
-    label: "Observe",
-    items: [],
-  },
-  {
-    // The id stays "gateway" while the label reads "Build": overlay
-    // contributions and label overrides key on the id, so renaming it would
-    // silently drop whatever a superset build files under this section.
-    id: "gateway",
-    label: "Build",
-    items: [
-      // No `operatorOnly` on Models or Routing any more, per the rule the axis
-      // carries: a row leaves the list by its page ceasing to refuse anyone
-      // (otari-ai#1942). Models reads the catalog any session may read, and
-      // Routing reads the tenant-scoped policy list for a non-operator.
+      { to: "/people", label: "People", icon: FiUsers },
+      { to: "/rules", label: "Rules", icon: FiShield },
+      // No `operatorOnly` on Models, per the rule the axis carries: a row
+      // leaves the list by its page ceasing to refuse anyone (otari-ai#1942).
+      // Models reads the catalog any session may read.
       {
         to: "/models",
         label: "Models",
         surface: "models",
         icon: FiLayers,
       },
-      // Deliberately not tagged `capability: "routing"`, though otari.ai's
-      // registry tags its own Routing item that way. ARCHITECTURE.md's
-      // capability lines mark the routing split (how much is core base, how
-      // much an overlay adapter) **provisional**, and say it is a decision for
-      // the maintainers rather than something a contributor assumes. Tagging
-      // this entry would assume it, and would withhold nothing today either
-      // way, since the base grants what it ships. Add the tag when the split is
-      // decided, together with its name in `BASE_CAPABILITIES`.
-      {
-        to: "/routing",
-        label: "Routing",
-        surface: "routing",
-        icon: FiRepeat,
-        // Policies and Guardrails as the navigation prototype groups them. The
-        // prototype's third entry, Aliases, is deliberately absent: this
-        // dashboard lists an alias as the one-target policy it is, in the same
-        // table (see `RoutingPage`), so `/aliases` is a compatibility redirect
-        // onto `/routing` rather than a destination. Linking it would give the
-        // group two entries for one page, and the second could never highlight.
-        // It comes back if and when Routing grows a separate alias view.
-        children: [
-          { to: "/routing", label: "Policies", icon: FiRepeat },
-          {
-            to: "/tools/guardrails",
-            label: "Guardrails",
-            icon: FiShield,
-            // Grouped with Routing, served by the tools surface.
-            surface: "tools",
-          },
-        ],
-      },
       {
         to: "/tools",
         label: "Tools",
         surface: "tools",
         icon: FiTool,
-        // Two of the three services the page configures, plus MCP servers;
-        // Guardrails is grouped under Routing, where the prototype puts it.
-        // MCP is the row that is not a tool-service view, so it has a page of
-        // its own rather than a filter over the settings page; web/AGENTS.md
-        // says why.
-        //
-        // `to` gates and names the group; it is not somewhere the rail
-        // navigates. A group with more than one visible child is a disclosure
-        // when expanded and a flyout when collapsed, and neither offers the
-        // parent, so `/tools` (the three services on one page) is reachable by
-        // URL only. Deliberate: each service has its own destination here, and
-        // Guardrails belongs to Routing, so a row for the combined page would
-        // duplicate all three and cross the grouping the design draws. Routing
-        // leads with Policies because `/routing` *is* the policies page, not to
-        // make a parent reachable.
-        children: [
-          { to: "/tools/web-search", label: "Web search", icon: FiGlobe },
-          {
-            to: "/tools/code-execution",
-            label: "Code execution",
-            icon: FiCode,
-          },
-          { to: "/tools/mcp-servers", label: "MCP servers", icon: FiServer },
-        ],
+        // One row, one page. `/tools` lists every tool with what it does and
+        // whether it is on; each one's settings open from it, and the row
+        // stays selected there (the prefix match below).
       },
-    ],
-  },
-  {
-    id: "access",
-    label: "Access",
-    items: [
-      // No `operatorOnly`, for the reason Activity and Usage dropped theirs
-      // (otari-ai#1941 this time): the page reads and mints through
-      // `/organizations/me/keys` for a caller who does not operate the
-      // deployment, so the destination serves every signed-in identity
-      // something true, their own keys.
-      {
-        to: "/keys",
-        label: "API keys",
-        surface: "keys",
-        icon: FiKey,
-      },
-      // The selected workspace's roster, not the organization's. The
-      // organization roster is "Members & roles" in the other context, and the
-      // two pages cross-link, which is the distinction the prototype draws.
-      {
-        to: "/members",
-        label: "Members",
-        surface: "workspaces",
-        icon: FiUsers,
-      },
+      // Create API key above the rail starts one; this lists and edits them.
+      { to: "/keys", label: "API keys", surface: "keys", icon: FiKey },
     ],
   },
 ] as const satisfies readonly NavSection[]
@@ -288,6 +186,9 @@ const ORGANIZATION_NAV_SECTIONS = [
         label: "Spend & budgets",
         surface: "budgets",
         icon: FiDollarSign,
+        // The operator opens it for the deployment's budgets whatever their
+        // role in the organization (`BudgetsPage`).
+        requires: "manager-or-operator",
       },
     ],
   },
@@ -453,8 +354,8 @@ export function applyNavLabelOverrides(
           // Groups only, which is what the platform's single `NavDisclosure`
           // label maps to. A group is a destination here as well as a heading,
           // so renaming one also renames what the breadcrumbs and the shell's
-          // gated-off panel call that page (`/tools`); the group and the page
-          // sharing a name is why that reads correctly rather than as a bug.
+          // gated-off panel call that page; the group and the page sharing a
+          // name is why that reads correctly rather than as a bug.
           // A plain link's label and a `NavChild`'s are outside the seam, as
           // they are over there; widen it when a contribution needs one.
           return label !== undefined && item.children
@@ -583,38 +484,104 @@ export const DEPLOYMENT_NAV_SECTIONS: readonly NavSection[] =
   )
 
 // Kept in route lookup for surface gating, outside the sidebar sections.
-// Availability follows the gateway's inference surface, not a paid capability.
+// Availability follows the gateway's inference surface, not a paid capability,
+// and a viewer, who may not run anything, has no use for it.
 export const PLAYGROUND_NAV_ITEM = {
   to: "/playground",
   label: "Playground",
   surface: "playground",
   icon: FiMessageSquare,
+  requires: "contributor",
 } as const satisfies NavItem
 
 /**
- * The workspace rail as the mobile drawer draws it: Playground after Models in
- * Build. The top bar links Playground on the desk, and below `md` that bar is
- * hidden, so the drawer is where a phone finds it.
+ * The workspace rail as the mobile drawer draws it: the same rows as the desk.
+ * The account menu offers the Playground on a phone as everywhere else.
  */
-export const DRAWER_NAV_SECTIONS: readonly NavSection[] = NAV_SECTIONS.map(
-  (section) =>
-    section.id === "gateway"
-      ? {
-          ...section,
-          items: section.items.flatMap((item) =>
-            item.to === "/models" ? [item, PLAYGROUND_NAV_ITEM] : [item],
-          ),
-        }
-      : section,
-)
+export const DRAWER_NAV_SECTIONS: readonly NavSection[] = NAV_SECTIONS
 
-/** Route lookup includes chrome destinations as well as all three sidebar scopes. */
+/**
+ * The Routing pages, registered without a row. Routing is a tab of Rules
+ * (`features/rules/RulesFrame.tsx`), and the workspace's guardrails open from
+ * its Data tab, so both select Rules in the rail (`railPathForPath`). Not
+ * tagged `capability: "routing"`: ARCHITECTURE.md marks the routing split
+ * provisional. `/aliases` redirects onto `/routing`.
+ */
+const ROUTING_NAV_ITEM = {
+  to: "/routing",
+  label: "Routing",
+  surface: "routing",
+  icon: FiRepeat,
+} as const satisfies NavItem
+
+// An owner or admin sets the workspace's guardrails; the page has nothing for
+// anyone else to do.
+const WORKSPACE_GUARDRAILS_NAV_ITEM = {
+  to: "/tools/guardrails",
+  label: "Guardrails",
+  surface: "tools",
+  icon: FiShield,
+  requires: "manager",
+} as const satisfies NavItem
+
+/**
+ * The workspace roster, registered without a row. People lists the workspace
+ * and links here for what only the roster does (add someone to the workspace,
+ * change or drop their workspace role), so People stays selected on it.
+ */
+const WORKSPACE_MEMBERS_NAV_ITEM = {
+  to: "/members",
+  label: "Members",
+  surface: "workspaces",
+  icon: FiUsers,
+} as const satisfies NavItem
+
+/** Destinations with no rail row, by the rail row that stands for them. */
+const OFF_RAIL_ITEMS: readonly { item: NavItem; railPath?: NavPath }[] = [
+  { item: WORKSPACE_MEMBERS_NAV_ITEM, railPath: "/people" },
+  { item: ROUTING_NAV_ITEM, railPath: "/rules" },
+  { item: WORKSPACE_GUARDRAILS_NAV_ITEM, railPath: "/rules" },
+]
+
+const RAIL_ITEMS: readonly NavItem[] = [
+  ...NAV_SECTIONS,
+  ...ORG_NAV_SECTIONS,
+  ...DEPLOYMENT_NAV_SECTIONS,
+].flatMap((section) => section.items)
+
+/**
+ * Route lookup includes chrome destinations as well as all three sidebar scopes.
+ * And the destinations with no row (`OFF_RAIL_ITEMS`).
+ */
 export const NAV_ITEMS: readonly NavItem[] = [
   PLAYGROUND_NAV_ITEM,
-  ...[...NAV_SECTIONS, ...ORG_NAV_SECTIONS, ...DEPLOYMENT_NAV_SECTIONS].flatMap(
-    (section) => section.items,
-  ),
+  ...OFF_RAIL_ITEMS.map(({ item }) => item),
+  ...RAIL_ITEMS,
 ]
+
+/**
+ * The rail row to mark selected at this pathname: for a destination with no
+ * row, the row that stands for it (Rules for Routing), and otherwise the
+ * destination's own entry.
+ */
+export function railPathForPath(pathname: string): NavPath | undefined {
+  const item = navItemForPath(pathname)
+  if (!item) return undefined
+  const offRail = OFF_RAIL_ITEMS.find((one) => one.item.to === item.to)
+  return offRail ? offRail.railPath : item.to
+}
+
+/**
+ * The rail row a destination with no row of its own sits under, by name, for
+ * the breadcrumb ("Rules" for Routing), or nothing.
+ */
+export function railLabelForPath(pathname: string): string | undefined {
+  const item = navItemForPath(pathname)
+  const railPath = OFF_RAIL_ITEMS.find(
+    (one) => one.item.to === item?.to,
+  )?.railPath
+  return railPath ? navItemForPath(railPath)?.label : undefined
+}
 
 /**
  * Every nested destination, paired with the entry it is gated by.

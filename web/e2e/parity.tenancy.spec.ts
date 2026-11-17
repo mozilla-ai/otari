@@ -262,7 +262,9 @@ test.describe("tenancy", () => {
     // the same component on two rails. That copy is gone, so this is the only
     // place it renders and the only place it can be covered.
     await login(page)
-    await nav(page).getByRole("link", { name: "Members", exact: true }).click()
+    // No rail row of its own: People links to it.
+    await nav(page).getByRole("link", { name: "People", exact: true }).click()
+    await page.getByRole("link", { name: "Workspace members" }).click()
 
     // A workspace's members are a subset of the organization's, and a fresh
     // deployment has exactly one identity, which owns every workspace it made.

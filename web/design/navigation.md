@@ -102,6 +102,15 @@ and labels in a tooltip. The states are the same values; only the label goes.
 Never hand-write a nav row. `rowStyles.ts` owns the classes and
 `rowStyles.test.ts` asserts them; a page adds a route to the registry instead.
 
+The selected row is announced as current (`aria-current="page"`), on a detail
+page too. A destination with no row of its own selects the row that stands for
+it: Routing selects Rules, the workspace roster People (`railPathForPath`).
+
+The workspace rail opens with its one action, **Create API key**, a primary
+button above the rows for anyone who may create a key; collapsed, it is a "+"
+named by a tooltip. Its foot carries the team budget for an organization owner
+or admin once a limit exists: spent, of how much, and a meter.
+
 ## Section headings in the rail
 
 `NAV_SECTION_HEADING_CLASS`, which is the `text-overline` role. A rail section

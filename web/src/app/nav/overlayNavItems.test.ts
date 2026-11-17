@@ -30,7 +30,7 @@ vi.mock("./overlayNavItems", () => ({
     // The workspace rail, contributed from the same list the organization rail
     // reads: one module for both is what a unique section id buys.
     {
-      sectionId: "observe",
+      sectionId: "index",
       items: [{ to: "/models", label: "Reports", icon: FiServer }],
     },
     // And the deployment rail, from that same list: the process every tenant
@@ -54,8 +54,17 @@ describe("a build that replaces the nav-item module", () => {
 
   it("appends into the workspace rail from that same list", () => {
     expect(
-      section(NAV_SECTIONS, "observe")?.items.map((item) => item.label),
-    ).toEqual(["Reports"])
+      section(NAV_SECTIONS, "index")?.items.map((item) => item.label),
+    ).toEqual([
+      "Home",
+      "Sessions",
+      "People",
+      "Rules",
+      "Models",
+      "Tools",
+      "API keys",
+      "Reports",
+    ])
   })
 
   it("appends into the deployment rail from that same list", () => {
@@ -85,8 +94,8 @@ describe("a build that replaces the nav-item module", () => {
       "Single sign-on",
     ])
     expect(
-      section(NAV_SECTIONS, "gateway")?.items.map((item) => item.label),
-    ).toEqual(["Models", "Routing", "Tools"])
+      section(ORG_NAV_SECTIONS, "org-general")?.items.map((item) => item.label),
+    ).toEqual(["Providers", "Guardrails", "Org settings"])
   })
 
   it("leaves a contributed row ungated unless it says otherwise", () => {

@@ -1,13 +1,13 @@
 import { expect, test } from "@playwright/test"
 
-import { login, openNested } from "../helpers"
+import { login, openTab } from "../helpers"
 import { docScreenshot } from "./fixtures"
 
 // The e2e gateway names a search backend and turns fetching on
 // (e2e/otari.yml), so the page's controls are live. Nothing is searched.
 test("a workspace's web search policy", async ({ page }) => {
   await login(page)
-  await openNested(page, "Tools", "Web search")
+  await openTab(page, "Tools", "Web search")
 
   await expect(page.getByText("Allow in Default workspace")).toBeVisible()
   for (const label of [

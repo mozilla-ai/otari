@@ -104,9 +104,10 @@ export async function openAccountMenu(page: Page): Promise<Locator> {
 /**
  * Expand a sidebar group and open one of the destinations nested under it.
  *
- * Routing and Tools nest their pages, so their sidebar row expands rather than
- * navigating; a spec reaching a child has to open the group first. Idempotent
- * on an already-open group, which is what arriving from a child route leaves.
+ * The organization rail's Providers nests its pages, so its row expands rather
+ * than navigating; a spec reaching a child has to open the group first.
+ * Idempotent on an already-open group, which is what arriving from a child
+ * route leaves.
  */
 export async function openNested(
   page: Page,
@@ -118,6 +119,25 @@ export async function openNested(
     await toggle.click()
   }
   await nav(page).getByRole("link", { name: child, exact: true }).click()
+}
+
+/**
+ * Open a rail row, then one of the tabs its page draws under its title: a
+ * tool under Tools, Routing under Rules. The tab is current once it has
+ * opened. The names are spelled at the call site so the docs check sees them.
+ */
+export async function openTab(
+  page: Page,
+  row: string,
+  tab: string,
+): Promise<void> {
+  await nav(page).getByRole("link", { name: row, exact: true }).click()
+  const link = page
+    .getByRole("main")
+    .getByRole("navigation")
+    .getByRole("link", { name: tab, exact: true })
+  await link.click()
+  await expect(link).toHaveAttribute("aria-current", "page")
 }
 
 /**

@@ -8,8 +8,8 @@ import {
   login,
   nav,
   openAccountMenu,
-  openNested,
   openOrganization,
+  openTab,
   pageHeading,
   pressRowAction,
   rowMenuItem,
@@ -434,7 +434,7 @@ test.describe("budgets", () => {
 test.describe("fallback routing", () => {
   test("grows and shrinks a policy's failure chain", async ({ page }) => {
     await login(page)
-    await openNested(page, "Routing", "Policies")
+    await openTab(page, "Rules", "Routing")
     // Routing is a tab of Rules, which titles the page.
     await expect(pageHeading(page, "Rules")).toBeVisible()
 

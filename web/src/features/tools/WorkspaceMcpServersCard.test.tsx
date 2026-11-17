@@ -187,7 +187,6 @@ function ServerPageProbe() {
 }
 
 function renderCard(
-  variant?: "card" | "page",
   surfaces?: string[],
   client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -197,7 +196,7 @@ function renderCard(
     <DeploymentProvider value={bootstrap(surfaces ? { surfaces } : {})}>
       <QueryClientProvider client={client}>
         <SelectedWorkspaceProvider>
-          <WorkspaceMcpServersCard variant={variant} />
+          <WorkspaceMcpServersCard />
         </SelectedWorkspaceProvider>
       </QueryClientProvider>
     </DeploymentProvider>,
@@ -240,30 +239,16 @@ describe("WorkspaceMcpServersCard", () => {
     window.sessionStorage.clear()
   })
 
-  it("opens the page it is the whole of, heading and register control", async () => {
-    // `variant="page"` is what renders /tools/mcp-servers: its h1 and the
-    // register control in that heading row. The
-    // page component is a one-line wrapper with no test of its own, so without
-    // this the page's only h1 could be dropped silently.
-    mockApi()
-    renderCard("page")
-
-    expect(
-      await screen.findByRole("heading", { level: 1, name: "MCP servers" }),
-    ).toBeInTheDocument()
-    expect(
-      await screen.findByRole("button", { name: "Add MCP server" }),
-    ).toBeInTheDocument()
-  })
-
-  it("keeps its own heading where it is one card among several", async () => {
+  it("draws no heading of its own and leads with its controls", async () => {
+    // The Tools tab names this view, so a heading here would say it twice.
     mockApi()
     renderCard()
 
-    expect(
-      await screen.findByRole("heading", { level: 2, name: "MCP servers" }),
-    ).toBeInTheDocument()
+    const add = await screen.findByRole("button", { name: "Add MCP server" })
+    expect(screen.queryByRole("heading", { name: "MCP servers" })).toBeNull()
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull()
+    expect(screen.queryByRole("heading", { level: 2 })).toBeNull()
+    expect(add.closest("section")?.firstElementChild).toContainElement(add)
   })
 
   it("says which keys can use the servers once the workspace has one", async () => {
@@ -274,7 +259,7 @@ describe("WorkspaceMcpServersCard", () => {
         apiKey({ id: "b", scopes: ["inference:run"] }),
       ],
     })
-    renderCard("page")
+    renderCard()
 
     expect(
       await screen.findByText(/1 of the 2 keys in this workspace/),
@@ -1185,7 +1170,7 @@ describe("WorkspaceMcpServersCard", () => {
 
   it("leaves Browse catalog out where the deployment switched the catalog off", async () => {
     mockApi()
-    renderCard("card", ["tools", "workspaces"])
+    renderCard(["tools", "workspaces"])
     await screen.findByText("No MCP servers yet.")
 
     expect(
@@ -1281,7 +1266,7 @@ describe("WorkspaceMcpServersCard", () => {
       defaultOptions: { queries: { retry: false } },
     })
     const user = userEvent.setup()
-    renderCard(undefined, undefined, client)
+    renderCard(undefined, client)
     const probes = () =>
       client.getQueryCache().findAll({
         predicate: (query) => query.queryKey.includes("mcp-server-probe"),
@@ -1308,7 +1293,7 @@ describe("WorkspaceMcpServersCard", () => {
 
   it("shows no Requests block while nobody is waiting, and asks for none without the catalog", async () => {
     const calls = mockApi()
-    renderCard("card", ["tools", "workspaces"])
+    renderCard(["tools", "workspaces"])
     await screen.findByText("No MCP servers yet.")
 
     expect(
@@ -1430,7 +1415,7 @@ describe("WorkspaceMcpServersCard", () => {
       role: "member",
       memberships: [{ workspace_id: ALPHA, name: "Alpha", role: "member" }],
     })
-    renderCard("card", ["tools", "workspaces"])
+    renderCard(["tools", "workspaces"])
 
     expect(
       await screen.findByText("This workspace has no servers for you yet."),
