@@ -24,6 +24,7 @@ from gateway.api.deps import (
     get_session_identity,
     verify_master_key,
 )
+from gateway.api.routes._flow_cookies import FlowCookies
 from gateway.api.routes._mcp_sign_in_pages import (
     SignInPage,
     confirm_page,
@@ -31,9 +32,9 @@ from gateway.api.routes._mcp_sign_in_pages import (
     leaving_page,
     other_user_page,
 )
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.exceptions import TenancyError
-from gateway.exceptions.tools_exceptions import McpConnectionFlowError
+from gateway.exceptions.tools_exceptions import McpConnectionFlowError, McpSignInLinkNeedsSessionError
 from gateway.log_config import logger
 from gateway.models.tenancy import User as TenancyUser
 from gateway.schemas.tools import (
@@ -65,6 +66,10 @@ session_router = APIRouter(
 # opens. A request arriving from another site carries no credential of ours, because the session
 # cookie is SameSite=Strict; the link's own page posts from this origin, so its POST does.
 callback_router = APIRouter(prefix="/mcp-connections", tags=["mcp-connections"])
+
+# A sign-in a link starts outside a dashboard session finishes only in the browser that pressed Continue,
+# which holds its flow's token here. The path covers the confirmation page and the callback.
+_FLOWS = FlowCookies(prefix="otari_mcp_flow", path=f"{API_ROOT}{callback_router.prefix}")
 
 
 @router.get("/mcp-connections")
@@ -212,6 +217,7 @@ async def _sign_in_link_page(
             server_host=preview.server_host,
             user_label=preview.user_label,
             opened_as=preview.opened_as,
+            needs_session=preview.needs_session,
         ),
         True,
     )
@@ -258,22 +264,29 @@ async def start_mcp_sign_in_from_link(
 
     Only that page can ask: a POST from anywhere else is answered with the page itself, as a GET
     would be. A dashboard session it arrives in must be the link's own user, and the sign-in is
-    then bound to that session.
+    then bound to that session. A link made for a dashboard account needs that session. Any other
+    sign-in is bound to this browser by a cookie, and the callback finishes it only where the
+    cookie comes back.
     """
     page, offered = await _sign_in_link_page(service, ticket, opened_by)
     if not offered or not _posted_from_this_gateway(request, config):
         return page
     try:
-        url = await service.start_from_sign_in_link(ticket=ticket, opened_by=opened_by)
+        started = await service.start_from_sign_in_link(ticket=ticket, opened_by=opened_by)
     except McpConnectionFlowError:
         return conversation_page(SignInPage.LINK_EXPIRED)
+    except McpSignInLinkNeedsSessionError:
+        return conversation_page(SignInPage.NEEDS_SESSION)
     except TenancyError as exc:
         # The deployment cannot run a sign-in, or the authorization server could not be reached.
         logger.info("MCP sign-in link refused reason=%s", type(exc).__name__)
         return conversation_page(SignInPage.CANNOT_START)
-    if urlsplit(url).scheme not in ("https", "http"):
+    if urlsplit(started.url).scheme not in ("https", "http"):
         return conversation_page(SignInPage.CANNOT_START)
-    return leaving_page(url)
+    leaving = leaving_page(started.url)
+    if started.state is not None and started.browser_token is not None:
+        _FLOWS.start(request, leaving, state=started.state, browser_token=started.browser_token)
+    return leaving
 
 
 @callback_router.get("/client-metadata", include_in_schema=False)
@@ -291,6 +304,7 @@ async def mcp_client_metadata(config: Annotated[GatewayConfig, Depends(get_confi
 
 @callback_router.get("/callback", include_in_schema=False)
 async def mcp_connection_callback(
+    request: Request,
     connections: McpConnectionServiceDep,
     config: Annotated[GatewayConfig, Depends(get_config)],
     state: Annotated[str | None, Query(max_length=512)] = None,
@@ -303,13 +317,20 @@ async def mcp_connection_callback(
     A sign-in started from the dashboard ends on the dashboard's own page, a
     refusal included. One started from a conversation's link ends on a plain
     page saying to go back to the conversation, since that person may have no
-    dashboard session at all.
+    dashboard session at all, and finishes only in the browser that started it.
     """
-    outcome = await connections.receive_callback(state=state, code=code, error=error, iss=iss)
+    browser_token = _FLOWS.browser_token(request, state) if state else None
+    outcome = await connections.receive_callback(
+        state=state, code=code, error=error, iss=iss, browser_token=browser_token
+    )
     if outcome.conversation:
         if outcome.connected is not None:
-            return conversation_page(SignInPage.CONNECTED, server_name=outcome.server_name)
-        return conversation_page(SignInPage.FAILED)
+            page = conversation_page(SignInPage.CONNECTED, server_name=outcome.server_name)
+        else:
+            page = conversation_page(SignInPage.FAILED)
+        if state and browser_token is not None:
+            _FLOWS.finish(request, page, state)
+        return page
     return RedirectResponse(
         url=config.ui_link(f"{McpConnectionService.DASHBOARD_CALLBACK_ROUTE}?{urlencode(outcome.query())}"),
         status_code=status.HTTP_303_SEE_OTHER,

@@ -245,6 +245,13 @@ class McpSignInLinkOtherUserError(TenancyForbiddenError):
         super().__init__("This sign-in link was made for another user")
 
 
+class McpSignInLinkNeedsSessionError(TenancyForbiddenError):
+    """A sign-in link made for a dashboard account was confirmed in a browser not signed in as that account."""
+
+    def __init__(self) -> None:
+        super().__init__("This sign-in link continues only in a dashboard session of the user it was made for")
+
+
 class WorkspaceMcpServerCheckOriginError(TenancyValidationError):
     """A connection check asked to send a stored server's credential to another origin than that server's."""
 

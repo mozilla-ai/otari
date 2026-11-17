@@ -132,6 +132,7 @@ from gateway.services.tools._mcp_admission import (
 from gateway.services.tools._mcp_connections import (
     CompletedConnection,
     FlowLanding,
+    LinkSignIn,
     McpConnectionEligibility,
     McpConnectionService,
     McpRevocation,
@@ -343,6 +344,7 @@ __all__ = [
     "McpGrantMembershipListener",
     "CompletedConnection",
     "FlowLanding",
+    "LinkSignIn",
     "McpConnectionEligibility",
     "McpConnectionService",
     "McpServerRequestService",
