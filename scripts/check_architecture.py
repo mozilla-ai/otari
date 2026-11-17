@@ -85,6 +85,14 @@ Enforces:
     so a cycle through a package initializer is found. Only imports at module
     scope are read, since an import inside a function or under if TYPE_CHECKING
     does not run when the module loads.
+27. Non-domain service imports: each service package whose name is not a domain
+    DOMAINS.md gives a section carries a ceiling on how many times code outside
+    it reaches below its root, and the count must equal that ceiling. Rule 21
+    covers the packages named for a domain, where reaching below the root is
+    refused outright; this covers the ones that are not domains yet, where the
+    debt is counted instead so it cannot grow. The count rising fails, and the
+    count falling fails until the ceiling is lowered, so every removal is
+    recorded and a package's dissolution is proved by its ceiling reaching zero.
 26. Composition root behavior: no class under api/deps/ defines a method, so the
     composition root builds things and threads the request's session into them
     rather than growing an implementation of its own. A class that carries data
@@ -1315,6 +1323,92 @@ def check_domain_names(src_root: Path, domains: set[str]) -> list[str]:
         if not (src_root / relative_path).exists() or locations.get(relative_path) in domains
     )
     violations.extend(_baseline_package_modules(src_root))
+    return violations
+
+
+# How many import statements outside each non-domain service package reach below
+# its root. A package here is one DOMAINS.md gives no section, so the target shape
+# dissolves it into the domains it names. The count may only fall, and a fall must
+# be recorded here, which is how the dissolution is proved. This baseline counts
+# rather than enumerates, because the enumeration runs to hundreds of entries and
+# the number is what has to come down.
+NON_DOMAIN_SERVICE_IMPORT_BASELINE: dict[str, int] = {
+    "code_execution": 1,
+    "tenancy": 76,
+}
+
+
+def _non_domain_service_packages(src_root: Path, domains: set[str]) -> list[str]:
+    """The service-layer packages whose name is not a domain DOMAINS.md gives a section."""
+    layer = src_root / SERVICE_SCOPE
+    if not layer.is_dir():
+        return []
+    return sorted(
+        entry.name
+        for entry in layer.iterdir()
+        if entry.is_dir() and (entry / "__init__.py").is_file() and entry.name not in domains
+    )
+
+
+def _below_root_imports(src_root: Path, package: str) -> int:
+    """How many import statements outside a service package name a module below its root.
+
+    The statement's own module decides it, not the names it binds: ``from pkg import Name``
+    reaches the root and is allowed, while ``from pkg.module import Name`` reaches past it.
+    ``_imported_modules`` cannot tell those apart, because it reports ``pkg.Name`` for the
+    first, so the module is read here instead.
+    """
+    prefix = f"{SERVICE_SCOPE.replace('/', '.')}.{package}."
+    inside = f"{SERVICE_SCOPE}/{package}/"
+    counted = 0
+    for relative_path, tree in _parsed_modules(src_root, "gateway"):
+        if relative_path.startswith(inside):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                module = node.module if node.level == 0 else _resolve_relative(node, src_root / relative_path, src_root)
+                reaches = module is not None and module.startswith(prefix)
+            elif isinstance(node, ast.Import):
+                reaches = any(alias.name.startswith(prefix) for alias in node.names)
+            else:
+                continue
+            if reaches:
+                counted += 1
+    return counted
+
+
+def check_non_domain_service_imports(src_root: Path, domains: set[str]) -> list[str]:
+    """Check each non-domain service package's below-root import count against its ceiling."""
+    if not (src_root / SERVICE_SCOPE).is_dir():
+        return []
+    packages = _non_domain_service_packages(src_root, domains)
+    violations: list[str] = []
+    for package in packages:
+        counted = _below_root_imports(src_root, package)
+        ceiling = NON_DOMAIN_SERVICE_IMPORT_BASELINE.get(package)
+        if ceiling is None and counted == 0:
+            # Nothing reaches below this package's root, so it carries no debt to cap.
+            continue
+        if ceiling is None:
+            violations.append(
+                f"services/{package}/ is not a domain DOMAINS.md gives a section and has no import ceiling; "
+                f"give it one of {counted}, or give the package a section"
+            )
+        elif counted > ceiling:
+            violations.append(
+                f"{counted} imports reach below services/{package}/, above its ceiling of {ceiling}; "
+                f"import what services.{package} exports, or split the package into the domains DOMAINS.md names"
+            )
+        elif counted < ceiling:
+            violations.append(
+                f"only {counted} imports now reach below services/{package}/, under its ceiling of {ceiling}; "
+                "lower the ceiling to that, so the removal cannot be spent again"
+            )
+    violations.extend(
+        f"services/{package}/ has an import ceiling but is no longer a service package that is not a domain; "
+        "remove its ceiling"
+        for package in sorted(set(NON_DOMAIN_SERVICE_IMPORT_BASELINE) - set(packages))
+    )
     return violations
 
 
@@ -3080,6 +3174,7 @@ def main() -> int:
     domain_name_violations = domains_page_violations + (check_domain_names(SRC_ROOT, domains) if domains else [])
     repository_import_violations = check_repository_imports(SRC_ROOT, domains)
     service_package_import_violations = check_service_package_imports(SRC_ROOT, domains)
+    non_domain_import_violations = check_non_domain_service_imports(SRC_ROOT, domains) if domains else []
     service_root_export_violations = check_service_root_exports(SRC_ROOT)
     model_access_violations = check_model_access(SRC_ROOT)
     import_cycle_violations = check_import_cycles(SRC_ROOT)
@@ -3164,6 +3259,12 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal import cycle violations: {len(import_cycle_violations)}")
 
+    if non_domain_import_violations:
+        print("\n❌ Non-domain service import violations:\n")
+        for violation in non_domain_import_violations:
+            print(f"  {violation}")
+        print(f"\nTotal non-domain service import violations: {len(non_domain_import_violations)}")
+
     if composition_root_violations:
         print("\n❌ Composition root behavior violations:\n")
         for violation in composition_root_violations:
@@ -3192,6 +3293,7 @@ def main() -> int:
         or model_access_violations
         or import_cycle_violations
         or composition_root_violations
+        or non_domain_import_violations
     ):
         print("\n💡 See ARCHITECTURE.md for the intended layering")
         return 1

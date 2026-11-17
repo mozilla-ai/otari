@@ -54,6 +54,11 @@ the old shape.
   class with a method added under `api/deps/`, including one nested in a
   builder, which belongs to the domain whose work it does. A class that carries
   data and no methods is fine.
+- A service package that is not a domain `DOMAINS.md` gives a section carries a
+  capped count of imports reaching below its root. Flag a new import below the
+  root of `services/tenancy/` or another such package: it has to come down, not
+  up, so a new one needs the count lowered elsewhere or the import routed
+  through the package root.
 - Flag a new module-level function under `services/` that takes an
   `AsyncSession`, including one added to a module already on
   `SERVICE_DATABASE_IMPORT_BASELINE`. The check does not catch that case.

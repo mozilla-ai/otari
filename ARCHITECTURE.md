@@ -255,6 +255,7 @@ Services and repositories are one package per domain inside their layer, and a s
 3. Only the Unit of Work calls `commit()` or `rollback()`, only a repository imports `session_for`, and only `get_unit_of_work` or a worker factory constructs a `UnitOfWork`. The [backend standards](.github/skills/backend-standards/SKILL.md#who-commits) say how it is used.
 4. Only a domain's own service package and the builders in `api/deps/` import `repositories.<domain>`.
 5. Code outside a domain imports only the package root of `services.<domain>`. A module whose name starts with `_` is private to its package.
+5a. A service package that is not a domain yet is held to the same rule by a count rather than a refusal: the boundary check records how many imports reach below its root, and that number may only fall. `services/tenancy/` is the one that matters, because `DOMAINS.md` dissolves it into **identity** and **organizations**, so its count reaching zero is what finishes that move.
 6. Domain service packages never import each other in a cycle.
 
 A service imports its own domain's repositories, the services of other domains, ports, models and exceptions, and never the API layer or an adapter. A repository imports models, and never a service or the API layer. A route imports its domain's service, schemas and exceptions.

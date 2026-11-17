@@ -2386,3 +2386,99 @@ def test_a_nested_class_does_not_count_toward_the_class_holding_it(
         _composition_root_behavior(1, "Outer", 1),
         _composition_root_behavior(4, "Outer.Inner", 2),
     ]
+
+
+_NON_DOMAIN_PACKAGE = "gateway/services/sidecar/__init__.py"
+_NON_DOMAIN_MEMBER = "gateway/services/sidecar/_impl.py"
+_OUTSIDE = "gateway/api/deps/things.py"
+
+
+def _sidecar(tmp_path: Path, *, outside_imports: int) -> None:
+    _write(tmp_path, _NON_DOMAIN_PACKAGE, "")
+    _write(tmp_path, _NON_DOMAIN_MEMBER, "VALUE = 1\n")
+    lines = "".join(f"from gateway.services.sidecar._impl import VALUE as V{n}\n" for n in range(outside_imports))
+    _write(tmp_path, _OUTSIDE, lines or "VALUE = 1\n")
+
+
+def test_a_non_domain_package_at_its_ceiling_is_clean(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "NON_DOMAIN_SERVICE_IMPORT_BASELINE", {"sidecar": 2})
+    _sidecar(tmp_path, outside_imports=2)
+    assert check.check_non_domain_service_imports(tmp_path, {"things"}) == []
+
+
+def test_a_count_above_the_ceiling_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "NON_DOMAIN_SERVICE_IMPORT_BASELINE", {"sidecar": 1})
+    _sidecar(tmp_path, outside_imports=3)
+    assert check.check_non_domain_service_imports(tmp_path, {"things"}) == [
+        "3 imports reach below services/sidecar/, above its ceiling of 1; import what services.sidecar "
+        "exports, or split the package into the domains DOMAINS.md names"
+    ]
+
+
+def test_a_count_below_the_ceiling_must_be_recorded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "NON_DOMAIN_SERVICE_IMPORT_BASELINE", {"sidecar": 5})
+    _sidecar(tmp_path, outside_imports=2)
+    assert check.check_non_domain_service_imports(tmp_path, {"things"}) == [
+        "only 2 imports now reach below services/sidecar/, under its ceiling of 5; "
+        "lower the ceiling to that, so the removal cannot be spent again"
+    ]
+
+
+def test_a_non_domain_package_with_no_ceiling_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "NON_DOMAIN_SERVICE_IMPORT_BASELINE", {})
+    _sidecar(tmp_path, outside_imports=2)
+    assert check.check_non_domain_service_imports(tmp_path, {"things"}) == [
+        "services/sidecar/ is not a domain DOMAINS.md gives a section and has no import ceiling; "
+        "give it one of 2, or give the package a section"
+    ]
+
+
+def test_a_package_that_became_a_domain_loses_its_ceiling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "NON_DOMAIN_SERVICE_IMPORT_BASELINE", {"sidecar": 2})
+    _sidecar(tmp_path, outside_imports=2)
+    assert check.check_non_domain_service_imports(tmp_path, {"sidecar"}) == [
+        "services/sidecar/ has an import ceiling but is no longer a service package that is not a domain; "
+        "remove its ceiling"
+    ]
+
+
+def test_an_import_inside_the_package_does_not_count(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "NON_DOMAIN_SERVICE_IMPORT_BASELINE", {"sidecar": 0})
+    _sidecar(tmp_path, outside_imports=0)
+    _write(
+        tmp_path,
+        "gateway/services/sidecar/_other.py",
+        "from gateway.services.sidecar._impl import VALUE\n",
+    )
+    assert check.check_non_domain_service_imports(tmp_path, {"things"}) == []
+
+
+def test_an_import_of_the_package_root_does_not_count(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "NON_DOMAIN_SERVICE_IMPORT_BASELINE", {"sidecar": 0})
+    _sidecar(tmp_path, outside_imports=0)
+    _write(tmp_path, _OUTSIDE, "from gateway.services.sidecar import VALUE\n")
+    assert check.check_non_domain_service_imports(tmp_path, {"things"}) == []
+
+
+def test_a_plain_import_below_the_root_counts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "NON_DOMAIN_SERVICE_IMPORT_BASELINE", {"sidecar": 0})
+    _sidecar(tmp_path, outside_imports=0)
+    _write(tmp_path, _OUTSIDE, "import gateway.services.sidecar._impl as impl\n")
+    assert check.check_non_domain_service_imports(tmp_path, {"things"}) == [
+        "1 imports reach below services/sidecar/, above its ceiling of 0; import what services.sidecar "
+        "exports, or split the package into the domains DOMAINS.md names"
+    ]
+
+
+def test_a_plain_import_of_the_package_root_does_not_count(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "NON_DOMAIN_SERVICE_IMPORT_BASELINE", {"sidecar": 0})
+    _sidecar(tmp_path, outside_imports=0)
+    _write(tmp_path, _OUTSIDE, "import gateway.services.sidecar\n")
+    assert check.check_non_domain_service_imports(tmp_path, {"things"}) == []
+
+
+def test_one_statement_counts_once_however_many_names_it_binds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "NON_DOMAIN_SERVICE_IMPORT_BASELINE", {"sidecar": 1})
+    _sidecar(tmp_path, outside_imports=0)
+    _write(tmp_path, _OUTSIDE, "from gateway.services.sidecar._impl import VALUE, OTHER, THIRD\n")
+    assert check.check_non_domain_service_imports(tmp_path, {"things"}) == []
