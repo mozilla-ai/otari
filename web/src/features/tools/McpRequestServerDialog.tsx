@@ -1,6 +1,6 @@
 import { useState } from "react"
 
-import type { McpServerRequest, WorkspaceMcpServer } from "@/client"
+import type { McpServerRequest } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { Dialog, DialogSection } from "@/design-system/feedback/Dialog"
 import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
@@ -9,10 +9,7 @@ import { TextArea } from "@/design-system/forms/TextArea"
 import { Chip } from "@/design-system/indicators/Chip"
 import { McpCatalogBrowser } from "@/features/tools/McpCatalogBrowser"
 import { McpServerLogo } from "@/features/tools/McpServerLogo"
-import {
-  type CatalogPick,
-  normalizeEndpoint,
-} from "@/features/tools/mcpCatalog"
+import type { CatalogPick } from "@/features/tools/mcpCatalog"
 import { isMcpCatalogSyncing, useMcpCatalogSync } from "@/shared/api/mcpCatalog"
 import {
   useAcknowledgeMcpServerRequest,
@@ -37,14 +34,11 @@ export function McpRequestServerDialog({
   onOpenChange,
   workspaceId,
   workspaceName,
-  existing,
 }: {
   isOpen: boolean
   onOpenChange: (isOpen: boolean) => void
   workspaceId: string
   workspaceName: string
-  /** The workspace's servers, which cannot be asked for again. */
-  existing: readonly WorkspaceMcpServer[]
 }) {
   const sync = useMcpCatalogSync(isOpen)
   const mine = useMyMcpServerRequests(workspaceId, isOpen)
@@ -63,7 +57,6 @@ export function McpRequestServerDialog({
       .filter((entry) => entry.status === "pending")
       .map((entry) => [entry.catalog_name, entry]),
   )
-  const added = new Set(existing.map((server) => normalizeEndpoint(server.url)))
 
   const startAsking = (pick: CatalogPick) => {
     request.reset()
@@ -240,7 +233,6 @@ export function McpRequestServerDialog({
             serverCount={status.server_count}
             isSyncing={isMcpCatalogSyncing(status)}
             selected={[]}
-            isAdded={(pick) => added.has(normalizeEndpoint(pick.url))}
             controlAt="end"
             emptyPopular="This workspace has every well-known server. Search for more."
             renderControl={(pick) => {

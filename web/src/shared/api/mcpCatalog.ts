@@ -1,12 +1,16 @@
 import {
-  keepPreviousData,
+  type QueryClient,
   useMutation,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
 import type { McpCatalogServers, McpCatalogSyncStatus } from "@/client"
 import { apiFetch } from "@/shared/api/client"
-import { MCP_CATALOG, MCP_CATALOG_SYNC_POLL_MS } from "@/shared/api/queryKeys"
+import {
+  MCP_CATALOG,
+  MCP_CATALOG_SYNC_POLL_MS,
+  workspaceMeta,
+} from "@/shared/api/queryKeys"
 
 // A sync changes the catalog at most a few times a day, so a page read a
 // minute ago is still the page.
@@ -35,16 +39,54 @@ export function mcpCatalogSyncRefetchMs(
   return Number.isFinite(until) ? Math.max(until, 0) + 1_000 : false
 }
 
+// The most catalog names one read sets aside: a workspace holds at most fifty servers.
+export const MAX_EXCLUDED_CATALOG_NAMES = 50
+
+/** `names` as the key and the query string carry them: sorted, each once, within the gateway's bound. */
+function excludedNames(names: readonly string[]): string[] {
+  return [...new Set(names)].sort().slice(0, MAX_EXCLUDED_CATALOG_NAMES)
+}
+
+/** Keeps the last list on screen while the next loads, never across a change of workspace. */
+function keptForWorkspace(workspaceId: string) {
+  return (
+    previous: McpCatalogServers | undefined,
+    previousQuery: { queryKey: readonly unknown[] } | undefined,
+  ) => (previousQuery?.queryKey[2] === workspaceId ? previous : undefined)
+}
+
+function catalogParams(workspaceId: string, exclude: string[]) {
+  const params = new URLSearchParams({ workspace_id: workspaceId })
+  for (const name of exclude) params.append("exclude", name)
+  return params
+}
+
 /**
- * One page of the catalog, filtered by the gateway. The previous page stays on
- * screen while the next query is in flight, so typing does not blank the list.
- * Re-read while a sync stores pages, so the list fills in as it goes.
+ * Re-read a workspace's catalog lists: the gateway leaves out the servers the
+ * workspace has, so adding, deleting or moving one changes what they hold.
+ */
+export function invalidateWorkspaceMcpCatalog(
+  queryClient: QueryClient,
+  workspaceId: string,
+) {
+  return queryClient.invalidateQueries({
+    predicate: (cached) =>
+      cached.queryKey[0] === MCP_CATALOG && cached.queryKey[2] === workspaceId,
+  })
+}
+
+/**
+ * One page of the catalog, filtered by the gateway, which also leaves out the
+ * servers named in `exclude` from the page and its count. The previous page
+ * stays on screen while the next query is in flight, so typing does not blank
+ * the list. Re-read while a sync stores pages, so the list fills in as it goes.
  */
 export function useMcpCatalogServers({
   query,
   page,
   pageSize,
   workspaceId,
+  exclude = [],
   enabled = true,
   isLoading = false,
 }: {
@@ -55,22 +97,32 @@ export function useMcpCatalogServers({
   pageSize: number
   /** The servers this workspace already has are left out. */
   workspaceId: string
+  /** Catalog names to leave out as well, such as the ones already picked. */
+  exclude?: readonly string[]
   enabled?: boolean
   /** A sync is running, so the catalog is growing under the reader. */
   isLoading?: boolean
 }) {
+  const excluded = excludedNames(exclude)
   return useQuery({
-    queryKey: [MCP_CATALOG, "servers", workspaceId, query, page, pageSize],
+    queryKey: [
+      MCP_CATALOG,
+      "servers",
+      workspaceId,
+      query,
+      page,
+      pageSize,
+      excluded,
+    ],
+    meta: workspaceMeta(workspaceId),
     enabled,
-    placeholderData: keepPreviousData,
+    placeholderData: keptForWorkspace(workspaceId),
     staleTime: CATALOG_STALE_MS,
     refetchInterval: isLoading ? MCP_CATALOG_SYNC_POLL_MS : false,
     queryFn: () => {
-      const params = new URLSearchParams({
-        skip: String(page * pageSize),
-        limit: String(pageSize),
-        workspace_id: workspaceId,
-      })
+      const params = catalogParams(workspaceId, excluded)
+      params.set("skip", String(page * pageSize))
+      params.set("limit", String(pageSize))
       if (query) params.set("q", query)
       return apiFetch<McpCatalogServers>(`/mcp-catalog/servers?${params}`)
     },
@@ -79,16 +131,23 @@ export function useMcpCatalogServers({
 
 /**
  * The well-known servers the catalog holds, from the list bundled with the
- * gateway, without the ones the workspace already has.
+ * gateway, without the ones the workspace already has or `exclude` names.
  */
-export function useMcpCatalogPopular(workspaceId: string, isLoading = false) {
+export function useMcpCatalogPopular(
+  workspaceId: string,
+  isLoading = false,
+  exclude: readonly string[] = [],
+) {
+  const excluded = excludedNames(exclude)
   return useQuery({
-    queryKey: [MCP_CATALOG, "popular", workspaceId],
+    queryKey: [MCP_CATALOG, "popular", workspaceId, excluded],
+    meta: workspaceMeta(workspaceId),
+    placeholderData: keptForWorkspace(workspaceId),
     staleTime: CATALOG_STALE_MS,
     refetchInterval: isLoading ? MCP_CATALOG_SYNC_POLL_MS : false,
     queryFn: () =>
       apiFetch<McpCatalogServers>(
-        `/mcp-catalog/popular?workspace_id=${encodeURIComponent(workspaceId)}`,
+        `/mcp-catalog/popular?${catalogParams(workspaceId, excluded)}`,
       ),
   })
 }

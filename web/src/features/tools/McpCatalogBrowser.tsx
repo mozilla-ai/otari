@@ -25,9 +25,9 @@ const MAX_QUERY_LENGTH = 200
 
 /**
  * "Official" on a server its maker runs on its own domain, so the real one
- * stands out among the gateways named after it. The gateway judges that from
- * names, so the tooltip gives the host for the reader to judge too. Nothing on
- * the others.
+ * stands out among the gateways named after it. The gateway grants it only on
+ * the domain the registry verified for the publisher's namespace; the tooltip
+ * gives the host for the reader to judge too. Nothing on the others.
  */
 export function OfficialChip({ pick }: { pick: CatalogPick }) {
   const said = `Runs on ${hostOf(pick)}, its publisher's own domain`
@@ -118,14 +118,15 @@ function AddByUrl({ onPress }: { onPress: () => void }) {
  * alphabetical order, which nobody can browse, so it is never listed.
  *
  * What is picked sits in a Selected list above both, so a pick made in a
- * search stays on screen once the search is cleared, and is listed once.
+ * search stays on screen once the search is cleared, and is listed once: the
+ * gateway leaves the picks out of the other lists, and out of their counts, so
+ * the pages and their "1–N of M" line hold what is on screen.
  */
 export function McpCatalogBrowser({
   workspaceId,
   serverCount,
   isSyncing,
   selected,
-  isAdded,
   renderControl,
   controlAt = "start",
   emptyPopular = "No other well-known servers to add. Search for more.",
@@ -138,8 +139,6 @@ export function McpCatalogBrowser({
   /** A sync is storing pages, so the lists are re-read as they grow. */
   isSyncing: boolean
   selected: CatalogPick[]
-  /** The workspace has this server, as of a read newer than the catalog's. */
-  isAdded: (pick: CatalogPick) => boolean
   renderControl: (pick: CatalogPick) => ReactNode
   /** Where a row's control sits: a checkbox leads, a button trails. */
   controlAt?: "start" | "end"
@@ -152,23 +151,20 @@ export function McpCatalogBrowser({
   const [pageSize, setPageSize] = useState(25)
   const query = useDebounced(typed.trim())
   const isSearching = query !== ""
-  const popular = useMcpCatalogPopular(workspaceId, isSyncing)
+  const picked = selected.map((pick) => pick.name)
+  const popular = useMcpCatalogPopular(workspaceId, isSyncing, picked)
   const results = useMcpCatalogServers({
     query,
     page,
     pageSize,
     workspaceId,
+    exclude: picked,
     enabled: isSearching,
     isLoading: isSyncing,
   })
 
-  const picked = new Set(selected.map((pick) => pick.name))
-  const isListed = (pick: CatalogPick) =>
-    !picked.has(pick.name) && !isAdded(pick)
-  const allPopular = (popular.data?.data ?? []).map(toCatalogPick)
-  const popularPicks = allPopular.filter(isListed)
-  const allRows = (results.data?.data ?? []).map(toCatalogPick)
-  const rows = allRows.filter(isListed)
+  const popularPicks = (popular.data?.data ?? []).map(toCatalogPick)
+  const rows = (results.data?.data ?? []).map(toCatalogPick)
 
   return (
     <div className="flex flex-col gap-4">
@@ -205,11 +201,11 @@ export function McpCatalogBrowser({
             <>
               {rows.length === 0 ? (
                 <EmptyMessage>
-                  {allRows.length > 0
-                    ? "Everything on this page is selected."
-                    : page === 0
-                      ? `No server matches "${query}".`
-                      : "Nothing on this page. The catalog changed since it was opened."}
+                  {page > 0
+                    ? "Nothing on this page. The catalog changed since it was opened."
+                    : selected.length > 0
+                      ? `No other server matches "${query}".`
+                      : `No server matches "${query}".`}
                 </EmptyMessage>
               ) : (
                 <CatalogList
@@ -221,7 +217,7 @@ export function McpCatalogBrowser({
               )}
               {/* Kept on an empty page past the first, so there is a way back
                   when a sync shortened the catalog under the reader. */}
-              {allRows.length > 0 || page > 0 ? (
+              {rows.length > 0 || page > 0 ? (
                 <TablePagination
                   label="catalog servers"
                   page={page}
@@ -250,10 +246,10 @@ export function McpCatalogBrowser({
               renderControl={renderControl}
               controlAt={controlAt}
             />
-          ) : selected.length > 0 && allPopular.length > 0 ? null : (
-            <EmptyMessage>
-              {popular.isPending ? "Reading the catalog." : emptyPopular}
-            </EmptyMessage>
+          ) : popular.isPending && !popular.data ? (
+            <EmptyMessage>Reading the catalog.</EmptyMessage>
+          ) : selected.length > 0 ? null : (
+            <EmptyMessage>{emptyPopular}</EmptyMessage>
           )}
           {serverCount > 0 ? (
             <p className="text-caption">

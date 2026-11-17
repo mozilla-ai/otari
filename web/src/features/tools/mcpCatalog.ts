@@ -18,7 +18,7 @@ export interface CatalogPick {
   /** Where the gateway serves its logo, or "" when it found none. */
   logoUrl: string
   logoTone: McpCatalogServer["logo_tone"]
-  /** Its maker's own server, on the maker's own domain, as far as the gateway can tell. */
+  /** Its maker's own server, on the domain the registry verified for its publisher. */
   isOfficial: boolean
 }
 

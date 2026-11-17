@@ -222,7 +222,6 @@ export function McpMemberServers({
           onOpenChange={setRequestOpen}
           workspaceId={workspaceId}
           workspaceName={workspaceName}
-          existing={servers}
         />
       ) : null}
 

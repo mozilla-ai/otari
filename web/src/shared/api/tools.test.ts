@@ -4,13 +4,22 @@ import { createElement, type ReactNode } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
+  useMcpCatalogPopular,
+  useMcpCatalogServers,
+} from "@/shared/api/mcpCatalog"
+import { useSwitchOrganization } from "@/shared/api/organizations"
+import { ORGANIZATION_CONTEXT } from "@/shared/api/queryKeys"
+import {
   useCheckWorkspaceMcpServer,
   useDisconnectMcp,
   useMcpServerConnections,
+  useMcpServerProbes,
+  useMyMcpConnections,
   useMyMcpServerTools,
   useRemoveMcpServerConnection,
   useWorkspaceMcpServers,
 } from "@/shared/api/tools"
+import { organizationContext } from "@/tests/fixtures"
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -173,5 +182,58 @@ describe("a server's connected users", () => {
 
     rerender({ serverId: "s-2", page: 1 })
     expect(result.current.data).toBeUndefined()
+  })
+})
+
+describe("the MCP page's workspace reads", () => {
+  const LEFT = "11111111-1111-1111-1111-111111111111"
+
+  it("are not read again for the workspace an organization switch leaves", async () => {
+    const reads: string[] = []
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.endsWith("/organizations/me/switch")) {
+        return Response.json(organizationContext())
+      }
+      reads.push(url)
+      return Response.json({ data: [], count: 0 })
+    })
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    client.setQueryData(
+      ORGANIZATION_CONTEXT,
+      organizationContext({
+        workspace_memberships: [
+          { workspace_id: LEFT, name: "Left", role: "owner" },
+        ],
+      }),
+    )
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client }, children)
+    const { result } = renderHook(
+      () => {
+        useMyMcpConnections(LEFT)
+        useMyMcpServerTools(LEFT, "s-1", true)
+        useMcpServerConnections(LEFT, "s-1", { page: 0, pageSize: 25 }, true)
+        useMcpServerProbes(LEFT, ["https://mcp.example.com/mcp"])
+        useMcpCatalogServers({
+          query: "x",
+          page: 0,
+          pageSize: 25,
+          workspaceId: LEFT,
+        })
+        useMcpCatalogPopular(LEFT)
+        return useSwitchOrganization()
+      },
+      { wrapper },
+    )
+    await waitFor(() => expect(reads).toHaveLength(6))
+
+    await act(() => result.current.mutateAsync("org-there"))
+
+    // Given the other reads a chance to go out, none of them names the workspace left.
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(reads).toHaveLength(6)
   })
 })

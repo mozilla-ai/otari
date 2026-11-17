@@ -26,7 +26,6 @@ import {
   describeAdded,
   describeRefusal,
   findFreeName,
-  normalizeEndpoint,
   suggestMode,
 } from "@/features/tools/mcpCatalog"
 import {
@@ -96,7 +95,7 @@ export function McpCatalogDialog({
   onOpenChange: (isOpen: boolean) => void
   workspaceId: string
   workspaceName: string
-  /** The workspace's servers, to leave out what is already there and avoid its names. */
+  /** The workspace's servers, whose names a new one avoids. */
   existing: WorkspaceMcpServer[]
   /** Open the form that adds a server by URL, for one the catalog does not list. */
   onAddByUrl?: () => void
@@ -134,7 +133,6 @@ export function McpCatalogDialog({
     step === "review" ? drafts.map((draft) => draft.pick.url) : [],
   )
 
-  const added = new Set(existing.map((server) => normalizeEndpoint(server.url)))
   const isPicked = (pick: CatalogPick) =>
     picks.some((other) => other.name === pick.name)
 
@@ -418,7 +416,6 @@ export function McpCatalogDialog({
                 serverCount={status.server_count}
                 isSyncing={isMcpCatalogSyncing(status)}
                 selected={picks}
-                isAdded={(pick) => added.has(normalizeEndpoint(pick.url))}
                 renderControl={(pick) => (
                   <Checkbox
                     ariaLabel={`Select ${pick.title}`}

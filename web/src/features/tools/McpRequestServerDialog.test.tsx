@@ -3,13 +3,9 @@ import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { McpServerRequest, WorkspaceMcpServer } from "@/client"
+import type { McpServerRequest } from "@/client"
 import { McpRequestServerDialog } from "@/features/tools/McpRequestServerDialog"
-import {
-  mcpCatalogServer,
-  mcpCatalogSyncStatus,
-  workspaceMcpServer,
-} from "@/tests/fixtures"
+import { mcpCatalogServer, mcpCatalogSyncStatus } from "@/tests/fixtures"
 
 const WORKSPACE = "11111111-1111-1111-1111-111111111111"
 
@@ -103,7 +99,7 @@ function mockApi({
   return calls
 }
 
-function renderDialog(existing: WorkspaceMcpServer[] = []) {
+function renderDialog() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -114,7 +110,6 @@ function renderDialog(existing: WorkspaceMcpServer[] = []) {
         onOpenChange={() => {}}
         workspaceId={WORKSPACE}
         workspaceName="Alpha"
-        existing={existing}
       />
     </QueryClientProvider>,
   )
@@ -300,15 +295,17 @@ describe("McpRequestServerDialog", () => {
     ).toBeVisible()
   })
 
-  it("leaves out a server the workspace already has", async () => {
-    mockApi()
-    renderDialog([workspaceMcpServer({ name: "Linear", url: LINEAR.url })])
+  it("asks the gateway to leave out the servers the workspace already has", async () => {
+    const calls = mockApi()
+    renderDialog()
 
     expect(
       await screen.findByRole("button", { name: "Request Sentry" }),
     ).toBeVisible()
     expect(
-      screen.queryByRole("button", { name: "Request Linear" }),
-    ).not.toBeInTheDocument()
+      calls.some((call) =>
+        call.url.includes(`/mcp-catalog/popular?workspace_id=${WORKSPACE}`),
+      ),
+    ).toBe(true)
   })
 })

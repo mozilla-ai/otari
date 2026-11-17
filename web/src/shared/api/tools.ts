@@ -49,6 +49,7 @@ import type {
   WorkspaceWebSearchConfig,
 } from "@/client"
 import { apiFetch } from "@/shared/api/client"
+import { invalidateWorkspaceMcpCatalog } from "@/shared/api/mcpCatalog"
 import { fetchAllPaged } from "@/shared/api/paging"
 import {
   GUARDRAIL_PROFILES,
@@ -799,6 +800,8 @@ export function useCreateWorkspaceMcpServer() {
       void queryClient.invalidateQueries({
         queryKey: [WORKSPACES, workspaceId, MCP_SERVER_REQUESTS],
       })
+      // The catalog leaves out what the workspace has.
+      void invalidateWorkspaceMcpCatalog(queryClient, workspaceId)
     },
   })
 }
@@ -831,6 +834,8 @@ export function useUpdateWorkspaceMcpServer() {
       void queryClient.invalidateQueries({
         queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
       })
+      // A new URL changes which catalog server the workspace has.
+      void invalidateWorkspaceMcpCatalog(queryClient, workspaceId)
     },
   })
 }
@@ -893,6 +898,7 @@ export function useMcpServerProbes(workspaceId: string, urls: string[]) {
   return useQueries({
     queries: urls.map((url) => ({
       queryKey: [WORKSPACES, workspaceId, "mcp-server-probe", url],
+      meta: workspaceMeta(workspaceId),
       staleTime: MCP_SERVER_PROBE_STALE_MS,
       retry: false,
       queryFn: () =>
@@ -936,6 +942,7 @@ function mcpServerConnectionsKey(workspaceId: string, serverId: string) {
 export function useMyMcpConnections(workspaceId: string | null) {
   return useQuery({
     queryKey: mcpConnectionsKey(workspaceId ?? ""),
+    meta: workspaceMeta(workspaceId),
     enabled: workspaceId !== null,
     // Every write that moves it invalidates it, so a minute between reads is safe.
     staleTime: 60_000,
@@ -959,6 +966,7 @@ export function useMyMcpServerTools(
 ) {
   return useQuery({
     queryKey: mcpMyToolsKey(workspaceId ?? "", serverId),
+    meta: workspaceMeta(workspaceId),
     enabled: enabled && workspaceId !== null,
     staleTime: 60_000,
     queryFn: ({ signal }) =>
@@ -1166,6 +1174,7 @@ export function useMcpServerConnections(
       page,
       pageSize,
     ],
+    meta: workspaceMeta(workspaceId),
     enabled,
     // Other people connect without this page hearing of it, so it is read again sooner.
     staleTime: 30_000,
@@ -1253,6 +1262,7 @@ export function useDeleteWorkspaceMcpServer() {
       void queryClient.invalidateQueries({
         queryKey: mcpKeyAccessRoot(workspaceId),
       })
+      void invalidateWorkspaceMcpCatalog(queryClient, workspaceId)
     },
   })
 }

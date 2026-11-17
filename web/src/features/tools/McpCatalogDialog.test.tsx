@@ -66,6 +66,7 @@ function mockApi({
   servers = [SENTRY, STRIPE, LINEAR],
   probes = {},
   created = {},
+  inWorkspace = [],
 }: {
   status?: McpCatalogSyncStatus
   afterRequest?: McpCatalogSyncStatus
@@ -73,6 +74,8 @@ function mockApi({
   servers?: McpCatalogServer[]
   probes?: Record<string, WorkspaceMcpServerHealth>
   created?: Record<string, WorkspaceMcpServer | string>
+  /** Catalog names the workspace already has, which the gateway leaves out as it does. */
+  inWorkspace?: string[]
 } = {}): Call[] {
   const calls: Call[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -88,14 +91,18 @@ function mockApi({
         status: method === "POST" ? 202 : 200,
       })
     }
+    const params = new URL(url, "http://localhost").searchParams
+    const leftOut = new Set([...inWorkspace, ...params.getAll("exclude")])
+    const listed = (server: McpCatalogServer) => !leftOut.has(server.name)
     if (url.includes("/mcp-catalog/popular")) {
-      return Response.json({ data: popular, count: popular.length })
+      const shelf = popular.filter(listed)
+      return Response.json({ data: shelf, count: shelf.length })
     }
     if (url.includes("/mcp-catalog/servers")) {
-      const params = new URL(url, "http://localhost").searchParams
       const query = (params.get("q") ?? "").toLowerCase()
-      const matching = servers.filter((server) =>
-        server.title.toLowerCase().includes(query),
+      const matching = servers.filter(
+        (server) =>
+          listed(server) && server.title.toLowerCase().includes(query),
       )
       const skip = Number(params.get("skip") ?? 0)
       const limit = Number(params.get("limit") ?? 25)
@@ -177,9 +184,8 @@ describe("McpCatalogDialog", () => {
   })
 
   it("leaves out a server the workspace already has, on Popular and in a search", async () => {
-    const calls = mockApi()
+    const calls = mockApi({ inWorkspace: [LINEAR.name] })
     const user = userEvent.setup()
-    // The same endpoint, spelled with a trailing slash the catalog does not have.
     renderDialog([
       workspaceMcpServer({ url: "https://mcp.linear.example/mcp/" }),
     ])
@@ -251,7 +257,7 @@ describe("McpCatalogDialog", () => {
 
     // A Popular pick moves up too, so it is never listed twice.
     await user.click(screen.getByRole("checkbox", { name: "Select Linear" }))
-    expect(screen.getAllByText("Linear")).toHaveLength(1)
+    await waitFor(() => expect(screen.getAllByText("Linear")).toHaveLength(1))
     expect(
       within(screen.getByRole("list", { name: "Selected" })).getByText(
         "Linear",
@@ -262,9 +268,8 @@ describe("McpCatalogDialog", () => {
     await user.click(screen.getByRole("checkbox", { name: "Select Stripe" }))
     await user.click(screen.getByRole("checkbox", { name: "Select Linear" }))
     expect(screen.queryByRole("list", { name: "Selected" })).toBeNull()
-    expect(
-      within(screen.getByRole("list", { name: "Popular" })).getByText("Linear"),
-    ).toBeInTheDocument()
+    const popular = await screen.findByRole("list", { name: "Popular" })
+    expect(await within(popular).findByText("Linear")).toBeInTheDocument()
   })
 
   it("offers the add-by-URL form for a server the catalog does not list", async () => {
@@ -607,5 +612,54 @@ describe("McpCatalogDialog", () => {
     expect(calls.some((call) => call.url.includes("skip=25&limit=25"))).toBe(
       true,
     )
+  })
+
+  it("counts and pages what is on screen once servers are picked", async () => {
+    const many = Array.from({ length: 30 }, (_, index) =>
+      mcpCatalogServer({
+        id: `id-${index}`,
+        name: `io.example/s${index}`,
+        title: `Server ${String(index).padStart(2, "0")}`,
+        url: `https://s${index}.example/mcp`,
+      }),
+    )
+    const calls = mockApi({ servers: many })
+    const user = userEvent.setup()
+    renderDialog()
+    await screen.findByRole("list", { name: "Popular" })
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search the catalog" }),
+      "server",
+    )
+    expect(await screen.findByText("1–25 of 30")).toBeInTheDocument()
+
+    for (const title of ["Server 00", "Server 01"]) {
+      await user.click(
+        screen.getByRole("checkbox", { name: `Select ${title}` }),
+      )
+    }
+
+    // The picks leave the page and the count on the gateway, not just the screen.
+    expect(await screen.findByText("1–25 of 28")).toBeInTheDocument()
+    const results = screen.getByRole("list", { name: "Results" })
+    expect(within(results).getAllByRole("listitem")).toHaveLength(25)
+    expect(within(results).queryByText("Server 00")).toBeNull()
+    expect(
+      calls.some(
+        (call) =>
+          call.url.includes("exclude=io.example%2Fs0") &&
+          call.url.includes("exclude=io.example%2Fs1"),
+      ),
+    ).toBe(true)
+
+    await user.click(
+      screen.getByRole("button", { name: "Next page, catalog servers" }),
+    )
+    expect(await screen.findByText("26–28 of 28")).toBeInTheDocument()
+    expect(
+      within(screen.getByRole("list", { name: "Results" })).getByText(
+        "Server 27",
+      ),
+    ).toBeInTheDocument()
   })
 })
