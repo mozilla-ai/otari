@@ -12,9 +12,11 @@ from gateway.core.feature import CoreFeature
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.repositories.api_keys import ApiKeyRepositories
 from gateway.repositories.budgets import BudgetRepositories
+from gateway.repositories.organizations import OrganizationRepositories
 from gateway.repositories.traces import TracesRepositories
 from gateway.services.api_keys import ApiKeyMembershipListener
 from gateway.services.budgets import BudgetMembershipListener
+from gateway.services.organizations import UserAccess
 from gateway.services.routing import clear_router_backend_cache
 from gateway.services.tenancy import MembershipListener, MembershipListeners
 from gateway.services.tools import McpGrantMembershipListener
@@ -115,3 +117,8 @@ def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
 
 
 MembershipListenerDep = Annotated[MembershipListener, Depends(get_membership_listener)]
+
+
+def get_user_access(uow: UnitOfWorkDep) -> UserAccess:
+    """Build the organizations domain's read of users' access lists on the request's Unit of Work."""
+    return UserAccess(OrganizationRepositories.on(uow))
