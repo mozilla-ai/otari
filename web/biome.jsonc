@@ -27,14 +27,17 @@
     // src/routes/) and the API client (from docs/public/openapi.json). Both are
     // committed and neither is edited by hand, so formatting them would only fight
     // the drift checks that guard them, and they are free to import across any line
-    // the generator chooses.
+    // the generator chooses. Vendored packages are left out for the same reason:
+    // each is an upstream library copied unchanged, so a reformat would turn the
+    // swap to the published package into a diff to review.
     "includes": [
       "src/**",
       "e2e/**",
       "vite.config.ts",
       "playwright.config.ts",
       "!src/routeTree.gen.ts",
-      "!src/client/schema.ts"
+      "!src/client/schema.ts",
+      "!src/**/vendor"
     ]
   },
 

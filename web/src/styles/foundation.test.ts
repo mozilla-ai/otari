@@ -901,10 +901,14 @@ describe("semantic tokens only", () => {
   // share card is rasterized through an <img>-loaded SVG document, where a
   // custom property does not resolve, so its palette has to be literal.
   const EXCEPTIONS = new Set(["features/usage/ShareCard.tsx"])
+  // Vendored packages are left out as well. Each is an upstream library copied
+  // unchanged so it can be swapped for the published one, and what it paints
+  // goes to its own canvas rather than to anything a token could style.
   const sources = walk(SRC).filter(
     (name) =>
       /\.tsx?$/.test(name) &&
       !/\.test\.tsx?$/.test(name) &&
+      !name.split("/").includes("vendor") &&
       !EXCEPTIONS.has(name),
   )
 
@@ -1864,6 +1868,8 @@ describe("the catalog shows every prop", () => {
   const CANNOT_BE_SHOWN: Record<string, string> = {
     "actions/CopyButton.selectOnFailure":
       "the fallback for a refused clipboard write, which a story cannot provoke without breaking the clipboard",
+    "feedback/Dialog.faceRef":
+      "a handle on the element around the frame's face for a caller's own transition, which renders nothing of its own",
     "feedback/FormDialog.returnFocusRef":
       "where focus lands after the frame is gone, which needs the trigger to unmount with it: a story could pass the prop and would demonstrate nothing",
     "feedback/FormDialog.target":
