@@ -2482,3 +2482,60 @@ def test_one_statement_counts_once_however_many_names_it_binds(tmp_path: Path, m
     _sidecar(tmp_path, outside_imports=0)
     _write(tmp_path, _OUTSIDE, "from gateway.services.sidecar._impl import VALUE, OTHER, THIRD\n")
     assert check.check_non_domain_service_imports(tmp_path, {"things"}) == []
+
+
+def _root_with(tmp_path: Path, body: str) -> None:
+    _write(tmp_path, check.COMPOSITION_ROOT_MODULE, body)
+
+
+def test_a_composition_root_at_its_baseline_is_clean(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 2)
+    _root_with(tmp_path, "def get_one() -> None: ...\n\n\ndef get_two() -> None: ...\n")
+    assert check.check_composition_root_size(tmp_path) == []
+
+
+def test_a_definition_added_to_the_composition_root_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 1)
+    _root_with(tmp_path, "def get_one() -> None: ...\n\n\ndef get_two() -> None: ...\n")
+    assert check.check_composition_root_size(tmp_path) == [
+        f"{check.COMPOSITION_ROOT_MODULE} holds 2 definitions, above its baseline of 1; put the new one "
+        "in the module of the domain whose work it does, which the root re-exports"
+    ]
+
+
+def test_a_definition_removed_must_be_recorded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 5)
+    _root_with(tmp_path, "def get_one() -> None: ...\n")
+    assert check.check_composition_root_size(tmp_path) == [
+        f"{check.COMPOSITION_ROOT_MODULE} holds 1 definitions, under its baseline of 5; lower the "
+        "baseline to that, so the room made cannot be spent again"
+    ]
+
+
+def test_an_annotated_alias_counts_as_a_definition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 1)
+    _root_with(tmp_path, "def get_one() -> None: ...\n\n\nOneDep = Annotated[object, Depends(get_one)]\n")
+    assert len(check.check_composition_root_size(tmp_path)) == 1
+
+
+def test_the_public_surface_list_is_not_a_definition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 1)
+    _root_with(tmp_path, 'def get_one() -> None: ...\n\n\n__all__ = ["get_one"]\n')
+    assert check.check_composition_root_size(tmp_path) == []
+
+
+def test_a_re_export_imported_into_the_root_is_not_a_definition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 1)
+    _root_with(
+        tmp_path,
+        "from gateway.api.deps.things import ThingDep, get_thing\n\n\ndef get_one() -> None: ...\n",
+    )
+    assert check.check_composition_root_size(tmp_path) == []
+
+
+def test_a_nested_definition_does_not_count(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 1)
+    _root_with(tmp_path, "def get_one() -> None:\n    def inner() -> None: ...\n\n    return inner()\n")
+    assert check.check_composition_root_size(tmp_path) == []

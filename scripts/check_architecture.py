@@ -85,6 +85,12 @@ Enforces:
     so a cycle through a package initializer is found. Only imports at module
     scope are read, since an import inside a function or under if TYPE_CHECKING
     does not run when the module loads.
+26. Composition root behavior: no class under api/deps/ defines a method, so the
+    composition root builds things and threads the request's session into them
+    rather than growing an implementation of its own. A class that carries data
+    and no methods is unaffected, so the parameter objects it legitimately holds
+    stay. A class nested in a function counts, since nesting would otherwise be
+    the way around the rule.
 27. Non-domain service imports: each service package whose name is not a domain
     DOMAINS.md gives a section carries a ceiling on how many times code outside
     it reaches below its root, and the count must equal that ceiling. Rule 21
@@ -93,12 +99,12 @@ Enforces:
     debt is counted instead so it cannot grow. The count rising fails, and the
     count falling fails until the ceiling is lowered, so every removal is
     recorded and a package's dissolution is proved by its ceiling reaching zero.
-26. Composition root behavior: no class under api/deps/ defines a method, so the
-    composition root builds things and threads the request's session into them
-    rather than growing an implementation of its own. A class that carries data
-    and no methods is unaffected, so the parameter objects it legitimately holds
-    stay. A class nested in a function counts, since nesting would otherwise be
-    the way around the rule.
+28. Composition root size: the package root of api/deps/ carries a count of the
+    definitions it holds, and that count may only fall. The root is where a
+    builder lands when nothing says otherwise, so it refills as fast as it is
+    emptied. This says nothing about which module a builder belongs in, which is
+    a judgement no check can make; it says only that the root is full, so the
+    next builder goes where a reader of that domain will look.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -1410,6 +1416,53 @@ def check_non_domain_service_imports(src_root: Path, domains: set[str]) -> list[
         for package in sorted(set(NON_DOMAIN_SERVICE_IMPORT_BASELINE) - set(packages))
     )
     return violations
+
+
+COMPOSITION_ROOT_MODULE = "gateway/api/deps/__init__.py"
+# How many definitions the composition root holds. It may only fall: the root is
+# where a builder lands when nothing says otherwise, and over two days it took
+# back three hundred lines of what a split had moved out. A fall must be recorded
+# here, so the room made cannot be spent again. The count says nothing about where
+# a builder belongs, which is a judgement no check can make.
+COMPOSITION_ROOT_SIZE_BASELINE = 89
+
+
+def _module_definitions(tree: ast.Module) -> int:
+    """How many names a module binds at its own scope, not counting its public surface list."""
+    definitions = 0
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            definitions += 1
+        elif isinstance(node, ast.Assign):
+            definitions += sum(1 for target in node.targets if isinstance(target, ast.Name) and target.id != "__all__")
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            definitions += node.target.id != "__all__"
+    return definitions
+
+
+def check_composition_root_size(src_root: Path) -> list[str]:
+    """Check the composition root's definition count against its baseline."""
+    module = src_root / COMPOSITION_ROOT_MODULE
+    if not module.is_file():
+        return []
+    try:
+        tree = ast.parse(module.read_text(encoding="utf-8"))
+    except SyntaxError:
+        return []
+    counted = _module_definitions(tree)
+    if counted > COMPOSITION_ROOT_SIZE_BASELINE:
+        return [
+            f"{COMPOSITION_ROOT_MODULE} holds {counted} definitions, above its baseline of "
+            f"{COMPOSITION_ROOT_SIZE_BASELINE}; put the new one in the module of the domain whose "
+            "work it does, which the root re-exports"
+        ]
+    if counted < COMPOSITION_ROOT_SIZE_BASELINE:
+        return [
+            f"{COMPOSITION_ROOT_MODULE} holds {counted} definitions, under its baseline of "
+            f"{COMPOSITION_ROOT_SIZE_BASELINE}; lower the baseline to that, so the room made "
+            "cannot be spent again"
+        ]
+    return []
 
 
 REPOSITORY_SCOPE = "gateway/repositories"
@@ -3182,6 +3235,7 @@ def main() -> int:
     model_access_violations = check_model_access(SRC_ROOT)
     import_cycle_violations = check_import_cycles(SRC_ROOT)
     composition_root_violations = check_composition_root_behavior(SRC_ROOT)
+    composition_root_size_violations = check_composition_root_size(SRC_ROOT)
 
     if import_violations:
         print("❌ Architecture violations found:\n")
@@ -3268,6 +3322,12 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal non-domain service import violations: {len(non_domain_import_violations)}")
 
+    if composition_root_size_violations:
+        print("\n❌ Composition root size violations:\n")
+        for violation in composition_root_size_violations:
+            print(f"  {violation}")
+        print(f"\nTotal composition root size violations: {len(composition_root_size_violations)}")
+
     if composition_root_violations:
         print("\n❌ Composition root behavior violations:\n")
         for violation in composition_root_violations:
@@ -3296,6 +3356,7 @@ def main() -> int:
         or model_access_violations
         or import_cycle_violations
         or composition_root_violations
+        or composition_root_size_violations
         or non_domain_import_violations
     ):
         print("\n💡 See ARCHITECTURE.md for the intended layering")
