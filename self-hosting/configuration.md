@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/f55265c30e7d765285b35c62d0b4afca70162357/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/c7f2cb670c044cdc9b084247244183d10c9c89c4/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -856,7 +856,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/f55265c30e7d765285b35c62d0b4afca70162357/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/c7f2cb670c044cdc9b084247244183d10c9c89c4/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -1620,13 +1620,6 @@ with the key and a price, and name it in `web_search_default_tool`; for Tavily,
 add `include_raw_content: true` to its options to keep each page's full text.
 The startup log says the same while they are set.
 
-### The older in-loop backend
-
-The older in-loop backend still serves a request that declares only the fetch
-tool, until it is removed. `web_fetch_default_tool` governs every fetch tool call,
-while `web_search_max_calls` does not apply there: the older backend keeps its
-fixed limit of 10 calls and its 422 past it.
-
 ## Decision providers
 
 `decision_providers` configures the upstreams behind `POST /api/v1/decisions`. The
@@ -1899,7 +1892,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/f55265c30e7d765285b35c62d0b4afca70162357/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/c7f2cb670c044cdc9b084247244183d10c9c89c4/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Contacting the Otari team
