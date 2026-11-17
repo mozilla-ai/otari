@@ -129,70 +129,70 @@ def test_a_catalog_server_is_looked_for_at_its_icon_then_its_publisher_then_its_
 
 
 @pytest.mark.parametrize(
-    ("name", "title", "url", "website", "kind"),
+    ("name", "title", "url", "kind"),
     [
-        ("com.stripe/mcp", "Stripe", "https://mcp.stripe.com", None, "vendor"),
-        ("io.github.getsentry/sentry-mcp", "Sentry", "https://mcp.sentry.dev/mcp", None, "vendor"),
-        ("com.figma.mcp/mcp", "Figma MCP Server", "https://mcp.figma.com/mcp", None, "vendor"),
-        ("com.monday/monday.com", "Monday.com", "https://mcp.monday.com/mcp", None, "vendor"),
-        ("uk.co.rentercheck/rentercheck", "RenterCheck", "https://rentercheck.co.uk/api/mcp", None, "vendor"),
-        ("io.github.pipeworx-io/intercom", "Intercom", "https://gateway.pipeworx.io/intercom", None, "community"),
-        ("com.example/notion", "Notion", "https://example.vercel.app/mcp", None, "community"),
+        ("com.stripe/mcp", "Stripe", "https://mcp.stripe.com", "vendor"),
+        ("com.figma.mcp/mcp", "Figma MCP Server", "https://mcp.figma.com/mcp", "vendor"),
+        ("com.monday/monday.com", "Monday.com", "https://mcp.monday.com/mcp", "vendor"),
+        ("uk.co.rentercheck/rentercheck", "RenterCheck", "https://rentercheck.co.uk/api/mcp", "vendor"),
+        ("io.github.pipeworx-io/intercom", "Intercom", "https://gateway.pipeworx.io/intercom", "community"),
+        ("com.example/notion", "Notion", "https://example.vercel.app/mcp", "community"),
         # Its maker's own, but a title that says more than the maker's name could be anyone's server for it.
-        ("ai.fudge/fudge", "Fudge for Shopify", "https://mcp.fudge.ai/mcp", None, "community"),
-        (
-            "io.usefulapi/fieldwire",
-            "Fieldwire MCP by usefulapi",
-            "https://fieldwire.usefulapi.io/mcp",
-            None,
-            "community",
-        ),
-        ("io.github.mcp-dir/crefisa-mcp", "Crefisa MCP", "https://api.mcp.ai/p_crefisa", None, "community"),
+        ("ai.fudge/fudge", "Fudge for Shopify", "https://mcp.fudge.ai/mcp", "community"),
+        ("io.usefulapi/fieldwire", "Fieldwire MCP by usefulapi", "https://fieldwire.usefulapi.io/mcp", "community"),
+        ("io.github.mcp-dir/crefisa-mcp", "Crefisa MCP", "https://api.mcp.ai/p_crefisa", "community"),
         # A name on a hosting platform is anyone's to take.
-        ("app.vercel.figma/mcp", "Figma", "https://figma.vercel.app/mcp", "https://figma.vercel.app", "community"),
+        ("app.vercel.figma/mcp", "Figma", "https://figma.vercel.app/mcp", "community"),
+        # The endpoint's domain is not the namespace's, so a lookalike domain titled with the maker's name is not
+        # the maker's, and neither is the same name under another ending.
+        ("io.lookalike/stripe", "Stripe", "https://mcp.stripe-payments.com/mcp", "community"),
+        ("com.stripe/mcp", "Stripe", "https://mcp.stripe.co/mcp", "community"),
+        # A GitHub namespace proves an account, not a domain, however well its name matches the endpoint's.
+        ("io.github.stripeofficial/mcp", "Stripe", "https://mcp.stripe.co/mcp", "community"),
+        ("io.github.getsentry/sentry-mcp", "Sentry", "https://mcp.sentry.example/mcp", "community"),
         # Listed by hand, and only at the host it was checked on.
-        ("io.github.github/github-mcp-server", "GitHub", "https://api.githubcopilot.com/mcp/", None, "vendor"),
-        ("io.github.github/github-mcp-server", "GitHub", "https://mcp.example.com/mcp", None, "community"),
-        ("io.github.someone/github", "GitHub", "https://api.githubcopilot.com/mcp/", None, "community"),
+        ("io.github.github/github-mcp-server", "GitHub", "https://api.githubcopilot.com/mcp/", "vendor"),
+        ("io.github.github/github-mcp-server", "GitHub", "https://mcp.example.com/mcp", "community"),
+        ("io.github.someone/github", "GitHub", "https://api.githubcopilot.com/mcp/", "community"),
+        ("io.github.getsentry/sentry-mcp", "Sentry", "https://mcp.sentry.dev/mcp", "vendor"),
     ],
 )
-def test_who_published_a_server(name: str, title: str, url: str, website: str | None, kind: str) -> None:
-    assert logos.publisher_kind(name, title, url, website) == kind
+def test_who_published_a_server(name: str, title: str, url: str, kind: str) -> None:
+    assert logos.publisher_kind(name, title, url) == kind
 
 
-# Each Popular entry's title and website as the registry listed them on 2026-11-12.
+# Each Popular entry's title as the registry listed it on 2026-11-12.
 _POPULAR_LISTED = {
-    "io.github.github/github-mcp-server": ("GitHub", None),
-    "com.notion/mcp": ("Notion", None),
-    "app.linear/linear": ("Linear", "https://linear.app"),
-    "io.github.getsentry/sentry-mcp": ("Sentry", "https://mcp.sentry.dev"),
-    "com.atlassian/atlassian-mcp-server": ("Atlassian Rovo MCP Server", "https://support.atlassian.com/"),
-    "com.figma.mcp/mcp": ("Figma MCP Server", None),
-    "com.stripe/mcp": ("Stripe", None),
-    "com.vercel/vercel-mcp": ("Vercel", None),
-    "com.supabase/mcp": ("Supabase", "https://supabase.com/mcp"),
-    "com.neon/mcp": ("Neon", "https://neon.com/docs/ai/neon-mcp-server"),
-    "com.gitlab/mcp": ("Gitlab", None),
-    "io.github.upstash/context7": ("Context7", "https://context7.com"),
-    "co.huggingface/hf-mcp-server": ("Hugging Face", None),
-    "com.cloudflare.mcp/mcp": ("Cloudflare", None),
-    "io.github.grafana/mcp-grafana": ("Grafana", "https://grafana.com/docs/grafana/latest/developer-resources/mcp/"),
-    "io.github.PostHog/mcp": ("PostHog MCP Server", None),
-    "com.canva.mcp/mcp": ("Canva MCP", None),
-    "com.monday/monday.com": ("Monday.com", None),
-    "com.paypal.mcp/mcp": ("Paypal", None),
-    "com.zapier/mcp": ("Zapier", "https://docs.zapier.com/mcp/home"),
-    "ai.granola/mcp": ("Granola", "https://www.granola.ai"),
+    "io.github.github/github-mcp-server": "GitHub",
+    "com.notion/mcp": "Notion",
+    "app.linear/linear": "Linear",
+    "io.github.getsentry/sentry-mcp": "Sentry",
+    "com.atlassian/atlassian-mcp-server": "Atlassian Rovo MCP Server",
+    "com.figma.mcp/mcp": "Figma MCP Server",
+    "com.stripe/mcp": "Stripe",
+    "com.vercel/vercel-mcp": "Vercel",
+    "com.supabase/mcp": "Supabase",
+    "com.neon/mcp": "Neon",
+    "com.gitlab/mcp": "Gitlab",
+    "io.github.upstash/context7": "Context7",
+    "co.huggingface/hf-mcp-server": "Hugging Face",
+    "com.cloudflare.mcp/mcp": "Cloudflare",
+    "io.github.grafana/mcp-grafana": "Grafana",
+    "io.github.PostHog/mcp": "PostHog MCP Server",
+    "com.canva.mcp/mcp": "Canva MCP",
+    "com.monday/monday.com": "Monday.com",
+    "com.paypal.mcp/mcp": "Paypal",
+    "com.zapier/mcp": "Zapier",
+    "ai.granola/mcp": "Granola",
 }
 
 
 def test_every_popular_server_is_its_makers_own() -> None:
-    # GitHub's and Atlassian's pass by the hand-kept list, the rest by the rule.
+    # The hand-kept list covers the ones the rule cannot see, the rule the rest.
     community = {
         entry.name
         for entry in POPULAR_SERVERS
-        if logos.publisher_kind(entry.name, *_POPULAR_LISTED[entry.name][:1], entry.url, _POPULAR_LISTED[entry.name][1])
-        == "community"
+        if logos.publisher_kind(entry.name, _POPULAR_LISTED[entry.name], entry.url) == "community"
     }
     assert community == set()
     assert {name for name, _ in logos.OFFICIAL_ENDPOINTS} <= {entry.name for entry in POPULAR_SERVERS}
@@ -202,7 +202,7 @@ def test_every_bundled_extra_is_a_makers_own_https_server_listed_once() -> None:
     assert len({extra.name for extra in EXTRA_SERVERS}) == len(EXTRA_SERVERS)
     for extra in EXTRA_SERVERS:
         assert extra.url.startswith("https://")
-        assert logos.publisher_kind(extra.name, extra.title, extra.url, extra.website_url) == "vendor"
+        assert logos.publisher_kind(extra.name, extra.title, extra.url) == "vendor"
         # The first place its logo is looked for is the icon named here, else its maker's site.
         assert logos.catalog_logo_sources(extra.name, extra.website_url, extra.icon_url)
 
