@@ -120,12 +120,14 @@ export function ToolsMenu({
                     key={server.id}
                     name={server.name}
                     isSelected={selectedMcpIds.includes(server.id)}
-                    isDisabled={!server.enabled}
+                    isDisabled={!server.enabled || server.sign_in_required}
                     onChange={(isOn) => onToggleMcpServer(server.id, isOn)}
                     note={
-                      server.enabled
-                        ? (server.purpose_hint ?? undefined)
-                        : "Turned off for this workspace."
+                      !server.enabled
+                        ? "Turned off for this workspace."
+                        : server.sign_in_required
+                          ? "Connect your account under Tools, MCP servers, to use it."
+                          : (server.purpose_hint ?? undefined)
                     }
                   />
                 ))}

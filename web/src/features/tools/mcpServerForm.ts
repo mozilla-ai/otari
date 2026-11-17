@@ -1,4 +1,7 @@
-// The form rules the add dialog and a server's Settings tab share.
+import type { McpCredentialMode } from "@/client"
+import type { RadioOption } from "@/design-system/forms/RadioGroup"
+
+// The form rules the add dialog and a server's Settings dialog share.
 
 /**
  * Comma separated in a form, a list on the wire, and null rather than `[]` for
@@ -24,6 +27,7 @@ export function parseAllowedTools(raw: string): string[] | null {
 export function urlProblem(
   raw: string,
   willHaveToken: boolean,
+  isPerUser = false,
 ): string | undefined {
   const trimmed = raw.trim()
   if (trimmed === "") return undefined
@@ -36,8 +40,43 @@ export function urlProblem(
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     return "An MCP endpoint is reached over http or https."
   }
+  if (isPerUser && parsed.protocol !== "https:") {
+    return "A personal server needs an https URL, so each member's own sign-in is not sent in the clear."
+  }
   if (willHaveToken && parsed.protocol !== "https:") {
     return "A server with an authorization token needs an https URL, so the token is not sent in the clear."
   }
   return undefined
 }
+
+/**
+ * What the dashboard calls a server's credential mode. UI words only: the API
+ * keeps `shared` and `per_user`.
+ */
+export const CREDENTIAL_MODE_COPY: Record<
+  McpCredentialMode,
+  { label: string; longLabel: string; help: string }
+> = {
+  shared: {
+    label: "Shared",
+    longLabel: "Shared account",
+    help: "One account for the whole workspace. An admin signs in for everyone, or pastes a token.",
+  },
+  per_user: {
+    label: "Personal",
+    longLabel: "Personal accounts",
+    help: "Each member connects their own account.",
+  },
+}
+
+/** The label of the control that picks a mode, in every form that has one. */
+export const SIGN_IN_MODE_LABEL = "Sign-in mode"
+
+/** The two modes as every form offers them, spelled out in full. */
+export const SIGN_IN_MODES: RadioOption[] = (
+  ["shared", "per_user"] as const
+).map((value) => ({
+  value,
+  label: CREDENTIAL_MODE_COPY[value].longLabel,
+  description: CREDENTIAL_MODE_COPY[value].help,
+}))

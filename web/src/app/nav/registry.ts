@@ -665,10 +665,23 @@ const DEPLOYMENT_PATHS: readonly string[] = DEPLOYMENT_NAV_SECTIONS.flatMap(
  * `/tools/web-search` "Tools". A breadcrumb wants the leaf.
  */
 export function navLabelForPath(pathname: string): string | undefined {
+  return navPageForPath(pathname)?.label
+}
+
+/**
+ * The rail destination a pathname is, or sits under, as `{ to, label }`.
+ *
+ * A child wins over its parent for its own subpages too, so a server's page at
+ * `/tools/mcp-servers/<id>` is under "MCP servers" rather than "Tools".
+ */
+export function navPageForPath(
+  pathname: string,
+): { to: string; label: string } | undefined {
   const child = NAV_ITEMS.flatMap((item) => item.children ?? []).find(
-    (one) => one.to === pathname,
+    (one) => one.to === pathname || pathname.startsWith(`${one.to}/`),
   )
-  return child?.label ?? navItemForPath(pathname)?.label
+  const entry = child ?? navItemForPath(pathname)
+  return entry ? { to: entry.to, label: entry.label } : undefined
 }
 
 /** Names for the chrome destinations, which no registry entry declares. */

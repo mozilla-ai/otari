@@ -92,15 +92,6 @@ export function ruleSummary(tools: readonly string[]): string {
   return `allow ${tools.map(patternLabel).join(", ")}`
 }
 
-/** The list page's summary of a server's default policy, uppercase like its cells. */
-export function defaultPolicySummary(tools: readonly string[]): string {
-  const mode = accessMode(tools)
-  if (mode === "all") return "DEFAULT: ALLOW"
-  if (mode === "read") return "DEFAULT: READ TOOLS"
-  if (mode === "none") return "DEFAULT: DENY"
-  return `DEFAULT: ALLOW ${tools.length} ${tools.length === 1 ? "TOOL" : "TOOLS"}`
-}
-
 /** Whether one pattern admits a tool name. */
 export function patternMatches(pattern: string, tool: string): boolean {
   if (pattern === READ_TOOLS) return false
@@ -168,4 +159,17 @@ export function verdictLabel(
     return `${verdict}, matched the default policy (${ruleSummary(check.tools)})`
   }
   return `${verdict}, matched the rule for ${ruleOwner}`
+}
+
+/** Whether an entry of a rule or an allow-list is a pattern rather than one tool's name. */
+export function isToolPattern(entry: string): boolean {
+  return entry.endsWith("*")
+}
+
+/** Which of `tools` an entry stands for, in the gateway's grammar: `*`, `prefix*`, or one exact name. */
+export function toolsMatching(
+  entry: string,
+  tools: readonly string[],
+): string[] {
+  return tools.filter((tool) => patternMatches(entry, tool))
 }

@@ -132,6 +132,38 @@ describe("usePlaygroundToolSelection", () => {
     expect(result.current.selectedMcpIds).toEqual([])
   })
 
+  it("drops an MCP server the caller is disconnected from while the page is open", () => {
+    const { result, rerender } = renderHook(
+      ({ available }: { available: PlaygroundTools }) =>
+        usePlaygroundToolSelection(available),
+      { initialProps: { available: tools() } },
+    )
+    act(() => result.current.toggleMcpServer("srv-1", true))
+    act(() => result.current.toggleMcpServer("srv-2", true))
+
+    rerender({
+      available: tools({
+        mcp_servers: [
+          {
+            id: "srv-1",
+            name: "Docs",
+            purpose_hint: null,
+            enabled: true,
+            sign_in_required: true,
+          },
+          {
+            id: "srv-2",
+            name: "Tickets",
+            purpose_hint: null,
+            enabled: true,
+            sign_in_required: false,
+          },
+        ],
+      }),
+    })
+    expect(result.current.selectedMcpIds).toEqual(["srv-2"])
+  })
+
   it("keeps a selection while the availability read has not answered", () => {
     // An undefined read is "not known yet", not "nothing is attachable".
     const { result } = renderHook(() => usePlaygroundToolSelection(undefined))

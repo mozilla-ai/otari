@@ -51,6 +51,26 @@ describe("Select", () => {
     ])
   })
 
+  it("explains each choice in the open list and still names it by its label", async () => {
+    render(
+      <Select
+        label="Availability"
+        value="off"
+        onChange={() => {}}
+        options={[
+          { value: "off", label: "Off", description: "Nobody can use it." },
+          { value: "on", label: "On", description: "Requests can ask for it." },
+        ]}
+      />,
+    )
+    // The closed control shows the label alone.
+    expect(screen.getByRole("button")).toHaveTextContent("Off")
+    expect(screen.getByRole("button")).not.toHaveTextContent("Nobody")
+    await userEvent.click(screen.getByRole("button"))
+    const option = await screen.findByRole("option", { name: "On" })
+    expect(option).toHaveAccessibleDescription("Requests can ask for it.")
+  })
+
   it("reports the value rather than the key react-aria carries", async () => {
     const onChange = vi.fn()
     render(

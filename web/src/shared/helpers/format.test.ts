@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest"
 import {
   deltaFraction,
   formatCost,
+  formatCount,
   formatFileSize,
   formatLatency,
   formatNumber,
@@ -80,6 +81,13 @@ describe("formatTokensCompact and formatUsdCompact", () => {
     expect(formatTokensCompact(10_000_000)).toBe("10M")
     expect(formatUsdCompact(12_345_678.9)).toBe("$12.3M")
     expect(formatUsdCompact(100_000)).toBe("$100K")
+  })
+})
+
+describe("formatCount", () => {
+  it("groups a whole count", () => {
+    expect(formatCount(24108)).toBe("24,108")
+    expect(formatCount(7)).toBe("7")
   })
 })
 

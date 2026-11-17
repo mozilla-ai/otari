@@ -14,6 +14,7 @@ import {
   NAV_SECTIONS,
   navContextForPath,
   navItemForPath,
+  navPageForPath,
   ORG_NAV_SECTIONS,
   pageLabelForPath,
   visibleNavSections,
@@ -357,6 +358,7 @@ describe("nav registry", () => {
       "admin",
       "budgets",
       "keys",
+      "mcp_catalog",
       "models",
       "organization_guardrails",
       "organization_providers",
@@ -772,6 +774,16 @@ describe("pageLabelForPath", () => {
     expect(pageLabelForPath("/invitations")).toBe("Invitations")
     expect(pageLabelForPath("/account")).toBe("Account")
     expect(pageLabelForPath("/nowhere")).toBeUndefined()
+  })
+})
+
+describe("navPageForPath", () => {
+  it("files a record's page under the child destination it belongs to", () => {
+    expect(navPageForPath("/tools/mcp-servers/abc")).toEqual({
+      to: "/tools/mcp-servers",
+      label: "MCP servers",
+    })
+    expect(pageLabelForPath("/tools/mcp-servers/abc")).toBe("MCP servers")
   })
 })
 
