@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type {
+  ApiKey,
   McpServerRequest,
   McpServerRequestGroup,
   OrganizationContext,
@@ -18,6 +19,7 @@ import {
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
+  apiKey,
   bootstrap,
   workspaceMcpServerHealth as health,
   mcpCatalogServer,
@@ -47,6 +49,7 @@ function mockApi({
   connectedIds = [],
   requests = [],
   mine = [],
+  keys = [],
 }: {
   memberships?: { workspace_id: string; name: string; role: string }[]
   servers?: WorkspaceMcpServer[]
@@ -66,11 +69,14 @@ function mockApi({
   requests?: McpServerRequestGroup[]
   // The caller's own requests, as a member reads them.
   mine?: McpServerRequest[]
+  // The workspace's keys, which the key-scope notice counts.
+  keys?: ApiKey[]
 } = {}): Call[] {
   const calls: Call[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
     const method = (init?.method ?? "GET").toUpperCase()
+    if (url.includes("/keys?")) return Response.json(keys)
     if (url.includes("/mcp-server-requests")) {
       calls.push({
         url,
@@ -258,6 +264,29 @@ describe("WorkspaceMcpServersCard", () => {
       await screen.findByRole("heading", { level: 2, name: "MCP servers" }),
     ).toBeInTheDocument()
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull()
+  })
+
+  it("says which keys can use the servers once the workspace has one", async () => {
+    mockApi({
+      servers: [workspaceMcpServer({ name: "github" })],
+      keys: [
+        apiKey({ id: "a", scopes: ["inference:run", "mcp:execute"] }),
+        apiKey({ id: "b", scopes: ["inference:run"] }),
+      ],
+    })
+    renderCard("page")
+
+    expect(
+      await screen.findByText(/1 of the 2 keys in this workspace/),
+    ).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "API keys" })).toBeInTheDocument()
+  })
+
+  it("says nothing about keys while the workspace has no server", async () => {
+    mockApi({ keys: [apiKey({ scopes: ["inference:run"] })] })
+    await renderLoaded()
+
+    expect(screen.queryByText("mcp:execute")).toBeNull()
   })
 
   it("lists the workspace's servers with what the API says about each", async () => {

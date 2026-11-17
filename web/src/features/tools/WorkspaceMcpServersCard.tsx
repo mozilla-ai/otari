@@ -15,6 +15,7 @@ import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { canManageWorkspace } from "@/features/organization/roles"
 import { McpCatalogDialog } from "@/features/tools/McpCatalogDialog"
 import { McpConnectionNoticeBanner } from "@/features/tools/McpConnectionNoticeBanner"
+import { McpKeyScopeNotice } from "@/features/tools/McpKeyScopeNotice"
 import { McpMemberServers } from "@/features/tools/McpMemberServers"
 import { McpModeLabel } from "@/features/tools/McpModeLabel"
 import { McpNotice } from "@/features/tools/McpNotice"
@@ -398,6 +399,9 @@ export function WorkspaceMcpServersCard({
         <McpNotice message={check.error} onDismiss={check.dismissError} />
       ) : null}
       <ErrorBanner error={workspace.error} />
+      {rows.length > 0 ? (
+        <McpKeyScopeNotice workspaceId={selected.workspace_id} />
+      ) : null}
 
       {manages ? null : (
         <McpMemberServers

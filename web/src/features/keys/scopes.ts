@@ -15,6 +15,8 @@ export type ScopeInfo = {
   group: ScopeGroupKey
   /** Set where a leaked key holding the scope could do lasting harm. */
   risk?: string
+  /** Set where leaving the scope off quietly turns something else off. */
+  hint?: string
 }
 
 /**
@@ -47,11 +49,16 @@ export const SCOPE_INFO: Record<KeyScope, ScopeInfo> = {
     group: "tools",
     risk: "Runs arbitrary code",
   },
-  "mcp:read": { label: "List MCP servers and their tools", group: "tools" },
+  "mcp:read": {
+    label: "List MCP servers and their tools",
+    group: "tools",
+    hint: "Needed to look up a server's id or sign-in link",
+  },
   "mcp:execute": {
     label: "Call MCP tools",
     group: "tools",
     risk: "Acts on the systems those tools reach",
+    hint: "Without it, the workspace's MCP servers do nothing for this key",
   },
   "telemetry:write": { label: "Send OpenTelemetry data", group: "agents" },
   "agents:write": {

@@ -67,6 +67,19 @@ describe("KeyScopeFields", () => {
     expect(seen.at(-1)).toEqual(["inference:run"])
   })
 
+  it("says under the MCP scopes what leaving them off turns off", () => {
+    renderFields(["inference:run"])
+
+    expect(
+      screen.getByText(
+        "Without it, the workspace's MCP servers do nothing for this key",
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText("Needed to look up a server's id or sign-in link"),
+    ).toBeInTheDocument()
+  })
+
   it("flags the scopes a leaked key could do lasting harm with", () => {
     renderFields(["inference:run"])
 
