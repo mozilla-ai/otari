@@ -161,8 +161,9 @@ export interface paths {
          *     one may remove afterwards.
          *
          *     Refused with 400 when the caller is another operator, when the current password is
-         *     missing or wrong, and for a target that is the caller, deactivated, not an operator,
-         *     or without a verified and unblocked email address and a password.
+         *     missing or wrong, for a session whose account has no password, and for a target that
+         *     is the caller, deactivated, not an operator, or without a verified and unblocked email
+         *     address and a password.
          *
          *     The master key keeps working and now acts as the new bootstrap operator, including
          *     resetting their password, so rotate it when whoever held it should no longer.
@@ -196,7 +197,7 @@ export interface paths {
          *     Refused with 409 for a deactivated account, one with no address, one that has no password and signs in
          *     with a provider or a passkey (its owner adds a password once signed in), and, where open_signup is
          *     disabled, an unverified address no organization still has as a member or invitee. The bootstrap operator's
-         *     account is refused too unless the caller is that account or carries the master key.
+         *     account is refused too unless the request carries the master key.
          */
         post: operations["admin-issue_password_link"];
         delete?: never;

@@ -36,7 +36,10 @@ from gateway.exceptions.organizations_exceptions import ForeignTenancyError
 from gateway.log_config import logger
 from gateway.models.platform import RuntimeSetting
 from gateway.models.tenancy import Organization, User
-from gateway.repositories.organizations.bootstrap_marker_repository import BOOTSTRAP_IDENTITY_KEY
+from gateway.repositories.organizations.bootstrap_marker_repository import (
+    BOOTSTRAP_IDENTITY_KEY,
+    BootstrapMarkerRepository,
+)
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
@@ -196,6 +199,15 @@ async def load_bootstrap_identity(db: AsyncSession) -> User | None:
     return await db.get(User, user_id)
 
 
+async def current_bootstrap_operator_id(db: AsyncSession) -> uuid.UUID | None:
+    """The identity the marker names, read past the session's identity map.
+
+    For a guard that must see a handover committed after this session first read the marker,
+    which ``load_bootstrap_identity`` may answer from that earlier read.
+    """
+    return await BootstrapMarkerRepository(db).user_id()
+
+
 async def password_claims_deployment(db: AsyncSession, identity: User) -> bool:
     """Whether setting this identity's password is the act that claims the deployment.
 
@@ -301,6 +313,7 @@ __all__ = [
     "DEFAULT_ORGANIZATION_SLUG",
     "DEFAULT_WORKSPACE_NAME",
     "BootstrapIdentityUnavailableError",
+    "current_bootstrap_operator_id",
     "ensure_bootstrap_identity",
     "load_bootstrap_identity",
     "password_claims_deployment",

@@ -49,6 +49,8 @@ def handover(email: str, url: str, master_key: str | None, yes: bool) -> None:
         base_url=f"{url.rstrip('/')}{API_ROOT}",
         headers={"Authorization": f"Bearer {master_key}"},
         timeout=30.0,
+        # Plain HTTP is allowed only to this machine, so no proxy from the environment may carry it elsewhere.
+        trust_env=parts.scheme == "https",
     ) as client:
         target = _find_account(client, email)
         if not yes:
@@ -69,6 +71,11 @@ def handover(email: str, url: str, master_key: str | None, yes: bool) -> None:
 def _find_account(client: Any, email: str) -> dict[str, Any]:
     """Resolve EMAIL to its one account, matching the whole address case-insensitively."""
     body = _request(client, "GET", "/admin/users", params={"search": email, "limit": _SEARCH_LIMIT})
+    if body.get("count", 0) > len(body.get("data", [])):
+        raise click.ClickException(
+            f"More than {_SEARCH_LIMIT} accounts match {email}, so it cannot be told apart here. "
+            "Hand over from Accounts instead."
+        )
     wanted = email.strip().lower()
     matches = [account for account in body.get("data", []) if (account.get("email") or "").lower() == wanted]
     if not matches:

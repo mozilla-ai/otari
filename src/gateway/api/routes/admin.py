@@ -156,8 +156,9 @@ async def hand_over_bootstrap_operator(
     one may remove afterwards.
 
     Refused with 400 when the caller is another operator, when the current password is
-    missing or wrong, and for a target that is the caller, deactivated, not an operator,
-    or without a verified and unblocked email address and a password.
+    missing or wrong, for a session whose account has no password, and for a target that
+    is the caller, deactivated, not an operator, or without a verified and unblocked email
+    address and a password.
 
     The master key keeps working and now acts as the new bootstrap operator, including
     resetting their password, so rotate it when whoever held it should no longer.
@@ -176,7 +177,9 @@ async def hand_over_bootstrap_operator(
     dependencies=[Depends(require_deployment_administration)],
 )
 async def issue_password_link(
-    identities: IdentityServiceDep, current_identity: CurrentIdentity, user_id: uuid.UUID
+    identities: IdentityServiceDep,
+    master_key: Annotated[str | None, Depends(verify_master_key)],
+    user_id: uuid.UUID,
 ) -> PasswordLinkPublic:
     """Give an account a single-use link that sets its password, for someone who cannot sign in.
 
@@ -189,9 +192,9 @@ async def issue_password_link(
     Refused with 409 for a deactivated account, one with no address, one that has no password and signs in
     with a provider or a passkey (its owner adds a password once signed in), and, where open_signup is
     disabled, an unverified address no organization still has as a member or invitee. The bootstrap operator's
-    account is refused too unless the caller is that account or carries the master key.
+    account is refused too unless the request carries the master key.
     """
-    link = await identities.issue_password_link(actor=current_identity, account_id=user_id)
+    link = await identities.issue_password_link(account_id=user_id, by_master_key=master_key is not None)
     return PasswordLinkPublic(mail_sent=link.mail_sent, link=link.link, expires_at=link.expires_at)
 
 

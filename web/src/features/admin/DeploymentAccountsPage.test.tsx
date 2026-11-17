@@ -79,11 +79,10 @@ function mockApi(opts: {
     if (url.endsWith("/bootstrap-operator")) {
       return new Response(null, { status: 204 })
     }
-    if (url.endsWith(`${API_ROOT}/organizations/me`)) {
-      const context = organizationContext()
+    if (url.endsWith(`${API_ROOT}/auth/profile`)) {
       return jsonResponse({
-        ...context,
-        caller: { ...context.caller, has_password: opts.hasPassword ?? false },
+        ...organizationContext().caller,
+        has_password: opts.hasPassword ?? false,
       })
     }
     if (url.endsWith("/password-link")) {
@@ -427,7 +426,7 @@ describe("DeploymentAccountsPage", () => {
     })
   })
 
-  it("asks for no password from an account that has none", async () => {
+  it("tells an account with no password to set one or use the master key", async () => {
     const successor = deploymentUser({ ...ANALYST, is_superuser: true })
     const requests = mockApi({
       accounts: [successor],
@@ -438,18 +437,17 @@ describe("DeploymentAccountsPage", () => {
     await userEvent.click(
       await screen.findByLabelText("Make Analyst the bootstrap operator"),
     )
-    await screen.findByRole("button", { name: "Make bootstrap operator" })
-    expect(screen.queryByLabelText(/Your current password/)).toBeNull()
-    await userEvent.click(
-      screen.getByRole("button", { name: "Make bootstrap operator" }),
-    )
 
-    await waitFor(() =>
-      expect(
-        requests.find((request) => request.url.endsWith("/bootstrap-operator"))
-          ?.body,
-      ).toEqual({ current_password: null }),
-    )
+    expect(
+      await screen.findByText(/Your account has no password/),
+    ).toBeInTheDocument()
+    expect(screen.queryByLabelText(/Your current password/)).toBeNull()
+    expect(
+      screen.getByRole("button", { name: "Make bootstrap operator" }),
+    ).toBeDisabled()
+    expect(
+      requests.some((request) => request.url.endsWith("/bootstrap-operator")),
+    ).toBe(false)
   })
 
   it("shows the handover disabled on the bootstrap operator's own row", async () => {

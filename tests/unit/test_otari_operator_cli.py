@@ -11,6 +11,8 @@ from click.testing import CliRunner
 from otari_agent.cli import cli
 
 _ACCOUNT_ID = "bbbbbbbb-0000-0000-0000-000000000000"
+# The keyword arguments each client the command built was given.
+_CLIENT_OPTIONS: list[dict[str, Any]] = []
 
 
 def _gateway(
@@ -19,6 +21,7 @@ def _gateway(
 ) -> list[httpx.Request]:
     """Route every client the command builds through ``handler``, recording each request."""
     seen: list[httpx.Request] = []
+    _CLIENT_OPTIONS.clear()
     real_client = httpx.Client
 
     def record(request: httpx.Request) -> httpx.Response:
@@ -26,6 +29,7 @@ def _gateway(
         return handler(request)
 
     def client(*args: Any, **kwargs: Any) -> httpx.Client:
+        _CLIENT_OPTIONS.append(kwargs)
         return real_client(*args, transport=httpx.MockTransport(record), **kwargs)
 
     monkeypatch.setattr(httpx, "Client", client)
@@ -170,4 +174,33 @@ def test_addresses_differing_only_in_case_are_refused_as_ambiguous(monkeypatch: 
 
     assert result.exit_code == 1
     assert "More than one account" in result.output
+    assert [request.method for request in seen] == ["GET"]
+
+
+def test_plain_http_to_this_machine_ignores_proxies_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A proxy would otherwise carry the master key off the machine in cleartext."""
+    _gateway(monkeypatch, _ok)
+
+    result = CliRunner().invoke(
+        cli,
+        ["operator", "handover", "grace@example.com", "--yes"],
+        env={"OTARI_MASTER_KEY": "otari-mk-test", "HTTP_PROXY": "http://proxy.example:8080"},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert _CLIENT_OPTIONS[0]["trust_env"] is False
+
+
+def test_a_search_with_more_matches_than_one_page_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    def truncated(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={**_accounts("grace@example.com"), "count": 5000})
+
+    seen = _gateway(monkeypatch, truncated)
+
+    result = CliRunner().invoke(
+        cli, ["operator", "handover", "grace@example.com", "--yes"], env={"OTARI_MASTER_KEY": "otari-mk-test"}
+    )
+
+    assert result.exit_code == 1
+    assert "accounts match" in result.output
     assert [request.method for request in seen] == ["GET"]

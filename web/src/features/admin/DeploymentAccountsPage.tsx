@@ -384,11 +384,13 @@ export function DeploymentAccountsPage() {
         }}
       />
 
-      <BootstrapHandoverDialog
-        key={handingTo?.id}
-        account={handingTo}
-        onClose={() => setHandingTo(undefined)}
-      />
+      {handingTo ? (
+        <BootstrapHandoverDialog
+          key={handingTo.id}
+          account={handingTo}
+          onClose={() => setHandingTo(undefined)}
+        />
+      ) : null}
 
       <PasswordLinkDialog
         account={linkFor}

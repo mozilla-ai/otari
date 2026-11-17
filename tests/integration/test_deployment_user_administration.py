@@ -964,6 +964,71 @@ def test_another_operator_cannot_get_a_password_link_for_the_bootstrap_operator(
     assert allowed.status_code == 201, allowed.text
 
 
+def test_a_bootstrap_session_without_a_password_cannot_hand_over(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """A master-key sign-in session on an unclaimed deployment has no password to step up with."""
+    _provisioned(client, master_key_header)
+    successor = _operator(
+        db_session_factory, organization_id=_default_organization_id(db_session_factory), email="grace@example.com"
+    )
+    assert client.post(f"{API_ROOT}/auth/session", json={"master_key": test_config.master_key}).status_code == 200
+    try:
+        response = _hand_over(client, successor)
+    finally:
+        client.cookies.clear()
+
+    assert response.status_code == 400, response.text
+    assert "Set a password" in response.text
+    assert _bootstrap_user_id(db_session_factory) != successor
+
+
+def test_the_bootstrap_session_cannot_get_a_password_link_for_its_own_account(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """A link handed back would set its password without the current one, getting past the step-up."""
+    _provisioned(client, master_key_header)
+    _claim(client, master_key_header)
+    bootstrap_id = _bootstrap_user_id(db_session_factory)
+    assert (
+        client.post(f"{API_ROOT}/auth/session", json={"email": "owner@example.com", "password": _PASSWORD}).status_code
+        == 200
+    )
+    try:
+        response = client.post(f"{API_ROOT}/admin/users/{bootstrap_id}/password-link")
+    finally:
+        client.cookies.clear()
+
+    assert response.status_code == 409, response.text
+
+
+def test_a_handover_voids_a_password_link_issued_before_it(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """Whoever was handed the link must not be able to set the new bootstrap operator's password."""
+    _provisioned(client, master_key_header)
+    successor = _operator(
+        db_session_factory, organization_id=_default_organization_id(db_session_factory), email="grace@example.com"
+    )
+    link = client.post(f"{API_ROOT}/admin/users/{successor}/password-link", headers=master_key_header)
+    assert link.status_code == 201, link.text
+    token = link.json()["link"].rsplit("token=", 1)[-1]
+
+    assert _hand_over(client, successor, master_key_header).status_code == 204
+    redeemed = client.post(
+        f"{API_ROOT}/auth/password/reset/confirm", json={"token": token, "new_password": "a-new-password"}
+    )
+
+    assert redeemed.status_code == 400, redeemed.text
+
+
 @pytest.mark.asyncio
 async def test_the_marker_moves_only_from_the_identity_it_still_names(async_db: AsyncSession) -> None:
     """Two handovers racing from the same operator: the second finds the marker moved."""

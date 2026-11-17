@@ -3,31 +3,34 @@ import { useState } from "react"
 
 import type { DeploymentUser } from "@/client"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { useProfile } from "@/shared/api/auth"
 import { useHandOverBootstrapOperator } from "@/shared/api/deployment"
-import { useOrganizationContext } from "@/shared/api/organizations"
 
 import { accountLabel } from "./accounts"
 
 /**
  * Hand the bootstrap operator role to another operator.
  *
- * Asks for the caller's own password when their account has one, as the
- * gateway does from a session: the role is the deployment's recovery point,
- * and only the master key can take it back, so a session alone is not enough
- * to give it away. Mount it keyed on the account, so a typed password does not
- * outlive the dialog.
+ * Asks for the caller's own password, as the gateway does from a session: the
+ * role is the deployment's recovery point, and only the master key can take it
+ * back, so a session alone is not enough to give it away. An account with no
+ * password cannot hand over from here at all, so the dialog says so instead.
+ * Mount it only while open, keyed on the account, so a typed password does not
+ * outlive it.
  */
 export function BootstrapHandoverDialog({
   account,
   onClose,
 }: {
-  /** The account taking the role; the dialog is closed while unset. */
-  account: DeploymentUser | undefined
+  /** The account taking the role. */
+  account: DeploymentUser
   onClose: () => void
 }) {
   const handOver = useHandOverBootstrapOperator()
-  const needsPassword =
-    useOrganizationContext().data?.caller?.has_password ?? false
+  // From the profile rather than the organization context, which a caller with
+  // no organization does not have. Unknown until it answers.
+  const hasPassword = useProfile().data?.has_password
   const [password, setPassword] = useState("")
   const close = () => {
     handOver.reset()
@@ -36,27 +39,25 @@ export function BootstrapHandoverDialog({
 
   return (
     <FormDialog
-      isOpen={account !== undefined}
+      isOpen
       onOpenChange={(open) => {
         if (!open) close()
       }}
       title="Bootstrap operator"
       description={
-        account ? (
-          <>
-            Make <strong>{accountLabel(account)}</strong> the account the master
-            key acts as.
-          </>
-        ) : null
+        <>
+          Make <strong>{accountLabel(account)}</strong> the account the master
+          key acts as.
+        </>
       }
       submitLabel="Make bootstrap operator"
       isPending={handOver.isPending}
       error={handOver.error}
       isDirty={password !== ""}
+      isSubmitDisabled={hasPassword !== true}
       onSubmit={() => {
-        if (!account) return
         handOver.mutate(
-          { id: account.id, currentPassword: needsPassword ? password : null },
+          { id: account.id, currentPassword: password },
           { onSuccess: close },
         )
       }}
@@ -71,7 +72,14 @@ export function BootstrapHandoverDialog({
         including resetting its password. If anyone who should no longer have it
         holds the master key, rotate it in Settings.
       </p>
-      {needsPassword ? (
+      {hasPassword === false ? (
+        <InfoBanner>
+          Your account has no password, so it cannot hand over the role from the
+          dashboard. Set one in Account settings, or run{" "}
+          <code>otari operator handover</code> with the master key.
+        </InfoBanner>
+      ) : null}
+      {hasPassword ? (
         <TextField
           value={password}
           onChange={setPassword}

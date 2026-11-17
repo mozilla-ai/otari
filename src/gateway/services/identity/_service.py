@@ -372,8 +372,8 @@ class IdentityService:
 
         Only the bootstrap operator may do it, which includes a request carrying the master key because
         that resolves to the same identity. From a session it asks for the caller's current password, as a
-        password change does: the role cannot be taken back by anyone without the master key, so a stolen
-        cookie must not be enough to give it away.
+        password change does, and refuses a session whose account has no password: the role cannot be taken
+        back by anyone without the master key, so a stolen cookie must not be enough to give it away.
 
         The target must be an active operator with a verified, unblocked address and a password. The
         password is what keeps the deployment claimed, since master-key sign-in is retired by the bootstrap
@@ -391,7 +391,11 @@ class IdentityService:
             )
         if user_id == actor.id:
             raise BootstrapHandoverRefusedError("This account is already the bootstrap operator")
-        if not by_master_key and actor.hashed_password is not None:
+        if not by_master_key:
+            if actor.hashed_password is None:
+                raise BootstrapHandoverRefusedError(
+                    "Set a password for your account first, or hand over the role with the master key"
+                )
             if not current_password:
                 raise BootstrapHandoverRefusedError("Enter your current password to hand over the role")
             if not await verify_password_async(current_password, actor.hashed_password):
@@ -407,6 +411,10 @@ class IdentityService:
             await self._require_handover_target(target)
             if not await self._organizations.move_bootstrap_operator(from_user_id=actor.id, to_user_id=target.id):
                 raise BootstrapHandoverRefusedError("The bootstrap operator changed while this was in progress")
+            # A reset link issued before the handover would otherwise set the new bootstrap operator's password.
+            target.password_reset_token_hash = None
+            target.password_reset_token_expires_at = None
+            self._users.stage(target)
             previous = await self._users.get_locked(actor.id)
             if previous is not None:
                 # Its operator access came from the marker until now, so it would otherwise lose it with no
@@ -434,7 +442,7 @@ class IdentityService:
         if await self.blocked_among([target.email]):
             raise BootstrapHandoverRefusedError("This account's address is blocked")
 
-    async def issue_password_link(self, *, actor: User, account_id: uuid.UUID) -> PasswordLink:
+    async def issue_password_link(self, *, account_id: uuid.UUID, by_master_key: bool) -> PasswordLink:
         """Give an account a single-use link that sets its password, for someone who operates the deployment.
 
         Where this deployment can mail links, the link is mailed to the account's address and not returned.
@@ -446,20 +454,19 @@ class IdentityService:
             DeploymentUserNotFoundError: If there is no such account.
             PasswordLinkUnavailableError: If the account is deactivated, has no address, its address is blocked, is
                 verified and has no password, or is unverified and ``unverified_identity_is_claimable`` refuses it,
-                which only happens where ``open_signup`` is off. Also if it is the bootstrap operator's and the
-                caller is not: a link passed back to another operator would let them sign in as that account and
-                keep the role.
+                which only happens where ``open_signup`` is off. Also for the bootstrap operator's account unless the
+                request carries the master key: a link handed back to a session, the account's own included,
+                would set its password without the current one and so get past the handover's step-up.
 
         """
         mailed = self._mailer.can_send_links
         async with self._uow:
+            # Before the row lock, in the order a handover takes the two, so neither waits on the other in a cycle.
+            await self._blocked_emails.lock_shared()
             account = await self._users.get_locked(account_id)
             if account is None:
                 raise DeploymentUserNotFoundError(account_id)
-            if account.id != actor.id and account.id == await self._organizations.bootstrap_operator_id():
-                raise PasswordLinkUnavailableError(
-                    "Only the bootstrap operator, or the master key, can reset the bootstrap operator's password."
-                )
+            await self._refuse_bootstrap_password_link(account.id, by_master_key=by_master_key)
             await self._require_password_link_allowed(account)
             token = generate_token() if mailed else generate_shared_token()
             expires_at = self._stage_reset_token(account, token)
@@ -479,10 +486,18 @@ class IdentityService:
                 return PasswordLink(mail_sent=True, link=None, expires_at=expires_at)
             # The mailed token is replaced, so the link handed back is the only one that works.
             async with self._uow:
+                # Again under the lock: a handover to this account may have landed during the send.
+                if await self._users.get_locked(account.id) is None:
+                    raise DeploymentUserNotFoundError(account_id)
+                await self._refuse_bootstrap_password_link(account.id, by_master_key=by_master_key)
                 token = generate_shared_token()
                 expires_at = self._stage_reset_token(account, token)
         logger.info("Issued a password link to pass on for account %s", account.id)
         return PasswordLink(mail_sent=False, link=self._mailer.link(_reset_path(token)), expires_at=expires_at)
+
+    async def _refuse_bootstrap_password_link(self, account_id: uuid.UUID, *, by_master_key: bool) -> None:
+        if not by_master_key and account_id == await self._organizations.bootstrap_operator_id():
+            raise PasswordLinkUnavailableError("Only the master key can reset the bootstrap operator's password.")
 
     async def _require_password_link_allowed(self, account: User) -> None:
         if not account.is_active:

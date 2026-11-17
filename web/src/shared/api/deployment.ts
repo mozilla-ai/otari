@@ -161,7 +161,7 @@ export function useHandOverBootstrapOperator() {
       currentPassword,
     }: {
       id: string
-      currentPassword: string | null
+      currentPassword: string
     }) =>
       apiFetch<void>(
         `/admin/users/${encodeURIComponent(id)}/bootstrap-operator`,

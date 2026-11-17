@@ -1448,7 +1448,7 @@ async def test_one_tenant_enforcement_does_not_lock_a_person_out_of_another(asyn
     signed_in = await _identity_service(async_db).sign_in(bystander, asserted_email=None)
     assert signed_in.active_organization_id == elsewhere.id
 
-    link = await _identity_service(async_db).issue_password_link(actor=bystander, account_id=bystander.id)
+    link = await _identity_service(async_db).issue_password_link(account_id=bystander.id, by_master_key=True)
     assert link.link is not None
 
 
@@ -1499,7 +1499,7 @@ async def test_a_password_link_is_refused_for_a_member_of_an_enforcing_organizat
     await async_db.commit()
 
     with pytest.raises(PasswordLinkUnavailableError):
-        await _identity_service(async_db).issue_password_link(actor=member, account_id=member.id)
+        await _identity_service(async_db).issue_password_link(account_id=member.id, by_master_key=True)
 
 
 async def test_setting_a_dashboard_password_is_refused_for_a_member_of_an_enforcing_organization(
