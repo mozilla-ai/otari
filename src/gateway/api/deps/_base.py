@@ -1,4 +1,9 @@
-"""The request-scoped dependencies every other builder in this package needs."""
+"""What the request or the app already has, that the rest of this package is built from.
+
+Config, the enabled features, the container, the request's session and its Unit
+of Work, and the shared resources the lifespan built. A builder of a domain's own
+objects belongs in that domain's module, not here.
+"""
 
 from typing import Annotated
 
@@ -12,11 +17,10 @@ from gateway.core.feature import CoreFeature
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.repositories.api_keys import ApiKeyRepositories
 from gateway.repositories.budgets import BudgetRepositories
-from gateway.repositories.organizations import OrganizationRepositories
 from gateway.repositories.traces import TracesRepositories
 from gateway.services.api_keys import ApiKeyMembershipListener
 from gateway.services.budgets import BudgetMembershipListener
-from gateway.services.organizations import UserAccess
+from gateway.services.log_writer import LogWriter
 from gateway.services.routing import clear_router_backend_cache
 from gateway.services.tenancy import MembershipListener, MembershipListeners
 from gateway.services.tools import McpGrantMembershipListener
@@ -119,6 +123,7 @@ def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
 MembershipListenerDep = Annotated[MembershipListener, Depends(get_membership_listener)]
 
 
-def get_user_access(uow: UnitOfWorkDep) -> UserAccess:
-    """Build the organizations domain's read of users' access lists on the request's Unit of Work."""
-    return UserAccess(OrganizationRepositories.on(uow))
+async def get_log_writer(request: Request) -> LogWriter:
+    """Return the usage-log writer this app's lifespan built."""
+    writer: LogWriter = request.app.state.log_writer
+    return writer
