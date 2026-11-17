@@ -9,7 +9,9 @@ import { Segmented } from "@/design-system/navigation/Segmented"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
 
+import { HarnessMark } from "@/shared/components/marks/BrandMark"
 import { PeekPanel, ResizeHandle } from "@/shared/components/PeekPanel"
+import { hasHarnessMark } from "@/shared/helpers/brandMarkKeys"
 import {
   formatCost,
   formatNumber,
@@ -531,7 +533,11 @@ export function TracePeek({
       <div className="flex shrink-0 flex-col gap-2 px-4 py-3">
         <div className="flex items-center gap-2">
           <span className="grid size-6 shrink-0 place-items-center">
-            <TypeMark type={shown.type} className="size-5" />
+            {!observation && trace.harness && hasHarnessMark(trace.harness) ? (
+              <HarnessMark harness={trace.harness} />
+            ) : (
+              <TypeMark type={shown.type} className="size-5" />
+            )}
           </span>
           {/* Focused only by the panel opening, as ListDetail's landing column
               is, so it draws no ring: it is not a control. */}

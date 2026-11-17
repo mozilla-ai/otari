@@ -503,6 +503,7 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
   return {
     id: summary.trace_id,
     name: sessionName(summary),
+    harness: summary.harness,
     timestamp: summary.started_at,
     observations,
     gateway: detail

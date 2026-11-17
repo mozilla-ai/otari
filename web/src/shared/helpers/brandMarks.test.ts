@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest"
 import {
+  hasHarnessMark,
   hasProviderMark,
   isProductMarkProvider,
 } from "@/shared/helpers/brandMarkKeys"
-import { makerMark, providerMark } from "@/shared/helpers/brandMarks"
+import {
+  harnessMark,
+  makerMark,
+  providerMark,
+} from "@/shared/helpers/brandMarks"
 
 describe("providerMark", () => {
   it("resolves a provider id to geometry", () => {
@@ -241,5 +246,22 @@ describe("makerMark", () => {
     expect(SAMPLE.filter((slug) => makerMark(slug) === undefined)).toEqual(
       TILED,
     )
+  })
+})
+
+describe("harnessMark", () => {
+  it("resolves the name a session shows its harness by", () => {
+    expect(harnessMark("claude-code")?.shapes.length).toBeGreaterThan(0)
+    expect(harnessMark(" Kilo-Code ")).toEqual(harnessMark("kilo-code"))
+    expect(hasHarnessMark("roo-code")).toBe(true)
+  })
+
+  it("has no mark for a harness LobeHub does not draw, or one a client named itself", () => {
+    // The caller tiles these: Crush has no mark in the source set, and any
+    // other `User-Agent` product can reach a session as its harness.
+    expect(harnessMark("crush")).toBeUndefined()
+    expect(hasHarnessMark("my-agent")).toBe(false)
+    expect(harnessMark("constructor")).toBeUndefined()
+    expect(hasHarnessMark("toString")).toBe(false)
   })
 })
