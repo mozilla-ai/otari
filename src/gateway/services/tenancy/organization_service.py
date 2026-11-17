@@ -103,6 +103,7 @@ from gateway.models.tenancy import (
     WorkspacesPublic,
 )
 from gateway.ports.growth_signal_port import GrowthAction, GrowthSignalPort
+from gateway.repositories.organizations.bootstrap_marker_repository import BootstrapMarkerRepository
 from gateway.repositories.tenancy import (
     InvitationRepository,
     OrganizationDomainRepository,
@@ -137,7 +138,6 @@ from gateway.services.tenancy.password_policy import validate_new_password
 from gateway.services.tenancy.provisioning_service import (
     DEFAULT_ORGANIZATION_SLUG,
     DEFAULT_WORKSPACE_NAME,
-    load_bootstrap_identity,
     password_claims_deployment,
 )
 
@@ -430,6 +430,7 @@ class OrganizationService:
         self.workspaces = WorkspaceMemberRepository(db)
         self.workspace_rows = WorkspaceRepository(db)
         self.invitations = InvitationRepository(db)
+        self.bootstrap_marker = BootstrapMarkerRepository(db)
         self.domains = OrganizationDomainRepository(db)
 
     # ------------------------------------------------------------------
@@ -438,8 +439,11 @@ class OrganizationService:
 
     async def bootstrap_operator_id(self) -> uuid.UUID | None:
         """Return the id of the identity first-boot provisioning made the deployment's operator, or None."""
-        bootstrap = await load_bootstrap_identity(self.db)
-        return None if bootstrap is None else bootstrap.id
+        return await self.bootstrap_marker.user_id()
+
+    async def move_bootstrap_operator(self, *, from_user_id: uuid.UUID, to_user_id: uuid.UUID) -> bool:
+        """Make ``to_user_id`` the bootstrap operator if ``from_user_id`` still is, in the caller's transaction."""
+        return await self.bootstrap_marker.move(from_user_id=from_user_id, to_user_id=to_user_id)
 
     async def is_deployment_operator(self, user: User) -> bool:
         """Whether the deployment's own administration admits this caller across every organization.

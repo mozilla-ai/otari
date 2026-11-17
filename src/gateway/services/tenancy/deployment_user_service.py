@@ -8,9 +8,9 @@ deployment-wide concepts were the ``is_superuser`` flag and the
 ``tenancy_bootstrap_user_id`` marker, neither of which had an API, so the
 recourse for a stuck or abusive account was SQL (mozilla-ai/otari#797).
 
-Four operations: list every identity, deactivate or reactivate one, flip its
-``is_superuser`` flag, and hand the bootstrap operator role to another operator.
-Creating and inviting stay
+Three operations, and deliberately only three: list every identity, deactivate
+or reactivate one, and flip its ``is_superuser`` flag. Handing the bootstrap
+operator role on is identity's (``IdentityService``). Creating and inviting stay
 with the organization surface, which is where the membership that makes an
 identity useful is created, and deleting is not here at all for the reason
 ``routes/organizations.py`` gives about deleting an organization: historical
@@ -51,7 +51,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
-    BootstrapHandoverRefusedError,
     BootstrapOperatorProtectedError,
     DeploymentAdministrationUnavailableError,
     DeploymentUserNotFoundError,
@@ -68,9 +67,10 @@ from gateway.models.tenancy import (
     OrganizationMember,
     User,
 )
+from gateway.repositories.organizations.bootstrap_marker_repository import BootstrapMarkerRepository
 from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository
 from gateway.services.dashboard_session_service import revoke_user_dashboard_sessions
-from gateway.services.tenancy.provisioning_service import load_bootstrap_identity, move_bootstrap_identity
+from gateway.services.tenancy.provisioning_service import load_bootstrap_identity
 
 if TYPE_CHECKING:
     from gateway.services.identity import SelfServiceKeyDeactivationListener
@@ -99,13 +99,11 @@ class DeploymentAdministrationAccess:
         """
         if actor.is_superuser:
             return True
-        bootstrap = await load_bootstrap_identity(self.db)
-        return bootstrap is not None and bootstrap.id == actor.id
+        return await self.is_bootstrap_operator(actor)
 
     async def is_bootstrap_operator(self, actor: User) -> bool:
-        """Whether this caller is the identity the bootstrap marker names."""
-        bootstrap = await load_bootstrap_identity(self.db)
-        return bootstrap is not None and bootstrap.id == actor.id
+        """Whether this caller is the identity the bootstrap marker names, read fresh from the database."""
+        return await BootstrapMarkerRepository(self.db).user_id() == actor.id
 
     async def administration_access_ids(self, actors: Iterable[User]) -> set[uuid.UUID]:
         """Which of ``actors`` may reach the surface, in one lookup rather than one each.
@@ -197,8 +195,7 @@ class DeploymentUserService(DeploymentAdministrationAccess):
                 raise DeploymentUserSelfChangeError(
                     "You cannot deactivate your own account or remove your own operator access"
                 )
-            bootstrap = await load_bootstrap_identity(self.db)
-            if bootstrap is not None and bootstrap.id == target.id:
+            if await self.is_bootstrap_operator(target):
                 raise BootstrapOperatorProtectedError(
                     "The deployment's bootstrap operator cannot be deactivated or have its operator access removed"
                 )
@@ -208,6 +205,12 @@ class DeploymentUserService(DeploymentAdministrationAccess):
             target = await self.users.get_locked(user_id)
             if target is None:
                 raise DeploymentUserNotFoundError(user_id)
+            # Read under the target's lock, which a handover to it holds until the marker has moved, so a
+            # handover that lands while this waits is seen here rather than overwritten.
+            if removes_access and await self.is_bootstrap_operator(target):
+                raise BootstrapOperatorProtectedError(
+                    "The deployment's bootstrap operator cannot be deactivated or have its operator access removed"
+                )
             if request.is_active is not None:
                 target.is_active = request.is_active
             if request.is_active is False:
@@ -239,59 +242,6 @@ class DeploymentUserService(DeploymentAdministrationAccess):
             memberships.get(target.id, []),
             bootstrap_id=bootstrap.id if bootstrap is not None else None,
             actor_id=actor.id,
-        )
-
-    async def hand_over_bootstrap_operator(self, *, actor: User, user_id: uuid.UUID) -> DeploymentUserPublic:
-        """Make another operator the bootstrap operator, keeping the previous one an operator.
-
-        Only the bootstrap operator may do it, which includes a request carrying the
-        master key because that resolves to the same identity: the role is the
-        deployment's recovery point, so no other operator can take it for themselves.
-
-        The target must be an active operator holding a password. The password is what
-        keeps the deployment claimed: master-key sign-in is retired by the bootstrap
-        operator's password alone, so handing the role to an account without one would
-        reopen it.
-        """
-        await self._require_administration_access(actor)
-        if not await self.is_bootstrap_operator(actor):
-            raise BootstrapHandoverRefusedError(
-                "Only the bootstrap operator, or a request carrying the master key, can hand over the role"
-            )
-        if user_id == actor.id:
-            raise BootstrapHandoverRefusedError("This account is already the bootstrap operator")
-
-        async with self.uow:
-            target = await self.users.get_locked(user_id)
-            if target is None:
-                raise DeploymentUserNotFoundError(user_id)
-            _require_handover_target(target)
-            if not await move_bootstrap_identity(self.db, from_user_id=actor.id, to_user_id=target.id):
-                raise BootstrapHandoverRefusedError("The bootstrap operator changed while this was in progress")
-            previous = await self.users.get_locked(actor.id)
-            if previous is not None:
-                # Its operator access came from the marker until now, so it would
-                # otherwise lose it with no one having chosen that.
-                previous.is_superuser = True
-                self.db.add(previous)
-        await self.db.refresh(target)
-        logger.warning("Bootstrap operator handed over: from=%s to=%s", actor.id, target.id)
-
-        memberships = await self.members.get_by_users_with_organizations([target.id])
-        return _to_public(target, memberships.get(target.id, []), bootstrap_id=target.id, actor_id=actor.id)
-
-
-def _require_handover_target(target: User) -> None:
-    """Refuse an account that could not serve as the bootstrap operator."""
-    if not target.is_active:
-        raise BootstrapHandoverRefusedError("Reactivate this account before handing it the bootstrap operator role")
-    if not target.is_superuser:
-        raise BootstrapHandoverRefusedError(
-            "Make this account an operator before handing it the bootstrap operator role"
-        )
-    if target.hashed_password is None or target.email is None:
-        raise BootstrapHandoverRefusedError(
-            "This account has no email and password to sign in with; it needs both to become the bootstrap operator"
         )
 
 

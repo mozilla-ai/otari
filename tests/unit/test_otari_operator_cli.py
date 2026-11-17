@@ -45,7 +45,7 @@ def _accounts(*emails: str) -> dict[str, Any]:
 def _ok(request: httpx.Request) -> httpx.Response:
     if request.method == "GET":
         return httpx.Response(200, json=_accounts("grace@example.com", "grace@example.com.au"))
-    return httpx.Response(200, json={"id": _ACCOUNT_ID, "email": "grace@example.com", "is_bootstrap_operator": True})
+    return httpx.Response(204)
 
 
 def test_hands_the_role_to_the_account_with_that_exact_address(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -53,12 +53,13 @@ def test_hands_the_role_to_the_account_with_that_exact_address(monkeypatch: pyte
 
     result = CliRunner().invoke(
         cli,
-        ["operator", "handover", "Grace@Example.com", "--url", "http://otari.test/", "--yes"],
+        ["operator", "handover", "Grace@Example.com", "--url", "https://otari.test/", "--yes"],
         env={"OTARI_MASTER_KEY": "otari-mk-test"},
     )
 
     assert result.exit_code == 0, result.output
     assert "grace@example.com is now the bootstrap operator" in result.output
+    assert "rotate it" in result.output
     listed, posted = seen
     assert listed.url.path == "/api/v1/admin/users"
     assert listed.url.params["search"] == "Grace@Example.com"
@@ -125,3 +126,48 @@ def test_the_master_key_is_required() -> None:
 
     assert result.exit_code == 2
     assert "master key is required" in result.output
+
+
+def test_refuses_to_send_the_master_key_over_plain_http_to_another_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _gateway(monkeypatch, _ok)
+
+    result = CliRunner().invoke(
+        cli,
+        ["operator", "handover", "grace@example.com", "--url", "http://otari.example.com", "--yes"],
+        env={"OTARI_MASTER_KEY": "otari-mk-test"},
+    )
+
+    assert result.exit_code == 2
+    assert "without HTTPS" in result.output
+    assert seen == []
+
+
+def test_a_redirect_is_reported_rather_than_followed(monkeypatch: pytest.MonkeyPatch) -> None:
+    def redirect(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json=_accounts("grace@example.com"))
+        return httpx.Response(307, headers={"Location": "https://elsewhere.test/"}, text="")
+
+    seen = _gateway(monkeypatch, redirect)
+
+    result = CliRunner().invoke(
+        cli, ["operator", "handover", "grace@example.com", "--yes"], env={"OTARI_MASTER_KEY": "otari-mk-test"}
+    )
+
+    assert result.exit_code == 1
+    assert "(307)" in result.output
+    assert len(seen) == 2
+
+
+def test_addresses_differing_only_in_case_are_refused_as_ambiguous(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _gateway(
+        monkeypatch, lambda request: httpx.Response(200, json=_accounts("grace@example.com", "Grace@example.com"))
+    )
+
+    result = CliRunner().invoke(
+        cli, ["operator", "handover", "grace@example.com", "--yes"], env={"OTARI_MASTER_KEY": "otari-mk-test"}
+    )
+
+    assert result.exit_code == 1
+    assert "More than one account" in result.output
+    assert [request.method for request in seen] == ["GET"]

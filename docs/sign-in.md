@@ -285,8 +285,9 @@ Send the master key as `Authorization: Bearer <master-key>` or
 inference request on the master key uses the deployment's default workspace.
 
 Operators can read the operator usage API (`/api/v1/usage`), covering every
-workspace of the operator's active organization (the default organization for
-the master key).
+workspace of the operator's active organization. For the master key that is the
+bootstrap operator's active organization, which is the default organization
+until that account switches or the role is handed to an account in another one.
 
 The **Accounts** page (`/api/v1/admin/users`) lists every account, a page at a
 time, searchable by name or email (`search`, case-insensitive). From it an
@@ -299,39 +300,38 @@ operator can:
 - send a password link.
 
 The bootstrap operator can also hand that role to another operator (see
-[Handing over the bootstrap operator](#handing-over-the-bootstrap-operator)).
+[The bootstrap operator](#the-bootstrap-operator)).
 
-#### Handing over the bootstrap operator
+#### The bootstrap operator
 
 The bootstrap operator is the account the deployment provisioned on first start,
 or the one the role was last handed to. Every other operator holds operator
-access that can be removed; the bootstrap operator is different in that:
+access that can be removed. The bootstrap operator differs in that:
 
 - the master key acts as it, for master-key sign-in and for requests carrying the
   master key, including tenant management in its active organization;
 - its password is the one that retires master-key sign-in, and the only one the
   master key can reset;
+- only it, or the master key, can be sent a password link for it;
 - it cannot be deactivated, lose operator access, or have its address blocked.
 
-To give the role to someone else, first grant their account operator access. The
-account must be active and have an email address and a password. Then, signed in
-as the bootstrap operator, click **Make bootstrap operator** on their row in
-**Accounts**. Or, wherever the master key is at hand:
+`POST /api/v1/admin/users/{user_id}/bootstrap-operator` hands the role to another
+account ([how to](run-the-dashboard.md#hand-over-the-bootstrap-operator)). Only the
+bootstrap operator or the master key may call it, so no other operator can take
+the role for themselves. From a dashboard session it takes the caller's
+`current_password`, as a password change does. It is refused with 400 for a
+target that is not an active operator with a verified, unblocked email address
+and a password, which is what keeps master-key sign-in retired.
 
-```bash
-OTARI_URL=https://otari.example.com OTARI_MASTER_KEY=otari-mk-... \
-  otari operator handover grace@example.com
-```
+After a handover:
 
-The command asks before it acts; `--yes` skips the question. Both call
-`POST /api/v1/admin/users/{user_id}/bootstrap-operator`, which only the bootstrap
-operator or the master key may call. Another operator is refused, so no operator
-can take the role for themselves.
-
-The previous bootstrap operator stays an operator, and the new one can remove that
-access from **Accounts**. Sessions the previous one already holds stay theirs,
-so a session opened with the master key before the handover keeps acting as the
-previous account.
+- the previous bootstrap operator stays an operator, which the new one can
+  remove from **Accounts**;
+- sessions the previous one already holds stay theirs, so a session opened with
+  the master key before the handover keeps acting as the previous account;
+- the master key acts as the new bootstrap operator, so whoever holds it can
+  reset that account's password and sign in as it. Rotate the master key when
+  someone who should no longer have that power holds it.
 
 #### Password links
 
@@ -345,7 +345,8 @@ from a forgotten password on a deployment without mail.
 - A password chosen through a passed-on link records the address as vouched
   for, not proven, like an [invitation](members.md#invitations) link.
 - It is refused for a deactivated account, one with no address, one with no
-  password that signs in with a provider or passkey, and, with `open_signup`
+  password that signs in with a provider or passkey, the bootstrap operator's
+  account unless the caller is that account or the master key, and, with `open_signup`
   disabled, an unverified address no organization still has as a member or
   invitee. With `open_signup` enabled, such an address gets a link, and the
   password chosen through it gives the account its own organization and

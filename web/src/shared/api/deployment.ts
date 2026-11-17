@@ -156,10 +156,19 @@ export function useUpdateDeploymentUser() {
 export function useHandOverBootstrapOperator() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (id: string) =>
-      apiFetch<DeploymentUser>(
+    mutationFn: ({
+      id,
+      currentPassword,
+    }: {
+      id: string
+      currentPassword: string | null
+    }) =>
+      apiFetch<void>(
         `/admin/users/${encodeURIComponent(id)}/bootstrap-operator`,
-        { method: "POST" },
+        {
+          method: "POST",
+          body: JSON.stringify({ current_password: currentPassword }),
+        },
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [DEPLOYMENT_ADMIN] })

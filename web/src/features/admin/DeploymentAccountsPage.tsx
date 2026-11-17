@@ -27,7 +27,6 @@ import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import {
   useDeploymentAdminAccess,
   useDeploymentUsers,
-  useHandOverBootstrapOperator,
   useIsBootstrapOperator,
   useUpdateDeploymentUser,
 } from "@/shared/api/deployment"
@@ -43,6 +42,7 @@ import {
   passwordLinkBlockedReason,
 } from "./accounts"
 import { BlockedEmailsSection } from "./BlockedEmailsSection"
+import { BootstrapHandoverDialog } from "./BootstrapHandoverDialog"
 import { PasswordLinkDialog } from "./PasswordLinkDialog"
 
 // Every account on the deployment, which is the one identity list that is not
@@ -104,7 +104,6 @@ export function DeploymentAccountsPage() {
   const accounts = useDeploymentUsers({ page, pageSize, search }, isGranted)
   const update = useUpdateDeploymentUser()
   const isBootstrapOperator = useIsBootstrapOperator().data === true
-  const handOver = useHandOverBootstrapOperator()
   const [deactivating, setDeactivating] = useState<DeploymentUser>()
   const [handingTo, setHandingTo] = useState<DeploymentUser>()
   const [linkFor, setLinkFor] = useState<DeploymentUser>()
@@ -184,7 +183,7 @@ export function DeploymentAccountsPage() {
           const handoverBlocked = bootstrapHandoverBlockedReason(account)
           return (
             <RowActionRow>
-              {isBootstrapOperator && !account.is_bootstrap_operator ? (
+              {isBootstrapOperator ? (
                 <RowAction
                   icon={FiAnchor}
                   label="Make bootstrap operator"
@@ -385,34 +384,10 @@ export function DeploymentAccountsPage() {
         }}
       />
 
-      <ConfirmDialog
-        isOpen={handingTo !== undefined}
-        onOpenChange={(open) => {
-          if (!open) {
-            setHandingTo(undefined)
-            handOver.reset()
-          }
-        }}
-        heading="Hand over the bootstrap operator role"
-        body={
-          <>
-            Make <strong>{handingTo ? accountLabel(handingTo) : ""}</strong> the
-            bootstrap operator? The master key will act as their account, and
-            theirs becomes the account that cannot be deactivated or lose
-            operator access. You stay an operator, which they can remove. Only
-            they, or the master key, can hand the role on again.
-          </>
-        }
-        confirmLabel="Hand over role"
-        isPending={handOver.isPending}
-        error={handOver.error}
-        onConfirm={() => {
-          if (handingTo) {
-            handOver.mutate(handingTo.id, {
-              onSuccess: () => setHandingTo(undefined),
-            })
-          }
-        }}
+      <BootstrapHandoverDialog
+        key={handingTo?.id}
+        account={handingTo}
+        onClose={() => setHandingTo(undefined)}
       />
 
       <PasswordLinkDialog

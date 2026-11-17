@@ -8,7 +8,11 @@ import type { BlockedEmail, DeploymentUser, PasswordLink } from "@/client"
 import { DeploymentAccountsPage } from "@/features/admin/DeploymentAccountsPage"
 import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
-import { bootstrap, deploymentUser } from "@/tests/fixtures"
+import {
+  bootstrap,
+  deploymentUser,
+  organizationContext,
+} from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 
 interface Request {
@@ -27,6 +31,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 function mockApi(opts: {
   granted?: boolean
   isBootstrapOperator?: boolean
+  hasPassword?: boolean
   accounts?: DeploymentUser[]
   count?: number
   passwordLink?: PasswordLink
@@ -72,7 +77,14 @@ function mockApi(opts: {
       )
     }
     if (url.endsWith("/bootstrap-operator")) {
-      return jsonResponse({ ...accounts[0], is_bootstrap_operator: true })
+      return new Response(null, { status: 204 })
+    }
+    if (url.endsWith(`${API_ROOT}/organizations/me`)) {
+      const context = organizationContext()
+      return jsonResponse({
+        ...context,
+        caller: { ...context.caller, has_password: opts.hasPassword ?? false },
+      })
     }
     if (url.endsWith("/password-link")) {
       return jsonResponse(opts.passwordLink, 201)
@@ -384,10 +396,41 @@ describe("DeploymentAccountsPage", () => {
     ).toBeDisabled()
   })
 
-  it("hands the bootstrap operator role on after a confirmation", async () => {
+  it("hands the bootstrap operator role on with the caller's password", async () => {
     const successor = deploymentUser({ ...ANALYST, is_superuser: true })
     const requests = mockApi({
       accounts: [successor, OPERATOR],
+      isBootstrapOperator: true,
+      hasPassword: true,
+    })
+    await renderPage(<DeploymentAccountsPage />)
+
+    await userEvent.click(
+      await screen.findByLabelText("Make Analyst the bootstrap operator"),
+    )
+    await userEvent.type(
+      await screen.findByLabelText(/Your current password/),
+      "hunter2-hunter2",
+    )
+    await userEvent.click(
+      screen.getByRole("button", { name: "Make bootstrap operator" }),
+    )
+
+    await waitFor(() => {
+      const posted = requests.find((request) =>
+        request.url.endsWith("/bootstrap-operator"),
+      )
+      expect(posted?.url).toContain(
+        `${API_ROOT}/admin/users/${successor.id}/bootstrap-operator`,
+      )
+      expect(posted?.body).toEqual({ current_password: "hunter2-hunter2" })
+    })
+  })
+
+  it("asks for no password from an account that has none", async () => {
+    const successor = deploymentUser({ ...ANALYST, is_superuser: true })
+    const requests = mockApi({
+      accounts: [successor],
       isBootstrapOperator: true,
     })
     await renderPage(<DeploymentAccountsPage />)
@@ -395,20 +438,29 @@ describe("DeploymentAccountsPage", () => {
     await userEvent.click(
       await screen.findByLabelText("Make Analyst the bootstrap operator"),
     )
+    await screen.findByRole("button", { name: "Make bootstrap operator" })
+    expect(screen.queryByLabelText(/Your current password/)).toBeNull()
     await userEvent.click(
-      screen.getByRole("button", { name: "Hand over role" }),
+      screen.getByRole("button", { name: "Make bootstrap operator" }),
     )
 
     await waitFor(() =>
       expect(
         requests.find((request) => request.url.endsWith("/bootstrap-operator"))
-          ?.url,
-      ).toContain(`${API_ROOT}/admin/users/${successor.id}/bootstrap-operator`),
+          ?.body,
+      ).toEqual({ current_password: null }),
     )
-    // Not offered on the bootstrap operator's own row.
+  })
+
+  it("shows the handover disabled on the bootstrap operator's own row", async () => {
+    mockApi({ accounts: [OPERATOR], isBootstrapOperator: true })
+    await renderPage(<DeploymentAccountsPage />)
+
     expect(
-      screen.queryByLabelText(/^Make Operator the bootstrap operator/),
-    ).not.toBeInTheDocument()
+      await screen.findByLabelText(
+        "Make Operator the bootstrap operator (This is already the bootstrap operator)",
+      ),
+    ).toBeDisabled()
   })
 
   it("offers the handover only to the bootstrap operator", async () => {

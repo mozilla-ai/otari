@@ -36,6 +36,7 @@ from gateway.exceptions.organizations_exceptions import ForeignTenancyError
 from gateway.log_config import logger
 from gateway.models.platform import RuntimeSetting
 from gateway.models.tenancy import Organization, User
+from gateway.repositories.organizations.bootstrap_marker_repository import BOOTSTRAP_IDENTITY_KEY
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
@@ -45,11 +46,6 @@ from gateway.repositories.tenancy import (
 )
 from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.tenancy.membership_listener import MembershipListener
-
-# Stored in runtime_settings, and deliberately not a SETTABLE_KEY, so
-# runtime_settings_service ignores it exactly as it ignores the master-key hash
-# and the dashboard-session marker.
-BOOTSTRAP_IDENTITY_KEY = "tenancy_bootstrap_user_id"
 
 DEFAULT_ORGANIZATION_NAME = "Default organization"
 DEFAULT_ORGANIZATION_SLUG = "default"
@@ -299,28 +295,6 @@ async def _provision(
     return operator
 
 
-async def move_bootstrap_identity(db: AsyncSession, *, from_user_id: uuid.UUID, to_user_id: uuid.UUID) -> bool:
-    """Point the marker at ``to_user_id`` if it still names ``from_user_id``, under a row lock.
-
-    Flush-only: the caller's Unit of Work commits it. False when the marker names
-    anybody else by the time the lock is held, so two handovers racing from the same
-    operator cannot both land.
-    """
-    marker = (
-        await db.execute(
-            select(RuntimeSetting)
-            .where(col(RuntimeSetting.key) == BOOTSTRAP_IDENTITY_KEY)
-            .with_for_update()
-            .execution_options(populate_existing=True)
-        )
-    ).scalar_one_or_none()
-    if marker is None or marker.value != str(from_user_id):
-        return False
-    marker.value = str(to_user_id)
-    await db.flush()
-    return True
-
-
 __all__ = [
     "BOOTSTRAP_IDENTITY_KEY",
     "DEFAULT_ORGANIZATION_NAME",
@@ -329,6 +303,5 @@ __all__ = [
     "BootstrapIdentityUnavailableError",
     "ensure_bootstrap_identity",
     "load_bootstrap_identity",
-    "move_bootstrap_identity",
     "password_claims_deployment",
 ]

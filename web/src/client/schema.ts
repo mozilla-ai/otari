@@ -156,12 +156,16 @@ export interface paths {
          *     The bootstrap operator is the account the master key acts as: master-key sign-in
          *     and requests carrying the master key resolve to it, and it cannot be deactivated or
          *     lose operator access. Only the current bootstrap operator, or a request carrying the
-         *     master key, may hand the role on. The previous bootstrap operator stays an operator,
-         *     which the new one may remove afterwards.
+         *     master key, may hand the role on, and from a dashboard session it takes the caller's
+         *     ``current_password``. The previous bootstrap operator stays an operator, which the new
+         *     one may remove afterwards.
          *
-         *     Refused with 400 when the caller is another operator, and for a target that is the
-         *     caller, deactivated, not an operator, or without an email and password: the
-         *     password is what keeps master-key sign-in retired once the deployment is claimed.
+         *     Refused with 400 when the caller is another operator, when the current password is
+         *     missing or wrong, and for a target that is the caller, deactivated, not an operator,
+         *     or without a verified and unblocked email address and a password.
+         *
+         *     The master key keeps working and now acts as the new bootstrap operator, including
+         *     resetting their password, so rotate it when whoever held it should no longer.
          */
         post: operations["admin-hand_over_bootstrap_operator"];
         delete?: never;
@@ -191,7 +195,8 @@ export interface paths {
          *
          *     Refused with 409 for a deactivated account, one with no address, one that has no password and signs in
          *     with a provider or a passkey (its owner adds a password once signed in), and, where open_signup is
-         *     disabled, an unverified address no organization still has as a member or invitee.
+         *     disabled, an unverified address no organization still has as a member or invitee. The bootstrap operator's
+         *     account is refused too unless the caller is that account or carries the master key.
          */
         post: operations["admin-issue_password_link"];
         delete?: never;
@@ -10519,6 +10524,17 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["BlockedEmailPublic"][];
+        };
+        /**
+         * BootstrapHandoverRequest
+         * @description Hand the bootstrap operator role to another operator.
+         */
+        BootstrapHandoverRequest: {
+            /**
+             * Current Password
+             * @description The caller's own current password. Required from a dashboard session whose account has a password, and ignored with the master key, as when changing a password.
+             */
+            current_password?: string | null;
         };
         /**
          * BreakGlassCreate
@@ -24424,16 +24440,18 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["BootstrapHandoverRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
-            200: {
+            204: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["DeploymentUserPublic"];
-                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
