@@ -17,7 +17,6 @@ import type {
   KeyScope,
   UpdateKeyRequest,
   UpdateOwnKeyRequest,
-  User,
 } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import {
@@ -39,8 +38,15 @@ import { useConfirmationFocus } from "@/design-system/hooks/useConfirmationFocus
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
-import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
+import { BudgetExemptToggle } from "@/features/keys/BudgetExemptToggle"
+import { OwnerAccessNote } from "@/features/keys/OwnerAccessNote"
+import {
+  storedUserMismatch,
+  type UserMismatchChoice,
+  UserMismatchPicker,
+  userMismatchChoice,
+} from "@/features/keys/UserMismatchPicker"
 import {
   accessLabel,
   ModelScopeControl,
@@ -287,134 +293,15 @@ function KeySecretStep({
 
 // ---------- create / edit forms (FormDialog) ----------
 
-// Shows the selected owner's model access so the operator sees the ceiling this
-// key narrows within (a key can inherit it or restrict to a subset, never exceed).
-function OwnerAccessNote({ userId, users }: { userId: string; users: User[] }) {
-  const id = userId.trim()
-  if (id === "") {
-    return (
-      <p className="text-caption">
-        Choose an owner above to see the models this key can inherit.
-      </p>
-    )
-  }
-  const owner = users.find((user) => user.user_id === id)
-  if (!owner) {
-    return (
-      <p className="text-caption">
-        New user <code>{id}</code> starts unrestricted, so this key may allow
-        any model.
-      </p>
-    )
-  }
-  const { text } = accessLabel(owner.allowed_models ?? undefined)
-  const entries =
-    owner.allowed_models && owner.allowed_models.length > 0
-      ? owner.allowed_models.join(", ")
-      : null
-  return (
-    <p className="text-caption">
-      Owner <code>{id}</code> allows{" "}
-      <span className="font-medium text-foreground">{text.toLowerCase()}</span>
-      {entries ? (
-        <>
-          {" ("}
-          <span className="font-mono">{entries}</span>
-          {")"}
-        </>
-      ) : null}
-      . This key inherits that, or narrows within it.
-    </p>
-  )
-}
-
-// Money-adjacent control: a labeled checkbox with the consequence spelled out, so
-// flipping it is a deliberate act rather than a bare switch in a table cell.
-function BudgetExemptToggle({
-  checked,
-  onChange,
-}: {
-  checked: boolean
-  onChange: (value: boolean) => void
-}) {
-  // The consequence sits beside the control rather than inside its label: a
-  // checkbox whose accessible name is a whole paragraph is read out in full on
-  // every focus. Beside rather than wrapped, so there is also no second
-  // <label> around the one `Checkbox` already renders.
-  return (
-    <div className="flex flex-col gap-0.5 border border-control-border p-3">
-      <Checkbox isSelected={checked} onChange={onChange}>
-        <span className="font-medium text-foreground">Exempt from budget</span>
-      </Checkbox>
-      <p className="text-caption">
-        Requests on this key are logged with their cost but never counted toward
-        the owner&apos;s budget or spend, and never blocked by it.
-      </p>
-    </div>
-  )
-}
-
-// Access-control adjacent: a three-way override of the deployment-wide
-// reject_user_mismatch, so it is a picker rather than a checkbox. Same shape as
-// the budget picker on the budgets page.
-/**
- * Which of the three the key does about a mismatched `user` field.
- *
- * A named union rather than `boolean | null`: this is three answers, and a
- * boolean holds two, so the third had to be smuggled in as an absent value that
- * every reader then had to know meant "inherit". The wire still spells it
- * `true`, `false` and `null`, converted at the two edges below.
- */
-type UserMismatchChoice = "inherit" | "reject" | "accept"
-
-const userMismatchChoice = (
-  stored: boolean | null | undefined,
-): UserMismatchChoice =>
-  stored === null || stored === undefined
-    ? "inherit"
-    : stored
-      ? "reject"
-      : "accept"
-
-const storedUserMismatch = (choice: UserMismatchChoice): boolean | null =>
-  choice === "inherit" ? null : choice === "reject"
-
-function UserMismatchPicker({
-  value,
-  onChange,
-}: {
-  value: UserMismatchChoice
-  onChange: (value: UserMismatchChoice) => void
-}) {
-  const selectId = "key-reject-user-mismatch"
-  return (
-    <div className="flex flex-col gap-1">
-      {/* The label carries markup (`user` as code), which FilterSelect's own
-          `label` cannot, so it stays here with `htmlFor` on the trigger and
-          `ariaLabel` naming the control for assistive tech. */}
-      <label htmlFor={selectId} className="text-body">
-        Mismatched <code>user</code> field
-      </label>
-      <FilterSelect
-        id={selectId}
-        ariaLabel="Mismatched user field"
-        value={value}
-        onChange={(next) => onChange(next as UserMismatchChoice)}
-        options={[
-          { value: "inherit", label: "Use the deployment setting (default)" },
-          { value: "reject", label: "Always reject (403)" },
-          { value: "accept", label: "Always accept" },
-        ]}
-      />
-      <span className="text-caption">
-        What happens when a request on this key names a different{" "}
-        <code>user</code> than its owner. Accept it for clients that send
-        telemetry there rather than an identity, such as Claude Code. Spend
-        binds to this key&apos;s owner either way.
-      </span>
-    </div>
-  )
-}
+/** What the mismatched `user` choice does, under the picker. */
+const MISMATCH_HELP = (
+  <>
+    What happens when a request on this key names a different <code>user</code>{" "}
+    than its owner. Accept it for clients that send telemetry there rather than
+    an identity, such as Claude Code. Spend binds to this key&apos;s owner
+    either way.
+  </>
+)
 
 // `isDeploymentWide` is which key surface this caller acts on (useKeysScope): an
 // operator names an owner and may exempt the key from budget; a member's key is
@@ -830,6 +717,7 @@ function CreateKeyDialog({
             />
           ) : null}
           <UserMismatchPicker
+            description={MISMATCH_HELP}
             value={rejectUserMismatch}
             onChange={setRejectUserMismatch}
           />
@@ -1138,6 +1026,7 @@ function EditKeyForm({
         />
       ) : null}
       <UserMismatchPicker
+        description={MISMATCH_HELP}
         value={rejectUserMismatch}
         onChange={setRejectUserMismatch}
       />

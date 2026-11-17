@@ -41,6 +41,7 @@ function usageParams(filters: UsageFilters): URLSearchParams {
   if (filters.start_date) params.set("start_date", filters.start_date)
   if (filters.end_date) params.set("end_date", filters.end_date)
   if (filters.status) params.set("status", filters.status)
+  if (filters.status_code) params.set("status_code", filters.status_code)
   appendAll("model", filters.model)
   if (filters.endpoint) params.set("endpoint", filters.endpoint)
   if (filters.provider) params.set("provider", filters.provider)
@@ -427,18 +428,27 @@ export function useUsageGroupedSeries(
 }
 
 /**
- * Requests the gateway refused since `start`, by person. The gateway records
- * its own refusals with the status it answered, and 403 is the one it gives an
- * over-budget or blocked caller and a model outside a key's allow-list.
+ * Requests the gateway refused since `start`, by person, or only `userId`'s
+ * when one is named. The gateway records its own refusals with the status it
+ * answered, and 403 is the one it gives an over-budget or blocked caller and a
+ * model outside a key's allow-list.
  */
 export function useRefusalsSince(
   start: string,
   workspaceId?: string,
   isEnabled = true,
+  userId?: string,
 ) {
   const scope = useUsageScope("organization")
   return useQuery({
-    queryKey: [USAGE, "refusals", scope.base, start, workspaceId ?? ""],
+    queryKey: [
+      USAGE,
+      "refusals",
+      scope.base,
+      start,
+      workspaceId ?? "",
+      userId ?? "",
+    ],
     queryFn: () =>
       apiFetch<UsageSummary>(
         `${scope.base}/summary?${new URLSearchParams({
@@ -447,6 +457,7 @@ export function useRefusalsSince(
           bucket: "day",
           dimensions: "user",
           ...(workspaceId ? { workspace_id: workspaceId } : {}),
+          ...(userId ? { user_id: userId } : {}),
         })}`,
       ),
     enabled: scope.isReady && isEnabled,

@@ -50,9 +50,9 @@ deployment.
   key's spend against its limit. Where the deployment enables it, a key's actions
   menu offers **Workload identity…**; see
   [Rules on a member's own key](workload-identity.md#rules-on-a-members-own-key).
-- **Overview and Routing** show an operator their active organization only. What
-  the Overview flags for each role is in
-  [What needs attention](review-usage-and-requests.md#what-needs-attention).
+- **Home, Sessions and Routing** show an operator their active organization
+  only. What Home shows each role is in
+  [Home](review-usage-and-requests.md#home).
 
 ## How a request is attributed
 

@@ -140,6 +140,7 @@ describe("the event catalog", () => {
       ACTIVATION_GUIDE_DISMISSED: "Activation Guide Dismissed",
       USE_MODEL_CLICKED: "Use This Model Clicked",
       SESSION_OPENED: "Session Opened",
+      CREATE_API_KEY_OPENED: "Create API Key Opened",
       CHECKOUT_CANCELLED: "Checkout Cancelled",
     })
   })

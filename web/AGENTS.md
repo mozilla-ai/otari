@@ -111,7 +111,10 @@ into the chrome: `app/overlayShellBanner.tsx` (a band above the header on every
 signed-in page), `app/nav/overlayMobileWalletSlot.tsx` (a balance in the mobile
 header, where the top bar's wallet slot is hidden), and
 `features/playground/overlayErrorAction.tsx` (an action under a failed
-Playground turn, given the refusal's status and error code). Each ships inert; `src/overlaySeams.test.ts`
+Playground turn, given the refusal's status and error code). One more adds to
+an owner's Home: `features/home/overlayHomeAccount.tsx` (a figure in place of
+Failures, a row under Needs attention and a clause in the all-clear line, for
+an edition that holds the organization's money). Each ships inert; `src/overlaySeams.test.ts`
 lists every seam and checks it is reached by its `@/…` specifier.
 
 One seam is a CSS custom property rather than a module: `--shell-corner-clearance`

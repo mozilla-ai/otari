@@ -95,11 +95,11 @@ test("add, choose and rotate provider keys", async ({ page }) => {
     ).toBeVisible()
     await page.keyboard.press("Escape")
 
-    // Rotate a provider key: confirm on the Overview's Requests tab, then
-    // archive the old key.
-    // Out of the organization rail, which has no Overview, into the workspace.
+    // Rotate a provider key: confirm on Sessions' Requests view, then archive
+    // the old key.
+    // Out of the organization rail, which has no Sessions, into the workspace.
     await gotoRoute(page, "/")
-    await nav(page).getByRole("link", { name: "Overview" }).click()
+    await nav(page).getByRole("link", { name: "Sessions" }).click()
     await page.getByRole("link", { name: "Requests", exact: true }).click()
     await openProviders(page)
     const old = page.getByRole("row", { name: /production/ })

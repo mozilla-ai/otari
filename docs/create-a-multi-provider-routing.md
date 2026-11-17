@@ -131,10 +131,10 @@ What changes is the control plane behind it. Otari resolves the route for the wo
 After the request succeeds:
 
 1. Open the same workspace.
-2. Go to the Overview and its Requests tab.
+2. Open Sessions and its Requests view.
 3. Confirm the request appears there.
 
-The Requests tab records the request and its cost, so spend across all providers is visible in one place.
+The Requests view records the request and its cost, so spend across all providers is visible in one place.
 
 The response's `Otari-Model` header names the model that answered, and `Otari-Fallback` says `true` when a backup did.
 
@@ -158,7 +158,7 @@ Temporarily break the primary for the workspace you used above, then send the sa
 2. Pin that workspace to `fallback-test`, as in [Control workspace access](model-providers.md#control-workspace-access). Other workspaces keep the organization's key.
 3. Send the same `production-chat` request from step 4, unchanged.
 
-The request still succeeds, but the response now comes from Anthropic. OpenAI refused the key, Otari moved to the next entry, and Anthropic served the call. `Otari-Fallback` is now `true`, and `Otari-Model` names the Anthropic model. The Requests tab records both attempts.
+The request still succeeds, but the response now comes from Anthropic. OpenAI refused the key, Otari moved to the next entry, and Anthropic served the call. `Otari-Fallback` is now `true`, and `Otari-Model` names the Anthropic model. The Requests view records both attempts.
 
 When you're done, remove the `fallback-test` key. If the workspace was pinned to another key before, pin it back.
 

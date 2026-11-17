@@ -39,7 +39,7 @@ attribution and per-user budgets. Deleting or deactivating a user blocks future
 access but keeps historical usage.
 
 **Account settings** holds the name you are known by in the account menu, the
-organization roster and the Overview's user column. Someone added by address has
+organization roster and the user column of Sessions. Someone added by address has
 no name until they set one; with no name, you are shown by your sign-in address.
 
 Signing in can also add you to an organization that has proven your email

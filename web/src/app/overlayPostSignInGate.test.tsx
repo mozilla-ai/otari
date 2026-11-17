@@ -110,7 +110,7 @@ describe("the shell's mount point", () => {
     await renderShell(<p>PAGE</p>)
 
     expect(await screen.findByText("PAGE")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Home" })).toBeInTheDocument()
   })
 
   it("is above the chrome, so a step replaces the rails rather than covering them", async () => {
@@ -121,9 +121,7 @@ describe("the shell's mount point", () => {
     await renderShell(<p>PAGE</p>)
 
     expect(await screen.findByText("STEP")).toBeInTheDocument()
-    expect(
-      screen.queryByRole("link", { name: "Overview" }),
-    ).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Home" })).not.toBeInTheDocument()
     expect(screen.queryByText("PAGE")).not.toBeInTheDocument()
   })
 
@@ -160,6 +158,6 @@ describe("the shell's mount point", () => {
 
     expect(await screen.findByText("ASKING")).toBeInTheDocument()
     expect(screen.getByText("PAGE")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Home" })).toBeInTheDocument()
   })
 })

@@ -63,7 +63,7 @@ export async function login(page: Page): Promise<void> {
   await field.press("Enter")
   // The sidebar appears once authenticated, regardless of the index landing
   // page.
-  await expect(nav(page).getByRole("link", { name: "Overview" })).toBeVisible()
+  await expect(nav(page).getByRole("link", { name: "Home" })).toBeVisible()
 }
 
 // The dashboard authenticates with a session cookie, but the seeding and

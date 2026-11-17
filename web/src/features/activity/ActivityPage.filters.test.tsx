@@ -33,6 +33,25 @@ describe("ActivityPage filter serialization", () => {
     }
   })
 
+  it("narrows to one status code a link carries, and says so", async () => {
+    // Home's "See the refusals" links here with the code it counted, so the
+    // list is the refused requests rather than every failure.
+    const { calls } = mockApi({ rows: [entry()] })
+    renderPage(<ActivityPage />, "/activity?status_code=403&range=24h")
+
+    await screen.findByText("gpt-4o")
+    const requested = calls.map((c) => c.url)
+    for (const path of [`${API_ROOT}/usage?`, `${API_ROOT}/usage/count`]) {
+      expect(
+        requested.some(
+          (url) => url.includes(path) && url.includes("status_code=403"),
+        ),
+        `${path} dropped the status code`,
+      ).toBe(true)
+    }
+    expect(screen.getByText(/Status code/)).toBeVisible()
+  })
+
   it("offers Web fetch as a named tool filter", async () => {
     const user = userEvent.setup()
     const { calls } = mockApi({ rows: [entry()] })

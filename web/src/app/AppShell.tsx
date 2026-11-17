@@ -58,6 +58,7 @@ import { TelemetryIdentity } from "@/app/TelemetryIdentity"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { useAdoptBrowserAvatar } from "@/features/account/avatar/avatarChoice"
 import { FeedbackDialog } from "@/features/feedback/FeedbackDialog"
+import { CreateKeyHost } from "@/features/keys/CreateKeyHost"
 import { PricingWarning } from "@/features/models/PricingWarning"
 import { UnpricedUsageWarning } from "@/features/models/UnpricedUsageWarning"
 import { canManage } from "@/features/organization/roles"
@@ -478,9 +479,12 @@ export function AppShell() {
   return (
     <EntitlementResolver>
       <PostSignInGate>
-        <BreadcrumbLeafProvider>
-          <AppShellChrome />
-        </BreadcrumbLeafProvider>
+        {/* The Create API key dialog, opened from any page that offers a key. */}
+        <CreateKeyHost>
+          <BreadcrumbLeafProvider>
+            <AppShellChrome />
+          </BreadcrumbLeafProvider>
+        </CreateKeyHost>
       </PostSignInGate>
     </EntitlementResolver>
   )
@@ -1329,8 +1333,8 @@ function AppShellChrome() {
                   // a registered path can be gated off, so the fallback is there
                   // for the type rather than for a case that happens.
                   title={`${navLabelForPath(pathname) ?? currentItem?.label ?? "That page"} is not available here`}
-                  description="This deployment does not serve that page. Choose another page from the menu, or go back to Overview."
-                  actionLabel={pathname === "/" ? undefined : "Go to Overview"}
+                  description="This deployment does not serve that page. Choose another page from the menu, or go back to Home."
+                  actionLabel={pathname === "/" ? undefined : "Go to Home"}
                   onAction={() => void navigate({ to: "/" })}
                 />
               ) : (

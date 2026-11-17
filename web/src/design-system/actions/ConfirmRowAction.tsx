@@ -7,6 +7,11 @@ export type ConfirmRowActionProps = {
   confirmLabel: string
   onConfirm: () => void
   isPending?: boolean
+  /**
+   * In a row's menu, hard to undo: the item wears the danger ink, after a
+   * rule, and the dialog's confirm is the danger button.
+   */
+  isDestructive?: boolean
 } & (
   | {
       /** The glyph the resting trigger wears. See `RowAction`. */
@@ -47,6 +52,7 @@ export function ConfirmRowAction({
   confirmLabel,
   onConfirm,
   isPending,
+  isDestructive,
   icon,
   label,
   children,
@@ -62,17 +68,23 @@ export function ConfirmRowAction({
   if (menu) {
     const name =
       label ?? (typeof children === "string" ? children : confirmLabel)
-    const ask = () => menu({ heading: name, confirmLabel, onConfirm })
+    const ask = () =>
+      menu({ heading: name, confirmLabel, isDestructive, onConfirm })
     // The ellipsis says a question follows, as on every other menu here.
     return icon ? (
       <RowAction
         icon={icon}
         label={`${name}…`}
         isDisabled={isPending}
+        isDestructive={isDestructive}
         onPress={ask}
       />
     ) : (
-      <RowAction isDisabled={isPending} onPress={ask}>
+      <RowAction
+        isDisabled={isPending}
+        isDestructive={isDestructive}
+        onPress={ask}
+      >
         {name}…
       </RowAction>
     )

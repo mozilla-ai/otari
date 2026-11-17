@@ -302,8 +302,8 @@ describe("AppShell responsive layout", () => {
 
     // On the index first, because that is the half the comment above is about:
     // "/" lights here and must stop lighting once a page under it is open.
-    expect(document.title).toBe("Overview · Otari")
-    expect(screen.getByRole("link", { name: "Overview" })).toHaveAttribute(
+    expect(document.title).toBe("Home · Otari")
+    expect(screen.getByRole("link", { name: "Home" })).toHaveAttribute(
       "aria-current",
       "page",
     )
@@ -574,7 +574,7 @@ describe("AppShell for a caller with no organization", () => {
 
     const sidebar = await screen.findByRole("navigation", { name: "Sidebar" })
     expect(
-      await within(sidebar).findByRole("link", { name: "Overview" }),
+      await within(sidebar).findByRole("link", { name: "Home" }),
     ).toBeInTheDocument()
     // A 404 is no organization, not an unavailable context, which would fail
     // open onto the operator rows and the organization rail.
@@ -692,7 +692,7 @@ describe("AppShell surface gating", () => {
   it("renders every destination the deployment serves", async () => {
     mockMatchMedia(false)
     await renderShell()
-    // The rail beyond Overview waits on the membership read.
+    // The rail beyond Home waits on the membership read.
     await screen.findByRole("button", { name: "Tools" })
     // Every label, not a sample: a surface misspelled on a NAV entry hides that
     // destination in every deployment, and only the full list catches it. Kept
@@ -703,7 +703,14 @@ describe("AppShell surface gating", () => {
       within(screen.getByRole("navigation", { name: "Sidebar" }))
         .getAllByRole("link")
         .map((link) => link.textContent),
-    ).toEqual(["Overview", "Models", "Providers", "API keys", "Members"])
+    ).toEqual([
+      "Home",
+      "Sessions",
+      "Models",
+      "Providers",
+      "API keys",
+      "Members",
+    ])
     // Routing and Tools nest destinations, so they expand rather than
     // navigate; their children are links once the group is open.
     expect(
@@ -796,7 +803,7 @@ describe("AppShell surface gating", () => {
     expect(screen.queryByRole("link", { name: "Usage" })).toBeNull()
     expect(screen.queryByRole("link", { name: "API keys" })).toBeNull()
     // Ungated and still present: the index is the deployment's front page.
-    expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Home" })).toBeInTheDocument()
     expect(
       await screen.findByRole("link", { name: "Models" }),
     ).toBeInTheDocument()
@@ -817,7 +824,7 @@ describe("AppShell surface gating", () => {
     // management surface at all is left with a landing row and no headings it
     // cannot fill.
     expect(screen.queryByText("Observe")).toBeNull()
-    expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Home" })).toBeInTheDocument()
   })
 })
 
@@ -866,7 +873,7 @@ describe("AppShell entitlement gating", () => {
       screen.getByText(/Choose another page from the menu/),
     ).toBeInTheDocument()
     expect(
-      screen.getByRole("button", { name: "Go to Overview" }),
+      screen.getByRole("button", { name: "Go to Home" }),
     ).toBeInTheDocument()
   })
 
@@ -1253,7 +1260,7 @@ describe("AppShell entitlement gating", () => {
     mockMatchMedia(false)
     const user = userEvent.setup()
     await renderShell()
-    // The rail beyond Overview waits on the membership read.
+    // The rail beyond Home waits on the membership read.
     await screen.findByRole("button", { name: "Tools" })
 
     // Shut to start. The panel stays mounted so it has a height to animate from,
@@ -1317,7 +1324,7 @@ describe("AppShell entitlement gating", () => {
     // that, so naming it on every page is a segment that never disambiguates
     // anything; the scope switcher names the active one where it matters.
     const crumb = await screen.findByLabelText("Breadcrumb")
-    expect(crumb).toHaveTextContent("Overview")
+    expect(crumb).toHaveTextContent("Home")
     expect(crumb).not.toHaveTextContent(/organization/i)
   })
 
@@ -1415,7 +1422,7 @@ describe("AppShell entitlement gating", () => {
       within(rail).getByRole("link", { name: "Accounts" }),
     ).toBeInTheDocument()
     // And neither of the other two rails is showing.
-    expect(within(rail).queryByRole("link", { name: "Overview" })).toBeNull()
+    expect(within(rail).queryByRole("link", { name: "Home" })).toBeNull()
     expect(
       within(rail).queryByRole("link", { name: "Members & roles" }),
     ).toBeNull()
@@ -1523,7 +1530,7 @@ describe("AppShell entitlement gating", () => {
     // bookmark was the only way back to them.
     window.localStorage.setItem("otari.dashboard.sidebarCollapsed", "1")
     await renderShell()
-    // The rail beyond Overview waits on the membership read.
+    // The rail beyond Home waits on the membership read.
     await screen.findByRole("button", { name: "Tools" })
 
     expect(screen.queryByRole("link", { name: "Tools" })).toBeNull()
@@ -1610,7 +1617,7 @@ describe("the telemetry the sidebar records", () => {
     const user = userEvent.setup()
     await renderShell(bootstrap(), { url: "/models" })
 
-    await user.click(screen.getByRole("link", { name: "Overview" }))
+    await user.click(screen.getByRole("link", { name: "Home" }))
 
     expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
       tab_name: "index",

@@ -1,22 +1,14 @@
 import { expect, type Page, test } from "@playwright/test"
 
-import {
-  filterChip,
-  login,
-  nav,
-  pickOption,
-  table,
-  tableRows,
-  tileValue,
-} from "./helpers"
+import { gotoRoute, login, pickOption, tableRows, tileValue } from "./helpers"
 import { COUNTS, PARITY } from "./parity-data"
 
 test.describe.configure({ mode: "serial" })
 
 async function openUsage(page: Page): Promise<void> {
   await login(page)
-  await nav(page).getByRole("link", { name: "Overview" }).click()
-  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible()
+  // The organization's usage page: the workspace's Usage view gave way to Home.
+  await gotoRoute(page, "/organization/usage")
   await expect(tileValue(page, "Tracked cost")).toBeVisible()
 }
 
@@ -120,44 +112,5 @@ test.describe("usage & analytics", () => {
     await expect(
       breakdownRow(page, "provider", PARITY.models.priced.provider),
     ).toBeVisible()
-  })
-
-  test("drills from a model's spend into the requests behind it", async ({
-    page,
-  }) => {
-    await openUsage(page)
-    await breakdownRow(page, "model", PARITY.models.priced.model)
-      .getByRole("rowheader")
-      .click()
-
-    // The drill is the join between the two pages: analytics says where the money
-    // went, the log says which requests spent it.
-    await expect(page).toHaveURL(/\/requests/)
-    await expect(
-      filterChip(page, "Model", PARITY.models.priced.model),
-    ).toBeVisible()
-    await expect(tableRows(page, "Activity log")).toHaveCount(COUNTS.priced)
-    // The window travels with the filter, so the log shows the same slice of time
-    // the chart was showing rather than reverting to its own default.
-    await expect(page).toHaveURL(/start_date=/)
-  })
-
-  test("drills from a session into the requests it ran", async ({ page }) => {
-    await openUsage(page)
-    await breakdownRow(page, "session", PARITY.sessions.light)
-      .getByRole("rowheader")
-      .click()
-
-    await expect(page).toHaveURL(/\/requests/)
-    await expect(
-      filterChip(page, "Session", PARITY.sessions.light),
-    ).toBeVisible()
-    // The light session carries both its succeeding and its failing requests.
-    await expect(tableRows(page, "Activity log")).toHaveCount(
-      COUNTS.unpriced + COUNTS.errors,
-    )
-    await expect(table(page, "Activity log")).toContainText(
-      PARITY.models.unpriced.model,
-    )
   })
 })

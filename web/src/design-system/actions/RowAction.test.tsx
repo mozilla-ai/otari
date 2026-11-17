@@ -265,6 +265,31 @@ describe("RowActionRow", () => {
     expect(screen.queryByRole("button")).toBeNull()
   })
 
+  it("puts a destructive two-step action in the danger ink, with a danger confirm", async () => {
+    const user = userEvent.setup()
+    render(
+      <RowActionRow>
+        <ConfirmRowAction
+          icon={FiTrash2}
+          label="Remove the limit"
+          confirmLabel="Remove"
+          isDestructive
+          onConfirm={vi.fn()}
+        />
+      </RowActionRow>,
+    )
+    await user.click(screen.getByRole("button", { name: /^Row actions/ }))
+    const item = await screen.findByRole("menuitem", {
+      name: "Remove the limit…",
+    })
+    expect(item.className).toContain("otari-row-menu-danger")
+    await user.click(item)
+    const dialog = await screen.findByRole("alertdialog")
+    expect(
+      within(dialog).getByRole("button", { name: "Remove" }).className,
+    ).toContain("danger")
+  })
+
   it("asks a two-step action's question in a dialog once the menu has closed", async () => {
     const user = userEvent.setup()
     const onConfirm = vi.fn()

@@ -18,11 +18,11 @@ import {
 test.describe.configure({ mode: "serial" })
 
 test.describe("dashboard core flows", () => {
-  test("first-run overview guides the operator to provider setup", async ({
+  test("first-run Home guides the operator to provider setup", async ({
     page,
   }) => {
     await login(page)
-    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Home" })).toBeVisible()
     await expect(page.getByText("Get started with Otari")).toBeVisible()
   })
 
@@ -113,7 +113,7 @@ test.describe("dashboard core flows", () => {
 
     // Permanent: the offer does not come back on the next page load.
     await page.reload()
-    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Home" })).toBeVisible()
     await expect(sheet).toBeHidden()
   })
 
@@ -473,7 +473,8 @@ test.describe("dashboard core flows", () => {
     expect(seeded.ok(), await seeded.text()).toBe(true)
 
     await login(page)
-    await nav(page).getByRole("link", { name: "Overview" }).click()
+    // The organization's usage, where the share affordance lives.
+    await gotoRoute(page, "/organization/usage")
 
     // The affordance lives in the chart's own caption row and only exists when the
     // range has data to share.

@@ -91,8 +91,8 @@ Which sign-in forms the page offers is described in
 4. Test the provider connection, or declare model IDs for a backend with no
    model-listing endpoint.
 5. Create an API key from the setup guide or the **Keys** page.
-6. Send a request and check that it appears on the **Overview**, in
-   **Requests**.
+6. Send a request and check that it appears in **Sessions**, in its
+   **Requests** view.
 
 The [Self-hosted quickstart](self-hosted-quickstart.md) has a complete request
 example.
@@ -217,7 +217,7 @@ it offers the key it already issued, named by its last characters, instead of
 a new one: **Use it** keeps that key, and **Replace it** issues a new one and
 the old key stops working.
 
-Set `activation_guide: false` to turn off the Overview's
+Set `activation_guide: false` to turn off the dashboard's
 setup guide for the deployment.
 
 ## Signup and terms

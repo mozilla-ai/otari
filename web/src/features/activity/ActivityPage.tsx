@@ -94,6 +94,7 @@ const URL_DEFAULTS = {
   start_date: "",
   end_date: "",
   status: "",
+  status_code: "",
   model: "",
   user_id: "",
   api_key_id: "",
@@ -159,10 +160,11 @@ function ActivityPageContent({
   // Provenance: gateway traffic vs an imported agent source. Set by its own select,
   // or by a drill-down (the pricing alarm links here scoped to gateway traffic).
   const sourceFilter = url.get("source")
-  // The Usage breakdowns (session / endpoint / provider) drill in the same way:
-  // no select of their own, carried as a chip so the scoping is visible and one
-  // click removes it.
+  // The Usage breakdowns (session / endpoint / provider) and Home's refusal
+  // links (status code) drill in the same way: no select of their own, carried
+  // as a chip so the scoping is visible and one click removes it.
   const sessionFilter = url.get("source_label")
+  const statusCodeFilter = url.get("status_code")
   const endpointFilter = url.get("endpoint")
   const providerFilter = url.get("provider")
   const toolFilter = url.get("tool")
@@ -262,6 +264,7 @@ function ActivityPageContent({
       api_key_id: apiKeyFilters.length > 0 ? apiKeyFilters : undefined,
       source: sourceFilter || undefined,
       source_label: sessionFilter || undefined,
+      status_code: statusCodeFilter || undefined,
       endpoint: endpointFilter || undefined,
       provider: providerFilter || undefined,
       tool: (toolFilter || undefined) as UsageFilters["tool"],
@@ -277,6 +280,7 @@ function ActivityPageContent({
       apiKeyFilters,
       sourceFilter,
       sessionFilter,
+      statusCodeFilter,
       endpointFilter,
       providerFilter,
       priced,
@@ -401,6 +405,7 @@ function ActivityPageContent({
       api_key_id: apiKeyFilters.length > 0 ? apiKeyFilters : undefined,
       source: sourceFilter || undefined,
       source_label: sessionFilter || undefined,
+      status_code: statusCodeFilter || undefined,
       endpoint: endpointFilter || undefined,
       provider: providerFilter || undefined,
       tool: (toolFilter || undefined) as UsageFilters["tool"],
@@ -418,6 +423,7 @@ function ActivityPageContent({
       apiKeyFilters,
       sourceFilter,
       sessionFilter,
+      statusCodeFilter,
       endpointFilter,
       providerFilter,
       priced,
@@ -524,6 +530,7 @@ function ActivityPageContent({
       pricedFilter ||
       sourceFilter ||
       sessionFilter ||
+      statusCodeFilter ||
       endpointFilter ||
       providerFilter ||
       toolFilter ||
@@ -555,6 +562,16 @@ function ActivityPageContent({
             label: "Source",
             value: describeSource(sourceFilter),
             onClear: () => url.patch({ source: "" }),
+          },
+        ]
+      : []),
+    ...(statusCodeFilter
+      ? [
+          {
+            key: "status_code",
+            label: "Status code",
+            value: statusCodeFilter,
+            onClear: () => url.patch({ status_code: "" }),
           },
         ]
       : []),

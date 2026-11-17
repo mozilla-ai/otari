@@ -4,7 +4,7 @@ icon: bolt
 
 # Quickstart
 
-This quickstart gets you to your first LLM request as fast as possible. You'll use your default workspace, generate a workspace token, choose a model, send one request, and confirm it appears on the workspace's Overview.
+This quickstart gets you to your first LLM request as fast as possible. You'll use your default workspace, generate a workspace token, choose a model, send one request, and confirm it appears in the workspace's Sessions.
 
 **Estimated time: 5 minutes.** All you need is an otari.ai account with some [balance](billing.md) or your own [provider key](model-providers.md).
 
@@ -16,7 +16,7 @@ Use your default workspace for the first request.
 
 1. Log in to [otari.ai](https://otari.ai).
 2. Open your default workspace in the top-left corner.
-3. You will use the **API keys**, Models, and **Overview** pages in this guide.
+3. You will use the **API keys**, Models, and **Sessions** pages in this guide.
 
 ## 2. Generate an API token
 
@@ -72,13 +72,13 @@ print(response.choices[0].message.content)
 
 ## 4. Confirm it worked
 
-1. Open the **Overview** and its **Requests** tab.
+1. Open **Sessions** and its **Requests** view.
 2. Look for the request you just sent.
 3. If it does not appear, double-check the provider key and workspace token first.
 
-![The Overview's Requests tab, listing requests with their user, model, tokens, cost and status.](assets/screenshots/quickstart-requests.png)
+![The Requests view of Sessions, listing requests with their user, model, tokens, cost and status.](assets/screenshots/quickstart-requests.png)
 
-**Success**: Once the request appears on the Overview as successful, your hosted path is working. If it shows an error, open it to see why. From there, you can add budgets, more providers, or an editor integration.
+**Success**: Once the request appears in Requests as successful, your hosted path is working. If it shows an error, open it to see why. From there, you can add budgets, more providers, or an editor integration.
 
 ## What's next?
 

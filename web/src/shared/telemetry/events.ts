@@ -85,6 +85,15 @@ export const TELEMETRY_EVENTS = {
   SESSION_OPENED: "Session Opened",
 
   /**
+   * The Create API key dialog opened.
+   *
+   * Carries `entry_point`, where it was opened from: the rail's button, an
+   * empty API keys list, a member's first-run step on Home, and so on. A press
+   * on a dialog already open is not another opening.
+   */
+  CREATE_API_KEY_OPENED: "Create API Key Opened",
+
+  /**
    * A wallet top-up abandoned at the payment provider.
    *
    * Named here and fired by nobody in this build: billing is ARCHITECTURE.md's

@@ -170,6 +170,8 @@ function InlineRowAction({
 export interface RowConfirmation {
   heading: string
   confirmLabel: string
+  /** A confirm that is hard to undo, on the danger button. */
+  isDestructive?: boolean
   onConfirm: () => void
 }
 
@@ -304,7 +306,7 @@ export function RowActionRow({ children }: { children: ReactNode }) {
           heading={`${confirming.heading}?`}
           body="This takes effect as soon as you confirm."
           confirmLabel={confirming.confirmLabel}
-          confirmVariant="primary"
+          confirmVariant={confirming.isDestructive ? "danger" : "primary"}
           isPending={false}
           onConfirm={() => {
             confirming.onConfirm()

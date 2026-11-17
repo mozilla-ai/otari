@@ -12,6 +12,7 @@ import {
   FiHome,
   FiKey,
   FiLayers,
+  FiList,
   FiLogIn,
   FiMessageSquare,
   FiRepeat,
@@ -67,23 +68,27 @@ const BASE_NAV_SECTIONS = [
       // Ungated on every axis: the index is the deployment's own front page and
       // reads whatever it is allowed to. The one row a caller with no
       // organization keeps, since it is where they are told how to get in.
-      //
-      // Its tabs (usage, requests and agent sessions over one window and one
-      // set of filters) gate themselves inside the page, on `usage` and
-      // `traces`, and none is `operatorOnly` (otari#837): for a caller who does
-      // not operate the deployment they read `/organizations/me/usage`.
       {
         to: "/",
-        label: "Overview",
+        label: "Home",
         icon: FiHome,
         reachableWithoutOrganization: true,
-        views: ["/requests", "/sessions"],
+      },
+      // Agent sessions and the requests behind them, two views under one
+      // title. Each gates itself inside the page, on `traces` and `usage`, and
+      // neither is `operatorOnly` (otari#837): for a caller who does not
+      // operate the deployment they read `/organizations/me/...`.
+      {
+        to: "/sessions",
+        label: "Sessions",
+        icon: FiList,
+        views: ["/requests"],
       },
     ],
   },
   {
-    // No base rows: the views it held are the Overview's tabs. Kept for the
-    // rows an overlay contributes by this id; empty, it renders nothing
+    // No base rows. Kept for the rows an overlay contributes by this id;
+    // empty, it renders nothing
     // (`visibleNavSections`).
     id: "observe",
     label: "Observe",

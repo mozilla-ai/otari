@@ -20,7 +20,7 @@ To select which provider keys a workspace can use, open the workspace from the l
 
 ## Manage a workspace
 
-From the main dashboard, select the workspace in the top-left corner. Its menu has **Overview**, **Models**, **Routing**, **Guardrails**, **Tools**, **API keys** and **Members**.
+From the main dashboard, select the workspace in the top-left corner. Its menu has **Home**, **Sessions**, **Models**, **Routing**, **Guardrails**, **Tools**, **API keys** and **Members**.
 
 Click **Organization** at the bottom of the menu, then use the sidebar to move between different areas:
 

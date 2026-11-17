@@ -72,7 +72,7 @@ limits under [Mail](configuration.md#invitations).
 
 - Invitations waiting for you are listed under **Invitations**, reached from the
   organization switcher. Someone signed in who belongs to no organization is
-  taken there when an invitation is waiting; otherwise Overview says how to get
+  taken there when an invitation is waiting; otherwise Home says how to get
   in. Creating an organization is offered only where signup is open.
 - Opening an invitation link while signed in as a different address says who the
   invitation is for and offers to sign out, because accepting always adds the

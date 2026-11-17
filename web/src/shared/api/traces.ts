@@ -136,7 +136,7 @@ export function useTraces(
   })
 }
 
-export function useTraceCount(filters: TraceFilters) {
+export function useTraceCount(filters: TraceFilters, isEnabled = true) {
   const scope = useTraceScope()
   return useQuery({
     queryKey: [TRACES, "count", scope.base, filters],
@@ -145,7 +145,7 @@ export function useTraceCount(filters: TraceFilters) {
       apiFetch<TraceCount>(
         `${scope.base}/count?${traceParams(filters).toString()}`,
       ),
-    enabled: scope.isReady,
+    enabled: scope.isReady && isEnabled,
     placeholderData: keepPreviousData,
     staleTime: 10_000,
   })

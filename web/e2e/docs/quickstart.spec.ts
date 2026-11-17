@@ -18,7 +18,7 @@ test("the quickstart's pages", async ({ page }) => {
 
   // Not the Models step: this gateway reaches no provider, so its catalog is
   // empty and a model's page has no "Use this model" to press.
-  await nav(page).getByRole("link", { name: "Overview" }).click()
+  await nav(page).getByRole("link", { name: "Sessions" }).click()
   await page.getByRole("link", { name: "Requests", exact: true }).click()
   await expect(page.getByRole("row").nth(1)).toBeVisible()
   await docScreenshot(page, "quickstart-requests")

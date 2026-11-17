@@ -276,8 +276,8 @@ otari import claude-code
 - Re-running imports only what is new.
 - Only token counts and identifiers are read, never prompts, completions or tool
   payloads.
-- Each session is labeled `<hostname>:<project>`, so you can group usage per
-  repository on the **Overview**.
+- Each session is labeled `<hostname>:<project>`, so an owner or admin can group
+  usage per repository under **Organization** → **Usage**.
 - The first event is sent on its own, so a rejection (an unknown user, a key that
   is not budget-exempt) shows before the rest is uploaded.
 

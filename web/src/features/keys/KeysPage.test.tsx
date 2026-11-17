@@ -1786,7 +1786,11 @@ describe("KeysPage", () => {
     await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
     await user.keyboard("{Escape}")
     await user.click(screen.getByRole("button", { name: "More options" }))
-    await pickOption(user, "Mismatched user field", "Always accept")
+    await pickOption(
+      user,
+      "When a request names a different user",
+      "Always accept",
+    )
     await user.click(screen.getByRole("button", { name: "Create key" }))
 
     const post = fetchMock.mock.calls.find(
@@ -2346,7 +2350,11 @@ describe("KeysPage", () => {
 
     const row = (await screen.findByText("ci-bot")).closest("tr")!
     await chooseAction(user, row, "Edit")
-    await pickOption(user, "Mismatched user field", "Always accept")
+    await pickOption(
+      user,
+      "When a request names a different user",
+      "Always accept",
+    )
     await user.click(screen.getByRole("button", { name: "Save" }))
 
     const patch = fetchMock.mock.calls.find(
@@ -2376,7 +2384,7 @@ describe("KeysPage", () => {
     await chooseAction(user, row, "Edit")
     await pickOption(
       user,
-      "Mismatched user field",
+      "When a request names a different user",
       "Use the deployment setting (default)",
     )
     await user.click(screen.getByRole("button", { name: "Save" }))
