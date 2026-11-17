@@ -952,20 +952,45 @@ COMPOSITION_ROOT_BEHAVIOR_BASELINE: tuple[tuple[str, str], ...] = (
 )
 
 
+def _method_count(class_node: ast.ClassDef) -> int:
+    """The methods a class defines, wherever in its body they stand.
+
+    A method under a conditional block in the body counts, since the block is
+    still the class's own scope. A class or a function nested in the body opens a
+    scope of its own, so what it holds is not the enclosing class's.
+    """
+    methods = 0
+    pending: list[ast.AST] = list(class_node.body)
+    while pending:
+        node = pending.pop()
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            methods += 1
+        elif not isinstance(node, ast.ClassDef):
+            pending.extend(ast.iter_child_nodes(node))
+    return methods
+
+
 def _classes_with_methods(tree: ast.Module) -> Iterator[tuple[int, str, int]]:
-    """Yield the line, qualified name and method count of each class that defines a method."""
+    """Yield the line, qualified name and method count of each class that defines a method.
 
-    def walk(body: list[ast.stmt], path: tuple[str, ...]) -> Iterator[tuple[int, str, int]]:
-        for node in body:
-            if isinstance(node, ast.ClassDef):
-                methods = sum(isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef) for child in node.body)
+    Every node is descended through, not only class and function bodies, so a class
+    under a conditional block, a try or a match case is found. Only a class or a
+    function extends the qualified name, because only those name a scope.
+    """
+
+    def walk(node: ast.AST, path: tuple[str, ...]) -> Iterator[tuple[int, str, int]]:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ClassDef):
+                methods = _method_count(child)
                 if methods:
-                    yield node.lineno, ".".join((*path, node.name)), methods
-                yield from walk(node.body, (*path, node.name))
-            elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-                yield from walk(node.body, (*path, node.name))
+                    yield child.lineno, ".".join((*path, child.name)), methods
+                yield from walk(child, (*path, child.name))
+            elif isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+                yield from walk(child, (*path, child.name))
+            else:
+                yield from walk(child, path)
 
-    return walk(tree.body, ())
+    return walk(tree, ())
 
 
 def check_composition_root_behavior(src_root: Path) -> list[str]:
