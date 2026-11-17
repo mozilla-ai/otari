@@ -181,17 +181,17 @@ class HostedOffers:
         """Each model priced by someone here, against the rate the default rung would give it.
 
         Returns, keyed by model, the version in effect, the default and whether
-        the two charge the same (tiers and unit included), for each such model
-        the default rung prices; and, sorted, the ones it does not. A rate the
-        configuration stored is left out, since the next start writes it again,
-        and so is one a refresh already moves.
+        the two charge the same, for each such model the default rung prices;
+        and, sorted, the ones it does not. Left out: a rate the configuration
+        stored, since the next start writes it again; one a refresh already
+        moves; and a tiered rate, which a default would flatten.
         """
         keys = {_key(provider, model): model for model in models}
         versions = await self.pricing.current_versions(keys, normalize_effective_at(None))
         chosen = {
             keys[key]: version
             for key, version in versions.items()
-            if version.origin not in (*_MOVABLE_ORIGINS, CONFIG_ORIGIN)
+            if version.origin not in (*_MOVABLE_ORIGINS, CONFIG_ORIGIN) and not version.pricing_tiers
         }
         if not chosen:
             return {}, []

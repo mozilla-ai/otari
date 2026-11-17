@@ -6,7 +6,8 @@ import { HostedProviderPage } from "@/features/hostedProviders/HostedProviderPag
 // a test can hand it one without a route tree.
 function SelectedHostedProvider() {
   const { name } = Route.useParams()
-  return <HostedProviderPage name={name} />
+  // Keyed by name, so moving to another provider drops the last one's dialogs and test result.
+  return <HostedProviderPage key={name} name={name} />
 }
 
 export const Route = createFileRoute("/admin/hosted-providers/$name")({

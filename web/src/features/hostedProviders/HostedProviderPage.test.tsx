@@ -809,6 +809,24 @@ describe("HostedProviderPage", () => {
       ).not.toBeChecked()
     })
 
+    it("gives a provider's only vendor its row and menu, open from the start", async () => {
+      mockApi({
+        providers: [together()],
+        models: routed().filter((model) => model.vendor === "Alibaba"),
+      })
+      await renderProviderPage("together")
+
+      expect(
+        await screen.findByRole("switch", { name: "Serve Alibaba models" }),
+      ).toBeChecked()
+      expect(
+        screen.getByRole("button", { name: "More for Alibaba" }),
+      ).toBeEnabled()
+      expect(
+        await screen.findByRole("grid", { name: "Alibaba models on together" }),
+      ).toBeInTheDocument()
+    })
+
     it("lists a vendor switched off that no model goes by, so it can be switched back on", async () => {
       mockApi({
         providers: [together()],
@@ -1021,6 +1039,54 @@ describe("HostedProviderPage", () => {
       )
       expect(
         await screen.findByText("Reset 1 model to the default price."),
+      ).toBeInTheDocument()
+    })
+
+    it("names a ticked model the server kept, its default gone since the preview", async () => {
+      const current = {
+        source: "deployment" as const,
+        input_price_per_million: 2,
+        output_price_per_million: 2,
+        unit: "token",
+      }
+      const change = (model: string) => ({
+        model,
+        vendor: "Alibaba",
+        current,
+        default: {
+          ...current,
+          source: "defaults" as const,
+          input_price_per_million: 1,
+        },
+        matches: false,
+      })
+      mockApi({
+        providers: [together()],
+        models: routed(),
+        priceReset: {
+          applied: false,
+          skipped_no_default: [],
+          changes: [change("Qwen/Qwen3-Coder"), change("Qwen/Qwen-Image-2.0")],
+        },
+        lostDefaults: ["Qwen/Qwen-Image-2.0"],
+      })
+      const user = userEvent.setup()
+      await renderProviderPage("together")
+
+      await user.click(
+        await screen.findByRole("button", { name: "Sync prices…" }),
+      )
+      const dialog = await screen.findByRole("dialog", { name: "Sync prices" })
+      await user.click(
+        await within(dialog).findByRole("button", {
+          name: "Use default price for 2",
+        }),
+      )
+
+      expect(
+        await screen.findByText(
+          "Reset 1 model to the default price. Kept the price of Qwen/Qwen-Image-2.0: no default price now.",
+        ),
       ).toBeInTheDocument()
     })
   })

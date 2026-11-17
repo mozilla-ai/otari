@@ -190,6 +190,8 @@ export function mockApi(
     vendorsOff?: string[]
     /** The total the models list reports, above what it returns for a provider it cuts. */
     modelCount?: number
+    /** Models whose default is gone by the time a reset is applied, after the preview listed them. */
+    lostDefaults?: string[]
     /** What a price reset answers, dry run or not. */
     priceReset?: HostedPriceReset
     /** What the catalog update finds and does: its removals show only with the cleanup ticked. */
@@ -334,13 +336,18 @@ export function mockApi(
       const sent = body as { dry_run: boolean; models?: string[] | null }
       const reset = opts.priceReset ?? { changes: [], skipped_no_default: [] }
       // An apply answers for the models it was sent, as the server does.
+      const lost = sent.dry_run ? [] : (opts.lostDefaults ?? [])
       const changes = reset.changes.filter(
         (change) =>
-          sent.dry_run || !sent.models || sent.models.includes(change.model),
+          (sent.dry_run ||
+            !sent.models ||
+            sent.models.includes(change.model)) &&
+          !lost.includes(change.model),
       )
       return jsonResponse({
         ...reset,
         changes,
+        skipped_no_default: [...reset.skipped_no_default, ...lost],
         applied: !sent.dry_run && changes.length > 0,
       })
     }

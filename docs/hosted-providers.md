@@ -284,9 +284,12 @@ implementation the price its listing names (see
 [Connecting otari.ai](#connecting-otariai)). A reset stores it as a new
 version, so later refreshes keep it current and requests already billed keep
 the cost they were billed at. A model the default does not price keeps its
-rate and is listed in `skipped_no_default`. A rate the `pricing:` block of
-`config.yml` stored is left alone, since the next start writes it again. With
-`default_pricing` off, only an
+rate and is listed in `skipped_no_default`. Two kinds of rate are never reset:
+one the `pricing:` block of `config.yml` stored, since the next start writes it
+again, and a tiered rate, which a default would flatten. For an `otari`
+provider, the reset asks the provider for its listing, so the default is the
+price it lists; its model list does not show that default beside each rate,
+only the reset's preview does. With `default_pricing` off, only an
 `otari` provider has a default to go back to.
 
 ### Workspace access
@@ -581,8 +584,8 @@ row shows how many of its models it serves, and:
 Open a vendor to see its models, each with a serving switch and a price, set
 in any unit on [Entering a rate](#entering-a-rate) with **Edit price** (a
 per-second video price goes through `POST /api/v1/pricing` instead); an
-unpriced model arrives switched off. A provider with one vendor lists its
-models without a vendor row. Tabs show one kind of model at a time (the kind
+unpriced model arrives switched off. A provider with one vendor shows that
+vendor already open. Tabs show one kind of model at a time (the kind
 comes from models.dev; `GET /api/v1/hosted-providers/{provider}/models` takes
 it as `type`), and the search box finds models by name or vendor (`search`).
 See [Who is shown which models](models.md#who-is-shown-which-models).

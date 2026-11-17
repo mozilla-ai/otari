@@ -33,7 +33,8 @@ export function PriceSyncDialog({
   vendor: string
   isOpen: boolean
   onClose: () => void
-  onApplied: (count: number) => void
+  /** How many models the server reset, and the ticked ones it kept, having no default now. */
+  onApplied: (count: number, kept: string[]) => void
 }) {
   const preview = useHostedPriceResetPreview(provider.name, opening, vendor)
   const reset = useResetHostedModelPrices(provider.name)
@@ -151,7 +152,12 @@ export function PriceSyncDialog({
         reset.mutate(picked, {
           // The server's own count: a default can go between preview and apply.
           onSuccess: (result) =>
-            onApplied(result.applied ? result.changes.length : 0),
+            onApplied(
+              result.applied ? result.changes.length : 0,
+              result.skipped_no_default.filter((model) =>
+                picked.includes(model),
+              ),
+            ),
         })
       }
     >

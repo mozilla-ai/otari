@@ -241,10 +241,9 @@ export function HostedProviderModelsPanel({
     serving === "" &&
     term === ""
   const groups = groupByVendor(rows, vendors)
-  // One vendor leaves nothing for a vendor row to add over the provider,
-  // unless that vendor is off, whose row is the only way back on.
-  const isFlat =
-    vendors.length <= 1 && vendors.every((vendor) => vendor.enabled)
+  // A provider's only vendor keeps its row, with its switch and menu, and
+  // starts open, since there is nothing to choose between.
+  const isSole = groups.length === 1
   // The list is read whole up to its limit; a provider offering more is cut.
   const isCut = models.data !== undefined && models.data.count > rows.length
 
@@ -341,9 +340,7 @@ export function HostedProviderModelsPanel({
               {`Showing the first ${rows.length} of ${models.data?.count} models. Search or filter to reach the rest.`}
             </p>
           ) : null}
-          {isFlat ? (
-            tableFor(rows, `Models on ${provider.name}`)
-          ) : groups.length === 0 ? (
+          {groups.length === 0 ? (
             <EmptyMessage>
               {filteredEmptyContent(term, serving) ?? "No model matches."}
             </EmptyMessage>
@@ -359,7 +356,8 @@ export function HostedProviderModelsPanel({
                   term !== "" ||
                   serving !== "" ||
                   kind !== "" ||
-                  opened.has(vendor.vendor)
+                  // `opened` records a press, which closes a sole vendor.
+                  opened.has(vendor.vendor) !== isSole
                 return (
                   <li key={vendor.vendor} className="flex flex-col">
                     <HostedVendorRow
@@ -436,11 +434,15 @@ export function HostedProviderModelsPanel({
         vendor={syncVendor}
         isOpen={isSyncOpen}
         onClose={() => setIsSyncOpen(false)}
-        onApplied={(count) => {
+        onApplied={(count, kept) => {
           setIsSyncOpen(false)
           refresh.reset()
           setOutcome(
-            `Reset ${plural(count, "model", "models")} to the default price.`,
+            `Reset ${plural(count, "model", "models")} to the default price.${
+              kept.length > 0
+                ? ` Kept the price of ${kept.join(", ")}: no default price now.`
+                : ""
+            }`,
           )
         }}
       />

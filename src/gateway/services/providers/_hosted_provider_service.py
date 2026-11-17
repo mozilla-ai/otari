@@ -557,9 +557,10 @@ class HostedProviderService:
     async def reset_prices(self, provider: str, request: HostedPriceResetRequest) -> HostedPriceResetPublic:
         """Put models an operator priced back on the default rate, or say what that would change.
 
-        The default rate is models.dev's, or the one the provider's own listing names. A model
-        it does not price keeps its price and is named as skipped. A rate the configuration
-        stored is left alone, since the next start writes it again. A reset writes a new version,
+        The default rate is models.dev's, or for another Otari the one its own listing names,
+        read by dialing it here. A model the default does not price keeps its price and is
+        named as skipped. A rate the configuration stored, and a tiered rate a default would
+        flatten, are left alone. A reset writes a new version,
         so requests already billed keep their cost, and every later refresh keeps the rate current.
 
         Raises:
@@ -568,6 +569,11 @@ class HostedProviderService:
         async with self.uow:
             source = await self._provider_or_raise(provider)
             rows = await self.models.list_all_for_provider(source.name)
+            credential = source.credential(quiet=True)
+            declared = source.declared_models
+        if source.implementation == OTARI_IMPLEMENTATION and credential is not None:
+            # Another Otari's default is the price its own listing names, which only a dial reads.
+            await self._dial(source.name, source.implementation, credential, declared)
         vendors = vendors_of(source.implementation, [row.model for row in rows])
         wanted = None if request.models is None else set(request.models)
         scoped = [
@@ -601,7 +607,13 @@ class HostedProviderService:
     async def _differing_defaults(
         self, source: HostedSource, rows: Sequence[HostedProviderModel]
     ) -> dict[str, HostedModelRates]:
-        """The default rate of each operator-priced model the default rung prices differently, keyed by model."""
+        """The default rate of each operator-priced model the default rung prices differently, keyed by model.
+
+        None for another Otari: its default is the price its listing names, which only a dial
+        reads, and a list is no place to dial. Its price sync dials, and answers there.
+        """
+        if source.implementation == OTARI_IMPLEMENTATION:
+            return {}
         paired, _ = await self.offers.custom_against_defaults(
             source.name, [row.model for row in rows], implementation=source.implementation
         )

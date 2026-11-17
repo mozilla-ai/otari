@@ -423,3 +423,73 @@ def test_removing_the_provider_takes_its_vendor_switches_with_it(
 
     assert response.status_code == 201, response.text
     assert _vendors(_models(client, master_key_header))["Alibaba"]["enabled"] is True
+
+
+@pytest.mark.usefixtures("together", "defaults")
+def test_a_tiered_price_is_never_reset(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    """A default carries no tiers, so a reset would flatten the operator's."""
+    with db_session_factory() as db:
+        db.add(
+            ModelPricing(
+                model_key=f"together:{QWEN}",
+                input_price_per_million=0.1,
+                output_price_per_million=0.1,
+                pricing_tiers=[{"min_input_tokens": 100_000, "input_price_per_million": 0.2}],
+                origin="api",
+                effective_at=datetime.now(UTC),
+            )
+        )
+        db.commit()
+
+    preview = client.post(f"{PATH}/models/reset-prices", json={"dry_run": True}, headers=master_key_header)
+
+    assert QWEN not in {change["model"] for change in preview.json()["changes"]}
+
+
+def test_another_otaris_reset_goes_back_to_the_price_its_listing_names(
+    client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Not the models.dev estimate: the listing is what the provider charges, and only a dial reads it."""
+
+    async def _listing(impl_name: str, **_: object) -> ProviderDiscovery:
+        return ProviderDiscovery(
+            provider=impl_name,
+            models=[
+                Model.model_validate(
+                    {
+                        "id": "z-ai/glm-5.3",
+                        "object": "model",
+                        "created": 0,
+                        "owned_by": "otari",
+                        "pricing": {"input_price_per_million": 3, "output_price_per_million": 4},
+                    }
+                )
+            ],
+        )
+
+    monkeypatch.setattr("gateway.services.providers._hosted_provider_service.test_provider_credentials", _listing)
+    created = client.post(
+        f"{API_ROOT}/hosted-providers",
+        json={"provider": "otari", "name": "otari-ai", "api_key": KEY, "api_base": "https://otari.test"},
+        headers=master_key_header,
+    )
+    assert created.status_code == 201, created.text
+    path = f"{API_ROOT}/hosted-providers/otari-ai"
+    [row] = client.get(f"{path}/models", headers=master_key_header).json()["data"]
+    assert row["price_source"] == "provider"
+    client.patch(
+        f"{path}/models/{row['id']}",
+        json={"input_price_per_million": 5, "output_price_per_million": 6},
+        headers=master_key_header,
+    )
+
+    preview = client.post(f"{path}/models/reset-prices", json={"dry_run": True}, headers=master_key_header)
+    applied = client.post(f"{path}/models/reset-prices", json={}, headers=master_key_header)
+
+    [change] = preview.json()["changes"]
+    assert change["default"]["input_price_per_million"] == 3
+    assert applied.json()["applied"] is True
+    [after] = client.get(f"{path}/models", headers=master_key_header).json()["data"]
+    assert (after["price_source"], after["input_price_per_million"]) == ("provider", 3)
