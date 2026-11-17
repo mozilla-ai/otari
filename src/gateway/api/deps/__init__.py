@@ -8,14 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps._base import (
     ContainerDep,
-    MembershipListenerDep,
     PortSessionDep,
     UnitOfWorkDep,
     get_config,
     get_container,
     get_enabled_features,
     get_log_writer,
-    get_membership_listener,
     get_unit_of_work,
     reset_config,
     set_config,
@@ -67,7 +65,7 @@ from gateway.api.deps.identity import (
     get_current_identity,
     require_deployment_operator_or_absent,
 )
-from gateway.api.deps.organizations import get_user_access
+from gateway.api.deps.organizations import MembershipListenerDep, get_membership_listener, get_user_access
 from gateway.api.deps.ports import (
     AgentModelRecommenderPortDep,
     BillingPortDep,

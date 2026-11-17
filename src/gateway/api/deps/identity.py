@@ -5,15 +5,13 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps._base import (
-    MembershipListenerDep,
-    UnitOfWorkDep,
-)
+from gateway.api.deps._base import UnitOfWorkDep
 from gateway.api.deps.auth import (
     get_session_identity,
     record_auth_failure,
     verify_master_key,
 )
+from gateway.api.deps.organizations import MembershipListenerDep
 from gateway.core.database import get_db
 from gateway.exceptions.identity_exceptions import DeploymentAdministrationUnavailableError
 from gateway.models.tenancy import User as TenancyUser
