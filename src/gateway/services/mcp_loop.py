@@ -593,6 +593,12 @@ class _ChatToolLoopStrategy:
                 "the gateway already executed (no-op on the client side).",
             )
 
+    def end_answer(self, result: ChatCompletion) -> None:
+        """End the round as an answer once the gateway's calls are dropped and none of the caller's remain."""
+        choice = result.choices[0]
+        if not choice.message.tool_calls:
+            choice.finish_reason = "stop"
+
     async def advance_transcript(
         self,
         transcript: list[Any],
@@ -742,6 +748,14 @@ class _ChatToolLoopStrategy:
         # continues the conversation.
         async for chunk in self._run_reported(state, pool, []):
             yield chunk
+
+    def end_stream_answer(self, state: _ChatStreamState) -> None:
+        # Only the gateway's calls reach here, and they were never forwarded.
+        state.finish_reason = "stop"
+        if state.pending_terminal is not None:
+            for choice in state.pending_terminal.choices:
+                if choice.finish_reason == "tool_calls":
+                    choice.finish_reason = "stop"
 
     def terminal_events(self, state: _ChatStreamState, acc: _ChatTotals) -> list[ChatCompletionChunk]:
         carrier = state.usage_carrier()
