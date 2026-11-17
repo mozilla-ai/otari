@@ -18,7 +18,7 @@ from gateway.api.deps import get_telemetry_storage_port
 from gateway.core.config import API_ROOT
 from gateway.models.api_keys import APIKey, DisabledReason
 from gateway.models.files import FileObject
-from gateway.models.guardrails import OrganizationGuardrail
+from gateway.models.guardrails import OrganizationGuardrail, OrganizationGuardrailDefinition
 from gateway.models.identity import ErasedAccount, OIDCConnection
 from gateway.models.organizations import OrganizationInvitation
 from gateway.models.provider_keys import OrgProviderKey
@@ -318,6 +318,12 @@ def _add_secrets(session_factory: Callable[[], Session], account: Account) -> No
                     url="https://mcp.example.com",
                     encrypted_token="encrypted",
                 ),
+                OrganizationGuardrailDefinition(
+                    organization_id=account.organization_id,
+                    name="ada-check",
+                    guardrail_name="pydantic_ai",
+                    encrypted_create_secrets="encrypted",
+                ),
                 OrganizationGuardrail(
                     organization_id=account.organization_id,
                     profile="ada-profile",
@@ -360,6 +366,9 @@ def _stored_secrets(session_factory: Callable[[], Session], account: Account) ->
             *session.query(WorkspaceMcpServer.encrypted_token)
             .filter(WorkspaceMcpServer.workspace_id == account.workspace_id)
             .all(),
+            *session.query(OrganizationGuardrailDefinition.encrypted_create_secrets)
+            .filter(OrganizationGuardrailDefinition.organization_id == account.organization_id)
+            .all(),
             *session.query(OrganizationGuardrail.encrypted_credential)
             .filter(OrganizationGuardrail.organization_id == account.organization_id)
             .all(),
@@ -376,10 +385,15 @@ def test_an_organization_left_to_nobody_loses_its_stored_credentials(
 ) -> None:
     account = _add_account(db_session_factory)
     _add_secrets(db_session_factory, account)
+    unrelated = _add_account(db_session_factory, email="grace@example.com")
+    _add_secrets(db_session_factory, unrelated)
 
     assert _delete(client, account, current_password=PASSWORD).status_code == 204
 
     assert all(value is None for row in _stored_secrets(db_session_factory, account) for value in row)
+    unrelated_secrets = _stored_secrets(db_session_factory, unrelated)
+    assert len(unrelated_secrets) == 7
+    assert all(row[0] is not None for row in unrelated_secrets)
     session = db_session_factory()
     try:
         assert (
@@ -399,7 +413,7 @@ def test_an_organization_others_use_keeps_its_stored_credentials(
     assert _delete(client, account, current_password=PASSWORD).status_code == 204
 
     secrets = _stored_secrets(db_session_factory, owner)
-    assert len(secrets) == 6
+    assert len(secrets) == 7
     assert all(row[0] is not None for row in secrets)
 
 
