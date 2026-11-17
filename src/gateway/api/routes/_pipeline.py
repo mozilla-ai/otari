@@ -3484,13 +3484,13 @@ class ToolContext:
         )
 
     def build_web_backends(self) -> Sequence[WebSearchBackend | WebFetchBackend | WebRetrievalBackend]:
-        """Build the request's web tool backends: on the libraries where its search runs on one, else the old backend.
+        """Build the request's web tool backends: on the libraries, else the old backend for a search.
 
-        On the libraries, the search and fetch backends are two members of the
-        request's pool, sharing its call allowance. A request that declared only
-        the fetch tool keeps the old backend, which delegates its fetches.
+        The search and fetch backends are members of the request's pool, sharing
+        its call allowance. A request that declared only the fetch tool gets the
+        fetch backend alone, on the instance its admission resolved.
         """
-        if self.web.in_loop_search is None:
+        if self.web.on_old_backend:
             return [self.build_web_retrieval_backend()]
         search_tool_entry = self.web_search_tool_entry or {}
         return build_web_search_backends(

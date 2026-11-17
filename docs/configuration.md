@@ -1620,13 +1620,6 @@ with the key and a price, and name it in `web_search_default_tool`; for Tavily,
 add `include_raw_content: true` to its options to keep each page's full text.
 The startup log says the same while they are set.
 
-### The older in-loop backend
-
-The older in-loop backend still serves a request that declares only the fetch
-tool, until it is removed. `web_fetch_default_tool` governs every fetch tool call,
-while `web_search_max_calls` does not apply there: the older backend keeps its
-fixed limit of 10 calls and its 422 past it.
-
 ## Decision providers
 
 `decision_providers` configures the upstreams behind `POST /api/v1/decisions`. The
