@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlmodel import col
 
 from gateway.core.config import GatewayConfig
-from gateway.core.tokens import hash_token
+from gateway.core.tokens import generate_shared_token, generate_token, hash_token
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.organizations_exceptions import InvitationNoLongerValidError, MembershipUpdateError
 from gateway.models.organizations import OrganizationInvitation
@@ -423,7 +423,7 @@ async def test_signup_is_told_the_address_an_invitation_was_sent_to(async_db: As
     organization = await create_organization(async_db, slug="lookup-live")
     await _invite(async_db, organization, email="ada@example.com")
 
-    assert await _link(async_db).proof_for(_TOKEN, "ada@example.com") is AddressProof.MAILBOX
+    assert await _link(async_db).proof_for(_TOKEN, claimed_address="ada@example.com") is AddressProof.MAILBOX
 
 
 async def test_signup_is_told_nothing_by_a_token_no_invitation_still_opens(async_db: AsyncSession) -> None:
@@ -441,9 +441,9 @@ async def test_signup_is_told_nothing_by_a_token_no_invitation_still_opens(async
     lookup = _link(async_db)
 
     answers = [
-        await lookup.proof_for("expired-token", "expired@example.com"),
-        await lookup.proof_for("declined-token", "declined@example.com"),
-        await lookup.proof_for("a-token-nobody-was-sent", "ada@example.com"),
+        await lookup.proof_for("expired-token", claimed_address="expired@example.com"),
+        await lookup.proof_for("declined-token", claimed_address="declined@example.com"),
+        await lookup.proof_for("a-token-nobody-was-sent", claimed_address="ada@example.com"),
     ]
 
     assert answers == [None, None, None]
@@ -471,6 +471,33 @@ async def test_a_link_acceptance_refuses_proves_nothing_at_signup(async_db: Asyn
 
     async with uow:
         opened = await link.open(_TOKEN)
-    proof = await link.proof_for(_TOKEN, "ada@example.com")
+    proof = await link.proof_for(_TOKEN, claimed_address="ada@example.com")
 
     assert (opened, proof) == (None, None)
+
+
+async def test_a_token_proves_nothing_about_an_address_it_was_not_sent_to(async_db: AsyncSession) -> None:
+    """The token alone is not the proof: it proves the address it was sent to, and no other."""
+    organization = await create_organization(async_db, slug="proof-other-address")
+    await _invite(async_db, organization, email="ada@example.com")
+
+    assert await _link(async_db).proof_for(_TOKEN, claimed_address="bob@example.com") is None
+
+
+async def test_a_hand_carried_link_only_vouches_for_the_address_an_emailed_one_proves(
+    async_db: AsyncSession,
+) -> None:
+    """A link nobody delivered proves the inviting organization's word, which auto-join does not take."""
+    organization = await create_organization(async_db, slug="proof-strength")
+    hand_carried = generate_shared_token()
+    emailed = generate_token()
+    await _invite(async_db, organization, email="carried@example.com", token=hand_carried)
+    await _invite(async_db, organization, email="mailed@example.com", token=emailed)
+    lookup = _link(async_db)
+
+    proofs = (
+        await lookup.proof_for(hand_carried, claimed_address="carried@example.com"),
+        await lookup.proof_for(emailed, claimed_address="mailed@example.com"),
+    )
+
+    assert proofs == (AddressProof.VOUCHED, AddressProof.MAILBOX)
