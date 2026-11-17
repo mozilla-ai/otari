@@ -14794,9 +14794,10 @@ export interface components {
          * @description What a price reset changed, or would change on a dry run.
          *
          *     ``changes`` lists every operator-priced model the default rung prices,
-         *     ``matches`` marking one whose price is already the default.
-         *     ``skipped_no_default`` names the operator-priced models the default rung
-         *     does not price, which keep their price. ``applied`` is false on a dry run.
+         *     ``matches`` marking one whose price is already the default; a price the
+         *     configuration stored is never listed. ``skipped_no_default`` names the
+         *     operator-priced models the default rung does not price, which keep their
+         *     price. ``applied`` is true only when a reset wrote something.
          */
         HostedPriceResetPublic: {
             /** Applied */
@@ -15123,11 +15124,19 @@ export interface components {
         };
         /**
          * HostedVendorModelsSwitchPublic
-         * @description What a vendor-wide switch did: how many models it changed, and how many it left off for want of a rate.
+         * @description What a vendor-wide switch did: how many models it changed, and how many it left off.
+         *
+         *     ``skipped_unpriced`` counts those left off for want of a rate, ``skipped_unavailable``
+         *     those the provider refused to serve, which an operator switches on one at a time.
          */
         HostedVendorModelsSwitchPublic: {
             /** Changed */
             changed: number;
+            /**
+             * Skipped Unavailable
+             * @default 0
+             */
+            skipped_unavailable: number;
             /** Skipped Unpriced */
             skipped_unpriced: number;
         };

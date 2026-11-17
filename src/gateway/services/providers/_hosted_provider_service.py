@@ -432,7 +432,7 @@ class HostedProviderService:
         kinds = _kinds(source, names)
         vendors = vendors_of(source.implementation, names)
         rates = await self.offers.current_rates(source.name, rows, implementation=source.implementation)
-        defaults = await self._differing_defaults(source, rows, rates)
+        defaults = await self._differing_defaults(source, rows)
 
         def served(row: HostedProviderModel) -> bool:
             return row.enabled and vendors[row.model] not in disabled
@@ -467,37 +467,51 @@ class HostedProviderService:
     async def set_vendor(self, provider: str, request: HostedVendorUpdateRequest) -> HostedVendorPublic:
         """Switch a vendor on or off on one provider, leaving each of its models' own switch as it is.
 
+        Switching on needs no offered model by the vendor, so a switch stored under a vendor name
+        no model goes by any more (models.dev renamed it, or its models were removed) can still be
+        cleared.
+
         Raises:
             HostedProviderNotFoundError: no such provider.
-            HostedVendorNotFoundError: the provider offers no model by that vendor.
+            HostedVendorNotFoundError: switching off a vendor the provider offers no model by.
         """
         async with self.uow:
             source = await self._provider_or_raise(provider)
             rows = await self.models.list_all_for_provider(source.name)
             vendors = vendors_of(source.implementation, [row.model for row in rows])
-            if request.vendor not in vendors.values():
-                raise HostedVendorNotFoundError(source.name, request.vendor)
             if request.enabled:
                 await self.vendors.switch_on(source.name, request.vendor)
+            elif request.vendor not in vendors.values():
+                raise HostedVendorNotFoundError(source.name, request.vendor)
             else:
                 await self.vendors.switch_off(source.name, request.vendor)
             disabled = await self.vendors.disabled_for(source.name)
         get_model_cache().clear(source.name)
-        rates = await self.offers.current_rates(source.name, rows, implementation=source.implementation)
-        defaults = await self._differing_defaults(source, rows, rates)
+        defaults = await self._differing_defaults(source, rows)
         facets = _vendor_facets(
             rows, vendors, disabled, lambda row: row.enabled and vendors[row.model] not in disabled, defaults
         )
-        return next(facet for facet in facets if facet.vendor == request.vendor)
+        return next(
+            (facet for facet in facets if facet.vendor == request.vendor),
+            HostedVendorPublic(
+                vendor=request.vendor,
+                enabled=request.enabled,
+                total=0,
+                serving=0,
+                unpriced=0,
+                unavailable=0,
+                custom_differs=0,
+            ),
+        )
 
     async def switch_vendor_models(
         self, provider: str, request: HostedVendorModelsSwitchRequest
     ) -> HostedVendorModelsSwitchPublic:
         """Set the switch of every model of one vendor, as an operator's choice, in one transaction.
 
-        Switching on serves only a model that has a rate; one with none stays off and is counted
-        as skipped. ``only_unpriced`` with switching off withholds only the models served without
-        a rate. The vendor's own switch is left as it is.
+        Switching on serves only a model that has a rate and that its provider has not refused;
+        the rest stay off and are counted as skipped. ``only_unpriced`` with switching off
+        withholds only the models served without a rate. The vendor's own switch is left as it is.
 
         Raises:
             HostedProviderNotFoundError: no such provider.
@@ -511,34 +525,41 @@ class HostedProviderService:
         if not members:
             raise HostedVendorNotFoundError(source.name, request.vendor)
         rates = await self.offers.current_rates(source.name, members, implementation=source.implementation)
-        changed = 0
-        skipped = 0
+        known = {row.model for row in members}
+        targets: list[HostedProviderModel] = []
+        skipped_unpriced = 0
+        skipped_unavailable = 0
         async with self.uow:
-            # Read again, so a switch an operator flipped since the read above is not overwritten.
-            fresh = await self.models.list_all_for_provider(source.name)
-            for row in fresh:
-                if vendor_of(source.implementation, row.model) != request.vendor:
+            # Read again, so a switch flipped since the read above is not overwritten. A model
+            # offered in between was not priced above, so it is left for the next press.
+            for row in await self.models.list_all_for_provider(source.name):
+                if row.model not in known:
                     continue
                 priced = row.model in rates
                 if request.enabled:
                     if row.enabled:
                         continue
+                    if row.disabled_reason == DISABLED_UNAVAILABLE:
+                        skipped_unavailable += 1
+                        continue
                     if not priced:
-                        skipped += 1
+                        skipped_unpriced += 1
                         continue
                 elif not row.enabled or (request.only_unpriced and priced):
                     continue
-                await self.offers.switch_by_operator(source.name, row, request.enabled)
-                await self.models.save(row)
-                changed += 1
+                targets.append(row)
+            await self.offers.switch_many_by_operator(source.name, targets, request.enabled)
         get_model_cache().clear(source.name)
-        return HostedVendorModelsSwitchPublic(changed=changed, skipped_unpriced=skipped)
+        return HostedVendorModelsSwitchPublic(
+            changed=len(targets), skipped_unpriced=skipped_unpriced, skipped_unavailable=skipped_unavailable
+        )
 
     async def reset_prices(self, provider: str, request: HostedPriceResetRequest) -> HostedPriceResetPublic:
         """Put models an operator priced back on the default rate, or say what that would change.
 
         The default rate is models.dev's, or the one the provider's own listing names. A model
-        it does not price keeps its price and is named as skipped. A reset writes a new version,
+        it does not price keeps its price and is named as skipped. A rate the configuration
+        stored is left alone, since the next start writes it again. A reset writes a new version,
         so requests already billed keep their cost, and every later refresh keeps the rate current.
 
         Raises:
@@ -550,48 +571,45 @@ class HostedProviderService:
         vendors = vendors_of(source.implementation, [row.model for row in rows])
         wanted = None if request.models is None else set(request.models)
         scoped = [
-            row
+            row.model
             for row in rows
             if (wanted is None or row.model in wanted)
             and (request.vendor is None or vendors[row.model] == request.vendor)
         ]
-        rates = await self.offers.current_rates(source.name, scoped, implementation=source.implementation)
-        custom = [row.model for row in scoped if (rate := rates.get(row.model)) and rate.source == "deployment"]
-        defaults = await self.offers.defaults_for(source.name, custom, implementation=source.implementation)
+        paired, skipped = await self.offers.custom_against_defaults(
+            source.name, scoped, implementation=source.implementation
+        )
         changes = [
             HostedPriceResetChangePublic(
                 model=model,
                 vendor=vendors[model],
-                current=rates[model],
-                default=(default_rates := HostedModelRates.from_version(defaults[model], "defaults")),
-                matches=_same_rates(rates[model], default_rates),
+                current=HostedModelRates.from_version(version, "deployment"),
+                default=HostedModelRates.from_version(default, "defaults"),
+                matches=matches,
             )
-            for model in sorted(custom)
-            if model in defaults
+            for model, (version, default, matches) in sorted(paired.items())
         ]
-        skipped = sorted(model for model in custom if model not in defaults)
-        if not request.dry_run and changes:
+        applied = not request.dry_run and bool(changes)
+        if applied:
             async with self.uow:
                 await self._provider_or_raise(provider)
                 await self.offers.reset_to_defaults(
-                    source.name, {change.model: defaults[change.model] for change in changes}
+                    source.name, {model: default for model, (_, default, _) in paired.items()}
                 )
-        return HostedPriceResetPublic(changes=changes, skipped_no_default=skipped, applied=not request.dry_run)
+        return HostedPriceResetPublic(changes=changes, skipped_no_default=skipped, applied=applied)
 
     async def _differing_defaults(
-        self, source: HostedSource, rows: Sequence[HostedProviderModel], rates: Mapping[str, HostedModelRates]
+        self, source: HostedSource, rows: Sequence[HostedProviderModel]
     ) -> dict[str, HostedModelRates]:
         """The default rate of each operator-priced model the default rung prices differently, keyed by model."""
-        custom = [row.model for row in rows if (rate := rates.get(row.model)) and rate.source == "deployment"]
-        if not custom:
-            return {}
-        defaults = await self.offers.defaults_for(source.name, custom, implementation=source.implementation)
-        differing: dict[str, HostedModelRates] = {}
-        for model, default in defaults.items():
-            default_rates = HostedModelRates.from_version(default, "defaults")
-            if not _same_rates(rates[model], default_rates):
-                differing[model] = default_rates
-        return differing
+        paired, _ = await self.offers.custom_against_defaults(
+            source.name, [row.model for row in rows], implementation=source.implementation
+        )
+        return {
+            model: HostedModelRates.from_version(default, "defaults")
+            for model, (_, default, matches) in paired.items()
+            if not matches
+        }
 
     async def add_model(self, provider: str, request: HostedModelCreateRequest) -> HostedModelPublic:
         """Offer a model on a provider, at the rate given or at the seeded default.
@@ -1135,23 +1153,6 @@ class HostedProviderService:
         return model
 
 
-def _same_rates(current: HostedModelRates, default: HostedModelRates) -> bool:
-    """Whether two rates charge the same, whichever rung each came from."""
-    return (
-        current.input_price_per_million,
-        current.output_price_per_million,
-        current.cache_read_price_per_million,
-        current.cache_write_price_per_million,
-        current.unit,
-    ) == (
-        default.input_price_per_million,
-        default.output_price_per_million,
-        default.cache_read_price_per_million,
-        default.cache_write_price_per_million,
-        default.unit,
-    )
-
-
 def _vendor_facets(
     rows: Sequence[HostedProviderModel],
     vendors: Mapping[str, str],
@@ -1159,8 +1160,12 @@ def _vendor_facets(
     served: Callable[[HostedProviderModel], bool],
     defaults: Mapping[str, HostedModelRates],
 ) -> list[HostedVendorPublic]:
-    """Each vendor among ``rows`` with its switch and counts, by name, ``Other`` last."""
-    grouped: dict[str, list[HostedProviderModel]] = {}
+    """Each vendor among ``rows`` with its switch and counts, by name, ``Other`` last.
+
+    A vendor switched off that no model goes by any more is listed with no models, so its
+    switch can still be seen and cleared.
+    """
+    grouped: dict[str, list[HostedProviderModel]] = {vendor: [] for vendor in disabled}
     for row in rows:
         grouped.setdefault(vendors[row.model], []).append(row)
     return [

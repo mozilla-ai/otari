@@ -9,16 +9,20 @@ back on the default rate. Model discovery is stubbed; the provider call is
 captured at the any-llm boundary and never made.
 """
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from any_llm.types.model import Model
 from fastapi.testclient import TestClient
+from sqlalchemy import update
+from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.pricing import SEED_ORIGIN, ModelPricing
+from gateway.models.providers import HostedProviderDisabledVendor, HostedProviderModel
 from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.providers._hosted_offers import HostedOffers
 from gateway.services.secret_box import generate_secret_key
@@ -206,6 +210,39 @@ def test_a_vendor_switched_off_is_refused_at_dispatch_and_left_out_of_the_catalo
 
 
 @pytest.mark.usefixtures("together")
+def test_switching_a_vendor_off_twice_is_not_an_error(client: TestClient, master_key_header: dict[str, str]) -> None:
+    _set_vendor(client, master_key_header, "Alibaba", enabled=False)
+    again = _set_vendor(client, master_key_header, "Alibaba", enabled=False)
+
+    assert again["enabled"] is False
+
+
+@pytest.mark.usefixtures("together")
+def test_a_switch_stored_under_a_name_no_model_goes_by_is_listed_and_can_be_cleared(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    """models.dev renaming a vendor, or its models going, must not leave a switch nobody can reach."""
+    with db_session_factory() as db:
+        db.add(HostedProviderDisabledVendor(provider="together", vendor="Old Name"))
+        db.commit()
+
+    stale = _vendors(_models(client, master_key_header))["Old Name"]
+    cleared = _set_vendor(client, master_key_header, "Old Name", enabled=True)
+
+    assert stale | {"vendor": None} == {
+        "vendor": None,
+        "enabled": False,
+        "total": 0,
+        "serving": 0,
+        "unpriced": 0,
+        "unavailable": 0,
+        "custom_differs": 0,
+    }
+    assert cleared["enabled"] is True
+    assert "Old Name" not in _vendors(_models(client, master_key_header))
+
+
+@pytest.mark.usefixtures("together")
 def test_a_vendor_the_provider_offers_nothing_by_is_a_404(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
@@ -229,8 +266,8 @@ def test_a_vendors_models_are_switched_together_and_an_unpriced_one_stays_off(
         f"{PATH}/models/switch", json={"vendor": "black-forest-labs", "enabled": True}, headers=master_key_header
     )
 
-    assert withheld.json() == {"changed": 2, "skipped_unpriced": 0}
-    assert served.json() == {"changed": 0, "skipped_unpriced": 1}
+    assert withheld.json() == {"changed": 2, "skipped_unpriced": 0, "skipped_unavailable": 0}
+    assert served.json() == {"changed": 0, "skipped_unpriced": 1, "skipped_unavailable": 0}
     rows = {row["model"]: row for row in _models(client, master_key_header)["data"]}
     assert rows[QWEN]["enabled"] is False
     assert rows[QWEN]["disabled_reason"] == "operator"
@@ -238,7 +275,30 @@ def test_a_vendors_models_are_switched_together_and_an_unpriced_one_stays_off(
 
     again = client.post(f"{PATH}/models/switch", json={"vendor": "Alibaba", "enabled": True}, headers=master_key_header)
 
-    assert again.json() == {"changed": 2, "skipped_unpriced": 0}
+    assert again.json() == {"changed": 2, "skipped_unpriced": 0, "skipped_unavailable": 0}
+
+
+@pytest.mark.usefixtures("together")
+def test_serving_all_of_a_vendor_leaves_a_model_its_provider_refused_off(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    client.post(f"{PATH}/models/switch", json={"vendor": "Alibaba", "enabled": False}, headers=master_key_header)
+    with db_session_factory() as db:
+        db.execute(
+            update(HostedProviderModel)
+            .where(HostedProviderModel.provider == "together", HostedProviderModel.model == QWEN)
+            .values(disabled_reason="unavailable")
+        )
+        db.commit()
+
+    served = client.post(
+        f"{PATH}/models/switch", json={"vendor": "Alibaba", "enabled": True}, headers=master_key_header
+    )
+
+    assert served.json() == {"changed": 1, "skipped_unpriced": 0, "skipped_unavailable": 1}
+    rows = {row["model"]: row for row in _models(client, master_key_header)["data"]}
+    assert rows[QWEN]["enabled"] is False
+    assert rows[CODER]["enabled"] is True
 
 
 @pytest.fixture
@@ -315,6 +375,39 @@ def test_a_reset_narrowed_to_a_vendor_leaves_the_others_alone(
     )
 
     assert response.json() == {"changes": [], "skipped_no_default": [DEEPSEEK], "applied": False}
+
+
+@pytest.mark.usefixtures("together", "defaults")
+def test_a_reset_that_finds_nothing_to_change_says_it_applied_nothing(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    response = client.post(f"{PATH}/models/reset-prices", json={"vendor": "DeepSeek"}, headers=master_key_header)
+
+    assert response.json()["applied"] is False
+
+
+@pytest.mark.usefixtures("together", "defaults")
+def test_a_price_the_configuration_stored_is_never_reset(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    """The next start writes it again, so a reset would only flip it back and forth."""
+    with db_session_factory() as db:
+        db.add(
+            ModelPricing(
+                model_key=f"together:{QWEN}",
+                input_price_per_million=0.5,
+                output_price_per_million=0.5,
+                origin="config",
+                effective_at=datetime.now(UTC),
+            )
+        )
+        db.commit()
+
+    preview = client.post(f"{PATH}/models/reset-prices", json={"dry_run": True}, headers=master_key_header)
+    rows = {row["model"]: row for row in _models(client, master_key_header)["data"]}
+
+    assert QWEN not in {change["model"] for change in preview.json()["changes"]}
+    assert rows[QWEN]["default_rates"] is None
 
 
 @pytest.mark.usefixtures("together")

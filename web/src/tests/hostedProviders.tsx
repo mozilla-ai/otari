@@ -141,7 +141,13 @@ export function vendorFacets(
   models: HostedModel[],
   vendorsOff: string[],
 ): HostedVendor[] {
-  const names = [...new Set(models.map((model) => model.vendor ?? "Other"))]
+  // A vendor switched off that no model goes by is listed too, as the server lists it.
+  const names = [
+    ...new Set([
+      ...models.map((model) => model.vendor ?? "Other"),
+      ...vendorsOff,
+    ]),
+  ]
   return names.sort().map((vendor) => {
     const members = models.filter(
       (model) => (model.vendor ?? "Other") === vendor,
@@ -182,6 +188,8 @@ export function mockApi(
     models?: HostedModel[]
     /** The vendor switches; every vendor of `models` is on otherwise. */
     vendorsOff?: string[]
+    /** The total the models list reports, above what it returns for a provider it cuts. */
+    modelCount?: number
     /** What a price reset answers, dry run or not. */
     priceReset?: HostedPriceReset
     /** What the catalog update finds and does: its removals show only with the cleanup ticked. */
@@ -316,12 +324,24 @@ export function mockApi(
       )
     }
     if (url.includes("/models/switch")) {
-      return jsonResponse({ changed: 2, skipped_unpriced: 1 })
+      return jsonResponse({
+        changed: 2,
+        skipped_unpriced: 1,
+        skipped_unavailable: 0,
+      })
     }
     if (url.includes("/models/reset-prices")) {
+      const sent = body as { dry_run: boolean; models?: string[] | null }
+      const reset = opts.priceReset ?? { changes: [], skipped_no_default: [] }
+      // An apply answers for the models it was sent, as the server does.
+      const changes = reset.changes.filter(
+        (change) =>
+          sent.dry_run || !sent.models || sent.models.includes(change.model),
+      )
       return jsonResponse({
-        ...(opts.priceReset ?? { changes: [], skipped_no_default: [] }),
-        applied: !(body as { dry_run: boolean }).dry_run,
+        ...reset,
+        changes,
+        applied: !sent.dry_run && changes.length > 0,
       })
     }
     if (url.includes("/models")) {
@@ -343,7 +363,7 @@ export function mockApi(
       )
       return jsonResponse({
         data: shown,
-        count: shown.length,
+        count: opts.modelCount ?? shown.length,
         type_counts: typeCounts,
         vendors: vendorFacets(models, opts.vendorsOff ?? []),
       })

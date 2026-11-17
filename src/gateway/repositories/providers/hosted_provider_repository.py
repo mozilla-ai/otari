@@ -7,11 +7,15 @@ lands in a column, so the service hands these repositories encrypted payloads.
 
 import uuid
 from collections.abc import Collection, Mapping, Sequence
+from datetime import UTC, datetime
 from typing import Any, Never, cast
 
 from sqlalchemy import CursorResult, delete, select, update
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 
+from gateway.core.sql import dialect_name
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.providers import (
     ConfiguredProviderImport,
@@ -367,12 +371,24 @@ class HostedProviderVendorRepository(BaseRepository[HostedProviderDisabledVendor
         return disabled
 
     async def switch_off(self, provider: str, vendor: str) -> bool:
-        """Stop serving ``vendor`` on ``provider``. Returns whether it was on."""
-        if vendor in await self.disabled_for(provider):
-            return False
-        self.db.add(HostedProviderDisabledVendor(provider=provider, vendor=vendor))
+        """Stop serving ``vendor`` on ``provider``. Returns whether it was on.
+
+        An insert that skips a row already there, so two requests switching the
+        same vendor off at once both succeed.
+        """
+        insert = postgresql_insert if dialect_name(self.db) == "postgresql" else sqlite_insert
+        result = cast(
+            CursorResult[Any],
+            await self.db.execute(
+                insert(HostedProviderDisabledVendor)
+                .values(id=uuid.uuid4(), provider=provider, vendor=vendor, created_at=datetime.now(UTC))
+                .on_conflict_do_nothing(
+                    index_elements=[HostedProviderDisabledVendor.provider, HostedProviderDisabledVendor.vendor]
+                )
+            ),
+        )
         await self.db.flush()
-        return True
+        return bool(result.rowcount)
 
     async def switch_on(self, provider: str, vendor: str) -> bool:
         """Serve ``vendor`` on ``provider`` again. Returns whether it was off."""

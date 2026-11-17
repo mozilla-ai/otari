@@ -11684,7 +11684,7 @@
         "type": "object"
       },
       "HostedPriceResetPublic": {
-        "description": "What a price reset changed, or would change on a dry run.\n\n``changes`` lists every operator-priced model the default rung prices,\n``matches`` marking one whose price is already the default.\n``skipped_no_default`` names the operator-priced models the default rung\ndoes not price, which keep their price. ``applied`` is false on a dry run.",
+        "description": "What a price reset changed, or would change on a dry run.\n\n``changes`` lists every operator-priced model the default rung prices,\n``matches`` marking one whose price is already the default; a price the\nconfiguration stored is never listed. ``skipped_no_default`` names the\noperator-priced models the default rung does not price, which keep their\nprice. ``applied`` is true only when a reset wrote something.",
         "properties": {
           "applied": {
             "title": "Applied",
@@ -12390,10 +12390,15 @@
         "type": "object"
       },
       "HostedVendorModelsSwitchPublic": {
-        "description": "What a vendor-wide switch did: how many models it changed, and how many it left off for want of a rate.",
+        "description": "What a vendor-wide switch did: how many models it changed, and how many it left off.\n\n``skipped_unpriced`` counts those left off for want of a rate, ``skipped_unavailable``\nthose the provider refused to serve, which an operator switches on one at a time.",
         "properties": {
           "changed": {
             "title": "Changed",
+            "type": "integer"
+          },
+          "skipped_unavailable": {
+            "default": 0,
+            "title": "Skipped Unavailable",
             "type": "integer"
           },
           "skipped_unpriced": {

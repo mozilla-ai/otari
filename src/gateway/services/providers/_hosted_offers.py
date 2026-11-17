@@ -26,7 +26,7 @@ from collections.abc import Collection, Mapping, Sequence
 from any_llm.types.model import Model
 
 from gateway.exceptions.providers_exceptions import HostedModelAlreadyOfferedError
-from gateway.models.pricing import LISTED_ORIGIN, SEED_ORIGIN, HostedPriceSource, ModelPricing
+from gateway.models.pricing import CONFIG_ORIGIN, LISTED_ORIGIN, SEED_ORIGIN, HostedPriceSource, ModelPricing
 from gateway.models.providers import DISABLED_BY_OPERATOR, DISABLED_UNAVAILABLE, DISABLED_UNPRICED, HostedProviderModel
 from gateway.repositories.providers import HostedModelConflict, HostedProviderModelRepository
 from gateway.schemas.providers import HostedModelCreateRequest, HostedModelRates, HostedModelUpdateRequest
@@ -163,6 +163,45 @@ class HostedOffers:
         row.enabled = enabled
         row.disabled_reason = None if enabled else DISABLED_BY_OPERATOR
         row.serves_unpriced = enabled and not await self.pricing.keys_with_a_price([_key(provider, row.model)])
+
+    async def switch_many_by_operator(self, provider: str, rows: Sequence[HostedProviderModel], enabled: bool) -> None:
+        """:meth:`switch_by_operator` for several rows, with one price lookup and one flush."""
+        if not rows:
+            return
+        priced = await self.pricing.keys_with_a_price([_key(provider, row.model) for row in rows])
+        for row in rows:
+            row.enabled = enabled
+            row.disabled_reason = None if enabled else DISABLED_BY_OPERATOR
+            row.serves_unpriced = enabled and _key(provider, row.model) not in priced
+        await self.models.flush()
+
+    async def custom_against_defaults(
+        self, provider: str, models: Collection[str], *, implementation: str | None = None
+    ) -> tuple[dict[str, tuple[ModelPricing, ModelPricing, bool]], list[str]]:
+        """Each model priced by someone here, against the rate the default rung would give it.
+
+        Returns, keyed by model, the version in effect, the default and whether
+        the two charge the same (tiers and unit included), for each such model
+        the default rung prices; and, sorted, the ones it does not. A rate the
+        configuration stored is left out, since the next start writes it again,
+        and so is one a refresh already moves.
+        """
+        keys = {_key(provider, model): model for model in models}
+        versions = await self.pricing.current_versions(keys, normalize_effective_at(None))
+        chosen = {
+            keys[key]: version
+            for key, version in versions.items()
+            if version.origin not in (*_MOVABLE_ORIGINS, CONFIG_ORIGIN)
+        }
+        if not chosen:
+            return {}, []
+        defaults = await self.defaults_for(provider, list(chosen), implementation=implementation)
+        paired = {
+            model: (version, defaults[model], self.pricing.rates_match(version, defaults[model]))
+            for model, version in chosen.items()
+            if model in defaults
+        }
+        return paired, sorted(model for model in chosen if model not in defaults)
 
     async def switch_off_by_operator(self, provider: str, models: Collection[str]) -> int:
         """Switch these models off under ``provider`` as an operator's choice. Returns how many were on."""

@@ -258,7 +258,12 @@ Through the API:
 | --- | --- |
 | `GET /api/v1/hosted-providers/{provider}/models` | Lists each model's `vendor`, and in `vendors` counts each vendor's models across the whole provider with the vendor's switch. Takes `vendor` to list one vendor's models; `search` matches a model's name or its vendor. |
 | `PATCH /api/v1/hosted-providers/{provider}/vendors` | Switches one vendor on or off: `{"vendor": "Alibaba", "enabled": false}`. |
-| `POST /api/v1/hosted-providers/{provider}/models/switch` | Sets every model's own switch for one vendor at once. Switching on serves the models that have a price and leaves the rest off; `only_unpriced` with switching off withholds only the models served without a price. |
+| `POST /api/v1/hosted-providers/{provider}/models/switch` | Sets every model's own switch for one vendor at once. Switching on serves the models that have a price and leaves the rest off, as it does a model the provider refused to serve (`skipped_unavailable`); `only_unpriced` with switching off withholds only the models served without a price. |
+
+A vendor switched off is stored under its name. If no offered model goes by
+that name any more (models.dev renamed the vendor, or its models were
+removed), the vendor is still listed, with no models, so it can be switched
+back on.
 
 ### Going back to the default price
 
@@ -279,7 +284,9 @@ implementation the price its listing names (see
 [Connecting otari.ai](#connecting-otariai)). A reset stores it as a new
 version, so later refreshes keep it current and requests already billed keep
 the cost they were billed at. A model the default does not price keeps its
-rate and is listed in `skipped_no_default`. With `default_pricing` off, only an
+rate and is listed in `skipped_no_default`. A rate the `pricing:` block of
+`config.yml` stored is left alone, since the next start writes it again. With
+`default_pricing` off, only an
 `otari` provider has a default to go back to.
 
 ### Workspace access

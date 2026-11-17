@@ -961,10 +961,15 @@ class HostedVendorModelsSwitchRequest(SQLModel):
 
 
 class HostedVendorModelsSwitchPublic(SQLModel):
-    """What a vendor-wide switch did: how many models it changed, and how many it left off for want of a rate."""
+    """What a vendor-wide switch did: how many models it changed, and how many it left off.
+
+    ``skipped_unpriced`` counts those left off for want of a rate, ``skipped_unavailable``
+    those the provider refused to serve, which an operator switches on one at a time.
+    """
 
     changed: int
     skipped_unpriced: int
+    skipped_unavailable: int = 0
 
 
 class HostedPriceResetRequest(SQLModel):
@@ -996,9 +1001,10 @@ class HostedPriceResetPublic(SQLModel):
     """What a price reset changed, or would change on a dry run.
 
     ``changes`` lists every operator-priced model the default rung prices,
-    ``matches`` marking one whose price is already the default.
-    ``skipped_no_default`` names the operator-priced models the default rung
-    does not price, which keep their price. ``applied`` is false on a dry run.
+    ``matches`` marking one whose price is already the default; a price the
+    configuration stored is never listed. ``skipped_no_default`` names the
+    operator-priced models the default rung does not price, which keep their
+    price. ``applied`` is true only when a reset wrote something.
     """
 
     changes: list[HostedPriceResetChangePublic]

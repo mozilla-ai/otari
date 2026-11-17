@@ -54,6 +54,10 @@ SEED_ORIGIN = "seed"
 # Otari's does. A refresh moves it with the listing, as it moves a seed.
 LISTED_ORIGIN = "listed"
 
+# What a rate the configuration's pricing block stored carries. The next start
+# writes it again, so nothing else should replace it.
+CONFIG_ORIGIN = "config"
+
 # What a rate somebody set through the API carries, which is what stops a
 # refresh moving it. Named for the same reason: the two are written in different
 # modules from the one that reads them back.

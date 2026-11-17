@@ -148,7 +148,11 @@ export function PriceSyncDialog({
       isPending={reset.isPending}
       error={reset.error}
       onSubmit={() =>
-        reset.mutate(picked, { onSuccess: () => onApplied(picked.length) })
+        reset.mutate(picked, {
+          // The server's own count: a default can go between preview and apply.
+          onSuccess: (result) =>
+            onApplied(result.applied ? result.changes.length : 0),
+        })
       }
     >
       {body()}

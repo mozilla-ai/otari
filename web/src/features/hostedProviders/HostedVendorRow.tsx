@@ -70,6 +70,9 @@ export function HostedVendorRow({
           {name}
         </span>
         {vendor.enabled ? null : <Badge tone="warn">Vendor off</Badge>}
+        {/* A switch stored under a name no model goes by any more, kept in
+            view so it can be switched back on. */}
+        {vendor.total === 0 ? <Badge tone="muted">No models</Badge> : null}
         {vendor.unpriced > 0 ? (
           <Badge tone="warn">{`${vendor.unpriced} unpriced`}</Badge>
         ) : null}
@@ -99,7 +102,7 @@ export function HostedVendorRow({
         <Dropdown>
           <Dropdown.Trigger
             aria-label={`More for ${name}`}
-            isDisabled={isBulkPending}
+            isDisabled={isBulkPending || vendor.total === 0}
             className="inline-flex size-11 items-center justify-center text-muted hover:text-foreground"
           >
             <FiMoreHorizontal aria-hidden className="size-4 shrink-0" />

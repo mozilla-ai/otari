@@ -63,7 +63,10 @@ function groupByVendor(rows: HostedModel[], vendors: HostedVendor[]) {
     byVendor.set(vendor, [...(byVendor.get(vendor) ?? []), row])
   }
   return vendors
-    .filter((vendor) => byVendor.has(vendor.vendor))
+    .filter(
+      (vendor) =>
+        byVendor.has(vendor.vendor) || (vendor.total === 0 && !vendor.enabled),
+    )
     .map((vendor) => ({ vendor, rows: byVendor.get(vendor.vendor) ?? [] }))
 }
 
@@ -171,9 +174,17 @@ export function HostedProviderModelsPanel({
           const changed = enabled
             ? `Served ${plural(result.changed, "more model", "more models")} by ${vendor}.`
             : `Withheld ${plural(result.changed, "model", "models")} by ${vendor}.`
-          setOutcome(
+          const skipped = [
             result.skipped_unpriced > 0
-              ? `${changed} Skipped ${result.skipped_unpriced} without a price.`
+              ? `${result.skipped_unpriced} without a price`
+              : "",
+            (result.skipped_unavailable ?? 0) > 0
+              ? `${result.skipped_unavailable} the provider refused to serve`
+              : "",
+          ].filter(Boolean)
+          setOutcome(
+            skipped.length > 0
+              ? `${changed} Skipped ${skipped.join(" and ")}.`
               : changed,
           )
         },
@@ -205,8 +216,12 @@ export function HostedProviderModelsPanel({
       onUseDefault={(row) => {
         clearOutcome()
         resetPrices.mutate([row.model], {
-          onSuccess: () =>
-            setOutcome(`${row.model} now uses the default price.`),
+          onSuccess: (result) =>
+            setOutcome(
+              result.applied
+                ? `${row.model} now uses the default price.`
+                : `${row.model} kept its price: it has no default price now.`,
+            ),
         })
       }}
     />
@@ -226,8 +241,12 @@ export function HostedProviderModelsPanel({
     serving === "" &&
     term === ""
   const groups = groupByVendor(rows, vendors)
-  // One vendor leaves nothing for a vendor row to add over the provider.
-  const isFlat = vendors.length <= 1
+  // One vendor leaves nothing for a vendor row to add over the provider,
+  // unless that vendor is off, whose row is the only way back on.
+  const isFlat =
+    vendors.length <= 1 && vendors.every((vendor) => vendor.enabled)
+  // The list is read whole up to its limit; a provider offering more is cut.
+  const isCut = models.data !== undefined && models.data.count > rows.length
 
   return (
     <section
@@ -316,6 +335,11 @@ export function HostedProviderModelsPanel({
               shown={kind}
               onShow={setKind}
             />
+          ) : null}
+          {isCut ? (
+            <p className="text-caption" role="status">
+              {`Showing the first ${rows.length} of ${models.data?.count} models. Search or filter to reach the rest.`}
+            </p>
           ) : null}
           {isFlat ? (
             tableFor(rows, `Models on ${provider.name}`)

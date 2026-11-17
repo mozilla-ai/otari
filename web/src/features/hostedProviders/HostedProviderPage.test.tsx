@@ -796,6 +796,48 @@ describe("HostedProviderPage", () => {
       expect(screen.queryByText("deepseek-ai/DeepSeek-V3.2")).toBeNull()
     })
 
+    it("keeps the vendor row of a provider's only vendor while it is off, its one way back on", async () => {
+      mockApi({
+        providers: [together()],
+        models: routed().filter((model) => model.vendor === "Alibaba"),
+        vendorsOff: ["Alibaba"],
+      })
+      await renderProviderPage("together")
+
+      expect(
+        await screen.findByRole("switch", { name: "Serve Alibaba models" }),
+      ).not.toBeChecked()
+    })
+
+    it("lists a vendor switched off that no model goes by, so it can be switched back on", async () => {
+      mockApi({
+        providers: [together()],
+        models: routed(),
+        vendorsOff: ["Old Name"],
+      })
+      await renderProviderPage("together")
+
+      const vendors = await screen.findByRole("list", {
+        name: "Vendors on together",
+      })
+      expect(within(vendors).getByText("No models")).toBeInTheDocument()
+      expect(
+        within(vendors).getByRole("switch", { name: "Serve Old Name models" }),
+      ).not.toBeChecked()
+      expect(
+        within(vendors).getByRole("button", { name: "More for Old Name" }),
+      ).toBeDisabled()
+    })
+
+    it("says so when a provider offers more models than the list reads", async () => {
+      mockApi({ providers: [together()], models: routed(), modelCount: 1500 })
+      await renderProviderPage("together")
+
+      expect(
+        await screen.findByText(/Showing the first \d+ of 1500 models/),
+      ).toBeInTheDocument()
+    })
+
     it("switches a vendor off with one request, holding its models' switches", async () => {
       const requests = mockApi({
         providers: [together()],
