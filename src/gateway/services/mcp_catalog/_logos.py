@@ -11,6 +11,7 @@ Also here: whether a catalog entry is its maker's own server or someone else's
 behind one that would vanish on its background.
 """
 
+import asyncio
 import hashlib
 import io
 import re
@@ -24,8 +25,8 @@ from urllib.parse import urlsplit
 MAX_LOGO_BYTES = 256 * 1024
 # An admin's upload: the dashboard sends a 256 px PNG, so this is generous.
 MAX_UPLOAD_BYTES = 512 * 1024
-# A raster declaring more pixels than this is refused before it is decoded.
-_MAX_PIXELS = 4096 * 4096
+# A raster declaring more pixels than this is refused before it is decoded. A logo is shown small.
+_MAX_PIXELS = 1024 * 1024
 
 PublisherKind = Literal["vendor", "community"]
 LogoTone = Literal["dark", "light", "tile"]
@@ -66,6 +67,16 @@ class Logo:
         """The logo these bytes make, with its digest and how bright its ink is."""
         return cls(content, content_type, etag_of(content), logo_luminance(content, content_type))
 
+    @classmethod
+    async def measured(cls, content: bytes, content_type: str) -> Self:
+        """:meth:`of`, run on a worker thread: measuring decodes a raster, which would hold the event loop."""
+        return await asyncio.to_thread(cls.of, content, content_type)
+
+    @staticmethod
+    async def decodes(content: bytes) -> bool:
+        """Whether a raster's pixel data decodes in full, on a worker thread. Within the pixel cap only."""
+        return await asyncio.to_thread(_raster_decodes, content)
+
     @staticmethod
     def sniff(content: bytes) -> str | None:
         """The image type these bytes are, or None when they are no image a logo may be."""
@@ -103,6 +114,20 @@ def _raster_size_ok(content: bytes) -> bool:
     except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
         return False
     return 0 < width * height <= _MAX_PIXELS
+
+
+def _raster_decodes(content: bytes) -> bool:
+    """Whether every pixel of a raster within the pixel cap decodes: a truncated or corrupt one does not."""
+    from PIL import Image, UnidentifiedImageError  # noqa: PLC0415 - only logo handling needs it
+
+    if not _raster_size_ok(content):
+        return False
+    try:
+        with Image.open(io.BytesIO(content)) as image:
+            image.load()
+    except (UnidentifiedImageError, OSError, ValueError, SyntaxError, Image.DecompressionBombError):
+        return False
+    return True
 
 
 def sniff_image(content: bytes) -> str | None:

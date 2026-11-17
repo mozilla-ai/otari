@@ -62,7 +62,7 @@ def get_user_access(uow: UnitOfWorkDep) -> UserAccess:
 
 
 def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
-    """Return the listener that keeps members' budget ceilings, own keys, session shares and MCP grants in step.
+    """Return the listener that keeps members' budget ceilings, own keys, session shares and MCP access in step.
 
     It writes through the request's Unit of Work, so a service that changes membership must be built on the same one.
     """

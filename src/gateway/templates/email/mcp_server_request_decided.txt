@@ -1,0 +1,8 @@
+{{HEADLINE}}
+
+{{INTRO}}
+
+{{DETAIL}}
+
+MCP servers:
+{{SERVERS_LINK}}

@@ -3,7 +3,7 @@ from collections.abc import Awaitable, Callable
 from functools import partial
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps._base import (
@@ -133,7 +133,6 @@ from gateway.api.deps.tools import (
     WorkspaceCodeExecutionPoliciesDep,
     WorkspaceCodeExecutionPolicyServiceDep,
     WorkspaceMcpServersDep,
-    WorkspaceMcpServerServiceDep,
     WorkspaceWebSearchPoliciesDep,
     WorkspaceWebSearchServiceDep,
     build_search_tool_refresh,
@@ -150,7 +149,6 @@ from gateway.api.deps.tools import (
     get_web_search_key_service,
     get_workspace_code_execution_policies,
     get_workspace_code_execution_policy_service,
-    get_workspace_mcp_server_service,
     get_workspace_mcp_servers,
     get_workspace_search_keys,
     get_workspace_web_search_policies,
@@ -227,9 +225,17 @@ from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
     OrgProviderKeyRepository,
+    UserRepository,
+    WorkspaceMemberRepository,
     WorkspaceRepository,
 )
-from gateway.repositories.tools import WorkspaceMcpServerRepository
+from gateway.repositories.tools import (
+    McpOAuthFlowRepository,
+    McpServerRequestRepository,
+    McpUserConnectionRepository,
+    WorkspaceMcpServerLogoRepository,
+    WorkspaceMcpServerRepository,
+)
 from gateway.repositories.update_check import UpdateCheckStateRepository
 from gateway.repositories.usage_and_telemetry import UsageLogRepository
 from gateway.repositories.users_repository import get_active_user
@@ -294,8 +300,18 @@ from gateway.services.tenancy.organization_guardrail_definition_service import (
     OrganizationGuardrailDefinitionService,
 )
 from gateway.services.tenancy.organization_guardrail_service import OrganizationGuardrailService
+from gateway.services.tenancy.workspace_mcp_server_service import (
+    WorkspaceMcpConnectionEligibility,
+    WorkspaceMcpServerService,
+)
 from gateway.services.tenancy.workspace_service import WorkspaceService
-from gateway.services.tools import WorkspaceMcpServerUrls
+from gateway.services.tools import (
+    McpConnectionService,
+    McpServerLogoService,
+    McpServerRequestService,
+    McpSignedInServers,
+    WorkspaceMcpServerUrls,
+)
 from gateway.services.update_check import UpdateCheckService
 from gateway.services.usage_and_telemetry import UsageService, VideoUsageWriter
 from gateway.services.workspace_scope import default_workspace_id, organization_for_workspace_id
@@ -433,6 +449,14 @@ def get_inference_service(
 InferenceServiceDep = Annotated[InferenceService, Depends(get_inference_service)]
 
 
+def get_mcp_signed_in_servers(db: Annotated[AsyncSession, Depends(get_db)]) -> McpSignedInServers:
+    """Build the read of which per-user MCP servers a user has signed in to, on the request's session."""
+    return McpSignedInServers(McpUserConnectionRepository(db))
+
+
+McpSignedInServersDep = Annotated[McpSignedInServers, Depends(get_mcp_signed_in_servers)]
+
+
 # =============================================================================
 # Composition root
 # =============================================================================
@@ -528,6 +552,31 @@ def get_workspace_funding(db: PortSessionDep, billing: BillingPortDep) -> Worksp
 
 
 WorkspaceFundingDep = Annotated[WorkspaceFunding, Depends(get_workspace_funding)]
+
+
+def get_mcp_connection_service(
+    uow: UnitOfWorkDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> McpConnectionService:
+    """Build the service that runs a user's sign-in to a per-user MCP server, on the request's Unit of Work."""
+    return McpConnectionService(
+        uow,
+        WorkspaceMcpServerRepository(uow),
+        McpUserConnectionRepository(uow),
+        McpOAuthFlowRepository(uow),
+        config,
+        eligibility=WorkspaceMcpConnectionEligibility(
+            uow,
+            WorkspaceRepository(uow),
+            WorkspaceMemberRepository(uow),
+            OrganizationMemberRepository(uow),
+            UserRepository(uow),
+        ),
+        users=get_user_access(uow),
+    )
+
+
+McpConnectionServiceDep = Annotated[McpConnectionService, Depends(get_mcp_connection_service)]
 
 
 def get_org_provider_key_service(
@@ -895,6 +944,59 @@ OperatesDeployment = Annotated[bool, Depends(master_key_caller_operates_deployme
 McpCatalogServiceDep = Annotated[McpCatalogService, Depends(get_mcp_catalog_service)]
 
 
+def get_mcp_server_logo_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    workspaces: WorkspaceAccessDep,
+    catalog: McpCatalogServiceDep,
+) -> McpServerLogoService:
+    """Build the MCP server logo service on the request's Unit of Work, with the catalog as its logo source."""
+    return McpServerLogoService(
+        uow, WorkspaceMcpServerRepository(uow), WorkspaceMcpServerLogoRepository(uow), workspaces, catalog
+    )
+
+
+McpServerLogoServiceDep = Annotated[McpServerLogoService, Depends(get_mcp_server_logo_service)]
+
+
+def get_mcp_server_request_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    workspaces: WorkspaceAccessDep,
+    catalog: McpCatalogServiceDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    background_tasks: BackgroundTasks,
+) -> McpServerRequestService:
+    """Build the service for members' MCP server requests on the request's Unit of Work.
+
+    Its mail goes out as a background task of the request, after the response.
+    """
+    return McpServerRequestService(
+        uow,
+        McpServerRequestRepository(uow),
+        WorkspaceMcpServerRepository(uow),
+        workspaces,
+        catalog,
+        Mailer(config),
+        send_later=background_tasks.add_task,
+    )
+
+
+McpServerRequestServiceDep = Annotated[McpServerRequestService, Depends(get_mcp_server_request_service)]
+
+
+def get_workspace_mcp_server_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_keys: ApiKeyServiceDep,
+    connections: McpConnectionServiceDep,
+    requests: McpServerRequestServiceDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> WorkspaceMcpServerService:
+    """Build the service on the request's session, with the keys its access lists name and the sign-ins it starts."""
+    return WorkspaceMcpServerService(db, api_keys, connections=connections, requests=requests, config=config)
+
+
+WorkspaceMcpServerServiceDep = Annotated[WorkspaceMcpServerService, Depends(get_workspace_mcp_server_service)]
+
+
 def build_unavailable_model_reporter(config: GatewayConfig) -> UnavailableModelReporter:
     """Build the app's reporter of models their providers refuse to serve, with the health checks listening."""
     return UnavailableModelReporter(UnavailableModelListener(lambda uow: build_health_check_service(uow, config)))
@@ -1170,6 +1272,7 @@ __all__ = [
     "InvitationMailLimitDep",
     "MaintenanceModeDep",
     "McpCatalogServiceDep",
+    "McpServerRequestServiceDep",
     "MembershipListenerDep",
     "MembershipOrganizationServiceDep",
     "ModelMetadataOverrideServiceDep",

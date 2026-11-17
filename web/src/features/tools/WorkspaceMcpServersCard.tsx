@@ -202,7 +202,12 @@ export function WorkspaceMcpServersCard({
   // access list and every later change live.
   const submit = (draft: McpServerDraft) =>
     create.mutate(
-      { workspaceId: selected.workspace_id, body: draft },
+      {
+        workspaceId: selected.workspace_id,
+        // This form adds a shared server that waits to be attached, which is what the gateway
+        // defaults to; sent rather than left out, so the request matches its type.
+        body: { ...draft, attach_by_default: false, credential_mode: "shared" },
+      },
       { onSuccess: (server) => openServer(server.id) },
     )
 
