@@ -10,7 +10,9 @@ def test_an_absolute_web_address_is_accepted(url: str) -> None:
     assert normalize_link_url(f" {url} ", "terms_url") == url
 
 
-@pytest.mark.parametrize("url", ["https://:443/terms", "https://example.com:bad/terms", "javascript:alert(1)", "/terms"])
+@pytest.mark.parametrize(
+    "url", ["https://:443/terms", "https://example.com:bad/terms", "javascript:alert(1)", "/terms"]
+)
 def test_a_link_with_no_usable_host_is_refused(url: str) -> None:
     with pytest.raises(ValueError, match="^terms_url must be an absolute http\\(s\\) URL$"):
         normalize_link_url(url, "terms_url")
