@@ -85,6 +85,12 @@ Enforces:
     so a cycle through a package initializer is found. Only imports at module
     scope are read, since an import inside a function or under if TYPE_CHECKING
     does not run when the module loads.
+26. Composition root behavior: no class under api/deps/ defines a method, so the
+    composition root builds things and threads the request's session into them
+    rather than growing an implementation of its own. A class that carries data
+    and no methods is unaffected, so the parameter objects it legitimately holds
+    stay. A class nested in a function counts, since nesting would otherwise be
+    the way around the rule.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -924,6 +930,85 @@ def check_listener_defaults(src_root: Path) -> list[str]:
         f"{relative_path} is on the listener default baseline for {name} of {path}, "
         "but no such listener has a default; remove it from the baseline"
         for relative_path, path, name in sorted(set(LISTENER_DEFAULT_BASELINE) - defaulted)
+    )
+    return violations
+
+
+COMPOSITION_ROOT_SCOPE = "gateway/api/deps"
+# The classes with behavior that stood in the composition root when rule 26 landed,
+# each as its path and its qualified name. A class that moves to the domain it
+# belongs to, or loses its methods, fails the check until its entry is removed, so
+# the list only shrinks. Four of them hold a raw session and cannot move until the
+# session-taking service functions take a Unit of Work instead.
+COMPOSITION_ROOT_BEHAVIOR_BASELINE: tuple[tuple[str, str], ...] = (
+    ("gateway/api/deps/__init__.py", "_BatchAccountingClaim"),
+    ("gateway/api/deps/__init__.py", "_CodeExecutionEnvironmentPrices"),
+    ("gateway/api/deps/__init__.py", "_DirectToolAccounts"),
+    ("gateway/api/deps/__init__.py", "_DirectToolGates"),
+    ("gateway/api/deps/__init__.py", "_KeySearchCatalogCaller"),
+    ("gateway/api/deps/__init__.py", "_ledger_on.Ledger"),
+    ("gateway/api/deps/traces.py", "DatabaseSessionOwners"),
+    ("gateway/api/deps/traces.py", "NoSessionOwners"),
+)
+
+
+def _method_count(class_node: ast.ClassDef) -> int:
+    """The methods a class defines, wherever in its body they stand.
+
+    A method under a conditional block in the body counts, since the block is
+    still the class's own scope. A class or a function nested in the body opens a
+    scope of its own, so what it holds is not the enclosing class's.
+    """
+    methods = 0
+    pending: list[ast.AST] = list(class_node.body)
+    while pending:
+        node = pending.pop()
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            methods += 1
+        elif not isinstance(node, ast.ClassDef):
+            pending.extend(ast.iter_child_nodes(node))
+    return methods
+
+
+def _classes_with_methods(tree: ast.Module) -> Iterator[tuple[int, str, int]]:
+    """Yield the line, qualified name and method count of each class that defines a method.
+
+    Every node is descended through, not only class and function bodies, so a class
+    under a conditional block, a try or a match case is found. Only a class or a
+    function extends the qualified name, because only those name a scope.
+    """
+
+    def walk(node: ast.AST, path: tuple[str, ...]) -> Iterator[tuple[int, str, int]]:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ClassDef):
+                methods = _method_count(child)
+                if methods:
+                    yield child.lineno, ".".join((*path, child.name)), methods
+                yield from walk(child, (*path, child.name))
+            elif isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+                yield from walk(child, (*path, child.name))
+            else:
+                yield from walk(child, path)
+
+    return walk(tree, ())
+
+
+def check_composition_root_behavior(src_root: Path) -> list[str]:
+    """Check that no class off the baseline has a method under api/deps/, and that every entry still does."""
+    violations: list[str] = []
+    found: set[tuple[str, str]] = set()
+    for relative_path, tree in _parsed_modules(src_root, COMPOSITION_ROOT_SCOPE):
+        for line, name, methods in _classes_with_methods(tree):
+            found.add((relative_path, name))
+            if (relative_path, name) not in COMPOSITION_ROOT_BEHAVIOR_BASELINE:
+                violations.append(
+                    f"{relative_path}:{line} defines {name} with {methods} method(s); the composition root builds "
+                    "things and holds no implementation, so this belongs to the domain whose work it does"
+                )
+    violations.extend(
+        f"{relative_path} is on the composition root behavior baseline for {name}, "
+        "which no longer defines a method there; remove it from the baseline"
+        for relative_path, name in sorted(set(COMPOSITION_ROOT_BEHAVIOR_BASELINE) - found)
     )
     return violations
 
@@ -2990,6 +3075,7 @@ def main() -> int:
     service_root_export_violations = check_service_root_exports(SRC_ROOT)
     model_access_violations = check_model_access(SRC_ROOT)
     import_cycle_violations = check_import_cycles(SRC_ROOT)
+    composition_root_violations = check_composition_root_behavior(SRC_ROOT)
 
     if import_violations:
         print("❌ Architecture violations found:\n")
@@ -3070,6 +3156,12 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal import cycle violations: {len(import_cycle_violations)}")
 
+    if composition_root_violations:
+        print("\n❌ Composition root behavior violations:\n")
+        for violation in composition_root_violations:
+            print(f"  {violation}")
+        print(f"\nTotal composition root behavior violations: {len(composition_root_violations)}")
+
     if model_access_violations:
         print("\n❌ Model access violations:\n")
         for violation in model_access_violations:
@@ -3091,6 +3183,7 @@ def main() -> int:
         or service_root_export_violations
         or model_access_violations
         or import_cycle_violations
+        or composition_root_violations
     ):
         print("\n💡 See ARCHITECTURE.md for the intended layering")
         return 1

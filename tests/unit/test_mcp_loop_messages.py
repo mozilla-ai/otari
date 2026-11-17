@@ -34,7 +34,6 @@ from gateway.services import mcp_loop_messages as messages_loop_module
 from gateway.services._tool_loop import FINAL_ROUND_NOTE, INVALID_ARGUMENTS_ERROR
 from gateway.services.mcp_client import MCPToolCallOutcome
 from gateway.services.mcp_loop_messages import (
-    MaxToolIterationsExceeded,
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
 )
@@ -451,18 +450,22 @@ async def test_loop_accumulates_usage_across_iterations(monkeypatch: pytest.Monk
 
 
 @pytest.mark.asyncio
-async def test_loop_max_iter_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_tool_call_on_the_last_round_ends_as_the_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A provider that declares the conversation's tools anyway (Bedrock) lets the model call one on the last round."""
+
     async def fake_amessages(**kwargs: Any) -> MessageResponse:
         return _message_response(stop_reason="tool_use", content=[_tool_use("tu", "fetch_url", {})])
 
     monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
 
-    with pytest.raises(MaxToolIterationsExceeded):
-        await anthropic_tool_loop(
-            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}], "max_tokens": 100},
-            pool=cast(Any, _FakePool(tool_names=["fetch_url"])),
-            max_iterations=2,
-        )
+    out = await anthropic_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}], "max_tokens": 100},
+        pool=cast(Any, _FakePool(tool_names=["fetch_url"])),
+        max_iterations=2,
+    )
+
+    assert out.content == []
+    assert out.stop_reason == "end_turn"
 
 
 _CALLER_TOOL = {"name": "get_weather", "description": "", "input_schema": {"type": "object"}}
@@ -1063,6 +1066,35 @@ async def test_stream_runs_owned_tool_and_continues(monkeypatch: pytest.MonkeyPa
     # sent the matching tool_result, because the loop consumed it.
     assert not any(getattr(getattr(e, "content_block", None), "type", None) == "tool_use" for e in events)
     assert pool.calls == [("fetch_url", {"u": "x"})]
+
+
+@pytest.mark.asyncio
+async def test_stream_a_tool_call_on_the_last_round_ends_as_the_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_amessages(**kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+        return _async_iter(
+            _msg_start_event(),
+            _tool_use_block_start(0, "tu_1", "fetch_url"),
+            _input_json_delta(0, "{}"),
+            _content_block_stop(0),
+            _msg_delta_event("tool_use"),
+            _msg_stop_event(),
+        )
+
+    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+    pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
+
+    events = [
+        event
+        async for event in anthropic_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}], "max_tokens": 100},
+            pool=cast(Any, pool),
+            max_iterations=2,
+        )
+    ]
+
+    assert pool.calls == [("fetch_url", {})]
+    assert [e.type for e in events] == ["message_start", "message_delta", "message_stop"]
+    assert cast(Any, events[1]).delta.stop_reason == "end_turn"
 
 
 @pytest.mark.asyncio
