@@ -886,11 +886,23 @@ class McpConnectionStart(pydantic.BaseModel):
     )
 
 
+class McpServerLeftOut(pydantic.BaseModel):
+    """A server the key's access list grants and that is still not listed, and why."""
+
+    id: uuid.UUID
+    name: str
+    reason: Literal["key_has_no_user"] = pydantic.Field(
+        description="`key_has_no_user`: the server signs each person in with their own account, and this key "
+        "belongs to no person, so there is nobody to sign in as"
+    )
+    detail: str = pydantic.Field(description="The reason in a sentence, for a person reading the response")
+
+
 class McpConnectionStarted(pydantic.BaseModel):
     """Where to send the caller's browser to sign in."""
 
     authorization_url: str = pydantic.Field(
-        description="The MCP server's authorization page. It carries a single-use state that expires in ten minutes"
+        description="The MCP server's authorization page. It carries a single-use state that expires in 30 minutes"
     )
 
 

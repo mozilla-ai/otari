@@ -368,7 +368,7 @@ or the master key:
 | `GET /mcp-servers/{server_id}/connections` | Lists who is connected, a page at a time (`skip`, `limit`), with the total in `count`: the caller's own connection first, then the rest oldest first | Workspace or organization owners and admins |
 | `DELETE /mcp-servers/{server_id}/connections/{user_id}` | Ends one user's connection | Workspace or organization owners and admins |
 
-A sign-in started here is single-use, expires after ten minutes, and finishes
+A sign-in started here is single-use, expires after 30 minutes, and finishes
 only for the person who started it. The authorization server redirects the
 browser to `<public_base_url>/api/v1/mcp-connections/callback`, which passes
 `state` and `code` on to the dashboard and spends nothing. A client other than
@@ -387,8 +387,10 @@ to is not refused. The model gets one stand-in tool for that server,
 `sign_in_to_<name>`, whose description says the server exists and needs the
 user's own sign-in. When the user asks for something that server does, the model
 calls it, and the result carries a link to show:
-`<public_base_url>/api/v1/mcp-connections/sign-in?ticket=...`. The person opens
-it and gets a plain Otari page that names the server and the Otari user the
+`<public_base_url>/api/v1/mcp-connections/sign-in#ticket=...`. The ticket sits
+after the `#`, which a browser never sends, so the address an access log or a
+proxy records is not a working link; the page posts the ticket back itself, and
+needs JavaScript for that. The person opens it and gets a plain Otari page that names the server and the Otari user the
 account will be attached to, and asks them to continue only if that user is
 them. They continue, sign in with their own account, and land on a plain Otari
 page that tells them to go back to the conversation. The next request uses the
@@ -586,7 +588,8 @@ for a server you do not trust to describe its own tools.
   the user to connect the server from the dashboard, then tries again.
   See [Signing in from the conversation](#signing-in-from-the-conversation).
 - **A key with no user cannot use a per-user server.** Nobody can sign in for
-  it, so no link is made: `GET /api/v1/mcp/servers` leaves the server out, and
+  it, so no link is made: `GET /api/v1/mcp/servers` lists the server under
+  `left_out` with the reason `key_has_no_user` rather than under `servers`, and
   discovery and execution answer `404 mcp_server_not_found`. Connecting the
   server from the dashboard does not change this; use a key that belongs to a
   user.
@@ -733,7 +736,8 @@ Authorization: Bearer <token>
       "purpose_hint": "Use for repository and issue lookups",
       "sign_in_required": false
     }
-  ]
+  ],
+  "left_out": []
 }
 ```
 
@@ -743,8 +747,11 @@ The enabled stored servers of the key's workspace whose
 `sign_in_required` is true for a
 [per-user server](#credential-mode) the key's user has not signed in to yet, and
 `sign_in_url` is then a link to the page that starts their sign-in, good for 30 minutes.
-Making the link stores nothing, so listing costs nothing. A key with no user does
-not see such a server at all. The URL and the token are
+Making the link stores nothing, so listing costs nothing. A key with no user
+cannot sign in, so such a server is not in `servers` for it; `left_out` names it
+instead, with `reason` `key_has_no_user` and a sentence in `detail`, so a person
+testing with that key sees why. `left_out` is empty for a key that belongs to a
+user. The URL and the token are
 never returned. A master key has no
 workspace and is refused with `404`, as on the other routes of this section; the
 route is rate limited and refuses a blocked user as they are.

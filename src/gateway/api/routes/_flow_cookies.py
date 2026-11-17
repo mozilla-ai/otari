@@ -30,6 +30,8 @@ class FlowCookies:
 
     prefix: str
     path: str
+    # How long the browser keeps a token: as long as the flow it binds may take.
+    max_age: int = OAUTH_STATE_TTL_SECONDS
 
     def start(self, request: Request, response: Response, *, state: str, browser_token: str) -> None:
         """Give the browser ``browser_token`` to hold for the flow ``state`` names.
@@ -47,7 +49,7 @@ class FlowCookies:
         response.set_cookie(
             self._cookie_name(state),
             browser_token,
-            max_age=OAUTH_STATE_TTL_SECONDS,
+            max_age=self.max_age,
             httponly=True,
             secure=request_is_https(request),
             samesite="lax",

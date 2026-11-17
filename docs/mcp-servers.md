@@ -170,7 +170,7 @@ The catalog lists remote MCP servers from the official MCP Registry, so you do n
 5. Select each server you want. It moves to **Selected** at the top and stays there when you change the search; untick it to put it back.
 6. Click **Add**, which reads **Add 2 servers** and so on when you picked several.
 7. For each server, check its name, which must be unique within the workspace, and choose its **Sign-in mode**:
-   - **Personal accounts**: each member connects their own account. Otari suggests it when the server asks a caller with no account to sign in.
+   - **Personal accounts**: each member connects their own account. Otari suggests it when the server asks a caller with no account to sign in. On a deployment that cannot run a sign-in yet, because whoever runs Otari has not set its public address (`public_base_url`), the catalog says so before you pick anything, the review step repeats it, this choice is turned off, and a server that asks each person to sign in is marked.
    - **Shared account**: one account for the whole workspace. Paste its token, or leave it blank and set the account up on the server's page after adding, where you can also sign in for everyone.
 8. Under **Availability**, choose **Off**, **On request** or **Every request**, as when you add a server by URL.
 9. Click **Confirm**.

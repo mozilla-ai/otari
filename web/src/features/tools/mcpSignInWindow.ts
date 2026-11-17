@@ -19,8 +19,8 @@
 
 const CHANNEL = "otari.mcp-sign-in"
 const PENDING_KEY = "otari.mcp-sign-in.windows"
-/** The gateway forgets a sign-in after ten minutes; a note outliving that names nothing. */
-const PENDING_LIFETIME_MS = 15 * 60_000
+/** The gateway forgets a sign-in after 30 minutes; a note outliving that names nothing. */
+const PENDING_LIFETIME_MS = 35 * 60_000
 const WINDOW_NAME = "otari-mcp-sign-in"
 const WINDOW_FEATURES = "popup,width=520,height=720"
 

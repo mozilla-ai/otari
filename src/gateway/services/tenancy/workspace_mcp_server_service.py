@@ -103,6 +103,7 @@ from gateway.schemas.tools import (
     McpConnectionStarted,
     McpServerConnectionPublic,
     McpServerConnectionsPublic,
+    McpServerLeftOut,
 )
 
 # The module as well as the names, so the check is looked up at call time and a
@@ -485,6 +486,12 @@ class WorkspaceMcpServerPublic(BaseModel):
 class WorkspaceMcpServersPublic(BaseModel):
     data: list[WorkspaceMcpServerPublic]
     count: int
+    sign_in_unavailable: str | None = Field(
+        default=None,
+        description="Why this deployment cannot sign anyone in to an MCP server yet, in words for a workspace "
+        "admin: a server in personal-accounts mode cannot be added, and nobody can sign in for everyone. "
+        "Null when sign-ins work.",
+    )
 
 
 MAX_GRANTS_PER_SERVER = 1000
@@ -629,6 +636,12 @@ class McpServerSummary(BaseModel):
         description="With sign_in_required: a link that starts this key's user's own sign-in to the server, "
         "working for 30 minutes",
     )
+
+
+_NO_USER_DETAIL = (
+    "This server signs each person in with their own account. This API key was created without a user, "
+    "so it has nobody to sign in as. Use a key created for a user to reach this server."
+)
 
 
 def _own_client(client_id: str | None, client_secret: str | None) -> dict[str, object] | None:
@@ -1206,17 +1219,7 @@ async def list_reachable_mcp_servers(
     A per-user server is left out for a caller with no user, and marked ``sign_in_required`` for
     one whose user has not signed in to it. A shared server that still needs a credential is left out.
     """
-    rows = (
-        (
-            await db.execute(
-                select(WorkspaceMcpServer)
-                .where(WorkspaceMcpServer.workspace_id == workspace_id, WorkspaceMcpServer.enabled.is_(True))
-                .order_by(WorkspaceMcpServer.created_at, WorkspaceMcpServer.id)
-            )
-        )
-        .scalars()
-        .all()
-    )
+    rows = await WorkspaceMcpServerRepository(db).enabled_in_workspace(workspace_id)
     reachable = [
         row
         for row in rows
@@ -1313,6 +1316,20 @@ class WorkspaceMcpServers:
     async def list_reachable(self, workspace_id: uuid.UUID, access: McpAccess) -> list[McpServerSummary]:
         """See :func:`list_reachable_mcp_servers`."""
         return await list_reachable_mcp_servers(self._db, workspace_id=workspace_id, access=access, tokens=self._tokens)
+
+    async def list_needing_a_user(self, workspace_id: uuid.UUID, access: McpAccess) -> list[McpServerLeftOut]:
+        """The enabled per-user servers the caller's access grants but :meth:`list_reachable` leaves out.
+
+        Empty for a caller with a user. A caller with none (a key made with no user, which bills to the
+        shared default user) cannot sign in, so it reaches none of these; this names them so it can say why.
+        """
+        if access.user_id is not None:
+            return []
+        return [
+            McpServerLeftOut(id=row.id, name=row.name, reason="key_has_no_user", detail=_NO_USER_DETAIL)
+            for row in await WorkspaceMcpServerRepository(self._db).enabled_in_workspace(workspace_id)
+            if _needs_a_user(row, access) and access.patterns_for(row.id, row.everyone_tools, _read_tools(row))
+        ]
 
     async def resolve_one(
         self, workspace_id: uuid.UUID, server_id: uuid.UUID, access: McpAccess | None = None
@@ -1557,6 +1574,7 @@ class WorkspaceMcpServerService:
                 for server in servers
             ],
             count=count,
+            sign_in_unavailable=None if self.config is None else McpConnectionService.sign_in_unavailable(self.config),
         )
 
     async def _shared_accounts(self, servers: Sequence[WorkspaceMcpServer]) -> dict[uuid.UUID, McpSharedAccountPublic]:

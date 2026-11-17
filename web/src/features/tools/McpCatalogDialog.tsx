@@ -6,6 +6,7 @@ import { Dialog, DialogSection } from "@/design-system/feedback/Dialog"
 import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { errorMessage } from "@/design-system/feedback/errorMessage"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Field } from "@/design-system/forms/Field"
 import { RadioGroup, type RadioOption } from "@/design-system/forms/RadioGroup"
@@ -81,6 +82,10 @@ const MODES: RadioOption[] = SIGN_IN_MODES.map(({ value, label }) => ({
   value,
   label,
 }))
+// Where the deployment cannot run a sign-in, the gateway refuses a Personal server.
+const MODES_WITHOUT_SIGN_IN: RadioOption[] = MODES.map((option) =>
+  option.value === "per_user" ? { ...option, isDisabled: true } : option,
+)
 
 export function McpCatalogDialog({
   isOpen,
@@ -90,6 +95,7 @@ export function McpCatalogDialog({
   existing,
   onAddByUrl,
   initialPicks,
+  signInUnavailable,
 }: {
   isOpen: boolean
   onOpenChange: (isOpen: boolean) => void
@@ -101,6 +107,8 @@ export function McpCatalogDialog({
   onAddByUrl?: () => void
   /** Servers to open the confirm step on, skipping the browse: the one a member's request names. */
   initialPicks?: CatalogPick[]
+  /** Why this deployment cannot sign anyone in to a server yet, as the gateway words it; absent when it can. */
+  signInUnavailable?: string | null
 }) {
   const sync = useMcpCatalogSync(isOpen)
   const create = useCreateWorkspaceMcpServer()
@@ -155,12 +163,23 @@ export function McpCatalogDialog({
       ),
     )
 
-  const suggestionFor = (index: number, draft: Draft) => {
+  const rawSuggestionFor = (index: number, draft: Draft) => {
     const probe = probes[index]
     return suggestMode(draft.pick, probe?.data, probe?.isPending ?? false)
   }
-  const modeOf = (index: number, draft: Draft): McpCredentialMode =>
-    draft.mode ?? suggestionFor(index, draft).mode
+  /** The server asks each person to sign in, which this deployment cannot run. */
+  const cannotSignIn = (index: number, draft: Draft) =>
+    Boolean(signInUnavailable) &&
+    rawSuggestionFor(index, draft).mode === "per_user"
+  const suggestionFor = (index: number, draft: Draft) =>
+    cannotSignIn(index, draft)
+      ? { mode: "shared" as const, reason: "" }
+      : rawSuggestionFor(index, draft)
+  const modeOf = (index: number, draft: Draft): McpCredentialMode => {
+    const chosen = draft.mode ?? suggestionFor(index, draft).mode
+    // A choice made before the deployment said it cannot sign anyone in does not stand.
+    return signInUnavailable && chosen === "per_user" ? "shared" : chosen
+  }
 
   const names = drafts.map((draft) => draft.name.trim())
   const findNameProblem = (draft: Draft): string | undefined => {
@@ -292,6 +311,11 @@ export function McpCatalogDialog({
           </>
         }
       >
+        {signInUnavailable ? (
+          <DialogSection>
+            <InfoBanner>{signInUnavailable}</InfoBanner>
+          </DialogSection>
+        ) : null}
         {drafts.map((draft, index) => {
           const problem = findNameProblem(draft)
           const mode = modeOf(index, draft)
@@ -322,11 +346,16 @@ export function McpCatalogDialog({
                   errorMessage={problem}
                   onChange={(name) => editDraft(draft.pick.name, { name })}
                 />
+                {cannotSignIn(index, draft) ? (
+                  <InfoBanner tone="warning">
+                    {`${draft.pick.title} asks each person to sign in, which this deployment cannot do yet.`}
+                  </InfoBanner>
+                ) : null}
                 <RadioGroup
                   label={SIGN_IN_MODE_LABEL}
                   orientation="horizontal"
                   value={mode}
-                  options={MODES}
+                  options={signInUnavailable ? MODES_WITHOUT_SIGN_IN : MODES}
                   isDisabled={isAdding}
                   description={
                     draft.mode === undefined && suggestion.reason
@@ -410,6 +439,9 @@ export function McpCatalogDialog({
         ) : (
           <div className="flex flex-col gap-4">
             <McpCatalogSyncNotice status={status} workspaceId={workspaceId} />
+            {signInUnavailable ? (
+              <InfoBanner>{signInUnavailable}</InfoBanner>
+            ) : null}
             {hasServers ? (
               <McpCatalogBrowser
                 workspaceId={workspaceId}

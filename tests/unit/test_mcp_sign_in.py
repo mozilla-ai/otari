@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import re
 import time
 import uuid
 from collections.abc import Iterator
@@ -10,7 +13,7 @@ from typing import Any, cast
 
 import pytest
 
-from gateway.api.routes._mcp_sign_in_pages import confirm_page, leaving_page, other_user_page
+from gateway.api.routes._mcp_sign_in_pages import confirm_page, leaving_page, opener_page, other_user_page
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.exceptions.tools_exceptions import McpConnectionSetupError, McpSignInRequiredError
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
@@ -50,7 +53,8 @@ def _ticket(link: str) -> str:
 def test_a_link_names_its_server_and_user_and_points_at_this_gateway() -> None:
     link = sign_in_link(_config(), server_id=SERVER, user_id="alice")
 
-    assert link.startswith(f"{ORIGIN}{API_ROOT}/mcp-connections/sign-in?ticket=")
+    assert link.startswith(f"{ORIGIN}{API_ROOT}/mcp-connections/sign-in#ticket=")
+    assert "?" not in link, "the ticket stays out of the part of the address a browser sends"
     assert link.startswith(cast(str, sign_in_link_prefix(_config())))
     assert "=" not in _ticket(link), "no padding for a chat to mangle"
     assert "alice" not in link
@@ -114,7 +118,7 @@ async def test_the_stand_in_hands_the_users_own_link_once_per_request() -> None:
     assert backend.owns_tool("sign_in_to_jira") and not backend.owns_tool("list_issues")
     assert backend.server_name_for_tool("sign_in_to_jira") == "jira"
     assert first == second and minted == [(SERVER, "alice")]
-    assert f"{ORIGIN}{API_ROOT}/mcp-connections/sign-in?ticket=" in first
+    assert f"{ORIGIN}{API_ROOT}/mcp-connections/sign-in#ticket=" in first
     assert backend.purpose_hints() == [
         (
             "jira",
@@ -250,6 +254,7 @@ def test_the_confirmation_page_names_the_user_and_the_server_and_escapes_every_v
     assert "Continue only if bob@example.com is you and you asked for this link yourself" in text
     assert "bob@example.com is an Otari dashboard account, so this continues only in a browser signed in" in text
     assert '<form method="post"><input type="hidden" name="ticket" value="abc">' in text
+    assert '<input type="hidden" name="step" value="continue">' in text
     csp = plain.headers["content-security-policy"]
     assert csp.startswith("default-src 'none'") and "form-action 'self'" in csp and "frame-ancestors 'none'" in csp
     assert plain.headers["x-frame-options"] == "DENY" and plain.headers["cache-control"] == "no-store"
@@ -257,6 +262,20 @@ def test_the_confirmation_page_names_the_user_and_the_server_and_escapes_every_v
         body = bytes(page.body).decode()
         assert "<script>" not in body and "<img" not in body and 'value=""' not in body
         assert "&lt;script&gt;" in body
+
+
+def test_the_opening_page_runs_only_its_own_script_and_carries_no_ticket() -> None:
+    page = opener_page()
+
+    body = bytes(page.body).decode()
+    [script] = re.findall(r"<script>(.*?)</script>", body, flags=re.DOTALL)
+    digest = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
+    csp = page.headers["content-security-policy"]
+    assert f"script-src 'sha256-{digest}'" in csp and "form-action 'self'" in csp
+    assert csp.startswith("default-src 'none'") and "frame-ancestors 'none'" in csp
+    assert "location.hash" in script and "history.replaceState" in script
+    assert '<form method="post"><input type="hidden" name="ticket" value=""></form>' in body
+    assert "<noscript>" in body and page.headers["cache-control"] == "no-store"
 
 
 def test_the_page_that_sends_the_browser_on_escapes_the_address_it_was_given() -> None:

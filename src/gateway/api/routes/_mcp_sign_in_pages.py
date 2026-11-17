@@ -1,10 +1,12 @@
 """The plain pages a person sees after opening an MCP sign-in link from a conversation.
 
 Served by the gateway itself rather than the dashboard, because the person may have no dashboard
-session: they came from a coding agent's chat. No script, nothing loaded from elsewhere, and no
-other site may frame one. Every value is escaped into its page.
+session: they came from a coding agent's chat. Nothing is loaded from elsewhere and no other site may
+frame one. Every value is escaped into its page. The one script is the opener's, pinned by its hash.
 """
 
+import base64
+import hashlib
 from enum import StrEnum
 from html import escape
 from urllib.parse import urlsplit
@@ -104,6 +106,36 @@ def conversation_page(page: SignInPage, *, server_name: str | None = None) -> HT
     )
 
 
+# Moves the link's ticket out of the fragment and into a POST, then takes it out of the address bar and history.
+_OPENER_SCRIPT = (
+    'var t=new URLSearchParams(location.hash.slice(1)).get("ticket")||"";'
+    'history.replaceState(null,"",location.pathname);'
+    "var f=document.forms[0];f.ticket.value=t;f.submit();"
+)
+_OPENER_CSP = (
+    f"{_CSP}; script-src 'sha256-{base64.b64encode(hashlib.sha256(_OPENER_SCRIPT.encode()).digest()).decode()}'; "
+    "form-action 'self'"
+)
+# The value the confirmation page's form sends, which is what tells Continue apart from opening the link.
+CONTINUE_STEP = "continue"
+
+
+def opener_page() -> HTMLResponse:
+    """What a sign-in link's address serves: a page that posts the ticket from the link's fragment back here.
+
+    The ticket travels in the fragment, which a browser never sends, so the address an access log or a
+    proxy records carries no working link. The post only shows the confirmation page; it starts nothing.
+    """
+    body = (
+        '<form method="post"><input type="hidden" name="ticket" value=""></form>'
+        + "<noscript>"
+        + _paragraph("This page needs JavaScript to open your sign-in link. Turn it on, then open the link again.")
+        + "</noscript>"
+        + f"<script>{_OPENER_SCRIPT}</script>"
+    )
+    return _response("Opening your sign-in link", body, status_code=200, csp=_OPENER_CSP)
+
+
 def confirm_page(
     *, ticket: str, server_name: str, server_host: str, user_label: str, opened_as: str | None, needs_session: bool
 ) -> HTMLResponse:
@@ -133,6 +165,7 @@ def confirm_page(
             else ""
         )
         + f'<form method="post"><input type="hidden" name="ticket" value="{escape(ticket)}">'
+        + f'<input type="hidden" name="step" value="{CONTINUE_STEP}">'
         + '<button type="submit">This is me, continue</button></form>'
     )
     return _response(

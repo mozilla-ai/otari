@@ -78,8 +78,10 @@ from gateway.services.tools._mcp_oauth import (
     McpOAuthTokens,
 )
 
-# How long a started sign-in may take to come back.
-FLOW_LIFETIME = timedelta(minutes=10)
+# How long a started sign-in may take to come back. A first sign-in at a provider can ask for a password, a
+# second factor and a consent screen, and ran past ten minutes in testing. The state is single-use and bound to
+# a dashboard session or a browser, so a longer wait gives nobody else anything to use.
+FLOW_LIFETIME = timedelta(minutes=30)
 # A token is renewed this long before its recorded expiry. A request hands the token to a tool loop
 # that may run for minutes, so the margin covers the request as well as the clock.
 EXPIRY_SKEW = timedelta(minutes=5)
@@ -327,13 +329,14 @@ def sign_in_link(config: GatewayConfig, *, server_id: uuid.UUID, user_id: str) -
         json.dumps({"p": _SIGN_IN_LINK_PURPOSE, "s": str(server_id), "u": user_id}, separators=(",", ":"))
     )
     # Fernet's padding is dropped and put back on reading, so the link has no character a chat may mangle.
-    return f"{_gateway_base(config)}{API_ROOT}{SIGN_IN_LINK_PATH}?{urlencode({'ticket': sealed.rstrip('=')})}"
+    # The ticket rides in the fragment, which a browser never sends, so no access log or proxy records it.
+    return f"{_gateway_base(config)}{API_ROOT}{SIGN_IN_LINK_PATH}#{urlencode({'ticket': sealed.rstrip('=')})}"
 
 
 def sign_in_link_prefix(config: GatewayConfig) -> str | None:
     """What every sign-in link on this deployment starts with, or ``None`` where none can be made."""
     base = _gateway_base(config)
-    return f"{base}{API_ROOT}{SIGN_IN_LINK_PATH}?ticket=" if base else None
+    return f"{base}{API_ROOT}{SIGN_IN_LINK_PATH}#ticket=" if base else None
 
 
 def read_sign_in_link(ticket: str) -> tuple[uuid.UUID, str] | None:
@@ -360,6 +363,26 @@ def sign_in_link_is_for(user_id: str, identity_id: uuid.UUID) -> bool:
     return str(identity_id) == user_id
 
 
+# Why a sign-in cannot run here, for a workspace admin who may not run the deployment.
+_NO_PUBLIC_ADDRESS = (
+    "Signing in to MCP servers is not set up on this Otari deployment yet: it needs its public address "
+    "(public_base_url), which whoever runs Otari sets. Until then, add servers that take a token or need no sign-in."
+)
+_NO_SECRET_KEY = (
+    "Signing in to MCP servers is not set up on this Otari deployment yet: it needs a secret key to keep sign-ins "
+    "(OTARI_SECRET_KEY), which whoever runs Otari sets. Until then, add servers that need no sign-in."
+)
+
+
+def sign_in_unavailable(config: GatewayConfig) -> str | None:
+    """Why this deployment cannot run a sign-in to an MCP server or keep its tokens, or ``None`` when it can."""
+    if not _gateway_base(config):
+        return _NO_PUBLIC_ADDRESS
+    if not secret_box_configured():
+        return _NO_SECRET_KEY
+    return None
+
+
 def require_per_user_support(config: GatewayConfig) -> None:
     """Refuse per-user mode on a deployment that could not run a sign-in or keep its tokens.
 
@@ -367,7 +390,8 @@ def require_per_user_support(config: GatewayConfig) -> None:
         McpConnectionSetupError: ``public_base_url`` is unset.
         SecretBoxUnavailableTenancyError: ``OTARI_SECRET_KEY`` is unset.
     """
-    callback_url(config)
+    if not _gateway_base(config):
+        raise McpConnectionSetupError(_NO_PUBLIC_ADDRESS)
     if not secret_box_configured():
         raise SecretBoxUnavailableTenancyError("MCP connection tokens")
 
@@ -736,6 +760,7 @@ class McpConnectionService:
     """Runs a sign-in to a stored MCP server, a user's own or a manager's for everyone, and ends a connection."""
 
     DASHBOARD_CALLBACK_ROUTE: ClassVar[str] = DASHBOARD_CALLBACK_ROUTE
+    FLOW_LIFETIME: ClassVar[timedelta] = FLOW_LIFETIME
     # What the rest of the gateway asks about sign-ins and connections without holding a service.
     client_metadata = staticmethod(client_metadata)
     collect_revocations = staticmethod(collect_revocations)
@@ -747,6 +772,7 @@ class McpConnectionService:
     sign_in_link_is_for = staticmethod(sign_in_link_is_for)
     sign_in_link_prefix = staticmethod(sign_in_link_prefix)
     sign_in_problem = staticmethod(sign_in_problem)
+    sign_in_unavailable = staticmethod(sign_in_unavailable)
     stored_oauth_client = staticmethod(stored_oauth_client)
 
     def __init__(
@@ -1742,6 +1768,7 @@ __all__ = [
     "collect_revocations",
     "revoke_in_background",
     "sign_in_problem",
+    "sign_in_unavailable",
     "CallbackOutcome",
     "DASHBOARD_CALLBACK_ROUTE",
     "CompletedConnection",

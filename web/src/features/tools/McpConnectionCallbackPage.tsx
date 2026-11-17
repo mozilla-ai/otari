@@ -38,7 +38,7 @@ const LIST = "/tools/mcp-servers"
 const REFUSALS = new Map<string, string>([
   [
     "unknown_state",
-    "This sign-in is unknown, already finished, or took longer than ten minutes.",
+    "This sign-in is unknown, already finished, or took longer than 30 minutes.",
   ],
 ])
 

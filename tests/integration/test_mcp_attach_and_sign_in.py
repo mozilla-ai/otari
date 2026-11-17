@@ -50,7 +50,7 @@ from gateway.services import mcp_stateless
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.mcp_stateless import ServerCheck
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
-from gateway.services.tools import OTARI_TOOL_CALLS_FIELD, _mcp_oauth
+from gateway.services.tools import OTARI_TOOL_CALLS_FIELD, McpConnectionService, _mcp_oauth
 from gateway.services.tools._mcp_oauth import AUTH_METHOD_NONE, McpOAuthClient, McpOAuthMetadata, McpOAuthTokens
 
 from .conftest import ALL_KEY_SCOPES, MODEL_NAME
@@ -58,7 +58,7 @@ from .conftest import ALL_KEY_SCOPES, MODEL_NAME
 PUBLIC_URL = "https://93.184.216.34/mcp"
 ISSUER = "https://93.184.216.36"
 ORIGIN = "https://otari.example.com"
-LINK_PREFIX = f"{ORIGIN}{API_ROOT}/mcp-connections/sign-in?ticket="
+LINK_PREFIX = f"{ORIGIN}{API_ROOT}/mcp-connections/sign-in#ticket="
 USER_TOKEN = "user-access-token"
 CLIENT_TOOL = {"type": "function", "function": {"name": "read_file", "parameters": {"type": "object"}}}
 
@@ -240,12 +240,25 @@ def _link(text: str) -> str:
 FROM_THE_PAGE = {"Sec-Fetch-Site": "same-origin"}
 
 
+def _ticket(link: str) -> str:
+    return parse_qs(urlsplit(link).fragment)["ticket"][0]
+
+
+def _open(client: TestClient, link: str) -> Any:
+    """Open a link as a browser does: the address alone goes out, and the page posts the fragment's ticket back."""
+    address = urlsplit(link)
+    assert address.path == f"{API_ROOT}/mcp-connections/sign-in" and not address.query
+    opener = client.get(address.path, follow_redirects=False)
+    assert opener.status_code == 200, opener.text
+    assert "location.hash" in opener.text and _ticket(link) not in opener.text
+    return client.post(address.path, data={"ticket": _ticket(link)}, headers=FROM_THE_PAGE)
+
+
 def _confirm(client: TestClient, link: str, headers: dict[str, str] | None = None) -> Any:
     """Press Continue on the page a link opens."""
-    ticket = parse_qs(urlsplit(link).query)["ticket"][0]
     return client.post(
         f"{API_ROOT}/mcp-connections/sign-in",
-        data={"ticket": ticket},
+        data={"ticket": _ticket(link), "step": "continue"},
         headers=FROM_THE_PAGE if headers is None else headers,
     )
 
@@ -404,7 +417,7 @@ def test_an_unsigned_in_user_gets_a_link_in_the_conversation_and_the_next_ask_wo
     assert test_db.execute(select(McpOAuthFlow)).first() is None, "minting a link stores nothing"
 
     for _ in range(2):
-        opened = client.get(link.removeprefix(ORIGIN), follow_redirects=False)
+        opened = _open(client, link)
         assert opened.status_code == 200, opened.text
         assert "sign in to jira (93.184.216.34)" in opened.text and "this Otari user: alice" in opened.text
         assert "Continue only if alice is you and you asked for this link yourself" in opened.text
@@ -435,8 +448,10 @@ def test_an_unsigned_in_user_gets_a_link_in_the_conversation_and_the_next_ask_wo
 
 def test_a_link_that_is_forged_or_altered_starts_nothing(client: TestClient) -> None:
     for ticket in ("", "nonsense", encrypt_secret('{"p":"other","s":"x","u":"alice"}').rstrip("=")):
-        opened = client.get(f"{API_ROOT}/mcp-connections/sign-in", params={"ticket": ticket}, follow_redirects=False)
-        confirmed = client.post(f"{API_ROOT}/mcp-connections/sign-in", data={"ticket": ticket}, headers=FROM_THE_PAGE)
+        opened = client.post(f"{API_ROOT}/mcp-connections/sign-in", data={"ticket": ticket}, headers=FROM_THE_PAGE)
+        confirmed = client.post(
+            f"{API_ROOT}/mcp-connections/sign-in", data={"ticket": ticket, "step": "continue"}, headers=FROM_THE_PAGE
+        )
         for answer in (opened, confirmed):
             assert answer.status_code == 400
             assert "This link has expired" in answer.text
@@ -475,7 +490,7 @@ def test_a_link_opened_in_another_users_dashboard_session_is_refused(
     link = _per_user_link(client, master_key_header, test_db, "mallory")
     _dashboard_session(client, master_key_header, test_db, "bob@example.com")
 
-    opened = client.get(link.removeprefix(ORIGIN))
+    opened = _open(client, link)
     confirmed = _confirm(client, link)
 
     for answer in (opened, confirmed):
@@ -492,7 +507,7 @@ def test_a_link_confirmed_in_its_own_users_dashboard_session_is_bound_to_it(
     identity = _dashboard_session(client, master_key_header, test_db, "bob@example.com")
     link = _per_user_link(client, master_key_header, test_db, str(identity.id))
 
-    opened = client.get(link.removeprefix(ORIGIN))
+    opened = _open(client, link)
     assert opened.status_code == 200, opened.text
     assert "this Otari user: bob@example.com" in opened.text
     assert "You are signed in to Otari as bob@example.com." in opened.text
@@ -550,6 +565,21 @@ def test_a_link_sign_in_finishes_only_in_the_browser_that_pressed_continue(
     assert cookie_name in landed.headers["set-cookie"] and "Max-Age=0" in landed.headers["set-cookie"]
 
 
+def test_the_browser_keeps_a_link_sign_ins_cookie_as_long_as_the_sign_in_may_take(
+    client: TestClient, master_key_header: dict[str, str], test_db: Session
+) -> None:
+    """A first sign-in with a password, a second factor and a consent screen can run past ten minutes."""
+    started = _confirm(client, _per_user_link(client, master_key_header, test_db))
+
+    _sent_on_to(started)
+    lifetime = int(McpConnectionService.FLOW_LIFETIME.total_seconds())
+    assert lifetime >= 30 * 60
+    assert f"Max-Age={lifetime}" in started.headers["set-cookie"]
+    test_db.expire_all()
+    flow = test_db.execute(select(McpOAuthFlow)).scalar_one()
+    assert flow.expires_at - datetime.now(UTC) > McpConnectionService.FLOW_LIFETIME - timedelta(minutes=1)
+
+
 def test_a_link_for_a_dashboard_account_needs_that_accounts_session(
     client: TestClient, master_key_header: dict[str, str], test_db: Session
 ) -> None:
@@ -558,7 +588,7 @@ def test_a_link_for_a_dashboard_account_needs_that_accounts_session(
     link = _per_user_link(client, master_key_header, test_db, str(identity.id))
     client.cookies.clear()
 
-    opened = client.get(link.removeprefix(ORIGIN))
+    opened = _open(client, link)
     assert opened.status_code == 200, opened.text
     assert "continues only in a browser signed in to the Otari dashboard as that account" in opened.text
     confirmed = _confirm(client, link)

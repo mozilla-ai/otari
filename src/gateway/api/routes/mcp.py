@@ -68,6 +68,7 @@ from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.rate_limit import check_rate_limit
 from gateway.repositories.users_repository import get_active_user
+from gateway.schemas.tools import McpServerLeftOut
 
 # The module as well as the names below, so the whole-request deadline is read
 # off it at call time and stays tunable in the one place that owns the ceilings.
@@ -592,6 +593,11 @@ class McpServersResponse(BaseModel):
     """The enabled stored servers the authenticated key can reach."""
 
     servers: list[McpServerSummary]
+    left_out: list[McpServerLeftOut] = Field(
+        default_factory=list,
+        description="Servers the key's access list grants that are not in `servers`, each with the reason. "
+        "Empty for a key that belongs to a user.",
+    )
 
 
 @router.get(
@@ -620,12 +626,14 @@ async def list_mcp_servers(
     the token are never returned. A master key has no workspace and is refused with a 404.
 
     A server that sends each user's own credential is listed with `sign_in_required` true until this
-    key's user has signed in to it, with a `sign_in_url` to the page that starts their sign-in, and is
-    left out for a key that has no user. Tool discovery and execution answer such a server with a 403, the code
-    `mcp_sign_in_required` and the same `sign_in_url`. Making a link stores nothing, so listing is free.
+    key's user has signed in to it, with a `sign_in_url` to the page that starts their sign-in. Tool
+    discovery and execution answer such a server with a 403, the code `mcp_sign_in_required` and the
+    same `sign_in_url`. Making a link stores nothing, so listing is free. A key that has no user cannot
+    sign in, so such a server is not in `servers` for it: it is in `left_out` instead, with the reason.
     """
     principal = await _authenticate(raw_request, db, config)
     listed = await servers.list_reachable(principal.workspace_id, principal.mcp_access)
+    needing_a_user = await servers.list_needing_a_user(principal.workspace_id, principal.mcp_access)
     user_id = principal.mcp_access.user_id
     return McpServersResponse(
         servers=[
@@ -633,7 +641,8 @@ async def list_mcp_servers(
             if summary.sign_in_required
             else summary
             for summary in listed
-        ]
+        ],
+        left_out=needing_a_user,
     )
 
 

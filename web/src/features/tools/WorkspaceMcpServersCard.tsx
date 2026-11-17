@@ -459,6 +459,7 @@ export function WorkspaceMcpServersCard({
           workspaceName={selected.name}
           existing={rows}
           initialPicks={requestedPick ? [requestedPick] : undefined}
+          signInUnavailable={query.data?.sign_in_unavailable}
           onAddByUrl={() => {
             setCatalogOpen(false)
             openAdd()

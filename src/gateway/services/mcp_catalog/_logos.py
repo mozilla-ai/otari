@@ -287,12 +287,18 @@ OFFICIAL_ENDPOINTS: frozenset[tuple[str, str]] = frozenset(
         # On atlassian.com under Atlassian's own namespace; only its title ("Atlassian Rovo MCP Server") says
         # more than the domain's name. Checked 2026-11-12.
         ("com.atlassian/atlassian-mcp-server", "mcp.atlassian.com"),
-        # Popular entries published under a GitHub account or on a domain other than their namespace's. Each is
-        # recorded on the Popular list as the maker's own server as the registry listed it on 2026-11-12.
+        # Popular entries published under a GitHub account or on a domain other than their namespace's. Each
+        # endpoint is the one the maker's own page gives, checked 2026-11-17:
+        # Sentry: the README of github.com/getsentry/sentry-mcp, and docs.sentry.io/product/sentry-mcp/.
         ("io.github.getsentry/sentry-mcp", "mcp.sentry.dev"),
+        # Upstash: the README of github.com/upstash/context7 gives this URL for the remote server.
         ("io.github.upstash/context7", "mcp.context7.com"),
+        # Grafana: grafana.com/docs/grafana-cloud/ai-tools/mcp-servers/cloud-mcp/ (Grafana Cloud only), and the
+        # server.json of github.com/grafana/mcp-grafana declares it as that server's remote.
         ("io.github.grafana/mcp-grafana", "mcp.grafana.com"),
+        # PostHog: posthog.com/docs/model-context-protocol calls it PostHog's hosted endpoint.
         ("io.github.PostHog/mcp", "mcp.posthog.com"),
+        # Neon: neon.com/docs/ai/neon-mcp-server, and github.com/neondatabase/mcp-server-neon publishes com.neon/mcp.
         ("com.neon/mcp", "mcp.neon.tech"),
     }
 )
