@@ -6,16 +6,14 @@ from typing import Annotated
 from fastapi import Depends, Request
 
 from gateway.api.deps._base import (
-    ContainerDep,
-    PortSessionDep,
     get_config,
     get_unit_of_work,
     get_user_access,
 )
 from gateway.api.deps.auth import federated_token_verifier
+from gateway.api.deps.ports import ApiKeyFormatPortDep, get_api_key_format_port
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.repositories.api_keys import ApiKeyRepositories
 from gateway.repositories.tenancy import WorkspaceRepository
 from gateway.services.api_keys import (
@@ -24,14 +22,6 @@ from gateway.services.api_keys import (
     FederationTokenExchange,
 )
 from gateway.services.secret_box import configured_secret_keys
-
-
-def get_api_key_format_port(db: PortSessionDep, container: ContainerDep) -> ApiKeyFormatPort:
-    """Resolve the key-format adapter this build bound at startup."""
-    return container.resolve(ApiKeyFormatPort, db)
-
-
-ApiKeyFormatPortDep = Annotated[ApiKeyFormatPort, Depends(get_api_key_format_port)]
 
 
 def get_api_key_service(uow: Annotated[UnitOfWork, Depends(get_unit_of_work)]) -> ApiKeyService:
@@ -72,3 +62,17 @@ def get_federation_token_exchange(
 
 
 FederationTokenExchangeDep = Annotated[FederationTokenExchange, Depends(get_federation_token_exchange)]
+
+
+# The key format is this domain's port, so it is reachable here as well as in ``ports``, which
+# defines it. Ports are defined there and re-exported upward, because a port defined beside its
+# domain would make ``ports`` import the domain modules and eventually cycle.
+__all__ = [
+    "ApiKeyFormatPortDep",
+    "ApiKeyServiceDep",
+    "FederationTokenExchangeDep",
+    "build_federation_token_exchange",
+    "get_api_key_format_port",
+    "get_api_key_service",
+    "get_federation_token_exchange",
+]
