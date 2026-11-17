@@ -130,6 +130,7 @@ from gateway.api.deps.ports import (
 )
 from gateway.api.deps.tools import (
     CodeExecutionEnvironmentServiceDep,
+    DirectToolAvailabilityDep,
     DirectToolServiceDep,
     OptionalWebProviderClientDep,
     PlaygroundToolOfferDep,
@@ -1180,6 +1181,7 @@ __all__ = [
     "DatabaseSessionOwners",
     "DeploymentAdministrationAccessDep",
     "DeploymentUserServiceDep",
+    "DirectToolAvailabilityDep",
     "DirectToolServiceDep",
     "EntitlementPortDep",
     "FederationTokenExchangeDep",

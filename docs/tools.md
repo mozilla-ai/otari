@@ -38,6 +38,14 @@ Unavailable but recognized tools remain in the response with
 A master key or a dashboard session belongs to no single workspace, so its
 answer reflects the deployment alone.
 
+Web search and web fetch also carry `direct_available`: whether
+`POST /api/v1/search` or `POST /api/v1/fetch`, naming no tool, would run for the
+caller. That is a separate question from `available`, which is about declaring
+the tool in a model request. A direct call also needs the API key to hold the
+`web:search` or `web:fetch` [scope](api-keys.md#scopes), and the key's tool list
+to allow the tool the call runs on. Code execution has no direct endpoint here,
+so its `direct_available` is `null`.
+
 ## Who runs a tool
 
 An `otari_*` type is executed by Otari. A provider-native web-search type is

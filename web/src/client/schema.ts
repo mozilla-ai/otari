@@ -7264,7 +7264,8 @@ export interface paths {
          *     unavailable, and so is a tool that runs on the deployment's account while
          *     the key's organization has no funds. Every other `tools[]` entry, including
          *     provider-native keywords not listed here, is forwarded to the upstream
-         *     provider untouched.
+         *     provider untouched. Web search and web fetch also say whether their direct
+         *     endpoints would run a call from this caller.
          */
         get: operations["tools-list_tools"];
         put?: never;
@@ -15550,6 +15551,11 @@ export interface components {
              * @description What the tool does, as the model is told.
              */
             description: string;
+            /**
+             * Direct Available
+             * @description For web search and web fetch, whether `POST /api/v1/search` or `POST /api/v1/fetch` naming no tool would run for this caller: something is set up to run it, the workspace allows web access, and for an API key, the key holds the `web:search` or `web:fetch` scope and its tool list allows the instance the call would run on. It can differ from `available`, which is about declaring the tool in a model request. `null` for the other tools, which have no direct endpoint here.
+             */
+            direct_available?: boolean | null;
             /**
              * Example
              * @description A ready-to-use `tools[]` entry.
