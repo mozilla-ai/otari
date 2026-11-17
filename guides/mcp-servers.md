@@ -27,6 +27,12 @@ There are two ways in: add a server by its URL, or pick servers from the catalog
 Saving opens the server's page, where its access rules live. **Availability**
 can be changed there at any time.
 
+A key reaches the workspace's servers only if it holds the `mcp:execute` scope,
+and lists them only with `mcp:read`. A new key holds neither. While a key you
+can see in the workspace lacks `mcp:execute`, **Tools** → **MCP servers** says
+how many do, with a link to **API keys**, where you change a key under
+**Access**. See [Scopes](api-keys.md#scopes).
+
 The top of the page says whether the server is **Shared** or **Personal**. To
 change that, or its name, URL, token or OAuth client, click **Settings** there
 and then **Save**. Under **Sign-in mode**, choose **Shared account** or **Personal
@@ -164,7 +170,7 @@ The catalog lists remote MCP servers from the official MCP Registry, so you do n
 5. Select each server you want. It moves to **Selected** at the top and stays there when you change the search; untick it to put it back.
 6. Click **Add**, which reads **Add 2 servers** and so on when you picked several.
 7. For each server, check its name, which must be unique within the workspace, and choose its **Sign-in mode**:
-   - **Personal accounts**: each member connects their own account. Otari suggests it when the server asks a caller with no account to sign in.
+   - **Personal accounts**: each member connects their own account. Otari suggests it when the server asks a caller with no account to sign in. On a deployment that cannot run a sign-in yet, because whoever runs Otari has not set its public address (`public_base_url`), the catalog says so before you pick anything, the review step repeats it, this choice is turned off, and a server that asks each person to sign in is marked.
    - **Shared account**: one account for the whole workspace. Paste its token, or leave it blank and set the account up on the server's page after adding, where you can also sign in for everyone.
 8. Under **Availability**, choose **Off**, **On request** or **Every request**, as when you add a server by URL.
 9. Click **Confirm**.

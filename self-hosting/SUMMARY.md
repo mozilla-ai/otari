@@ -10,6 +10,7 @@
 
 ## Providers
 
+* [Connect otari.ai](providers/otari-ai.md)
 * [Connect OpenAI](providers/openai.md)
 * [Connect Gemini](providers/gemini.md)
 * [Connect a llama.cpp server](providers/llamacpp.md)
