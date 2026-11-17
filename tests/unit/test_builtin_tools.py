@@ -19,6 +19,7 @@ from gateway.services.tools import (
     BuiltinTool,
     Dialect,
     NativeCall,
+    Refusal,
     Tool,
     native_rendering,
 )
@@ -147,6 +148,30 @@ def test_code_execution_is_rendered_only_in_the_dialect_whose_keyword_declared_i
         and rendering.declared({"type": declared_type})
     }
     assert rendered == expected
+
+
+@pytest.mark.parametrize("dialect", list(Dialect))
+def test_a_code_execution_is_never_refused_for_a_call_limit(dialect: Dialect) -> None:
+    rendering = native_rendering(CODE_EXECUTION_TOOL_NAME, dialect)
+    assert rendering is not None
+
+    assert rendering.refused(NativeCall(CODE_EXECUTION_TOOL_NAME, "c1", {}), Refusal.CALL_LIMIT) == []
+
+
+def test_a_code_execution_with_invalid_input_is_reported_failed_in_every_dialect() -> None:
+    call = NativeCall(CODE_EXECUTION_TOOL_NAME, "c1", {})
+
+    def rendered(dialect: Dialect) -> list[Any]:
+        rendering = native_rendering(CODE_EXECUTION_TOOL_NAME, dialect)
+        assert rendering is not None
+        return rendering.refused(call, Refusal.INVALID_INPUT)
+
+    [entry] = rendered(Dialect.CHAT)
+    assert (entry["status"], entry["error"]["tag"]) == ("failed", "invalid_input")
+    _use, result = rendered(Dialect.MESSAGES)
+    assert result.content.error_code == "invalid_tool_input"
+    [item] = rendered(Dialect.RESPONSES)
+    assert (item.type, item.status) == ("code_interpreter_call", "failed")
 
 
 def test_a_name_the_registry_does_not_list_has_no_rendering() -> None:

@@ -22,6 +22,8 @@ from gateway.core.error_codes import (
 
 # The tag of a call refused because the request used up its calls, which reaches no provider.
 CALL_LIMIT_TAG = "call_limit"
+# The tag of a call refused because the model's arguments were not a JSON object, which reaches no provider.
+INVALID_INPUT_TAG = "invalid_input"
 # The tag of a call refused because its price would take the request past a budget, which reaches no provider.
 BUDGET_EXCEEDED_TAG = "budget_exceeded"
 # A provider call that failed before it was sent: an instance's key that cannot be read, an

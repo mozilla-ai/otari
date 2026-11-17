@@ -11,7 +11,7 @@ from openai.types.responses.response_code_interpreter_tool_call import OutputIma
 from gateway.core.media_types import guess_mime_type
 from gateway.services.sandbox_backend import CodeExecution
 from gateway.services.tools._code_execution_declarations import native_code_execution_dialect
-from gateway.services.tools._native import Dialect
+from gateway.services.tools._native import Dialect, Refusal
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -96,9 +96,15 @@ class ResponsesCodeExecutionRendering:
         files_base_url = getattr(pool, "files_base_url", None)
         return [_code_interpreter_call_item(execution, container_id, files_base_url) for execution in take_executions()]
 
-    def refused(self, call: NativeCall) -> list[Any]:
-        """Nothing: code execution has no use cap, so no call of it is refused."""
-        return []
+    def refused(self, call: NativeCall, reason: Refusal) -> list[Any]:
+        """A failed item for a run refused before it reached the sandbox.
+
+        Code execution has no use cap, so only a call whose arguments did not parse is refused.
+        """
+        del call
+        if reason is not Refusal.INVALID_INPUT:
+            return []
+        return [_code_interpreter_call_item(CodeExecution(code="", result=None, invalid_input=True), "")]
 
 
 RENDERING = ResponsesCodeExecutionRendering()

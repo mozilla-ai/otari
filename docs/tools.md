@@ -366,6 +366,13 @@ tools the client must execute are preserved.
 A call to one of Otari's tools that the model was still writing when it ran out
 of output tokens is neither run nor returned. The response ends with the provider's
 stop reason, such as `length` or `max_tokens`, and holds no call the client cannot run.
+A call to one of Otari's tools whose arguments are not a JSON object (cut off
+mid-stream, or a list, a string or `null`) is not run either, and spends none of
+the request's tool allowance: the model reads `[tool error] invalid_input: ...` as
+its result and can try again, and Otari logs a warning naming the tool, never the
+arguments. Empty arguments still mean no arguments. An `otari_tool_calls` entry
+for the call is `failed` with `"tag": "invalid_input"`, and a native Messages
+block carries `error_code: invalid_tool_input`.
 The dashboard Playground's own completion route is the one exception: its stream
 also reports every gateway-run call and its result in an `otari_tool_activity`
 field, on a chunk of its own before and after each call, so the page can show

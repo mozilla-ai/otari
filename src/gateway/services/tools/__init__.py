@@ -158,6 +158,7 @@ from gateway.services.tools._native import (
     Dialect,
     NativeCall,
     NativeRendering,
+    Refusal,
 )
 from gateway.services.tools._provider_tools import provider_tools
 from gateway.services.tools._registry import BUILTIN_TOOLS, native_rendering
@@ -318,6 +319,7 @@ __all__ = [
     "Dialect",
     "NativeCall",
     "NativeRendering",
+    "Refusal",
     "Tool",
     "ToolRateInForce",
     "ToolUseBudget",

@@ -862,6 +862,9 @@ class _Writer:
         self.logs.append(log)
         return True
 
+    async def after_commit(self, _logs: list[UsageLog]) -> None:
+        pass
+
     async def start(self) -> None:
         pass
 
