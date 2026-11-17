@@ -524,18 +524,21 @@ class HostedProviderService:
         members = [row for row in rows if vendors[row.model] == request.vendor]
         if not members:
             raise HostedVendorNotFoundError(source.name, request.vendor)
-        rates = await self.offers.current_rates(source.name, members, implementation=source.implementation)
         known = {row.model for row in members}
+        # The default rung does not move with a deleted price, so it is read here, outside the
+        # block; the stored prices are read inside it, with the rows.
+        fallback = await self.offers.fallback_priced(source.name, known, implementation=source.implementation)
         targets: list[HostedProviderModel] = []
         skipped_unpriced = 0
         skipped_unavailable = 0
         async with self.uow:
             # Read again, so a switch flipped since the read above is not overwritten. A model
             # offered in between was not priced above, so it is left for the next press.
+            stored = await self.offers.stored_priced(source.name, known)
             for row in await self.models.list_all_for_provider(source.name, reload=True):
                 if row.model not in known:
                     continue
-                priced = row.model in rates
+                priced = row.model in stored or row.model in fallback
                 if request.enabled:
                     if row.enabled:
                         continue
@@ -548,7 +551,7 @@ class HostedProviderService:
                 elif not row.enabled or (request.only_unpriced and priced):
                     continue
                 targets.append(row)
-            await self.offers.switch_many_by_operator(source.name, targets, request.enabled)
+            await self.offers.switch_many_priced_by_operator(targets, request.enabled)
         get_model_cache().clear(source.name)
         return HostedVendorModelsSwitchPublic(
             changed=len(targets), skipped_unpriced=skipped_unpriced, skipped_unavailable=skipped_unavailable

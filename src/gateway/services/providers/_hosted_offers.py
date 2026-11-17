@@ -164,16 +164,37 @@ class HostedOffers:
         row.disabled_reason = None if enabled else DISABLED_BY_OPERATOR
         row.serves_unpriced = enabled and not await self.pricing.keys_with_a_price([_key(provider, row.model)])
 
-    async def switch_many_by_operator(self, provider: str, rows: Sequence[HostedProviderModel], enabled: bool) -> None:
-        """:meth:`switch_by_operator` for several rows, with one price lookup and one flush."""
+    async def switch_many_priced_by_operator(self, rows: Sequence[HostedProviderModel], enabled: bool) -> None:
+        """Set several rows' switches as an operator chose them, in one flush.
+
+        The caller switches on only rows that have a rate, so none is marked as
+        served without one: a refresh holds it again if its rate goes, which is
+        what an operator who served "every priced model" asked for.
+        """
         if not rows:
             return
-        priced = await self.pricing.keys_with_a_price([_key(provider, row.model) for row in rows])
         for row in rows:
             row.enabled = enabled
             row.disabled_reason = None if enabled else DISABLED_BY_OPERATOR
-            row.serves_unpriced = enabled and _key(provider, row.model) not in priced
+            row.serves_unpriced = False
         await self.models.flush()
+
+    async def stored_priced(self, provider: str, models: Collection[str]) -> set[str]:
+        """The models among ``models`` the deployment price list holds a version for, read now."""
+        keys = {_key(provider, model): model for model in models}
+        return {keys[key] for key in await self.pricing.keys_with_a_price(keys)}
+
+    async def fallback_priced(
+        self, provider: str, models: Collection[str], *, implementation: str | None = None
+    ) -> set[str]:
+        """The models among ``models`` a request would be priced for by the default rung, with no stored version.
+
+        Empty while the deployment does not consult the dataset, as in :meth:`current_rates`.
+        A dataset walk, so call it outside any block.
+        """
+        if not default_pricing_enabled():
+            return set()
+        return set(await self.defaults_for(provider, models, implementation=implementation))
 
     async def custom_against_defaults(
         self,

@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from any_llm.types.model import Model
 from fastapi.testclient import TestClient
-from sqlalchemy import update
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT, GatewayConfig
@@ -310,9 +310,9 @@ def test_serving_all_of_a_vendor_sees_a_refusal_recorded_while_it_ran(
 ) -> None:
     """A model refused between the switch's two reads stays off, though the session already held its row."""
     client.post(f"{PATH}/models/switch", json={"vendor": "Alibaba", "enabled": False}, headers=master_key_header)
-    priced = HostedOffers.current_rates
+    priced = HostedOffers.fallback_priced
 
-    async def _refused_meanwhile(self: HostedOffers, *args: Any, **kwargs: Any) -> Any:
+    async def _refused_meanwhile(self: HostedOffers, *args: Any, **kwargs: Any) -> set[str]:
         rates = await priced(self, *args, **kwargs)
         with db_session_factory() as db:
             db.execute(
@@ -323,13 +323,51 @@ def test_serving_all_of_a_vendor_sees_a_refusal_recorded_while_it_ran(
             db.commit()
         return rates
 
-    monkeypatch.setattr(HostedOffers, "current_rates", _refused_meanwhile)
+    monkeypatch.setattr(HostedOffers, "fallback_priced", _refused_meanwhile)
 
     served = client.post(
         f"{PATH}/models/switch", json={"vendor": "Alibaba", "enabled": True}, headers=master_key_header
     )
 
     assert served.json() == {"changed": 1, "skipped_unpriced": 0, "skipped_unavailable": 1}
+
+
+@pytest.mark.usefixtures("together")
+def test_serving_all_of_a_vendor_skips_a_model_whose_price_went_while_it_ran(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prices are read again in the write, and what it serves is priced, so a refresh may hold it later."""
+    client.post(f"{PATH}/models/switch", json={"vendor": "Alibaba", "enabled": False}, headers=master_key_header)
+    fallback = HostedOffers.fallback_priced
+
+    async def _price_deleted_meanwhile(self: HostedOffers, *args: Any, **kwargs: Any) -> set[str]:
+        priced = await fallback(self, *args, **kwargs)
+        with db_session_factory() as db:
+            db.execute(delete(ModelPricing).where(ModelPricing.model_key == f"together:{QWEN}"))
+            db.commit()
+        return priced
+
+    monkeypatch.setattr(HostedOffers, "fallback_priced", _price_deleted_meanwhile)
+
+    served = client.post(
+        f"{PATH}/models/switch", json={"vendor": "Alibaba", "enabled": True}, headers=master_key_header
+    )
+
+    assert served.json() == {"changed": 1, "skipped_unpriced": 1, "skipped_unavailable": 0}
+    with db_session_factory() as db:
+        states = dict(
+            db.execute(
+                select(HostedProviderModel.model, HostedProviderModel.serves_unpriced).where(
+                    HostedProviderModel.provider == "together",
+                    HostedProviderModel.model.in_([QWEN, CODER]),
+                    HostedProviderModel.enabled.is_(True),
+                )
+            ).all()
+        )
+    assert states == {CODER: False}
 
 
 @pytest.fixture
