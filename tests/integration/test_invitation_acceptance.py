@@ -14,7 +14,8 @@ from gateway.core.tokens import hash_token
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.organizations_exceptions import InvitationNoLongerValidError, MembershipUpdateError
 from gateway.models.organizations import OrganizationInvitation
-from gateway.models.tenancy import Organization, User, Workspace, WorkspaceMember
+from gateway.models.tenancy import Organization, OrganizationDomain, User, Workspace, WorkspaceMember
+from gateway.ports.signup_invite_port import AddressProof
 from gateway.repositories.organizations import NewInvitation, OrganizationRepositories, SendRequest
 from gateway.repositories.organizations.organization_invitation_repository import OrganizationInvitationRepository
 from gateway.repositories.tenancy import (
@@ -28,10 +29,10 @@ from gateway.services.mail import Mailer
 from gateway.services.organizations import (
     DeliveryRule,
     InvitationFactsReader,
-    InvitedAddresses,
     OrganizationClaimedDomains,
 )
 from gateway.services.organizations._acceptance import AcceptingPerson, InvitationAcceptance
+from gateway.services.organizations._invitation_link import InvitationLink
 from gateway.services.tenancy import OrganizationService
 
 from .conftest import _to_async_url
@@ -50,11 +51,11 @@ _NOW = datetime(2026, 7, 1, 12, tzinfo=UTC)
 _TOKEN = "an-invitation-token"
 
 
-def _config() -> GatewayConfig:
-    """A deployment that can deliver links, so the delivery rule is not consulted at acceptance."""
+def _config(*, mail_transport: str = "smtp") -> GatewayConfig:
+    """A deployment that can deliver links by default, so the delivery rule is not consulted."""
     return GatewayConfig(
         mail_from_email="otari@example.com",
-        mail_transport="smtp",
+        mail_transport=mail_transport,
         public_base_url="https://otari.example.com",
         smtp_host="smtp.example.com",
     )
@@ -68,17 +69,33 @@ def _acceptance(session: AsyncSession) -> InvitationAcceptance:
         uow,
         OrganizationRepositories.on(uow),
         admission=OrganizationService(session, membership_listener=membership_listener_on(uow), uow=uow),
-        blocked=NO_BLOCKED_ADDRESSES,
         clock=lambda: _NOW,
-        delivery=DeliveryRule(domains, NO_BLOCKED_ADDRESSES),
+        link=_link(session, uow=uow),
         facts=InvitationFactsReader(
             domains=domains,
             organizations=OrganizationRepository(uow),
             users=UserRepository(uow),
             workspaces=WorkspaceRepository(uow),
         ),
-        mailer=Mailer(_config()),
         sso=NO_SSO_ENFORCEMENT,
+    )
+
+
+def _link(session: AsyncSession, *, uow: UnitOfWork | None = None, mail_transport: str = "smtp") -> InvitationLink:
+    """The one reader of what a link still opens, on a deployment that can deliver them.
+
+    Built on the caller's Unit of Work where there is one, because its repositories read inside that
+    caller's block.
+    """
+    uow = uow or UnitOfWork(session)
+    domains = OrganizationClaimedDomains(OrganizationDomainRepository(uow))
+    return InvitationLink(
+        uow,
+        OrganizationRepositories.on(uow),
+        blocked=NO_BLOCKED_ADDRESSES,
+        clock=lambda: _NOW,
+        delivery=DeliveryRule(domains, NO_BLOCKED_ADDRESSES),
+        mailer=Mailer(_config(mail_transport=mail_transport)),
     )
 
 
@@ -402,16 +419,11 @@ async def test_an_accept_that_would_leave_no_active_owner_is_refused_and_keeps_t
     assert role == "owner"
 
 
-def _invited_addresses(session: AsyncSession) -> InvitedAddresses:
-    uow = UnitOfWork(session)
-    return InvitedAddresses(uow, OrganizationRepositories.on(uow), clock=lambda: _NOW)
-
-
 async def test_signup_is_told_the_address_an_invitation_was_sent_to(async_db: AsyncSession) -> None:
     organization = await create_organization(async_db, slug="lookup-live")
     await _invite(async_db, organization, email="ada@example.com")
 
-    assert await _invited_addresses(async_db).invited_email(_TOKEN) == "ada@example.com"
+    assert await _link(async_db).proof_for(_TOKEN, "ada@example.com") is AddressProof.MAILBOX
 
 
 async def test_signup_is_told_nothing_by_a_token_no_invitation_still_opens(async_db: AsyncSession) -> None:
@@ -426,12 +438,39 @@ async def test_signup_is_told_nothing_by_a_token_no_invitation_still_opens(async
         assert expired is not None
         expired.expires_at = _NOW - timedelta(seconds=1)
         await invitations.decline_by_token_hash(hash_token("declined-token"), at=_NOW)
-    lookup = _invited_addresses(async_db)
+    lookup = _link(async_db)
 
     answers = [
-        await lookup.invited_email("expired-token"),
-        await lookup.invited_email("declined-token"),
-        await lookup.invited_email("a-token-nobody-was-sent"),
+        await lookup.proof_for("expired-token", "expired@example.com"),
+        await lookup.proof_for("declined-token", "declined@example.com"),
+        await lookup.proof_for("a-token-nobody-was-sent", "ada@example.com"),
     ]
 
     assert answers == [None, None, None]
+
+
+async def test_a_link_acceptance_refuses_proves_nothing_at_signup(async_db: AsyncSession) -> None:
+    """One reader answers both, so a link the deployment turns away cannot go on proving an address.
+
+    The deployment cannot deliver links, and another organization has proven the address's domain.
+    """
+    holder = await create_organization(async_db, slug="holds-the-domain")
+    inviter = await create_organization(async_db, slug="carries-the-link")
+    async_db.add(
+        OrganizationDomain(
+            domain="example.com",
+            organization_id=holder.id,
+            verification_token="a-verification-token",
+            verified_at=_NOW - timedelta(days=1),
+        )
+    )
+    await async_db.flush()
+    await _invite(async_db, inviter, email="ada@example.com")
+    uow = UnitOfWork(async_db)
+    link = _link(async_db, uow=uow, mail_transport="console")
+
+    async with uow:
+        opened = await link.open(_TOKEN)
+    proof = await link.proof_for(_TOKEN, "ada@example.com")
+
+    assert (opened, proof) == (None, None)

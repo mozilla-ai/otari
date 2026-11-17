@@ -7,8 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tenancy import User
+from gateway.ports.signup_invite_port import AddressProof
 from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository
-from gateway.services.tenancy import AddressProof, OrganizationService
+from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.user_service import create_user_for_signup
 
 from .tenancy_helpers import NO_BLOCKED_ADDRESSES, create_organization, membership_listener_on

@@ -51,4 +51,14 @@ def stored_address(value: str) -> str | None:
     return candidate
 
 
-__all__ = ["MAX_STORED_ADDRESS_LENGTH", "normalized_address", "stored_address"]
+def same_address(first: str, second: str) -> bool:
+    """Return whether these two values are the same address.
+
+    A difference of case or surrounding space is the same address. A value that is not an address
+    matches nothing, including another value that is not an address.
+    """
+    normalized = normalized_address(first)
+    return normalized is not None and normalized_address(second) == normalized
+
+
+__all__ = ["MAX_STORED_ADDRESS_LENGTH", "normalized_address", "same_address", "stored_address"]

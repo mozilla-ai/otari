@@ -38,15 +38,13 @@ from gateway.api.routes._public_auth import (
     refuse_exhausted_verification_attempts,
     throttle_public_auth,
 )
-from gateway.core.addresses import MAX_STORED_ADDRESS_LENGTH, normalized_address
+from gateway.core.addresses import MAX_STORED_ADDRESS_LENGTH
 from gateway.core.config import GatewayConfig
-from gateway.core.tokens import is_shared_token
 from gateway.exceptions.identity_exceptions import VerificationTokenInvalidError
 from gateway.models.tenancy import MAX_FULL_NAME_LENGTH
 from gateway.services.mail import MailNotConfiguredError
 from gateway.services.tenancy import report_new_account
 from gateway.services.tenancy.user_service import (
-    AddressProof,
     create_user_for_signup,
     resend_verification_email,
     verify_email,
@@ -143,21 +141,6 @@ _INVITED_MESSAGE = "Your account is ready. Sign in to continue."
 _RESEND_MESSAGE = "If this address is registered and unverified, a verification email is on its way."
 
 
-def _address_proof(invited: str | None, claimed: str, *, token: str | None) -> AddressProof | None:
-    """Which proof of ``claimed`` an invitation to ``invited`` carries, or None where it proves nothing.
-
-    Both addresses are compared in normal form, and a value that is not an address matches nothing,
-    including another value that is not an address. A link handed over rather than emailed vouches for
-    the address instead of proving the mailbox answers.
-    """
-    if invited is None or token is None:
-        return None
-    invited_address = normalized_address(invited)
-    if invited_address is None or normalized_address(claimed) != invited_address:
-        return None
-    return AddressProof.VOUCHED if is_shared_token(token) else AddressProof.MAILBOX
-
-
 @router.post("/signup")
 async def signup(
     body: SignupRequest,
@@ -187,8 +170,7 @@ async def signup(
     verification email would prove nothing more. Only the token's holder learns that.
     """
     throttle_public_auth(request)
-    invited = await invites.invited_email(body.invite) if body.invite else None
-    proof = _address_proof(invited, body.email, token=body.invite)
+    proof = await invites.proof_for(body.invite, body.email) if body.invite else None
     try:
         claimed = await create_user_for_signup(
             db,

@@ -5,8 +5,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from gateway.core.addresses import normalized_address
-from gateway.core.tokens import hash_token
+from pydantic import ValidationError
+
+from gateway.core.addresses import same_address
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.organizations_exceptions import (
     InvitationAddressMismatchError,
@@ -16,13 +17,10 @@ from gateway.exceptions.organizations_exceptions import (
 from gateway.models.organizations import OrganizationInvitation
 from gateway.models.tenancy import OrganizationMemberRole, WorkspaceAssignmentRequest
 from gateway.repositories.organizations import OrganizationRepositories
-from gateway.services.mail import Mailer
 from gateway.services.organizations._admission import MembershipAdmission
-from gateway.services.organizations._blocked_addresses import BlockedAddresses
-from gateway.services.organizations._delivery_rule import DeliveryRule
 from gateway.services.organizations._invitation_facts import InvitationFacts, InvitationFactsReader
+from gateway.services.organizations._invitation_link import InvitationLink
 from gateway.services.organizations._sso_enforcement import SsoEnforcement
-from gateway.services.organizations._workspace_assignments import workspace_id_of
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -34,22 +32,23 @@ class AcceptingPerson:
 
 
 def _offered_workspaces(invitation: OrganizationInvitation) -> list[WorkspaceAssignmentRequest]:
-    """The workspace grants an invitation offers, skipping any whose stored id is not one."""
-    return [
-        WorkspaceAssignmentRequest(workspace_id=workspace_id, role=assignment["role"])
-        for assignment in invitation.workspace_assignments
-        if (workspace_id := workspace_id_of(assignment)) is not None
-    ]
+    """The workspace grants an invitation offers, skipping any its stored row does not describe.
+
+    The column holds whatever was written to it, so a grant naming no workspace or no role it could
+    give is left out rather than refusing the whole invitation.
+    """
+    offered = []
+    for assignment in invitation.workspace_assignments:
+        try:
+            offered.append(WorkspaceAssignmentRequest.model_validate(assignment))
+        except ValidationError:
+            continue
+    return offered
 
 
 def _require_the_invited_address(invited: str, by: AcceptingPerson) -> None:
-    """Refuse unless the person accepting holds the invited address.
-
-    Both are read by the one rule for an address that is stored, so a difference of case or
-    surrounding space is the same address. Two values that are not addresses never match.
-    """
-    invited_address = normalized_address(invited)
-    if invited_address is None or normalized_address(by.email) != invited_address:
+    """Refuse unless the person accepting holds the invited address."""
+    if not same_address(invited, by.email):
         raise InvitationAddressMismatchError(invited)
 
 
@@ -70,36 +69,6 @@ class InvitationPreview:
     invited_email: str
 
 
-class InvitedAddresses:
-    """Answers which address an invitation was sent to, while its link still opens it.
-
-    Signup asks this of a token somebody arrived with, so a link that reached a mailbox stands in for
-    the verification email that would otherwise prove the address.
-    """
-
-    def __init__(
-        self,
-        uow: UnitOfWork,
-        repositories: OrganizationRepositories,
-        *,
-        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
-    ) -> None:
-        self._uow = uow
-        self._invitations = repositories.invitations
-        self._clock = clock
-
-    async def invited_email(self, token: str) -> str | None:
-        """The address this token was sent to, or None when no invitation it still opens holds it.
-
-        NOTE: Callers must not call this from inside an already-open Unit of Work block.
-        """
-        async with self._uow:
-            invitation = await self._invitations.get_by_token_hash(hash_token(token))
-            if invitation is None or not invitation.can_still_be_used(now=self._clock()):
-                return None
-            return invitation.email
-
-
 class InvitationAcceptance:
     """Answers an invitation link: the facts it offers, and the invitee's decline.
 
@@ -113,11 +82,9 @@ class InvitationAcceptance:
         repositories: OrganizationRepositories,
         *,
         admission: MembershipAdmission,
-        blocked: BlockedAddresses,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
-        delivery: DeliveryRule,
         facts: InvitationFactsReader,
-        mailer: Mailer,
+        link: InvitationLink,
         sso: SsoEnforcement,
     ) -> None:
         self._uow = uow
@@ -125,18 +92,13 @@ class InvitationAcceptance:
         self._organizations = repositories.organizations
         self._origins = repositories.membership_origins
         self._admission = admission
-        self._blocked = blocked
         self._clock = clock
-        self._delivery = delivery
         self._facts = facts
-        self._mailer = mailer
+        self._link = link
         self._sso = sso
 
     async def preview(self, token: str) -> InvitationPreview:
-        """What this invitation offers, raising the one refusal every unusable link gets.
-
-        NOTE: Callers must not call this from inside an already-open Unit of Work block.
-        """
+        """What this invitation offers, raising the one refusal every unusable link gets."""
         async with self._uow:
             invitation = await self._valid_or_refused(token)
             facts = await self._facts.read(invitation, now=self._clock())
@@ -154,8 +116,6 @@ class InvitationAcceptance:
             InvitationAddressMismatchError: the account accepting does not hold the invited address.
             InvitationNoLongerValidError: the link was never one, or it expired, was declined,
                 cancelled, blocked, or already used.
-
-        NOTE: Callers must not call this from inside an already-open Unit of Work block.
         """
         now = self._clock()
         async with self._uow:
@@ -190,8 +150,6 @@ class InvitationAcceptance:
         """Record that the invitee declined, which ends the link.
 
         The organization's admins see no change: the invitation stays pending until it expires.
-
-        NOTE: Callers must not call this from inside an already-open Unit of Work block.
         """
         async with self._uow:
             invitation = await self._valid_or_refused(token)
@@ -203,21 +161,7 @@ class InvitationAcceptance:
 
         NOTE: Callers must call this inside an open Unit of Work block.
         """
-        now = self._clock()
-        invitation = await self._invitations.get_by_token_hash(hash_token(token))
-        if invitation is None or not invitation.can_still_be_used(now=now):
-            raise InvitationNoLongerValidError()
-        if await self._refuses_the_address(invitation, now=now):
+        invitation = await self._link.open(token)
+        if invitation is None:
             raise InvitationNoLongerValidError()
         return invitation
-
-    async def _refuses_the_address(self, invitation: OrganizationInvitation, *, now: datetime) -> bool:
-        """Whether the deployment refuses this address its invitation.
-
-        The blocklist is the deployment operator's own refusal, so it is asked wherever an invitation
-        is opened. Whether another organization has proven the address's domain is that organization's
-        data, so it is asked only where links cannot be delivered and the admin carried this one by hand.
-        """
-        if self._mailer.can_deliver_links:
-            return bool(await self._blocked.blocked_among([invitation.email]))
-        return not await self._delivery.allows(invitation.email, invitation.organization_id, now=now)

@@ -46,6 +46,7 @@ from gateway.services.organizations._acceptance import (
     InvitationAcceptance,
     _require_the_invited_address,
 )
+from gateway.services.organizations._invitation_link import InvitationLink
 
 pytestmark = pytest.mark.asyncio
 
@@ -134,22 +135,31 @@ class _Store:
         sso: object | None = None,
     ) -> InvitationAcceptance:
         domains = OrganizationClaimedDomains(OrganizationDomainRepository(self.uow))
-        blocklist = blocked if blocked is not None else _NoBlockedAddresses()
         return InvitationAcceptance(
             self.uow,
             OrganizationRepositories.on(self.uow),
             admission=admission or _RecordingAdmission(uuid.uuid4()),  # type: ignore[arg-type]
-            blocked=blocklist,  # type: ignore[arg-type]
             clock=self.clock,
-            delivery=DeliveryRule(domains, blocklist),  # type: ignore[arg-type]
+            link=self.link(blocked=blocked, mail_transport=mail_transport),
             facts=InvitationFactsReader(
                 domains=domains,
                 organizations=OrganizationRepository(self.uow),
                 users=UserRepository(self.uow),
                 workspaces=WorkspaceRepository(self.uow),
             ),
-            mailer=Mailer(_config(mail_transport=mail_transport)),
             sso=sso or _Sso(refuses=False),  # type: ignore[arg-type]
+        )
+
+    def link(self, *, blocked: object | None = None, mail_transport: str = "smtp") -> InvitationLink:
+        domains = OrganizationClaimedDomains(OrganizationDomainRepository(self.uow))
+        blocklist = blocked if blocked is not None else _NoBlockedAddresses()
+        return InvitationLink(
+            self.uow,
+            OrganizationRepositories.on(self.uow),
+            blocked=blocklist,  # type: ignore[arg-type]
+            clock=self.clock,
+            delivery=DeliveryRule(domains, blocklist),  # type: ignore[arg-type]
+            mailer=Mailer(_config(mail_transport=mail_transport)),
         )
 
     async def member(self, organization: Organization, *, full_name: str = "Joiner") -> tuple[uuid.UUID, uuid.UUID]:

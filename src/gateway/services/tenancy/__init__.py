@@ -28,7 +28,6 @@ from gateway.services.tenancy.organization_service import (
 from gateway.services.tenancy.password_reset_email import render_password_reset_email
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.user_service import (
-    AddressProof,
     describe_caller,
     forget_unproven_access,
     report_new_account,
@@ -40,7 +39,6 @@ from gateway.services.tenancy.user_service import (
 from gateway.services.tenancy.workspace_service import WorkspaceService
 
 __all__ = [
-    "AddressProof",
     "DeploymentAdministrationAccess",
     "DeploymentUserService",
     "DomainAutoJoinListener",

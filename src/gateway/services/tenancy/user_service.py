@@ -51,7 +51,6 @@ below is what gives it a way to sign in.
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from enum import StrEnum
 
 from fastapi import BackgroundTasks
 from sqlalchemy.exc import IntegrityError
@@ -76,6 +75,7 @@ from gateway.exceptions.identity_exceptions import (
 )
 from gateway.models.tenancy import CallerIdentityPublic, User
 from gateway.ports.growth_signal_port import GrowthSignalPort
+from gateway.ports.signup_invite_port import AddressProof
 from gateway.repositories.identity import WebAuthnCredentialRepository
 from gateway.repositories.tenancy import UserRepository
 from gateway.services.dashboard_session_service import revoke_user_dashboard_sessions
@@ -367,16 +367,6 @@ async def report_sign_in(growth: GrowthSignalPort, identity: User, *, background
 
 class _SignupRaceLostError(Exception):
     """Another write claimed this address first, so the signup's block rolls back and answers as a no-op."""
-
-
-class AddressProof(StrEnum):
-    """How a signup proved the address it claims, where it proved one at all."""
-
-    MAILBOX = "mailbox"
-    """An invitation emailed to the address, so its holder receives mail there."""
-
-    VOUCHED = "vouched"
-    """An invitation handed over as a link, so an organization vouches for the address and nobody else does."""
 
 
 async def create_user_for_signup(
