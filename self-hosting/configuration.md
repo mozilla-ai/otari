@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/c7f2cb670c044cdc9b084247244183d10c9c89c4/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/dc246591accb3eed43f97a61b2ade1effdbe7fe0/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -86,6 +86,9 @@ the corresponding startup value after the database is available.
 | `platform_url` | The otari.ai address **Connect otari.ai** asks for a key. Defaults to `https://api.otari.ai`; an empty value removes the option. Startup setting. See [Connecting otari.ai](hosted-providers.md#connecting-otariai). |
 | `update_check` | Check otari.ai daily for new releases and security fixes, sending the version and a random install id. Unset (the default) asks an operator in the dashboard, except that `DO_NOT_TRACK` (`1`, `true` or `yes`) or a non-empty `CI` then answers `false` and nothing is asked; `true` or `false` answers for them and wins over both. See [Update check](update-check.md). |
 | `health_checks_enabled` | Offer the Health page and its scheduled checks of the hosted providers' models. Defaults to `true`; startup setting. See [Health checks](health-checks.md). |
+| `mcp_catalog_enabled` | Offer the MCP server catalog. Defaults to `true`; startup setting. See [MCP server catalog](mcp-catalog.md). |
+| `mcp_catalog_sync` | Whether Otari copies the MCP Registry into the catalog: `off`, `manual` (the default, loaded from **Browse catalog**), or `scheduled`. `off` suits a deployment with no outbound access. |
+| `mcp_catalog_sync_interval_hours` | Hours between syncs when `mcp_catalog_sync` is `scheduled`, from 1 to 720. Defaults to 24. |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
 | `rate_limit_rpm` | Per-user request limit. Unset disables it. |
@@ -856,7 +859,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/c7f2cb670c044cdc9b084247244183d10c9c89c4/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/dc246591accb3eed43f97a61b2ade1effdbe7fe0/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -1892,7 +1895,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/c7f2cb670c044cdc9b084247244183d10c9c89c4/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/dc246591accb3eed43f97a61b2ade1effdbe7fe0/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Contacting the Otari team

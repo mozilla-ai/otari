@@ -28,6 +28,8 @@
   * [Key](api-endpoints/key.md)
   * [Keys](api-endpoints/keys.md)
   * [MCP](api-endpoints/mcp.md)
+  * [MCP catalog](api-endpoints/mcp-catalog.md)
+  * [MCP connections](api-endpoints/mcp-connections.md)
   * [MCP servers](api-endpoints/mcp-servers.md)
   * [Messages](api-endpoints/messages.md)
   * [Model overrides](api-endpoints/model-overrides.md)
