@@ -9,7 +9,8 @@ deployment-wide concepts were the ``is_superuser`` flag and the
 recourse for a stuck or abusive account was SQL (mozilla-ai/otari#797).
 
 Three operations, and deliberately only three: list every identity, deactivate
-or reactivate one, and flip its ``is_superuser`` flag. Creating and inviting stay
+or reactivate one, and flip its ``is_superuser`` flag. Handing the bootstrap
+operator role on is identity's (``IdentityService``). Creating and inviting stay
 with the organization surface, which is where the membership that makes an
 identity useful is created, and deleting is not here at all for the reason
 ``routes/organizations.py`` gives about deleting an organization: historical
@@ -97,6 +98,10 @@ class DeploymentAdministrationAccess:
         """
         if actor.is_superuser:
             return True
+        return await self.is_bootstrap_operator(actor)
+
+    async def is_bootstrap_operator(self, actor: User) -> bool:
+        """Whether this caller is the identity the bootstrap marker names, read fresh from the database."""
         bootstrap = await load_bootstrap_identity(self.db)
         return bootstrap is not None and bootstrap.id == actor.id
 
@@ -190,8 +195,7 @@ class DeploymentUserService(DeploymentAdministrationAccess):
                 raise DeploymentUserSelfChangeError(
                     "You cannot deactivate your own account or remove your own operator access"
                 )
-            bootstrap = await load_bootstrap_identity(self.db)
-            if bootstrap is not None and bootstrap.id == target.id:
+            if await self.is_bootstrap_operator(target):
                 raise BootstrapOperatorProtectedError(
                     "The deployment's bootstrap operator cannot be deactivated or have its operator access removed"
                 )
@@ -201,6 +205,12 @@ class DeploymentUserService(DeploymentAdministrationAccess):
             target = await self.users.get_locked(user_id)
             if target is None:
                 raise DeploymentUserNotFoundError(user_id)
+            # Read under the target's lock, which a handover to it holds until the marker has moved, so a
+            # handover that lands while this waits is seen here rather than overwritten.
+            if removes_access and await self.is_bootstrap_operator(target):
+                raise BootstrapOperatorProtectedError(
+                    "The deployment's bootstrap operator cannot be deactivated or have its operator access removed"
+                )
             if request.is_active is not None:
                 target.is_active = request.is_active
             if request.is_active is False:

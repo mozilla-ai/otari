@@ -40,8 +40,10 @@ from gateway.models.tenancy import (
     OrganizationMember,
     User,
 )
+from gateway.repositories.organizations.bootstrap_marker_repository import BootstrapMarkerRepository
 from gateway.repositories.tenancy import OrganizationMemberRepository, OrganizationRepository, UserRepository
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
+from gateway.services.password_service import hash_password
 from gateway.services.tenancy.provisioning_service import BOOTSTRAP_IDENTITY_KEY
 
 
@@ -388,7 +390,7 @@ def test_the_operator_probe_answers_for_the_bootstrap_caller(
     response = client.get(f"{API_ROOT}/admin/access", headers=master_key_header)
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"granted": True}
+    assert response.json() == {"granted": True, "is_bootstrap_operator": True}
 
 
 def _session_for(
@@ -455,7 +457,7 @@ def test_a_non_operator_session_is_refused_with_404_by_every_route(
     assert listed.status_code == 404, listed.text
     assert patched.status_code == 404, patched.text
     assert access.status_code == 200, access.text
-    assert access.json() == {"granted": False}
+    assert access.json() == {"granted": False, "is_bootstrap_operator": False}
 
 
 def test_an_operator_session_that_is_not_the_bootstrap_one_administers(
@@ -646,3 +648,399 @@ async def test_a_deleted_identity_cached_in_the_session_is_not_found(
             user_id=target.id,
             request=DeploymentUserUpdateRequest(is_active=False),
         )
+
+
+# =============================================================================
+# Handing over the bootstrap operator role
+# =============================================================================
+
+_PASSWORD = "correct horse battery staple"
+
+
+def _operator(
+    session_factory: Callable[[], Session],
+    *,
+    organization_id: uuid.UUID,
+    email: str,
+    is_superuser: bool = True,
+    is_active: bool = True,
+    with_password: bool = True,
+    verified: bool = True,
+    vouched: bool = False,
+) -> uuid.UUID:
+    """An identity that can take the role unless a flag says otherwise."""
+    session = session_factory()
+    try:
+        user = User(
+            email=email,
+            full_name=email.split("@")[0].title(),
+            active_organization_id=organization_id,
+            is_superuser=is_superuser,
+            is_active=is_active,
+            hashed_password=hash_password(_PASSWORD) if with_password else None,
+            email_verified_at=datetime.now(UTC) if verified else None,
+            email_vouched_at=datetime.now(UTC) if vouched else None,
+        )
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+        session.add(
+            OrganizationMember(organization_id=organization_id, user_id=user.id, role="member", status="active")
+        )
+        session.commit()
+        return user.id
+    finally:
+        session.close()
+
+
+def _is_superuser(session_factory: Callable[[], Session], user_id: uuid.UUID) -> bool:
+    session = session_factory()
+    try:
+        user = session.get(User, user_id)
+        assert user is not None
+        return user.is_superuser
+    finally:
+        session.close()
+
+
+def _provisioned(client: TestClient, master_key_header: dict[str, str]) -> None:
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == 200
+
+
+def _claim(client: TestClient, master_key_header: dict[str, str], email: str = "owner@example.com") -> None:
+    """Give the bootstrap operator an address and a password, which claims the deployment."""
+    claimed = client.put(
+        f"{API_ROOT}/auth/password", headers=master_key_header, json={"email": email, "new_password": _PASSWORD}
+    )
+    assert claimed.status_code == 200, claimed.text
+
+
+def _hand_over(client: TestClient, user_id: uuid.UUID, headers: dict[str, str] | None = None, **body: str) -> Any:
+    return client.post(f"{API_ROOT}/admin/users/{user_id}/bootstrap-operator", headers=headers, json=body or None)
+
+
+def test_the_master_key_hands_the_role_to_another_operator(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    _provisioned(client, master_key_header)
+    previous = _bootstrap_user_id(db_session_factory)
+    successor = _operator(
+        db_session_factory, organization_id=_default_organization_id(db_session_factory), email="grace@example.com"
+    )
+
+    response = _hand_over(client, successor, master_key_header)
+
+    assert response.status_code == 204, response.text
+    assert _bootstrap_user_id(db_session_factory) == successor
+    # The previous one stays an operator, now an ordinary one the successor may demote.
+    assert _is_superuser(db_session_factory, previous) is True
+    listed = _list(client, master_key_header)
+    assert _row(listed, previous)["is_bootstrap_operator"] is False
+    assert _row(listed, successor)["is_bootstrap_operator"] is True
+    # The master key now acts as the successor.
+    assert _row(listed, successor)["is_self"] is True
+    demoted = client.patch(
+        f"{API_ROOT}/admin/users/{previous}", headers=master_key_header, json={"is_superuser": False}
+    )
+    assert demoted.status_code == 200, demoted.text
+
+
+def test_the_bootstrap_session_hands_the_role_on_with_its_current_password(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """The dashboard path: a session, so a stolen cookie alone is not enough."""
+    _provisioned(client, master_key_header)
+    _claim(client, master_key_header)
+    successor = _operator(
+        db_session_factory, organization_id=_default_organization_id(db_session_factory), email="grace@example.com"
+    )
+    signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "owner@example.com", "password": _PASSWORD})
+    assert signed_in.status_code == 200, signed_in.text
+
+    try:
+        missing = _hand_over(client, successor)
+        wrong = _hand_over(client, successor, current_password="not the password")
+        assert _bootstrap_user_id(db_session_factory) != successor
+        handed = _hand_over(client, successor, current_password=_PASSWORD)
+    finally:
+        client.cookies.clear()
+
+    assert missing.status_code == 400, missing.text
+    assert "current password" in missing.text
+    assert wrong.status_code == 400, wrong.text
+    assert handed.status_code == 204, handed.text
+    assert _bootstrap_user_id(db_session_factory) == successor
+
+
+def test_after_a_handover_the_master_key_acts_on_the_successor(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """Master-key sign-in stays retired, and a master-key password reset now lands on the successor."""
+    _provisioned(client, master_key_header)
+    _claim(client, master_key_header)
+    successor = _operator(
+        db_session_factory, organization_id=_default_organization_id(db_session_factory), email="grace@example.com"
+    )
+    assert _hand_over(client, successor, master_key_header).status_code == 204
+
+    sign_in = client.post(f"{API_ROOT}/auth/session", json={"master_key": test_config.master_key})
+    reset = client.put(f"{API_ROOT}/auth/password", headers=master_key_header, json={"new_password": "a-new-password"})
+    client.cookies.clear()
+    as_successor = client.post(
+        f"{API_ROOT}/auth/session", json={"email": "grace@example.com", "password": "a-new-password"}
+    )
+    client.cookies.clear()
+
+    assert sign_in.status_code == 403, sign_in.text
+    assert reset.status_code == 200, reset.text
+    assert as_successor.status_code == 200, as_successor.text
+
+
+def test_handing_over_an_unclaimed_deployment_claims_it(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """The successor holds a password, so master-key sign-in retires with the handover."""
+    _provisioned(client, master_key_header)
+    assert client.post(f"{API_ROOT}/auth/session", json={"master_key": test_config.master_key}).status_code == 200
+    client.cookies.clear()
+    successor = _operator(
+        db_session_factory, organization_id=_default_organization_id(db_session_factory), email="grace@example.com"
+    )
+
+    assert _hand_over(client, successor, master_key_header).status_code == 204
+
+    sign_in = client.post(f"{API_ROOT}/auth/session", json={"master_key": test_config.master_key})
+    client.cookies.clear()
+    assert sign_in.status_code == 403, sign_in.text
+
+
+def test_the_access_probe_says_who_holds_the_role(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    _provisioned(client, master_key_header)
+    _, token = _session_for(
+        db_session_factory,
+        organization_id=_default_organization_id(db_session_factory),
+        email="operator@example.com",
+        is_superuser=True,
+    )
+
+    as_master_key = client.get(f"{API_ROOT}/admin/access", headers=master_key_header)
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+    try:
+        as_operator = client.get(f"{API_ROOT}/admin/access")
+    finally:
+        client.cookies.clear()
+
+    assert as_master_key.json() == {"granted": True, "is_bootstrap_operator": True}
+    assert as_operator.json() == {"granted": True, "is_bootstrap_operator": False}
+
+
+def test_another_operator_cannot_take_the_role(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """A 400 and not a 403, which would sign an operator in good standing out."""
+    _provisioned(client, master_key_header)
+    previous = _bootstrap_user_id(db_session_factory)
+    operator_id, token = _session_for(
+        db_session_factory,
+        organization_id=_default_organization_id(db_session_factory),
+        email="operator@example.com",
+        is_superuser=True,
+    )
+
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+    try:
+        response = _hand_over(client, operator_id)
+    finally:
+        client.cookies.clear()
+
+    assert response.status_code == 400, response.text
+    assert _bootstrap_user_id(db_session_factory) == previous
+
+
+@pytest.mark.parametrize(
+    ("flags", "detail"),
+    [
+        ({"is_superuser": False}, "Make this account an operator"),
+        ({"is_active": False}, "Reactivate this account"),
+        ({"with_password": False}, "no password"),
+        ({"verified": False}, "not verified"),
+        ({"vouched": True}, "only vouched for"),
+    ],
+)
+def test_a_target_that_could_not_hold_the_role_is_refused(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    flags: dict[str, bool],
+    detail: str,
+) -> None:
+    _provisioned(client, master_key_header)
+    previous = _bootstrap_user_id(db_session_factory)
+    target = _operator(
+        db_session_factory,
+        organization_id=_default_organization_id(db_session_factory),
+        email="grace@example.com",
+        **flags,
+    )
+
+    response = _hand_over(client, target, master_key_header)
+
+    assert response.status_code == 400, response.text
+    assert detail in response.text
+    assert _bootstrap_user_id(db_session_factory) == previous
+
+
+def test_a_target_whose_address_is_blocked_is_refused(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """Otherwise the role would land on an address the blocklist already refuses sign-in to."""
+    _provisioned(client, master_key_header)
+    target = _operator(
+        db_session_factory, organization_id=_default_organization_id(db_session_factory), email="grace@example.com"
+    )
+    blocked = client.post(f"{API_ROOT}/admin/blocked-emails", headers=master_key_header, json={"value": "example.com"})
+    assert blocked.status_code == 201, blocked.text
+
+    response = _hand_over(client, target, master_key_header)
+
+    assert response.status_code == 400, response.text
+    assert "blocked" in response.text
+
+
+def test_handing_the_role_to_itself_or_nobody_is_refused(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    _provisioned(client, master_key_header)
+    previous = _bootstrap_user_id(db_session_factory)
+
+    itself = _hand_over(client, previous, master_key_header)
+    nobody = _hand_over(client, uuid.uuid4(), master_key_header)
+
+    assert itself.status_code == 400, itself.text
+    assert nobody.status_code == 404, nobody.text
+
+
+def test_another_operator_cannot_get_a_password_link_for_the_bootstrap_operator(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """With no mail the link comes back to the caller, who could sign in as the bootstrap operator."""
+    _provisioned(client, master_key_header)
+    _claim(client, master_key_header)
+    bootstrap_id = _bootstrap_user_id(db_session_factory)
+    _, token = _session_for(
+        db_session_factory,
+        organization_id=_default_organization_id(db_session_factory),
+        email="operator@example.com",
+        is_superuser=True,
+    )
+
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+    try:
+        refused = client.post(f"{API_ROOT}/admin/users/{bootstrap_id}/password-link")
+    finally:
+        client.cookies.clear()
+    allowed = client.post(f"{API_ROOT}/admin/users/{bootstrap_id}/password-link", headers=master_key_header)
+
+    assert refused.status_code == 409, refused.text
+    assert allowed.status_code == 201, allowed.text
+
+
+def test_a_bootstrap_session_without_a_password_cannot_hand_over(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """A master-key sign-in session on an unclaimed deployment has no password to step up with."""
+    _provisioned(client, master_key_header)
+    successor = _operator(
+        db_session_factory, organization_id=_default_organization_id(db_session_factory), email="grace@example.com"
+    )
+    assert client.post(f"{API_ROOT}/auth/session", json={"master_key": test_config.master_key}).status_code == 200
+    try:
+        response = _hand_over(client, successor)
+    finally:
+        client.cookies.clear()
+
+    assert response.status_code == 400, response.text
+    assert "Set a password" in response.text
+    assert _bootstrap_user_id(db_session_factory) != successor
+
+
+def test_the_bootstrap_session_cannot_get_a_password_link_for_its_own_account(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """A link handed back would set its password without the current one, getting past the step-up."""
+    _provisioned(client, master_key_header)
+    _claim(client, master_key_header)
+    bootstrap_id = _bootstrap_user_id(db_session_factory)
+    assert (
+        client.post(f"{API_ROOT}/auth/session", json={"email": "owner@example.com", "password": _PASSWORD}).status_code
+        == 200
+    )
+    try:
+        response = client.post(f"{API_ROOT}/admin/users/{bootstrap_id}/password-link")
+    finally:
+        client.cookies.clear()
+
+    assert response.status_code == 409, response.text
+
+
+def test_a_handover_voids_a_password_link_issued_before_it(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """Whoever was handed the link must not be able to set the new bootstrap operator's password."""
+    _provisioned(client, master_key_header)
+    successor = _operator(
+        db_session_factory, organization_id=_default_organization_id(db_session_factory), email="grace@example.com"
+    )
+    link = client.post(f"{API_ROOT}/admin/users/{successor}/password-link", headers=master_key_header)
+    assert link.status_code == 201, link.text
+    token = link.json()["link"].rsplit("token=", 1)[-1]
+
+    assert _hand_over(client, successor, master_key_header).status_code == 204
+    redeemed = client.post(
+        f"{API_ROOT}/auth/password/reset/confirm", json={"token": token, "new_password": "a-new-password"}
+    )
+
+    assert redeemed.status_code == 400, redeemed.text
+
+
+@pytest.mark.asyncio
+async def test_the_marker_moves_only_from_the_identity_it_still_names(async_db: AsyncSession) -> None:
+    """Two handovers racing from the same operator: the second finds the marker moved."""
+    anchor, _ = await _identity(async_db, full_name="Operator")
+    await _mark_bootstrap(async_db, anchor)
+    first, _ = await _identity(async_db, full_name="First", is_superuser=True)
+    second, _ = await _identity(async_db, full_name="Second", is_superuser=True)
+    markers = BootstrapMarkerRepository(async_db)
+
+    assert await markers.move(from_user_id=anchor.id, to_user_id=first.id) is True
+    assert await markers.move(from_user_id=anchor.id, to_user_id=second.id) is False
+    assert await markers.user_id() == first.id

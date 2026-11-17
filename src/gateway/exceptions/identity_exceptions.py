@@ -81,6 +81,14 @@ class AccountErasureFailedError(TenancyError):
         )
 
 
+class BootstrapHandoverRefusedError(TenancyValidationError):
+    """A handover of the bootstrap operator role that would not leave a usable anchor.
+
+    A 400 rather than a 403 even when the caller is the reason, because the dashboard's
+    `apiFetch` ends the session on a 403 and the caller here is an operator in good standing.
+    """
+
+
 class EmptyDeploymentUserUpdateError(TenancyValidationError):
     """A change request that names neither flag.
 
@@ -778,6 +786,7 @@ __all__ = [
     "BlockedEmailEntryExistsError",
     "BlockedEmailEntryNotFoundError",
     "BlockedEmailError",
+    "BootstrapHandoverRefusedError",
     "BootstrapOperatorProtectedError",
     "CurrentPasswordIncorrectError",
     "CurrentPasswordRequiredError",

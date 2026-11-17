@@ -36,6 +36,7 @@ from gateway.schemas.identity import (
     BlockedEmailCreateRequest,
     BlockedEmailPublic,
     BlockedEmailsPublic,
+    BootstrapHandoverRequest,
     PasswordLinkPublic,
 )
 
@@ -74,7 +75,10 @@ async def get_administration_access(
     the same thing without one. It publishes only the caller's own standing,
     which they could establish by trying an endpoint anyway.
     """
-    return DeploymentAdminAccessPublic(granted=await service.has_administration_access(current_identity))
+    return DeploymentAdminAccessPublic(
+        granted=await service.has_administration_access(current_identity),
+        is_bootstrap_operator=await service.is_bootstrap_operator(current_identity),
+    )
 
 
 @router.get("/users")
@@ -131,11 +135,52 @@ async def update_deployment_user(
 
 
 @router.post(
+    "/users/{user_id}/bootstrap-operator",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_deployment_administration)],
+)
+async def hand_over_bootstrap_operator(
+    identities: IdentityServiceDep,
+    current_identity: CurrentIdentity,
+    master_key: Annotated[str | None, Depends(verify_master_key)],
+    user_id: uuid.UUID,
+    body: BootstrapHandoverRequest | None = None,
+) -> None:
+    """Make another operator the deployment's bootstrap operator.
+
+    The bootstrap operator is the account the master key acts as: master-key sign-in
+    and requests carrying the master key resolve to it, and it cannot be deactivated or
+    lose operator access. Only the current bootstrap operator, or a request carrying the
+    master key, may hand the role on, and from a dashboard session it takes the caller's
+    ``current_password``. The previous bootstrap operator stays an operator, which the new
+    one may remove afterwards.
+
+    Refused with 400 when the caller is another operator, when the current password is
+    missing or wrong, for a session whose account has no password, and for a target that
+    is the caller, deactivated, not an operator, or without an unblocked email address that
+    is verified rather than only vouched for, and a password.
+
+    The master key keeps working and now acts as the new bootstrap operator, including
+    resetting their password, so rotate it when whoever held it should no longer.
+    """
+    await identities.hand_over_bootstrap_operator(
+        actor=current_identity,
+        user_id=user_id,
+        current_password=body.current_password if body is not None else None,
+        by_master_key=master_key is not None,
+    )
+
+
+@router.post(
     "/users/{user_id}/password-link",
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_deployment_administration)],
 )
-async def issue_password_link(identities: IdentityServiceDep, user_id: uuid.UUID) -> PasswordLinkPublic:
+async def issue_password_link(
+    identities: IdentityServiceDep,
+    master_key: Annotated[str | None, Depends(verify_master_key)],
+    user_id: uuid.UUID,
+) -> PasswordLinkPublic:
     """Give an account a single-use link that sets its password, for someone who cannot sign in.
 
     Where this deployment can mail links, the link goes to the account's address and is not returned, the
@@ -146,9 +191,10 @@ async def issue_password_link(identities: IdentityServiceDep, user_id: uuid.UUID
 
     Refused with 409 for a deactivated account, one with no address, one that has no password and signs in
     with a provider or a passkey (its owner adds a password once signed in), and, where open_signup is
-    disabled, an unverified address no organization still has as a member or invitee.
+    disabled, an unverified address no organization still has as a member or invitee. The bootstrap operator's
+    account is refused too unless the request carries the master key.
     """
-    link = await identities.issue_password_link(user_id)
+    link = await identities.issue_password_link(account_id=user_id, by_master_key=master_key is not None)
     return PasswordLinkPublic(mail_sent=link.mail_sent, link=link.link, expires_at=link.expires_at)
 
 

@@ -263,7 +263,7 @@ from gateway.services.mcp_catalog import McpCatalogService
 from gateway.services.model_discovery_service import DiscoveryDial, HostedDiscovery
 from gateway.services.oauth_service import redirect_uri
 from gateway.services.organization_pricing_service import OrganizationPricingService
-from gateway.services.organizations import AccountRelease, OrganizationClaimedDomains
+from gateway.services.organizations import AccountRelease, BootstrapOperatorMarker, OrganizationClaimedDomains
 from gateway.services.overview import OverviewService
 from gateway.services.pricing import DeploymentPricingService
 from gateway.services.pricing_refresh_service import ModelsDevPriceUpdates
@@ -617,6 +617,7 @@ def get_identity_service(
         identity_provider=identity_provider,
         domain_claims=VerifiedDomainLookup(OrganizationDomainRepository(uow)),
         organizations=organizations,
+        bootstrap_operator=BootstrapOperatorMarker(OrganizationRepositories.on(uow)),
         sign_in_listener=DomainAutoJoinListener(
             OrganizationDomainRepository(uow), OrganizationMemberRepository(uow), organizations
         ),

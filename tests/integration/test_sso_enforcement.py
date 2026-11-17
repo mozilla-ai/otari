@@ -42,6 +42,7 @@ from gateway.models.tenancy import (
     WebAuthnCredential,
 )
 from gateway.repositories.identity import IdentityRepositories, OAuthPendingStateRepository
+from gateway.repositories.organizations import OrganizationRepositories
 from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository
 from gateway.repositories.tenancy.organization_domain_repository import OrganizationDomainRepository
 from gateway.schemas.identity import OIDCConnectionRequest
@@ -49,7 +50,7 @@ from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash
 from gateway.services.identity import IdentityService, OIDCConnectionService
 from gateway.services.identity._discovery import DiscoveredProvider
 from gateway.services.mail import Mailer
-from gateway.services.organizations import OrganizationClaimedDomains
+from gateway.services.organizations import BootstrapOperatorMarker, OrganizationClaimedDomains
 from gateway.services.password_service import hash_password
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.tenancy import (
@@ -199,6 +200,7 @@ def _identity_service(db: AsyncSession) -> IdentityService:
         identity_provider=policy,
         domain_claims=VerifiedDomainLookup(OrganizationDomainRepository(uow)),
         organizations=organizations,
+        bootstrap_operator=BootstrapOperatorMarker(OrganizationRepositories.on(uow)),
         sign_in_listener=DomainAutoJoinListener(
             OrganizationDomainRepository(uow), OrganizationMemberRepository(uow), organizations
         ),
@@ -1448,7 +1450,7 @@ async def test_one_tenant_enforcement_does_not_lock_a_person_out_of_another(asyn
     signed_in = await _identity_service(async_db).sign_in(bystander, asserted_email=None)
     assert signed_in.active_organization_id == elsewhere.id
 
-    link = await _identity_service(async_db).issue_password_link(bystander.id)
+    link = await _identity_service(async_db).issue_password_link(account_id=bystander.id, by_master_key=True)
     assert link.link is not None
 
 
@@ -1499,7 +1501,7 @@ async def test_a_password_link_is_refused_for_a_member_of_an_enforcing_organizat
     await async_db.commit()
 
     with pytest.raises(PasswordLinkUnavailableError):
-        await _identity_service(async_db).issue_password_link(member.id)
+        await _identity_service(async_db).issue_password_link(account_id=member.id, by_master_key=True)
 
 
 async def test_setting_a_dashboard_password_is_refused_for_a_member_of_an_enforcing_organization(

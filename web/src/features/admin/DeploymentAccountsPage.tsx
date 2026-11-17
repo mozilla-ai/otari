@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react"
 import {
+  FiAnchor,
   FiCheckCircle,
   FiKey,
   FiShield,
@@ -26,6 +27,7 @@ import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import {
   useDeploymentAdminAccess,
   useDeploymentUsers,
+  useIsBootstrapOperator,
   useUpdateDeploymentUser,
 } from "@/shared/api/deployment"
 import { formatRelative } from "@/shared/helpers/format"
@@ -35,10 +37,12 @@ import { useDebounced } from "@/shared/hooks/useDebounced"
 import {
   accountLabel,
   accountLockoutReason,
+  bootstrapHandoverBlockedReason,
   organizationSummary,
   passwordLinkBlockedReason,
 } from "./accounts"
 import { BlockedEmailsSection } from "./BlockedEmailsSection"
+import { BootstrapHandoverDialog } from "./BootstrapHandoverDialog"
 import { PasswordLinkDialog } from "./PasswordLinkDialog"
 
 // Every account on the deployment, which is the one identity list that is not
@@ -49,8 +53,10 @@ import { PasswordLinkDialog } from "./PasswordLinkDialog"
 //
 // The controls match what the API serves: deactivate (which also ends that
 // account's dashboard sessions), reactivate, grant or remove operator access,
-// send a password link to someone who cannot sign in, and keep the email
-// blocklist (`BlockedEmailsSection`). Creating an account
+// send a password link to someone who cannot sign in, hand the bootstrap
+// operator role to another operator (offered to the bootstrap operator alone,
+// the one account the gateway lets do it), and keep the email blocklist
+// (`BlockedEmailsSection`). Creating an account
 // is not here, because an account without a
 // membership can do nothing and memberships are the organization surface's; nor
 // is deleting one, because historical attribution resolves through rows that
@@ -97,7 +103,9 @@ export function DeploymentAccountsPage() {
   const search = useDebounced(url.get("q").trim().slice(0, MAX_SEARCH_LENGTH))
   const accounts = useDeploymentUsers({ page, pageSize, search }, isGranted)
   const update = useUpdateDeploymentUser()
+  const isBootstrapOperator = useIsBootstrapOperator().data === true
   const [deactivating, setDeactivating] = useState<DeploymentUser>()
+  const [handingTo, setHandingTo] = useState<DeploymentUser>()
   const [linkFor, setLinkFor] = useState<DeploymentUser>()
 
   const rows = accounts.data?.data ?? []
@@ -172,8 +180,18 @@ export function DeploymentAccountsPage() {
         cell: (account) => {
           const blocked = accountLockoutReason(account)
           const linkBlocked = passwordLinkBlockedReason(account)
+          const handoverBlocked = bootstrapHandoverBlockedReason(account)
           return (
             <RowActionRow>
+              {isBootstrapOperator ? (
+                <RowAction
+                  icon={FiAnchor}
+                  label="Make bootstrap operator"
+                  isDisabled={handoverBlocked !== undefined}
+                  ariaLabel={`Make ${accountLabel(account)} the bootstrap operator${handoverBlocked ? ` (${handoverBlocked})` : ""}`}
+                  onPress={() => setHandingTo(account)}
+                />
+              ) : null}
               <RowAction
                 icon={FiKey}
                 label="Password link"
@@ -244,7 +262,7 @@ export function DeploymentAccountsPage() {
         },
       },
     ],
-    [update],
+    [update, isBootstrapOperator],
   )
 
   if (access.isLoading) {
@@ -298,7 +316,8 @@ export function DeploymentAccountsPage() {
       <InfoBanner>
         Your own account, and the bootstrap operator that master-key sign-in
         reaches this deployment through, cannot be deactivated or lose operator
-        access here. Everything else on this page applies to them normally.
+        access here. Everything else on this page applies to them normally. The
+        bootstrap operator can hand that role to another operator.
       </InfoBanner>
 
       <SearchField
@@ -364,6 +383,14 @@ export function DeploymentAccountsPage() {
           }
         }}
       />
+
+      {handingTo ? (
+        <BootstrapHandoverDialog
+          key={handingTo.id}
+          account={handingTo}
+          onClose={() => setHandingTo(undefined)}
+        />
+      ) : null}
 
       <PasswordLinkDialog
         account={linkFor}

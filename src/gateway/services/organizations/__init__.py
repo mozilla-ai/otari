@@ -6,6 +6,7 @@ Most of it is still in ``services/tenancy``; code new to the domain lands here.
 from gateway.repositories.users_repository import AccessLists, BudgetUse
 from gateway.services.organizations._account_release import AccountRelease, ReleasedOrganizations
 from gateway.services.organizations._blocked_addresses import BlockedAddresses
+from gateway.services.organizations._bootstrap_operator import BootstrapOperatorMarker
 from gateway.services.organizations._claimed_domains import (
     ClaimedDomain,
     ClaimedDomains,
@@ -23,6 +24,7 @@ __all__ = [
     "AccountRelease",
     "AccessLists",
     "BlockedAddresses",
+    "BootstrapOperatorMarker",
     "BudgetUse",
     "ClaimedDomain",
     "ClaimedDomains",

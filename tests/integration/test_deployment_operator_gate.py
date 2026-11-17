@@ -410,7 +410,7 @@ def test_the_admin_router_keeps_its_own_404_rather_than_the_gate_403(
 
     assert listed.status_code == 404, listed.text
     assert access.status_code == 200, access.text
-    assert access.json() == {"granted": False}
+    assert access.json() == {"granted": False, "is_bootstrap_operator": False}
 
 
 # =============================================================================

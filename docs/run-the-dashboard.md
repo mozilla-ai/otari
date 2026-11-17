@@ -60,6 +60,8 @@ page. The master key still works for the management API and can reset the
 operator's password, but only the operator's. For a member who forgot theirs,
 send a password link from **Accounts** (see
 [Deployment-wide account administration](sign-in.md#deployment-wide-account-administration)).
+To make another operator the one the master key acts as, see
+[Hand over the bootstrap operator](#hand-over-the-bootstrap-operator).
 
 Which sign-in forms the page offers is described in
 [Dashboard sessions and identity](sign-in.md#dashboard-sessions-and-identity).
@@ -86,6 +88,37 @@ Which sign-in forms the page offers is described in
 
 The [Self-hosted quickstart](self-hosted-quickstart.md) has a complete request
 example.
+
+## Hand over the bootstrap operator
+
+The bootstrap operator is the account the master key acts as (see
+[The bootstrap operator](sign-in.md#the-bootstrap-operator)). To give the role to
+someone else:
+
+1. Make sure their account is active, has a password and an email address it
+   verified by email (not one only vouched for by a passed-on link), and is not
+   blocked.
+2. On **Accounts**, click **Make operator** on their row if they are not an
+   operator yet.
+3. Signed in as the bootstrap operator, click **Make bootstrap operator** on
+   their row, enter your current password, and confirm. An account with no
+   password sets one in **Account settings** first, or uses the command below.
+
+   Or, wherever the master key is at hand, run:
+
+   ```bash
+   OTARI_URL=https://otari.example.com OTARI_MASTER_KEY=otari-mk-... \
+     otari operator handover grace@example.com
+   ```
+
+   The command asks before it acts, and `--yes` skips the question. It refuses
+   to send the master key over plain HTTP to any host but this machine.
+4. If someone who should no longer reset the new bootstrap operator's password
+   holds the master key, rotate it: from **Settings** for a key Otari generated,
+   or by changing `OTARI_MASTER_KEY` where you set it.
+
+You stay an operator. The new bootstrap operator can remove that from
+**Accounts**.
 
 ## The deployment view
 
