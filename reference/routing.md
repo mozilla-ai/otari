@@ -323,8 +323,10 @@ request schemas.
 
 - A plan may contain at most five candidates, including router pools and
   `on_failure`.
-- Targets must be concrete provider or instance selectors. Policies and aliases
-  cannot chain.
+- Targets must be concrete provider or instance selectors, or name one of the
+  workspace's [provider keys by its request prefix](https://docs.otari.ai/guides/organize/model-providers#add-a-key-for-your-own-endpoint),
+  so a policy can fall over between two keys on the same endpoint. Policies and
+  aliases cannot chain.
 - Policy names cannot contain `:` or `/` or collide with an alias or provider
   instance.
 - `routing.enabled: false` disables policy resolution but still validates the

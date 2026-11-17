@@ -7479,6 +7479,39 @@
         "title": "DecisionUsage",
         "type": "object"
       },
+      "DeleteAccountRequest": {
+        "description": "The confirmation an account deletion needs.",
+        "example": {
+          "confirm_email": "ada@example.com",
+          "current_password": "..."
+        },
+        "properties": {
+          "confirm_email": {
+            "description": "The account's email address, typed to confirm the deletion.",
+            "maxLength": 255,
+            "title": "Confirm Email",
+            "type": "string"
+          },
+          "current_password": {
+            "anyOf": [
+              {
+                "maxLength": 72,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The account's password. Required when the account has one.",
+            "title": "Current Password"
+          }
+        },
+        "required": [
+          "confirm_email"
+        ],
+        "title": "DeleteAccountRequest",
+        "type": "object"
+      },
       "DeploymentAdminAccessPublic": {
         "description": "Whether the caller may reach the deployment administration surface.\n\nThe one endpoint in that surface that answers 200 for everybody, and\ndeliberately: the rest refuse with 404 so they do not confirm they exist,\nwhich leaves the dashboard nothing to gate its navigation on but a failed\nrequest. This says the same thing a caller could learn by trying, without\nthe try.",
         "properties": {
@@ -34132,6 +34165,49 @@
         ]
       }
     },
+    "/api/v1/auth/account": {
+      "delete": {
+        "description": "Delete the caller's account and sign them out.\n\nErases the account's sign-in identity, sessions, passkeys, Playground\nconversations, agent traces, telemetry, files and keys. Usage rows are\nkept for the deployment's totals under a new id that does not identify\nthe person, and an organization nobody else is active in is renamed, its\nkeys revoked and its stored credentials cleared. Invitations to the\naccount's address are withdrawn everywhere. Refused while the account is the last active owner of\nan organization other people are active in.",
+        "operationId": "auth-delete_own_account",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Own Account",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/v1/auth/oauth/{provider}/authorize": {
       "get": {
         "description": "Start an OAuth sign-in: where to send the browser, and the state to keep.\n\nSafe to repeat. Each call keeps the sign-ins the browser already has in\nflight, up to a few at once, after which the oldest is dropped.\n\nNOTE: This GET writes. It records the authorization and sets an HttpOnly\ncookie, and that pair is what lets the callback refuse a code this\ndeployment never asked for, or one presented from another browser.",
@@ -40088,7 +40164,7 @@
     },
     "/api/v1/key/usage/summary": {
       "get": {
-        "description": "Spend, tokens and request volume of the calling key's own requests.\n\nThe same summary as ``GET /api/v1/usage/summary``, over the rows this key\nwrote alone: the same bounded window (default last 30 days), breakdowns, tag\nfilters and ``group_by_tag``. Tag a request with ``metadata`` and pass\n``group_by_tag`` to read what each kind of request cost.",
+        "description": "Spend, tokens and request volume of the calling key's own requests.\n\nThe same summary as ``GET /api/v1/usage/summary``, over the rows this key\nwrote alone: the same bounded window (default last 30 days), breakdowns, tag\nfilters and ``group_by_tag``. Tag a request with ``metadata`` and pass\n``group_by_tag`` to read what each kind of request cost. The key's own user\nis listed in ``by_user`` without a ``label``.",
         "operationId": "key-get_key_usage_summary",
         "parameters": [
           {
