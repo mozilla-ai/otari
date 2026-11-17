@@ -17,6 +17,7 @@ from gateway.api.deps._base import (
     get_config,
     get_container,
     get_enabled_features,
+    get_log_writer,
     get_membership_listener,
     get_unit_of_work,
     get_user_access,
@@ -1541,11 +1542,6 @@ def require_capability(capability: str) -> Callable[[EntitlementPort], Awaitable
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
 
     return _require
-
-
-async def get_log_writer(request: Request) -> LogWriter:
-    writer: LogWriter = request.app.state.log_writer
-    return writer
 
 
 def _video_rate_lookup(db: AsyncSession) -> VideoRateLookup:

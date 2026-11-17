@@ -1,4 +1,4 @@
-"""The request-scoped dependencies every other builder in this package needs."""
+"""The shared request-scoped dependencies the rest of this package builds on."""
 
 from typing import Annotated
 
@@ -16,6 +16,7 @@ from gateway.repositories.organizations import OrganizationRepositories
 from gateway.repositories.traces import TracesRepositories
 from gateway.services.api_keys import ApiKeyMembershipListener
 from gateway.services.budgets import BudgetMembershipListener
+from gateway.services.log_writer import LogWriter
 from gateway.services.organizations import UserAccess
 from gateway.services.routing import clear_router_backend_cache
 from gateway.services.tenancy import MembershipListener, MembershipListeners
@@ -122,3 +123,9 @@ MembershipListenerDep = Annotated[MembershipListener, Depends(get_membership_lis
 def get_user_access(uow: UnitOfWorkDep) -> UserAccess:
     """Build the organizations domain's read of users' access lists on the request's Unit of Work."""
     return UserAccess(OrganizationRepositories.on(uow))
+
+
+async def get_log_writer(request: Request) -> LogWriter:
+    """Return the usage-log writer this app's lifespan built."""
+    writer: LogWriter = request.app.state.log_writer
+    return writer
