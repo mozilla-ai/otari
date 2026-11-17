@@ -10,7 +10,7 @@ the controller needs are here; the React wrapper and the barrel are not.
 The files are upstream's but for one patch, marked "Patched in otari" in
 `capture.ts`. Tailwind's preflight gives every box `border: 0 solid`, and
 upstream's picture of the DOM kept the solid style but dropped the zero width,
-so every box in the bent picture grew a 3px grey border. Biome and the
+so every box in the bent picture grew a 3px gray border. Biome and the
 semantic-token check skip this directory so the copy stays comparable with
 upstream. Do not edit it otherwise.
 

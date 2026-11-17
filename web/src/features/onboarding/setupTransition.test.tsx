@@ -160,12 +160,12 @@ it("keeps the copy unreachable while the wave treats it as the live view", async
   expect(copy.style.pointerEvents).toBe("none")
 })
 
-it("hands the payoff its input once the front has crossed it, before the colour fades", async () => {
+it("hands the payoff its input once the front has crossed it, before the color fades", async () => {
   const { frame } = await land()
   await waitFor(() => expect(waves[0]?.updates.at(-1)?.revealed).toBe(true))
   expect(faceIn(frame)).toHaveAttribute("inert")
 
-  // Past the anticipation and the front's travel, with the colour still on
+  // Past the anticipation and the front's travel, with the color still on
   // the edges: the run has not finished.
   waves[0].debug.progress = 0.6
 

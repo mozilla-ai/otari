@@ -185,7 +185,7 @@ function carry(
         copy.querySelector(`[${LANDING_SOURCE}]`) ??
         copy.querySelector("footer"),
     })
-    // The controller hands the face over only when the colour has left its
+    // The controller hands the face over only when the color has left its
     // edges, which on this type is the end of the run. The front has crossed
     // the frame well before, so input goes to the face then. Read off the
     // wave's own frames, so a paused tab keeps the two in step.
