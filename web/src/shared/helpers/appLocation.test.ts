@@ -8,6 +8,7 @@ import {
   routeParam,
   routePath,
   routeSearchParams,
+  routeWithoutFragment,
 } from "@/shared/helpers/appLocation"
 
 describe("currentRoute", () => {
@@ -91,5 +92,14 @@ describe("navigateTo and followInAppLink", () => {
     expect(click("/providers", { metaKey: true })).not.toHaveBeenCalled()
     expect(click("https://example.com/")).not.toHaveBeenCalled()
     expect(window.location.pathname).toBe("/")
+  })
+})
+
+describe("routeWithoutFragment", () => {
+  it("keeps the path and query and drops the fragment", () => {
+    expect(routeWithoutFragment("/usage?range=7d#token=t")).toBe(
+      "/usage?range=7d",
+    )
+    expect(routeWithoutFragment("#key=k")).toBe("/")
   })
 })

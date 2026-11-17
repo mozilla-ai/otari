@@ -1,4 +1,5 @@
 import { type OAuthStartResult, startOAuthSignIn } from "@/shared/api/client"
+import { routeWithoutFragment } from "@/shared/helpers/appLocation"
 
 import { resolveSignInReturnRoute } from "./publicAuthPaths"
 
@@ -47,7 +48,10 @@ export function rememberOAuthState(
   }
   window.sessionStorage.removeItem(RETURN_KEY)
   try {
-    window.sessionStorage.setItem(RETURN_KEY, returnRoute)
+    // A page's path and query, never its fragment, which is where a link's
+    // secret rides: what is kept here names a page and authorizes nothing.
+    // codeql[js/clear-text-storage-of-sensitive-data]
+    window.sessionStorage.setItem(RETURN_KEY, routeWithoutFragment(returnRoute))
   } catch {
     // Storage full: the sign-in still starts, and lands on the home page.
   }

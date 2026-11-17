@@ -134,3 +134,12 @@ export function routeSearchParams(route: string): URLSearchParams {
     queryAt === -1 ? "" : beforeHash.slice(queryAt + 1),
   )
 }
+
+/**
+ * A route without its fragment, for keeping somewhere other than the address
+ * bar: a link's secret rides in the fragment, so this is the part that holds
+ * none.
+ */
+export function routeWithoutFragment(route: string): string {
+  return route.split("#", 1)[0] || "/"
+}
