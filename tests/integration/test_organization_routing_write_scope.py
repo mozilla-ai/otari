@@ -290,6 +290,43 @@ def test_a_fallback_may_name_the_organizations_keys_by_their_request_prefix(
     assert created.status_code == status.HTTP_200_OK, created.text
 
 
+def test_a_request_prefix_reaches_the_same_key_in_slash_form(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    _slugged_key(db_session_factory, world.alpha, "synth-a")
+
+    created = _post(
+        client,
+        world,
+        "alpha_admin",
+        _POLICIES,
+        _policy_body(world, name="slashed", target="synth-a/hf:zai-org/GLM-4.7"),
+    )
+
+    assert created.status_code == status.HTTP_200_OK, created.text
+
+
+def test_an_alias_elsewhere_named_like_a_request_prefix_does_not_block_it(
+    client: TestClient, master_key_header: dict[str, str], world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    """Alias names span every workspace, so another workspace's alias can share a key's prefix."""
+    _slugged_key(db_session_factory, world.alpha, "synth-a")
+    elsewhere = client.post(
+        f"{API_ROOT}/aliases", json={"name": "synth-a", "target": _ALPHA_TARGET}, headers=master_key_header
+    )
+    assert elsewhere.status_code == status.HTTP_200_OK, elsewhere.text
+
+    created = _post(
+        client,
+        world,
+        "alpha_admin",
+        _POLICIES,
+        _policy_body(world, name="prefixed", target="synth-a:hf:zai-org/GLM-4.7"),
+    )
+
+    assert created.status_code == status.HTTP_200_OK, created.text
+
+
 def test_another_organizations_request_prefix_is_not_a_target(
     client: TestClient, world: _World, db_session_factory: Callable[[], Session]
 ) -> None:

@@ -1845,7 +1845,8 @@ class GatewayConfig(
             msg = f"aliases.{name} target '{target}' must be of the form 'instance:model' or 'provider:model'."
             raise ValueError(msg)
         prefix = target[:cut]
-        if prefix in known_aliases:
+        # Alias names span every workspace, so another workspace's alias may share a key's prefix here.
+        if prefix in known_aliases and prefix not in own_prefixes:
             msg = f"aliases.{name} target '{target}' points at another alias; alias chaining is not supported."
             raise ValueError(msg)
         if prefix in self.providers or prefix in own_prefixes:

@@ -102,9 +102,9 @@ from gateway.schemas.routing import AutomaticFallbackPublic, AutomaticFallbacksR
 from gateway.services.alias_service import all_alias_names
 from gateway.services.model_access import intersect_allowlists, is_model_allowed
 from gateway.services.policy_store import all_policy_names
-from gateway.services.provider_kwargs import normalize_pricing_key
+from gateway.services.provider_kwargs import normalize_pricing_key, split_selector
 from gateway.services.routing import FALLBACK_WINDOW
-from gateway.services.tenancy import OrganizationService
+from gateway.services.tenancy import OrganizationService, OrgProviderKeyService
 from gateway.services.tenancy.authorization import (
     VisibleWorkspaceScope,
     resolve_visible_workspace,
@@ -173,7 +173,9 @@ async def _writable_workspace(
         organization=organization,
         organizations=organizations,
     )
-    await _require_reachable_targets(db, config, user=user, targets=targets, model_provider=model_provider)
+    await _require_reachable_targets(
+        db, config, user=user, workspace_id=workspace.id, targets=targets, model_provider=model_provider
+    )
     return workspace
 
 
@@ -198,6 +200,7 @@ async def _require_reachable_targets(
     config: GatewayConfig,
     *,
     user: TenancyUser,
+    workspace_id: uuid.UUID,
     targets: list[str],
     model_provider: ModelProviderPort | None,
 ) -> None:
@@ -217,10 +220,19 @@ async def _require_reachable_targets(
         return
     indirections = all_alias_names(config) | all_policy_names(config)
     allowlist = await resolve_session_model_allowlist(db, config, user=user, model_provider=model_provider)
+    own_prefixes = await OrgProviderKeyService(db, config).get_workspace_byo_providers(workspace_id=workspace_id)
+
+    def canonical(target: str) -> str:
+        # any-llm knows no key's request prefix, so `synth-a/model` is spelled `synth-a:model` here.
+        split = split_selector(target)
+        if split is not None and split[0] in own_prefixes:
+            return f"{split[0]}:{split[1]}"
+        return normalize_pricing_key(config, target)
+
     unreachable = [
         target
         for target in targets
-        if target not in indirections and not is_model_allowed(allowlist, normalize_pricing_key(config, target))
+        if target not in indirections and not is_model_allowed(allowlist, canonical(target))
     ]
     if unreachable:
         raise HTTPException(
