@@ -39,8 +39,8 @@ export function RestoreFocus({
   return null
 }
 
-/** `sm` 440px, `md` 520px (the default), `lg` 640px, `xl` 928px. */
-export type FormDialogSize = "sm" | "md" | "lg" | "xl"
+/** `sm` 440px, `md` 520px (the default), `lg` 640px. */
+export type FormDialogSize = "sm" | "md" | "lg"
 
 export interface FormDialogProps {
   isOpen: boolean

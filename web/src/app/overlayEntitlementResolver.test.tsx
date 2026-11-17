@@ -228,17 +228,14 @@ describe("the shell's mount point", () => {
     // the surfaces before the page rendered, so a destination this deployment
     // does not host is answerable now and no entitlement query can change it.
     // Waiting on one would hold back a panel that is already correct.
-    // `/organization/usage` is gated on `organization_usage`, which this
-    // bootstrap leaves out, so the base registry gates it off with no overlay
-    // contribution involved.
+    // `/workspaces` is gated on `workspaces`, which this bootstrap leaves out,
+    // so the base registry gates it off with no overlay contribution involved.
     resolved.value = { capabilities: [], isLoading: true }
     await renderShell(
-      <p>ORGANIZATION USAGE</p>,
-      "/organization/usage",
+      <p>WORKSPACES</p>,
+      "/workspaces",
       bootstrap({
-        surfaces: SURFACES.filter(
-          (surface) => surface !== "organization_usage",
-        ),
+        surfaces: SURFACES.filter((surface) => surface !== "workspaces"),
       }),
     )
 

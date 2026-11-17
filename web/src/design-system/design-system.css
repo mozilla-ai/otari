@@ -297,16 +297,6 @@
 .otari-dialog--lg {
   width: 40rem;
 }
-/* The one size that is about the body's shape rather than its length: a frame
- * whose content is two columns side by side, where `lg` leaves the second one
- * too narrow to hold its own controls. `ShareDialog` is the case, and it is the
- * reason this exists rather than a call site widening itself: a width spelled
- * on the dialog loses to the unlayered `.modal__dialog` rule above, so the only
- * class that can win is one in this family. */
-.otari-form-dialog--xl,
-.otari-dialog--xl {
-  width: 58rem;
-}
 
 /* A field fills this dialog. `Field` and `SecretField` cap themselves at
  * `max-w-md`, which is right on a page (a 448px measure under a 620px column

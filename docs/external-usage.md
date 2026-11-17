@@ -100,8 +100,7 @@ in [Event fields](external-usage-reference.md#event-fields).
 
 ## See what you imported
 
-In **Sessions**, the **Requests** view marks imported rows by their source, and
-**Organization** → **Usage** shows them beside routed spend. Their cost is an
-estimate at API rates, not what a subscription charged, and an event with no
-price is kept without a cost. Budget gauges leave imported usage out. How each
+In **Sessions**, the **Requests** view marks imported rows by their source.
+Their cost is an estimate at API rates, not what a subscription charged, and an
+event with no price is kept without a cost. Budget gauges leave imported usage out. How each
 event is priced is in [Pricing](external-usage-reference.md#pricing).

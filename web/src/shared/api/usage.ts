@@ -81,7 +81,7 @@ function usageParams(filters: UsageFilters): URLSearchParams {
 // can never read each other's cached rows.
 //
 // `"organization"` pins the narrow surface regardless of who is asking. It
-// exists for the organization-wide Usage page (otari-ai#1963), whose question is
+// exists for the organization-wide reads (otari-ai#1963), whose question is
 // "this organization", so for an operator the caller-derived scope would answer
 // a different one: `/usage` reads every tenant on the deployment, and a page
 // titled with the organization would silently overstate it. A pinned base needs
@@ -343,7 +343,7 @@ export function useRequestGroups(groupIds: readonly string[]) {
 // bare `[]` at each call site so it is clear the omission is deliberate.
 export const NO_BREAKDOWNS: SummaryDimension[] = []
 
-// Aggregated spend/tokens/requests for the Usage page. Shares the activity
+// Aggregated spend/tokens/requests over a window. Shares the activity
 // filter serialization and adds the time-series bucket. `enabled` lets a caller
 // skip the request (e.g. the previous-period query when the range is unbounded,
 // so there is nothing to compare against). staleTime is longer than the live

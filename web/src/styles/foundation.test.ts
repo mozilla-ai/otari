@@ -897,18 +897,13 @@ describe("semantic tokens only", () => {
   // Every source file that styles anything, which is the whole of `src`: there
   // is no bridge tree left to be exempt, so the rule is the repo's.
   const SRC = join(WEB, "src")
-  // The one deliberate exception, and it says why at the top of the file: the
-  // share card is rasterized through an <img>-loaded SVG document, where a
-  // custom property does not resolve, so its palette has to be literal.
-  const EXCEPTIONS = new Set(["features/usage/ShareCard.tsx"])
-  // The vendored wave engine is left out too: an upstream library kept
+  // The vendored wave engine is left out: an upstream library kept
   // comparable with its source, painting to its own canvas.
   const sources = walk(SRC).filter(
     (name) =>
       /\.tsx?$/.test(name) &&
       !/\.test\.tsx?$/.test(name) &&
-      !name.startsWith("features/onboarding/vendor/") &&
-      !EXCEPTIONS.has(name),
+      !name.startsWith("features/onboarding/vendor/"),
   )
 
   it("covers the source tree", () => {
@@ -1754,10 +1749,9 @@ describe("buttons come in three variants", () => {
     ).toEqual([])
   })
 
-  // The two shapes the first version of this scan reported green on. Six
-  // retired `outline` Buttons survived in `features/usage/ShareDialog.tsx`
-  // behind the first of them, so these are regression tests and not
-  // hypotheticals.
+  // The two shapes the first version of this scan reported green on, which
+  // let six retired `outline` Buttons survive, so these are regression tests
+  // and not hypotheticals.
   it("reads a retired variant inside a conditional expression", () => {
     expect(
       offenders('<Button variant={on ? "primary" : "outline"}>Go</Button>'),

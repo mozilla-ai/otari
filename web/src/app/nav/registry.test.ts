@@ -56,7 +56,6 @@ describe("nav registry", () => {
     // The second rail, reached from the sidebar footer. Its own registry, so
     // its order is asserted separately from the workspace one's.
     expect(ORG_NAV_SECTIONS.map((section) => section.id)).toEqual([
-      "org-observe",
       "org-people",
       "org-money",
       "org-general",
@@ -78,7 +77,6 @@ describe("nav registry", () => {
       "Tools",
       "API keys",
       "Members",
-      "Usage",
       "Workspaces",
       "Members & roles",
       "Email domains",
@@ -376,9 +374,6 @@ describe("nav registry", () => {
     for (const item of ORG_NAV_SECTIONS.flatMap(({ items }) => items)) {
       expect(surfaces).toContain(item.surface)
     }
-    expect(navItemForPath("/organization/usage")?.surface).toBe(
-      "organization_usage",
-    )
     expect(navItemForPath("/organization/provider-keys")?.surface).toBe(
       "organization_providers",
     )

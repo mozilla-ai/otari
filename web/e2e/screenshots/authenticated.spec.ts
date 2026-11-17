@@ -356,15 +356,6 @@ test.describe("organization rail", () => {
     ).toBeVisible()
     await captureScreenshot(page, "organization-guardrails")
   })
-
-  test("organization usage", async ({ page }) => {
-    await login(page)
-    await gotoRoute(page, "/organization/usage")
-    await expect(
-      page.getByRole("heading", { name: /organization usage/i }).first(),
-    ).toBeVisible()
-    await captureScreenshot(page, "organization-usage")
-  })
 })
 
 /**

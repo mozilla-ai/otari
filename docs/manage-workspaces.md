@@ -24,7 +24,6 @@ From the main dashboard, select the workspace in the top-left corner. Its menu h
 
 Click **Organization** at the bottom of the menu, then use the sidebar to move between different areas:
 
-* **Usage**: for analytics and request history.
 * **Members & roles**: to invite members and manage their workspace-specific access.
 * **Spend & budgets**: to define how much can be spent and over what period. To enforce the budget, you need to create a **spend ceiling** that applies it to an organization or workspace.
 * **Providers**: to manage provider-key access. All workspaces within the organization can use the credentials for connecting to model providers, but you can also choose which provider keys a workspace can use (see **Create a workspace**, above).

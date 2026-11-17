@@ -21,6 +21,40 @@ test.describe("Home and Sessions", () => {
     await expect(page.getByText("Get started with Otari")).toBeHidden()
   })
 
+  test("reports the window's spend, tokens and failures, and where it went", async ({
+    page,
+  }) => {
+    await login(page)
+    // The value beside each figure's label. The labels name the window, so
+    // they are matched by shape rather than by a day count.
+    const figure = (label: RegExp) =>
+      page
+        .getByRole("main")
+        .getByText(label)
+        .locator("xpath=following-sibling::span[1]")
+
+    const spent = figure(/^Spent(, \d+ days| this month)$/)
+    await expect(spent).toHaveText(/^\$/)
+    await expect(spent).not.toHaveText("$0.00")
+    // Tokens and failures come from different parts of the summary payload, so
+    // a dash in either is a regression of its own.
+    await expect(figure(/^Tokens(, \d+ days| this month)$/)).not.toHaveText("—")
+    await expect(figure(/^Failures$/)).not.toHaveText("—")
+
+    const where = page.getByRole("region", { name: "Where it went" })
+    // The radio itself is visually hidden behind its label, which is what a
+    // person presses.
+    await where
+      .getByRole("radiogroup", { name: "Break down by" })
+      .getByText("Models", { exact: true })
+      .click()
+    await expect(
+      where.getByRole("radio", { name: "Models", exact: true }),
+    ).toBeChecked()
+    await expect(tableRows(page, "Spend by models").first()).toBeVisible()
+    await expect(where).toContainText(PARITY.models.priced.model)
+  })
+
   test("a window picked on one view carries to the other", async ({ page }) => {
     await login(page)
     await nav(page).getByRole("link", { name: "Sessions" }).click()

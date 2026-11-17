@@ -3,7 +3,7 @@
 Every user-visible number, cost, and timestamp goes through
 `web/src/shared/helpers/format.ts`. That module is the only place the dashboard decides how a
 value reads, which is what keeps a cost formatted the same way in a table cell, a stat tile,
-and a share card.
+and a chart readout.
 
 Use what is there before adding anything: `formatNumber`, `formatCost`, `formatUsd`,
 `formatUsdHeadline`, `formatTokens`, `formatPct`, `formatContext`, `formatDateTime`,

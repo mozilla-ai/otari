@@ -103,13 +103,13 @@ describe("rail location memory", () => {
     // A destination that is still gated, which is the whole point of the case:
     // an unregistered path is dropped by the test above for a different reason,
     // so using one here would keep passing while testing nothing.
-    window.localStorage.setItem(ORGANIZATION_KEY, "/organization/usage")
+    window.localStorage.setItem(ORGANIZATION_KEY, "/workspaces")
 
     expect(
-      lastLocation("organization", withoutSurface("organization_usage")),
+      lastLocation("organization", withoutSurface("workspaces")),
     ).toBeUndefined()
     expect(lastLocation("organization", showsEverything)).toEqual({
-      to: "/organization/usage",
+      to: "/workspaces",
     })
   })
 

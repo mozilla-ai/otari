@@ -155,10 +155,7 @@ describe("useObserveScope", () => {
 
   it("reads the URL's users and fetches nothing extra when inactive", async () => {
     const { calls } = mockApi({ members: [ME] })
-    renderPage(
-      <Probe active={false} />,
-      "/organization/usage?user_id=u1&scope=mine",
-    )
+    renderPage(<Probe active={false} />, "/?user_id=u1&scope=mine")
     await waitFor(() => expect(state().users).toEqual(["u1"]))
 
     expect(state()).toMatchObject({ scope: "everyone", resolved: true })

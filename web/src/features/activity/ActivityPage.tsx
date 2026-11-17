@@ -160,9 +160,9 @@ function ActivityPageContent({
   // Provenance: gateway traffic vs an imported agent source. Set by its own select,
   // or by a drill-down (the pricing alarm links here scoped to gateway traffic).
   const sourceFilter = url.get("source")
-  // The Usage breakdowns (session / endpoint / provider) and Home's refusal
-  // links (status code) drill in the same way: no select of their own, carried
-  // as a chip so the scoping is visible and one click removes it.
+  // Session, status code, endpoint and provider have no select of their own: a
+  // link carries them, shown as a chip so the scoping is visible and one click
+  // removes it.
   const sessionFilter = url.get("source_label")
   const statusCodeFilter = url.get("status_code")
   const endpointFilter = url.get("endpoint")
@@ -516,8 +516,7 @@ function ActivityPageContent({
   // Neither the default preset nor the unbounded "All" is itself a filter: only an
   // explicit sub-window or a bounded non-default preset narrows the window, so a
   // brand-new gateway reads "never used" on both its 24h default and on "All",
-  // and only a real narrowing reads "filtered empty". (UsagePage can mirror this
-  // with a bare `!== default` because it has no unbounded preset; Activity does.)
+  // and only a real narrowing reads "filtered empty".
   const rangePreset = findPreset(ACTIVITY_PRESETS, range)
   const timeFiltered =
     Boolean(startParam || endParam) ||
@@ -729,8 +728,8 @@ function ActivityPageContent({
   // `filters`, which tripped the page reset below: pressing refresh on page 12
   // dropped the operator back onto page 1, making deep browsing unusable. The
   // window is instead re-anchored when the range selection changes (see
-  // `pickPreset`). Every window-scoped query is refetched explicitly (see the
-  // UsagePage refresh note), since the keys are unchanged by design here.
+  // `pickPreset`). Every window-scoped query is refetched explicitly, since the
+  // keys are unchanged by design here.
   const refresh = () => {
     void usage.refetch()
     void count.refetch()

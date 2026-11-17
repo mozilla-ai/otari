@@ -35,9 +35,6 @@ spent, the spend limit on them there, their tokens and their sessions.
 row opens its sessions. Someone with no active key and no session yet is offered
 **Create API key**; someone who may not create keys is told whom to ask.
 
-For usage over time across every workspace, with breakdowns, an owner or admin
-opens **Organization** → **Usage**.
-
 ### Get started
 
 On a gateway with nothing to route to and nothing served yet, Home opens with

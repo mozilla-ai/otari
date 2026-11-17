@@ -127,9 +127,7 @@ can link Vite's esbuild binary at all.
   can express is the exception**: a percentage width, a computed offset, a position that
   follows the data. Tailwind emits only the utilities the source asks for, so `w-[${pct}%]`
   compiles to nothing and the value has to reach the element as a property. `Meter.tsx:16` and
-  `SpendMeter.tsx:92` are the reference sites; `ShareCard.tsx` is a documented whole-file
-  exception for a different reason (it is rasterized through an `<img>`, where custom
-  properties do not resolve). The pre-paint block in `index.html` is the only `<style>` tag,
+  `SpendMeter.tsx:92` are the reference sites. The pre-paint block in `index.html` is the only `<style>` tag,
   and [layout-stability.md](./layout-stability.md) says why.
 - A HeroUI `<Link href>` for an internal route: it is a full page reload. Use TanStack
   Router's `<Link to>`.
