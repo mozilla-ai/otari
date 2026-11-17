@@ -67,7 +67,7 @@ def get_federation_token_exchange(
     uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> FederationTokenExchange:
-    """The request's token exchange."""
+    """Build the request's token exchange on the verifier the app keeps across requests."""
     return build_federation_token_exchange(uow, config, federated_token_verifier(request, config))
 
 
