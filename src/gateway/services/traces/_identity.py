@@ -25,24 +25,52 @@ from gateway.types.traces import SessionSource, is_identifier
 SESSION_TAG = "session_id"
 
 # Headers in which an agent harness sends its own session id, and the harness each
-# one belongs to. Claude Code sends ``x-claude-code-session-id`` on every request of
-# a session, and opencode ``x-opencode-session-id``. An opencode subagent runs in a
-# session of its own, so it sends its own id.
+# one belongs to. Each name is the harness's own, so it counts from any client: Claude
+# Code sends ``x-claude-code-session-id`` on every request of a session, opencode
+# ``x-opencode-session-id``, Amp its thread id, and goose its session id. An opencode or
+# goose subagent runs in a session of its own, so it sends its own id.
 HARNESS_SESSION_HEADERS: Mapping[str, str] = {
     "x-claude-code-session-id": "claude-code",
     "x-opencode-session-id": "opencode",
+    "x-amp-thread-id": "amp",
+    "agent-session-id": "goose",
 }
+
+# Session headers that name no harness: LiteLLM's convention, which OpenHands sends with
+# its conversation id. The harness then comes from ``User-Agent``.
+_SHARED_SESSION_HEADERS = ("x-litellm-session-id",)
 
 # Headers a harness sends only on a subagent's requests. A subagent shares its parent's
 # session id and works inside the parent's turn, so the task it was handed is no new prompt.
 HARNESS_SUBAGENT_HEADERS = frozenset({"x-claude-code-agent-id"})
 
-# Codex sends its thread id as ``thread-id`` and its root thread's id as ``session-id``.
-# The thread is the session, so a subagent gets one of its own; ``session-id`` is read
-# only without a ``thread-id``. Both names are generic, so they count only on a request
-# whose ``originator`` or ``User-Agent`` starts with ``codex``.
-_CODEX_SESSION_HEADERS = ("thread-id", "session-id")
-_CODEX_MARKER_HEADERS = ("originator", "user-agent")
+
+@dataclass(frozen=True)
+class _MarkedHarness:
+    """A harness that sends its session id under a generic name, read only on its own requests.
+
+    A request is the harness's when one of ``markers`` (a header and the prefix its value
+    starts with) matches. Its session headers are read in order, the first one set winning.
+    """
+
+    harness: str
+    markers: tuple[tuple[str, str], ...]
+    session_headers: tuple[str, ...]
+
+
+# Harnesses whose session header names are generic, so they count only beside the
+# harness's own mark. Codex sends its thread id as ``thread-id`` and its root thread's id
+# as ``session-id``; the thread is the session, so a subagent gets one of its own. Kilo
+# Code and Crush give a subagent a session of its own too. pi sends ``session-id`` on the
+# Responses API and the other names on the APIs where its session affinity is turned on.
+# Roo Code sends ``session_id`` only from its OpenAI provider.
+_MARKED_HARNESSES = (
+    _MarkedHarness("codex", (("originator", "codex"), ("user-agent", "codex")), ("thread-id", "session-id")),
+    _MarkedHarness("kilo-code", (("user-agent", "kilo-code/"), ("user-agent", "kilo/")), ("x-session-id",)),
+    _MarkedHarness("crush", (("user-agent", "charm-crush/"),), ("x-session-id",)),
+    _MarkedHarness("pi", (("user-agent", "pi/"),), ("session-id", "session_id", "x-session-affinity", "x-session-id")),
+    _MarkedHarness("roo-code", (("originator", "roo-code"), ("user-agent", "roo-code/")), ("session_id",)),
+)
 
 # ``User-Agent`` product names a harness is known by, where it differs from the name shown.
 _HARNESS_PRODUCTS: Mapping[str, str] = {"claude-cli": "claude-code"}
@@ -97,8 +125,11 @@ def _clean(value: str | None) -> str | None:
     return value[:_MAX_KEY_LENGTH] if value else None
 
 
-def _is_codex(headers: Mapping[str, str]) -> bool:
-    return any((headers.get(header) or "").strip().lower().startswith("codex") for header in _CODEX_MARKER_HEADERS)
+def _marked_harness(headers: Mapping[str, str]) -> _MarkedHarness | None:
+    for marked in _MARKED_HARNESSES:
+        if any((headers.get(header) or "").strip().lower().startswith(prefix) for header, prefix in marked.markers):
+            return marked
+    return None
 
 
 def resolve_session(
@@ -115,10 +146,10 @@ def resolve_session(
     for header in HARNESS_SESSION_HEADERS:
         if (key := _clean(headers.get(header))) is not None:
             return SessionRef(source="harness", key=key)
-    if _is_codex(headers):
-        for header in _CODEX_SESSION_HEADERS:
-            if (key := _clean(headers.get(header))) is not None:
-                return SessionRef(source="harness", key=key)
+    marked = _marked_harness(headers)
+    for header in (*(marked.session_headers if marked else ()), *_SHARED_SESSION_HEADERS):
+        if (key := _clean(headers.get(header))) is not None:
+            return SessionRef(source="harness", key=key)
     return None
 
 
@@ -137,8 +168,8 @@ def harness_of(headers: Mapping[str, str]) -> str | None:
     for header, harness in HARNESS_SESSION_HEADERS.items():
         if headers.get(header):
             return harness
-    if _is_codex(headers):
-        return "codex"
+    if (marked := _marked_harness(headers)) is not None:
+        return marked.harness
     agent = (headers.get("user-agent") or "").strip()
     if not agent:
         return None

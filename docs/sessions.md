@@ -26,8 +26,10 @@ Otari records sessions for the completions it serves, which is on by default. On
 a deployment you run, [Store agent traces](trace-storage.md) says how to turn it
 off or change how long sessions are kept.
 
-- **Claude Code and Codex** are recognized automatically when they route through
-  Otari. Claude Code can also send its sessions without routing its model
+- **Claude Code, Codex, opencode, Amp, goose, Kilo Code, Crush, pi, Roo Code and
+  OpenHands** are recognized automatically when they route through Otari, by the
+  session id each one sends ([the full list](sessions-reference.md#what-makes-a-session)).
+  Claude Code can also send its sessions without routing its model
   traffic; see [Send Claude Code sessions to Otari](claude-code.md#send-claude-code-sessions-to-otari).
 - **Your own agent** sends the same `Otari-Conversation-Id` header on every
   request of one run, tool-result follow-ups included. Give each run, and each
