@@ -34,6 +34,23 @@ async function ensureOrgProviderKey(page: Page): Promise<void> {
   }
 }
 
+// A hosted provider for its page to draw. Pointed at the discard port, so the
+// create's model listing fails at once and the page shows an empty catalog.
+async function ensureHostedProvider(page: Page): Promise<void> {
+  const created = await page.request.post(`${API_ROOT}/hosted-providers`, {
+    headers: authHeaders,
+    data: {
+      provider: "openai",
+      name: "screenshot-hosted",
+      api_key: "sk-not-a-real-credential",
+      api_base: "http://127.0.0.1:9/v1",
+    },
+  })
+  if (created.status() !== 409) {
+    await expectOk(created, "create hosted provider")
+  }
+}
+
 // One entry per destination the nav registry can reach. The matrix in
 // playwright.config.ts multiplies each of these by three viewports and both
 // themes, so adding a page here is the whole cost of covering it.
@@ -138,6 +155,13 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     route: "/admin/hosted-providers",
     name: "admin-hosted-providers",
     heading: /hosted providers/i,
+  },
+  {
+    route: "/admin/hosted-providers/screenshot-hosted",
+    name: "admin-hosted-provider-detail",
+    // The provider's own title, so "No hosted provider named" does not pass.
+    heading: /^screenshot-hosted$/i,
+    prepare: ensureHostedProvider,
   },
   {
     route: "/admin/recommender",

@@ -25,7 +25,7 @@ test.describe("dashboard core flows", () => {
     await expect(page.getByText("Get started with Otari")).toBeVisible()
   })
 
-  test("add a provider from onboarding, and it appears in the table", async ({
+  test("add a provider from onboarding, and it opens on its own page", async ({
     page,
   }) => {
     await login(page)
@@ -42,7 +42,7 @@ test.describe("dashboard core flows", () => {
       .fill("http://e2e-box:8000/v1")
     await dialog.getByRole("button", { name: "Add provider" }).click()
 
-    await expect(page.getByText("e2e-llm")).toBeVisible({ timeout: 30_000 })
+    await expect(pageHeading(page, "e2e-llm")).toBeVisible({ timeout: 30_000 })
     // Onboarding clears once a provider exists.
     await expect(page.getByText("Welcome to Otari")).toBeHidden()
   })

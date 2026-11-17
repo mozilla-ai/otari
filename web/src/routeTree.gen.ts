@@ -59,6 +59,8 @@ import { Route as ToolsMcpServersRouteImport } from './routes/tools.mcp-servers'
 import { Route as ToolsWebSearchRouteImport } from './routes/tools.web-search'
 import { Route as WorkspacesIndexRouteImport } from './routes/workspaces.index'
 import { Route as WorkspacesWorkspaceIdRouteImport } from './routes/workspaces.$workspaceId'
+import { Route as AdminHostedProvidersIndexRouteImport } from './routes/admin.hosted-providers.index'
+import { Route as AdminHostedProvidersNameRouteImport } from './routes/admin.hosted-providers.$name'
 import { Route as ToolsMcpServersIndexRouteImport } from './routes/tools.mcp-servers.index'
 import { Route as ToolsMcpServersServerIdRouteImport } from './routes/tools.mcp-servers.$serverId'
 
@@ -313,6 +315,18 @@ const WorkspacesWorkspaceIdRoute = WorkspacesWorkspaceIdRouteImport.update({
   path: '/$workspaceId',
   getParentRoute: () => WorkspacesRoute,
 } as any)
+const AdminHostedProvidersIndexRoute =
+  AdminHostedProvidersIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AdminHostedProvidersRoute,
+  } as any)
+const AdminHostedProvidersNameRoute =
+  AdminHostedProvidersNameRouteImport.update({
+    id: '/$name',
+    path: '/$name',
+    getParentRoute: () => AdminHostedProvidersRoute,
+  } as any)
 const ToolsMcpServersIndexRoute = ToolsMcpServersIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -348,7 +362,7 @@ export interface FileRoutesByFullPath {
   '/sessions': typeof OverviewSessionsRoute
   '/admin/accounts': typeof AdminAccountsRoute
   '/admin/code-execution': typeof AdminCodeExecutionRoute
-  '/admin/hosted-providers': typeof AdminHostedProvidersRoute
+  '/admin/hosted-providers': typeof AdminHostedProvidersRouteWithChildren
   '/admin/recommender': typeof AdminRecommenderRoute
   '/admin/web-search': typeof AdminWebSearchRoute
   '/mcp-connections/callback': typeof McpConnectionsCallbackRoute
@@ -374,7 +388,9 @@ export interface FileRoutesByFullPath {
   '/routing/': typeof RoutingIndexRoute
   '/tools/': typeof ToolsIndexRoute
   '/workspaces/': typeof WorkspacesIndexRoute
+  '/admin/hosted-providers/$name': typeof AdminHostedProvidersNameRoute
   '/tools/mcp-servers/$serverId': typeof ToolsMcpServersServerIdRoute
+  '/admin/hosted-providers/': typeof AdminHostedProvidersIndexRoute
   '/tools/mcp-servers/': typeof ToolsMcpServersIndexRoute
 }
 export interface FileRoutesByTo {
@@ -394,7 +410,6 @@ export interface FileRoutesByTo {
   '/sessions': typeof OverviewSessionsRoute
   '/admin/accounts': typeof AdminAccountsRoute
   '/admin/code-execution': typeof AdminCodeExecutionRoute
-  '/admin/hosted-providers': typeof AdminHostedProvidersRoute
   '/admin/recommender': typeof AdminRecommenderRoute
   '/admin/web-search': typeof AdminWebSearchRoute
   '/mcp-connections/callback': typeof McpConnectionsCallbackRoute
@@ -420,7 +435,9 @@ export interface FileRoutesByTo {
   '/routing': typeof RoutingIndexRoute
   '/tools': typeof ToolsIndexRoute
   '/workspaces': typeof WorkspacesIndexRoute
+  '/admin/hosted-providers/$name': typeof AdminHostedProvidersNameRoute
   '/tools/mcp-servers/$serverId': typeof ToolsMcpServersServerIdRoute
+  '/admin/hosted-providers': typeof AdminHostedProvidersIndexRoute
   '/tools/mcp-servers': typeof ToolsMcpServersIndexRoute
 }
 export interface FileRoutesById {
@@ -448,7 +465,7 @@ export interface FileRoutesById {
   '/_overview/sessions': typeof OverviewSessionsRoute
   '/admin/accounts': typeof AdminAccountsRoute
   '/admin/code-execution': typeof AdminCodeExecutionRoute
-  '/admin/hosted-providers': typeof AdminHostedProvidersRoute
+  '/admin/hosted-providers': typeof AdminHostedProvidersRouteWithChildren
   '/admin/recommender': typeof AdminRecommenderRoute
   '/admin/web-search': typeof AdminWebSearchRoute
   '/mcp-connections/callback': typeof McpConnectionsCallbackRoute
@@ -475,7 +492,9 @@ export interface FileRoutesById {
   '/routing/': typeof RoutingIndexRoute
   '/tools/': typeof ToolsIndexRoute
   '/workspaces/': typeof WorkspacesIndexRoute
+  '/admin/hosted-providers/$name': typeof AdminHostedProvidersNameRoute
   '/tools/mcp-servers/$serverId': typeof ToolsMcpServersServerIdRoute
+  '/admin/hosted-providers/': typeof AdminHostedProvidersIndexRoute
   '/tools/mcp-servers/': typeof ToolsMcpServersIndexRoute
 }
 export interface FileRouteTypes {
@@ -530,7 +549,9 @@ export interface FileRouteTypes {
     | '/routing/'
     | '/tools/'
     | '/workspaces/'
+    | '/admin/hosted-providers/$name'
     | '/tools/mcp-servers/$serverId'
+    | '/admin/hosted-providers/'
     | '/tools/mcp-servers/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -550,7 +571,6 @@ export interface FileRouteTypes {
     | '/sessions'
     | '/admin/accounts'
     | '/admin/code-execution'
-    | '/admin/hosted-providers'
     | '/admin/recommender'
     | '/admin/web-search'
     | '/mcp-connections/callback'
@@ -576,7 +596,9 @@ export interface FileRouteTypes {
     | '/routing'
     | '/tools'
     | '/workspaces'
+    | '/admin/hosted-providers/$name'
     | '/tools/mcp-servers/$serverId'
+    | '/admin/hosted-providers'
     | '/tools/mcp-servers'
   id:
     | '__root__'
@@ -630,7 +652,9 @@ export interface FileRouteTypes {
     | '/routing/'
     | '/tools/'
     | '/workspaces/'
+    | '/admin/hosted-providers/$name'
     | '/tools/mcp-servers/$serverId'
+    | '/admin/hosted-providers/'
     | '/tools/mcp-servers/'
   fileRoutesById: FileRoutesById
 }
@@ -656,7 +680,7 @@ export interface RootRouteChildren {
   WorkspacesRoute: typeof WorkspacesRouteWithChildren
   AdminAccountsRoute: typeof AdminAccountsRoute
   AdminCodeExecutionRoute: typeof AdminCodeExecutionRoute
-  AdminHostedProvidersRoute: typeof AdminHostedProvidersRoute
+  AdminHostedProvidersRoute: typeof AdminHostedProvidersRouteWithChildren
   AdminRecommenderRoute: typeof AdminRecommenderRoute
   AdminWebSearchRoute: typeof AdminWebSearchRoute
   McpConnectionsCallbackRoute: typeof McpConnectionsCallbackRoute
@@ -1014,6 +1038,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspacesWorkspaceIdRouteImport
       parentRoute: typeof WorkspacesRoute
     }
+    '/admin/hosted-providers/': {
+      id: '/admin/hosted-providers/'
+      path: '/'
+      fullPath: '/admin/hosted-providers/'
+      preLoaderRoute: typeof AdminHostedProvidersIndexRouteImport
+      parentRoute: typeof AdminHostedProvidersRoute
+    }
+    '/admin/hosted-providers/$name': {
+      id: '/admin/hosted-providers/$name'
+      path: '/$name'
+      fullPath: '/admin/hosted-providers/$name'
+      preLoaderRoute: typeof AdminHostedProvidersNameRouteImport
+      parentRoute: typeof AdminHostedProvidersRoute
+    }
     '/tools/mcp-servers/': {
       id: '/tools/mcp-servers/'
       path: '/'
@@ -1161,6 +1199,19 @@ const WorkspacesRouteWithChildren = WorkspacesRoute._addFileChildren(
   WorkspacesRouteChildren,
 )
 
+interface AdminHostedProvidersRouteChildren {
+  AdminHostedProvidersNameRoute: typeof AdminHostedProvidersNameRoute
+  AdminHostedProvidersIndexRoute: typeof AdminHostedProvidersIndexRoute
+}
+
+const AdminHostedProvidersRouteChildren: AdminHostedProvidersRouteChildren = {
+  AdminHostedProvidersNameRoute: AdminHostedProvidersNameRoute,
+  AdminHostedProvidersIndexRoute: AdminHostedProvidersIndexRoute,
+}
+
+const AdminHostedProvidersRouteWithChildren =
+  AdminHostedProvidersRoute._addFileChildren(AdminHostedProvidersRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   SplatRoute: SplatRoute,
   OverviewRoute: OverviewRouteWithChildren,
@@ -1183,7 +1234,7 @@ const rootRouteChildren: RootRouteChildren = {
   WorkspacesRoute: WorkspacesRouteWithChildren,
   AdminAccountsRoute: AdminAccountsRoute,
   AdminCodeExecutionRoute: AdminCodeExecutionRoute,
-  AdminHostedProvidersRoute: AdminHostedProvidersRoute,
+  AdminHostedProvidersRoute: AdminHostedProvidersRouteWithChildren,
   AdminRecommenderRoute: AdminRecommenderRoute,
   AdminWebSearchRoute: AdminWebSearchRoute,
   McpConnectionsCallbackRoute: McpConnectionsCallbackRoute,

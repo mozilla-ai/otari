@@ -12,21 +12,27 @@ import type {
   HostedModel,
   HostedModels,
   HostedModelsRefresh,
+  HostedPriceReset,
   HostedProvider,
   HostedProviders,
   HostedProviderTestResult,
+  HostedVendor,
+  HostedVendorModelsSwitch,
   PlatformConnectStart,
   PlatformConnectStatus,
   ReencryptHostedProvidersResult,
+  SwitchHostedVendorModelsRequest,
   TestHostedProviderRequest,
   UpdateHostedModelRequest,
   UpdateHostedProviderRequest,
+  UpdateHostedVendorRequest,
 } from "@/client"
 import { apiFetch, longRequestSignal } from "@/shared/api/client"
 import {
   AUTOMATIC_FALLBACKS,
   CATALOG,
   HOSTED_CATALOG_UPDATE_PREVIEW,
+  HOSTED_PRICE_RESET_PREVIEW,
   HOSTED_PROVIDER_AVAILABLE_MODELS,
   HOSTED_PROVIDERS,
   MODELS,
@@ -56,6 +62,9 @@ import {
  * the whole list.
  */
 const PROVIDER_PAGE_LIMIT = 1000
+
+/** The API's maximum for one provider's models. */
+const MODEL_LIST_LIMIT = 1000
 
 const providerPath = (provider: string) =>
   `/hosted-providers/${encodeURIComponent(provider)}`
@@ -213,41 +222,104 @@ export function useCancelPlatformConnect() {
 }
 
 /**
- * One page of a provider's offered models.
+ * A provider's offered models, all of them, with each vendor's switch and counts.
+ *
+ * Not paged: the models are shown under their vendors, and a vendor's models
+ * split across pages would hide what its switch covers. The API's maximum is
+ * the bound, which no provider here comes near.
  *
  * The provider is part of the key, so the placeholder is kept only while the
- * same provider pages: a bare `keepPreviousData` would paint one provider's
- * models under another's name for a frame when a different row is opened.
+ * same provider is shown: a bare `keepPreviousData` would paint one provider's
+ * models under another's name for a frame.
  */
 export function useHostedModels(
   provider: string,
-  page: number,
-  pageSize: number,
   /** One kind of model (`ModelType`, or `unknown`); empty for every kind. */
   type = "",
-  /** Only models whose name contains this text; empty for every model. */
+  /** Only models whose name or vendor contains this text; empty for every model. */
   search = "",
   /** Only served models, or only withheld ones; undefined for both. */
   served?: boolean,
 ) {
   return useQuery({
-    queryKey: [
-      HOSTED_PROVIDERS,
-      "models",
-      provider,
-      page,
-      pageSize,
-      type,
-      search,
-      served,
-    ],
+    queryKey: [HOSTED_PROVIDERS, "models", provider, type, search, served],
     queryFn: () =>
       apiFetch<HostedModels>(
-        `${providerPath(provider)}/models?skip=${page * pageSize}&limit=${pageSize}${type ? `&type=${encodeURIComponent(type)}` : ""}${search ? `&search=${encodeURIComponent(search)}` : ""}${served === undefined ? "" : `&enabled=${served}`}`,
+        `${providerPath(provider)}/models?limit=${MODEL_LIST_LIMIT}${type ? `&type=${encodeURIComponent(type)}` : ""}${search ? `&search=${encodeURIComponent(search)}` : ""}${served === undefined ? "" : `&enabled=${served}`}`,
       ),
     staleTime: 30_000,
     placeholderData: (previous, previousQuery) =>
       previousQuery?.queryKey[2] === provider ? previous : undefined,
+  })
+}
+
+/** Switch one vendor on or off on a provider; its models keep their own switches. */
+export function useSetHostedVendor(provider: string) {
+  const invalidate = useInvalidateHosted()
+  return useMutation({
+    mutationFn: (body: UpdateHostedVendorRequest) =>
+      apiFetch<HostedVendor>(`${providerPath(provider)}/vendors`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: invalidate,
+  })
+}
+
+/** Set every model of one vendor's switch at once. */
+export function useSwitchHostedVendorModels(provider: string) {
+  const invalidate = useInvalidateHosted()
+  return useMutation({
+    mutationFn: (body: SwitchHostedVendorModelsRequest) =>
+      apiFetch<HostedVendorModelsSwitch>(
+        `${providerPath(provider)}/models/switch`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+    onSuccess: invalidate,
+  })
+}
+
+/**
+ * What putting a provider's operator-set prices back on the default would
+ * change, read once per opening of the sync dialog.
+ *
+ * A dry-run POST read as a query, keyed on the opening for the reason
+ * `useHostedCatalogUpdatePreview` gives: a reopen shows the pending state
+ * rather than the last opening's answer.
+ */
+export function useHostedPriceResetPreview(
+  provider: string,
+  opening: number,
+  /** One vendor's models; empty for every vendor. */
+  vendor = "",
+) {
+  return useQuery({
+    ...NO_RETRY,
+    queryKey: [HOSTED_PRICE_RESET_PREVIEW, provider, opening, vendor],
+    queryFn: () =>
+      apiFetch<HostedPriceReset>(
+        `${providerPath(provider)}/models/reset-prices`,
+        {
+          method: "POST",
+          body: JSON.stringify({ dry_run: true, vendor: vendor || null }),
+        },
+      ),
+    enabled: opening > 0,
+    staleTime: Number.POSITIVE_INFINITY,
+    gcTime: 0,
+  })
+}
+
+/** Put the named models back on the default price. */
+export function useResetHostedModelPrices(provider: string) {
+  const invalidate = useInvalidateHosted()
+  return useMutation({
+    mutationFn: (models: string[]) =>
+      apiFetch<HostedPriceReset>(
+        `${providerPath(provider)}/models/reset-prices`,
+        { method: "POST", body: JSON.stringify({ models, dry_run: false }) },
+      ),
+    onSuccess: invalidate,
   })
 }
 

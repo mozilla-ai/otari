@@ -97,22 +97,22 @@ test.describe("hosted provider setup", () => {
     await dialog.getByRole("button", { name: "Add provider" }).click()
     await expect(dialog).toBeHidden({ timeout: 30_000 })
 
-    const provider = hostedRow(page)
-    await expect(provider).toBeVisible()
+    // Adding a provider opens its own page, where its test, edit and remove are.
+    await expect(pageHeading(page, PROVIDER)).toBeVisible({ timeout: 30_000 })
 
     // Testing has to come back with a reported outcome, not just stop spinning:
     // an assertion that it merely does not say "Connected." would also pass if
     // the check never ran at all. Nothing is listening, so the outcome is a
-    // failure, in whichever shape the row reports one.
-    await provider.getByRole("button", { name: `Test ${PROVIDER}` }).click()
+    // failure, in whichever shape the page reports one.
+    await page.getByRole("button", { name: `Test ${PROVIDER}` }).click()
     await expect(
-      provider.getByText(
+      page.getByText(
         /Connection error\.|Connection failed\.|Could not list models|refused|connect/i,
       ),
     ).toBeVisible({ timeout: 30_000 })
-    await expect(provider).not.toContainText("Connected.")
+    await expect(page.getByText("Connected.")).toHaveCount(0)
 
-    await provider.getByRole("button", { name: `Edit ${PROVIDER}` }).click()
+    await page.getByRole("button", { name: `Edit ${PROVIDER}` }).click()
     const editProvider = page.getByRole("dialog", {
       name: "Edit hosted provider",
     })
@@ -128,9 +128,7 @@ test.describe("hosted provider setup", () => {
     // Reopening after a reload is what proves the edit was persisted rather
     // than only echoed back into a form that never closed.
     await page.reload()
-    await hostedRow(page)
-      .getByRole("button", { name: `Edit ${PROVIDER}` })
-      .click()
+    await page.getByRole("button", { name: `Edit ${PROVIDER}` }).click()
     await expect(
       editProvider.getByRole("textbox", { name: "API base URL" }),
     ).toHaveValue("http://127.0.0.1:9/v2")
@@ -138,15 +136,15 @@ test.describe("hosted provider setup", () => {
     await expect(editProvider).toBeHidden()
 
     // The confirmation is a modal, so it names the provider rather than relying
-    // on the row behind the backdrop to say which one this is about.
-    await hostedRow(page)
-      .getByRole("button", { name: `Remove ${PROVIDER}` })
-      .click()
+    // on the page behind the backdrop to say which one this is about.
+    await page.getByRole("button", { name: `Remove ${PROVIDER}` }).click()
     const confirmProvider = page.getByRole("alertdialog")
     await expect(confirmProvider).toContainText(PROVIDER)
     await confirmProvider
       .getByRole("button", { name: "Remove provider" })
       .click()
+    // Removing it goes back to the list, where it is gone.
+    await expect(pageHeading(page, "Hosted providers")).toBeVisible()
     await expect(hostedRow(page)).toHaveCount(0)
   })
 })
