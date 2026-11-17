@@ -6,9 +6,11 @@ import time
 import uuid
 from collections.abc import Collection, Sequence
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from gateway.adapters.rate_limit_store_adapter import InMemoryRateLimitStore
 from gateway.core.config import GatewayConfig
@@ -86,6 +88,26 @@ def _available_at(error: InvitationResendTooSoonError) -> datetime:
     return datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
 
 
+_LOCK_WAITERS = text(
+    "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'"
+)
+
+
+async def _until_a_session_waits_on_a_lock(engine: AsyncEngine, *racing: asyncio.Task[Any]) -> None:
+    """Return once a session on this database is blocked on a lock, or once one of ``racing`` has finished.
+
+    A fixed sleep releases the paused side whether or not the other side has reached the lock yet,
+    so on a slow runner a race test passes without the race. A task that finishes instead, because
+    the code under test took no lock, ends the wait so the test's own assertions report it.
+    """
+    async with asyncio.timeout(10.0):
+        while not any(task.done() for task in racing):
+            async with engine.connect() as connection:
+                if await connection.scalar(_LOCK_WAITERS):
+                    return
+            await asyncio.sleep(0.01)
+
+
 @pytest.fixture(autouse=True)
 def _no_mail_settings_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("OTARI_MAIL_FROM_EMAIL", "OTARI_MAIL_TRANSPORT", "OTARI_PUBLIC_BASE_URL", "OTARI_SMTP_HOST"):
@@ -122,9 +144,9 @@ async def test_two_bulk_invites_that_share_an_address(postgres_url: str, monkeyp
         service = _invitations(session, store=store)
         return await service.invite_many(by, emails, InvitationOffer(role="member", workspaces=()))
 
-    async def release_once_the_first_insert_is_staged() -> None:
+    async def release_once_the_other_call_waits(*racing: asyncio.Task[BulkInvitations]) -> None:
         await inserted.wait()
-        await asyncio.sleep(0.2)
+        await _until_a_session_waits_on_a_lock(engine, *racing)
         released.set()
 
     try:
@@ -142,7 +164,7 @@ async def test_two_bulk_invites_that_share_an_address(postgres_url: str, monkeyp
             second_task = asyncio.create_task(
                 invite_many(second, by_second, ["second-only@example.com", shared_address])
             )
-            releaser = asyncio.create_task(release_once_the_first_insert_is_staged())
+            releaser = asyncio.create_task(release_once_the_other_call_waits(first_task, second_task))
             first_result, second_result = await asyncio.wait_for(asyncio.gather(first_task, second_task), timeout=10.0)
             await releaser
             await first.commit()
@@ -204,9 +226,9 @@ async def test_two_bulk_invites_sharing_two_addresses_in_opposite_order_serializ
         service = _invitations(session, store=store)
         return await service.invite_many(by, emails, InvitationOffer(role="member", workspaces=()))
 
-    async def release_once_the_first_insert_is_staged() -> None:
+    async def release_once_the_other_call_waits(*racing: asyncio.Task[BulkInvitations]) -> None:
         await inserted.wait()
-        await asyncio.sleep(0.2)
+        await _until_a_session_waits_on_a_lock(engine, *racing)
         released.set()
 
     try:
@@ -222,7 +244,7 @@ async def test_two_bulk_invites_sharing_two_addresses_in_opposite_order_serializ
 
             first_task = asyncio.create_task(invite_many(first, by_first, [address_x, address_y]))
             second_task = asyncio.create_task(invite_many(second, by_second, [address_y, address_x]))
-            releaser = asyncio.create_task(release_once_the_first_insert_is_staged())
+            releaser = asyncio.create_task(release_once_the_other_call_waits(first_task, second_task))
             first_result, second_result = await asyncio.wait_for(asyncio.gather(first_task, second_task), timeout=10.0)
             await releaser
             await first.commit()
@@ -284,9 +306,9 @@ async def test_two_bulk_invites_replacing_the_same_expired_invitations_serialize
         service = _invitations(session, store=store)
         return await service.invite_many(by, emails, InvitationOffer(role="member", workspaces=()))
 
-    async def release_once_the_first_delete_is_staged() -> None:
+    async def release_once_the_other_call_waits(*racing: asyncio.Task[BulkInvitations]) -> None:
         await paused.wait()
-        await asyncio.sleep(0.2)
+        await _until_a_session_waits_on_a_lock(engine, *racing)
         released.set()
 
     try:
@@ -319,7 +341,7 @@ async def test_two_bulk_invites_replacing_the_same_expired_invitations_serialize
 
             first_task = asyncio.create_task(invite_many(first, by_first, [address_x, address_y]))
             second_task = asyncio.create_task(invite_many(second, by_second, [address_y, address_x]))
-            releaser = asyncio.create_task(release_once_the_first_delete_is_staged())
+            releaser = asyncio.create_task(release_once_the_other_call_waits(first_task, second_task))
             first_result, second_result = await asyncio.wait_for(asyncio.gather(first_task, second_task), timeout=10.0)
             await releaser
             await first.commit()
@@ -384,7 +406,6 @@ async def test_an_owner_demoted_mid_invite_cannot_still_grant_the_owner_role(
 
             async def demote_once_the_invite_is_waiting() -> None:
                 await arrived.wait()
-                await asyncio.sleep(0.2)
                 members = OrganizationMemberRepository(demote_session)
                 member = await members.get_active_by_organization_and_user(organization.id, owner.id)
                 assert member is not None
@@ -450,7 +471,6 @@ async def test_an_owner_demoted_before_the_settings_lock_still_refuses_the_write
 
             async def demote_once_the_write_is_waiting() -> None:
                 await arrived.wait()
-                await asyncio.sleep(0.2)
                 members = OrganizationMemberRepository(demote_session)
                 member = await members.get_active_by_organization_and_user(organization.id, owner.id)
                 assert member is not None
@@ -514,7 +534,6 @@ async def test_sso_turned_on_mid_invite_still_refuses_the_write(
 
             async def enforce_sso_once_the_invite_is_waiting() -> None:
                 await arrived.wait()
-                await asyncio.sleep(0.2)
                 organizations = OrganizationRepository(sso_session)
                 row = await organizations.get(organization.id)
                 assert row is not None
@@ -596,9 +615,8 @@ async def test_sso_turned_on_during_the_write_takes_effect_only_after_the_insert
             invite_task = asyncio.create_task(invite())
             sso_task = asyncio.create_task(enable_sso_once_the_write_is_open())
             await asyncio.wait_for(arrived.wait(), timeout=10.0)
-            # Gives the enable above time to reach the database and either block on the write
-            # transaction's lock, or, unlocked, run straight through.
-            await asyncio.sleep(0.2)
+            # The enable either blocks on the write transaction's lock or, unlocked, runs straight through.
+            await _until_a_session_waits_on_a_lock(engine, sso_task)
             released.set()
             result = await asyncio.wait_for(invite_task, timeout=10.0)
             await sso_task
@@ -712,9 +730,8 @@ async def test_a_resend_blocks_on_the_organizations_lock_a_role_change_holds(pos
                 return await _resend_service(resend_session, store=store).resend(by, issued.invitation.id)
 
             resending = asyncio.create_task(resend())
-            # The role-change lock is still open here, so the resend cannot have reached its write yet.
-            done, _ = await asyncio.wait({resending}, timeout=0.5)
-            assert not done, "the resend must wait for the lock a role change holds"
+            await _until_a_session_waits_on_a_lock(engine, resending)
+            assert not resending.done(), "the resend must wait for the lock a role change holds"
 
             await locker.commit()
             reissued = await asyncio.wait_for(resending, timeout=10.0)
@@ -768,7 +785,6 @@ async def test_an_owner_demoted_mid_resend_cannot_still_mint_an_owner_link(
 
             async def demote_once_the_resend_is_waiting() -> None:
                 await arrived.wait()
-                await asyncio.sleep(0.2)
                 members = OrganizationMemberRepository(demote_session)
                 member = await members.get_active_by_organization_and_user(organization.id, owner.id)
                 assert member is not None
@@ -850,9 +866,9 @@ async def test_two_resends_at_once(postgres_url: str, monkeypatch: pytest.Monkey
         await session.commit()
         return issued
 
-    async def release_once_the_first_is_waiting() -> None:
+    async def release_once_the_other_waits(*racing: asyncio.Task[Any]) -> None:
         await arrived.wait()
-        await asyncio.sleep(0.2)
+        await _until_a_session_waits_on_a_lock(engine, *racing)
         released.set()
 
     try:
@@ -870,7 +886,7 @@ async def test_two_resends_at_once(postgres_url: str, monkeypatch: pytest.Monkey
             by_second = ActingMember(organization_id=organization.id, user_id=second_owner.id)
             first_task = asyncio.create_task(attempt(first, by_first, issued.invitation.id))
             second_task = asyncio.create_task(attempt(second, by_second, issued.invitation.id))
-            releaser = asyncio.create_task(release_once_the_first_is_waiting())
+            releaser = asyncio.create_task(release_once_the_other_waits(first_task, second_task))
             first_result, second_result = await asyncio.wait_for(asyncio.gather(first_task, second_task), timeout=10.0)
             await releaser
     finally:
@@ -966,9 +982,9 @@ async def test_two_resends_at_once_when_the_winner_crosses_the_limit(
         await session.commit()
         return issued
 
-    async def release_once_the_first_is_waiting() -> None:
+    async def release_once_the_other_waits(*racing: asyncio.Task[Any]) -> None:
         await arrived.wait()
-        await asyncio.sleep(0.2)
+        await _until_a_session_waits_on_a_lock(engine, *racing)
         released.set()
 
     try:
@@ -986,7 +1002,7 @@ async def test_two_resends_at_once_when_the_winner_crosses_the_limit(
             by_second = ActingMember(organization_id=organization.id, user_id=second_owner.id)
             first_task = asyncio.create_task(attempt(first, by_first, issued.invitation.id))
             second_task = asyncio.create_task(attempt(second, by_second, issued.invitation.id))
-            releaser = asyncio.create_task(release_once_the_first_is_waiting())
+            releaser = asyncio.create_task(release_once_the_other_waits(first_task, second_task))
             first_result, second_result = await asyncio.wait_for(asyncio.gather(first_task, second_task), timeout=10.0)
             await releaser
     finally:
@@ -1047,7 +1063,6 @@ async def test_a_resend_racing_a_cancel_is_not_found_once_the_cancel_wins(
 
             async def cancel_once_resend_is_waiting() -> None:
                 await arrived.wait()
-                await asyncio.sleep(0.2)
                 await _invitations(cancel_session, store=store).cancel(by, issued.invitation.id)
                 await cancel_session.commit()
                 released.set()
@@ -1107,7 +1122,6 @@ async def test_sso_turned_on_while_a_resend_holds_its_admission_refuses_the_writ
 
             async def enforce_sso_once_the_resend_is_waiting() -> None:
                 await arrived.wait()
-                await asyncio.sleep(0.2)
                 organizations = OrganizationRepository(sso_session)
                 row = await organizations.get(organization.id)
                 assert row is not None
@@ -1189,7 +1203,6 @@ async def test_a_resend_races_the_delivery_workers_claim(postgres_url: str, monk
 
             async def claim_once_resend_is_waiting() -> None:
                 await arrived.wait()
-                await asyncio.sleep(0.2)
                 worker_repository = OrganizationInvitationRepository(worker_session)
                 claimed = await worker_repository.claim_due_send(
                     now=_NOW, held_until=_NOW + timedelta(minutes=10), max_attempts=3, token_hash="worker-claim"
@@ -1278,7 +1291,6 @@ async def test_a_resend_renewing_an_expired_invitation_survives_a_bulk_invite_re
 
             async def resend_once_the_invite_is_waiting() -> None:
                 await arrived.wait()
-                await asyncio.sleep(0.2)
                 await _invitations(resend_session, store=store).resend(by, invitation_id)
                 await resend_session.commit()
                 released.set()
