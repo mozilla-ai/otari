@@ -140,11 +140,18 @@ server's **Availability** to **Every request**, or your client names the server 
 `mcp_server_ids`, just ask your agent for something the server does:
 
 1. Ask, for example "check my open Jira tasks".
-2. The agent answers with a sign-in link. Open it within 30 minutes.
+2. The agent answers with a sign-in link. Open it within 30 minutes. If you
+   have an Otari dashboard account, open it in a browser where you are signed
+   in to the dashboard.
 3. An Otari page names the server and the Otari user your account will be
    attached to. Check that the user is you, then click **This is me, continue**
-   and sign in with your own account.
+   and sign in with your own account, in the same browser.
 4. A page says you are signed in. Go back to the conversation and ask again.
+
+If the page says **Sign in to Otari first**, the link is for a dashboard
+account: sign in to the dashboard in that browser, then open the link again.
+The sign-in finishes only in the browser where you clicked **This is me,
+continue**, so do not copy the server's sign-in page into another browser.
 
 The second ask uses your account.
 
@@ -154,7 +161,9 @@ example `https://otari.example.com/api/v1/mcp-connections/sign-in?ticket=...`.
 An address that only starts the same way, such as
 `https://otari.example.com.other.site/...`, is not Otari: do not open it.
 
-Keep the link to yourself. It is made for you, from the key your agent uses, and
+Keep the link to yourself. It is made for you, from the key your agent uses. A
+link for a dashboard account continues only in that account's own dashboard
+session. A link for a user with no dashboard login does not need one, so
 whoever opens it within its 30 minutes and continues connects the account they
 sign in with to you.
 
@@ -162,7 +171,9 @@ Never open a sign-in link someone else sent you. It is made for their Otari
 user, so signing in through it would hand them the use of your account on that
 server. The page the link opens names the user it is for: if that is not you, or
 you did not ask for the link yourself, close the page. If you are signed in to
-the Otari dashboard as a different user, the page refuses to continue.
+the Otari dashboard as a different user, the page refuses to continue. Someone
+who sends you the server's own sign-in page, copied out of their link, gets
+nothing either: that sign-in finishes only in the browser that started it.
 
 ## What your keys see before you connect
 

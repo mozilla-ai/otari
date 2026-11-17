@@ -135,9 +135,10 @@ an owner/admin of that workspace.
 - A workspace may configure up to 50 servers.
 - `everyone_tools` (default `["*"]`) is the server's default policy, and
   `read_tools` the tools labeled read. On create, leaving it out (or sending
-  `null`) follows the tools the server marks read-only. On `PATCH`, leaving it
-  out keeps the labels as they are, and only an explicit `null` goes back to
-  following the server; see [Server access](#server-access).
+  `null`) takes the tools the server marks read-only in its first listing. On
+  `PATCH`, leaving it out keeps the labels as they are, and only an explicit
+  `null` goes back to the server's first-listing hints; see
+  [Read tools](#read-tools).
 - `GET /{server_id}` reads one server, for any member who can see the workspace.
 - `credential_mode` (default `shared`) says whose credential a call carries;
   see [Credential mode](#credential-mode). On a shared server, `shared_account`
@@ -204,10 +205,18 @@ server's page and in the form that adds one; the server's row under
   reached, does not answer within 10 seconds, whose URL fails its safety check or
   whose stored credential will not decrypt is dropped from that request, with the
   reason in the log, and the request goes on without it. A request's attached
-  servers get 15 seconds between them to renew their tokens, and another 15
-  between them to connect, so several that hang cost one wait of each kind, not
-  one each, and the worst case before the model is called is about 30 seconds.
-  A server the request named still fails it.
+  servers share one budget of 15 seconds for everything they do before the model
+  is called: renewing a token, checking the URL and connecting all draw on it. So
+  however many hang, and in whichever step, they cost a request 15 seconds at
+  most. A server the request named still fails it.
+- **A server that keeps failing is skipped for a while.** An attached server
+  that times out on its own 10 seconds is recorded as failing in its
+  [`health`](#connection-checks), like one that cannot be reached at all. For a
+  minute after that, every request on every gateway process leaves it out
+  without trying it, so it costs them nothing. The first request after the minute
+  tries it again: a failure starts another minute, and an answer brings it back
+  at once. A request that names the server still tries it, and so does
+  **Check**.
 - **Streaming works the same way.** The loop runs gateway tool calls between
   rounds and streams only what the model writes for the user.
 - **Loop limits and the bill.** The loop stops after `max_tool_iterations` rounds
@@ -393,13 +402,21 @@ new connection.
   a request from another site gets the page again. So a link previewer, a mail
   scanner or another site cannot start a sign-in for someone. Continuing again
   with no dashboard session replaces the sign-in started before.
-- **A dashboard session is checked, and none is needed.** With no session, the
-  sign-in finishes on its state alone, and the page is what tells the person
-  whose link it is. A link continued in a dashboard session is bound to that
-  session and finishes in the dashboard. A session that belongs to a different
-  user than the link's is refused.
-- **Treat a link like a short-lived invitation.** Whoever opens it within its 30
-  minutes and continues connects the account they sign in with to that user, so
+- **The sign-in finishes only in the browser that continued.** Continuing gives
+  that browser a cookie for this one sign-in, and the server's redirect back to
+  Otari finishes it only when the same browser brings the cookie back. So the
+  server's sign-in address, copied out of one browser and opened in another,
+  connects nothing: someone who sends their own link's sign-in page to another
+  person cannot get that person's account attached to their own user.
+- **A dashboard account needs its own session.** When the link's user is a
+  dashboard account, the link continues only in a browser signed in to the
+  dashboard as that account, and finishes in the dashboard. Without a session
+  the page says to sign in first and open the link again. A session that belongs
+  to a different user than the link's is refused. A link for a user with no
+  dashboard login (a user that exists only for API keys) needs no session.
+- **Treat a link like a short-lived invitation.** The link can be opened more
+  than once within its 30 minutes. For a user with no dashboard login, whoever
+  opens it and continues connects the account they sign in with to that user, so
   nobody should open a sign-in link someone else sent them. It never carries a
   token or the sign-in's state, and the log masks it.
 - **Only Otari makes the link.** It always starts with the deployment's own
@@ -442,8 +459,8 @@ everyone, lists the server once and records it the same way; one finished from
 a conversation's link with no dashboard session does not. This covers a
 shared token, a shared account and any user's own connection,
 stores nothing about who asked, and never delays or fails the request. One
-server is written at most once every 15 minutes unless its status changes, and
-each gateway process runs at most 64 such writes at once: a contact past that
+server's answers are written at most once every 15 minutes, and the same failure
+at most once a minute, unless its status changes; each gateway process runs at most 64 such writes at once: a contact past that
 is not recorded. A
 user who has not signed in to a per-user server, or whose own token the server
 refuses, is not a server failure and records nothing. So `health.checked_at` is
@@ -523,12 +540,17 @@ the default policy. The Playground offers only the servers that user reaches.
 stands for exactly that list, so a rule of `["@read"]` keeps meaning "read only"
 as the labels change. A tool that is not on it counts as write.
 
-Until a manager edits them, the labels follow the server: `read_tools` is the
-tools the server marks with MCP's `readOnlyHint`, as its last recorded tool
-listing reported them in `health.read_only_hinted_tools`, and
-`read_tools_from_server` is `true`. A server whose tools are not known yet has
-none, so `@read` allows nothing until a manager's check, or a request from a
-caller whose grant reaches the server, lists them. A caller whose only grant is
+Until a manager edits them, the labels are the server's own, from its first
+tool listing: `read_tools` is the tools the server marked with MCP's
+`readOnlyHint` the first time its tools were listed, and
+`read_tools_from_server` is `true`. They stay as they were then. A tool the
+server adds later, or relabels as read-only later, is not read until a manager
+labels it, so a server cannot widen `@read` on its own.
+`health.read_only_hinted_tools` shows what the latest listing says, for a
+manager to compare. Changing the server's `url` clears the kept hints, and the
+next listing of the new address sets them. A server whose tools are not known
+yet has none, so `@read` allows nothing until a manager's check, or a request
+from a caller whose grant reaches the server, lists them. A caller whose only grant is
 `@read` cannot list them with its own request: resolution leaves the server
 out, or refuses it, before connecting.
 
@@ -539,11 +561,12 @@ edits the labels, and nobody's access grows on upgrade.
 
 A `PATCH` that sets `read_tools`, an empty list included, makes the labels the
 manager's: `read_tools_from_server` turns `false` and no later check changes
-them. Sending `"read_tools": null` goes back to following the server.
+them. Sending `"read_tools": null` goes back to the hints of the server's first
+listing.
 
-A server can mark any tool read-only, and while the labels follow it, its word
-decides what `@read` allows. Set the labels yourself for a server you do not
-trust to describe its own tools.
+A server can mark any tool read-only in that first listing, and until a manager
+edits the labels its word decides what `@read` allows. Set the labels yourself
+for a server you do not trust to describe its own tools.
 
 #### What a caller sees
 
@@ -765,8 +788,8 @@ the live catalog did not return.
 
 `annotations` is the server's own metadata, passed through as untrusted data.
 Otari never infers safety from a tool's name or description, and reads
-`readOnlyHint` in one place only: as the default for a server's
-[read tools](#read-tools) until a manager sets them. Your risk policy is yours.
+`readOnlyHint` in one place only: from a server's first listing, as the default
+for its [read tools](#read-tools) until a manager sets them. Your risk policy is yours.
 
 `tools` is either the complete authorized catalog or absent: a pagination
 failure or a discovery ceiling returns `502 mcp_discovery_limit_exceeded` with no

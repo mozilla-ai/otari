@@ -25,7 +25,9 @@ time.
 
 Servers the workspace already has are not shown, on Popular or in a search.
 What you tick moves to **Selected**, above both, and stays there when you
-change or clear the search; untick it there to put it back.
+change or clear the search; untick it there to put it back. A ticked server
+leaves the search's pages and its count, so the range under the results counts
+only the servers still listed there.
 
 If a server is not in the catalog, **Add it by URL** at the bottom of the
 dialog opens the form that takes a URL.
@@ -46,23 +48,31 @@ Figma's own server stands out among the gateways named after Figma. Hover it
 to see the host. Among servers that match a search equally well, Official ones
 come first. A server is Official when all of this holds:
 
-- its endpoint lives on a domain of its publisher: its registry namespace, its
-  GitHub organization or its website;
+- its endpoint lives on the domain of its registry namespace: `com.stripe/mcp`
+  on `stripe.com` or one of its subdomains. The namespace is the one thing the
+  registry checks, by asking the publisher to prove they control that domain;
 - that domain is not a hosting platform's, such as `vercel.app` or
   `workers.dev`, where anyone can take a name;
 - its title is that domain's name and nothing more. "Stripe" on `stripe.com`
   and "Figma MCP Server" on `figma.com` are. "Fudge for Shopify" on `fudge.ai`
   is not, so nobody's helper for Shopify reads as Shopify's own.
 
-Two servers the rule cannot recognize are listed by hand: GitHub's, which
-lives on `githubcopilot.com`, and Atlassian's, whose title says more than
-"Atlassian". Every Popular server is Official.
+Nothing else the publisher writes counts. A website or a title of their choosing
+earns no label, so a lookalike domain titled "Stripe" is not Official and does
+not rank first. A namespace under `io.github.` proves only a GitHub account,
+not a domain, so it earns none either.
 
-The label is read from names. Nobody at Otari checked the servers, and the
-rule cannot tell a maker from someone who registered the maker's name under
-another ending (`example.dev` for `example.com`). Check the host before you
-trust a server with a credential. A server with no label is not suspect: many
-are a company's own server for a product with a longer name.
+A few servers the rule cannot recognize are listed by hand, each at the one
+host it was checked on: GitHub's, which lives on `githubcopilot.com`,
+Atlassian's, whose title says more than "Atlassian", Neon's, which lives on
+`neon.tech` under a `com.neon` namespace, and the Popular servers published
+under a GitHub account (Sentry, Context7, Grafana and PostHog). Every Popular
+server is Official.
+
+Nobody at Otari checked the servers themselves. The label says the endpoint is
+on the publisher's verified domain, not that the server is safe. Check the host
+before you trust a server with a credential. A server with no label is not
+suspect: many are a company's own server for a product with a longer name.
 
 ## Loading the catalog
 
@@ -250,6 +260,9 @@ curl "https://otari.example.com/api/v1/mcp-catalog/servers?q=sentry&limit=25" -H
 # The same, without the servers a workspace already has. Works on /popular too.
 curl "https://otari.example.com/api/v1/mcp-catalog/servers?q=sentry&workspace_id=<workspace-id>" -H "Otari-Key: Bearer $OTARI_MASTER_KEY"
 
+# Without servers set aside by name, such as the ones already picked. Works on /popular too.
+curl "https://otari.example.com/api/v1/mcp-catalog/servers?q=sentry&exclude=com.stripe/mcp&exclude=app.linear/linear" -H "Otari-Key: Bearer $OTARI_MASTER_KEY"
+
 # The Popular servers the catalog holds.
 curl "https://otari.example.com/api/v1/mcp-catalog/popular" -H "Otari-Key: Bearer $OTARI_MASTER_KEY"
 
@@ -282,6 +295,10 @@ come first.
 `workspace_id` names a workspace the caller can see, and leaves out the
 servers it already has, matched by URL with or without a trailing slash. A
 workspace the caller cannot see is a 404.
+
+`exclude`, repeated up to 50 times, names catalog servers to leave out as well.
+Both leave the servers out of `count` too, so `skip` pages the same rows the
+caller sees. The dialog sends the servers already picked this way.
 
 The sync status carries the mode, whether a sync is running or waiting to
 start, the last `outcome` (`complete`, `partial` or `failed`) with its `error`,

@@ -160,7 +160,7 @@ The catalog lists remote MCP servers from the official MCP Registry, so you do n
 1. Select the workspace in the top-left corner.
 2. Go to **Tools** → **MCP servers**.
 3. Click **Browse catalog**. If the catalog is empty, click **Load catalog** and wait a couple of minutes while it fills in.
-4. Pick from **Popular**, or type in **Search the catalog** to find any server by its name or description. Each server shows its logo. An **Official** label marks a server its maker runs on its own domain; hover it to see the host. Servers the workspace already has are not listed. If the server you want is not listed, click **Add it by URL**.
+4. Pick from **Popular**, or type in **Search the catalog** to find any server by its name or description. Each server shows its logo. An **Official** label marks a server its maker runs on the domain the registry verified for it; hover it to see the host. [What you see](mcp-catalog.md#what-you-see) gives the rule. Servers the workspace already has are not listed. If the server you want is not listed, click **Add it by URL**.
 5. Select each server you want. It moves to **Selected** at the top and stays there when you change the search; untick it to put it back.
 6. Click **Add**, which reads **Add 2 servers** and so on when you picked several.
 7. For each server, check its name, which must be unique within the workspace, and choose its **Sign-in mode**:
@@ -218,17 +218,19 @@ policy. Adding a rule for a key or user that already has one replaces it.
 ### Let a key only read
 
 **Read tools only** allows the tools labeled as read on that server. The labels
-start as the tools the server itself marks as read-only, so the rule works as
-soon as the server's tools are known, and the choice says how many tools it
-allows.
+start as the tools the server itself marked as read-only the first time its
+tools were listed, so the rule works as soon as the server's tools are known,
+and the choice says how many tools it allows. They stay as they were then: a
+tool the server adds later, or relabels as read-only later, is not read until
+you label it, so a server cannot widen the rule on its own.
 
 1. Add a rule for the key with **Read tools only**, as above.
 
 A server can mark any tool as read-only, so look at the list under
 **Read tools** before you rely on it. To set the labels yourself:
 
-1. Under **Read tools**, click **Edit**. The tools the server marks as read-only
-   are ticked.
+1. Under **Read tools**, click **Edit**. The tools the server marked as read-only
+   in its first listing are ticked.
 2. Tick the tools that only read, and untick the ones you do not trust.
 3. Click **Save read tools**.
 
