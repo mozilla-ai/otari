@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router"
 
 import type { CatalogProviderModel } from "@/client"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { TablePagination } from "@/design-system/data/TablePagination"
 import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
@@ -11,15 +12,27 @@ import { formatPricedRate } from "@/features/models/pricingUnit"
 import { publicCatalogHref } from "@/features/models/publicCatalog"
 import { ProviderPolicyLinks } from "@/features/providers/ProviderPolicyLinks"
 import { modelCountLabel } from "@/features/providers/ProvidersPage"
+import {
+  catalogPage,
+  needsPager,
+  PROVIDERS_URL_DEFAULTS,
+  type ProvidersListState,
+  providersListFromUrl,
+  providersListToUrl,
+  useClampedPage,
+} from "@/features/providers/providersList"
 import { publicProvidersHref } from "@/features/providers/publicProviders"
 import { ApiError } from "@/shared/api/client"
 import { useCatalogProvider } from "@/shared/api/models"
 import { ProviderMark } from "@/shared/components/marks/BrandMark"
 import { formatContext } from "@/shared/helpers/format"
+import { useUrlState } from "@/shared/helpers/urlState"
+import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 // One provider on a page of its own: its mark, name and the operator's links
-// to its terms, then every model it offers with its list price. A model's name
-// opens the model's page, where its offerings across providers are compared.
+// to its terms, then the models it offers with their list prices, a page at a
+// time. A model's name opens the model's page, where its offerings across
+// providers are compared.
 
 function price(
   value: number | null | undefined,
@@ -120,14 +133,32 @@ function BackLink({ publicView }: { publicView: boolean }) {
 
 export function ProviderDetailView({
   name,
+  list,
+  onListChange,
   publicView = false,
 }: {
   name: string
+  /** The page of the provider's models on screen. */
+  list: ProvidersListState
+  onListChange: (next: ProvidersListState) => void
   /** Ahead of a session: links are hash paths, as there is no router. */
   publicView?: boolean
 }) {
-  const selected = useCatalogProvider(name)
+  // The models the selected workspace may call, as the Models page shows them.
+  const workspace = useSelectedWorkspace()
+  const selected = useCatalogProvider(
+    name,
+    catalogPage(list),
+    publicView ? "" : (workspace.selected?.workspace_id ?? ""),
+    publicView || workspace.isSettled,
+  )
   const provider = selected.data
+  useClampedPage(
+    list,
+    onListChange,
+    provider?.model_count,
+    selected.isPlaceholderData,
+  )
 
   if (!provider) {
     if (
@@ -186,12 +217,30 @@ export function ProviderDetailView({
             }
           />
         </TableScrollFrame>
+        {needsPager(provider.model_count) ? (
+          <TablePagination
+            page={list.page}
+            pageSize={list.pageSize}
+            total={provider.model_count}
+            rowsOnPage={provider.models.length}
+            isFetching={selected.isFetching}
+            onPageChange={(page) => onListChange({ ...list, page })}
+            onPageSizeChange={(pageSize) => onListChange({ page: 0, pageSize })}
+          />
+        ) : null}
       </section>
     </div>
   )
 }
 
-/** The provider page on the router. */
+/** The provider page on the router, its page of models kept in the URL. */
 export function ProviderDetailPage({ name }: { name: string }) {
-  return <ProviderDetailView name={name} />
+  const url = useUrlState(PROVIDERS_URL_DEFAULTS)
+  return (
+    <ProviderDetailView
+      name={name}
+      list={providersListFromUrl(url)}
+      onListChange={(next) => url.patch(providersListToUrl(next))}
+    />
+  )
 }

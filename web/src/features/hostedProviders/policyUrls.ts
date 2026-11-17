@@ -1,18 +1,24 @@
 /**
  * Why a provider's Terms of service or Privacy policy URL would be refused, or
  * `undefined` when it would not. Blank is allowed (no link); anything else has
- * to be an absolute http(s) URL, the rule the server applies with a 422.
+ * to be an absolute http(s) URL with no username or password, the rule the
+ * server applies with a 422.
  */
 export function policyUrlError(value: string): string | undefined {
   const trimmed = value.trim()
   if (trimmed === "") return undefined
+  let url: URL
   try {
-    const url = new URL(trimmed)
-    if (url.protocol === "http:" || url.protocol === "https:") return undefined
+    url = new URL(trimmed)
   } catch {
-    // Not a URL at all; the message below covers it.
+    return "Enter a full http:// or https:// address."
   }
-  return "Enter a full http:// or https:// address."
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    return "Enter a full http:// or https:// address."
+  }
+  // The link is shown to visitors, so a credential in it would be published.
+  if (url.username || url.password) return "Leave out a username or password."
+  return undefined
 }
 
 /** The value a URL field sends: null for blank, so the link is cleared. */

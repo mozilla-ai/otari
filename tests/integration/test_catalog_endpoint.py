@@ -975,6 +975,37 @@ def test_a_providers_models_carry_its_own_price_rather_than_the_cheapest(
     ]
 
 
+def test_the_providers_are_paged_with_the_total_alongside(priced: TestClient, master_header: dict[str, str]) -> None:
+    whole = _get(priced, f"{API_ROOT}/catalog/providers", headers=master_header)
+    first = _get(priced, f"{API_ROOT}/catalog/providers", headers=master_header, params={"limit": 1})
+    second = _get(priced, f"{API_ROOT}/catalog/providers", headers=master_header, params={"skip": 1, "limit": 1})
+
+    assert whole["count"] == first["count"] == second["count"] == len(whole["providers"]) == 2
+    assert first["providers"] + second["providers"] == whole["providers"]
+
+
+def test_a_providers_models_are_paged_with_the_total_alongside(
+    priced: TestClient, master_header: dict[str, str]
+) -> None:
+    path = f"{API_ROOT}/catalog/providers/nebius"
+    whole = _get(priced, path, headers=master_header)
+    pages = [_get(priced, path, headers=master_header, params={"skip": skip, "limit": 1}) for skip in (0, 1, 2)]
+
+    assert whole["model_count"] == len(whole["models"]) == 2
+    assert [page["model_count"] for page in pages] == [2, 2, 2]
+    assert [len(page["models"]) for page in pages] == [1, 1, 0]
+    assert [model for page in pages for model in page["models"]] == whole["models"]
+
+
+@pytest.mark.parametrize("path", ["/catalog/providers", "/catalog/providers/fireworks"])
+@pytest.mark.parametrize("params", [{"limit": 0}, {"limit": 1001}, {"skip": -1}])
+def test_the_providers_window_is_bounded(
+    priced: TestClient, master_header: dict[str, str], path: str, params: dict[str, int]
+) -> None:
+    response = priced.get(f"{API_ROOT}{path}", headers=master_header, params=params)
+    assert response.status_code == 422, response.text
+
+
 def test_an_unknown_provider_is_404(priced: TestClient, master_header: dict[str, str]) -> None:
     with patch.object(mcs, "_fallback", return_value=parse_catalog(CATALOG)):
         response = priced.get(f"{API_ROOT}/catalog/providers/no-such-provider", headers=master_header)

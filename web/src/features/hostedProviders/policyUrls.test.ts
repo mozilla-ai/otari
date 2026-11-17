@@ -18,6 +18,13 @@ describe("policyUrlError", () => {
     expect(policyUrlError("javascript:alert(1)")).toBeDefined()
     expect(policyUrlError("ftp://example.com/terms")).toBeDefined()
   })
+
+  it("refuses a username or password", () => {
+    const refusal = "Leave out a username or password."
+    expect(policyUrlError("https://user:pw@example.com/terms")).toBe(refusal)
+    expect(policyUrlError("https://user@example.com/terms")).toBe(refusal)
+    expect(policyUrlError("https://:pw@example.com/terms")).toBe(refusal)
+  })
 })
 
 describe("policyUrlValue", () => {

@@ -4640,7 +4640,7 @@
         "type": "object"
       },
       "CatalogProviderDetail": {
-        "description": "One provider instance and every model it offers the caller, sorted by name.",
+        "description": "One provider instance and a page of the models it offers the caller, sorted by name.",
         "properties": {
           "display_name": {
             "description": "models.dev's name for the implementation, with the instance name after it where the two differ; the instance name where models.dev does not know it.",
@@ -4653,6 +4653,7 @@
             "type": "integer"
           },
           "models": {
+            "description": "The requested page; `model_count` is the total.",
             "items": {
               "$ref": "#/components/schemas/CatalogProviderModel"
             },
@@ -4853,8 +4854,13 @@
       },
       "CatalogProvidersResponse": {
         "properties": {
+          "count": {
+            "description": "Providers the caller may see, before paging.",
+            "title": "Count",
+            "type": "integer"
+          },
           "providers": {
-            "description": "Sorted by display name.",
+            "description": "The requested page, sorted by display name.",
             "items": {
               "$ref": "#/components/schemas/CatalogProviderSummary"
             },
@@ -4863,6 +4869,7 @@
           }
         },
         "required": [
+          "count",
           "providers"
         ],
         "title": "CatalogProvidersResponse",
@@ -36830,6 +36837,54 @@
       "get": {
         "description": "The provider instances offering a model this caller may use, with each one's policy links.\n\nRead from the same grouped catalog as ``GET /catalog/models``, so a provider\nis listed exactly when that listing shows one of its models.",
         "operationId": "catalog-list_catalog_providers",
+        "parameters": [
+          {
+            "description": "For a signed-in caller, only the providers a request billed to this workspace may call.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "For a signed-in caller, only the providers a request billed to this workspace may call.",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "description": "Number of providers to skip.",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of providers to skip.",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of providers to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of providers to return.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -36840,6 +36895,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -36859,7 +36924,7 @@
     },
     "/api/v1/catalog/providers/{name}": {
       "get": {
-        "description": "One provider instance and every model it offers this caller, at the caller's rates.\n\nAn instance offering the caller nothing answers 404, the same as one that\ndoes not exist, so the route cannot be used to probe for a restricted provider.",
+        "description": "One provider instance and a page of the models it offers this caller, at the caller's rates.\n\nAn instance offering the caller nothing answers 404, the same as one that\ndoes not exist, so the route cannot be used to probe for a restricted provider.",
         "operationId": "catalog-get_catalog_provider",
         "parameters": [
           {
@@ -36869,6 +36934,52 @@
             "schema": {
               "title": "Name",
               "type": "string"
+            }
+          },
+          {
+            "description": "For a signed-in caller, only the models a request billed to this workspace may call.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "For a signed-in caller, only the models a request billed to this workspace may call.",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "description": "Number of the provider's models to skip.",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of the provider's models to skip.",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of the provider's models to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of the provider's models to return.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
             }
           }
         ],

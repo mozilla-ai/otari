@@ -806,13 +806,19 @@ async def list_catalog_providers(
     model_provider: RequestSessionModelProviderPortDep,
     hosted_providers: HostedProviderServiceDep,
     org_provider_keys: OrgProviderKeyServiceDep,
+    workspace_id: Annotated[
+        uuid.UUID | None,
+        Query(description="For a signed-in caller, only the providers a request billed to this workspace may call."),
+    ] = None,
+    skip: Annotated[int, Query(ge=0, description="Number of providers to skip.")] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of providers to return.")] = 100,
 ) -> CatalogProvidersResponse:
     """The provider instances offering a model this caller may use, with each one's policy links.
 
     Read from the same grouped catalog as ``GET /catalog/models``, so a provider
     is listed exactly when that listing shows one of its models.
     """
-    merged = await _merged_for(db, config, caller, session_identity, model_provider)
+    merged = await _merged_for(db, config, caller, session_identity, model_provider, workspace_id)
     grouped = await _group(
         db,
         config,
@@ -822,10 +828,11 @@ async def list_catalog_providers(
         hosted_providers=hosted_providers,
         org_provider_keys=org_provider_keys,
     )
-    summaries = [summary for summary, _ in (await _provider_summaries(grouped, hosted_providers)).values()]
-    return CatalogProvidersResponse(
-        providers=sorted(summaries, key=lambda summary: (summary.display_name.casefold(), summary.name))
+    summaries = sorted(
+        (summary for summary, _ in (await _provider_summaries(grouped, hosted_providers)).values()),
+        key=lambda summary: (summary.display_name.casefold(), summary.name),
     )
+    return CatalogProvidersResponse(count=len(summaries), providers=summaries[skip : skip + limit])
 
 
 @router.get("/providers/{name}", openapi_extra=key_scope(None))
@@ -838,13 +845,19 @@ async def get_catalog_provider(
     model_provider: RequestSessionModelProviderPortDep,
     hosted_providers: HostedProviderServiceDep,
     org_provider_keys: OrgProviderKeyServiceDep,
+    workspace_id: Annotated[
+        uuid.UUID | None,
+        Query(description="For a signed-in caller, only the models a request billed to this workspace may call."),
+    ] = None,
+    skip: Annotated[int, Query(ge=0, description="Number of the provider's models to skip.")] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of the provider's models to return.")] = 100,
 ) -> CatalogProviderDetail:
-    """One provider instance and every model it offers this caller, at the caller's rates.
+    """One provider instance and a page of the models it offers this caller, at the caller's rates.
 
     An instance offering the caller nothing answers 404, the same as one that
     does not exist, so the route cannot be used to probe for a restricted provider.
     """
-    merged = await _merged_for(db, config, caller, session_identity, model_provider)
+    merged = await _merged_for(db, config, caller, session_identity, model_provider, workspace_id)
     grouped = await _group(
         db,
         config,
@@ -874,4 +887,4 @@ async def get_catalog_provider(
             )
         )
     models.sort(key=lambda model: (model.name.casefold(), model.id))
-    return CatalogProviderDetail(**summary.model_dump(), models=models)
+    return CatalogProviderDetail(**summary.model_dump(), models=models[skip : skip + limit])

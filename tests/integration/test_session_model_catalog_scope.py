@@ -627,6 +627,38 @@ def test_naming_a_workspace_lists_only_what_that_workspace_may_call(
     assert _MISTRAL_MODEL in other
 
 
+def test_naming_a_workspace_lists_only_the_providers_that_workspace_may_call(
+    client: TestClient, world: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The providers pages narrow by workspace exactly as the model list does, so neither shows the other's reach."""
+    bind_model_provider(client, HostedModelProvider("mistral"))
+    monkeypatch.setattr(
+        workspace_hosted_access,
+        "_rules",
+        {world.workspaces["alpha_one"]: {"mistral": WorkspaceHostedRule(enabled=False, models=None)}},
+    )
+
+    def providers(workspace: str) -> tuple[set[str], int]:
+        params = {"workspace_id": str(world.workspaces[workspace])}
+        client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_owner"])
+        try:
+            listed = client.get(f"{API_ROOT}/catalog/providers", params=params)
+            assert listed.status_code == status.HTTP_200_OK, listed.text
+            detail = client.get(f"{API_ROOT}/catalog/providers/mistral", params=params)
+            return {provider["name"] for provider in listed.json()["providers"]}, detail.status_code
+        finally:
+            client.cookies.clear()
+
+    narrowed, narrowed_detail = providers("alpha_one")
+    other, other_detail = providers("alpha_two")
+
+    assert "mistral" not in narrowed
+    assert "openai" in narrowed
+    assert narrowed_detail == status.HTTP_404_NOT_FOUND
+    assert "mistral" in other
+    assert other_detail == status.HTTP_200_OK
+
+
 def test_a_workspace_requiring_zero_data_retention_lists_no_undeclared_offering(
     client: TestClient, world: _World, monkeypatch: pytest.MonkeyPatch
 ) -> None:

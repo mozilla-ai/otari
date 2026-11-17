@@ -1355,7 +1355,7 @@ export interface paths {
         };
         /**
          * Get Catalog Provider
-         * @description One provider instance and every model it offers this caller, at the caller's rates.
+         * @description One provider instance and a page of the models it offers this caller, at the caller's rates.
          *
          *     An instance offering the caller nothing answers 404, the same as one that
          *     does not exist, so the route cannot be used to probe for a restricted provider.
@@ -11393,7 +11393,7 @@ export interface components {
         };
         /**
          * CatalogProviderDetail
-         * @description One provider instance and every model it offers the caller, sorted by name.
+         * @description One provider instance and a page of the models it offers the caller, sorted by name.
          */
         CatalogProviderDetail: {
             /**
@@ -11406,7 +11406,10 @@ export interface components {
              * @description Catalog models the caller may see that this instance offers.
              */
             model_count: number;
-            /** Models */
+            /**
+             * Models
+             * @description The requested page; `model_count` is the total.
+             */
             models: components["schemas"]["CatalogProviderModel"][];
             /**
              * Name
@@ -11503,8 +11506,13 @@ export interface components {
         /** CatalogProvidersResponse */
         CatalogProvidersResponse: {
             /**
+             * Count
+             * @description Providers the caller may see, before paging.
+             */
+            count: number;
+            /**
              * Providers
-             * @description Sorted by display name.
+             * @description The requested page, sorted by display name.
              */
             providers: components["schemas"]["CatalogProviderSummary"][];
         };
@@ -26311,7 +26319,14 @@ export interface operations {
     };
     "catalog-list_catalog_providers": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description For a signed-in caller, only the providers a request billed to this workspace may call. */
+                workspace_id?: string | null;
+                /** @description Number of providers to skip. */
+                skip?: number;
+                /** @description Maximum number of providers to return. */
+                limit?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -26327,11 +26342,27 @@ export interface operations {
                     "application/json": components["schemas"]["CatalogProvidersResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     "catalog-get_catalog_provider": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description For a signed-in caller, only the models a request billed to this workspace may call. */
+                workspace_id?: string | null;
+                /** @description Number of the provider's models to skip. */
+                skip?: number;
+                /** @description Maximum number of the provider's models to return. */
+                limit?: number;
+            };
             header?: never;
             path: {
                 name: string;

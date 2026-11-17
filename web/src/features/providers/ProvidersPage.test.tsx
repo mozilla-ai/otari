@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, within } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -12,8 +13,9 @@ import { ProviderDetailPage } from "@/features/providers/ProviderDetailPage"
 import { ProvidersPage } from "@/features/providers/ProvidersPage"
 import { PublicProvidersPage } from "@/features/providers/PublicProvidersPage"
 import { API_ROOT } from "@/shared/api/client"
+import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
-import { bootstrap } from "@/tests/fixtures"
+import { bootstrap, organizationContext } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 
 const FIREWORKS: CatalogProviderSummary = {
@@ -34,7 +36,10 @@ const OPENAI_EU: CatalogProviderSummary = {
   privacy_url: null,
 }
 
-const LIST: CatalogProvidersResponse = { providers: [FIREWORKS, OPENAI_EU] }
+const LIST: CatalogProvidersResponse = {
+  count: 2,
+  providers: [FIREWORKS, OPENAI_EU],
+}
 
 const FIREWORKS_DETAIL: CatalogProviderDetail = {
   ...FIREWORKS,
@@ -76,18 +81,52 @@ function jsonResponse(body: unknown, status = 200): Response {
   })
 }
 
-function mockApi() {
+function mockApi({
+  list = () => LIST,
+  detail = () => FIREWORKS_DETAIL,
+  workspaceId,
+}: {
+  list?: (params: URLSearchParams) => CatalogProvidersResponse
+  detail?: (params: URLSearchParams) => CatalogProviderDetail
+  workspaceId?: string
+} = {}) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-    const url = String(input)
-    if (url.endsWith(`${API_ROOT}/catalog/providers`)) return jsonResponse(LIST)
-    if (url.endsWith(`${API_ROOT}/catalog/providers/fireworks`)) {
-      return jsonResponse(FIREWORKS_DETAIL)
+    const url = new URL(String(input), "http://localhost")
+    const path = url.pathname
+    if (path.endsWith(`${API_ROOT}/catalog/providers`)) {
+      return jsonResponse(list(url.searchParams))
     }
-    if (url.includes(`${API_ROOT}/catalog/providers/`)) {
+    if (path.endsWith(`${API_ROOT}/catalog/providers/fireworks`)) {
+      return jsonResponse(detail(url.searchParams))
+    }
+    if (path.includes(`${API_ROOT}/catalog/providers/`)) {
       return jsonResponse({ detail: "Provider not found" }, 404)
+    }
+    if (path.includes(`${API_ROOT}/organizations/me`)) {
+      return jsonResponse(
+        organizationContext({
+          workspace_memberships: workspaceId
+            ? [{ workspace_id: workspaceId, name: "Research", role: "owner" }]
+            : [],
+        }),
+      )
     }
     return jsonResponse({ detail: "unexpected" }, 500)
   })
+}
+
+function provider(index: number): CatalogProviderSummary {
+  return {
+    ...OPENAI_EU,
+    name: `provider-${index}`,
+    display_name: `Provider ${index}`,
+  }
+}
+
+function requestsTo(fetchMock: ReturnType<typeof mockApi>, path: string) {
+  return fetchMock.mock.calls
+    .map(([input]) => new URL(String(input), "http://localhost"))
+    .filter((url) => url.pathname.endsWith(path))
 }
 
 function providers(ui: ReactElement) {
@@ -142,6 +181,70 @@ describe("ProvidersPage", () => {
     expect(within(openai).queryByText("Terms of service")).toBeNull()
     expect(within(openai).queryByText("Privacy policy")).toBeNull()
   })
+
+  it("asks for one page and carries no pager while everything fits on it", async () => {
+    const fetchMock = mockApi()
+    await renderWithRouter(providers(<ProvidersPage />), { url: "/providers" })
+
+    await screen.findByRole("list", { name: "Providers" })
+    const [request] = requestsTo(fetchMock, "/catalog/providers")
+    expect(request?.searchParams.get("skip")).toBe("0")
+    expect(request?.searchParams.get("limit")).toBe("25")
+    expect(request?.searchParams.has("workspace_id")).toBe(false)
+    expect(screen.queryByRole("button", { name: /next/i })).toBeNull()
+  })
+
+  it("pages through more providers than fit on one page", async () => {
+    const fetchMock = mockApi({
+      list: (params) => ({
+        count: 26,
+        providers:
+          params.get("skip") === "25"
+            ? [provider(26)]
+            : Array.from({ length: 25 }, (_, index) => provider(index + 1)),
+      }),
+    })
+    await renderWithRouter(providers(<ProvidersPage />), { url: "/providers" })
+    const user = userEvent.setup()
+
+    await screen.findByRole("link", { name: "Provider 1" })
+    expect(screen.getByText(/26 providers serve/)).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: /next/i }))
+
+    expect(
+      await screen.findByRole("link", { name: "Provider 26" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Provider 1" })).toBeNull()
+    await waitFor(() =>
+      expect(
+        requestsTo(fetchMock, "/catalog/providers").some(
+          (url) => url.searchParams.get("skip") === "25",
+        ),
+      ).toBe(true),
+    )
+  })
+
+  it("lists what the selected workspace may call", async () => {
+    const workspaceId = "44444444-4444-4444-4444-444444444444"
+    const fetchMock = mockApi({ workspaceId })
+    await renderWithRouter(
+      providers(
+        <SelectedWorkspaceProvider>
+          <ProvidersPage />
+        </SelectedWorkspaceProvider>,
+      ),
+      { url: "/providers" },
+    )
+
+    await screen.findByRole("list", { name: "Providers" })
+    const requests = requestsTo(fetchMock, "/catalog/providers")
+    // The first read included: the page waits for the selection rather than
+    // showing the whole organization's providers first.
+    expect(requests.length).toBeGreaterThan(0)
+    for (const request of requests) {
+      expect(request.searchParams.get("workspace_id")).toBe(workspaceId)
+    }
+  })
 })
 
 describe("ProviderDetailPage", () => {
@@ -185,6 +288,42 @@ describe("ProviderDetailPage", () => {
     ).toBeInTheDocument()
     expect(screen.getByText(/No provider named nope/)).toBeInTheDocument()
   })
+
+  it("pages through more models than fit on one page", async () => {
+    const model = (index: number) => ({
+      ...FIREWORKS_DETAIL.models[0]!,
+      id: `acme/model-${index}`,
+      name: `Model ${index}`,
+    })
+    const fetchMock = mockApi({
+      detail: (params) => ({
+        ...FIREWORKS,
+        model_count: 26,
+        models:
+          params.get("skip") === "25"
+            ? [model(26)]
+            : Array.from({ length: 25 }, (_, index) => model(index + 1)),
+      }),
+    })
+    await renderWithRouter(providers(<ProviderDetailPage name="fireworks" />), {
+      url: "/providers/fireworks",
+    })
+    const user = userEvent.setup()
+
+    const table = await screen.findByRole("grid", {
+      name: "Models from Fireworks AI",
+    })
+    expect(within(table).getByRole("link", { name: "Model 1" })).toBeVisible()
+    expect(screen.getByText(/26 models/)).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: /next/i }))
+
+    expect(
+      await within(table).findByRole("link", { name: "Model 26" }),
+    ).toBeInTheDocument()
+    const pages = requestsTo(fetchMock, "/catalog/providers/fireworks")
+    expect(pages.at(-1)?.searchParams.get("skip")).toBe("25")
+    expect(pages.at(-1)?.searchParams.get("limit")).toBe("25")
+  })
 })
 
 // No router on purpose: the public pages render ahead of the session, where
@@ -223,5 +362,31 @@ describe("PublicProvidersPage", () => {
       "href",
       "#/providers",
     )
+  })
+
+  it("pages a visitor's list in memory and names no workspace", async () => {
+    const fetchMock = mockApi({
+      list: (params) => ({
+        count: 26,
+        providers:
+          params.get("skip") === "25"
+            ? [provider(26)]
+            : Array.from({ length: 25 }, (_, index) => provider(index + 1)),
+      }),
+    })
+    render(providers(<PublicProvidersPage />))
+    const user = userEvent.setup()
+
+    await screen.findByRole("link", { name: "Provider 1" })
+    await user.click(screen.getByRole("button", { name: /next/i }))
+
+    expect(
+      await screen.findByRole("link", { name: "Provider 26" }),
+    ).toBeInTheDocument()
+    const requests = requestsTo(fetchMock, "/catalog/providers")
+    expect(requests.at(-1)?.searchParams.get("skip")).toBe("25")
+    for (const request of requests) {
+      expect(request.searchParams.has("workspace_id")).toBe(false)
+    }
   })
 })

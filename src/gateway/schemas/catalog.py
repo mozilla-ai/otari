@@ -234,7 +234,8 @@ class CatalogProviderSummary(BaseModel):
 
 
 class CatalogProvidersResponse(BaseModel):
-    providers: list[CatalogProviderSummary] = Field(description="Sorted by display name.")
+    count: int = Field(description="Providers the caller may see, before paging.")
+    providers: list[CatalogProviderSummary] = Field(description="The requested page, sorted by display name.")
 
 
 class CatalogProviderModel(BaseModel):
@@ -261,6 +262,6 @@ class CatalogProviderModel(BaseModel):
 
 
 class CatalogProviderDetail(CatalogProviderSummary):
-    """One provider instance and every model it offers the caller, sorted by name."""
+    """One provider instance and a page of the models it offers the caller, sorted by name."""
 
-    models: list[CatalogProviderModel]
+    models: list[CatalogProviderModel] = Field(description="The requested page; `model_count` is the total.")
