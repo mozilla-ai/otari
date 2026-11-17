@@ -15,6 +15,7 @@ from gateway.core.tokens import hash_token
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.organizations_exceptions import (
     InvitationAddressMismatchError,
+    InvitationNeedsSsoSignInError,
     InvitationNoLongerValidError,
 )
 from gateway.models.organizations import WorkspaceAssignment
@@ -74,6 +75,20 @@ class _EverythingBlocked:
         return set(emails)
 
 
+class _Sso:
+    """An SSO enforcement that refuses, or admits, whoever asks."""
+
+    def __init__(self, *, refuses: bool) -> None:
+        self._refuses = refuses
+        self.asked: list[tuple[uuid.UUID, str, uuid.UUID]] = []
+
+    async def blocks_joining(
+        self, *, organization: Organization, role: OrganizationMemberRole, user_id: uuid.UUID
+    ) -> bool:
+        self.asked.append((organization.id, role, user_id))
+        return self._refuses
+
+
 class _RecordingAdmission:
     """Stands in for the collaborator that admits a member, recording what it was asked to do."""
 
@@ -116,6 +131,7 @@ class _Store:
         admission: object | None = None,
         blocked: object | None = None,
         mail_transport: str = "smtp",
+        sso: object | None = None,
     ) -> InvitationAcceptance:
         domains = OrganizationClaimedDomains(OrganizationDomainRepository(self.uow))
         blocklist = blocked if blocked is not None else _NoBlockedAddresses()
@@ -133,6 +149,7 @@ class _Store:
                 workspaces=WorkspaceRepository(self.uow),
             ),
             mailer=Mailer(_config(mail_transport=mail_transport)),
+            sso=sso or _Sso(refuses=False),  # type: ignore[arg-type]
         )
 
     async def member(self, organization: Organization, *, full_name: str = "Joiner") -> tuple[uuid.UUID, uuid.UUID]:
@@ -397,3 +414,36 @@ async def test_accept_refuses_a_declined_link_and_leaves_it_for_the_admin(store:
 
     async with store.uow:
         assert await store.repositories.invitations.get(invitation_id) is not None
+
+
+async def test_accept_is_refused_where_single_sign_on_does_not_admit_the_account(store: _Store) -> None:
+    organization = await store.organization()
+    invitation_id = await store.invitation(organization)
+    user_id, member_id = await store.member(organization)
+    admission = _RecordingAdmission(member_id)
+    sso = _Sso(refuses=True)
+    # Read before the call: the refusal rolls the block back, and a rollback expires every instance.
+    organization_id = organization.id
+
+    with pytest.raises(InvitationNeedsSsoSignInError, match="ada@example.com"):
+        await store.acceptance(admission=admission, sso=sso).accept(
+            "plain-token", by=AcceptingPerson(email="ada@example.com", user_id=user_id)
+        )
+
+    assert sso.asked == [(organization_id, "member", user_id)]
+    assert admission.calls == []
+    async with store.uow:
+        assert await store.repositories.invitations.get(invitation_id) is not None
+
+
+async def test_accept_asks_single_sign_on_about_the_role_the_invitation_offers(store: _Store) -> None:
+    organization = await store.organization()
+    await store.invitation(organization)
+    user_id, member_id = await store.member(organization)
+    sso = _Sso(refuses=False)
+
+    await store.acceptance(admission=_RecordingAdmission(member_id), sso=sso).accept(
+        "plain-token", by=AcceptingPerson(email="ada@example.com", user_id=user_id)
+    )
+
+    assert sso.asked == [(organization.id, "member", user_id)]

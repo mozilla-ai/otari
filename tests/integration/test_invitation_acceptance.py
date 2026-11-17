@@ -32,6 +32,7 @@ from gateway.services.tenancy import OrganizationService
 from .conftest import _to_async_url
 from .tenancy_helpers import (
     NO_BLOCKED_ADDRESSES,
+    NO_SSO_ENFORCEMENT,
     create_member,
     create_organization,
     create_workspace,
@@ -72,6 +73,7 @@ def _acceptance(session: AsyncSession) -> InvitationAcceptance:
             workspaces=WorkspaceRepository(uow),
         ),
         mailer=Mailer(_config()),
+        sso=NO_SSO_ENFORCEMENT,
     )
 
 

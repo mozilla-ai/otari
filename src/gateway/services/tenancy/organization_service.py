@@ -446,6 +446,23 @@ class OrganizationService:
         bootstrap = await load_bootstrap_identity(self.db)
         return None if bootstrap is None else bootstrap.id
 
+    async def sso_refuses_joining(
+        self, *, organization: Organization, is_linked: bool, role: OrganizationMemberRole, user: User
+    ) -> bool:
+        """Whether this organization's SSO enforcement refuses this person joining it as ``role``.
+
+        The same rule as for a membership that exists, asked of somebody who holds none yet.
+        ``is_linked`` is whether they hold a sign-in link to this organization's own connection,
+        which the identity domain owns and this service cannot read.
+        """
+        return organization.sso_required and _sso_would_block_joining(
+            organization=organization,
+            is_deployment_operator=await self.is_deployment_operator(user),
+            is_linked=is_linked,
+            role=role,
+            user_id=user.id,
+        )
+
     async def is_deployment_operator(self, user: User) -> bool:
         """Whether the deployment's own administration admits this caller across every organization.
 
@@ -3003,13 +3020,40 @@ def sso_would_block_membership(
     The rule without the switch, which is what a preflight reports: it has to say who would lose
     access before enforcement is on, and the same rule then decides who does.
     """
-    if is_deployment_operator:
-        return False
-    if (
-        organization.sso_break_glass_user_id == membership.user_id
-        and membership.role == OWNER_ROLE
-        and membership.status == ACTIVE_MEMBERSHIP_STATUS
-    ):
+    return _sso_would_block(
+        is_deployment_operator=is_deployment_operator,
+        is_linked=is_linked,
+        break_glass=(
+            organization.sso_break_glass_user_id == membership.user_id
+            and membership.role == OWNER_ROLE
+            and membership.status == ACTIVE_MEMBERSHIP_STATUS
+        ),
+    )
+
+
+def _sso_would_block_joining(
+    *,
+    organization: Organization,
+    is_deployment_operator: bool,
+    is_linked: bool,
+    role: str,
+    user_id: uuid.UUID,
+) -> bool:
+    """Whether this organization's SSO enforcement would refuse this person joining it as ``role``.
+
+    The same rule as for a membership that exists, for a person who holds none yet. The membership a
+    join creates is active, which is what the break-glass exception needs.
+    """
+    return _sso_would_block(
+        is_deployment_operator=is_deployment_operator,
+        is_linked=is_linked,
+        break_glass=organization.sso_break_glass_user_id == user_id and role == OWNER_ROLE,
+    )
+
+
+def _sso_would_block(*, is_deployment_operator: bool, is_linked: bool, break_glass: bool) -> bool:
+    """Whether SSO refuses somebody: nobody exempt is refused, and everybody else needs a link."""
+    if is_deployment_operator or break_glass:
         return False
     return not is_linked
 

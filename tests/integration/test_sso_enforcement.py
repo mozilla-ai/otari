@@ -1916,3 +1916,69 @@ async def test_switching_into_a_non_enforcing_organization_is_unaffected(
 
     assert response.status_code == 200, response.text
     assert response.json()["organization"]["id"] == str(organization.id)
+
+
+async def test_the_rule_refuses_a_person_with_no_link_joining(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="joining-unlinked")
+    organization.sso_required = True
+    organization.sso_break_glass_waived = True
+    async_db.add(organization)
+    stranger = await _member_with_email(
+        async_db, organization, role="member", email="unlinked@acme.example", full_name="No Link"
+    )
+    service = OrganizationService(async_db, membership_listener=None)
+
+    refused = await service.sso_refuses_joining(
+        organization=organization, is_linked=False, role="member", user=stranger
+    )
+
+    assert refused is True
+
+
+async def test_the_rule_admits_a_person_joining_with_a_link(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="joining-linked")
+    organization.sso_required = True
+    async_db.add(organization)
+    joiner = await _member_with_email(
+        async_db, organization, role="member", email="linked@acme.example", full_name="Has Link"
+    )
+    service = OrganizationService(async_db, membership_listener=None)
+
+    refused = await service.sso_refuses_joining(organization=organization, is_linked=True, role="member", user=joiner)
+
+    assert refused is False
+
+
+async def test_the_rule_admits_the_break_glass_owner_joining_as_owner_alone(async_db: AsyncSession) -> None:
+    """The exception is for the owner it names, which is why the role they join as decides it."""
+    organization = await create_organization(async_db, slug="joining-break-glass")
+    owner = await _member_with_email(
+        async_db, organization, role="owner", email="glass@acme.example", full_name="Ada Owner"
+    )
+    organization.sso_required = True
+    organization.sso_break_glass_user_id = owner.id
+    async_db.add(organization)
+    await async_db.flush()
+    service = OrganizationService(async_db, membership_listener=None)
+
+    as_owner = await service.sso_refuses_joining(organization=organization, is_linked=False, role="owner", user=owner)
+    as_member = await service.sso_refuses_joining(organization=organization, is_linked=False, role="member", user=owner)
+
+    assert (as_owner, as_member) == (False, True)
+
+
+async def test_the_port_answers_for_a_person_who_is_not_a_member_yet(async_db: AsyncSession) -> None:
+    """``blocks_membership`` cannot: it reads an active membership and answers False when there is none."""
+    organization = await create_organization(async_db, slug="joining-port")
+    organization.sso_required = True
+    organization.sso_break_glass_waived = True
+    async_db.add(organization)
+    await async_db.flush()
+    stranger = await UserRepository(async_db).create_local_identity(
+        full_name="Stranger", active_organization_id=organization.id, email="stranger@acme.example"
+    )
+    await async_db.flush()
+    service = _connection_service(async_db)
+
+    assert await service.blocks_membership(user=stranger, organization=organization) is False
+    assert await service.blocks_joining(organization=organization, role="member", user_id=stranger.id) is True

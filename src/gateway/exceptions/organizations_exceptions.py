@@ -36,6 +36,15 @@ class InvitationAddressMismatchError(TenancyForbiddenError):
         super().__init__(f"This invitation is for {invited_email}. Sign in as that address to accept it.")
 
 
+class InvitationNeedsSsoSignInError(TenancyForbiddenError):
+    """An invitation to an organization whose members sign in through its own connection."""
+
+    def __init__(self, invited_email: object):
+        super().__init__(
+            f"Sign in through this organization's own connection as {invited_email} to accept this invitation."
+        )
+
+
 class InvitationNoLongerValidError(TenancyNotFoundError):
     """An invitation link cannot be used: it was never one, or it expired, was declined, cancelled or blocked.
 
@@ -567,6 +576,7 @@ __all__ = [
     "InvitationLimitCeiling",
     "InvitationLimitError",
     "InvitationAddressMismatchError",
+    "InvitationNeedsSsoSignInError",
     "InvitationNoLongerValidError",
     "InvitationNotFoundError",
     "InvitationPasswordNotAcceptedError",

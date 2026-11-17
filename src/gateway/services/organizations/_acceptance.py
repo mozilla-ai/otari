@@ -10,6 +10,7 @@ from gateway.core.tokens import hash_token
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.organizations_exceptions import (
     InvitationAddressMismatchError,
+    InvitationNeedsSsoSignInError,
     InvitationNoLongerValidError,
 )
 from gateway.models.organizations import OrganizationInvitation
@@ -20,6 +21,7 @@ from gateway.services.organizations._admission import MembershipAdmission
 from gateway.services.organizations._blocked_addresses import BlockedAddresses
 from gateway.services.organizations._delivery_rule import DeliveryRule
 from gateway.services.organizations._invitation_facts import InvitationFacts, InvitationFactsReader
+from gateway.services.organizations._sso_enforcement import SsoEnforcement
 from gateway.services.organizations._workspace_assignments import workspace_id_of
 
 
@@ -86,6 +88,7 @@ class InvitationAcceptance:
         delivery: DeliveryRule,
         facts: InvitationFactsReader,
         mailer: Mailer,
+        sso: SsoEnforcement,
     ) -> None:
         self._uow = uow
         self._invitations = repositories.invitations
@@ -97,6 +100,7 @@ class InvitationAcceptance:
         self._delivery = delivery
         self._facts = facts
         self._mailer = mailer
+        self._sso = sso
 
     async def preview(self, token: str) -> InvitationPreview:
         """What this invitation offers, raising the one refusal every unusable link gets.
@@ -127,12 +131,16 @@ class InvitationAcceptance:
         async with self._uow:
             invitation = await self._valid_or_refused(token)
             _require_the_invited_address(invitation.email, by)
+            # Taken before the enforcement is read, because turning it on takes the same lock.
+            await self._organizations.lock_settings(invitation.organization_id)
+            organization = await self._organizations.get(invitation.organization_id)
+            if organization is None:
+                raise InvitationNoLongerValidError()
+            if await self._sso.blocks_joining(organization=organization, role=invitation.role, user_id=by.user_id):
+                raise InvitationNeedsSsoSignInError(invitation.email)
             # Removing the row is what makes the link work once, and settles two acceptances at once.
             accepted = await self._invitations.delete_by_token_hash(invitation.token_hash)
             if accepted is None:
-                raise InvitationNoLongerValidError()
-            organization = await self._organizations.get(accepted.organization_id)
-            if organization is None:
                 raise InvitationNoLongerValidError()
             admitted = await self._admission.admit(
                 organization_id=accepted.organization_id,
