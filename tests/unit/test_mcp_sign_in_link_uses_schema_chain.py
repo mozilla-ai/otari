@@ -14,7 +14,7 @@ from sqlalchemy import Engine, create_engine, inspect, text
 
 _ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
 _REVISION = "e5b9d2f7a4c1"
-_BEFORE = "c8e1f4a7b2d9"
+_BEFORE = "a9d3f5b7c1e2"
 _TABLE = "mcp_sign_in_link_uses"
 _INDEX = "ix_mcp_sign_in_link_uses_expires_at"
 

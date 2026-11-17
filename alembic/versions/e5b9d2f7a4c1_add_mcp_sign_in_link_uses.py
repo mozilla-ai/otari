@@ -4,7 +4,7 @@
 sign-in, so the link cannot start another, until the link would have expired anyway.
 
 Revision ID: e5b9d2f7a4c1
-Revises: c8e1f4a7b2d9
+Revises: a9d3f5b7c1e2
 Create Date: 2026-11-17
 """
 
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "e5b9d2f7a4c1"
-down_revision: str | Sequence[str] | None = "c8e1f4a7b2d9"
+down_revision: str | Sequence[str] | None = "a9d3f5b7c1e2"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
