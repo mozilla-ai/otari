@@ -18,6 +18,7 @@ Otari never guesses from content.
 | The `session_label` request field | `"session_label": "chat-42"` | `client` |
 | A `session_id` request tag | `"metadata": {"session_id": "chat-42"}` | `client` |
 | Claude Code's own session id | `x-claude-code-session-id`, sent on every request | `harness` |
+| opencode's own session id | `x-opencode-session-id`, sent on every request | `harness` |
 | Codex's own session id | `thread-id`, or `session-id` without one, when `originator` or `User-Agent` starts with `codex` | `harness` |
 | A Claude Code span's session | `session.id` on an exported span | `otlp` |
 | An OTLP span's Claude session | `anthropic.session.id` on an exported span | `otlp` |
