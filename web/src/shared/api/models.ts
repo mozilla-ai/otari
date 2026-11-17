@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
   CatalogModelDetail,
+  CatalogProviderDetail,
+  CatalogProvidersResponse,
   CatalogQueryParams,
   CatalogResponse,
   DiscoverableModelsResponse,
@@ -119,6 +121,33 @@ export function useCatalogModel(
       ),
     staleTime: 60_000,
     enabled: modelId !== undefined && enabled,
+  })
+}
+
+/**
+ * The providers this deployment serves, each with how many models it offers.
+ * Readable by any session, and by a visitor where the catalog is public. Keyed
+ * under CATALOG so a hosted provider or pricing write refreshes it.
+ */
+export function useCatalogProviders() {
+  return useQuery({
+    ...NO_RETRY,
+    queryKey: [CATALOG, "providers"],
+    queryFn: () => apiFetch<CatalogProvidersResponse>("/catalog/providers"),
+    staleTime: 60_000,
+  })
+}
+
+/** One provider and the models it offers; 404 for one the caller cannot see. */
+export function useCatalogProvider(name: string) {
+  return useQuery({
+    ...NO_RETRY,
+    queryKey: [CATALOG, "provider", name],
+    queryFn: () =>
+      apiFetch<CatalogProviderDetail>(
+        `/catalog/providers/${encodeURIComponent(name)}`,
+      ),
+    staleTime: 60_000,
   })
 }
 

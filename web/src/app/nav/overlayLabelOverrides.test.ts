@@ -32,6 +32,7 @@ describe("a build that replaces the label-override module", () => {
   it("renames a base disclosure label", () => {
     expect(gateway()?.items.map((item) => item.label)).toEqual([
       "Models",
+      "Providers",
       "Routing",
       "Built-in tools",
     ])

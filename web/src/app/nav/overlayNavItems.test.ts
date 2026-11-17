@@ -86,7 +86,7 @@ describe("a build that replaces the nav-item module", () => {
     ])
     expect(
       section(NAV_SECTIONS, "gateway")?.items.map((item) => item.label),
-    ).toEqual(["Models", "Routing", "Tools"])
+    ).toEqual(["Models", "Providers", "Routing", "Tools"])
   })
 
   it("leaves a contributed row ungated unless it says otherwise", () => {

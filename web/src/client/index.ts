@@ -275,6 +275,12 @@ export type CatalogModelSummary = Schemas["CatalogModelSummary"]
 export type CatalogModelDetail = Schemas["CatalogModelDetail"]
 export type CatalogOffering = Schemas["CatalogOffering"]
 export type CatalogCapabilities = Schemas["CatalogCapabilities"]
+// The same catalog folded by provider instance (`/v1/catalog/providers`): the
+// list of providers this deployment serves, and one provider with its models.
+export type CatalogProvidersResponse = Schemas["CatalogProvidersResponse"]
+export type CatalogProviderSummary = Schemas["CatalogProviderSummary"]
+export type CatalogProviderDetail = Schemas["CatalogProviderDetail"]
+export type CatalogProviderModel = Schemas["CatalogProviderModel"]
 export type ModelMetadataOverride = Schemas["ModelMetadataOverrideRequest"]
 export type ModelInputModality = NonNullable<
   ModelMetadataOverride["input_modalities"]
