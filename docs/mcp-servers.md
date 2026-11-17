@@ -10,7 +10,7 @@ There are two ways in: add a server by its URL, or pick servers from the catalog
 2. Go to **Tools** → **MCP servers**.
 3. Click **Add MCP server**.
 4. Enter a **Name** for the server. This must be unique within the workspace and is used to identify the server’s tools.
-5. Enter the MCP server **URL**. The endpoint must be reachable from the Otari gateway.
+5. Enter the MCP server **URL**. The endpoint must be reachable from the Otari gateway. If the server is on a private network, see [Connect an MCP server on a private network](connect-a-private-mcp-server.md).
 6. Under **Sign-in mode**, keep **Shared account** to use one account for the whole workspace, or choose **Personal accounts** to have every member connect their own account. The second is described in [Connect your account to an MCP server](connect-your-account-to-an-mcp-server.md).
 7. With **Shared account**, enter an **Authorization token** if the server takes one. If it only offers a sign-in, leave the field blank: you sign in for everyone on the server's page once it is added. See [Set up a Shared server's account](#set-up-a-shared-servers-account).
 8. Optionally, add a **Purpose hint** describing when the model should use this server, for example, “Use for repository and issue lookups.”
