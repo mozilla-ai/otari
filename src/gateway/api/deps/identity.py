@@ -1,21 +1,57 @@
-"""Which tenancy identity a request acts as, and whether it may act deployment-wide."""
+"""Which tenancy identity a request acts as, how it signs in, and whether it may act deployment-wide."""
 
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps._base import UnitOfWorkDep
+from gateway.api.deps._base import (
+    UnitOfWorkDep,
+    get_config,
+)
+from gateway.api.deps.api_keys import (
+    ApiKeyFormatPortDep,
+    get_api_key_service,
+)
 from gateway.api.deps.auth import (
     get_session_identity,
     record_auth_failure,
     verify_master_key,
 )
-from gateway.api.deps.organizations import MembershipListenerDep
+from gateway.api.deps.organizations import (
+    MembershipListenerDep,
+    OrganizationServiceDep,
+    WorkspaceServiceDep,
+)
+from gateway.api.deps.ports import (
+    IdentityProviderPortDep,
+)
+from gateway.core.config import (
+    OAUTH_PROVIDERS,
+    GatewayConfig,
+)
 from gateway.core.database import get_db
 from gateway.exceptions.identity_exceptions import DeploymentAdministrationUnavailableError
 from gateway.models.tenancy import User as TenancyUser
-from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess
+from gateway.repositories.api_keys import ApiKeyRepositories
+from gateway.repositories.identity import IdentityRepositories, OAuthPendingStateRepository
+from gateway.repositories.identity.oauth_app_grant_repository import OAuthAppGrantRepository
+from gateway.repositories.organizations import OrganizationRepositories
+from gateway.repositories.tenancy import (
+    OrganizationDomainRepository,
+    OrganizationMemberRepository,
+)
+from gateway.services.api_keys import ApiKeyDeactivationListener
+from gateway.services.identity import IdentityService, OAuthAppService, OIDCConnectionService
+from gateway.services.mail import Mailer
+from gateway.services.oauth_service import redirect_uri
+from gateway.services.organizations import BootstrapOperatorMarker, OrganizationClaimedDomains
+from gateway.services.tenancy import (
+    DomainAutoJoinListener,
+    OrganizationService,
+    VerifiedDomainLookup,
+)
+from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess, DeploymentUserService
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 
 
@@ -74,3 +110,118 @@ async def require_deployment_operator_or_absent(
     if not await DeploymentAdministrationAccess(db).has_administration_access(identity):
         record_auth_failure("not_deployment_operator")
         raise DeploymentAdministrationUnavailableError
+
+
+def get_deployment_user_service(
+    db: Annotated[AsyncSession, Depends(get_db)], uow: UnitOfWorkDep
+) -> DeploymentUserService:
+    """Wire account changes and self-service key deactivation to the request's single transaction."""
+    return DeploymentUserService(db, uow=uow, keys=ApiKeyDeactivationListener(ApiKeyRepositories.on(uow)))
+
+
+DeploymentUserServiceDep = Annotated[DeploymentUserService, Depends(get_deployment_user_service)]
+
+
+def get_deployment_administration_access(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> DeploymentAdministrationAccess:
+    """Read deployment administration authority without constructing mutation collaborators."""
+    return DeploymentAdministrationAccess(db)
+
+
+DeploymentAdministrationAccessDep = Annotated[
+    DeploymentAdministrationAccess, Depends(get_deployment_administration_access)
+]
+
+
+def get_identity_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    uow: UnitOfWorkDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    identity_provider: IdentityProviderPortDep,
+    membership_listener: MembershipListenerDep,
+) -> IdentityService:
+    """Build the identity service on the request's Unit of Work.
+
+    Its own organization service is built on the same Unit of Work, not the deployment's shared
+    read-only one, because provisioning an SSO sign-in's account writes through it. It carries
+    the membership listener because the sign-in paths built here grant a workspace membership,
+    which has to be announced.
+    """
+    organizations = OrganizationService(db, membership_listener=membership_listener, uow=uow)
+    return IdentityService(
+        uow,
+        IdentityRepositories.on(uow),
+        identity_provider=identity_provider,
+        domain_claims=VerifiedDomainLookup(OrganizationDomainRepository(uow)),
+        organizations=organizations,
+        bootstrap_operator=BootstrapOperatorMarker(OrganizationRepositories.on(uow)),
+        sign_in_listener=DomainAutoJoinListener(
+            OrganizationDomainRepository(uow), OrganizationMemberRepository(uow), organizations
+        ),
+        session_ttl_hours=config.dashboard_session_ttl_hours,
+        terms_url=config.terms_url,
+        mailer=Mailer(config),
+        open_signup=config.open_signup,
+        password_reset_expiry_hours=config.password_reset_expiry_hours,
+    )
+
+
+IdentityServiceDep = Annotated[IdentityService, Depends(get_identity_service)]
+
+
+def get_oidc_connection_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    uow: UnitOfWorkDep,
+    organizations: OrganizationServiceDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> OIDCConnectionService:
+    """Build the organization OIDC connection service on the request's Unit of Work.
+
+    ``sign_in_states`` is the one repository built on the session instead, for the reason the
+    service's own attribute gives: the sign-in client is used after the block that built it.
+
+    ``sso_redirect_uri`` is None where this deployment has no public address,
+    because a path alone is not registerable at a provider.
+    """
+    return OIDCConnectionService(
+        uow,
+        IdentityRepositories.on(uow),
+        organizations=organizations,
+        domains=OrganizationClaimedDomains(OrganizationDomainRepository(uow)),
+        sign_in_states=OAuthPendingStateRepository(db),
+        allow_private_hosts=config.oidc_allow_private_hosts,
+        passkey_rp_id=config.webauthn_relying_party.rp_id if config.webauthn_relying_party else None,
+        offered_providers=frozenset(
+            provider for provider in OAUTH_PROVIDERS if config.oauth_client_credentials(provider) is not None
+        ),
+        sso_redirect_uri=redirect_uri(config, "sso") if config.public_base_url else None,
+    )
+
+
+OIDCConnectionServiceDep = Annotated[OIDCConnectionService, Depends(get_oidc_connection_service)]
+
+
+def get_oauth_app_service(
+    request: Request,
+    uow: UnitOfWorkDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    key_format: ApiKeyFormatPortDep,
+    organizations: OrganizationServiceDep,
+    workspaces: WorkspaceServiceDep,
+) -> OAuthAppService:
+    """Build app authorization using the external authorization API origin as issuer."""
+    return OAuthAppService(
+        uow,
+        OAuthAppGrantRepository(uow),
+        get_api_key_service(uow),
+        key_format,
+        organizations,
+        workspaces,
+        apps=config.oauth_apps,
+        ui_link=config.ui_link,
+        issuer=str(request.base_url.replace(path="", query="", fragment="")).rstrip("/"),
+    )
+
+
+OAuthAppServiceDep = Annotated[OAuthAppService, Depends(get_oauth_app_service)]
