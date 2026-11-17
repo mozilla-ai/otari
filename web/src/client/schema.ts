@@ -2482,7 +2482,8 @@ export interface paths {
          *     The same summary as ``GET /api/v1/usage/summary``, over the rows this key
          *     wrote alone: the same bounded window (default last 30 days), breakdowns, tag
          *     filters and ``group_by_tag``. Tag a request with ``metadata`` and pass
-         *     ``group_by_tag`` to read what each kind of request cost.
+         *     ``group_by_tag`` to read what each kind of request cost. The key's own user
+         *     is listed in ``by_user`` without a ``label``.
          */
         get: operations["key-get_key_usage_summary"];
         put?: never;
