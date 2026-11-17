@@ -48,6 +48,8 @@ from gateway.schemas.providers import (
     HostedModelsPublic,
     HostedModelsRefreshPublic,
     HostedModelUpdateRequest,
+    HostedPriceResetPublic,
+    HostedPriceResetRequest,
     HostedProviderCreateRequest,
     HostedProviderPublic,
     HostedProvidersPublic,
@@ -55,6 +57,10 @@ from gateway.schemas.providers import (
     HostedProviderTestPublic,
     HostedProviderTestRequest,
     HostedProviderUpdateRequest,
+    HostedVendorModelsSwitchPublic,
+    HostedVendorModelsSwitchRequest,
+    HostedVendorPublic,
+    HostedVendorUpdateRequest,
 )
 from gateway.types.model_type import OfferedModelType
 
@@ -227,13 +233,60 @@ async def list_hosted_models(
     ] = None,
     enabled: Annotated[
         bool | None,
-        Query(description="Only models served (`true`) or only models withheld (`false`)"),
+        Query(
+            description="Only models served (`true`) or only models withheld (`false`), "
+            "a model of a vendor switched off counting as withheld"
+        ),
+    ] = None,
+    vendor: Annotated[
+        str | None,
+        Query(max_length=128, description="Only models made by this vendor, `Other` for those nothing names one for"),
     ] = None,
 ) -> HostedModelsPublic:
-    """List the models offered on one provider, with the price each currently serves at."""
+    """List the models offered on one provider, with the price each currently serves at.
+
+    ``search`` matches a model's name or its vendor. ``vendors`` counts each vendor's models
+    across the whole provider, whatever the list was narrowed to, with the vendor's own switch.
+    """
     return await service.list_models(
-        provider, skip=skip, limit=limit, model_type=model_type, search=search, enabled=enabled
+        provider, skip=skip, limit=limit, model_type=model_type, search=search, enabled=enabled, vendor=vendor
     )
+
+
+@router.patch("/{provider}/vendors")
+async def update_hosted_vendor(
+    service: HostedProviderServiceDep, provider: str, body: HostedVendorUpdateRequest
+) -> HostedVendorPublic:
+    """Switch one vendor on or off on a provider.
+
+    Off withholds every model of the vendor, including models a later refresh offers, and keeps
+    each model's own switch, which applies again once the vendor is switched back on.
+    """
+    return await service.set_vendor(provider, body)
+
+
+@router.post("/{provider}/models/switch")
+async def switch_hosted_vendor_models(
+    service: HostedProviderServiceDep, provider: str, body: HostedVendorModelsSwitchRequest
+) -> HostedVendorModelsSwitchPublic:
+    """Switch every model of one vendor on or off at once.
+
+    Switching on serves only the models that have a price; the rest stay off and are counted
+    as skipped. ``only_unpriced`` with switching off withholds only the models served without a price.
+    """
+    return await service.switch_vendor_models(provider, body)
+
+
+@router.post("/{provider}/models/reset-prices")
+async def reset_hosted_model_prices(
+    service: HostedProviderServiceDep, provider: str, body: HostedPriceResetRequest
+) -> HostedPriceResetPublic:
+    """Put models priced by an operator back on the default price, or preview it with ``dry_run``.
+
+    The default is models.dev's price, or the one the provider's own listing names. A model the
+    default does not price keeps its price. Requests already billed keep the cost they were billed at.
+    """
+    return await service.reset_prices(provider, body)
 
 
 @router.post("/{provider}/models", status_code=status.HTTP_201_CREATED)

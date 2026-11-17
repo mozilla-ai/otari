@@ -486,6 +486,20 @@ class HostedProviderUpdateRequest(SQLModel):
         return normalize_link_url(value, info.field_name or "link")
 
 
+class HostedProviderModelSummary(SQLModel):
+    """How many models a hosted provider offers, how many it serves, and what holds the rest back.
+
+    ``serving`` counts a model switched on whose vendor is switched on too.
+    ``unpriced`` counts a model held off for want of a rate, and
+    ``vendors_off`` the vendors the provider does not serve.
+    """
+
+    total: int
+    serving: int
+    unpriced: int
+    vendors_off: int
+
+
 class HostedProviderPublic(SQLModel):
     """One hosted provider, known by its name, its implementation and the tail of its key.
 
@@ -509,6 +523,7 @@ class HostedProviderPublic(SQLModel):
     country. ``zero_data_retention`` is the operator's declaration that the
     upstream keeps no prompt or completion data. ``terms_url`` and
     ``privacy_url`` are the upstream's policies, null where none is linked.
+    ``models`` counts its offered models, on the list only.
     """
 
     id: uuid.UUID | None = None
@@ -528,6 +543,7 @@ class HostedProviderPublic(SQLModel):
     terms_url: str | None = None
     privacy_url: str | None = None
     shadows_config: bool = False
+    models: HostedProviderModelSummary | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -832,6 +848,10 @@ class HostedModelPublic(SQLModel):
     while it waits for a rate, ``operator`` when an operator switched it off,
     ``unavailable`` when its provider refused to serve it. ``type`` is the
     kind of model, from models.dev, and None when it does not know.
+    ``vendor`` is who makes the model, ``Other`` when nothing names one.
+    ``default_rates`` is what the default rung (models.dev, or the provider's
+    own listing) would price a model an operator priced, where it prices it
+    and the two differ; None otherwise.
     """
 
     id: uuid.UUID
@@ -844,6 +864,8 @@ class HostedModelPublic(SQLModel):
     cache_write_price_per_million: float | None = None
     unit: str | None = None
     price_source: HostedPriceSource | None = None
+    default_rates: HostedModelRates | None = None
+    vendor: str | None = None
     enabled: bool
     disabled_reason: HostedModelDisabledReason | None = None
     created_at: datetime
@@ -851,7 +873,13 @@ class HostedModelPublic(SQLModel):
 
     @classmethod
     def from_row(
-        cls, row: HostedProviderModel, *, rates: HostedModelRates | None, model_type: ModelType | None = None
+        cls,
+        row: HostedProviderModel,
+        *,
+        rates: HostedModelRates | None,
+        model_type: ModelType | None = None,
+        vendor: str | None = None,
+        default_rates: HostedModelRates | None = None,
     ) -> HostedModelPublic:
         """Read one offered row for the API, with whatever currently prices it."""
         return cls(
@@ -859,6 +887,8 @@ class HostedModelPublic(SQLModel):
             provider=row.provider,
             model=row.model,
             type=model_type,
+            vendor=vendor,
+            default_rates=default_rates,
             input_price_per_million=rates.input_price_per_million if rates else None,
             output_price_per_million=rates.output_price_per_million if rates else None,
             cache_read_price_per_million=rates.cache_read_price_per_million if rates else None,
@@ -872,6 +902,27 @@ class HostedModelPublic(SQLModel):
         )
 
 
+class HostedVendorPublic(SQLModel):
+    """One vendor whose models a hosted provider offers, and what it serves of them.
+
+    ``enabled`` is the vendor's switch: off withholds every model of the
+    vendor, including ones offered later, and keeps each model's own switch.
+    The counts cover the whole provider, whatever the list was narrowed to:
+    ``serving`` the models served, ``unpriced`` those held off for want of a
+    rate, ``unavailable`` those the provider refused to serve, and
+    ``custom_differs`` those an operator priced where the default rate now
+    says something else.
+    """
+
+    vendor: str
+    enabled: bool
+    total: int
+    serving: int
+    unpriced: int
+    unavailable: int
+    custom_differs: int
+
+
 class HostedModelsPublic(SQLModel):
     """A page of one hosted provider's offered models, and how many there are in total.
 
@@ -882,6 +933,77 @@ class HostedModelsPublic(SQLModel):
     data: list[HostedModelPublic]
     count: int
     type_counts: dict[OfferedModelType, int] = Field(default_factory=dict)
+    vendors: list[HostedVendorPublic] = Field(default_factory=list)
+
+
+class HostedVendorUpdateRequest(SQLModel):
+    """Switch a vendor on or off on one hosted provider."""
+
+    model_config = {"json_schema_extra": {"example": {"vendor": "Alibaba", "enabled": False}}}
+
+    vendor: str = Field(min_length=1, max_length=128)
+    enabled: bool
+
+
+class HostedVendorModelsSwitchRequest(SQLModel):
+    """Set the switch of every model of one vendor at once.
+
+    ``enabled`` true serves each model that has a rate, and leaves one with
+    none off. ``only_unpriced`` with ``enabled`` false withholds only the
+    models served without a rate.
+    """
+
+    model_config = {"json_schema_extra": {"example": {"vendor": "Alibaba", "enabled": False}}}
+
+    vendor: str = Field(min_length=1, max_length=128)
+    enabled: bool
+    only_unpriced: bool = False
+
+
+class HostedVendorModelsSwitchPublic(SQLModel):
+    """What a vendor-wide switch did: how many models it changed, and how many it left off for want of a rate."""
+
+    changed: int
+    skipped_unpriced: int
+
+
+class HostedPriceResetRequest(SQLModel):
+    """Put models an operator priced back on the default rate.
+
+    ``models`` names them; null means every model, narrowed to ``vendor``
+    when one is given. ``dry_run`` answers what a reset would change and
+    writes nothing.
+    """
+
+    model_config = {"json_schema_extra": {"example": {"vendor": "Alibaba", "dry_run": True}}}
+
+    models: list[str] | None = Field(default=None, max_length=1000)
+    vendor: str | None = Field(default=None, max_length=128)
+    dry_run: bool = False
+
+
+class HostedPriceResetChangePublic(SQLModel):
+    """One model a reset covers: the rate an operator set, and the default rate it moves to."""
+
+    model: str
+    vendor: str
+    current: HostedModelRates
+    default: HostedModelRates
+    matches: bool
+
+
+class HostedPriceResetPublic(SQLModel):
+    """What a price reset changed, or would change on a dry run.
+
+    ``changes`` lists every operator-priced model the default rung prices,
+    ``matches`` marking one whose price is already the default.
+    ``skipped_no_default`` names the operator-priced models the default rung
+    does not price, which keep their price. ``applied`` is false on a dry run.
+    """
+
+    changes: list[HostedPriceResetChangePublic]
+    skipped_no_default: list[str]
+    applied: bool
 
 
 class HostedModelsRefreshPublic(SQLModel):

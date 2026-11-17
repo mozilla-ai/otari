@@ -291,6 +291,28 @@ class HostedProviderModel(Base):
     )
 
 
+class HostedProviderDisabledVendor(Base):
+    """A vendor whose models one hosted provider does not serve.
+
+    A row is the switch turned off: dispatch refuses every model of that
+    vendor on that provider, including models a later refresh offers, while
+    each model's own switch is kept for when the row is deleted. ``provider``
+    holds the hosted provider's name rather than a foreign key, as
+    ``hosted_provider_models`` does, because a provider declared in
+    configuration has no row of its own.
+    """
+
+    __tablename__ = "hosted_provider_disabled_vendors"
+    __table_args__ = (
+        UniqueConstraint("provider", "vendor", name="uq_hosted_provider_disabled_vendors_provider_vendor"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    provider: Mapped[str] = mapped_column(String(64))
+    vendor: Mapped[str] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
 class ConfiguredProviderImport(Base):
     """A ``providers:`` entry of config.yml already copied onto a hosted provider of its name.
 

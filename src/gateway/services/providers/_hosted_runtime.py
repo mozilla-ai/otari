@@ -8,7 +8,7 @@ from any_llm import LLMProvider
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.ports.model_provider_port import NO_ORGANIZATION, HostedCredential, HostedModels, ModelProviderPort
-from gateway.repositories.providers import HostedProviderModelRepository
+from gateway.repositories.providers import HostedProviderModelRepository, HostedProviderVendorRepository
 from gateway.services.provider_kwargs import (
     ResolvedProvider,
     hosted_lookup,
@@ -18,6 +18,7 @@ from gateway.services.provider_kwargs import (
 from gateway.services.providers._country_gate import CountryGate, ensure_hosted_country
 from gateway.services.providers._hosted_credentials import ResolvedHostedProvider
 from gateway.services.providers._hosted_sources import HostedSources
+from gateway.services.providers._hosted_vendors import vendor_of
 from gateway.services.providers._workspace_hosted_access import ensure_workspace_may_use_hosted
 
 
@@ -141,28 +142,45 @@ async def serve_on_hosted_provider(
 class HostedProviderRuntime:
     """Answer the two questions the dispatch path and the catalog ask."""
 
-    def __init__(self, uow: UnitOfWork, *, sources: HostedSources, models: HostedProviderModelRepository) -> None:
+    def __init__(
+        self,
+        uow: UnitOfWork,
+        *,
+        sources: HostedSources,
+        models: HostedProviderModelRepository,
+        vendors: HostedProviderVendorRepository,
+    ) -> None:
         self.uow = uow
         self.sources = sources
         self.models = models
+        self.vendors = vendors
 
     async def serveable_models(self, *, organization_id: uuid.UUID | None) -> dict[str, frozenset[str]]:
         """Each provider serveable to ``organization_id``, with the models switched on under it.
 
         The same refusals as :meth:`resolve`, so the listing and the resolve
         agree: a provider switched off, one restricted to another organization
-        and one whose ciphertext no configured key reads are all absent.
+        and one whose ciphertext no configured key reads are all absent, and so
+        is every model of a vendor its provider has switched off.
         """
         async with self.uow:
-            serveable = [
-                source.name
+            serveable = {
+                source.name: source.implementation
                 for source in await self.sources.all()
                 if source.enabled
                 and not source.withheld_from(organization_id)
                 and source.credential(quiet=True) is not None
-            ]
+            }
             served = await self.models.enabled_models_for_providers(serveable)
-        return {name: frozenset(served.get(name, set())) for name in serveable}
+            disabled = await self.vendors.disabled_for_providers(serveable)
+        return {
+            name: frozenset(
+                model
+                for model in served.get(name, set())
+                if name not in disabled or vendor_of(implementation, model) not in disabled[name]
+            )
+            for name, implementation in serveable.items()
+        }
 
     async def resolve(
         self, name: str, model: str | None = None, *, organization_id: uuid.UUID | None
@@ -174,7 +192,8 @@ class HostedProviderRuntime:
         model the provider does not offer switched on, and a ciphertext no
         configured key reads. A model with no row is refused unless the
         provider serves unlisted models, so otherwise the operator's roster is
-        the whole of what the deployment's credential serves.
+        the whole of what the deployment's credential serves. A model of a
+        vendor the provider has switched off is refused whatever its own row says.
         """
         async with self.uow:
             source = await self.sources.get(name)
@@ -185,5 +204,8 @@ class HostedProviderRuntime:
                 if offered is None and not source.serves_unlisted_models:
                     return None
                 if offered is not None and not offered.enabled:
+                    return None
+                disabled = await self.vendors.disabled_for(source.name)
+                if disabled and vendor_of(source.implementation, model) in disabled:
                     return None
             return source.credential()

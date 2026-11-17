@@ -248,6 +248,16 @@ class HostedOffers:
             rates[model] = HostedModelRates.from_version(default, PRICE_SOURCE_DEFAULT)
         return rates
 
+    async def reset_to_defaults(self, provider: str, defaults: Mapping[str, ModelPricing]) -> None:
+        """Put each model back on its default rate, as a new version a refresh moves from now on.
+
+        The version an operator chose stays in the history, so a request already
+        billed keeps the cost it was billed at.
+        """
+        await self.pricing.store_defaults(
+            {_key(provider, model): default for model, default in defaults.items()}, normalize_effective_at(None)
+        )
+
     async def write_rate(
         self, provider: str, model: str, request: HostedModelCreateRequest | HostedModelUpdateRequest
     ) -> None:

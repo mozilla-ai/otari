@@ -11242,7 +11242,7 @@
         "type": "object"
       },
       "HostedModelPublic": {
-        "description": "One offered model, with the price the deployment currently serves it at.\n\n``price_source`` says which rung of the deployment's ladder answered:\n``deployment`` for a rate an operator set, ``provider`` for the rate the\nprovider's own listing named, ``defaults`` for the community-maintained\nrate, whether this surface stored it or the fallback supplies it, and None\nwhen nothing prices the model yet. ``unit`` says what\nthe rates are per, so a per-request rate is not read as a per-token one.\n``enabled`` is the serving switch; a model offered without a discoverable\nprice starts off. ``disabled_reason`` says why a model is off: ``unpriced``\nwhile it waits for a rate, ``operator`` when an operator switched it off,\n``unavailable`` when its provider refused to serve it. ``type`` is the\nkind of model, from models.dev, and None when it does not know.",
+        "description": "One offered model, with the price the deployment currently serves it at.\n\n``price_source`` says which rung of the deployment's ladder answered:\n``deployment`` for a rate an operator set, ``provider`` for the rate the\nprovider's own listing named, ``defaults`` for the community-maintained\nrate, whether this surface stored it or the fallback supplies it, and None\nwhen nothing prices the model yet. ``unit`` says what\nthe rates are per, so a per-request rate is not read as a per-token one.\n``enabled`` is the serving switch; a model offered without a discoverable\nprice starts off. ``disabled_reason`` says why a model is off: ``unpriced``\nwhile it waits for a rate, ``operator`` when an operator switched it off,\n``unavailable`` when its provider refused to serve it. ``type`` is the\nkind of model, from models.dev, and None when it does not know.\n``vendor`` is who makes the model, ``Other`` when nothing names one.\n``default_rates`` is what the default rung (models.dev, or the provider's\nown listing) would price a model an operator priced, where it prices it\nand the two differ; None otherwise.",
         "properties": {
           "cache_read_price_per_million": {
             "anyOf": [
@@ -11270,6 +11270,16 @@
             "format": "date-time",
             "title": "Created At",
             "type": "string"
+          },
+          "default_rates": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HostedModelRates"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "disabled_reason": {
             "anyOf": [
@@ -11389,6 +11399,17 @@
               }
             ],
             "title": "Updated At"
+          },
+          "vendor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vendor"
           }
         },
         "required": [
@@ -11399,6 +11420,63 @@
           "created_at"
         ],
         "title": "HostedModelPublic",
+        "type": "object"
+      },
+      "HostedModelRates": {
+        "description": "The rates a hosted model is currently served at, and which rung of the deployment's ladder said so.",
+        "properties": {
+          "cache_read_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Read Price Per Million"
+          },
+          "cache_write_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Price Per Million"
+          },
+          "input_price_per_million": {
+            "title": "Input Price Per Million",
+            "type": "number"
+          },
+          "output_price_per_million": {
+            "title": "Output Price Per Million",
+            "type": "number"
+          },
+          "source": {
+            "enum": [
+              "organization",
+              "deployment",
+              "defaults",
+              "provider"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "unit": {
+            "default": "token",
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "input_price_per_million",
+          "output_price_per_million"
+        ],
+        "title": "HostedModelRates",
         "type": "object"
       },
       "HostedModelUpdateRequest": {
@@ -11511,6 +11589,13 @@
             },
             "title": "Type Counts",
             "type": "object"
+          },
+          "vendors": {
+            "items": {
+              "$ref": "#/components/schemas/HostedVendorPublic"
+            },
+            "title": "Vendors",
+            "type": "array"
           }
         },
         "required": [
@@ -11564,6 +11649,111 @@
           "count"
         ],
         "title": "HostedModelsRefreshPublic",
+        "type": "object"
+      },
+      "HostedPriceResetChangePublic": {
+        "description": "One model a reset covers: the rate an operator set, and the default rate it moves to.",
+        "properties": {
+          "current": {
+            "$ref": "#/components/schemas/HostedModelRates"
+          },
+          "default": {
+            "$ref": "#/components/schemas/HostedModelRates"
+          },
+          "matches": {
+            "title": "Matches",
+            "type": "boolean"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "vendor": {
+            "title": "Vendor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "vendor",
+          "current",
+          "default",
+          "matches"
+        ],
+        "title": "HostedPriceResetChangePublic",
+        "type": "object"
+      },
+      "HostedPriceResetPublic": {
+        "description": "What a price reset changed, or would change on a dry run.\n\n``changes`` lists every operator-priced model the default rung prices,\n``matches`` marking one whose price is already the default.\n``skipped_no_default`` names the operator-priced models the default rung\ndoes not price, which keep their price. ``applied`` is false on a dry run.",
+        "properties": {
+          "applied": {
+            "title": "Applied",
+            "type": "boolean"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/HostedPriceResetChangePublic"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "skipped_no_default": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Skipped No Default",
+            "type": "array"
+          }
+        },
+        "required": [
+          "changes",
+          "skipped_no_default",
+          "applied"
+        ],
+        "title": "HostedPriceResetPublic",
+        "type": "object"
+      },
+      "HostedPriceResetRequest": {
+        "description": "Put models an operator priced back on the default rate.\n\n``models`` names them; null means every model, narrowed to ``vendor``\nwhen one is given. ``dry_run`` answers what a reset would change and\nwrites nothing.",
+        "example": {
+          "dry_run": true,
+          "vendor": "Alibaba"
+        },
+        "properties": {
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 1000,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Models"
+          },
+          "vendor": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vendor"
+          }
+        },
+        "title": "HostedPriceResetRequest",
         "type": "object"
       },
       "HostedProviderCreateRequest": {
@@ -11702,8 +11892,37 @@
         "title": "HostedProviderCreateRequest",
         "type": "object"
       },
+      "HostedProviderModelSummary": {
+        "description": "How many models a hosted provider offers, how many it serves, and what holds the rest back.\n\n``serving`` counts a model switched on whose vendor is switched on too.\n``unpriced`` counts a model held off for want of a rate, and\n``vendors_off`` the vendors the provider does not serve.",
+        "properties": {
+          "serving": {
+            "title": "Serving",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "unpriced": {
+            "title": "Unpriced",
+            "type": "integer"
+          },
+          "vendors_off": {
+            "title": "Vendors Off",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "serving",
+          "unpriced",
+          "vendors_off"
+        ],
+        "title": "HostedProviderModelSummary",
+        "type": "object"
+      },
       "HostedProviderPublic": {
-        "description": "One hosted provider, known by its name, its implementation and the tail of its key.\n\nNo shape in this section carries key material: a stored credential is\nknown by its last four characters and nothing else, ``client_args`` goes\nout with credential-shaped values masked, and ``api_base`` with the\npassword in its userinfo and its query values masked.\n\n``name`` is what requests address and every route takes; ``provider`` is\nthe any-llm implementation. ``source`` says where the provider is defined.\nA ``config`` provider comes from the ``hosted_providers:`` block, has no\nrow and so no ``id`` or timestamps, and is changed by editing the\nconfiguration rather than through this API; its models are administered as\na stored provider's are. ``shadows_config`` marks a stored provider that\nwins over a configuration entry of the same name, which serves again once\nthe row is deleted. ``has_api_key`` is false for one stored without a key,\nand ``decryptable`` false for one whose key or extras no configured\n``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.\n``serves_unlisted_models`` is true for one that serves a model its roster\ndoes not list. ``supported_countries`` is null for one that serves every\ncountry. ``zero_data_retention`` is the operator's declaration that the\nupstream keeps no prompt or completion data. ``terms_url`` and\n``privacy_url`` are the upstream's policies, null where none is linked.",
+        "description": "One hosted provider, known by its name, its implementation and the tail of its key.\n\nNo shape in this section carries key material: a stored credential is\nknown by its last four characters and nothing else, ``client_args`` goes\nout with credential-shaped values masked, and ``api_base`` with the\npassword in its userinfo and its query values masked.\n\n``name`` is what requests address and every route takes; ``provider`` is\nthe any-llm implementation. ``source`` says where the provider is defined.\nA ``config`` provider comes from the ``hosted_providers:`` block, has no\nrow and so no ``id`` or timestamps, and is changed by editing the\nconfiguration rather than through this API; its models are administered as\na stored provider's are. ``shadows_config`` marks a stored provider that\nwins over a configuration entry of the same name, which serves again once\nthe row is deleted. ``has_api_key`` is false for one stored without a key,\nand ``decryptable`` false for one whose key or extras no configured\n``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.\n``serves_unlisted_models`` is true for one that serves a model its roster\ndoes not list. ``supported_countries`` is null for one that serves every\ncountry. ``zero_data_retention`` is the operator's declaration that the\nupstream keeps no prompt or completion data. ``terms_url`` and\n``privacy_url`` are the upstream's policies, null where none is linked.\n``models`` counts its offered models, on the list only.",
         "properties": {
           "api_base": {
             "anyOf": [
@@ -11776,6 +11995,16 @@
               }
             ],
             "title": "Id"
+          },
+          "models": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HostedProviderModelSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "name": {
             "title": "Name",
@@ -12158,6 +12387,124 @@
           "skipped"
         ],
         "title": "HostedProvidersReencryptPublic",
+        "type": "object"
+      },
+      "HostedVendorModelsSwitchPublic": {
+        "description": "What a vendor-wide switch did: how many models it changed, and how many it left off for want of a rate.",
+        "properties": {
+          "changed": {
+            "title": "Changed",
+            "type": "integer"
+          },
+          "skipped_unpriced": {
+            "title": "Skipped Unpriced",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "changed",
+          "skipped_unpriced"
+        ],
+        "title": "HostedVendorModelsSwitchPublic",
+        "type": "object"
+      },
+      "HostedVendorModelsSwitchRequest": {
+        "description": "Set the switch of every model of one vendor at once.\n\n``enabled`` true serves each model that has a rate, and leaves one with\nnone off. ``only_unpriced`` with ``enabled`` false withholds only the\nmodels served without a rate.",
+        "example": {
+          "enabled": false,
+          "vendor": "Alibaba"
+        },
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "only_unpriced": {
+            "default": false,
+            "title": "Only Unpriced",
+            "type": "boolean"
+          },
+          "vendor": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Vendor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "vendor",
+          "enabled"
+        ],
+        "title": "HostedVendorModelsSwitchRequest",
+        "type": "object"
+      },
+      "HostedVendorPublic": {
+        "description": "One vendor whose models a hosted provider offers, and what it serves of them.\n\n``enabled`` is the vendor's switch: off withholds every model of the\nvendor, including ones offered later, and keeps each model's own switch.\nThe counts cover the whole provider, whatever the list was narrowed to:\n``serving`` the models served, ``unpriced`` those held off for want of a\nrate, ``unavailable`` those the provider refused to serve, and\n``custom_differs`` those an operator priced where the default rate now\nsays something else.",
+        "properties": {
+          "custom_differs": {
+            "title": "Custom Differs",
+            "type": "integer"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "serving": {
+            "title": "Serving",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "unavailable": {
+            "title": "Unavailable",
+            "type": "integer"
+          },
+          "unpriced": {
+            "title": "Unpriced",
+            "type": "integer"
+          },
+          "vendor": {
+            "title": "Vendor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "vendor",
+          "enabled",
+          "total",
+          "serving",
+          "unpriced",
+          "unavailable",
+          "custom_differs"
+        ],
+        "title": "HostedVendorPublic",
+        "type": "object"
+      },
+      "HostedVendorUpdateRequest": {
+        "description": "Switch a vendor on or off on one hosted provider.",
+        "example": {
+          "enabled": false,
+          "vendor": "Alibaba"
+        },
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "vendor": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Vendor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "vendor",
+          "enabled"
+        ],
+        "title": "HostedVendorUpdateRequest",
         "type": "object"
       },
       "Icon": {
@@ -39777,7 +40124,7 @@
     },
     "/api/v1/hosted-providers/{provider}/models": {
       "get": {
-        "description": "List the models offered on one provider, with the price each currently serves at.",
+        "description": "List the models offered on one provider, with the price each currently serves at.\n\n``search`` matches a model's name or its vendor. ``vendors`` counts each vendor's models\nacross the whole provider, whatever the list was narrowed to, with the vendor's own switch.",
         "operationId": "hosted-providers-list_hosted_models",
         "parameters": [
           {
@@ -39867,7 +40214,7 @@
             }
           },
           {
-            "description": "Only models served (`true`) or only models withheld (`false`)",
+            "description": "Only models served (`true`) or only models withheld (`false`), a model of a vendor switched off counting as withheld",
             "in": "query",
             "name": "enabled",
             "required": false,
@@ -39880,8 +40227,27 @@
                   "type": "null"
                 }
               ],
-              "description": "Only models served (`true`) or only models withheld (`false`)",
+              "description": "Only models served (`true`) or only models withheld (`false`), a model of a vendor switched off counting as withheld",
               "title": "Enabled"
+            }
+          },
+          {
+            "description": "Only models made by this vendor, `Other` for those nothing names one for",
+            "in": "query",
+            "name": "vendor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only models made by this vendor, `Other` for those nothing names one for",
+              "title": "Vendor"
             }
           }
         ],
@@ -40031,6 +40397,128 @@
         ]
       }
     },
+    "/api/v1/hosted-providers/{provider}/models/reset-prices": {
+      "post": {
+        "description": "Put models priced by an operator back on the default price, or preview it with ``dry_run``.\n\nThe default is models.dev's price, or the one the provider's own listing names. A model the\ndefault does not price keeps its price. Requests already billed keep the cost they were billed at.",
+        "operationId": "hosted-providers-reset_hosted_model_prices",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostedPriceResetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedPriceResetPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Reset Hosted Model Prices",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers/{provider}/models/switch": {
+      "post": {
+        "description": "Switch every model of one vendor on or off at once.\n\nSwitching on serves only the models that have a price; the rest stay off and are counted\nas skipped. ``only_unpriced`` with switching off withholds only the models served without a price.",
+        "operationId": "hosted-providers-switch_hosted_vendor_models",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostedVendorModelsSwitchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedVendorModelsSwitchPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Switch Hosted Vendor Models",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
     "/api/v1/hosted-providers/{provider}/models/{model_id}": {
       "delete": {
         "description": "Stop offering a model on a provider. Its pricing history stays.",
@@ -40156,6 +40644,67 @@
           }
         ],
         "summary": "Update Hosted Model",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers/{provider}/vendors": {
+      "patch": {
+        "description": "Switch one vendor on or off on a provider.\n\nOff withholds every model of the vendor, including models a later refresh offers, and keeps\neach model's own switch, which applies again once the vendor is switched back on.",
+        "operationId": "hosted-providers-update_hosted_vendor",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostedVendorUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedVendorPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Hosted Vendor",
         "tags": [
           "hosted-providers"
         ]
