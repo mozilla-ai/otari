@@ -391,6 +391,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Own Account
+         * @description Delete the caller's account and sign them out.
+         *
+         *     Erases the account's sign-in identity, sessions, passkeys, Playground
+         *     conversations, agent traces, telemetry, files and keys. Usage rows are
+         *     kept for the deployment's totals under a new id that does not identify
+         *     the person, and an organization nobody else is active in is renamed, its
+         *     keys revoked and its stored credentials cleared. Invitations to the
+         *     account's address are withdrawn everywhere. Refused while the account is the last active owner of
+         *     an organization other people are active in.
+         */
+        delete: operations["auth-delete_own_account"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/oauth/{provider}/authorize": {
         parameters: {
             query?: never;
@@ -12564,6 +12592,26 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * DeleteAccountRequest
+         * @description The confirmation an account deletion needs.
+         * @example {
+         *       "confirm_email": "ada@example.com",
+         *       "current_password": "..."
+         *     }
+         */
+        DeleteAccountRequest: {
+            /**
+             * Confirm Email
+             * @description The account's email address, typed to confirm the deletion.
+             */
+            confirm_email: string;
+            /**
+             * Current Password
+             * @description The account's password. Required when the account has one.
+             */
+            current_password?: string | null;
+        };
+        /**
          * DeploymentAdminAccessPublic
          * @description Whether the caller may reach the deployment administration surface.
          *
@@ -24707,6 +24755,37 @@ export interface operations {
             };
             /** @description The audio upload exceeds the maximum request size. */
             413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "auth-delete_own_account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteAccountRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
                 headers: {
                     [name: string]: unknown;
                 };

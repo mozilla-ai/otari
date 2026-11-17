@@ -1,11 +1,11 @@
 import uuid
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import NamedTuple, Never
 
-from sqlalchemy import String, and_, cast, func, or_, select
+from sqlalchemy import String, and_, cast, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
@@ -346,7 +346,7 @@ class AccessLists(NamedTuple):
 
 
 class UserAccessRepository(BaseRepository[User, Never, Never]):
-    """Read users' model and search tool access lists, and their display names."""
+    """Read users' model and search tool access lists and display names, and erase users."""
 
     def __init__(self, uow: UnitOfWork) -> None:
         super().__init__(uow, User)
@@ -369,6 +369,29 @@ class UserAccessRepository(BaseRepository[User, Never, Never]):
                 pass
             owner = (await self.db.execute(statement)).scalar_one()
         return owner.deleted_at is None and not owner.blocked
+
+    async def lock_with_end_users(self, user_id: str) -> list[str]:
+        """Lock ``user_id``'s row and its end users' rows, and return the ids of those that exist."""
+        statement = (
+            select(User.user_id)
+            .where(or_(User.user_id == user_id, User.parent_user_id == user_id))
+            .order_by(User.user_id)
+            .with_for_update()
+        )
+        return list((await self.db.execute(statement)).scalars().all())
+
+    async def add_tombstone(self) -> str:
+        """Stage a new deleted user with no name, for rows kept after the users they belonged to are gone."""
+        tombstone = User(user_id=str(uuid.uuid4()), alias=None, deleted_at=datetime.now(UTC))
+        self.db.add(tombstone)
+        await self.db.flush()
+        return tombstone.user_id
+
+    async def remove_all(self, user_ids: Collection[str]) -> None:
+        """Stage the deletion of these users, which takes their keys and the other rows that cascade with them."""
+        if not user_ids:
+            return
+        await self.db.execute(delete(User).where(User.user_id.in_(list(user_ids))))
 
     async def access_lists(self, user_id: str) -> AccessLists | None:
         """A user's access lists, or ``None`` when there is no such user."""

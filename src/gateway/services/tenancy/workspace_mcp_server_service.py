@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import dataclasses
 import uuid
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Collection, Sequence
 from contextlib import AbstractAsyncContextManager
 from functools import partial
 from typing import TYPE_CHECKING, Annotated, Literal
@@ -1345,6 +1345,12 @@ class WorkspaceMcpServerService:
         self.requests = requests
         self.config = config
         self._tokens = McpUserTokens(McpUserConnectionRepository(db))
+
+    async def forget_secrets(
+        self, organization_ids: Collection[uuid.UUID], workspace_ids: Collection[uuid.UUID]
+    ) -> None:
+        """Stage clearing the MCP server tokens these workspaces hold, for the caller's transaction."""
+        await WorkspaceMcpServerRepository(self.db).forget_secrets(organization_ids, workspace_ids)
 
     async def _require_management(self, user: User, workspace_id: uuid.UUID) -> uuid.UUID:
         """Resolve the workspace and confirm the caller may manage it.

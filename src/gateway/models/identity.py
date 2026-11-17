@@ -139,6 +139,20 @@ class BlockedEmail(Base):
         return "@" not in self.pattern
 
 
+class ErasedAccount(Base):
+    """An account deleted at its own request: its old id and when, and nothing that names the person.
+
+    The record of the erasure, and what to erase again after restoring a backup taken before it.
+    """
+
+    __tablename__ = "erased_account"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    erased_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
+    )
+
+
 def is_organization_connection_provider(provider: str | None) -> bool:
     """Whether ``provider`` names an organization's own OIDC connection rather than a built-in one.
 

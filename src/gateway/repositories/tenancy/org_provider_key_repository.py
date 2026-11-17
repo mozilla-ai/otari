@@ -300,6 +300,19 @@ class OrgProviderKeyRepository(
         await self.db.refresh(key)
         return key
 
+    async def forget_secrets(
+        self, organization_ids: Collection[uuid.UUID], workspace_ids: Collection[uuid.UUID]
+    ) -> None:
+        """Stage clearing the API key and client arguments of every key these organizations hold."""
+        if not organization_ids:
+            return
+        await self.db.execute(
+            update(OrgProviderKey)
+            .where(col(OrgProviderKey.organization_id).in_(list(organization_ids)))
+            .values(encrypted_api_key=None, last4=None, client_args=None)
+            .execution_options(synchronize_session=False)
+        )
+
 
 class WorkspaceProviderKeyOverrideRepository:
     """Repository for `workspace_provider_key_overrides` rows.

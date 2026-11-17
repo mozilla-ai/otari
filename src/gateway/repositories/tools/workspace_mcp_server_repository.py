@@ -8,7 +8,7 @@ import uuid
 from collections.abc import Collection
 from typing import Never
 
-from sqlalchemy import ColumnElement, func, or_, select
+from sqlalchemy import ColumnElement, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
@@ -131,3 +131,16 @@ class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Nev
             select(WorkspaceMcpServer.id, WorkspaceMcpServer.url).where(WorkspaceMcpServer.workspace_id == workspace_id)
         )
         return {row.id: row.url for row in rows}
+
+    async def forget_secrets(
+        self, organization_ids: Collection[uuid.UUID], workspace_ids: Collection[uuid.UUID]
+    ) -> None:
+        """Stage clearing the bearer token of every server in these workspaces."""
+        if not workspace_ids:
+            return
+        await self.db.execute(
+            update(WorkspaceMcpServer)
+            .where(WorkspaceMcpServer.workspace_id.in_(list(workspace_ids)))
+            .values(encrypted_token=None)
+            .execution_options(synchronize_session=False)
+        )

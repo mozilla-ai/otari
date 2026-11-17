@@ -51,7 +51,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Collection, Iterator
 from datetime import datetime
 from typing import Annotated, Any, Literal, Protocol
 
@@ -708,6 +708,12 @@ class OrganizationGuardrailDefinitionService:
         self._build_state = build_state
         self._rebuild = rebuild
         self._handle = handle
+
+    async def forget_secrets(
+        self, organization_ids: Collection[uuid.UUID], workspace_ids: Collection[uuid.UUID]
+    ) -> None:
+        """Stage clearing the guardrail secrets these organizations hold, for the caller's transaction."""
+        await self._definitions.forget_secrets(organization_ids, workspace_ids)
 
     async def _rebuilt(self, definition: OrganizationGuardrailDefinition) -> GuardrailBuildState:
         """Bring this worker in step with a row that just changed, and say what it holds.

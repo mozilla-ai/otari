@@ -60,6 +60,17 @@ class MembershipUpdateError(TenancyValidationError):
     """A membership change the organization's own rules refuse (e.g. the last owner)."""
 
 
+class AccountDeletionLastOwnerError(TenancyConflictError):
+    """An account deletion that would leave an organization with members and no owner."""
+
+    def __init__(self, organization_names: list[str]) -> None:
+        super().__init__(
+            "Make another member an owner of "
+            + ", ".join(organization_names)
+            + " before deleting your account, or the organization would have nobody to manage it"
+        )
+
+
 class NotAnOrganizationMemberError(TenancyValidationError):
     def __init__(self, user_id: object):
         super().__init__(f"User {user_id} is not an active member of this organization")
@@ -522,6 +533,7 @@ class SignupRegistrationUnresolvedError(TenancyError):
 
 
 __all__ = [
+    "AccountDeletionLastOwnerError",
     "AddressAlreadyInvitedError",
     "DefaultOrganizationDeletionError",
     "DirectMemberAddUnavailableError",

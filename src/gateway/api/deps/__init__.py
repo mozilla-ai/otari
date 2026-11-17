@@ -206,6 +206,7 @@ from gateway.repositories.identity import IdentityRepositories, OAuthPendingStat
 from gateway.repositories.identity.oauth_app_grant_repository import OAuthAppGrantRepository
 from gateway.repositories.inference import InferenceRepositories
 from gateway.repositories.mcp_catalog import McpCatalogServerRepository, McpCatalogSyncStateRepository
+from gateway.repositories.organizations import OrganizationRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
 from gateway.repositories.pricing import ModelPricingRepository, OrganizationModelPricingRepository
 from gateway.repositories.providers import (
@@ -247,7 +248,7 @@ from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.feedback import FeedbackService
 from gateway.services.files import FileBackends, FileService, SandboxFileBridge, StagedFile
 from gateway.services.health_checks import HealthCheckService, UnavailableModelListener
-from gateway.services.identity import IdentityService, OAuthAppService, OIDCConnectionService
+from gateway.services.identity import AccountDeletionService, IdentityService, OAuthAppService, OIDCConnectionService
 from gateway.services.inference import (
     BatchResultsService,
     InferenceService,
@@ -262,7 +263,7 @@ from gateway.services.mcp_catalog import McpCatalogService
 from gateway.services.model_discovery_service import DiscoveryDial, HostedDiscovery
 from gateway.services.oauth_service import redirect_uri
 from gateway.services.organization_pricing_service import OrganizationPricingService
-from gateway.services.organizations import OrganizationClaimedDomains
+from gateway.services.organizations import AccountRelease, OrganizationClaimedDomains
 from gateway.services.overview import OverviewService
 from gateway.services.pricing import DeploymentPricingService
 from gateway.services.pricing_refresh_service import ModelsDevPriceUpdates
@@ -1181,6 +1182,40 @@ async def get_optional_file_service(
 OptionalFileServiceDep = Annotated[FileService | None, Depends(get_optional_file_service)]
 
 
+async def get_account_deletion_service(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    uow: UnitOfWorkDep,
+    files: OptionalFileServiceDep,
+    traces: TraceServiceDep,
+    telemetry: TelemetryStoragePortDep,
+    provider_keys: OrgProviderKeyServiceDep,
+    endpoints: ProviderEndpointServiceDep,
+    web_search_keys: WebSearchKeyServiceDep,
+    mcp_servers: WorkspaceMcpServerServiceDep,
+    guardrails: OrganizationGuardrailDefinitionServiceDep,
+) -> AccountDeletionService:
+    """Build account deletion on the request's Unit of Work, with every domain an account leaves records in."""
+    identities = IdentityRepositories.on(uow)
+    return AccountDeletionService(
+        uow,
+        identities,
+        bootstrap_operator_id=await OrganizationService(db, membership_listener=None).bootstrap_operator_id(),
+        organizations=AccountRelease(OrganizationRepositories.on(uow)),
+        users=get_user_access(uow),
+        keys=get_api_key_service(uow),
+        usage=get_usage_service(uow),
+        files=files,
+        traces=traces,
+        trace_writer=getattr(request.app.state, "trace_writer", None),
+        telemetry=telemetry,
+        secrets=(provider_keys, endpoints, web_search_keys, mcp_servers, guardrails, identities.connections),
+    )
+
+
+AccountDeletionServiceDep = Annotated[AccountDeletionService, Depends(get_account_deletion_service)]
+
+
 async def get_deployment_trace_scope(
     workspace_ids: CallerWorkspaces,
     organization_id: CallerOrganization,
@@ -1241,6 +1276,7 @@ OAuthAppServiceDep = Annotated[OAuthAppService, Depends(get_oauth_app_service)]
 
 __all__ = [
     "AUTH_FAILURES",
+    "AccountDeletionServiceDep",
     "AgentModelRecommenderPortDep",
     "AgentRecommenderServiceDep",
     "ApiKeyFormatPortDep",

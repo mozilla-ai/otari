@@ -55,6 +55,32 @@ class BootstrapOperatorProtectedError(TenancyValidationError):
     """
 
 
+class AccountDeletionUnconfirmedError(TenancyValidationError):
+    """An account deletion whose typed confirmation is not the account's own address."""
+
+    def __init__(self) -> None:
+        super().__init__("Type the account's email address to confirm its deletion")
+
+
+class AccountDeletionPasswordRequiredError(TenancyValidationError):
+    """An account deletion with no password, for an account that has one."""
+
+    def __init__(self) -> None:
+        super().__init__("The current password is required to delete the account")
+
+
+class AccountErasureFailedError(TenancyError):
+    """A store outside the deployment's transaction refused to erase a deleted account's records.
+
+    Some may already be erased, but the account is not deleted, so the deletion can be retried to finish.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Could not erase all of this account's telemetry and traces; the account was not deleted. Try again."
+        )
+
+
 class EmptyDeploymentUserUpdateError(TenancyValidationError):
     """A change request that names neither flag.
 
@@ -746,6 +772,9 @@ class BlockedEmailEntryNotFoundError(TenancyNotFoundError):
 
 
 __all__ = [
+    "AccountDeletionPasswordRequiredError",
+    "AccountDeletionUnconfirmedError",
+    "AccountErasureFailedError",
     "BlockedEmailEntryExistsError",
     "BlockedEmailEntryNotFoundError",
     "BlockedEmailError",

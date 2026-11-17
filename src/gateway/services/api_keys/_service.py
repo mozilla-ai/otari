@@ -62,6 +62,11 @@ class ApiKeyService:
         self._federation_rules = repositories.federation_rules
         self._users = users
 
+    async def revoke_in_workspaces(self, workspace_ids: Collection[uuid.UUID]) -> None:
+        """Revoke every key in these workspaces, so none of them can be enabled again."""
+        async with self._uow:
+            await self._keys.revoke_in_workspaces(workspace_ids)
+
     async def get_workspace_id_for_key(self, key_id: str) -> uuid.UUID | None:
         """Return the ID of the workspace that owns a key, or None when no key has that ID."""
         return await self._keys.get_workspace_id_for_key(key_id)

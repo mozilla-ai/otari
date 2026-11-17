@@ -266,6 +266,9 @@ PUT /api/v1/auth/password                           # dashboard-only
 GET /api/v1/auth/profile                            # dashboard-only
 PATCH /api/v1/auth/profile                          # dashboard-only
 PUT /api/v1/auth/profile/avatar                     # dashboard-only
+# Deleting the signed-in account: the account page's Danger Zone. It confirms with
+# the person's own address and password, which no SDK caller holds.
+DELETE /api/v1/auth/account                         # dashboard-only
 # A signed-in person's message to the Otari team, sent from the top bar (the
 # account menu on a phone).
 # It is something a person writes, not something an integration calls.

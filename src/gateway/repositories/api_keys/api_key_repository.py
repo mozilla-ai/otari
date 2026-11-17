@@ -73,6 +73,17 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         result = await self.db.execute(select(APIKey.id).where(APIKey.workspace_id.in_(workspace_ids)))
         return list(result.scalars().all())
 
+    async def revoke_in_workspaces(self, workspace_ids: Collection[uuid.UUID]) -> None:
+        """Stage revoking every key in these workspaces, whoever it is billed to."""
+        if not workspace_ids:
+            return
+        await self.db.execute(
+            update(APIKey)
+            .where(APIKey.workspace_id.in_(list(workspace_ids)))
+            .values(is_active=False, disabled_reason=DisabledReason.REVOKED)
+            .execution_options(synchronize_session=False)
+        )
+
     async def reload_locked(self, key: APIKey) -> None:
         """Re-read ``key`` from the database and lock its row until the commit."""
         await self.db.refresh(key, with_for_update=True)

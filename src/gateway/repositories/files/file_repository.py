@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Never, cast
 
-from sqlalchemy import and_, delete, or_, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy.sql.elements import ColumnElement
@@ -181,6 +181,22 @@ class FileRepository(BaseRepository[FileObject, Never, Never]):
         """Stage the file's removal from every read, leaving the row for the sweep."""
         record.deleted_at = at
         await self.db.flush()
+
+    async def release_owned(self, user_ids: Collection[str], to_user_id: str, at: datetime) -> None:
+        """Stage moving these users' rows onto ``to_user_id``, deleted and unnamed, for the sweep to reclaim."""
+        if not user_ids:
+            return
+        await self.db.execute(
+            update(FileObject)
+            .where(FileObject.user_id.in_(list(user_ids)))
+            .values(
+                user_id=to_user_id,
+                filename="deleted",
+                metadata_={},
+                deleted_at=func.coalesce(FileObject.deleted_at, at),
+            )
+            .execution_options(synchronize_session=False)
+        )
 
     async def existing_ids(self, file_ids: Collection[str]) -> set[str]:
         """Which of ``file_ids`` already have a row, recorded or uploaded.

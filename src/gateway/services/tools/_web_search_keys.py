@@ -13,7 +13,7 @@ off for it, and any member can see which keys the workspace uses.
 """
 
 import uuid
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import MappingProxyType
@@ -235,6 +235,12 @@ class WebSearchKeyService:
     # ------------------------------------------------------------------
     # The organization's keys: owners and admins only
     # ------------------------------------------------------------------
+
+    async def forget_secrets(
+        self, organization_ids: Collection[uuid.UUID], workspace_ids: Collection[uuid.UUID]
+    ) -> None:
+        """Stage clearing the web search keys these organizations hold, for the caller's transaction."""
+        await self.keys.forget_secrets(organization_ids, workspace_ids)
 
     async def list_keys(self, *, user: User, include_archived: bool, skip: int, limit: int) -> OrgWebSearchKeysPublic:
         organization_id = await self._managed_organization(user)
