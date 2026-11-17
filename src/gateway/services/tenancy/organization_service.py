@@ -15,7 +15,7 @@ import re
 import secrets
 import unicodedata
 import uuid
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -119,7 +119,12 @@ from gateway.repositories.users_repository import (
     live_attribution_user_ids,
 )
 from gateway.services.mail import Mailer
-from gateway.services.organizations import BlockedAddresses, InvitationMailLimit, SsoEnforcement
+from gateway.services.organizations import (
+    AdmittedMember,
+    BlockedAddresses,
+    InvitationMailLimit,
+    SsoEnforcement,
+)
 from gateway.services.password_service import hash_password_async
 from gateway.services.secret_box import secret_box_configured
 from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess
@@ -2227,6 +2232,56 @@ class OrganizationService:
 
         return AcceptInvitationResultPublic(organization_name=organization.name, role=membership.role)
 
+    async def admit(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        role: OrganizationMemberRole,
+        user_id: uuid.UUID,
+        workspaces: Sequence[WorkspaceAssignmentRequest],
+    ) -> AdmittedMember:
+        """Make this person an active member with this role, granting each workspace that still exists.
+
+        The organization becomes the person's active one, and an attribution row is minted, so the
+        member can own API keys as a directly added one can. A workspace that has been deleted since
+        the offer was made is dropped rather than refused.
+
+        Locks the organization, then the identity, then the workspaces, which is the order the
+        membership update path takes.
+
+        Raises:
+            MembershipUpdateError: the role offered would leave the organization with no active owner.
+            OrganizationMemberDeactivatedError: the account is deactivated, so a membership grants nothing.
+            OrganizationNotFoundError: the organization no longer exists.
+
+        """
+        async with self._require_unit_of_work():
+            organization = await self.organizations.get(organization_id)
+            if organization is None:
+                raise OrganizationNotFoundError(organization_id)
+            await self.organizations.lock(organization_id)
+            await self.users.lock(user_id)
+            identity = await self.users.get(user_id)
+            if identity is None or not identity.is_active:
+                raise OrganizationMemberDeactivatedError(identity.email if identity is not None else user_id)
+            membership, created = await self.members.add_if_absent(
+                organization_id=organization_id, user_id=user_id, role=role
+            )
+            if not created:
+                await self._require_an_owner_remains(
+                    membership, organization_id=organization_id, new_role=role, new_status=ACTIVE_MEMBERSHIP_STATUS
+                )
+                workspace_ids = await self.workspace_rows.lock_in_organization(organization_id)
+                membership = await self._update_membership(
+                    membership, {"role": role, "status": ACTIVE_MEMBERSHIP_STATUS}
+                )
+                await self._require_membership_listener().organization_member_changed(membership, workspace_ids)
+            assignments = await self._drop_vanished_workspace_assignments(organization, list(workspaces))
+            await self._apply_workspace_assignments(user_id=user_id, assignments=assignments)
+            await get_or_create_attribution_user(self.db, user_id=str(user_id), alias=identity.email)
+            await self.users.move_active_organization([user_id], organization_id)
+            return AdmittedMember(created=created, member_id=membership.id)
+
     async def list_pending_organization_invitations_for_user(
         self,
         *,
@@ -2846,7 +2901,24 @@ class OrganizationService:
         if actor_membership.role != "owner" and new_role == "owner":
             raise MembershipUpdateError("Only organization owners can grant the owner role")
 
-        target_is_active_owner = target_membership.role == "owner" and target_membership.status == "active"
+        await self._require_an_owner_remains(
+            target_membership, organization_id=organization_id, new_role=new_role, new_status=new_status
+        )
+
+    async def _require_an_owner_remains(
+        self,
+        membership: OrganizationMember,
+        *,
+        organization_id: uuid.UUID,
+        new_role: str,
+        new_status: str,
+    ) -> None:
+        """Refuse a change that would leave the organization with no active owner.
+
+        NOTE: Callers must hold the organization's row lock.
+        This counts the active owners and the caller then writes, with no unique index behind the count.
+        """
+        target_is_active_owner = membership.role == "owner" and membership.status == "active"
         if target_is_active_owner and (new_role != "owner" or new_status != "active"):
             if await self.members.count_active_owners(organization_id) <= 1:
                 raise MembershipUpdateError("An organization must keep at least one active owner")

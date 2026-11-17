@@ -1,0 +1,236 @@
+"""Admitting an invited person: the membership, the workspace grants, their ceilings and the active organization."""
+
+import uuid
+from collections.abc import Sequence
+
+import pytest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
+
+from gateway.exceptions.organizations_exceptions import MembershipUpdateError
+from gateway.models.budgets import ScopedBudget, WorkspaceBudgetDefault
+from gateway.models.tenancy import (
+    OrganizationMember,
+    User,
+    WorkspaceAssignmentRequest,
+    WorkspaceMember,
+)
+from gateway.models.users import User as BillingUser
+from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository, WorkspaceMemberRepository
+from gateway.services.organizations import MembershipAdmission
+from gateway.services.tenancy import OrganizationService
+from gateway.services.tenancy.membership_listener import MembershipListener
+
+from .tenancy_helpers import (
+    create_budget,
+    create_member,
+    create_organization,
+    create_workspace,
+    membership_writes,
+)
+
+pytestmark = pytest.mark.asyncio
+
+
+class _RecordingListener:
+    """The budget listener, with every organization-member announcement recorded."""
+
+    def __init__(self, inner: MembershipListener) -> None:
+        self._inner = inner
+        self.changed: list[tuple[uuid.UUID, int]] = []
+
+    async def member_joined(self, member: WorkspaceMember) -> None:
+        await self._inner.member_joined(member)
+
+    async def member_removed(self, member: WorkspaceMember) -> None:
+        await self._inner.member_removed(member)
+
+    async def member_role_changed(self, member: WorkspaceMember) -> None:
+        await self._inner.member_role_changed(member)
+
+    async def organization_member_changed(
+        self, membership: OrganizationMember, workspace_ids: Sequence[uuid.UUID]
+    ) -> None:
+        self.changed.append((membership.id, len(workspace_ids)))
+        await self._inner.organization_member_changed(membership, workspace_ids)
+
+    async def workspace_deleted(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
+        await self._inner.workspace_deleted(workspace_id, member_ids)
+
+    async def member_lost_workspaces(self, user_id: uuid.UUID, workspace_ids: Sequence[uuid.UUID]) -> None:
+        await self._inner.member_lost_workspaces(user_id, workspace_ids)
+
+
+async def _invitee(db: AsyncSession, *, active_organization_id: uuid.UUID, email: str) -> User:
+    """An identity that is a member of nothing, active somewhere else."""
+    return await UserRepository(db).create_local_identity(
+        full_name="Invitee", active_organization_id=active_organization_id, email=email
+    )
+
+
+async def _ceilings_for(db: AsyncSession, scope_id: uuid.UUID) -> list[str]:
+    rows = await db.execute(select(ScopedBudget.budget_id).where(ScopedBudget.scope_id == str(scope_id)))
+    return list(rows.scalars().all())
+
+
+async def test_admitting_a_new_member_gives_them_the_ceiling_a_workspace_policy_owes(async_db: AsyncSession) -> None:
+    writes = membership_writes(async_db)
+    organization = await create_organization(async_db, slug="admit-ceiling")
+    elsewhere = await create_organization(async_db, slug="admit-ceiling-other")
+    owner = await create_member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await create_workspace(async_db, organization, name="Engineering", owner=owner)
+    async_db.add(
+        WorkspaceBudgetDefault(workspace_id=workspace.id, budget_id=await create_budget(async_db, max_budget=25.0))
+    )
+    await async_db.flush()
+    invitee = await _invitee(async_db, active_organization_id=elsewhere.id, email="ada@example.com")
+    service = OrganizationService(async_db, **writes)
+
+    async with writes["uow"]:
+        admitted = await service.admit(
+            organization_id=organization.id,
+            role="member",
+            user_id=invitee.id,
+            workspaces=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role="member")],
+        )
+
+    assert admitted.created is True
+    membership = await WorkspaceMemberRepository(async_db).get_by_workspace_and_user(workspace.id, invitee.id)
+    assert membership is not None
+    assert await _ceilings_for(async_db, membership.id) != []
+
+
+async def test_admitting_a_suspended_member_revives_them_with_the_offered_role(async_db: AsyncSession) -> None:
+    writes = membership_writes(async_db)
+    organization = await create_organization(async_db, slug="admit-revive")
+    await create_member(async_db, organization, role="owner", full_name="Owner")
+    returning = await create_member(async_db, organization, role="viewer", full_name="Returning")
+    members = OrganizationMemberRepository(async_db)
+    suspended = await members.get_by_organization_and_user(organization.id, returning.id)
+    assert suspended is not None
+    await members.update_membership(suspended, {"status": "suspended"})
+    await async_db.flush()
+    service = OrganizationService(async_db, **writes)
+
+    async with writes["uow"]:
+        admitted = await service.admit(
+            organization_id=organization.id, role="admin", user_id=returning.id, workspaces=[]
+        )
+
+    assert admitted.created is False
+    revived = await members.get_by_organization_and_user(organization.id, returning.id)
+    assert revived is not None
+    assert (revived.role, revived.status) == ("admin", "active")
+
+
+async def test_admitting_drops_a_workspace_that_no_longer_exists(async_db: AsyncSession) -> None:
+    writes = membership_writes(async_db)
+    organization = await create_organization(async_db, slug="admit-vanished")
+    elsewhere = await create_organization(async_db, slug="admit-vanished-other")
+    owner = await create_member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await create_workspace(async_db, organization, name="Engineering", owner=owner)
+    invitee = await _invitee(async_db, active_organization_id=elsewhere.id, email="grace@example.com")
+    service = OrganizationService(async_db, **writes)
+
+    async with writes["uow"]:
+        admitted = await service.admit(
+            organization_id=organization.id,
+            role="member",
+            user_id=invitee.id,
+            workspaces=[
+                WorkspaceAssignmentRequest(workspace_id=workspace.id, role="member"),
+                WorkspaceAssignmentRequest(workspace_id=uuid.uuid4(), role="member"),
+            ],
+        )
+
+    assert admitted.created is True
+    placements = (
+        (
+            await async_db.execute(
+                select(col(WorkspaceMember.workspace_id)).where(col(WorkspaceMember.user_id) == invitee.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert list(placements) == [workspace.id]
+
+
+async def test_admitting_refuses_an_offer_that_would_leave_no_active_owner(async_db: AsyncSession) -> None:
+    writes = membership_writes(async_db)
+    organization = await create_organization(async_db, slug="admit-last-owner")
+    only_owner = await create_member(async_db, organization, role="owner", full_name="Only Owner")
+    service = OrganizationService(async_db, **writes)
+
+    with pytest.raises(MembershipUpdateError, match="at least one active owner"):
+        async with writes["uow"]:
+            await service.admit(organization_id=organization.id, role="member", user_id=only_owner.id, workspaces=[])
+
+
+async def test_admitting_makes_the_organization_active_and_mints_the_attribution_row(async_db: AsyncSession) -> None:
+    writes = membership_writes(async_db)
+    organization = await create_organization(async_db, slug="admit-active-org")
+    elsewhere = await create_organization(async_db, slug="admit-active-org-other")
+    await create_member(async_db, organization, role="owner", full_name="Owner")
+    invitee = await _invitee(async_db, active_organization_id=elsewhere.id, email="ida@example.com")
+    service = OrganizationService(async_db, **writes)
+
+    async with writes["uow"]:
+        await service.admit(organization_id=organization.id, role="member", user_id=invitee.id, workspaces=[])
+
+    active = (
+        await async_db.execute(select(col(User.active_organization_id)).where(col(User.id) == invitee.id))
+    ).scalar_one()
+    assert active == organization.id
+    attribution = (
+        await async_db.execute(select(BillingUser.user_id).where(BillingUser.user_id == str(invitee.id)))
+    ).scalar_one_or_none()
+    assert attribution is not None
+
+
+async def test_admitting_an_active_member_announces_the_role_it_applied(async_db: AsyncSession) -> None:
+    """A demotion through an invitation is announced, so a viewer's keys are disabled as the admin path does."""
+    writes = membership_writes(async_db)
+    listener = _RecordingListener(writes["membership_listener"])
+    organization = await create_organization(async_db, slug="admit-announces")
+    owner = await create_member(async_db, organization, role="owner", full_name="Owner")
+    active = await create_member(async_db, organization, role="admin", full_name="Active Admin")
+    await create_workspace(async_db, organization, name="Engineering", owner=owner)
+    service = OrganizationService(async_db, membership_listener=listener, uow=writes["uow"])
+
+    async with writes["uow"]:
+        admitted = await service.admit(organization_id=organization.id, role="viewer", user_id=active.id, workspaces=[])
+
+    assert admitted.created is False
+    assert [member_id for member_id, _ in listener.changed] == [admitted.member_id]
+    assert listener.changed[0][1] >= 1
+
+
+async def test_a_refused_offer_leaves_no_membership_behind(async_db: AsyncSession) -> None:
+    writes = membership_writes(async_db)
+    organization = await create_organization(async_db, slug="admit-rolled-back")
+    elsewhere = await create_organization(async_db, slug="admit-rolled-back-other")
+    owner = await create_member(async_db, organization, role="owner", full_name="Only Owner")
+    workspace = await create_workspace(async_db, organization, name="Engineering", owner=owner)
+    invitee = await _invitee(async_db, active_organization_id=elsewhere.id, email="rolled@example.com")
+    service = OrganizationService(async_db, **writes)
+
+    with pytest.raises(MembershipUpdateError):
+        async with writes["uow"]:
+            await service.admit(
+                organization_id=organization.id,
+                role="member",
+                user_id=invitee.id,
+                workspaces=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role="member")],
+            )
+            # The refusal below is what the test is about: it must take the membership above with it.
+            await service.admit(organization_id=organization.id, role="member", user_id=owner.id, workspaces=[])
+
+    assert (
+        await OrganizationMemberRepository(async_db).get_by_organization_and_user(organization.id, invitee.id) is None
+    )
+
+
+# The service is the collaborator acceptance holds, checked by mypy rather than by a call.
+_CONFORMS: MembershipAdmission = OrganizationService(None, membership_listener=None)  # type: ignore[arg-type]
