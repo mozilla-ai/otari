@@ -341,12 +341,12 @@ def _add_secrets(session_factory: Callable[[], Session], account: Account) -> No
         session.close()
 
 
-def _stored_secrets(session_factory: Callable[[], Session], account: Account) -> list[object]:
+def _stored_secrets(session_factory: Callable[[], Session], account: Account) -> list[Any]:
     """Every credential still stored in ``account``'s organization and workspace."""
     session = session_factory()
     try:
         return [
-            *session.query(OrgProviderKey.encrypted_api_key, OrgProviderKey.client_args)
+            *session.query(col(OrgProviderKey.encrypted_api_key), col(OrgProviderKey.client_args))
             .filter(col(OrgProviderKey.organization_id) == account.organization_id)
             .all(),
             *session.query(ProviderEndpoint.encrypted_api_key)
