@@ -1,8 +1,8 @@
 import { useState } from "react"
 
 import { PublicCatalogBar } from "@/features/models/PublicCatalogBar"
-import { ProviderDetailView } from "@/features/providers/ProviderDetailPage"
-import { ProvidersView } from "@/features/providers/ProvidersPage"
+import { ProviderDetailView } from "@/features/providers/ProviderDetailView"
+import { ProvidersView } from "@/features/providers/ProvidersView"
 import {
   PROVIDERS_URL_DEFAULTS,
   providersListFromUrl,
@@ -29,14 +29,9 @@ export function PublicProvidersPage({ name }: { name?: string }) {
       <PublicCatalogBar current={name ? null : "providers"} />
       <main className="mx-auto flex w-full max-w-[112.5rem] flex-col gap-6 px-4 py-5 md:px-6 md:py-6">
         {name ? (
-          <ProviderDetailView
-            name={name}
-            list={list}
-            onListChange={setList}
-            publicView
-          />
+          <ProviderDetailView name={name} list={list} onListChange={setList} />
         ) : (
-          <ProvidersView list={list} onListChange={setList} publicView />
+          <ProvidersView list={list} onListChange={setList} />
         )}
       </main>
     </div>

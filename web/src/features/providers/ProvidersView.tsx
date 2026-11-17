@@ -1,5 +1,3 @@
-import { Link } from "@tanstack/react-router"
-
 import type { CatalogProviderSummary } from "@/client"
 import { TablePagination } from "@/design-system/data/TablePagination"
 import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
@@ -10,10 +8,7 @@ import { ProviderPolicyLinks } from "@/features/providers/ProviderPolicyLinks"
 import {
   catalogPage,
   needsPager,
-  PROVIDERS_URL_DEFAULTS,
   type ProvidersListState,
-  providersListFromUrl,
-  providersListToUrl,
   useClampedPage,
 } from "@/features/providers/providersList"
 import { publicProvidersHref } from "@/features/providers/publicProviders"
@@ -21,29 +16,19 @@ import { useCatalogProviders } from "@/shared/api/models"
 import { ProviderMark } from "@/shared/components/marks/BrandMark"
 import { followInAppLink } from "@/shared/helpers/appLocation"
 import { formatNumber } from "@/shared/helpers/format"
-import { useUrlState } from "@/shared/helpers/urlState"
-import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 // Every provider the deployment serves, one card each: its mark and name, how
 // many models it offers, and the operator's links to its terms. A card opens the
 // provider's own page.
 //
-// `ProvidersView` takes `publicView` and its page state the way
-// `ModelCatalogView` does, so the same page renders ahead of a session
-// (`PublicProvidersPage`), where links are plain anchors because there is no
-// router and the page lives in component state.
+// Rendered ahead of a session (`PublicProvidersPage`), where links are plain
+// anchors because there is no router and the page lives in component state.
 
-export function modelCountLabel(count: number): string {
+function modelCountLabel(count: number): string {
   return `${formatNumber(count)} ${count === 1 ? "model" : "models"}`
 }
 
-function ProviderCard({
-  provider,
-  publicView,
-}: {
-  provider: CatalogProviderSummary
-  publicView: boolean
-}) {
+function ProviderCard({ provider }: { provider: CatalogProviderSummary }) {
   // The title link stretches over the card (`after:inset-0`), so the whole
   // card opens the provider while the policy links above it stay their own
   // targets: an anchor cannot hold another.
@@ -56,23 +41,13 @@ function ProviderCard({
           providerId={provider.provider}
           label={provider.display_name}
         />
-        {publicView ? (
-          <a
-            href={publicProvidersHref(provider.name)}
-            onClick={followInAppLink}
-            className={titleClass}
-          >
-            {provider.display_name}
-          </a>
-        ) : (
-          <Link
-            to="/providers/$name"
-            params={{ name: provider.name }}
-            className={titleClass}
-          >
-            {provider.display_name}
-          </Link>
-        )}
+        <a
+          href={publicProvidersHref(provider.name)}
+          onClick={followInAppLink}
+          className={titleClass}
+        >
+          {provider.display_name}
+        </a>
       </div>
       <span className="text-caption">
         {modelCountLabel(provider.model_count)}
@@ -85,20 +60,12 @@ function ProviderCard({
 export function ProvidersView({
   list,
   onListChange,
-  publicView = false,
 }: {
   list: ProvidersListState
   onListChange: (next: ProvidersListState) => void
-  publicView?: boolean
 }) {
-  // What the selected workspace may call, held until the selection is known so
-  // the page never shows the wider list first. A visitor has no workspace.
-  const workspace = useSelectedWorkspace()
-  const providers = useCatalogProviders(
-    catalogPage(list),
-    publicView ? "" : (workspace.selected?.workspace_id ?? ""),
-    publicView || workspace.isSettled,
-  )
+  // A visitor has no workspace, so the list is the deployment's whole catalog.
+  const providers = useCatalogProviders(catalogPage(list), "", true)
   const rows = providers.data?.providers
   const count = providers.data?.count
   useClampedPage(list, onListChange, count, providers.isPlaceholderData)
@@ -119,11 +86,7 @@ export function ProvidersView({
           className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3"
         >
           {rows.map((provider) => (
-            <ProviderCard
-              key={provider.name}
-              provider={provider}
-              publicView={publicView}
-            />
+            <ProviderCard key={provider.name} provider={provider} />
           ))}
         </ul>
       )}
@@ -139,16 +102,5 @@ export function ProvidersView({
         />
       ) : null}
     </div>
-  )
-}
-
-/** The providers list on the router, its page kept in the URL. */
-export function ProvidersPage() {
-  const url = useUrlState(PROVIDERS_URL_DEFAULTS)
-  return (
-    <ProvidersView
-      list={providersListFromUrl(url)}
-      onListChange={(next) => url.patch(providersListToUrl(next))}
-    />
   )
 }

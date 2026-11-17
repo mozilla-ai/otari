@@ -3,7 +3,6 @@ import {
   FiAtSign,
   FiBarChart2,
   FiBox,
-  FiCloud,
   FiCode,
   FiCpu,
   FiDollarSign,
@@ -110,14 +109,6 @@ const BASE_NAV_SECTIONS = [
         label: "Models",
         surface: "models",
         icon: FiLayers,
-      },
-      // Who serves those models, with each provider's terms. Read from the
-      // same catalog, so it shares the Models surface.
-      {
-        to: "/providers",
-        label: "Providers",
-        surface: "models",
-        icon: FiCloud,
       },
       // Deliberately not tagged `capability: "routing"`, though otari.ai's
       // registry tags its own Routing item that way. ARCHITECTURE.md's

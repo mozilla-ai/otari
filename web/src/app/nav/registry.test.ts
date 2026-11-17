@@ -74,7 +74,6 @@ describe("nav registry", () => {
       "Home",
       "Sessions",
       "Models",
-      "Providers",
       "Routing",
       "Tools",
       "API keys",

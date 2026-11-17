@@ -22,7 +22,6 @@ import { Route as MembersRouteImport } from './routes/members'
 import { Route as ModelsRouteImport } from './routes/models'
 import { Route as OrganizationRouteImport } from './routes/organization'
 import { Route as PlaygroundRouteImport } from './routes/playground'
-import { Route as ProvidersRouteImport } from './routes/providers'
 import { Route as RoutingRouteImport } from './routes/routing'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ToolsRouteImport } from './routes/tools'
@@ -50,8 +49,6 @@ import { Route as OrganizationUsageRouteImport } from './routes/organization.usa
 import { Route as OrganizationWebSearchKeysRouteImport } from './routes/organization.web-search-keys'
 import { Route as PeopleIndexRouteImport } from './routes/people.index'
 import { Route as PeoplePersonIdRouteImport } from './routes/people.$personId'
-import { Route as ProvidersIndexRouteImport } from './routes/providers.index'
-import { Route as ProvidersNameRouteImport } from './routes/providers.$name'
 import { Route as RoutingIndexRouteImport } from './routes/routing.index'
 import { Route as RoutingNameRouteImport } from './routes/routing.$name'
 import { Route as RulesIndexRouteImport } from './routes/rules.index'
@@ -130,11 +127,6 @@ const OrganizationRoute = OrganizationRouteImport.update({
 const PlaygroundRoute = PlaygroundRouteImport.update({
   id: '/playground',
   path: '/playground',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ProvidersRoute = ProvidersRouteImport.update({
-  id: '/providers',
-  path: '/providers',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RoutingRoute = RoutingRouteImport.update({
@@ -274,16 +266,6 @@ const PeoplePersonIdRoute = PeoplePersonIdRouteImport.update({
   path: '/people/$personId',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ProvidersIndexRoute = ProvidersIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => ProvidersRoute,
-} as any)
-const ProvidersNameRoute = ProvidersNameRouteImport.update({
-  id: '/$name',
-  path: '/$name',
-  getParentRoute: () => ProvidersRoute,
-} as any)
 const RoutingIndexRoute = RoutingIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -376,7 +358,6 @@ export interface FileRoutesByFullPath {
   '/models': typeof ModelsRouteWithChildren
   '/organization': typeof OrganizationRouteWithChildren
   '/playground': typeof PlaygroundRoute
-  '/providers': typeof ProvidersRouteWithChildren
   '/routing': typeof RoutingRouteWithChildren
   '/settings': typeof SettingsRoute
   '/tools': typeof ToolsRouteWithChildren
@@ -400,7 +381,6 @@ export interface FileRoutesByFullPath {
   '/organization/usage': typeof OrganizationUsageRoute
   '/organization/web-search-keys': typeof OrganizationWebSearchKeysRoute
   '/people/$personId': typeof PeoplePersonIdRoute
-  '/providers/$name': typeof ProvidersNameRoute
   '/routing/$name': typeof RoutingNameRoute
   '/rules/$ruleId': typeof RulesRuleIdRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
@@ -411,7 +391,6 @@ export interface FileRoutesByFullPath {
   '/models/': typeof ModelsIndexRoute
   '/organization/': typeof OrganizationIndexRoute
   '/people/': typeof PeopleIndexRoute
-  '/providers/': typeof ProvidersIndexRoute
   '/routing/': typeof RoutingIndexRoute
   '/rules/': typeof RulesIndexRoute
   '/tools/': typeof ToolsIndexRoute
@@ -451,7 +430,6 @@ export interface FileRoutesByTo {
   '/organization/usage': typeof OrganizationUsageRoute
   '/organization/web-search-keys': typeof OrganizationWebSearchKeysRoute
   '/people/$personId': typeof PeoplePersonIdRoute
-  '/providers/$name': typeof ProvidersNameRoute
   '/routing/$name': typeof RoutingNameRoute
   '/rules/$ruleId': typeof RulesRuleIdRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
@@ -462,7 +440,6 @@ export interface FileRoutesByTo {
   '/models': typeof ModelsIndexRoute
   '/organization': typeof OrganizationIndexRoute
   '/people': typeof PeopleIndexRoute
-  '/providers': typeof ProvidersIndexRoute
   '/routing': typeof RoutingIndexRoute
   '/rules': typeof RulesIndexRoute
   '/tools': typeof ToolsIndexRoute
@@ -487,7 +464,6 @@ export interface FileRoutesById {
   '/models': typeof ModelsRouteWithChildren
   '/organization': typeof OrganizationRouteWithChildren
   '/playground': typeof PlaygroundRoute
-  '/providers': typeof ProvidersRouteWithChildren
   '/routing': typeof RoutingRouteWithChildren
   '/settings': typeof SettingsRoute
   '/tools': typeof ToolsRouteWithChildren
@@ -511,7 +487,6 @@ export interface FileRoutesById {
   '/organization/usage': typeof OrganizationUsageRoute
   '/organization/web-search-keys': typeof OrganizationWebSearchKeysRoute
   '/people/$personId': typeof PeoplePersonIdRoute
-  '/providers/$name': typeof ProvidersNameRoute
   '/routing/$name': typeof RoutingNameRoute
   '/rules/$ruleId': typeof RulesRuleIdRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
@@ -523,7 +498,6 @@ export interface FileRoutesById {
   '/models/': typeof ModelsIndexRoute
   '/organization/': typeof OrganizationIndexRoute
   '/people/': typeof PeopleIndexRoute
-  '/providers/': typeof ProvidersIndexRoute
   '/routing/': typeof RoutingIndexRoute
   '/rules/': typeof RulesIndexRoute
   '/tools/': typeof ToolsIndexRoute
@@ -549,7 +523,6 @@ export interface FileRouteTypes {
     | '/models'
     | '/organization'
     | '/playground'
-    | '/providers'
     | '/routing'
     | '/settings'
     | '/tools'
@@ -573,7 +546,6 @@ export interface FileRouteTypes {
     | '/organization/usage'
     | '/organization/web-search-keys'
     | '/people/$personId'
-    | '/providers/$name'
     | '/routing/$name'
     | '/rules/$ruleId'
     | '/tools/code-execution'
@@ -584,7 +556,6 @@ export interface FileRouteTypes {
     | '/models/'
     | '/organization/'
     | '/people/'
-    | '/providers/'
     | '/routing/'
     | '/rules/'
     | '/tools/'
@@ -624,7 +595,6 @@ export interface FileRouteTypes {
     | '/organization/usage'
     | '/organization/web-search-keys'
     | '/people/$personId'
-    | '/providers/$name'
     | '/routing/$name'
     | '/rules/$ruleId'
     | '/tools/code-execution'
@@ -635,7 +605,6 @@ export interface FileRouteTypes {
     | '/models'
     | '/organization'
     | '/people'
-    | '/providers'
     | '/routing'
     | '/rules'
     | '/tools'
@@ -659,7 +628,6 @@ export interface FileRouteTypes {
     | '/models'
     | '/organization'
     | '/playground'
-    | '/providers'
     | '/routing'
     | '/settings'
     | '/tools'
@@ -683,7 +651,6 @@ export interface FileRouteTypes {
     | '/organization/usage'
     | '/organization/web-search-keys'
     | '/people/$personId'
-    | '/providers/$name'
     | '/routing/$name'
     | '/rules/$ruleId'
     | '/tools/code-execution'
@@ -695,7 +662,6 @@ export interface FileRouteTypes {
     | '/models/'
     | '/organization/'
     | '/people/'
-    | '/providers/'
     | '/routing/'
     | '/rules/'
     | '/tools/'
@@ -720,7 +686,6 @@ export interface RootRouteChildren {
   ModelsRoute: typeof ModelsRouteWithChildren
   OrganizationRoute: typeof OrganizationRouteWithChildren
   PlaygroundRoute: typeof PlaygroundRoute
-  ProvidersRoute: typeof ProvidersRouteWithChildren
   RoutingRoute: typeof RoutingRouteWithChildren
   SettingsRoute: typeof SettingsRoute
   ToolsRoute: typeof ToolsRouteWithChildren
@@ -829,13 +794,6 @@ declare module '@tanstack/react-router' {
       path: '/playground'
       fullPath: '/playground'
       preLoaderRoute: typeof PlaygroundRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/providers': {
-      id: '/providers'
-      path: '/providers'
-      fullPath: '/providers'
-      preLoaderRoute: typeof ProvidersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/routing': {
@@ -1027,20 +985,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PeoplePersonIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/providers/': {
-      id: '/providers/'
-      path: '/'
-      fullPath: '/providers/'
-      preLoaderRoute: typeof ProvidersIndexRouteImport
-      parentRoute: typeof ProvidersRoute
-    }
-    '/providers/$name': {
-      id: '/providers/$name'
-      path: '/$name'
-      fullPath: '/providers/$name'
-      preLoaderRoute: typeof ProvidersNameRouteImport
-      parentRoute: typeof ProvidersRoute
-    }
     '/routing/': {
       id: '/routing/'
       path: '/'
@@ -1206,20 +1150,6 @@ const OrganizationRouteWithChildren = OrganizationRoute._addFileChildren(
   OrganizationRouteChildren,
 )
 
-interface ProvidersRouteChildren {
-  ProvidersNameRoute: typeof ProvidersNameRoute
-  ProvidersIndexRoute: typeof ProvidersIndexRoute
-}
-
-const ProvidersRouteChildren: ProvidersRouteChildren = {
-  ProvidersNameRoute: ProvidersNameRoute,
-  ProvidersIndexRoute: ProvidersIndexRoute,
-}
-
-const ProvidersRouteWithChildren = ProvidersRoute._addFileChildren(
-  ProvidersRouteChildren,
-)
-
 interface RoutingRouteChildren {
   RoutingNameRoute: typeof RoutingNameRoute
   RoutingIndexRoute: typeof RoutingIndexRoute
@@ -1306,7 +1236,6 @@ const rootRouteChildren: RootRouteChildren = {
   ModelsRoute: ModelsRouteWithChildren,
   OrganizationRoute: OrganizationRouteWithChildren,
   PlaygroundRoute: PlaygroundRoute,
-  ProvidersRoute: ProvidersRouteWithChildren,
   RoutingRoute: RoutingRouteWithChildren,
   SettingsRoute: SettingsRoute,
   ToolsRoute: ToolsRouteWithChildren,

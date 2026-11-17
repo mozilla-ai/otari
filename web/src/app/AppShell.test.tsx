@@ -703,14 +703,7 @@ describe("AppShell surface gating", () => {
       within(screen.getByRole("navigation", { name: "Sidebar" }))
         .getAllByRole("link")
         .map((link) => link.textContent),
-    ).toEqual([
-      "Home",
-      "Sessions",
-      "Models",
-      "Providers",
-      "API keys",
-      "Members",
-    ])
+    ).toEqual(["Home", "Sessions", "Models", "API keys", "Members"])
     // Routing and Tools nest destinations, so they expand rather than
     // navigate; their children are links once the group is open.
     expect(

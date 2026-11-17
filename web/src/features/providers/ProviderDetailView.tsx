@@ -1,5 +1,3 @@
-import { Link } from "@tanstack/react-router"
-
 import type { CatalogProviderModel } from "@/client"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { TablePagination } from "@/design-system/data/TablePagination"
@@ -14,10 +12,7 @@ import { ProviderPolicyLinks } from "@/features/providers/ProviderPolicyLinks"
 import {
   catalogPage,
   needsPager,
-  PROVIDERS_URL_DEFAULTS,
   type ProvidersListState,
-  providersListFromUrl,
-  providersListToUrl,
   useClampedPage,
 } from "@/features/providers/providersList"
 import { publicProvidersHref } from "@/features/providers/publicProviders"
@@ -26,13 +21,12 @@ import { useCatalogProvider } from "@/shared/api/models"
 import { ProviderMark } from "@/shared/components/marks/BrandMark"
 import { followInAppLink } from "@/shared/helpers/appLocation"
 import { formatContext } from "@/shared/helpers/format"
-import { useUrlState } from "@/shared/helpers/urlState"
-import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 // One provider on a page of its own: its mark, name and the operator's links
 // to its terms, then the models it offers with their list prices, a page at a
 // time. A model's name opens the model's page, where its offerings across
-// providers are compared.
+// providers are compared. Rendered ahead of a session (`PublicProvidersPage`),
+// so links are plain anchors.
 
 function price(
   value: number | null | undefined,
@@ -42,9 +36,7 @@ function price(
   return value == null ? "—" : formatPricedRate(value, unit ?? "token")
 }
 
-function modelColumns(
-  publicView: boolean,
-): DataTableColumn<CatalogProviderModel>[] {
+function modelColumns(): DataTableColumn<CatalogProviderModel>[] {
   return [
     {
       id: "name",
@@ -52,23 +44,13 @@ function modelColumns(
       isRowHeader: true,
       cell: (row) => (
         <span className="flex min-w-0 flex-col">
-          {publicView ? (
-            <a
-              href={publicCatalogHref(row.id)}
-              onClick={followInAppLink}
-              className="text-body break-words text-link hover:text-link-hover"
-            >
-              {row.name}
-            </a>
-          ) : (
-            <Link
-              to="/models/$"
-              params={{ _splat: row.id }}
-              className="text-body break-words text-link hover:text-link-hover"
-            >
-              {row.name}
-            </Link>
-          )}
+          <a
+            href={publicCatalogHref(row.id)}
+            onClick={followInAppLink}
+            className="text-body break-words text-link hover:text-link-hover"
+          >
+            {row.name}
+          </a>
           <code className="text-caption font-mono max-md:[overflow-wrap:anywhere]">
             {row.id}
           </code>
@@ -115,23 +97,16 @@ function modelColumns(
 
 const rowKey = (row: CatalogProviderModel) => row.id
 
-function BackLink({ publicView }: { publicView: boolean }) {
-  const className = "text-link hover:text-link-hover"
+function BackLink() {
   return (
     <nav aria-label="Breadcrumb" className="text-caption">
-      {publicView ? (
-        <a
-          href={publicProvidersHref()}
-          onClick={followInAppLink}
-          className={className}
-        >
-          ← Providers
-        </a>
-      ) : (
-        <Link to="/providers" className={className}>
-          ← Providers
-        </Link>
-      )}
+      <a
+        href={publicProvidersHref()}
+        onClick={followInAppLink}
+        className="text-link hover:text-link-hover"
+      >
+        ← Providers
+      </a>
     </nav>
   )
 }
@@ -140,23 +115,14 @@ export function ProviderDetailView({
   name,
   list,
   onListChange,
-  publicView = false,
 }: {
   name: string
   /** The page of the provider's models on screen. */
   list: ProvidersListState
   onListChange: (next: ProvidersListState) => void
-  /** Ahead of a session: links are plain anchors, as there is no router. */
-  publicView?: boolean
 }) {
-  // The models the selected workspace may call, as the Models page shows them.
-  const workspace = useSelectedWorkspace()
-  const selected = useCatalogProvider(
-    name,
-    catalogPage(list),
-    publicView ? "" : (workspace.selected?.workspace_id ?? ""),
-    publicView || workspace.isSettled,
-  )
+  // A visitor has no workspace, so the models are the whole catalog's.
+  const selected = useCatalogProvider(name, catalogPage(list), "", true)
   const provider = selected.data
   useClampedPage(
     list,
@@ -173,7 +139,7 @@ export function ProviderDetailView({
     ) {
       return (
         <div className="flex flex-col gap-6">
-          <BackLink publicView={publicView} />
+          <BackLink />
           <PageIntro
             title="Provider not found"
             detail={
@@ -189,7 +155,7 @@ export function ProviderDetailView({
 
   return (
     <div className="flex flex-col gap-6">
-      <BackLink publicView={publicView} />
+      <BackLink />
       {selected.isError ? <ErrorBanner error={selected.error} /> : null}
       <div className="flex flex-col gap-2">
         <PageIntro
@@ -213,7 +179,7 @@ export function ProviderDetailView({
         <TableScrollFrame className="otari-provider-models-table">
           <DataTable
             ariaLabel={`Models from ${provider.display_name}`}
-            columns={modelColumns(publicView)}
+            columns={modelColumns()}
             rows={provider.models}
             getRowKey={rowKey}
             mobileLayout="cards"
@@ -235,17 +201,5 @@ export function ProviderDetailView({
         ) : null}
       </section>
     </div>
-  )
-}
-
-/** The provider page on the router, its page of models kept in the URL. */
-export function ProviderDetailPage({ name }: { name: string }) {
-  const url = useUrlState(PROVIDERS_URL_DEFAULTS)
-  return (
-    <ProviderDetailView
-      name={name}
-      list={providersListFromUrl(url)}
-      onListChange={(next) => url.patch(providersListToUrl(next))}
-    />
   )
 }

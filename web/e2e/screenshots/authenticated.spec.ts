@@ -113,16 +113,6 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     // The page's own title, so a 404 does not pass for a model.
     heading: /parity/i,
   },
-  { route: "/providers", name: "providers", heading: /providers/i },
-  {
-    // The organization's own openai key is the one provider the seeded
-    // deployment serves, so the page draws it.
-    route: "/providers/openai",
-    name: "provider-detail",
-    // The provider's own title, so a 404 ("Provider not found") does not pass.
-    heading: /openai/i,
-    prepare: ensureOrgProviderKey,
-  },
   { route: "/routing", name: "routing", heading: /routing/i },
   { route: "/keys", name: "keys", heading: /keys/i },
   // The selected workspace's roster, which is not the organization one below:
