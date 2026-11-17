@@ -58,6 +58,11 @@ from gateway.api.deps.auth import (
     verify_master_key,
     verify_service_key,
 )
+from gateway.api.deps.budgets import (
+    BudgetServiceDep,
+    build_budget_service,
+    get_budget_service,
+)
 from gateway.api.deps.identity import (
     CurrentIdentity,
     get_current_identity,
@@ -121,7 +126,6 @@ from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.usage_signal_port import UsageSignalPort
 from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit, rate_limit_headers
 from gateway.repositories.api_keys import ApiKeyRepositories
-from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.catalog import ModelMetadataOverrideRepository
 from gateway.repositories.files import FileRepositories
 from gateway.repositories.health_checks import (
@@ -801,30 +805,6 @@ def get_invitation_mail_limit(
 
 
 InvitationMailLimitDep = Annotated[InvitationMailLimit, Depends(get_invitation_mail_limit)]
-
-
-def get_budget_service(
-    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> BudgetService:
-    """Build the request's budget service on the request's Unit of Work."""
-    organizations = OrganizationService(db, membership_listener=None)
-    return BudgetService(
-        uow,
-        BudgetRepositories.on(uow),
-        organizations,
-        get_api_key_service(uow),
-        WorkspaceAccess(db, organizations),
-        users=get_user_access(uow),
-    )
-
-
-BudgetServiceDep = Annotated[BudgetService, Depends(get_budget_service)]
-
-
-def build_budget_service(session: AsyncSession) -> BudgetService:
-    """Build the budget service for startup work, on a Unit of Work over a session of its own."""
-    return get_budget_service(get_unit_of_work(session), session)
 
 
 def get_organization_guardrail_definition_service(
@@ -1915,6 +1895,7 @@ __all__ = [
     "ApiKeyServiceDep",
     "BatchResultsServiceDep",
     "BillingPortDep",
+    "BudgetServiceDep",
     "CallerOrganization",
     "CallerUsageScope",
     "CallerWorkspaceQuery",
@@ -1972,6 +1953,7 @@ __all__ = [
     "WorkspaceMcpServersDep",
     "WorkspaceWebSearchPoliciesDep",
     "asks_to_keep_trace_content",
+    "build_budget_service",
     "build_health_check_service",
     "build_invitation_cleanup",
     "build_invitation_delivery",
@@ -1984,6 +1966,7 @@ __all__ = [
     "extract_credential_token",
     "get_agent_model_recommender_port",
     "get_api_key_service",
+    "get_budget_service",
     "get_config",
     "get_container",
     "get_current_identity",
