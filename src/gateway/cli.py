@@ -172,7 +172,7 @@ def serve(
 @click.option(
     "--config",
     "-c",
-    type=click.Path(exists=True),
+    type=click.Path(exists=True, dir_okay=False),
     envvar="OTARI_CONFIG_PATH",
     show_envvar=True,
     help="Path to config YAML file",
@@ -198,7 +198,7 @@ def init_db(config: str | None, database_url: str | None) -> None:
 @click.option(
     "--config",
     "-c",
-    type=click.Path(exists=True),
+    type=click.Path(exists=True, dir_okay=False),
     envvar="OTARI_CONFIG_PATH",
     show_envvar=True,
     help="Path to config YAML file",
