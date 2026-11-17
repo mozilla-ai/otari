@@ -2247,3 +2247,142 @@ def test_a_renamed_annotated_import_still_names_a_type(tmp_path: Path, monkeypat
     )
 
     assert check.check_model_access(tmp_path) == []
+
+
+_COMPOSITION_ROOT_MODULE = "gateway/api/deps/__init__.py"
+
+
+def _composition_root_behavior(line: int, name: str, methods: int, path: str = _COMPOSITION_ROOT_MODULE) -> str:
+    return (
+        f"{path}:{line} defines {name} with {methods} method(s); the composition root builds "
+        "things and holds no implementation, so this belongs to the domain whose work it does"
+    )
+
+
+def test_a_class_with_a_method_in_the_composition_root_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_BEHAVIOR_BASELINE", ())
+    _write(tmp_path, _COMPOSITION_ROOT_MODULE, "class Claim:\n    def claim(self) -> None: ...\n")
+    assert check.check_composition_root_behavior(tmp_path) == [_composition_root_behavior(1, "Claim", 1)]
+
+
+def test_a_class_with_no_methods_in_the_composition_root_is_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_BEHAVIOR_BASELINE", ())
+    _write(tmp_path, _COMPOSITION_ROOT_MODULE, "class Ports:\n    search: object\n    files: object\n")
+    assert check.check_composition_root_behavior(tmp_path) == []
+
+
+def test_a_dataclass_of_data_in_the_composition_root_is_clean(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_BEHAVIOR_BASELINE", ())
+    _write(
+        tmp_path,
+        _COMPOSITION_ROOT_MODULE,
+        "@dataclass(frozen=True, kw_only=True)\nclass Ports:\n    search: object\n",
+    )
+    assert check.check_composition_root_behavior(tmp_path) == []
+
+
+def test_a_dataclass_that_grows_a_method_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_BEHAVIOR_BASELINE", ())
+    _write(
+        tmp_path,
+        _COMPOSITION_ROOT_MODULE,
+        "@dataclass(frozen=True)\nclass Ports:\n    search: object\n\n    def pick(self) -> None: ...\n",
+    )
+    assert check.check_composition_root_behavior(tmp_path) == [_composition_root_behavior(2, "Ports", 1)]
+
+
+def test_a_class_nested_in_a_builder_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_BEHAVIOR_BASELINE", ())
+    _write(
+        tmp_path,
+        _COMPOSITION_ROOT_MODULE,
+        "def ledger_on(db: object) -> object:\n"
+        "    class Ledger:\n"
+        "        def rate(self) -> None: ...\n\n"
+        "        def spend(self) -> None: ...\n\n"
+        "    return Ledger()\n",
+    )
+    assert check.check_composition_root_behavior(tmp_path) == [_composition_root_behavior(2, "ledger_on.Ledger", 2)]
+
+
+def test_a_baselined_class_in_the_composition_root_is_clean(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_BEHAVIOR_BASELINE", ((_COMPOSITION_ROOT_MODULE, "Claim"),))
+    _write(tmp_path, _COMPOSITION_ROOT_MODULE, "class Claim:\n    def claim(self) -> None: ...\n")
+    assert check.check_composition_root_behavior(tmp_path) == []
+
+
+def test_a_baselined_class_that_moved_out_fails_until_its_entry_goes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_BEHAVIOR_BASELINE", ((_COMPOSITION_ROOT_MODULE, "Claim"),))
+    _write(tmp_path, _COMPOSITION_ROOT_MODULE, "def get_claim() -> object:\n    return object()\n")
+    assert check.check_composition_root_behavior(tmp_path) == [
+        f"{_COMPOSITION_ROOT_MODULE} is on the composition root behavior baseline for Claim, "
+        "which no longer defines a method there; remove it from the baseline"
+    ]
+
+
+def test_a_class_with_a_method_outside_the_composition_root_is_not_checked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_BEHAVIOR_BASELINE", ())
+    _write(tmp_path, "gateway/services/tools/_claim.py", "class Claim:\n    def claim(self) -> None: ...\n")
+    assert check.check_composition_root_behavior(tmp_path) == []
+
+
+def test_a_method_under_a_conditional_in_a_class_body_counts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_BEHAVIOR_BASELINE", ())
+    _write(
+        tmp_path,
+        _COMPOSITION_ROOT_MODULE,
+        "class Claim:\n    if TYPE_CHECKING:\n        def claim(self) -> None: ...\n",
+    )
+    assert check.check_composition_root_behavior(tmp_path) == [_composition_root_behavior(1, "Claim", 1)]
+
+
+def test_a_class_under_a_conditional_in_a_builder_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_BEHAVIOR_BASELINE", ())
+    _write(
+        tmp_path,
+        _COMPOSITION_ROOT_MODULE,
+        "def ledger_on(db: object) -> object:\n"
+        "    if db is not None:\n"
+        "        class Ledger:\n"
+        "            def rate(self) -> None: ...\n\n"
+        "        return Ledger()\n"
+        "    return None\n",
+    )
+    assert check.check_composition_root_behavior(tmp_path) == [_composition_root_behavior(3, "ledger_on.Ledger", 1)]
+
+
+def test_a_class_under_an_exception_handler_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_BEHAVIOR_BASELINE", ())
+    _write(
+        tmp_path,
+        _COMPOSITION_ROOT_MODULE,
+        "try:\n    import fast\nexcept ImportError:\n    class Fallback:\n        def run(self) -> None: ...\n",
+    )
+    assert check.check_composition_root_behavior(tmp_path) == [_composition_root_behavior(4, "Fallback", 1)]
+
+
+def test_a_nested_class_does_not_count_toward_the_class_holding_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_BEHAVIOR_BASELINE", ())
+    _write(
+        tmp_path,
+        _COMPOSITION_ROOT_MODULE,
+        "class Outer:\n"
+        "    def mine(self) -> None: ...\n\n"
+        "    class Inner:\n"
+        "        def theirs(self) -> None: ...\n\n"
+        "        def also(self) -> None: ...\n",
+    )
+    assert check.check_composition_root_behavior(tmp_path) == [
+        _composition_root_behavior(1, "Outer", 1),
+        _composition_root_behavior(4, "Outer.Inner", 2),
+    ]

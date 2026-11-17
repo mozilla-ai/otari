@@ -39,7 +39,6 @@ from gateway.log_config import logger
 from gateway.services import mcp_loop_responses as responses_loop_module
 from gateway.services._tool_loop import INVALID_ARGUMENTS_ERROR
 from gateway.services.mcp_loop_responses import (
-    MaxToolIterationsExceeded,
     responses_tool_loop,
     responses_tool_loop_stream,
 )
@@ -448,18 +447,26 @@ async def test_loop_adds_every_rounds_provider_searches(monkeypatch: pytest.Monk
 
 
 @pytest.mark.asyncio
-async def test_loop_max_iter_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("status", ["completed", "incomplete"])
+async def test_a_tool_call_on_the_last_round_ends_as_the_answer(monkeypatch: pytest.MonkeyPatch, status: str) -> None:
+    """A provider that declares the conversation's tools anyway (Bedrock) lets the model call one on the last round.
+
+    Gemini reports a round that calls a function as ``incomplete`` with no reason, which the answer must not keep.
+    """
+
     async def fake_aresponses(**kwargs: Any) -> Response:
-        return _response(output=[_function_call("c", "fetch_url", "{}")])
+        return _response(output=[_function_call("c", "fetch_url", "{}")], status=status)
 
     monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
 
-    with pytest.raises(MaxToolIterationsExceeded):
-        await responses_tool_loop(
-            completion_kwargs={"model": "fake", "input_data": "go"},
-            pool=cast(Any, _FakePool(tool_names=["fetch_url"])),
-            max_iterations=2,
-        )
+    out = await responses_tool_loop(
+        completion_kwargs={"model": "fake", "input_data": "go"},
+        pool=cast(Any, _FakePool(tool_names=["fetch_url"])),
+        max_iterations=2,
+    )
+
+    assert not any(getattr(item, "type", None) == "function_call" for item in out.output or [])
+    assert out.status == "completed"
 
 
 @pytest.mark.asyncio
@@ -1183,6 +1190,34 @@ async def test_stream_runs_owned_function_call_and_continues(monkeypatch: pytest
     seqs = [e.sequence_number for e in events if getattr(e, "sequence_number", None) is not None]
     assert seqs == list(range(len(seqs)))
     assert pool.calls == [("fetch_url", {"u": "x"})]
+
+
+@pytest.mark.asyncio
+async def test_stream_a_tool_call_on_the_last_round_ends_as_the_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_aresponses(**kwargs: Any) -> AsyncIterator[ResponseStreamEvent]:
+        call = _function_call("call_1", "fetch_url", "{}")
+        return _async_iter(
+            _output_item_added(0, _function_call("call_1", "fetch_url", "")),
+            _function_call_args_done(0, "fc_item_1", "fetch_url", "{}"),
+            _output_item_done(0, call),
+            _response_completed(output=[call]),
+        )
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+    pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
+
+    events = [
+        event
+        async for event in responses_tool_loop_stream(
+            completion_kwargs={"model": "fake", "input_data": "go"},
+            pool=cast(Any, pool),
+            max_iterations=2,
+        )
+    ]
+
+    assert pool.calls == [("fetch_url", {})]
+    [completed] = [e for e in events if e.type == "response.completed"]
+    assert not any(getattr(item, "type", None) == "function_call" for item in completed.response.output)
 
 
 @pytest.mark.asyncio

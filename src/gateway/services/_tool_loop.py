@@ -165,6 +165,8 @@ class ToolLoopStrategy(Protocol, Generic[ResultT, AccT]):
 
     def filter_owned(self, result: ResultT, owned: list[Any], pool: ToolBackend) -> None: ...
 
+    def end_answer(self, result: ResultT) -> None: ...
+
     async def advance_transcript(
         self,
         transcript: list[Any],
@@ -218,6 +220,8 @@ class StreamToolLoopStrategy(Protocol, Generic[ChunkT, StateT, AccT]):
     def synthetic_events(self, state: StateT, acc: AccT) -> list[ChunkT]: ...
 
     def finalize_exit(self, state: StateT, pool: ToolBackend, acc: AccT) -> AsyncIterator[ChunkT]: ...
+
+    def end_stream_answer(self, state: StateT) -> None: ...
 
 
 def _prepare(
@@ -439,9 +443,9 @@ async def run_tool_loop(
     2. Foreign tools present: mixed batches execute the owned subset for its
        side effects and filter it from the returned result, so the caller only
        sees calls it can dispatch itself.
-    3. Nothing owned, or the round stopped in step 1: return the result as the
-       final answer, without the owned calls of a round the model stopped
-       short, as the streaming loop does.
+    3. Nothing owned, the round stopped in step 1, or it is the last round the
+       loop allows: return the result as the final answer, without the owned
+       calls, as the streaming loop does.
     4. Otherwise execute the owned calls, extend the transcript, and iterate.
 
     ``on_first_response`` is invoked once, right after the first upstream call
@@ -464,10 +468,7 @@ async def run_tool_loop(
     first_response_signaled = False
     written: int | None = None
 
-    final = False
     for iteration in range(1, max_iterations + 1):
-        if final:
-            break
         final = iteration == max_iterations
         kwargs = _round_request(
             strategy.transcript_key, base, merged_tools, user_tools, pool, transcript, first=iteration == 1, final=final
@@ -505,11 +506,14 @@ async def run_tool_loop(
                 strategy.filter_owned(result, owned, pool)
             strategy.fold_usage(result, acc)
             return result
-        if stopped or not owned:
+        if stopped or not owned or final:
             if owned:
-                # The model stopped before finishing these calls (a token limit, say), so
-                # the gateway does not run them, and the caller never declared the tools.
+                # The model stopped before finishing these calls (a token limit, say), or
+                # called a tool on the last round the loop allows, so the gateway does not
+                # run them, and the caller never declared the tools.
                 strategy.filter_owned(result, owned, pool)
+            if owned and not stopped:
+                strategy.end_answer(result)
             strategy.fold_usage(result, acc)
             return result
 
@@ -567,10 +571,7 @@ async def run_tool_loop_stream(
     acc = strategy.new_stream_accumulator()
     written: int | None = None
 
-    final = False
     for iteration in range(1, max_iterations + 1):
-        if final:
-            break
         final = iteration == max_iterations
         kwargs = _round_request(
             strategy.transcript_key, base, merged_tools, user_tools, pool, transcript, first=iteration == 1, final=final
@@ -618,6 +619,15 @@ async def run_tool_loop_stream(
             # result (see ``run_tool_loop``), so the two agree.
             async for activity in strategy.finalize_exit(state, pool, acc):
                 yield activity
+            for terminal in strategy.terminal_events(state, acc):
+                yield terminal
+            return
+        if final:
+            # The model called the gateway's tools on the last round the loop allows,
+            # which withholds them (a provider that must declare the tools a
+            # conversation already called, such as Bedrock, offers them anyway). Their
+            # calls were hidden from the stream, so the round ends as the answer.
+            strategy.end_stream_answer(state)
             for terminal in strategy.terminal_events(state, acc):
                 yield terminal
             return
