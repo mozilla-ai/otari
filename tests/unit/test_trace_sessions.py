@@ -39,6 +39,22 @@ _CODEX = {
     "session-id": _CODEX_THREAD,
     "thread-id": _CODEX_THREAD,
 }
+# Harnesses that send their session id under a generic name, each with the mark that
+# makes the name count, and the header the id rides in.
+_KILO_CODE = {"user-agent": "Kilo-Code/7.2.4", "x-title": "Kilo Code", "x-session-id": "ses_4f1a"}
+_CRUSH = {"user-agent": "Charm-Crush/0.31.0 (https://charm.land/crush)", "x-session-id": "9c1e0f2ab47d3e55"}
+_PI = {"user-agent": "pi/0.112.0 (darwin; node/24.11.0; arm64)", "session-id": "019a7c1e-3b2d-7f44"}
+_ROO_CODE = {
+    "originator": "roo-code",
+    "user-agent": "roo-code/3.36.0 (darwin 25.1.0; arm64) node/22",
+    "session_id": "t-1",
+}
+_MARKED = {
+    "kilo-code": (_KILO_CODE, "x-session-id"),
+    "crush": (_CRUSH, "x-session-id"),
+    "pi": (_PI, "session-id"),
+    "roo-code": (_ROO_CODE, "session_id"),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -89,6 +105,63 @@ def test_a_session_id_header_from_another_client_names_no_session() -> None:
 
     assert resolve(headers, session_label=None, tags=None) is None
     assert harness_of(headers) == "python-httpx"
+
+
+@pytest.mark.parametrize(("header", "harness"), [("x-amp-thread-id", "amp"), ("agent-session-id", "goose")])
+def test_a_harnesss_own_session_header_names_the_session_from_any_client(header: str, harness: str) -> None:
+    headers = {header: "T-7f3e"}
+
+    assert resolve(headers, session_label=None, tags=None) == SessionRef(source="harness", key="T-7f3e")
+    assert harness_of(headers) == harness
+
+
+@pytest.mark.parametrize("harness", list(_MARKED))
+def test_a_generic_session_header_names_the_session_beside_its_harnesss_mark(harness: str) -> None:
+    headers, header = _MARKED[harness]
+
+    assert resolve(headers, session_label=None, tags=None) == SessionRef(source="harness", key=headers[header])
+    assert harness_of(headers) == harness
+
+
+@pytest.mark.parametrize("harness", list(_MARKED))
+def test_a_generic_session_header_without_its_harnesss_mark_names_no_session(harness: str) -> None:
+    headers, header = _MARKED[harness]
+    unmarked = {"user-agent": "python-httpx/0.28", header: headers[header]}
+
+    assert resolve(unmarked, session_label=None, tags=None) is None
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"user-agent": "kilo/stable/7.2.4/cli", "x-session-id": "ses_4f1a"},
+        {"user-agent": "pi/0.112.0", "session_id": "ses_4f1a"},
+        {"user-agent": "pi/0.112.0", "x-session-affinity": "ses_4f1a"},
+        {"user-agent": "roo-code/3.36.0", "session_id": "ses_4f1a"},
+    ],
+)
+def test_each_header_and_mark_a_harness_sends_its_session_with_is_enough(headers: dict[str, str]) -> None:
+    assert resolve(headers, session_label=None, tags=None) == SessionRef(source="harness", key="ses_4f1a")
+
+
+def test_a_kilo_code_subagent_is_a_session_of_its_own() -> None:
+    subagent = _KILO_CODE | {"x-session-id": "ses_77b0", "x-parent-session-id": _KILO_CODE["x-session-id"]}
+
+    assert resolve(subagent, session_label=None, tags=None) == SessionRef(source="harness", key="ses_77b0")
+    assert not is_subagent(subagent)
+
+
+def test_litellms_session_header_names_the_session_and_leaves_the_harness_to_the_user_agent() -> None:
+    headers = {"user-agent": "litellm/1.80.0", "x-litellm-session-id": "conv-81d2"}
+
+    assert resolve(headers, session_label=None, tags=None) == SessionRef(source="harness", key="conv-81d2")
+    assert harness_of(headers) == "litellm"
+
+
+def test_a_harnesss_own_session_header_wins_over_a_generic_one() -> None:
+    headers = _CRUSH | {"x-amp-thread-id": "T-7f3e", "x-litellm-session-id": "conv-81d2"}
+
+    assert resolve(headers, session_label=None, tags=None) == SessionRef(source="harness", key="T-7f3e")
 
 
 @pytest.mark.parametrize(
@@ -150,6 +223,8 @@ def test_only_an_identifier_shaped_key_the_client_chose_names_the_session(ref: S
         (_CODEX, "codex"),
         (_OPENCODE, "opencode"),
         ({"user-agent": "my-proxy/2.0", "x-opencode-session-id": _OPENCODE_SESSION}, "opencode"),
+        ({"user-agent": "Charm-Crush/0.31.0 (https://charm.land/crush)"}, "crush"),
+        ({"user-agent": "kilo/stable/7.2.4/cli"}, "kilo-code"),
         ({"user-agent": "opencode/0.15 ai-sdk"}, "opencode"),
         ({"user-agent": "OpenAI/Python 1.99"}, "openai"),
         ({}, None),
