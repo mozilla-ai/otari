@@ -345,11 +345,12 @@ def sign_in_link_prefix(config: GatewayConfig) -> str | None:
 
 @dataclass(frozen=True, slots=True)
 class SignInLinkTicket:
-    """What a sign-in link's ticket names, and the hash it is recorded under once it has been used."""
+    """What a sign-in link's ticket names, the hash it is recorded under once used, and when it stops opening."""
 
     server_id: uuid.UUID
     user_id: str
     ticket_hash: str = field(repr=False)
+    good_until: datetime
 
 
 def read_sign_in_link(ticket: str) -> SignInLinkTicket | None:
@@ -358,15 +359,22 @@ def read_sign_in_link(ticket: str) -> SignInLinkTicket | None:
         return None
     try:
         sealed = (ticket + "=" * (-len(ticket) % 4)).encode()
-        plain = get_secret_box().decrypt(sealed, ttl=int(SIGN_IN_LINK_LIFETIME.total_seconds()))
+        box = get_secret_box()
+        lifetime = int(SIGN_IN_LINK_LIFETIME.total_seconds())
+        plain = box.decrypt(sealed, ttl=lifetime)
         payload = json.loads(plain)
         if not isinstance(payload, dict) or payload.get("p") != _SIGN_IN_LINK_PURPOSE:
             return None
         # The hash is of the token's bytes, which its signature covers, not of the text: base64 decoding
         # skips stray characters, so many spellings of one link decrypt alike and only the bytes are one.
         raw = base64.urlsafe_b64decode(sealed)
+        # Fernet compares whole seconds and still opens a ticket in the second its lifetime ends.
+        good_until = datetime.fromtimestamp(box.extract_timestamp(sealed) + lifetime + 1, UTC)
         return SignInLinkTicket(
-            server_id=uuid.UUID(payload["s"]), user_id=str(payload["u"]), ticket_hash=hashlib.sha256(raw).hexdigest()
+            server_id=uuid.UUID(payload["s"]),
+            user_id=str(payload["u"]),
+            ticket_hash=hashlib.sha256(raw).hexdigest(),
+            good_until=good_until,
         )
     except (InvalidToken, SecretBoxUnavailableError, ValueError, KeyError, TypeError):
         return None
@@ -895,7 +903,7 @@ class McpConnectionService:
                 await self._link_uses.purge_expired(now)
                 # Of two Continues on one link, the database lets one claim it, and the other's sign-in
                 # is never stored.
-                if not await self._link_uses.claim(link.ticket_hash, expires_at=now + SIGN_IN_LINK_LIFETIME):
+                if not await self._link_uses.claim(link.ticket_hash, expires_at=link.good_until):
                     logger.warning("MCP sign-in link refused reason=used server_id=%s", server_id)
                     raise McpSignInLinkUsedError
             # Discovery took seconds. The row is locked and read again, so a sign-in found for the

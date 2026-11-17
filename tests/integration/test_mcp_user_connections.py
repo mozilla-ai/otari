@@ -91,11 +91,11 @@ from gateway.services.tools import (
     _mcp_oauth,
 )
 from gateway.services.tools._mcp_connections import (
-    SIGN_IN_LINK_LIFETIME,
     CompletedConnection,
     McpServerRef,
     checked_return_to,
     client_metadata,
+    read_sign_in_link,
     sign_in_link,
     stored_oauth_client,
 )
@@ -2903,7 +2903,8 @@ async def test_a_link_starts_one_sign_in_and_is_then_spent_whatever_becomes_of_i
     started = await connections.start_from_link(ticket)
     [use] = await _link_uses(async_db)
     assert ticket not in use.ticket_hash and len(use.ticket_hash) == 64, "the link is recorded by its hash"
-    assert use.expires_at >= datetime.now(UTC) + SIGN_IN_LINK_LIFETIME - timedelta(minutes=1)
+    link = read_sign_in_link(ticket)
+    assert link is not None and use.expires_at == link.good_until, "kept for as long as the link opens"
 
     # The sign-in it started is refused at the authorization server: the link stays spent.
     refused = await connections.receive_callback(
