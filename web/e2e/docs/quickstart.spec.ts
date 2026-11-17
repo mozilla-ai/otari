@@ -9,7 +9,10 @@ test("the quickstart's pages", async ({ page }) => {
   await login(page)
 
   await nav(page).getByRole("link", { name: "API keys" }).click()
-  await page.getByRole("button", { name: "Create key" }).click()
+  await page
+    .getByRole("main")
+    .getByRole("button", { name: "Create API key" })
+    .click()
   const dialog = page.getByRole("dialog")
   await expect(
     dialog.getByRole("button", { name: "More options" }),

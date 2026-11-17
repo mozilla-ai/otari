@@ -344,9 +344,8 @@ flex row.
 
 **Read the table's own block in `globals.css` before measuring anything.** Ten of
 the sixteen per-table classes declare widths on some of their columns, keyed on
-`data-key`, and `.otari-keys-table` is `table-layout: fixed` outright
-(`globals.css:2731`, "Key lanes stay fixed while the name absorbs the available
-width"). So a width is often written down rather than solved, and measuring the
+`data-key`, and `.otari-activity-table` and `.otari-rules-table` are
+`table-layout: fixed` outright. So a width is often written down rather than solved, and measuring the
 live table to rediscover it is the slower route to a worse answer. Read both
 blocks before changing one: `.otari-breakdown`'s columns are specified in two
 places, as `min-width` at `globals.css:2279` and as `width` at `globals.css:2827`,
@@ -361,7 +360,7 @@ them by injecting the new cell into the live table and reading the result back.
 - Give every part of an injected cell `flex: 0 0 auto`. Without it the parts
   shrink to fit and overflow their own element with no error, leaving column
   widths that look plausible and are not.
-- Overwrite `last_used` with a real timestamp first. Every row in the seed says
+- Overwrite `last_used_at` with a real timestamp first. Every row in the seed says
   "never", and that one substitution moves a measured overflow from 0 to 23px.
 
 **A dialog's bounding box is a few percent large while it opens.** The overlay

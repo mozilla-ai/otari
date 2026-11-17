@@ -65,7 +65,7 @@ Next, create the credential your app will actually send to Otari.
 
 1. Open the target workspace in the top-left corner.
 2. Go to the **API keys** page.
-3. Click **Create key**.
+3. Click **Create API key**.
 4. Copy the key immediately.
 
 You can export it locally like this:

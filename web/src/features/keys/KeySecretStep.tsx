@@ -1,6 +1,6 @@
 /**
- * A new key's secret, shown once, as the Create API key dialog ends: the
- * secret alone, where the API keys page's own step adds two example requests.
+ * A key's secret, shown once: where the Create API key dialog ends, and in
+ * the dialog a regenerated secret arrives in.
  */
 
 import type { RefObject } from "react"

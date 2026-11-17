@@ -241,6 +241,12 @@ describe("keyAccess", () => {
     expect(keyAccess(key(), caller("viewer", {}))).toBe("read")
   })
 
+  it("refuses an organization viewer every write, an admin of the key's team included", () => {
+    expect(keyAccess(key(), caller("viewer", { platform: "admin" }))).toBe(
+      "read",
+    )
+  })
+
   it("leaves a member removed from the key's team only switching it off or deleting it", () => {
     expect(keyAccess(key(), caller("member", { data: "member" }))).toBe(
       "revoke",

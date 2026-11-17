@@ -3177,117 +3177,97 @@ body {
 .otari-members-table[data-scrolled="true"] .table__cell[data-column="member"] {
   border-right: 1px solid var(--color-control-border);
 }
-/* Key lanes stay fixed while the name absorbs the available width. */
-.otari-keys-table .table__content {
-  table-layout: fixed;
-  width: 100%;
+/* The API keys table: one line per key, on the Sessions table's terms (rules
+   above and below, no side rules, cells that never wrap). Rows are 44px at
+   every width rather than Sessions' 28px on a desk, because each carries a
+   pressable menu trigger. Key takes the width the fixed lanes leave. */
+.otari-keys-table .otari-table.table-root {
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
 }
 .otari-keys-table .table__row .table__cell {
-  height: 3.625rem;
-  padding-block: 0.5rem;
+  height: 2.75rem;
+  padding-block: 0;
+}
+.otari-keys-table .table__column,
+.otari-keys-table .table__cell[data-column] {
   white-space: nowrap;
 }
-.otari-keys-table .table__column {
-  white-space: nowrap;
+/* Every other lane is a fixed width, so the whole of the slack goes here:
+   an auto-layout table otherwise shares it out by content, and the name's
+   zero max-width below gives it next to none. */
+.otari-keys-table .table__column[data-key="name"] {
+  width: 100%;
+  min-width: 12rem;
 }
-.otari-keys-table .table__column:first-child {
-  width: 3rem;
+/* A zero max-width stops the auto-layout table sizing Key to its longest name,
+   so the name's own ellipsis has an edge to cut at. */
+.otari-keys-table .table__cell[data-column="name"] {
+  max-width: 0;
 }
-.otari-keys-table .table__column[data-key="status"] {
-  width: 7.5rem;
+.otari-keys-table .table__column[data-key="state"] {
+  width: 7rem;
+  min-width: 7rem;
 }
 .otari-keys-table .table__column[data-key="owner"] {
-  width: 10.625rem;
+  width: 10.5rem;
+  min-width: 10.5rem;
 }
+.otari-keys-table .table__cell[data-column="owner"] {
+  max-width: 10.5rem;
+}
+.otari-keys-table .table__column[data-key="used"],
+.otari-keys-table .table__column[data-key="expires"] {
+  width: 6.5rem;
+  min-width: 6.5rem;
+}
+/* A budget is "$15.00 a day" at most. */
 .otari-keys-table .table__column[data-key="budget"] {
   width: 10rem;
+  min-width: 10rem;
 }
-.otari-keys-table .table__column[data-key="expires"] {
-  width: 6.875rem;
+.otari-keys-table .table__column[data-key="spend"] {
+  width: 10rem;
+  min-width: 10rem;
 }
-.otari-keys-table .table__column[data-key="last_used"] {
-  width: 7.5rem;
+.otari-keys-table .table__column[data-key="tokens"] {
+  width: 5.5rem;
+  min-width: 5.5rem;
 }
+/* 56px: the 32px trigger, the row's 16px end padding, and 8px before it. */
 .otari-keys-table .table__column[data-key="actions"] {
-  width: 5rem;
+  width: 3.5rem;
+  min-width: 3.5rem;
 }
-.otari-key-actions-trigger {
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2.75rem;
-  height: 2.75rem;
-  flex-shrink: 0;
-  color: var(--color-text-muted);
+.otari-keys-table .table__column[data-key="actions"],
+.otari-keys-table .table__cell[data-column="actions"] {
+  padding-inline-start: 0.5rem;
 }
-@media (hover: hover) {
-  .otari-key-actions-trigger:hover {
-    color: var(--color-text);
-    background: var(--color-surface-muted);
-  }
+/* The phone's cards (`DataTable` with `mobileLayout="cards"`): the name over
+   its last four, and each field's label in sentence case in a 120px lane,
+   rather than the table header's overline. */
+.otari-keys-table li {
+  padding-bottom: 0.875rem;
 }
-/* The ring is `otari-focus-ring` on the trigger; only the offset is local. The
-   trigger is flush with the row's right edge, where the utility's outward 2px
-   would be clipped by the table's own overflow. */
-.otari-key-actions-trigger[data-focus-visible],
-.otari-key-actions-trigger[aria-expanded="true"] {
-  outline: 2px solid var(--focus-ring-ink, var(--color-focus));
-  outline-offset: -2px;
+.otari-keys-table li .otari-key-cell {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
 }
-/* HeroUI has no prop for the menu's density or its two text lanes. */
-.otari-key-actions-menu {
-  width: 16.75rem;
-  max-width: calc(100vw - 2rem);
+.otari-keys-table li .otari-key-name {
+  font-weight: 550;
 }
-.otari-key-actions-menu .dropdown__menu {
-  padding: 0;
+.otari-keys-table li dl {
+  grid-template-columns: 7.5rem minmax(0, 1fr);
 }
-.otari-key-actions-menu .menu-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  min-height: 2.75rem;
-  padding: 0.5rem 0.75rem;
-  color: var(--color-text-muted);
-}
-.otari-key-actions-menu .menu-item .label {
-  white-space: nowrap;
-}
-.otari-key-actions-menu .menu-item [slot="description"] {
-  margin-left: auto;
-  text-align: right;
-}
-.otari-key-actions-menu .menu-item:last-child {
-  border-top: 1px solid var(--color-border-subtle);
-}
-.otari-key-actions-menu .menu-item[data-focused],
-.otari-key-actions-menu .menu-item[data-hovered] {
-  background: var(--color-surface-muted);
-}
-/* Everywhere the dense desk size below does not apply, which is every touch
-   screen and every narrow window, the description drops under its label: at
-   the menu's 268px, sharing the line wrapped a description to three lines. */
-@media not all and (min-width: 48rem) and (pointer: fine) {
-  .otari-key-actions-menu .menu-item {
-    flex-wrap: wrap;
-    row-gap: 0.125rem;
-  }
-  .otari-key-actions-menu .menu-item [slot="description"] {
-    flex-basis: 100%;
-    /* The label's own start: a 14px icon and the item's 0.5rem gap. */
-    margin-left: 1.375rem;
-    text-align: left;
-  }
-}
-@media (min-width: 48rem) and (pointer: fine) {
-  .otari-key-actions-trigger {
-    width: 2rem;
-    height: 2rem;
-  }
-  .otari-key-actions-menu .menu-item {
-    min-height: 2.25rem;
-  }
+.otari-keys-table li dt {
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  font-weight: 400;
+  line-height: 1.25rem;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-text-subtle);
 }
 .otari-breakdown .table__column[data-key="requests"],
 .otari-breakdown .table__column[data-key="tokens"] {

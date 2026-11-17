@@ -125,6 +125,11 @@ export function grantableRoleOptions(callerRole: string | undefined): readonly {
 /** The roles that may manage an organization or a workspace. */
 const MANAGEMENT_ROLES: readonly string[] = ["owner", "admin"]
 
+/** Whether `role`, in an organization or a workspace, manages it. */
+export function isManagementRole(role: string | undefined): boolean {
+  return role !== undefined && MANAGEMENT_ROLES.includes(role)
+}
+
 /** Whether the caller's standing in their organization lets them manage it. */
 export function canManage(context: OrganizationContext | undefined): boolean {
   return context !== undefined && MANAGEMENT_ROLES.includes(context.role)
@@ -229,6 +234,11 @@ export function memberLabel(member: OrganizationMember): string {
 
 /** The roles that may change a workspace's resources; everything but viewer. */
 const CONTRIBUTOR_ROLES: readonly string[] = ["owner", "admin", "member"]
+
+/** Whether `role`, in an organization or a workspace, may change its own resources there. */
+export function isContributorRole(role: string | undefined): boolean {
+  return role !== undefined && CONTRIBUTOR_ROLES.includes(role)
+}
 
 /**
  * Whether the caller may change their own resources in a workspace, such as

@@ -26,7 +26,9 @@ test("create a fallback policy", async ({ page }) => {
   await page.getByRole("link", { name: /^Back to / }).click()
 
   await nav(page).getByRole("link", { name: "API keys" }).click()
-  await expect(page.getByRole("button", { name: "Create key" })).toBeVisible()
+  await expect(
+    page.getByRole("main").getByRole("button", { name: "Create API key" }),
+  ).toBeVisible()
 
   await openNested(page, "Routing", "Policies")
   await page.getByRole("button", { name: "Create policy" }).first().click()

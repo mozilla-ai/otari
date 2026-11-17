@@ -57,8 +57,13 @@ test("an organization admin gives their own key a federation rule and reads its 
   )
 
   await gotoRoute(memberPage, "/keys")
-  await memberPage.getByRole("button", { name: "Actions for hackbot" }).click()
-  await memberPage.getByRole("menuitem", { name: /^Workload identity/ }).click()
+  // The key was made through the API after the dashboard loaded its list, so
+  // read the list afresh rather than from the cache.
+  await memberPage.reload()
+  await pressRowAction(
+    memberPage.getByRole("row", { name: /hackbot/ }),
+    /^Workload identity/,
+  )
   const dialog = memberPage.getByRole("dialog", { name: "Workload identity" })
   await expect(dialog.getByText("No rules yet.")).toBeVisible()
 

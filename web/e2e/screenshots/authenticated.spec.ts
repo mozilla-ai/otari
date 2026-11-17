@@ -530,7 +530,11 @@ test.describe("the keys page's one-time secret", () => {
     // The heading's own action, not the empty state's: the seeded database has
     // rows, so there is no empty state, and this is the placement the whole
     // change is about.
-    await page.getByRole("button", { name: "Create key" }).first().click()
+    await page
+      .getByRole("main")
+      .getByRole("button", { name: "Create API key" })
+      .first()
+      .click()
     const dialog = page.getByRole("dialog")
     await expect(dialog).toBeVisible()
     await expect(dialog.getByLabel("Name")).toBeVisible()
@@ -545,10 +549,14 @@ test.describe("the keys page's one-time secret", () => {
     await expect(
       page.getByRole("heading", { name: /keys/i }).first(),
     ).toBeVisible()
-    await page.getByRole("button", { name: "Create key" }).first().click()
+    await page
+      .getByRole("main")
+      .getByRole("button", { name: "Create API key" })
+      .first()
+      .click()
     const dialog = page.getByRole("dialog")
     await dialog.getByRole("button", { name: "More options" }).click()
-    await expect(dialog.getByText("Restrict this key's models")).toBeVisible()
+    await expect(dialog.getByText("Restrict this key’s models")).toBeVisible()
     await captureScreenshot(page, "keys-create-dialog-advanced")
   })
 })

@@ -322,3 +322,148 @@ describe("CreateKeyDialog", () => {
     ).not.toBeInTheDocument()
   })
 })
+
+describe("what a new key carries", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  /** The one key the dialog posted, and where it posted it. */
+  function posted(writes: ReturnType<typeof mockApi>) {
+    const post = writes.find((write) => /\/keys$/.test(write.url))
+    if (!post) throw new Error("no key was posted")
+    return post
+  }
+
+  async function moreOptions(
+    user: ReturnType<typeof userEvent.setup>,
+    dialog: HTMLElement,
+  ) {
+    await user.click(
+      within(dialog).getByRole("button", { name: "More options" }),
+    )
+  }
+
+  it("sends the owner the operator names, and the access narrowed under More options", async () => {
+    const writes = mockApi({ role: "owner", isOperator: true })
+    const { user, dialog } = await openDialog()
+    await moreOptions(user, dialog)
+    await user.type(within(dialog).getByPlaceholderText(/Pick a user/), "alice")
+    // Off the picker first: its open list hides the rest of the dialog.
+    await user.click(within(dialog).getByLabelText("Name"))
+    await user.click(within(dialog).getByRole("button", { name: "Block all" }))
+    await user.click(within(dialog).getByRole("button", { name: "No tool" }))
+    await createKey(user, dialog)
+
+    await screen.findByRole("dialog", { name: "API key created" })
+    expect(posted(writes).body).toMatchObject({
+      user_id: "alice",
+      allowed_models: [],
+      allowed_tools: [],
+    })
+  })
+
+  it("sends the default scope and the deployment's user setting when left alone", async () => {
+    const writes = mockApi({ role: "owner", isOperator: false })
+    const { user, dialog } = await openDialog()
+    await createKey(user, dialog)
+
+    await screen.findByRole("dialog", { name: "API key created" })
+    expect(posted(writes).body).toMatchObject({
+      scopes: ["inference:run"],
+      reject_user_mismatch: null,
+      allowed_models: null,
+      allowed_tools: null,
+    })
+  })
+
+  it("sends the scopes checked", async () => {
+    const writes = mockApi({ role: "owner", isOperator: false })
+    const { user, dialog } = await openDialog()
+    await moreOptions(user, dialog)
+    await user.click(
+      within(dialog).getByRole("button", { name: /Advanced scopes/ }),
+    )
+    await user.click(
+      within(dialog).getByRole("checkbox", {
+        name: "All coding agents scopes",
+      }),
+    )
+    await createKey(user, dialog)
+
+    await screen.findByRole("dialog", { name: "API key created" })
+    expect(posted(writes).body.scopes).toEqual([
+      "inference:run",
+      "telemetry:write",
+      "agents:write",
+    ])
+  })
+
+  it("pins a key to accept a mismatched user field", async () => {
+    const writes = mockApi({ role: "owner", isOperator: false })
+    const { user, dialog } = await openDialog()
+    await moreOptions(user, dialog)
+    await pickOption(
+      user,
+      "When a request names a different user",
+      "Always accept",
+      dialog,
+    )
+    await createKey(user, dialog)
+
+    await screen.findByRole("dialog", { name: "API key created" })
+    expect(posted(writes).body.reject_user_mismatch).toBe(false)
+  })
+
+  it("makes the operator a service key, exempt from budget", async () => {
+    const writes = mockApi({ role: "owner", isOperator: true })
+    const { user, dialog } = await openDialog()
+    await moreOptions(user, dialog)
+    await user.click(within(dialog).getByLabelText("Service key"))
+    await user.click(within(dialog).getByLabelText("Exempt from budget"))
+    await createKey(user, dialog)
+
+    await screen.findByRole("dialog", { name: "API key created" })
+    expect(posted(writes).body).toMatchObject({
+      is_service_key: true,
+      end_user_budget_ids: [],
+      end_user_budget_id: null,
+      max_end_users: null,
+      exclude_from_budget: true,
+    })
+  })
+
+  it("makes an organization owner the organization's service key", async () => {
+    const writes = mockApi({ role: "owner", isOperator: false })
+    const { user, dialog } = await openDialog()
+    await moreOptions(user, dialog)
+    await user.click(within(dialog).getByLabelText("Service key"))
+    await createKey(user, dialog)
+
+    await screen.findByRole("dialog", { name: "API key created" })
+    const post = posted(writes)
+    expect(post.url).toBe(`${API_ROOT}/organizations/me/keys`)
+    expect(post.body).toMatchObject({
+      is_service_key: true,
+      end_user_budget_ids: [],
+      end_user_budget_id: null,
+      max_end_users: 10000,
+    })
+  })
+
+  it("offers a member no service key, and sends neither an owner nor an exemption", async () => {
+    const writes = mockApi({ role: "member", isOperator: false })
+    const { user, dialog } = await openDialog()
+    expect(within(dialog).queryByPlaceholderText(/Pick a user/)).toBeNull()
+    await moreOptions(user, dialog)
+    expect(within(dialog).queryByLabelText("Service key")).toBeNull()
+    expect(within(dialog).queryByLabelText("Exempt from budget")).toBeNull()
+    await createKey(user, dialog)
+
+    await screen.findByRole("dialog", { name: "API key created" })
+    const post = posted(writes)
+    expect(post.url).toBe(`${API_ROOT}/organizations/me/keys`)
+    expect(post.body).not.toHaveProperty("user_id")
+    expect(post.body).not.toHaveProperty("exclude_from_budget")
+  })
+})

@@ -23,11 +23,11 @@ Use your default workspace for the first request.
 Generate the credential your app will actually send to otari.ai. This token starts with `otk_`.
 
 1. Open the **API keys** page.
-2. Click **Create key**.
+2. Click **Create API key**.
 3. Give the key a name and, if needed, set an expiration date. By default, the key inherits your existing model access, but you can limit it to specific models. To customize model access, click **More options** and select the models you want the key to use.
-4. Click **Create key**, then copy the token right away. It is only shown once.
+4. Click **Create API key**, then copy the token right away. It is only shown once.
 
-![The New key dialog, with a name and an owner filled in.](assets/screenshots/api-keys-create.png)
+![The Create API key dialog, with a name filled in.](assets/screenshots/api-keys-create.png)
 
 **Keep it secret**. Treat the token like a password. Keep it in your shell or secret store, not in source control:
 

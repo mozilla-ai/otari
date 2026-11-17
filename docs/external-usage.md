@@ -14,13 +14,14 @@ Imported usage is recorded after the fact: it never counts toward a budget and
 never blocks a request. So it is sent with a key that is exempt from budgets,
 which only the deployment's operator can create.
 
-1. Signed in as the operator, open **API keys** and click **Create key**.
-2. Name the key for the importer. Under **Access**, open **Advanced scopes**,
-   check **Send OpenTelemetry data** and **Report usage observed elsewhere**,
-   and clear **Call models**. Those are the two [scopes](api-keys.md#scopes)
-   importing needs, `telemetry:write` and `usage:write`, and no model calls.
-3. Open **More options** and tick **Exempt from budget**.
-4. Click **Create key** and copy the key.
+1. Signed in as the operator, open **API keys** and click **Create API key**.
+2. Name the key for the importer, and open **More options**.
+3. Under **Access**, open **Advanced scopes**, check **Send OpenTelemetry
+   data** and **Report usage observed elsewhere**, and clear **Call models**.
+   Those are the two [scopes](api-keys.md#scopes) importing needs,
+   `telemetry:write` and `usage:write`, and no model calls.
+4. Tick **Exempt from budget**.
+5. Click **Create API key** and copy the key.
 
 Through the API, the same key is
 `{"key_name": "importer", "scopes": ["telemetry:write", "usage:write"], "exclude_from_budget": true}`

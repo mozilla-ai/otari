@@ -9,6 +9,10 @@
  */
 
 import type { ApiKey } from "@/client"
+import {
+  isContributorRole,
+  isManagementRole,
+} from "@/features/organization/roles"
 
 /** What a key is called on screen, named or not. */
 export function keyLabel(key: { key_name: string | null }): string {
@@ -142,9 +146,6 @@ export function listsOtherPeoplesKeys(
   )
 }
 
-const MANAGEMENT_ROLES = ["owner", "admin"]
-const CONTRIBUTOR_ROLES = ["owner", "admin", "member"]
-
 export interface Caller {
   /** The deployment operator acts on every key, through `/api/v1/keys`. */
   isOperator: boolean
@@ -166,13 +167,11 @@ export interface Caller {
 type KeyAccess = "write" | "revoke" | "read"
 
 export function keyAccess(key: ApiKey, caller: Caller): KeyAccess {
-  if (caller.isOperator) return "write"
-  if (caller.role === undefined) return "read"
-  if (MANAGEMENT_ROLES.includes(caller.role)) return "write"
-  if (!CONTRIBUTOR_ROLES.includes(caller.role)) return "read"
+  if (caller.isOperator || isManagementRole(caller.role)) return "write"
+  if (!isContributorRole(caller.role)) return "read"
   const workspaceRole = caller.workspaceRoles.get(key.workspace_id)
   if (workspaceRole === undefined) return "revoke"
-  return CONTRIBUTOR_ROLES.includes(workspaceRole) ? "write" : "read"
+  return isContributorRole(workspaceRole) ? "write" : "read"
 }
 
 /**
@@ -185,8 +184,7 @@ export function canAddWorkloadIdentity(
 ): boolean {
   return (
     federationMemberRules &&
-    (caller.isOperator ||
-      (caller.role !== undefined && MANAGEMENT_ROLES.includes(caller.role)))
+    (caller.isOperator || isManagementRole(caller.role))
   )
 }
 

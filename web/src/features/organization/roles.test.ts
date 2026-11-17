@@ -7,6 +7,8 @@ import {
   canManage,
   canManageWorkspace,
   grantableRoleOptions,
+  isContributorRole,
+  isManagementRole,
   isOwner,
   MEMBERSHIP_ROLES,
   memberLabel,
@@ -36,6 +38,20 @@ describe("tenancy roles", () => {
     expect(
       canManageWorkspace(organizationContext({ role: "owner" }), undefined),
     ).toBe(true)
+  })
+
+  it("reads a bare role as managing, contributing, or neither", () => {
+    expect(MEMBERSHIP_ROLES.filter(isManagementRole)).toEqual([
+      "owner",
+      "admin",
+    ])
+    expect(MEMBERSHIP_ROLES.filter(isContributorRole)).toEqual([
+      "owner",
+      "admin",
+      "member",
+    ])
+    expect(isManagementRole(undefined)).toBe(false)
+    expect(isContributorRole(undefined)).toBe(false)
   })
 
   it("reserves ownership for the owner role", () => {
