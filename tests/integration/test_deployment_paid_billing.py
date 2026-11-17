@@ -1077,7 +1077,7 @@ def test_a_direct_search_whose_admission_does_not_commit_is_not_served(
     key = _key(client)
 
     with (
-        patch("gateway.api.deps.release_session", new=AsyncMock(return_value=False)),
+        patch("gateway.api.deps.tools.release_session", new=AsyncMock(return_value=False)),
         patch("gateway.services.tools._direct_tool_call.run_direct_search", new=AsyncMock()) as searched,
     ):
         response = _search(client, key)
