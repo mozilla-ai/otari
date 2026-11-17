@@ -229,7 +229,6 @@ from gateway.repositories.tenancy import (
     OrgProviderKeyRepository,
     WorkspaceRepository,
 )
-from gateway.repositories.tools import OrgWebSearchKeyRepository, WorkspaceMcpServerRepository
 from gateway.repositories.update_check import UpdateCheckStateRepository
 from gateway.repositories.usage_and_telemetry import UsageLogRepository
 from gateway.repositories.users_repository import get_active_user
@@ -1037,6 +1036,11 @@ async def get_account_deletion_service(
     files: OptionalFileServiceDep,
     traces: TraceServiceDep,
     telemetry: TelemetryStoragePortDep,
+    provider_keys: OrgProviderKeyServiceDep,
+    endpoints: ProviderEndpointServiceDep,
+    web_search_keys: WebSearchKeyServiceDep,
+    mcp_servers: WorkspaceMcpServerServiceDep,
+    guardrails: OrganizationGuardrailDefinitionServiceDep,
 ) -> AccountDeletionService:
     """Build account deletion on the request's Unit of Work, with every domain an account leaves records in."""
     identities = IdentityRepositories.on(uow)
@@ -1052,14 +1056,7 @@ async def get_account_deletion_service(
         traces=traces,
         trace_writer=getattr(request.app.state, "trace_writer", None),
         telemetry=telemetry,
-        secrets=(
-            OrgProviderKeyRepository(uow),
-            ProviderEndpointRepository(uow),
-            OrgWebSearchKeyRepository(uow),
-            WorkspaceMcpServerRepository(uow),
-            OrganizationGuardrailDefinitionRepository(uow),
-            identities.connections,
-        ),
+        secrets=(provider_keys, endpoints, web_search_keys, mcp_servers, guardrails, identities.connections),
     )
 
 

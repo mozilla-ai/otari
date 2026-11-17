@@ -36,7 +36,7 @@ import asyncio
 import re
 import uuid
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -481,6 +481,12 @@ class OrgProviderKeyService:
     # ------------------------------------------------------------------
     # Organization-scoped keys
     # ------------------------------------------------------------------
+
+    async def forget_secrets(
+        self, organization_ids: Collection[uuid.UUID], workspace_ids: Collection[uuid.UUID]
+    ) -> None:
+        """Stage clearing these organizations' provider keys and client arguments, for the caller's transaction."""
+        await self.keys.forget_secrets(organization_ids, workspace_ids)
 
     async def list_keys_for_user(
         self,

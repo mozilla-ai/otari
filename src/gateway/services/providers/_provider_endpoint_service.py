@@ -20,7 +20,7 @@ shape the request itself.
 
 import re
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -89,6 +89,12 @@ class ProviderEndpointService:
         self.resolve_workspace = resolve_workspace
         self.user_is_active = user_is_active
         self.refresh_cache = refresh_cache
+
+    async def forget_secrets(
+        self, organization_ids: Collection[uuid.UUID], workspace_ids: Collection[uuid.UUID]
+    ) -> None:
+        """Stage clearing the endpoint keys these workspaces hold, for the caller's transaction."""
+        await self.endpoints.forget_secrets(organization_ids, workspace_ids)
 
     async def list_endpoints(
         self, *, workspace_id: uuid.UUID | None, user_id: str | None, skip: int, limit: int

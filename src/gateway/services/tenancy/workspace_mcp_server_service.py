@@ -36,7 +36,7 @@ configuration rather than a narrowing of one.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Collection
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated, Literal
 
@@ -65,7 +65,7 @@ from gateway.models.tenancy import MANAGEMENT_ROLES, User
 from gateway.models.tools import WorkspaceMcpServer, WorkspaceMcpServerGrant
 from gateway.ports.growth_signal_port import GrowthAction, GrowthSignalPort
 from gateway.repositories.tenancy import OrganizationMemberRepository, WorkspaceMemberRepository, WorkspaceRepository
-from gateway.repositories.tools import WorkspaceMcpServerGrantRepository
+from gateway.repositories.tools import WorkspaceMcpServerGrantRepository, WorkspaceMcpServerRepository
 from gateway.repositories.users_repository import lock_live_users, provision_attribution_users
 
 # The module as well as the names, so the check is looked up at call time and a
@@ -707,6 +707,12 @@ class WorkspaceMcpServerService:
         self.organizations = OrganizationService(db, membership_listener=None)
         # Reads the workspace's keys, which a server's access list names.
         self.api_keys = api_keys
+
+    async def forget_secrets(
+        self, organization_ids: Collection[uuid.UUID], workspace_ids: Collection[uuid.UUID]
+    ) -> None:
+        """Stage clearing the MCP server tokens these workspaces hold, for the caller's transaction."""
+        await WorkspaceMcpServerRepository(self.db).forget_secrets(organization_ids, workspace_ids)
 
     async def _require_management(self, user: User, workspace_id: uuid.UUID) -> uuid.UUID:
         """Resolve the workspace and confirm the caller may manage it.

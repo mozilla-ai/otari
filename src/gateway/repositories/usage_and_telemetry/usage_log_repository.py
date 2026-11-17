@@ -440,15 +440,15 @@ class UsageLogRepository(BaseRepository[UsageLog, Never, Never]):
     async def reassign_owner(self, user_ids: Collection[str], to_user_id: str) -> None:
         """Stage moving these users' rows onto ``to_user_id``, without the fields that could name a person.
 
-        The caller's tags, the session label and the provider-facing end-user
-        identifier are cleared; the counts and costs stay.
+        The caller's tags, the session label, the provider-facing end-user
+        identifier and the upstream error text are cleared; the counts and costs stay.
         """
         if not user_ids:
             return
         await self.db.execute(
             update(UsageLog)
             .where(UsageLog.user_id.in_(list(user_ids)))
-            .values(user_id=to_user_id, tags=None, source_label=None, safety_identifier=None)
+            .values(user_id=to_user_id, tags=None, source_label=None, safety_identifier=None, error_message=None)
             .execution_options(synchronize_session=False)
         )
 

@@ -102,6 +102,7 @@ def _add_account(
             tags={"customer": "Ada"},
             source_label="ada-laptop",
             safety_identifier="ada-at-example",
+            error_message="Unknown user ada@example.com",
         )
         file = FileObject(
             user_id=billing_id,
@@ -178,6 +179,7 @@ def test_deleting_an_account_erases_the_person_and_keeps_anonymous_usage(
         assert usage.tags is None
         assert usage.source_label is None
         assert usage.safety_identifier is None
+        assert usage.error_message is None
         tombstone = session.get(BillingUser, usage.user_id)
         assert tombstone is not None
         assert tombstone.alias is None
