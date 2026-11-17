@@ -624,6 +624,11 @@ class _MessagesToolLoopStrategy:
                 "blocks the gateway already executed (no-op on the client side).",
             )
 
+    def end_answer(self, result: MessageResponse) -> None:
+        """End the round as an answer once the gateway's calls are dropped and none of the caller's remain."""
+        if not any(getattr(block, "type", None) == "tool_use" for block in result.content or []):
+            result.stop_reason = "end_turn"
+
     async def advance_transcript(
         self,
         transcript: list[Any],
@@ -805,6 +810,14 @@ class _MessagesToolLoopStrategy:
                 budget=self._budget,
             ):
                 yield event
+
+    def end_stream_answer(self, state: _MessagesStreamState) -> None:
+        # Only the gateway's tool_use blocks reach here, and they were never forwarded.
+        state.stop_reason = "end_turn"
+        for term in state.deferred_terminal:
+            delta = getattr(term, "delta", None) if getattr(term, "type", None) == "message_delta" else None
+            if delta is not None and getattr(delta, "stop_reason", None) == "tool_use":
+                delta.stop_reason = "end_turn"
 
     def terminal_events(
         self,

@@ -675,18 +675,25 @@ async def test_loop_preserves_cached_tokens_when_final_iteration_lacks_details(
 
 
 @pytest.mark.asyncio
-async def test_loop_max_iter_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_tool_call_on_the_last_round_ends_as_the_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A provider that declares the conversation's tools anyway (Bedrock) lets the model call one on the last round."""
+
     async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
-        return _completion(finish="tool_calls", tool_calls=[("c", "fetch_url", "{}")])
+        return _completion(finish="tool_calls", content="So far: 4.", tool_calls=[("c", "fetch_url", "{}")])
 
     monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    pool = _FakePool(tool_names=["fetch_url"])
 
-    with pytest.raises(MaxToolIterationsExceeded):
-        await mcp_tool_loop(
-            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
-            pool=_FakePool(tool_names=["fetch_url"]),
-            max_iterations=2,
-        )
+    out = await mcp_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+        pool=pool,
+        max_iterations=2,
+    )
+
+    assert len(pool.calls) == 1
+    assert out.choices[0].message.content == "So far: 4."
+    assert out.choices[0].message.tool_calls is None
+    assert out.choices[0].finish_reason == "stop"
 
 
 @pytest.mark.asyncio
@@ -984,6 +991,32 @@ async def test_stream_loop_runs_mcp_tool_and_continues(monkeypatch: pytest.Monke
     # `tool_calls` terminal is suppressed.
     assert finishes == ["stop"]
     assert pool.calls == [("fetch_url", {})]
+
+
+@pytest.mark.asyncio
+async def test_stream_a_tool_call_on_the_last_round_ends_as_the_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_acompletion(**kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
+        return _async_iter(
+            _chunk(content="So far: 4."),
+            _chunk(tool_calls=[(0, "call_1", "fetch_url", "{}")]),
+            _chunk(finish="tool_calls"),
+        )
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
+
+    chunks = [
+        c
+        async for c in mcp_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+            pool=pool,
+            max_iterations=2,
+        )
+    ]
+
+    assert pool.calls == [("fetch_url", {})]
+    assert [c.choices[0].finish_reason for c in chunks if c.choices and c.choices[0].finish_reason] == ["stop"]
+    assert not any(c.choices and c.choices[0].delta.tool_calls for c in chunks)
 
 
 def _activity_of(chunks: list[ChatCompletionChunk]) -> list[dict[str, Any]]:
@@ -1488,7 +1521,7 @@ async def test_a_round_is_held_with_what_the_round_before_wrote(monkeypatch: pyt
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stream", [False, True], ids=["non-streaming", "streaming"])
-async def test_a_round_the_budget_cannot_hold_ends_the_loop_even_if_the_model_calls_a_tool_anyway(
+async def test_a_round_the_budget_cannot_hold_ends_as_the_answer_even_if_the_model_calls_a_tool_anyway(
     monkeypatch: pytest.MonkeyPatch, stream: bool
 ) -> None:
     """No round runs after the one the budget could not hold, whatever the model asks for in it."""
@@ -1505,18 +1538,20 @@ async def test_a_round_the_budget_cannot_hold_ends_the_loop_even_if_the_model_ca
     completion_kwargs = {"model": "fake", "messages": [{"role": "user", "content": "go"}]}
     pool = _FakePool(tool_names=["fetch_url"])
 
-    with pytest.raises(MaxToolIterationsExceeded):
-        if stream:
-            async for _ in mcp_tool_loop_stream(
-                completion_kwargs=completion_kwargs, pool=pool, max_iterations=10, round_gate=_RoundGate(False)
-            ):
-                pass
-        else:
-            await mcp_tool_loop(
-                completion_kwargs=completion_kwargs, pool=pool, max_iterations=10, round_gate=_RoundGate(False)
-            )
+    if stream:
+        async for _ in mcp_tool_loop_stream(
+            completion_kwargs=completion_kwargs, pool=pool, max_iterations=10, round_gate=_RoundGate(False)
+        ):
+            pass
+    else:
+        result = await mcp_tool_loop(
+            completion_kwargs=completion_kwargs, pool=pool, max_iterations=10, round_gate=_RoundGate(False)
+        )
+        assert result.choices[0].finish_reason == "stop"
+        assert not result.choices[0].message.tool_calls
 
     assert len(sent) == 2
+    assert pool.calls == [("fetch_url", {})], "only the first round's call runs"
 
 
 @pytest.mark.asyncio

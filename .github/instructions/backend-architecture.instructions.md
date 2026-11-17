@@ -50,6 +50,10 @@ the old shape.
   that receives the session or another domain's repository.
 - A builder in `api/deps/` builds the service. Flag a new service builder
   defined anywhere else.
+- A builder in `api/deps/` builds things and holds no implementation. Flag a
+  class with a method added under `api/deps/`, including one nested in a
+  builder, which belongs to the domain whose work it does. A class that carries
+  data and no methods is fine.
 - Flag a new module-level function under `services/` that takes an
   `AsyncSession`, including one added to a module already on
   `SERVICE_DATABASE_IMPORT_BASELINE`. The check does not catch that case.
