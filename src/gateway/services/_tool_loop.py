@@ -129,7 +129,7 @@ class AnsweredRounds:
     """The usage of the rounds a failed tool loop had answered, carried on the exception it raised.
 
     The provider bills every round it answers, but a loop that fails on a later round,
-    or hits its iteration cap, returns no answer to fold their usage onto. The rounds'
+    or in one of the gateway's own tool steps, returns no answer to fold their usage onto. The rounds'
     summed usage rides on the exception instead, so the failure row can bill it:
     ``result`` is the last answered round as a finished loop would have returned it,
     and ``events`` are a stream's terminal events in the same form.
@@ -591,9 +591,7 @@ async def run_tool_loop(
             _carry_answered(exc, strategy, answered, acc)
             raise
 
-    exceeded = MaxToolIterationsExceeded(f"Exceeded max_tool_iterations={max_iterations}")
-    _carry_answered(exceeded, strategy, answered, acc)
-    raise exceeded
+    raise MaxToolIterationsExceeded(f"Exceeded max_tool_iterations={max_iterations}")
 
 
 async def run_tool_loop_stream(
@@ -726,6 +724,4 @@ async def run_tool_loop_stream(
         for synthetic in strategy.synthetic_events(state, acc):
             yield synthetic
 
-    exceeded = MaxToolIterationsExceeded(f"Exceeded max_tool_iterations={max_iterations}")
-    _carry_answered_stream(exceeded, strategy, answered)
-    raise exceeded
+    raise MaxToolIterationsExceeded(f"Exceeded max_tool_iterations={max_iterations}")

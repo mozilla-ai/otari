@@ -428,8 +428,7 @@ To tag a request with a free-form end-user ID, put it in `metadata`
   error, and a client disconnect that writes no row (above) records nothing.
   The field is null on any row whose stream was not cut.
 - A request whose gateway tool loop (MCP servers, web search or fetch, code
-  execution) fails after the provider answered one or more of its rounds,
-  because a later round failed or the loop hit `max_tool_iterations`, is
+  execution) fails after the provider answered one or more of its rounds is
   billed for the rounds the provider answered, streamed or not. The row stays
   an `error`.
 

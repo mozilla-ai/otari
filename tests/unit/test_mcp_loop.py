@@ -1762,21 +1762,29 @@ async def test_a_tool_that_fails_a_mixed_batch_carries_the_usage_of_the_round_th
 
 
 @pytest.mark.asyncio
-async def test_a_streamed_loop_past_its_cap_carries_the_usage_of_every_round(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_streamed_failure_carries_the_usage_of_every_round_answered_before_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rounds 1 and 2 were billed, so round 3's failure carries their summed usage."""
     each_round = CompletionUsage(prompt_tokens=100, completion_tokens=20, total_tokens=120)
+    calls = {"n": 0}
 
     async def fake_acompletion(**kwargs: Any) -> Any:
+        calls["n"] += 1
+        if calls["n"] == 3:
+            raise RuntimeError("context length exceeded")
         return _async_iter(
-            _chunk(tool_calls=[(0, "c1", "fetch_url", "{}")]), *_round_end("tool_calls", each_round, trailing=True)
+            _chunk(tool_calls=[(0, f"c{calls['n']}", "fetch_url", "{}")]),
+            *_round_end("tool_calls", each_round, trailing=True),
         )
 
     monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
 
-    with pytest.raises(MaxToolIterationsExceeded) as failure:
+    with pytest.raises(RuntimeError) as failure:
         async for _ in mcp_tool_loop_stream(
             completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
             pool=_FakePool(tool_names=["fetch_url"]),
-            max_iterations=2,
+            max_iterations=5,
         ):
             pass
 
