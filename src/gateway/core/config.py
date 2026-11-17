@@ -807,7 +807,8 @@ class GatewayConfig(
     cors_inference_origins: Annotated[list[str], Shown(SettingsGroup.RATE_LIMITING)] = Field(
         default_factory=list,
         description=(
-            "Origins whose pages may call the model endpoints from a browser with an API key, or '*' for any. "
+            "Origins whose pages may call the model and web tool endpoints from a browser with an API key, "
+            "and exchange or revoke an OAuth app token, or '*' for any. "
             "Never with credentials, and no other route: the dashboard's origin belongs in cors_allow_origins."
         ),
     )
