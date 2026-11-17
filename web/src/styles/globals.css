@@ -3547,3 +3547,13 @@ body {
     border-top: 1px solid var(--color-control-border);
   }
 }
+
+/* People's table: the limit lane holds its meter rather than being squeezed by
+   the name, and the top model's lane fits a model id and its share of the
+   row's spend. */
+.otari-spend-table .table__column[data-key="limit"] {
+  min-width: 17rem;
+}
+.otari-spend-table .table__column[data-key="model"] {
+  width: 10.375rem;
+}

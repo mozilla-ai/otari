@@ -94,6 +94,7 @@ import { MemberIdentityCell } from "./MemberIdentityCell"
 import {
   asMembershipRole,
   canManage,
+  grantableRoleOptions,
   MEMBERSHIP_ROLE_OPTIONS,
   memberLabel,
   memberRowKey,
@@ -298,6 +299,11 @@ function InviteMemberForm({
   const [email, setEmail] = useState("")
   const [role, setRole] = useState<MembershipRole>("member")
   const [workspaceIds, setWorkspaceIds] = useState<string[]>([])
+  // The roles this caller may give, by name alone: the table beside it says
+  // what each one does.
+  const roleOptions = grantableRoleOptions(
+    useOrganizationContext().data?.role,
+  ).map(({ value, label }) => ({ value, label }))
   const [result, setResult] = useState<InviteOrganizationMemberResult>()
   const [outcomes, setOutcomes] =
     useState<BulkInviteOrganizationMembersResult>()
@@ -478,7 +484,7 @@ function InviteMemberForm({
           label="Role"
           value={role}
           onChange={(value) => setRole(asMembershipRole(value) ?? "member")}
-          options={MEMBERSHIP_ROLE_OPTIONS}
+          options={roleOptions}
           shouldReserveMessage={false}
         />
       </div>

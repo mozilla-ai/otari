@@ -1,3 +1,4 @@
+import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 import { Button } from "@/design-system/actions/Button"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
@@ -27,6 +28,7 @@ export function RulePeople({
   rule: Rule
   isManager: boolean
 }) {
+  const navigate = useNavigate()
   const [isAll, setAll] = useState(false)
   const people = rule.people ?? []
   const max = rule.spend?.max ?? 0
@@ -131,6 +133,16 @@ export function RulePeople({
             columns={columns}
             rows={rows}
             getRowKey={rowKey}
+            onRowAction={(key) => {
+              if (!rows.some((row) => row.memberId === key)) return
+              void navigate({
+                to: "/people/$personId",
+                params: { personId: key },
+              })
+            }}
+            rowClassName={(row) =>
+              row.memberId ? undefined : "cursor-default!"
+            }
             emptyContent={
               <EmptyMessage>
                 Nobody on the roster is under this rule.

@@ -411,6 +411,28 @@ describe("OrganizationMembersPage", () => {
     })
   })
 
+  it("never offers an admin Owner, which only an owner may grant", async () => {
+    mockApi({
+      context: organizationContext({ role: "admin" }),
+      members: [OWNER],
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Invite member" }),
+    )
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: /Role/ }),
+    )
+    const listbox = await screen.findByRole("listbox")
+    expect(
+      within(listbox)
+        .getAllByRole("option")
+        .map((option) => option.textContent),
+    ).toEqual(["Member", "Viewer", "Admin"])
+  })
+
   it("invites a viewer as a viewer of the workspaces that were ticked", async () => {
     const requests = mockApi({
       members: [OWNER],

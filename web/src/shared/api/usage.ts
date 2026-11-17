@@ -522,3 +522,44 @@ export function useRefusedUsage(
     staleTime: 30_000,
   })
 }
+
+/**
+ * One spend-by-model summary since `start` per value of `param` (a person or a
+ * key), in parallel. A null value asks nothing, so a caller passes only the
+ * rows it shows and can ask about.
+ */
+export function useModelSummariesBy(
+  param: "user_id" | "api_key_id",
+  values: readonly (string | null)[],
+  start: string,
+  { workspaceId, userId }: { workspaceId: string; userId?: string },
+) {
+  const scope = useUsageScope("organization")
+  return useQueries({
+    queries: values.map((value) => ({
+      queryKey: [
+        USAGE,
+        "model-summary",
+        scope.base,
+        param,
+        value,
+        start,
+        workspaceId,
+        userId ?? null,
+      ],
+      queryFn: () =>
+        apiFetch<UsageSummary>(
+          `${scope.base}/summary?${new URLSearchParams({
+            start_date: start,
+            bucket: "day",
+            dimensions: "model",
+            [param]: value ?? "",
+            ...(workspaceId ? { workspace_id: workspaceId } : {}),
+            ...(userId ? { user_id: userId } : {}),
+          })}`,
+        ),
+      enabled: scope.isReady && value !== null,
+      staleTime: 30_000,
+    })),
+  })
+}

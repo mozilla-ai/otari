@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { SortDescriptor } from "react-aria-components"
 
-import type { TraceDetail, TraceSortKey, TraceSummary } from "@/client"
+import type { TraceDetail, TraceSortKey } from "@/client"
 import { RefreshButton } from "@/design-system/actions/RefreshButton"
-import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { DataTable } from "@/design-system/data/DataTable"
 import {
   PAGE_SIZE_OPTIONS,
   TablePagination,
@@ -13,7 +13,6 @@ import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { SearchField } from "@/design-system/forms/SearchField"
 import { useIsMobile } from "@/design-system/hooks/useIsMobile"
-import { Chip } from "@/design-system/indicators/Chip"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { ActivityTimeline } from "@/features/activity/ActivityTimeline"
@@ -29,12 +28,7 @@ import {
   useTraces,
 } from "@/shared/api/traces"
 import { useWorkspaces } from "@/shared/api/workspaces"
-import {
-  anyHarnessMark,
-  HarnessMark,
-  NoHarnessMark,
-} from "@/shared/components/marks/BrandMark"
-import { formatCost, formatNumber } from "@/shared/helpers/format"
+import { anyHarnessMark } from "@/shared/components/marks/BrandMark"
 import {
   ACTIVITY_DEFAULT_KEY,
   bucketDurationMs,
@@ -49,16 +43,10 @@ import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 import { BreakGlassLog } from "./BreakGlassLog"
 import { exceptionalAccess } from "./exceptionalAccess"
-import { formatDuration, formatTraceTimestamp, plural } from "./format"
 import { toTrace } from "./fromApi"
 import { SessionContent, ShareSessionAction } from "./SessionContent"
+import { columns } from "./sessionColumns"
 import { TracePeek } from "./TracePeek"
-import {
-  sessionDurationMs,
-  sessionName,
-  shortId,
-  traceKind,
-} from "./traceModel"
 
 const DEFAULT_PAGE_SIZE = 50
 
@@ -111,116 +99,6 @@ const ALL_FALLBACK_MS = 30 * 24 * 3_600_000
 const HAS_ERROR: Record<string, "true" | "false"> = {
   error: "true",
   success: "false",
-}
-
-const EMPTY = <span className="text-subtle">—</span>
-
-function columns(
-  peekId: string,
-  withMarks: boolean,
-): DataTableColumn<TraceSummary>[] {
-  return [
-    {
-      id: "last_activity",
-      allowsSorting: true,
-      header: "Last activity",
-      cell: (session) => (
-        <span className="text-mono-caption whitespace-nowrap text-muted">
-          {formatTraceTimestamp(session.last_activity_at)}
-        </span>
-      ),
-    },
-    {
-      id: "name",
-      header: "Name",
-      isRowHeader: true,
-      cell: (session) => (
-        <span className="flex min-w-0 items-center gap-2">
-          {withMarks ? (
-            session.harness ? (
-              <HarnessMark harness={session.harness} />
-            ) : (
-              <NoHarnessMark />
-            )
-          ) : null}
-          <span className="truncate text-body">{sessionName(session)}</span>
-          <span className="shrink-0 text-mono-caption whitespace-nowrap text-subtle">
-            {shortId(session.trace_id)}
-          </span>
-          {session.trace_id === peekId ? (
-            <span className="sr-only">, open</span>
-          ) : null}
-        </span>
-      ),
-    },
-    {
-      id: "user",
-      header: "User",
-      cell: (session) =>
-        session.user_id ? (
-          <span className="block max-w-48 truncate text-mono-caption text-muted">
-            {session.user_id}
-          </span>
-        ) : (
-          EMPTY
-        ),
-    },
-    {
-      id: "levels",
-      allowsSorting: true,
-      header: "Levels",
-      cell: (session) =>
-        session.error_count ? (
-          <Chip tone="danger">{plural(session.error_count, "error")}</Chip>
-        ) : (
-          EMPTY
-        ),
-    },
-    {
-      id: "latency",
-      allowsSorting: true,
-      header: "Latency",
-      align: "end",
-      cell: (session) => (
-        <span className="text-mono-caption">
-          {formatDuration(sessionDurationMs(session))}
-        </span>
-      ),
-    },
-    {
-      id: "tokens",
-      allowsSorting: true,
-      header: "Tokens",
-      align: "end",
-      cell: (session) =>
-        session.input_tokens || session.output_tokens ? (
-          <span className="text-mono-caption whitespace-nowrap">
-            {formatNumber(session.input_tokens)} →{" "}
-            {formatNumber(session.output_tokens)} (Σ{" "}
-            {formatNumber(session.input_tokens + session.output_tokens)})
-          </span>
-        ) : (
-          EMPTY
-        ),
-    },
-    {
-      id: "cost",
-      allowsSorting: true,
-      header: "Total cost",
-      align: "end",
-      cell: (session) =>
-        session.cost ? (
-          <span className="text-mono-caption">{formatCost(session.cost)}</span>
-        ) : (
-          EMPTY
-        ),
-    },
-    {
-      id: "tags",
-      header: "Tags",
-      cell: (session) => <Chip>{traceKind(session)}</Chip>,
-    },
-  ]
 }
 
 interface TimeWindow {
@@ -441,6 +319,7 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
     return out
   }, [points, chartStart, bucket, now])
   const win = custom ?? { start: chartStart, end: now }
+
   const rows = traces.data?.items ?? []
   const withMarks = anyHarnessMark(rows.map((session) => session.harness))
   const tableColumns = useMemo(
