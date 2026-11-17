@@ -84,6 +84,19 @@ const MAKER_MARK_SLUGS: ReadonlySet<string> = new Set([
   "z-ai",
 ])
 
+/** Agent harnesses with a mark, by the name a session shows. */
+const HARNESS_MARK_IDS: ReadonlySet<string> = new Set([
+  "claude-code",
+  "codex",
+  "opencode",
+  "amp",
+  "goose",
+  "kilo-code",
+  "pi",
+  "roo-code",
+  "openhands",
+])
+
 /**
  * The ids this deployment serves its own models under.
  *
@@ -97,18 +110,6 @@ const MAKER_MARK_SLUGS: ReadonlySet<string> = new Set([
  * `otari-ai` is the instance **Connect otari.ai** creates
  * (`PLATFORM_PROVIDER_NAME`), whose offerings can arrive without a type.
  */
-/** Agent harnesses with a mark, by the name a session shows. */
-const HARNESS_MARK_IDS: ReadonlySet<string> = new Set([
-  "claude-code",
-  "codex",
-  "opencode",
-  "amp",
-  "goose",
-  "kilo-code",
-  "pi",
-  "roo-code",
-  "openhands",
-])
 
 const PRODUCT_MARK_IDS: readonly string[] = ["mzai", "otari", "otari-ai"]
 

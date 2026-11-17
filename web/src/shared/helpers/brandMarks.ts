@@ -31,6 +31,7 @@
  * recognize, and an operator names their own instances, so the absence is the
  * ordinary case and the caller draws a lettermark instead.
  */
+
 /** One filled shape of a mark. `fillOpacity` only where the source is multi-tone. */
 export interface ProviderMarkShape {
   d: string
@@ -50,15 +51,6 @@ export interface ProviderMarkGlyph {
   source: string
 }
 
-/**
- * `bedrock` wears LobeHub's Bedrock product mark, not the AWS one.
- *
- * The only AWS mark in the source set is the lowercase wordmark, which is not
- * legible at 16px and less so at 14px. Bedrock has a glyph of its own, so it
- * takes that. `sagemaker` has none and still tiles, as does `maker:amazon` in
- * {@link MAKER_MARKS}: the Bedrock glyph names the service, not the company
- * that trains Nova, so giving it to the maker row would be a false claim.
- */
 /**
  * Every mark's geometry, declared once.
  *
@@ -106,6 +98,15 @@ const GLYPH_AZURE: ProviderMarkGlyph = {
   source: "Azure",
 }
 
+/**
+ * `bedrock` wears LobeHub's Bedrock product mark, not the AWS one.
+ *
+ * The only AWS mark in the source set is the lowercase wordmark, which is not
+ * legible at 16px and less so at 14px. Bedrock has a glyph of its own, so it
+ * takes that. `sagemaker` has none and still tiles, as does `maker:amazon` in
+ * {@link MAKER_MARKS}: the Bedrock glyph names the service, not the company
+ * that trains Nova, so giving it to the maker row would be a false claim.
+ */
 const GLYPH_BEDROCK: ProviderMarkGlyph = {
   viewBox: "0 0 24 24",
   shapes: [
