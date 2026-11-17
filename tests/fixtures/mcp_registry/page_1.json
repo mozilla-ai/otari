@@ -1,0 +1,190 @@
+{
+  "servers": [
+    {
+      "server": {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+        "name": "ac.inference.sh/mcp",
+        "description": "run any ai model. compose agents, stack knowledge, connect tools. one api, pay per run.",
+        "title": "inference.sh",
+        "version": "2.0.1",
+        "remotes": [
+          {
+            "type": "streamable-http",
+            "url": "https://api.inference.sh/mcp"
+          }
+        ]
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {
+          "status": "active",
+          "statusChangedAt": "2026-07-27T10:44:51.359634Z",
+          "publishedAt": "2026-07-27T10:44:51.359634Z",
+          "updatedAt": "2026-07-27T10:44:51.359634Z",
+          "isLatest": true
+        }
+      }
+    },
+    {
+      "server": {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+        "name": "ac.snag/snag",
+        "description": "Gives your coding agent the captured console, network, replay and screenshot evidence for a bug.",
+        "version": "1.0.0",
+        "remotes": [
+          {
+            "type": "streamable-http",
+            "url": "https://mcp.snag.ac/mcp"
+          }
+        ]
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {
+          "status": "active",
+          "statusChangedAt": "2026-09-09T10:35:53.194664Z",
+          "publishedAt": "2026-09-09T10:35:53.194664Z",
+          "updatedAt": "2026-09-09T10:35:53.194664Z",
+          "isLatest": true
+        }
+      }
+    },
+    {
+      "server": {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+        "name": "academy.apexai/apex-ai-academy",
+        "description": "Co-Learn with your Agent: fact-checked AI lessons with Human and Agent views.",
+        "title": "Apex AI Academy",
+        "repository": {
+          "url": "https://github.com/ApexAI-Academy/sample-agents",
+          "source": "github"
+        },
+        "version": "1.0.2",
+        "websiteUrl": "https://apexai.academy/developers/",
+        "remotes": [
+          {
+            "type": "streamable-http",
+            "url": "https://apexai.academy/mcp",
+            "headers": [
+              {
+                "description": "Optional: Bearer <personal apex_ key> for Premium tools. Public tools need no key.",
+                "isSecret": true,
+                "name": "Authorization"
+              }
+            ]
+          }
+        ]
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {
+          "status": "active",
+          "statusChangedAt": "2026-10-17T03:25:05.205722Z",
+          "publishedAt": "2026-10-17T03:25:05.205722Z",
+          "updatedAt": "2026-10-17T03:25:05.205722Z",
+          "isLatest": true
+        }
+      }
+    },
+    {
+      "server": {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+        "name": "ae.easyvoice/tts",
+        "description": "Hosted text-to-speech MCP server: 66 voices in 9 languages, long-form narration, podcasts.",
+        "title": "EasyVoice text to speech",
+        "version": "1.0.0",
+        "websiteUrl": "https://easyvoice.ae/tts-mcp-server",
+        "remotes": [
+          {
+            "type": "streamable-http",
+            "url": "https://easyvoice.ae/api/mcp",
+            "headers": [
+              {
+                "description": "Bearer <your EasyVoice API key> (free key at https://easyvoice.ae/account/keys)",
+                "isRequired": true,
+                "isSecret": true,
+                "name": "Authorization"
+              }
+            ]
+          }
+        ]
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {
+          "status": "active",
+          "statusChangedAt": "2026-10-11T18:47:52.634428Z",
+          "publishedAt": "2026-10-11T18:47:52.634428Z",
+          "updatedAt": "2026-10-11T18:47:52.634428Z",
+          "isLatest": true
+        }
+      }
+    },
+    {
+      "server": {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+        "name": "agency.extremely/agency",
+        "description": "Your agency of AI agents in your AI app: what agents did, approvals, requests, jobs and reports.",
+        "title": "EXTREMELY agency",
+        "repository": {
+          "url": "https://github.com/maxkxd/extremely-autonomous-agents",
+          "source": "github",
+          "subfolder": "packages/agency-mcp"
+        },
+        "version": "0.1.1",
+        "websiteUrl": "https://extremely.agency",
+        "packages": [
+          {
+            "registryType": "npm",
+            "identifier": "@extremely-agency/mcp",
+            "version": "0.1.1",
+            "transport": {
+              "type": "stdio"
+            }
+          }
+        ]
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {
+          "status": "active",
+          "statusChangedAt": "2026-11-05T13:13:18.17912Z",
+          "publishedAt": "2026-11-05T13:13:18.17912Z",
+          "updatedAt": "2026-11-05T13:13:18.17912Z",
+          "isLatest": true
+        }
+      }
+    },
+    {
+      "server": {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+        "name": "agency.thirdhemisphere/ai-authority-index",
+        "description": "Read-only CRISP scores and AI visibility data from Third Hemisphere's AI Authority Index.",
+        "title": "Third Hemisphere AI Authority Index",
+        "version": "1.0.0",
+        "websiteUrl": "https://thirdhemisphere.agency/ai-authority-index/data",
+        "remotes": [
+          {
+            "type": "streamable-http",
+            "url": "https://thirdhemisphere.agency/mcp",
+            "headers": [
+              {
+                "description": "Optional free API key for higher rate limits. Request one at https://thirdhemisphere.agency/ai-authority-index/data",
+                "isSecret": true,
+                "name": "x-api-key"
+              }
+            ]
+          }
+        ]
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {
+          "status": "active",
+          "statusChangedAt": "2026-10-31T04:11:36.857336Z",
+          "publishedAt": "2026-10-31T04:11:36.857336Z",
+          "updatedAt": "2026-10-31T04:11:36.857336Z",
+          "isLatest": true
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "count": 6,
+    "nextCursor": "agency.thirdhemisphere/ai-authority-index:1.0.0"
+  }
+}

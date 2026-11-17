@@ -22,6 +22,7 @@ test("the deployment bootstrap is served unauthenticated", async ({
       "health_checks",
       "hosted_providers",
       "keys",
+      "mcp_catalog",
       "models",
       "organization_guardrails",
       "organization_providers",
