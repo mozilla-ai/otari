@@ -77,8 +77,10 @@ refresh tokens. The key is minted only when the code is exchanged, after checkin
 the user still has access. Abandoned approvals create no API keys; expired
 approvals are pruned on subsequent approvals.
 
-Browser clients also need their origin in `cors_allow_origins` for token exchange.
-That does not let them approve grants: consent requires a request from the
+Browser clients also need their origin in `cors_inference_origins` for token
+exchange and revocation, which also opens the model and web tool endpoints the
+key is for. Never put an app's origin in `cors_allow_origins`: that list sends
+credentials. Neither lets an app approve grants: consent requires a request from the
 dashboard origin configured by `ui_base_url` or `public_base_url`, or a same-origin
 request to the gateway dashboard. Tokens must be
 kept in the application's credential store, never URLs or logs.

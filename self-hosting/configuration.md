@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/4a6e4a2d002c6c7ecf3b77b8b0a4cf8c551df85e/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/68aac2e721e3c4dd29d3cae3e203075d78315f4d/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -123,7 +123,7 @@ the corresponding startup value after the database is available.
 | `trace_platform_break_glass_enabled` | Let the deployment's operator open any organization's session content, recorded with a reason and a reference. Defaults to `false`. See [Who reads content](https://docs.otari.ai/reference/gateway/sessions-reference#who-reads-content). |
 | `trace_content_key_backend` | What seals that content: `secret_key` (the default, `OTARI_SECRET_KEY`), `aws_kms`, or `aws_kms_only`, which opens nothing `OTARI_SECRET_KEY` sealed. See [Sealing content with AWS KMS](trace-storage.md#sealing-content-with-aws-kms). |
 | `cors_allow_origins` | Origins whose pages may call any route, with credentials, so a dashboard served from another host keeps its session. `*` opens every route to any origin without credentials, so a dashboard session needs its origin named. Empty, the default, sends no CORS headers. Startup setting. |
-| `cors_inference_origins` | Origins whose pages may call the model endpoints from a browser with an API key, or `*` for any. Never with credentials. Empty, the default, opens none. Startup setting. See [Calling models from a browser](#calling-models-from-a-browser). |
+| `cors_inference_origins` | Origins whose pages may call the model and web tool endpoints from a browser with an API key, and exchange an OAuth app code for one, or `*` for any. Never with credentials. Empty, the default, opens none. Startup setting. See [Calling models from a browser](#calling-models-from-a-browser). |
 | `accept_incoming_trace_context` | Join spans the gateway creates to the caller's trace. Defaults to `false`. See [Trace context propagation](#trace-context-propagation). |
 | `enable_docs` | Serve OpenAPI, Swagger UI, and ReDoc. |
 
@@ -317,9 +317,12 @@ cors_inference_origins: ["*"]
 
 It opens these endpoints, and no others: chat completions, responses,
 messages and message token counts, embeddings, rerank, moderations, the audio
-and image endpoints, and the model list (`GET /api/v1/models`), which a page
-reads to offer its models. The rest of the API, the dashboard's included,
-answers a page on another origin as it did before.
+and image endpoints, direct web search and fetch (`/api/v1/search`,
+`/api/v1/fetch`), the model list (`GET /api/v1/models`) and the tool list
+(`GET /api/v1/tools`), which a page reads to offer its models and tools, and
+the token exchange and revocation of [OAuth apps](oauth-apps.md). The rest of
+the API, the dashboard's included and the app consent screen with it, answers a
+page on another origin as it did before.
 
 A browser never sends credentials under it, so a page cannot use the session
 of someone signed in to the dashboard: only the API key the page itself holds.
@@ -862,7 +865,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/4a6e4a2d002c6c7ecf3b77b8b0a4cf8c551df85e/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/68aac2e721e3c4dd29d3cae3e203075d78315f4d/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -1898,7 +1901,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/4a6e4a2d002c6c7ecf3b77b8b0a4cf8c551df85e/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/68aac2e721e3c4dd29d3cae3e203075d78315f4d/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Contacting the Otari team
