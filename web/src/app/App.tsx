@@ -20,8 +20,10 @@ import {
   publicCatalogPath,
   takeRememberedModel,
 } from "@/features/models/publicCatalog"
+import { publicProvidersPath } from "@/features/providers/publicProviders"
 import type { WireBootstrap } from "@/shared/helpers/bootstrap"
 import { normalizeBootstrap } from "@/shared/helpers/bootstrap"
+import { providerDisplayName } from "@/shared/helpers/providers"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider, useDeployment } from "@/shared/hooks/useDeployment"
 
@@ -40,6 +42,13 @@ import { DeploymentProvider, useDeployment } from "@/shared/hooks/useDeployment"
 const PublicCatalogPage = lazy(() =>
   import("@/features/models/PublicCatalogPage").then((module) => ({
     default: module.PublicCatalogPage,
+  })),
+)
+
+// Split for the same reason as the catalog above.
+const PublicProvidersPage = lazy(() =>
+  import("@/features/providers/PublicProvidersPage").then((module) => ({
+    default: module.PublicProvidersPage,
   })),
 )
 
@@ -170,6 +179,25 @@ function DeploymentRoot({ hash }: { hash: string }) {
       <PublicPageTitle page="Models">
         <Suspense fallback={<PageLoading label="Loading models…" />}>
           <PublicCatalogPage key={hash} modelId={publicCatalog.modelId} />
+        </Suspense>
+      </PublicPageTitle>
+    )
+  }
+
+  // The providers the catalog is served by, under the same switch and for the
+  // same visitor.
+  const publicProviders = publicProvidersPath(hash)
+  if (public_catalog && !isAuthenticated && publicProviders !== null) {
+    return (
+      <PublicPageTitle
+        page={
+          publicProviders.name
+            ? providerDisplayName(publicProviders.name)
+            : "Providers"
+        }
+      >
+        <Suspense fallback={<PageLoading label="Loading providers…" />}>
+          <PublicProvidersPage key={hash} name={publicProviders.name} />
         </Suspense>
       </PublicPageTitle>
     )

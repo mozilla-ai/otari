@@ -127,6 +127,7 @@ class AccountDeletionService:
         # Read now: a retried transaction rolls back, which expires the account's loaded attributes.
         account_id, email = account.id, account.email
         async with self._uow:
+            await self._refuse_bootstrap_operator(account_id)
             await self._organizations.ensure_releasable(account_id)
             pending = await self._users.lock_with_end_users(str(account_id))
         erased: set[str] = set()
@@ -173,10 +174,17 @@ class AccountDeletionService:
                     await self._files.release_owned(locked_ids, tombstone_id)
                 await self._users.remove(locked_ids)
             identity = await self._identities.get_locked(identity_id)
+            # Again under the account's lock, which a handover to it also takes, so the role cannot land
+            # on the account between the checks above and its deletion.
+            await self._refuse_bootstrap_operator(identity_id)
             if identity is not None:
                 await self._identities.delete(identity)
             await self._erased.add(identity_id)
         return released
+
+    async def _refuse_bootstrap_operator(self, identity_id: uuid.UUID) -> None:
+        if await self._organizations.is_bootstrap_operator(identity_id):
+            raise BootstrapOperatorProtectedError("The deployment's bootstrap operator cannot delete its account")
 
     async def _erase_records(self, user_ids: list[str]) -> None:
         """Erase these users' telemetry and agent traces, raising ``AccountErasureFailedError`` if a store refuses."""

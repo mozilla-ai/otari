@@ -24,8 +24,9 @@ from typing import Annotated, Any
 from urllib.parse import urlsplit
 
 from any_llm import LLMProvider
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator
 
+from gateway.core.link_urls import normalize_link_url
 from gateway.core.settings.inference import country_codes
 from gateway.core.settings_view import OMITTED, SettingsGroup, Shown
 
@@ -73,11 +74,18 @@ class _HostedProviderEntryShape(BaseModel):
     models: list[str] | None = None
     supported_countries: list[str] | None = None
     zero_data_retention: bool = False
+    terms_url: str | None = None
+    privacy_url: str | None = None
 
     @field_validator("supported_countries")
     @classmethod
     def _country_codes(cls, value: list[str] | None) -> list[str] | None:
         return country_codes(value) if value is not None else None
+
+    @field_validator("terms_url", "privacy_url")
+    @classmethod
+    def _link_url(cls, value: str | None, info: ValidationInfo) -> str | None:
+        return normalize_link_url(value, info.field_name or "link")
 
 
 @dataclass(frozen=True)
@@ -97,6 +105,9 @@ class HostedProviderEntry:
     supported_countries: tuple[str, ...] | None = None
     # The operator's declaration that the upstream keeps no prompt or completion data.
     zero_data_retention: bool = False
+    # The upstream's own policies, linked from the public Providers pages.
+    terms_url: str | None = None
+    privacy_url: str | None = None
 
 
 def _entry_error(name: str, exc: ValidationError) -> ValueError:
@@ -150,6 +161,8 @@ def parse_hosted_providers(raw: Mapping[str, Any]) -> dict[str, HostedProviderEn
             models=tuple(shape.models or ()),
             supported_countries=tuple(shape.supported_countries) if shape.supported_countries is not None else None,
             zero_data_retention=shape.zero_data_retention,
+            terms_url=shape.terms_url,
+            privacy_url=shape.privacy_url,
         )
     return entries
 

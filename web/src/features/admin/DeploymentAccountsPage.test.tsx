@@ -8,7 +8,11 @@ import type { BlockedEmail, DeploymentUser, PasswordLink } from "@/client"
 import { DeploymentAccountsPage } from "@/features/admin/DeploymentAccountsPage"
 import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
-import { bootstrap, deploymentUser } from "@/tests/fixtures"
+import {
+  bootstrap,
+  deploymentUser,
+  organizationContext,
+} from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 
 interface Request {
@@ -26,6 +30,9 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function mockApi(opts: {
   granted?: boolean
+  isBootstrapOperator?: boolean
+  hasPassword?: boolean
+  profileFails?: boolean
   accounts?: DeploymentUser[]
   count?: number
   passwordLink?: PasswordLink
@@ -48,7 +55,10 @@ function mockApi(opts: {
     })
 
     if (url.includes(`${API_ROOT}/admin/access`)) {
-      return jsonResponse({ granted })
+      return jsonResponse({
+        granted,
+        is_bootstrap_operator: opts.isBootstrapOperator ?? false,
+      })
     }
     if (url.includes(`${API_ROOT}/admin/blocked-emails`)) {
       const blocked = opts.blocked ?? []
@@ -66,6 +76,18 @@ function mockApi(opts: {
         },
         201,
       )
+    }
+    if (url.endsWith("/bootstrap-operator")) {
+      return new Response(null, { status: 204 })
+    }
+    if (url.endsWith(`${API_ROOT}/auth/profile`)) {
+      if (opts.profileFails) {
+        return jsonResponse({ detail: "The profile could not be read" }, 500)
+      }
+      return jsonResponse({
+        ...organizationContext().caller,
+        has_password: opts.hasPassword ?? false,
+      })
     }
     if (url.endsWith("/password-link")) {
       return jsonResponse(opts.passwordLink, 201)
@@ -373,6 +395,113 @@ describe("DeploymentAccountsPage", () => {
     expect(
       await screen.findByLabelText(
         /^Deactivate Anchor \(The bootstrap operator/,
+      ),
+    ).toBeDisabled()
+  })
+
+  it("hands the bootstrap operator role on with the caller's password", async () => {
+    const successor = deploymentUser({ ...ANALYST, is_superuser: true })
+    const requests = mockApi({
+      accounts: [successor, OPERATOR],
+      isBootstrapOperator: true,
+      hasPassword: true,
+    })
+    await renderPage(<DeploymentAccountsPage />)
+
+    await userEvent.click(
+      await screen.findByLabelText("Make Analyst the bootstrap operator"),
+    )
+    await userEvent.type(
+      await screen.findByLabelText(/Your current password/),
+      "hunter2-hunter2",
+    )
+    await userEvent.click(
+      screen.getByRole("button", { name: "Make bootstrap operator" }),
+    )
+
+    await waitFor(() => {
+      const posted = requests.find((request) =>
+        request.url.endsWith("/bootstrap-operator"),
+      )
+      expect(posted?.url).toContain(
+        `${API_ROOT}/admin/users/${successor.id}/bootstrap-operator`,
+      )
+      expect(posted?.body).toEqual({ current_password: "hunter2-hunter2" })
+    })
+  })
+
+  it("tells an account with no password to set one or use the master key", async () => {
+    const successor = deploymentUser({ ...ANALYST, is_superuser: true })
+    const requests = mockApi({
+      accounts: [successor],
+      isBootstrapOperator: true,
+    })
+    await renderPage(<DeploymentAccountsPage />)
+
+    await userEvent.click(
+      await screen.findByLabelText("Make Analyst the bootstrap operator"),
+    )
+
+    expect(
+      await screen.findByText(/Your account has no password/),
+    ).toBeInTheDocument()
+    expect(screen.queryByLabelText(/Your current password/)).toBeNull()
+    expect(
+      screen.getByRole("button", { name: "Make bootstrap operator" }),
+    ).toBeDisabled()
+    expect(
+      requests.some((request) => request.url.endsWith("/bootstrap-operator")),
+    ).toBe(false)
+  })
+
+  it("reports a profile that could not be read, with a way to try again", async () => {
+    mockApi({
+      accounts: [deploymentUser({ ...ANALYST, is_superuser: true })],
+      isBootstrapOperator: true,
+      profileFails: true,
+    })
+    await renderPage(<DeploymentAccountsPage />)
+
+    await userEvent.click(
+      await screen.findByLabelText("Make Analyst the bootstrap operator"),
+    )
+
+    expect(
+      await screen.findByRole("button", { name: "Try again" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Make bootstrap operator" }),
+    ).toBeDisabled()
+  })
+
+  it("shows the handover disabled on the bootstrap operator's own row", async () => {
+    mockApi({ accounts: [OPERATOR], isBootstrapOperator: true })
+    await renderPage(<DeploymentAccountsPage />)
+
+    expect(
+      await screen.findByLabelText(
+        "Make Operator the bootstrap operator (This is already the bootstrap operator)",
+      ),
+    ).toBeDisabled()
+  })
+
+  it("offers the handover only to the bootstrap operator", async () => {
+    mockApi({ accounts: [deploymentUser({ ...ANALYST, is_superuser: true })] })
+    await renderPage(<DeploymentAccountsPage />)
+
+    await screen.findByLabelText("Deactivate Analyst")
+    expect(
+      screen.queryByLabelText(/the bootstrap operator$/),
+    ).not.toBeInTheDocument()
+  })
+
+  it("disables the handover to an account that is not an operator, with the reason", async () => {
+    mockApi({ accounts: [ANALYST], isBootstrapOperator: true })
+    await renderPage(<DeploymentAccountsPage />)
+
+    expect(
+      await screen.findByLabelText(
+        "Make Analyst the bootstrap operator (Make this account an operator first)",
       ),
     ).toBeDisabled()
   })

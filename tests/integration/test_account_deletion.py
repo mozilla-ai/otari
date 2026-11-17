@@ -21,6 +21,7 @@ from gateway.models.files import FileObject
 from gateway.models.guardrails import OrganizationGuardrail, OrganizationGuardrailDefinition
 from gateway.models.identity import ErasedAccount, OIDCConnection
 from gateway.models.organizations import OrganizationInvitation
+from gateway.models.platform import RuntimeSetting
 from gateway.models.provider_keys import OrgProviderKey
 from gateway.models.providers import ProviderEndpoint
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace
@@ -29,6 +30,7 @@ from gateway.models.usage import UsageLog
 from gateway.models.users import User as BillingUser
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.password_service import hash_password
+from gateway.services.tenancy.provisioning_service import BOOTSTRAP_IDENTITY_KEY
 
 PASSWORD = "a-real-password"  # pragma: allowlist secret
 EMAIL = "ada@example.com"
@@ -521,3 +523,44 @@ def test_an_end_user_named_during_the_erasure_is_erased_before_it_is_deleted(
         assert session.get(BillingUser, telemetry.late_id) is None
     finally:
         session.close()
+
+
+class _HandsOverDuringPurge:
+    """A telemetry store that makes the account being deleted the bootstrap operator while it is purged."""
+
+    def __init__(self, session_factory: Callable[[], Session], identity_id: uuid.UUID) -> None:
+        self._session_factory = session_factory
+        self._identity_id = identity_id
+
+    async def purge_user(self, *, user_id: str) -> None:
+        # On a thread of its own: the test's session is synchronous and this runs on the app's event loop.
+        await asyncio.to_thread(self._mark)
+
+    def _mark(self) -> None:
+        session = self._session_factory()
+        try:
+            marker = session.get(RuntimeSetting, BOOTSTRAP_IDENTITY_KEY)
+            assert marker is not None
+            marker.value = str(self._identity_id)
+            session.commit()
+        finally:
+            session.close()
+
+
+def test_an_account_handed_the_bootstrap_role_mid_deletion_is_kept(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    """The role can move after the request checked it, so deletion checks again under the account's lock."""
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == 200
+    account = _add_account(db_session_factory)
+    overrides = cast(Any, client.app).dependency_overrides
+    overrides[get_telemetry_storage_port] = lambda: _HandsOverDuringPurge(db_session_factory, account.identity_id)
+    try:
+        response = _delete(client, account, current_password=PASSWORD)
+    finally:
+        overrides.pop(get_telemetry_storage_port, None)
+        client.cookies.clear()
+
+    assert response.status_code == 400, response.text
+    assert "bootstrap operator" in response.json()["detail"]
+    assert _identity_exists(db_session_factory, account.identity_id)

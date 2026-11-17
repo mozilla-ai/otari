@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
   CatalogModelDetail,
+  CatalogProviderDetail,
+  CatalogProvidersResponse,
   CatalogQueryParams,
   CatalogResponse,
   DiscoverableModelsResponse,
@@ -119,6 +121,80 @@ export function useCatalogModel(
       ),
     staleTime: 60_000,
     enabled: modelId !== undefined && enabled,
+  })
+}
+
+/** A page of a catalog list: `skip` and `limit` as the gateway takes them. */
+export interface CatalogPage {
+  skip: number
+  limit: number
+}
+
+function catalogPageQuery({ skip, limit }: CatalogPage, workspaceId: string) {
+  const search = new URLSearchParams({
+    skip: String(skip),
+    limit: String(limit),
+  })
+  if (workspaceId) search.set("workspace_id", workspaceId)
+  return search
+}
+
+/**
+ * A page of the providers this deployment serves, each with how many models it
+ * offers. Readable by any session, and by a visitor where the catalog is
+ * public. `workspaceId` narrows to what a request billed to that workspace may
+ * call; empty is the caller's whole reach. Keyed under CATALOG so a hosted
+ * provider or pricing write refreshes it.
+ */
+export function useCatalogProviders(
+  page: CatalogPage,
+  workspaceId = "",
+  enabled = true,
+) {
+  return useQuery({
+    ...NO_RETRY,
+    queryKey: [CATALOG, "providers", page.skip, page.limit, workspaceId],
+    meta: workspaceMeta(workspaceId),
+    queryFn: ({ signal }) =>
+      apiFetch<CatalogProvidersResponse>(
+        `/catalog/providers?${catalogPageQuery(page, workspaceId)}`,
+        { signal },
+      ),
+    staleTime: 60_000,
+    // Never across workspaces, for the reason `useCatalog` gives.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[4] === workspaceId ? previous : undefined,
+    enabled,
+  })
+}
+
+/**
+ * One provider and a page of the models it offers; 404 for one the caller
+ * cannot see. `workspaceId` narrows as `useCatalogProviders` does.
+ */
+export function useCatalogProvider(
+  name: string,
+  page: CatalogPage,
+  workspaceId = "",
+  enabled = true,
+) {
+  return useQuery({
+    ...NO_RETRY,
+    queryKey: [CATALOG, "provider", name, page.skip, page.limit, workspaceId],
+    meta: workspaceMeta(workspaceId),
+    queryFn: ({ signal }) =>
+      apiFetch<CatalogProviderDetail>(
+        `/catalog/providers/${encodeURIComponent(name)}?${catalogPageQuery(page, workspaceId)}`,
+        { signal },
+      ),
+    staleTime: 60_000,
+    // Only another page of the same provider stands in.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[2] === name &&
+      previousQuery.queryKey[5] === workspaceId
+        ? previous
+        : undefined,
+    enabled,
   })
 }
 

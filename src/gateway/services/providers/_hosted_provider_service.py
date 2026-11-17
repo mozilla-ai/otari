@@ -105,7 +105,7 @@ from gateway.services.providers._hosted_name_index import (
 )
 from gateway.services.providers._hosted_offers import OTARI_IMPLEMENTATION, HostedOffers
 from gateway.services.providers._hosted_runtime import HostedProviderRuntime
-from gateway.services.providers._hosted_sources import HostedSource, HostedSources
+from gateway.services.providers._hosted_sources import HostedProviderProfile, HostedSource, HostedSources
 from gateway.services.providers._model_kinds import page_by_kind
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
 from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
@@ -256,6 +256,8 @@ class HostedProviderService:
                     serves_unlisted_models=request.serves_unlisted_models,
                     supported_countries=request.supported_countries,
                     zero_data_retention=request.zero_data_retention,
+                    terms_url=request.terms_url,
+                    privacy_url=request.privacy_url,
                 )
             except HostedProviderConflict as conflict:
                 # The pre-check races the insert; the unique constraint decides.
@@ -282,7 +284,8 @@ class HostedProviderService:
         key, where the provider can be served without one. ``client_args``
         omitted is left alone, null clears, and an entry echoed back as the
         mask keeps the stored value. The restriction reads the same way:
-        omitted keeps it, null lifts it, and so do the supported countries.
+        omitted keeps it, null lifts it, and so do the supported countries and
+        the two policy links.
 
         Raises:
             HostedProviderNotFoundError: no such provider.
@@ -338,6 +341,10 @@ class HostedProviderService:
                 row.restricted_to_organization_id = request.restricted_to_organization_id
             if "supported_countries" in request.model_fields_set:
                 row.supported_countries = request.supported_countries
+            if "terms_url" in request.model_fields_set:
+                row.terms_url = request.terms_url
+            if "privacy_url" in request.model_fields_set:
+                row.privacy_url = request.privacy_url
             await self.providers.save(row)
             public = self._public(source)
         remember_hosted_zero_data_retention(row.name, row.zero_data_retention)
@@ -801,6 +808,20 @@ class HostedProviderService:
         async with self.uow:
             return await self.sources.zero_data_retention_names(organization_id)
 
+    async def profiles(self) -> dict[str, HostedProviderProfile]:
+        """Every hosted provider's implementation, terms of service and privacy policy, by name.
+
+        Whoever reads this decides which providers a caller may be shown; a
+        profile is public once its provider is.
+        """
+        async with self.uow:
+            return {
+                source.name: HostedProviderProfile(
+                    implementation=source.implementation, terms_url=source.terms_url, privacy_url=source.privacy_url
+                )
+                for source in await self.sources.all()
+            }
+
     async def resolve(
         self, name: str, model: str | None = None, *, organization_id: uuid.UUID | None
     ) -> ResolvedHostedProvider | None:
@@ -910,6 +931,8 @@ class HostedProviderService:
             restricted_to_organization_id=entry.restricted_to_organization_id,
             supported_countries=list(entry.supported_countries) if entry.supported_countries is not None else None,
             zero_data_retention=entry.zero_data_retention,
+            terms_url=entry.terms_url,
+            privacy_url=entry.privacy_url,
         )
 
     async def _require_organization(self, organization_id: uuid.UUID | None) -> None:

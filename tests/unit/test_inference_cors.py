@@ -1,8 +1,9 @@
-"""``cors_inference_origins`` opens the model endpoints to a browser with an API key, and nothing else.
+"""``cors_inference_origins`` opens the model, web tool and OAuth app token endpoints to a browser, and nothing else.
 
 A page on any origin may call a model with a key it holds, the way curl already
-can. What these tests pin is what it may not do: send credentials, reach any
-other route, or take over the dashboard's own CORS policy.
+can, and an app's page may exchange the code it was sent for that key. What
+these tests pin is what it may not do: send credentials, reach any other route,
+approve its own grant, or take over the dashboard's own CORS policy.
 """
 
 from collections.abc import Iterator
@@ -84,6 +85,8 @@ def test_a_page_sending_a_cookie_is_still_not_allowed_credentials(client: TestCl
         (f"{API_ROOT}/pricing", "GET"),
         (f"{API_ROOT}/models/discoverable", "GET"),
         (f"{API_ROOT}/models/metadata", "GET"),
+        (f"{API_ROOT}/search-tools", "GET"),
+        (f"{API_ROOT}/oauth/apps/workspaces", "GET"),
     ],
 )
 def test_no_other_route_is_opened(client: TestClient, path: str, method: str) -> None:
@@ -95,9 +98,36 @@ def test_the_other_model_endpoints_are_opened_too(client: TestClient, path: str)
     assert _preflight(client, path, PAGE)["access-control-allow-origin"] == "*"
 
 
-@pytest.mark.parametrize("path", [f"{API_ROOT}/models", f"{API_ROOT}/models/openai:gpt-4o-mini"])
-def test_a_page_may_read_the_models_it_can_offer(client: TestClient, path: str) -> None:
+@pytest.mark.parametrize("path", [f"{API_ROOT}/models", f"{API_ROOT}/models/openai:gpt-4o-mini", f"{API_ROOT}/tools"])
+def test_a_page_may_read_the_models_and_tools_it_can_offer(client: TestClient, path: str) -> None:
     assert _preflight(client, path, PAGE, "GET")["access-control-allow-origin"] == "*"
+
+
+@pytest.mark.parametrize(
+    "path", [f"{API_ROOT}/search", f"{API_ROOT}/search/brave", f"{API_ROOT}/fetch", f"{API_ROOT}/fetch/jina"]
+)
+def test_a_page_may_search_and_fetch_with_its_key(client: TestClient, path: str) -> None:
+    preflight = _preflight(client, path, PAGE)
+
+    assert preflight["access-control-allow-origin"] == "*"
+    assert "access-control-allow-credentials" not in preflight
+
+
+def test_an_app_page_may_exchange_and_revoke_its_token_but_never_approve(tmp_path: Path) -> None:
+    config = _config(
+        tmp_path,
+        cors_inference_origins=["*"],
+        oauth_apps={"app": {"name": "App", "redirect_uris": [f"{PAGE}/callback"]}},
+    )
+    with TestClient(create_app(config)) as client:
+        token = _preflight(client, f"{API_ROOT}/oauth/apps/token", PAGE)
+        revoke = _preflight(client, f"{API_ROOT}/oauth/apps/revoke", PAGE)
+        approve = _preflight(client, f"{API_ROOT}/oauth/apps/authorize", PAGE)
+
+    assert token["access-control-allow-origin"] == "*"
+    assert revoke["access-control-allow-origin"] == "*"
+    assert "access-control-allow-credentials" not in token
+    assert "access-control-allow-origin" not in approve
 
 
 def test_a_signed_in_dashboard_session_cannot_be_used_from_the_page(client: TestClient) -> None:
@@ -151,7 +181,8 @@ def test_with_neither_list_set_no_route_answers_cors(tmp_path: Path) -> None:
 
 
 def test_each_opened_path_is_a_route_the_gateway_serves(tmp_path: Path) -> None:
-    app: FastAPI = create_app(_config(tmp_path))
+    oauth_apps = {"app": {"name": "App", "redirect_uris": [f"{PAGE}/callback"]}}
+    app: FastAPI = create_app(_config(tmp_path, oauth_apps=oauth_apps))
     served = {
         context.path for context in iter_route_contexts(app.routes) if isinstance(context.original_route, APIRoute)
     }

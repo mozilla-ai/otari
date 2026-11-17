@@ -347,6 +347,8 @@ GET /api/v1/pricing/current                         # dashboard's paged view of 
 # Model catalog, grouped by model
 GET /api/v1/catalog/models                          # not yet wrapped
 GET /api/v1/catalog/models/{model_id}               # not yet wrapped
+GET /api/v1/catalog/providers                       # not yet wrapped
+GET /api/v1/catalog/providers/{name}                # not yet wrapped
 POST /api/v1/catalog/selectors/refresh              # not yet wrapped
 # Providers
 GET /api/v1/providers/catalog/{provider_id}         # not yet wrapped
@@ -397,6 +399,7 @@ POST /api/v1/admin/blocked-emails                               # dashboard-only
 GET /api/v1/admin/users                                         # dashboard-only
 PATCH /api/v1/admin/users/{user_id}                             # dashboard-only
 POST /api/v1/admin/users/{user_id}/password-link                # dashboard-only
+POST /api/v1/admin/users/{user_id}/bootstrap-operator           # operator surface (dashboard and `otari operator handover`)
 # Tenancy: organizations, workspaces, and their memberships. The dashboard's
 # tenancy pages are the consumer; an SDK caller acts inside one workspace with a
 # key that already names it, so none of these is an SDK surface yet. Move to

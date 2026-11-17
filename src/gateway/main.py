@@ -741,9 +741,10 @@ _CORS_EXPOSE_HEADERS = (
     # The scope a refused key lacks, which a browser client cannot read unexposed.
     "WWW-Authenticate",
 )
-# The model endpoints ``cors_inference_origins`` opens to a browser: each one
-# takes an API key and calls a model, except the model list a page reads to
-# offer its models, and none changes the deployment.
+# The endpoints ``cors_inference_origins`` opens to a browser: each one takes
+# an API key, or (the OAuth app token exchange) a code and its verifier, and
+# none takes a session or changes the deployment. The model list and the tool
+# list are what a page reads to offer models and web tools.
 _INFERENCE_CORS_PATHS = frozenset(
     {
         f"{API_ROOT}/chat/completions",
@@ -754,9 +755,20 @@ _INFERENCE_CORS_PATHS = frozenset(
         f"{API_ROOT}/rerank",
         f"{API_ROOT}/moderations",
         f"{API_ROOT}/models",
+        f"{API_ROOT}/search",
+        f"{API_ROOT}/fetch",
+        f"{API_ROOT}/tools",
+        f"{API_ROOT}/oauth/apps/token",
+        f"{API_ROOT}/oauth/apps/revoke",
     }
 )
-_INFERENCE_CORS_PREFIXES = (f"{API_ROOT}/audio/", f"{API_ROOT}/images/", f"{API_ROOT}/models/")
+_INFERENCE_CORS_PREFIXES = (
+    f"{API_ROOT}/audio/",
+    f"{API_ROOT}/images/",
+    f"{API_ROOT}/models/",
+    f"{API_ROOT}/search/",
+    f"{API_ROOT}/fetch/",
+)
 # Under the model list's prefix but for the operator alone, so a page never needs them.
 _INFERENCE_CORS_OPERATOR_PATHS = frozenset({f"{API_ROOT}/models/discoverable", f"{API_ROOT}/models/metadata"})
 

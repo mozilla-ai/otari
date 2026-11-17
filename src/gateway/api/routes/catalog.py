@@ -59,6 +59,10 @@ from gateway.schemas.catalog import (
     CatalogCapabilities,
     CatalogFacets,
     CatalogModelSummary,
+    CatalogProviderDetail,
+    CatalogProviderModel,
+    CatalogProvidersResponse,
+    CatalogProviderSummary,
     CatalogQuery,
     ModelMetadataOverrideRequest,
 )
@@ -740,3 +744,147 @@ async def get_catalog_model(
             grouped, identity.key, {models_dev_provider_id(o.provider_type) for o in offerings}
         ),
     )
+
+
+@dataclass
+class _Instance:
+    """One provider instance's share of the grouped catalog."""
+
+    provider_type: str
+    models: dict[str, tuple[ModelIdentity, list[_Offering]]]
+    """The instance's offerings, with the model they are offerings of, by that model's identity key."""
+
+
+def _instances(grouped: _Grouped) -> dict[str, _Instance]:
+    """The grouped catalog split by provider instance, so a provider is listed only where a model is."""
+    instances: dict[str, _Instance] = {}
+    for identity in grouped.identities.values():
+        for selector in identity.selectors:
+            offering = grouped.offerings[selector]
+            instance = instances.setdefault(offering.wire.provider, _Instance(offering.wire.provider_type, {}))
+            instance.models.setdefault(identity.key, (identity, []))[1].append(offering)
+    return instances
+
+
+def _provider_display_name(grouped: _Grouped, name: str, provider_type: str) -> str:
+    known = grouped.catalog.providers.get(models_dev_provider_id(provider_type)) if grouped.catalog else None
+    if known is None or not known.name:
+        return name
+    return known.name if name == provider_type else f"{known.name} ({name})"
+
+
+async def _provider_summaries(
+    grouped: _Grouped, hosted_providers: HostedProviderService
+) -> dict[str, tuple[CatalogProviderSummary, _Instance]]:
+    profiles = await hosted_providers.profiles()
+    summaries: dict[str, tuple[CatalogProviderSummary, _Instance]] = {}
+    for name, instance in _instances(grouped).items():
+        profile = profiles.get(name)
+        # An offering names its instance's implementation only where the
+        # selector index knows it; a hosted provider's own record always does.
+        provider_type = profile.implementation if profile else instance.provider_type
+        summaries[name] = (
+            CatalogProviderSummary(
+                name=name,
+                provider=provider_type,
+                display_name=_provider_display_name(grouped, name, provider_type),
+                model_count=len(instance.models),
+                terms_url=profile.terms_url if profile else None,
+                privacy_url=profile.privacy_url if profile else None,
+            ),
+            instance,
+        )
+    return summaries
+
+
+@router.get("/providers", openapi_extra=key_scope(None))
+async def list_catalog_providers(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    caller: Annotated[CatalogCaller, Depends(verify_catalog_reader_or_public)],
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+    model_provider: RequestSessionModelProviderPortDep,
+    hosted_providers: HostedProviderServiceDep,
+    org_provider_keys: OrgProviderKeyServiceDep,
+    workspace_id: Annotated[
+        uuid.UUID | None,
+        Query(description="For a signed-in caller, only the providers a request billed to this workspace may call."),
+    ] = None,
+    skip: Annotated[int, Query(ge=0, description="Number of providers to skip.")] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of providers to return.")] = 100,
+) -> CatalogProvidersResponse:
+    """The provider instances offering a model this caller may use, with each one's policy links.
+
+    Read from the same grouped catalog as ``GET /catalog/models``, so a provider
+    is listed exactly when that listing shows one of its models.
+    """
+    merged = await _merged_for(db, config, caller, session_identity, model_provider, workspace_id)
+    grouped = await _group(
+        db,
+        config,
+        merged,
+        caller=caller,
+        session_identity=session_identity,
+        hosted_providers=hosted_providers,
+        org_provider_keys=org_provider_keys,
+    )
+    summaries = sorted(
+        (summary for summary, _ in (await _provider_summaries(grouped, hosted_providers)).values()),
+        key=lambda summary: (summary.display_name.casefold(), summary.name),
+    )
+    return CatalogProvidersResponse(count=len(summaries), providers=summaries[skip : skip + limit])
+
+
+@router.get("/providers/{name}", openapi_extra=key_scope(None))
+async def get_catalog_provider(
+    name: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    caller: Annotated[CatalogCaller, Depends(verify_catalog_reader_or_public)],
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+    model_provider: RequestSessionModelProviderPortDep,
+    hosted_providers: HostedProviderServiceDep,
+    org_provider_keys: OrgProviderKeyServiceDep,
+    workspace_id: Annotated[
+        uuid.UUID | None,
+        Query(description="For a signed-in caller, only the models a request billed to this workspace may call."),
+    ] = None,
+    skip: Annotated[int, Query(ge=0, description="Number of the provider's models to skip.")] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of the provider's models to return.")] = 100,
+) -> CatalogProviderDetail:
+    """One provider instance and a page of the models it offers this caller, at the caller's rates.
+
+    An instance offering the caller nothing answers 404, the same as one that
+    does not exist, so the route cannot be used to probe for a restricted provider.
+    """
+    merged = await _merged_for(db, config, caller, session_identity, model_provider, workspace_id)
+    grouped = await _group(
+        db,
+        config,
+        merged,
+        caller=caller,
+        session_identity=session_identity,
+        hosted_providers=hosted_providers,
+        org_provider_keys=org_provider_keys,
+    )
+    found = (await _provider_summaries(grouped, hosted_providers)).get(name)
+    if found is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Provider '{name}' not found")
+    summary, instance = found
+    models: list[CatalogProviderModel] = []
+    for identity, members in instance.models.values():
+        # The model as this instance alone offers it, folded the way the list folds every offering.
+        folded = _summary(identity, members, organization_id=grouped.organization_id)
+        models.append(
+            CatalogProviderModel(
+                id=folded.id,
+                name=folded.name,
+                vendor=folded.vendor,
+                price_unit=folded.price_unit,
+                input_price=folded.min_input_price_per_million,
+                output_price=folded.min_output_price_per_million,
+                context_length=folded.context_window,
+            )
+        )
+    models.sort(key=lambda model: (model.name.casefold(), model.id))
+    return CatalogProviderDetail(**summary.model_dump(), models=models[skip : skip + limit])

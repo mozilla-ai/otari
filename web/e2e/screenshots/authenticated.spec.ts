@@ -45,6 +45,8 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
   readonly route: string
   readonly name: string
   readonly heading: RegExp
+  /** Creates what the page draws, where the seed holds none of it. */
+  readonly prepare?: (page: Page) => Promise<void>
 }> = [
   { route: "/", name: "overview", heading: /overview/i },
   // The one page in this matrix with no page title, which is why its heading
@@ -62,6 +64,16 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     name: "model-detail",
     // The page's own title, so a 404 does not pass for a model.
     heading: /parity/i,
+  },
+  { route: "/providers", name: "providers", heading: /providers/i },
+  {
+    // The organization's own openai key is the one provider the seeded
+    // deployment serves, so the page draws it.
+    route: "/providers/openai",
+    name: "provider-detail",
+    // The provider's own title, so a 404 ("Provider not found") does not pass.
+    heading: /openai/i,
+    prepare: ensureOrgProviderKey,
   },
   { route: "/routing", name: "routing", heading: /routing/i },
   { route: "/keys", name: "keys", heading: /keys/i },
@@ -167,9 +179,10 @@ async function open(page: Page, route: string, heading: RegExp): Promise<void> {
 // page whose look changed would then take every page below it out of the run,
 // and a review would see one diff where there are five.
 test.describe("workspace rail", () => {
-  for (const { route, name, heading } of WORKSPACE_ROUTES) {
+  for (const { route, name, heading, prepare } of WORKSPACE_ROUTES) {
     test(name, async ({ page }) => {
       await login(page)
+      await prepare?.(page)
       await open(page, route, heading)
       await captureScreenshot(page, name)
     })

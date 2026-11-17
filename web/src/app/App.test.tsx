@@ -180,6 +180,57 @@ describe("App", () => {
     expect(screen.queryByRole("heading", { name: "Models" })).toBeNull()
   })
 
+  it("renders the public providers page ahead of the sign-in screen where the catalog is public", async () => {
+    vi.mocked(apiFetch).mockImplementation(async (path) => {
+      if (path === "/catalog/providers") {
+        return { providers: [] } as never
+      }
+      return [] as never
+    })
+    window.location.hash = "#/providers"
+
+    renderApp(bootstrap({ public_catalog: true }))
+
+    expect(
+      await screen.findByRole("heading", { name: "Providers" }),
+    ).toBeInTheDocument()
+    expect(document.title).toBe("Providers · Otari")
+    expect(
+      screen.queryByRole("heading", { name: "Sign in to Otari" }),
+    ).toBeNull()
+  })
+
+  it("titles a public provider page by the provider's name", async () => {
+    vi.mocked(apiFetch).mockResolvedValue({
+      name: "fireworks",
+      provider: "fireworks",
+      display_name: "Fireworks AI",
+      model_count: 0,
+      terms_url: null,
+      privacy_url: null,
+      models: [],
+    } as never)
+    window.location.hash = "#/providers/fireworks"
+
+    renderApp(bootstrap({ public_catalog: true }))
+
+    expect(
+      await screen.findByRole("heading", { name: "Fireworks AI" }),
+    ).toBeInTheDocument()
+    expect(document.title).toBe("Fireworks AI · Otari")
+  })
+
+  it("keeps the providers page behind the sign-in screen by default", () => {
+    window.location.hash = "#/providers"
+
+    renderApp(bootstrap())
+
+    expect(
+      screen.getByRole("heading", { name: "Sign in to Otari" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Providers" })).toBeNull()
+  })
+
   it("renders a public auth page ahead of the sign-in screen", async () => {
     window.location.hash = "#/verify-email?token=abc123"
 

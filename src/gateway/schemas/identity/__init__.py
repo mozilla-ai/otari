@@ -52,6 +52,19 @@ class PasswordLinkPublic(BaseModel):
     expires_at: datetime = Field(description="When the link stops working.")
 
 
+class BootstrapHandoverRequest(BaseModel):
+    """Hand the bootstrap operator role to another operator."""
+
+    current_password: str | None = Field(
+        default=None,
+        max_length=1024,
+        description=(
+            "The caller's own current password. Required from a dashboard session whose account has a password, "
+            "and ignored with the master key, as when changing a password."
+        ),
+    )
+
+
 class MailedLinkRequest(BaseModel):
     """A token from a verification or password reset link."""
 
@@ -383,6 +396,7 @@ __all__ = [
     "BlockedEmailCreatedPublic",
     "BlockedEmailPublic",
     "BlockedEmailsPublic",
+    "BootstrapHandoverRequest",
     "MailedLinkRequest",
     "MailedLinkStatusResponse",
     "OIDCConnectionDomain",

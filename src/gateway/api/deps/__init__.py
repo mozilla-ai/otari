@@ -62,7 +62,17 @@ from gateway.api.deps.budgets import (
 )
 from gateway.api.deps.identity import (
     CurrentIdentity,
+    DeploymentAdministrationAccessDep,
+    DeploymentUserServiceDep,
+    IdentityServiceDep,
+    OAuthAppServiceDep,
+    OIDCConnectionServiceDep,
     get_current_identity,
+    get_deployment_administration_access,
+    get_deployment_user_service,
+    get_identity_service,
+    get_oauth_app_service,
+    get_oidc_connection_service,
     require_deployment_operator_or_absent,
 )
 from gateway.api.deps.organizations import (
@@ -177,11 +187,7 @@ from gateway.api.deps.traces import (
     workspace_members,
     workspaces_keeping_content_for,
 )
-from gateway.core.config import (
-    API_ROOT,
-    OAUTH_PROVIDERS,
-    GatewayConfig,
-)
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import get_db
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.log_config import logger
@@ -193,7 +199,6 @@ from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.model_provider_port import HostedModels
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.usage_signal_port import UsageSignalPort
-from gateway.repositories.api_keys import ApiKeyRepositories
 from gateway.repositories.catalog import ModelMetadataOverrideRepository
 from gateway.repositories.files import FileRepositories
 from gateway.repositories.health_checks import (
@@ -202,8 +207,7 @@ from gateway.repositories.health_checks import (
     HealthCheckRunRepository,
     HealthCheckSettingsRepository,
 )
-from gateway.repositories.identity import IdentityRepositories, OAuthPendingStateRepository
-from gateway.repositories.identity.oauth_app_grant_repository import OAuthAppGrantRepository
+from gateway.repositories.identity import IdentityRepositories
 from gateway.repositories.inference import InferenceRepositories
 from gateway.repositories.mcp_catalog import McpCatalogServerRepository, McpCatalogSyncStateRepository
 from gateway.repositories.organizations import OrganizationRepositories
@@ -221,7 +225,6 @@ from gateway.repositories.providers import (
 from gateway.repositories.rate_limits import RateLimitRuleRepository
 from gateway.repositories.routing import AgentRecommenderRepository
 from gateway.repositories.tenancy import (
-    OrganizationDomainRepository,
     OrganizationGuardrailDefinitionRepository,
     OrganizationMemberRepository,
     OrganizationRepository,
@@ -241,7 +244,6 @@ from gateway.repositories.tools import (
 from gateway.repositories.update_check import UpdateCheckStateRepository
 from gateway.repositories.usage_and_telemetry import UsageLogRepository
 from gateway.repositories.users_repository import get_active_user
-from gateway.services.api_keys import ApiKeyDeactivationListener
 from gateway.services.batch_service import claim_batch_accounting
 from gateway.services.budgets import record_external_spend
 from gateway.services.catalog import ModelMetadataOverrideService
@@ -249,7 +251,7 @@ from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.feedback import FeedbackService
 from gateway.services.files import FileBackends, FileService, SandboxFileBridge, StagedFile
 from gateway.services.health_checks import HealthCheckService, UnavailableModelListener
-from gateway.services.identity import AccountDeletionService, IdentityService, OAuthAppService, OIDCConnectionService
+from gateway.services.identity import AccountDeletionService
 from gateway.services.inference import (
     BatchResultsService,
     InferenceService,
@@ -262,9 +264,8 @@ from gateway.services.mail import Mailer
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.mcp_catalog import McpCatalogService
 from gateway.services.model_discovery_service import DiscoveryDial, HostedDiscovery
-from gateway.services.oauth_service import redirect_uri
 from gateway.services.organization_pricing_service import OrganizationPricingService
-from gateway.services.organizations import AccountRelease, OrganizationClaimedDomains
+from gateway.services.organizations import AccountRelease
 from gateway.services.overview import OverviewService
 from gateway.services.pricing import DeploymentPricingService
 from gateway.services.pricing_refresh_service import ModelsDevPriceUpdates
@@ -289,14 +290,9 @@ from gateway.services.routing import (
     AutomaticRouter,
     RoutingService,
 )
-from gateway.services.tenancy import (
-    DomainAutoJoinListener,
-    OrganizationService,
-    VerifiedDomainLookup,
-    organization_guardrail_runner,
-)
+from gateway.services.tenancy import OrganizationService, organization_guardrail_runner
 from gateway.services.tenancy.authorization import WorkspaceAccess
-from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess, DeploymentUserService
+from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService, refresh_org_provider_cache
 from gateway.services.tenancy.organization_guardrail_definition_service import (
     OrganizationGuardrailDefinitionService,
@@ -491,28 +487,6 @@ def get_overview_service(
 OverviewServiceDep = Annotated[OverviewService, Depends(get_overview_service)]
 
 
-def get_deployment_user_service(
-    db: Annotated[AsyncSession, Depends(get_db)], uow: UnitOfWorkDep
-) -> DeploymentUserService:
-    """Wire account changes and self-service key deactivation to the request's single transaction."""
-    return DeploymentUserService(db, uow=uow, keys=ApiKeyDeactivationListener(ApiKeyRepositories.on(uow)))
-
-
-DeploymentUserServiceDep = Annotated[DeploymentUserService, Depends(get_deployment_user_service)]
-
-
-def get_deployment_administration_access(
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> DeploymentAdministrationAccess:
-    """Read deployment administration authority without constructing mutation collaborators."""
-    return DeploymentAdministrationAccess(db)
-
-
-DeploymentAdministrationAccessDep = Annotated[
-    DeploymentAdministrationAccess, Depends(get_deployment_administration_access)
-]
-
-
 def get_organization_guardrail_definition_service(
     uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -596,73 +570,6 @@ def get_organization_guardrail_service(db: Annotated[AsyncSession, Depends(get_d
 
 
 OrganizationGuardrailServiceDep = Annotated[OrganizationGuardrailService, Depends(get_organization_guardrail_service)]
-
-
-def get_identity_service(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    uow: UnitOfWorkDep,
-    config: Annotated[GatewayConfig, Depends(get_config)],
-    identity_provider: IdentityProviderPortDep,
-    membership_listener: MembershipListenerDep,
-) -> IdentityService:
-    """Build the identity service on the request's Unit of Work.
-
-    Its own organization service is built on the same Unit of Work, not the deployment's shared
-    read-only one, because provisioning an SSO sign-in's account writes through it. It carries
-    the membership listener because the sign-in paths built here grant a workspace membership,
-    which has to be announced.
-    """
-    organizations = OrganizationService(db, membership_listener=membership_listener, uow=uow)
-    return IdentityService(
-        uow,
-        IdentityRepositories.on(uow),
-        identity_provider=identity_provider,
-        domain_claims=VerifiedDomainLookup(OrganizationDomainRepository(uow)),
-        organizations=organizations,
-        sign_in_listener=DomainAutoJoinListener(
-            OrganizationDomainRepository(uow), OrganizationMemberRepository(uow), organizations
-        ),
-        session_ttl_hours=config.dashboard_session_ttl_hours,
-        terms_url=config.terms_url,
-        mailer=Mailer(config),
-        open_signup=config.open_signup,
-        password_reset_expiry_hours=config.password_reset_expiry_hours,
-    )
-
-
-IdentityServiceDep = Annotated[IdentityService, Depends(get_identity_service)]
-
-
-def get_oidc_connection_service(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    uow: UnitOfWorkDep,
-    organizations: OrganizationServiceDep,
-    config: Annotated[GatewayConfig, Depends(get_config)],
-) -> OIDCConnectionService:
-    """Build the organization OIDC connection service on the request's Unit of Work.
-
-    ``sign_in_states`` is the one repository built on the session instead, for the reason the
-    service's own attribute gives: the sign-in client is used after the block that built it.
-
-    ``sso_redirect_uri`` is None where this deployment has no public address,
-    because a path alone is not registerable at a provider.
-    """
-    return OIDCConnectionService(
-        uow,
-        IdentityRepositories.on(uow),
-        organizations=organizations,
-        domains=OrganizationClaimedDomains(OrganizationDomainRepository(uow)),
-        sign_in_states=OAuthPendingStateRepository(db),
-        allow_private_hosts=config.oidc_allow_private_hosts,
-        passkey_rp_id=config.webauthn_relying_party.rp_id if config.webauthn_relying_party else None,
-        offered_providers=frozenset(
-            provider for provider in OAUTH_PROVIDERS if config.oauth_client_credentials(provider) is not None
-        ),
-        sso_redirect_uri=redirect_uri(config, "sso") if config.public_base_url else None,
-    )
-
-
-OIDCConnectionServiceDep = Annotated[OIDCConnectionService, Depends(get_oidc_connection_service)]
 
 
 def get_org_provider_model_service(
@@ -1251,31 +1158,6 @@ def get_feedback_service() -> FeedbackService:
     return FeedbackService()
 
 
-def get_oauth_app_service(
-    request: Request,
-    uow: UnitOfWorkDep,
-    config: Annotated[GatewayConfig, Depends(get_config)],
-    key_format: ApiKeyFormatPortDep,
-    organizations: OrganizationServiceDep,
-    workspaces: WorkspaceServiceDep,
-) -> OAuthAppService:
-    """Build app authorization using the external authorization API origin as issuer."""
-    return OAuthAppService(
-        uow,
-        OAuthAppGrantRepository(uow),
-        get_api_key_service(uow),
-        key_format,
-        organizations,
-        workspaces,
-        apps=config.oauth_apps,
-        ui_link=config.ui_link,
-        issuer=str(request.base_url.replace(path="", query="", fragment="")).rstrip("/"),
-    )
-
-
-OAuthAppServiceDep = Annotated[OAuthAppService, Depends(get_oauth_app_service)]
-
-
 __all__ = [
     "AUTH_FAILURES",
     "AccountDeletionServiceDep",
@@ -1296,6 +1178,8 @@ __all__ = [
     "ContainerDep",
     "CurrentIdentity",
     "DatabaseSessionOwners",
+    "DeploymentAdministrationAccessDep",
+    "DeploymentUserServiceDep",
     "DirectToolServiceDep",
     "EntitlementPortDep",
     "FederationTokenExchangeDep",
@@ -1390,6 +1274,8 @@ __all__ = [
     "get_container",
     "get_current_identity",
     "get_db",
+    "get_deployment_administration_access",
+    "get_deployment_user_service",
     "get_direct_tool_service",
     "get_enabled_features",
     "get_entitlement_port",
@@ -1399,6 +1285,7 @@ __all__ = [
     "get_file_store",
     "get_growth_signal_port",
     "get_identity_provider_port",
+    "get_identity_service",
     "get_invitation_claim_settings",
     "get_invitation_mail_limit",
     "get_log_writer",
@@ -1406,6 +1293,7 @@ __all__ = [
     "get_membership_organization_service",
     "get_model_provider_port",
     "get_oauth_app_service",
+    "get_oidc_connection_service",
     "get_optional_web_provider_client",
     "get_organization_break_glass",
     "get_organization_domain_service",

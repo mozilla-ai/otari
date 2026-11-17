@@ -34,7 +34,7 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions import TenancyError, TenancyNotFoundError
 from gateway.exceptions.organizations_exceptions import ForeignTenancyError
 from gateway.log_config import logger
-from gateway.models.platform import RuntimeSetting
+from gateway.models.platform import BOOTSTRAP_IDENTITY_KEY, RuntimeSetting
 from gateway.models.tenancy import Organization, User
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
@@ -45,11 +45,6 @@ from gateway.repositories.tenancy import (
 )
 from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.tenancy.membership_listener import MembershipListener
-
-# Stored in runtime_settings, and deliberately not a SETTABLE_KEY, so
-# runtime_settings_service ignores it exactly as it ignores the master-key hash
-# and the dashboard-session marker.
-BOOTSTRAP_IDENTITY_KEY = "tenancy_bootstrap_user_id"
 
 DEFAULT_ORGANIZATION_NAME = "Default organization"
 DEFAULT_ORGANIZATION_SLUG = "default"
@@ -186,7 +181,15 @@ async def load_bootstrap_identity(db: AsyncSession) -> User | None:
     ``ensure_bootstrap_identity`` provision one and what makes the deployment
     read as unclaimed.
     """
-    marker = await db.get(RuntimeSetting, BOOTSTRAP_IDENTITY_KEY)
+    # Past the session's identity map: a guard must see a handover committed after this session first
+    # read the marker, which ``db.get`` would answer from that earlier read.
+    marker = (
+        await db.execute(
+            select(RuntimeSetting)
+            .where(col(RuntimeSetting.key) == BOOTSTRAP_IDENTITY_KEY)
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
     if marker is None:
         return None
     try:

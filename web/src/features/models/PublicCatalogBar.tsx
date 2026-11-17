@@ -7,6 +7,7 @@ import {
   publicCatalogHref,
   siteHomeHref,
 } from "@/features/models/publicCatalog"
+import { publicProvidersHref } from "@/features/providers/publicProviders"
 import { OTARI_COMMUNITY_URL } from "@/shared/helpers/community"
 import { documentationHref } from "@/shared/helpers/docs"
 import { useDeployment } from "@/shared/hooks/useDeployment"
@@ -22,12 +23,17 @@ const DRAWER_LINK =
 
 /**
  * The public catalog's bar: the same destinations as the site in front of it
- * (Models, Documentation, Log in, Sign up, GitHub, Discord), so a visitor who
+ * (Models, Providers, Documentation, Log in, Sign up, GitHub, Discord), so a visitor who
  * came from that site's navbar finds the same one here. The logo goes back to the site
  * where the deployment names one (`site_url`), else to the catalog.
  *
  */
-export function PublicCatalogBar({ onList }: { onList: boolean }) {
+export function PublicCatalogBar({
+  current,
+}: {
+  /** The list the visitor is on, marked as the current page; null elsewhere. */
+  current: "models" | "providers" | null
+}) {
   const deployment = useDeployment()
   const { open_signup } = deployment
   const [menuOpen, setMenuOpen] = useState(false)
@@ -45,10 +51,17 @@ export function PublicCatalogBar({ onList }: { onList: boolean }) {
       <nav aria-label="Site" className="flex items-center gap-1 md:gap-2">
         <a
           href={publicCatalogHref()}
-          aria-current={onList ? "page" : undefined}
+          aria-current={current === "models" ? "page" : undefined}
           className={LINK}
         >
           Models
+        </a>
+        <a
+          href={publicProvidersHref()}
+          aria-current={current === "providers" ? "page" : undefined}
+          className={LINK}
+        >
+          Providers
         </a>
         <a
           href={docsHref}
@@ -120,11 +133,19 @@ export function PublicCatalogBar({ onList }: { onList: boolean }) {
                 <Drawer.Body className="flex flex-col gap-1 px-2 py-3">
                   <a
                     href={publicCatalogHref()}
-                    aria-current={onList ? "page" : undefined}
+                    aria-current={current === "models" ? "page" : undefined}
                     onClick={() => setMenuOpen(false)}
                     className={DRAWER_LINK}
                   >
                     Models
+                  </a>
+                  <a
+                    href={publicProvidersHref()}
+                    aria-current={current === "providers" ? "page" : undefined}
+                    onClick={() => setMenuOpen(false)}
+                    className={DRAWER_LINK}
+                  >
+                    Providers
                   </a>
                   <a
                     href={docsHref}

@@ -140,7 +140,9 @@ function mockApi(
     /** Answers the list 404, as the router refusing a non-operator. */
     listRefused?: boolean
     /** Answers a provider PATCH with this refusal. */
-    patchRefusal?: string
+    patchRefusal?: unknown
+    /** The status that refusal carries; 400 otherwise. */
+    patchRefusalStatus?: number
     providers?: HostedProvider[]
     models?: HostedModel[]
     /** What the catalog update finds and does: its removals show only with the cleanup ticked. */
@@ -298,7 +300,10 @@ function mockApi(
         return jsonResponse({ message: "Hosted provider deleted" })
       }
       if (method === "PATCH" && opts.patchRefusal) {
-        return jsonResponse({ detail: opts.patchRefusal }, 400)
+        return jsonResponse(
+          { detail: opts.patchRefusal },
+          opts.patchRefusalStatus ?? 400,
+        )
       }
       return jsonResponse({ ...providers[0], ...body }, 201)
     }
@@ -902,6 +907,127 @@ describe("HostedProvidersPage", () => {
       api_key: "sk-new",
       api_base: "https://proxy.example.com/v1",
     })
+  })
+
+  it("adds a provider with its terms and privacy links", async () => {
+    const requests = mockApi({ providers: [] })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      (await screen.findAllByRole("button", { name: "Add provider" }))[0],
+    )
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Anthropic" }))
+    await user.type(within(dialog).getByLabelText("API key"), "sk-ant-secret")
+    await user.type(
+      within(dialog).getByRole("textbox", { name: "Terms of service URL" }),
+      "https://anthropic.example/terms",
+    )
+    await user.type(
+      within(dialog).getByRole("textbox", { name: "Privacy policy URL" }),
+      "https://anthropic.example/privacy",
+    )
+    await user.click(
+      within(dialog).getByRole("button", { name: "Add provider" }),
+    )
+
+    await waitFor(() =>
+      expect(hostedRequests(requests, "POST")).toHaveLength(1),
+    )
+    expect(hostedRequests(requests, "POST")[0].body).toMatchObject({
+      terms_url: "https://anthropic.example/terms",
+      privacy_url: "https://anthropic.example/privacy",
+    })
+  })
+
+  it("holds back an add whose terms link is not an http(s) address", async () => {
+    mockApi({ providers: [] })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      (await screen.findAllByRole("button", { name: "Add provider" }))[0],
+    )
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Anthropic" }))
+    await user.type(within(dialog).getByLabelText("API key"), "sk-ant-secret")
+    await user.type(
+      within(dialog).getByRole("textbox", { name: "Terms of service URL" }),
+      "anthropic.example/terms",
+    )
+
+    expect(
+      within(dialog).getByText("Enter a full http:// or https:// address."),
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).getByRole("button", { name: "Add provider" }),
+    ).toBeDisabled()
+  })
+
+  it("edits a provider's links, sending a cleared one as null", async () => {
+    const requests = mockApi({
+      providers: [
+        hostedProvider({
+          terms_url: "https://openai.example/terms",
+          privacy_url: "https://openai.example/privacy",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(await screen.findByRole("button", { name: "Edit openai" }))
+    const dialog = await screen.findByRole("dialog")
+    const terms = within(dialog).getByRole("textbox", {
+      name: "Terms of service URL",
+    })
+    expect(terms).toHaveValue("https://openai.example/terms")
+    await user.clear(terms)
+    await user.type(terms, "https://openai.example/terms-v2")
+    await user.clear(
+      within(dialog).getByRole("textbox", { name: "Privacy policy URL" }),
+    )
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+    await waitFor(() =>
+      expect(hostedRequests(requests, "PATCH")).toHaveLength(1),
+    )
+    expect(hostedRequests(requests, "PATCH")[0].body).toEqual({
+      api_base: "",
+      terms_url: "https://openai.example/terms-v2",
+      privacy_url: null,
+    })
+  })
+
+  it("names the server's refusal of a link in the edit dialog", async () => {
+    mockApi({
+      patchRefusalStatus: 422,
+      patchRefusal: [
+        {
+          loc: ["body", "terms_url"],
+          msg: "URL scheme should be 'http' or 'https'",
+          type: "url_scheme",
+        },
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(await screen.findByRole("button", { name: "Edit openai" }))
+    const dialog = await screen.findByRole("dialog")
+    await user.type(
+      within(dialog).getByRole("textbox", { name: "Terms of service URL" }),
+      "https://openai.example/terms",
+    )
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+    expect(
+      await within(dialog).findByText(/URL scheme should be/),
+    ).toBeInTheDocument()
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
   })
 
   it("keeps the edit open on the server's refusal, naming it", async () => {

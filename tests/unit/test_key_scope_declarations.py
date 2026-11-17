@@ -60,6 +60,8 @@ SELF_AUTHENTICATING = {
 OPEN_TO_EVERY_KEY = {
     ("GET", f"{API_ROOT}/catalog/models"),
     ("GET", f"{API_ROOT}/catalog/models/{{model_id:path}}"),
+    ("GET", f"{API_ROOT}/catalog/providers"),
+    ("GET", f"{API_ROOT}/catalog/providers/{{name}}"),
     ("GET", f"{API_ROOT}/code/environments"),
     ("GET", f"{API_ROOT}/models"),
     ("GET", f"{API_ROOT}/models/{{model_id:path}}"),

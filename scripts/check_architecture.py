@@ -2354,7 +2354,7 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "baseline": (),
     },
     "gateway.models.platform.RuntimeSetting": {
-        "repository": None,
+        "repository": "gateway/repositories/organizations/bootstrap_marker_repository.py",
         "baseline": (
             "gateway/services/dashboard_session_service.py",
             "gateway/services/maintenance_mode_service.py",
