@@ -73,6 +73,7 @@ describe("nav registry", () => {
       "Playground",
       "Overview",
       "Models",
+      "Providers",
       "Routing",
       "Tools",
       "API keys",

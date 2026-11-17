@@ -22,6 +22,7 @@ import { Route as MembersRouteImport } from './routes/members'
 import { Route as ModelsRouteImport } from './routes/models'
 import { Route as OrganizationRouteImport } from './routes/organization'
 import { Route as PlaygroundRouteImport } from './routes/playground'
+import { Route as ProvidersRouteImport } from './routes/providers'
 import { Route as RoutingRouteImport } from './routes/routing'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ToolsRouteImport } from './routes/tools'
@@ -47,6 +48,8 @@ import { Route as OrganizationProviderKeysRouteImport } from './routes/organizat
 import { Route as OrganizationSsoRouteImport } from './routes/organization.sso'
 import { Route as OrganizationUsageRouteImport } from './routes/organization.usage'
 import { Route as OrganizationWebSearchKeysRouteImport } from './routes/organization.web-search-keys'
+import { Route as ProvidersIndexRouteImport } from './routes/providers.index'
+import { Route as ProvidersNameRouteImport } from './routes/providers.$name'
 import { Route as RoutingIndexRouteImport } from './routes/routing.index'
 import { Route as RoutingNameRouteImport } from './routes/routing.$name'
 import { Route as ToolsIndexRouteImport } from './routes/tools.index'
@@ -121,6 +124,11 @@ const OrganizationRoute = OrganizationRouteImport.update({
 const PlaygroundRoute = PlaygroundRouteImport.update({
   id: '/playground',
   path: '/playground',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProvidersRoute = ProvidersRouteImport.update({
+  id: '/providers',
+  path: '/providers',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RoutingRoute = RoutingRouteImport.update({
@@ -250,6 +258,16 @@ const OrganizationWebSearchKeysRoute =
     path: '/web-search-keys',
     getParentRoute: () => OrganizationRoute,
   } as any)
+const ProvidersIndexRoute = ProvidersIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ProvidersRoute,
+} as any)
+const ProvidersNameRoute = ProvidersNameRouteImport.update({
+  id: '/$name',
+  path: '/$name',
+  getParentRoute: () => ProvidersRoute,
+} as any)
 const RoutingIndexRoute = RoutingIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -320,6 +338,7 @@ export interface FileRoutesByFullPath {
   '/models': typeof ModelsRouteWithChildren
   '/organization': typeof OrganizationRouteWithChildren
   '/playground': typeof PlaygroundRoute
+  '/providers': typeof ProvidersRouteWithChildren
   '/routing': typeof RoutingRouteWithChildren
   '/settings': typeof SettingsRoute
   '/tools': typeof ToolsRouteWithChildren
@@ -342,6 +361,7 @@ export interface FileRoutesByFullPath {
   '/organization/sso': typeof OrganizationSsoRoute
   '/organization/usage': typeof OrganizationUsageRoute
   '/organization/web-search-keys': typeof OrganizationWebSearchKeysRoute
+  '/providers/$name': typeof ProvidersNameRoute
   '/routing/$name': typeof RoutingNameRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
@@ -350,6 +370,7 @@ export interface FileRoutesByFullPath {
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/models/': typeof ModelsIndexRoute
   '/organization/': typeof OrganizationIndexRoute
+  '/providers/': typeof ProvidersIndexRoute
   '/routing/': typeof RoutingIndexRoute
   '/tools/': typeof ToolsIndexRoute
   '/workspaces/': typeof WorkspacesIndexRoute
@@ -386,6 +407,7 @@ export interface FileRoutesByTo {
   '/organization/sso': typeof OrganizationSsoRoute
   '/organization/usage': typeof OrganizationUsageRoute
   '/organization/web-search-keys': typeof OrganizationWebSearchKeysRoute
+  '/providers/$name': typeof ProvidersNameRoute
   '/routing/$name': typeof RoutingNameRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
@@ -394,6 +416,7 @@ export interface FileRoutesByTo {
   '/': typeof OverviewIndexRoute
   '/models': typeof ModelsIndexRoute
   '/organization': typeof OrganizationIndexRoute
+  '/providers': typeof ProvidersIndexRoute
   '/routing': typeof RoutingIndexRoute
   '/tools': typeof ToolsIndexRoute
   '/workspaces': typeof WorkspacesIndexRoute
@@ -415,6 +438,7 @@ export interface FileRoutesById {
   '/models': typeof ModelsRouteWithChildren
   '/organization': typeof OrganizationRouteWithChildren
   '/playground': typeof PlaygroundRoute
+  '/providers': typeof ProvidersRouteWithChildren
   '/routing': typeof RoutingRouteWithChildren
   '/settings': typeof SettingsRoute
   '/tools': typeof ToolsRouteWithChildren
@@ -437,6 +461,7 @@ export interface FileRoutesById {
   '/organization/sso': typeof OrganizationSsoRoute
   '/organization/usage': typeof OrganizationUsageRoute
   '/organization/web-search-keys': typeof OrganizationWebSearchKeysRoute
+  '/providers/$name': typeof ProvidersNameRoute
   '/routing/$name': typeof RoutingNameRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
@@ -446,6 +471,7 @@ export interface FileRoutesById {
   '/_overview/': typeof OverviewIndexRoute
   '/models/': typeof ModelsIndexRoute
   '/organization/': typeof OrganizationIndexRoute
+  '/providers/': typeof ProvidersIndexRoute
   '/routing/': typeof RoutingIndexRoute
   '/tools/': typeof ToolsIndexRoute
   '/workspaces/': typeof WorkspacesIndexRoute
@@ -468,6 +494,7 @@ export interface FileRouteTypes {
     | '/models'
     | '/organization'
     | '/playground'
+    | '/providers'
     | '/routing'
     | '/settings'
     | '/tools'
@@ -490,6 +517,7 @@ export interface FileRouteTypes {
     | '/organization/sso'
     | '/organization/usage'
     | '/organization/web-search-keys'
+    | '/providers/$name'
     | '/routing/$name'
     | '/tools/code-execution'
     | '/tools/guardrails'
@@ -498,6 +526,7 @@ export interface FileRouteTypes {
     | '/workspaces/$workspaceId'
     | '/models/'
     | '/organization/'
+    | '/providers/'
     | '/routing/'
     | '/tools/'
     | '/workspaces/'
@@ -534,6 +563,7 @@ export interface FileRouteTypes {
     | '/organization/sso'
     | '/organization/usage'
     | '/organization/web-search-keys'
+    | '/providers/$name'
     | '/routing/$name'
     | '/tools/code-execution'
     | '/tools/guardrails'
@@ -542,6 +572,7 @@ export interface FileRouteTypes {
     | '/'
     | '/models'
     | '/organization'
+    | '/providers'
     | '/routing'
     | '/tools'
     | '/workspaces'
@@ -562,6 +593,7 @@ export interface FileRouteTypes {
     | '/models'
     | '/organization'
     | '/playground'
+    | '/providers'
     | '/routing'
     | '/settings'
     | '/tools'
@@ -584,6 +616,7 @@ export interface FileRouteTypes {
     | '/organization/sso'
     | '/organization/usage'
     | '/organization/web-search-keys'
+    | '/providers/$name'
     | '/routing/$name'
     | '/tools/code-execution'
     | '/tools/guardrails'
@@ -593,6 +626,7 @@ export interface FileRouteTypes {
     | '/_overview/'
     | '/models/'
     | '/organization/'
+    | '/providers/'
     | '/routing/'
     | '/tools/'
     | '/workspaces/'
@@ -614,6 +648,7 @@ export interface RootRouteChildren {
   ModelsRoute: typeof ModelsRouteWithChildren
   OrganizationRoute: typeof OrganizationRouteWithChildren
   PlaygroundRoute: typeof PlaygroundRoute
+  ProvidersRoute: typeof ProvidersRouteWithChildren
   RoutingRoute: typeof RoutingRouteWithChildren
   SettingsRoute: typeof SettingsRoute
   ToolsRoute: typeof ToolsRouteWithChildren
@@ -718,6 +753,13 @@ declare module '@tanstack/react-router' {
       path: '/playground'
       fullPath: '/playground'
       preLoaderRoute: typeof PlaygroundRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/providers': {
+      id: '/providers'
+      path: '/providers'
+      fullPath: '/providers'
+      preLoaderRoute: typeof ProvidersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/routing': {
@@ -895,6 +937,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrganizationWebSearchKeysRouteImport
       parentRoute: typeof OrganizationRoute
     }
+    '/providers/': {
+      id: '/providers/'
+      path: '/'
+      fullPath: '/providers/'
+      preLoaderRoute: typeof ProvidersIndexRouteImport
+      parentRoute: typeof ProvidersRoute
+    }
+    '/providers/$name': {
+      id: '/providers/$name'
+      path: '/$name'
+      fullPath: '/providers/$name'
+      preLoaderRoute: typeof ProvidersNameRouteImport
+      parentRoute: typeof ProvidersRoute
+    }
     '/routing/': {
       id: '/routing/'
       path: '/'
@@ -1032,6 +1088,20 @@ const OrganizationRouteWithChildren = OrganizationRoute._addFileChildren(
   OrganizationRouteChildren,
 )
 
+interface ProvidersRouteChildren {
+  ProvidersNameRoute: typeof ProvidersNameRoute
+  ProvidersIndexRoute: typeof ProvidersIndexRoute
+}
+
+const ProvidersRouteChildren: ProvidersRouteChildren = {
+  ProvidersNameRoute: ProvidersNameRoute,
+  ProvidersIndexRoute: ProvidersIndexRoute,
+}
+
+const ProvidersRouteWithChildren = ProvidersRoute._addFileChildren(
+  ProvidersRouteChildren,
+)
+
 interface RoutingRouteChildren {
   RoutingNameRoute: typeof RoutingNameRoute
   RoutingIndexRoute: typeof RoutingIndexRoute
@@ -1105,6 +1175,7 @@ const rootRouteChildren: RootRouteChildren = {
   ModelsRoute: ModelsRouteWithChildren,
   OrganizationRoute: OrganizationRouteWithChildren,
   PlaygroundRoute: PlaygroundRoute,
+  ProvidersRoute: ProvidersRouteWithChildren,
   RoutingRoute: RoutingRouteWithChildren,
   SettingsRoute: SettingsRoute,
   ToolsRoute: ToolsRouteWithChildren,

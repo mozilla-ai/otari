@@ -16,9 +16,10 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal, Self
 
-from pydantic import field_validator, model_validator
+from pydantic import ValidationInfo, field_validator, model_validator
 from sqlmodel import Field, SQLModel
 
+from gateway.core.link_urls import normalize_link_url
 from gateway.core.settings.inference import country_codes
 from gateway.models.money import as_float
 from gateway.models.pricing import HostedPriceSource, ModelPricing, PriceSource
@@ -413,6 +414,9 @@ class HostedProviderCreateRequest(SQLModel):
     ``provider_supported_countries``; null serves every country.
     ``zero_data_retention`` declares that the upstream keeps no prompt or
     completion data; the catalog shows it and nothing enforces it.
+    ``terms_url`` and ``privacy_url`` link the upstream's own terms of service
+    and privacy policy from the public Providers pages: absolute http(s)
+    addresses with no username or password.
     """
 
     model_config = {"json_schema_extra": {"example": {"provider": "openai", "api_key": "<your OpenAI API key>"}}}
@@ -427,11 +431,18 @@ class HostedProviderCreateRequest(SQLModel):
     serves_unlisted_models: bool = False
     supported_countries: list[str] | None = Field(default=None, max_length=300)
     zero_data_retention: bool = False
+    terms_url: str | None = Field(default=None, max_length=1024)
+    privacy_url: str | None = Field(default=None, max_length=1024)
 
     @field_validator("supported_countries")
     @classmethod
     def _country_codes(cls, value: list[str] | None) -> list[str] | None:
         return country_codes(value) if value is not None else None
+
+    @field_validator("terms_url", "privacy_url")
+    @classmethod
+    def _link_url(cls, value: str | None, info: ValidationInfo) -> str | None:
+        return normalize_link_url(value, info.field_name or "link")
 
 
 class HostedProviderUpdateRequest(SQLModel):
@@ -446,7 +457,8 @@ class HostedProviderUpdateRequest(SQLModel):
     null clears it, and an entry echoed back as the mask keeps the stored value.
     ``restricted_to_organization_id`` reads the same way: omitted keeps the
     restriction, null lifts it, and so does ``supported_countries``, where an
-    empty list closes the provider to every country.
+    empty list closes the provider to every country. ``terms_url`` and
+    ``privacy_url`` omitted are left alone; null or an empty string removes the link.
     """
 
     # A toggle alone, so a reader who edits the example never re-sends a key.
@@ -460,11 +472,18 @@ class HostedProviderUpdateRequest(SQLModel):
     serves_unlisted_models: bool | None = None
     supported_countries: list[str] | None = Field(default=None, max_length=300)
     zero_data_retention: bool | None = None
+    terms_url: str | None = Field(default=None, max_length=1024)
+    privacy_url: str | None = Field(default=None, max_length=1024)
 
     @field_validator("supported_countries")
     @classmethod
     def _country_codes(cls, value: list[str] | None) -> list[str] | None:
         return country_codes(value) if value is not None else None
+
+    @field_validator("terms_url", "privacy_url")
+    @classmethod
+    def _link_url(cls, value: str | None, info: ValidationInfo) -> str | None:
+        return normalize_link_url(value, info.field_name or "link")
 
 
 class HostedProviderPublic(SQLModel):
@@ -488,7 +507,8 @@ class HostedProviderPublic(SQLModel):
     ``serves_unlisted_models`` is true for one that serves a model its roster
     does not list. ``supported_countries`` is null for one that serves every
     country. ``zero_data_retention`` is the operator's declaration that the
-    upstream keeps no prompt or completion data.
+    upstream keeps no prompt or completion data. ``terms_url`` and
+    ``privacy_url`` are the upstream's policies, null where none is linked.
     """
 
     id: uuid.UUID | None = None
@@ -505,6 +525,8 @@ class HostedProviderPublic(SQLModel):
     serves_unlisted_models: bool = False
     supported_countries: list[str] | None = None
     zero_data_retention: bool = False
+    terms_url: str | None = None
+    privacy_url: str | None = None
     shadows_config: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -541,6 +563,8 @@ class HostedProviderPublic(SQLModel):
             serves_unlisted_models=row.serves_unlisted_models,
             supported_countries=row.supported_countries,
             zero_data_retention=row.zero_data_retention,
+            terms_url=row.terms_url,
+            privacy_url=row.privacy_url,
             shadows_config=shadows_config,
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -560,6 +584,8 @@ class HostedProviderPublic(SQLModel):
         restricted_to_organization_id: uuid.UUID | None,
         supported_countries: list[str] | None = None,
         zero_data_retention: bool = False,
+        terms_url: str | None = None,
+        privacy_url: str | None = None,
     ) -> HostedProviderPublic:
         """Read one configuration entry for the API, masked as a row is.
 
@@ -577,6 +603,8 @@ class HostedProviderPublic(SQLModel):
             restricted_to_organization_id=restricted_to_organization_id,
             supported_countries=supported_countries,
             zero_data_retention=zero_data_retention,
+            terms_url=terms_url,
+            privacy_url=privacy_url,
         )
 
 

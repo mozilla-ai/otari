@@ -4659,6 +4659,242 @@
         "title": "CatalogOffering",
         "type": "object"
       },
+      "CatalogProviderDetail": {
+        "description": "One provider instance and a page of the models it offers the caller, sorted by name.",
+        "properties": {
+          "display_name": {
+            "description": "models.dev's name for the implementation, with the instance name after it where the two differ; the instance name where models.dev does not know it.",
+            "title": "Display Name",
+            "type": "string"
+          },
+          "model_count": {
+            "description": "Catalog models the caller may see that this instance offers.",
+            "title": "Model Count",
+            "type": "integer"
+          },
+          "models": {
+            "description": "The requested page; `model_count` is the total.",
+            "items": {
+              "$ref": "#/components/schemas/CatalogProviderModel"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "name": {
+            "description": "The instance name a selector starts with, such as `fireworks` or `openai-eu`.",
+            "title": "Name",
+            "type": "string"
+          },
+          "privacy_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The provider's privacy policy; null where none is set.",
+            "title": "Privacy Url"
+          },
+          "provider": {
+            "description": "The any-llm implementation behind the instance.",
+            "title": "Provider",
+            "type": "string"
+          },
+          "terms_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The provider's terms of service; null where none is set.",
+            "title": "Terms Url"
+          }
+        },
+        "required": [
+          "name",
+          "provider",
+          "display_name",
+          "model_count",
+          "models"
+        ],
+        "title": "CatalogProviderDetail",
+        "type": "object"
+      },
+      "CatalogProviderModel": {
+        "description": "One catalog model as one provider instance offers it.",
+        "properties": {
+          "context_length": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The largest context window this instance serves.",
+            "title": "Context Length"
+          },
+          "id": {
+            "description": "The catalog id, the one `GET /catalog/models/{id}` takes.",
+            "title": "Id",
+            "type": "string"
+          },
+          "input_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "This instance's input rate for the caller, in USD per million of `price_unit`, as the catalog's `min_input_price_per_million` is. The cheapest where the instance offers the model more than once.",
+            "title": "Input Price"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "output_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "This instance's output rate for the caller, in the same unit as `input_price`.",
+            "title": "Output Price"
+          },
+          "price_unit": {
+            "anyOf": [
+              {
+                "enum": [
+                  "token",
+                  "request",
+                  "image",
+                  "character",
+                  "megapixel",
+                  "second",
+                  "minute",
+                  "web_search"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the prices are per. Null where nothing on this instance prices the model.",
+            "title": "Price Unit"
+          },
+          "vendor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vendor"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "vendor"
+        ],
+        "title": "CatalogProviderModel",
+        "type": "object"
+      },
+      "CatalogProviderSummary": {
+        "description": "One provider instance offering at least one model the caller may see.",
+        "properties": {
+          "display_name": {
+            "description": "models.dev's name for the implementation, with the instance name after it where the two differ; the instance name where models.dev does not know it.",
+            "title": "Display Name",
+            "type": "string"
+          },
+          "model_count": {
+            "description": "Catalog models the caller may see that this instance offers.",
+            "title": "Model Count",
+            "type": "integer"
+          },
+          "name": {
+            "description": "The instance name a selector starts with, such as `fireworks` or `openai-eu`.",
+            "title": "Name",
+            "type": "string"
+          },
+          "privacy_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The provider's privacy policy; null where none is set.",
+            "title": "Privacy Url"
+          },
+          "provider": {
+            "description": "The any-llm implementation behind the instance.",
+            "title": "Provider",
+            "type": "string"
+          },
+          "terms_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The provider's terms of service; null where none is set.",
+            "title": "Terms Url"
+          }
+        },
+        "required": [
+          "name",
+          "provider",
+          "display_name",
+          "model_count"
+        ],
+        "title": "CatalogProviderSummary",
+        "type": "object"
+      },
+      "CatalogProvidersResponse": {
+        "properties": {
+          "count": {
+            "description": "Providers the caller may see, before paging.",
+            "title": "Count",
+            "type": "integer"
+          },
+          "providers": {
+            "description": "The requested page, sorted by display name.",
+            "items": {
+              "$ref": "#/components/schemas/CatalogProviderSummary"
+            },
+            "title": "Providers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "providers"
+        ],
+        "title": "CatalogProvidersResponse",
+        "type": "object"
+      },
       "CatalogResponse": {
         "description": "The grouped catalog, and the facts a reader needs to interpret its prices.",
         "properties": {
@@ -11331,7 +11567,7 @@
         "type": "object"
       },
       "HostedProviderCreateRequest": {
-        "description": "Configure a provider this deployment will serve hosted inference on.\n\n``provider`` is the any-llm implementation. ``name`` is what requests\naddress it by (``name:model``), defaulting to ``provider``; a name of its\nown lets two endpoints of one implementation coexist. ``api_key`` may be\nleft out for a backend that needs none, or for an endpoint of its own\n(``api_base``), which is called with a placeholder key.\n\n``client_args`` is whatever the provider's SDK client needs beyond the key\n(Bedrock's region and IAM pair), the same shape an organization provider\nkey takes. Values under credential-shaped names come back masked.\n``restricted_to_organization_id`` keeps the provider to one organization;\nevery other one is served as if it were not configured.\n``serves_unlisted_models`` serves a model the roster does not list, as a\n``config.yml`` instance does, and switches on every model it offers\nwhether or not something prices it. ``supported_countries`` keeps the\nprovider to requests from those ISO country codes, checked as well as\n``provider_supported_countries``; null serves every country.\n``zero_data_retention`` declares that the upstream keeps no prompt or\ncompletion data; the catalog shows it and nothing enforces it.",
+        "description": "Configure a provider this deployment will serve hosted inference on.\n\n``provider`` is the any-llm implementation. ``name`` is what requests\naddress it by (``name:model``), defaulting to ``provider``; a name of its\nown lets two endpoints of one implementation coexist. ``api_key`` may be\nleft out for a backend that needs none, or for an endpoint of its own\n(``api_base``), which is called with a placeholder key.\n\n``client_args`` is whatever the provider's SDK client needs beyond the key\n(Bedrock's region and IAM pair), the same shape an organization provider\nkey takes. Values under credential-shaped names come back masked.\n``restricted_to_organization_id`` keeps the provider to one organization;\nevery other one is served as if it were not configured.\n``serves_unlisted_models`` serves a model the roster does not list, as a\n``config.yml`` instance does, and switches on every model it offers\nwhether or not something prices it. ``supported_countries`` keeps the\nprovider to requests from those ISO country codes, checked as well as\n``provider_supported_countries``; null serves every country.\n``zero_data_retention`` declares that the upstream keeps no prompt or\ncompletion data; the catalog shows it and nothing enforces it.\n``terms_url`` and ``privacy_url`` link the upstream's own terms of service\nand privacy policy from the public Providers pages: absolute http(s)\naddresses with no username or password.",
         "example": {
           "api_key": "<your OpenAI API key>",
           "provider": "openai"
@@ -11392,6 +11628,18 @@
             ],
             "title": "Name"
           },
+          "privacy_url": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Privacy Url"
+          },
           "provider": {
             "maxLength": 64,
             "minLength": 1,
@@ -11430,6 +11678,18 @@
             ],
             "title": "Supported Countries"
           },
+          "terms_url": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terms Url"
+          },
           "zero_data_retention": {
             "default": false,
             "title": "Zero Data Retention",
@@ -11443,7 +11703,7 @@
         "type": "object"
       },
       "HostedProviderPublic": {
-        "description": "One hosted provider, known by its name, its implementation and the tail of its key.\n\nNo shape in this section carries key material: a stored credential is\nknown by its last four characters and nothing else, ``client_args`` goes\nout with credential-shaped values masked, and ``api_base`` with the\npassword in its userinfo and its query values masked.\n\n``name`` is what requests address and every route takes; ``provider`` is\nthe any-llm implementation. ``source`` says where the provider is defined.\nA ``config`` provider comes from the ``hosted_providers:`` block, has no\nrow and so no ``id`` or timestamps, and is changed by editing the\nconfiguration rather than through this API; its models are administered as\na stored provider's are. ``shadows_config`` marks a stored provider that\nwins over a configuration entry of the same name, which serves again once\nthe row is deleted. ``has_api_key`` is false for one stored without a key,\nand ``decryptable`` false for one whose key or extras no configured\n``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.\n``serves_unlisted_models`` is true for one that serves a model its roster\ndoes not list. ``supported_countries`` is null for one that serves every\ncountry. ``zero_data_retention`` is the operator's declaration that the\nupstream keeps no prompt or completion data.",
+        "description": "One hosted provider, known by its name, its implementation and the tail of its key.\n\nNo shape in this section carries key material: a stored credential is\nknown by its last four characters and nothing else, ``client_args`` goes\nout with credential-shaped values masked, and ``api_base`` with the\npassword in its userinfo and its query values masked.\n\n``name`` is what requests address and every route takes; ``provider`` is\nthe any-llm implementation. ``source`` says where the provider is defined.\nA ``config`` provider comes from the ``hosted_providers:`` block, has no\nrow and so no ``id`` or timestamps, and is changed by editing the\nconfiguration rather than through this API; its models are administered as\na stored provider's are. ``shadows_config`` marks a stored provider that\nwins over a configuration entry of the same name, which serves again once\nthe row is deleted. ``has_api_key`` is false for one stored without a key,\nand ``decryptable`` false for one whose key or extras no configured\n``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.\n``serves_unlisted_models`` is true for one that serves a model its roster\ndoes not list. ``supported_countries`` is null for one that serves every\ncountry. ``zero_data_retention`` is the operator's declaration that the\nupstream keeps no prompt or completion data. ``terms_url`` and\n``privacy_url`` are the upstream's policies, null where none is linked.",
         "properties": {
           "api_base": {
             "anyOf": [
@@ -11521,6 +11781,17 @@
             "title": "Name",
             "type": "string"
           },
+          "privacy_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Privacy Url"
+          },
           "provider": {
             "title": "Provider",
             "type": "string"
@@ -11569,6 +11840,17 @@
               }
             ],
             "title": "Supported Countries"
+          },
+          "terms_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terms Url"
           },
           "updated_at": {
             "anyOf": [
@@ -11702,7 +11984,7 @@
         "type": "object"
       },
       "HostedProviderUpdateRequest": {
-        "description": "Rotate the key, repoint the base, or turn a provider off.\n\n``provider`` and ``name`` are immutable: changing either is a delete plus a\ncreate, because the key belongs to the provider it was issued by and\nrequests address the name. Omitting ``api_key`` leaves the stored\ncredential untouched, so a toggle never re-sends a secret the caller does\nnot have; an explicit null removes it, where the provider can be served\nwithout one. ``client_args`` omitted is left alone; an explicit\nnull clears it, and an entry echoed back as the mask keeps the stored value.\n``restricted_to_organization_id`` reads the same way: omitted keeps the\nrestriction, null lifts it, and so does ``supported_countries``, where an\nempty list closes the provider to every country.",
+        "description": "Rotate the key, repoint the base, or turn a provider off.\n\n``provider`` and ``name`` are immutable: changing either is a delete plus a\ncreate, because the key belongs to the provider it was issued by and\nrequests address the name. Omitting ``api_key`` leaves the stored\ncredential untouched, so a toggle never re-sends a secret the caller does\nnot have; an explicit null removes it, where the provider can be served\nwithout one. ``client_args`` omitted is left alone; an explicit\nnull clears it, and an entry echoed back as the mask keeps the stored value.\n``restricted_to_organization_id`` reads the same way: omitted keeps the\nrestriction, null lifts it, and so does ``supported_countries``, where an\nempty list closes the provider to every country. ``terms_url`` and\n``privacy_url`` omitted are left alone; null or an empty string removes the link.",
         "example": {
           "enabled": false
         },
@@ -11755,6 +12037,18 @@
             ],
             "title": "Enabled"
           },
+          "privacy_url": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Privacy Url"
+          },
           "restricted_to_organization_id": {
             "anyOf": [
               {
@@ -11792,6 +12086,18 @@
               }
             ],
             "title": "Supported Countries"
+          },
+          "terms_url": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terms Url"
           },
           "zero_data_retention": {
             "anyOf": [
@@ -36608,6 +36914,193 @@
           }
         ],
         "summary": "Get Catalog Model",
+        "tags": [
+          "catalog"
+        ],
+        "x-otari-key-scopes": []
+      }
+    },
+    "/api/v1/catalog/providers": {
+      "get": {
+        "description": "The provider instances offering a model this caller may use, with each one's policy links.\n\nRead from the same grouped catalog as ``GET /catalog/models``, so a provider\nis listed exactly when that listing shows one of its models.",
+        "operationId": "catalog-list_catalog_providers",
+        "parameters": [
+          {
+            "description": "For a signed-in caller, only the providers a request billed to this workspace may call.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "For a signed-in caller, only the providers a request billed to this workspace may call.",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "description": "Number of providers to skip.",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of providers to skip.",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of providers to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of providers to return.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProvidersResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Catalog Providers",
+        "tags": [
+          "catalog"
+        ],
+        "x-otari-key-scopes": []
+      }
+    },
+    "/api/v1/catalog/providers/{name}": {
+      "get": {
+        "description": "One provider instance and a page of the models it offers this caller, at the caller's rates.\n\nAn instance offering the caller nothing answers 404, the same as one that\ndoes not exist, so the route cannot be used to probe for a restricted provider.",
+        "operationId": "catalog-get_catalog_provider",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "For a signed-in caller, only the models a request billed to this workspace may call.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "For a signed-in caller, only the models a request billed to this workspace may call.",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "description": "Number of the provider's models to skip.",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of the provider's models to skip.",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of the provider's models to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of the provider's models to return.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProviderDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Catalog Provider",
         "tags": [
           "catalog"
         ],

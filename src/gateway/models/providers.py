@@ -241,6 +241,9 @@ class HostedProvider(Base):
     # The ISO country codes whose requests this provider serves, or None for
     # every country. Checked as well as ``provider_supported_countries``.
     supported_countries: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    # The upstream's own policies, linked from the public Providers pages.
+    terms_url: Mapped[str | None] = mapped_column(String(1024), default=None)
+    privacy_url: Mapped[str | None] = mapped_column(String(1024), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)

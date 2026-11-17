@@ -34,7 +34,7 @@ export function PublicCatalogPage({ modelId }: { modelId?: string }) {
   )
   return (
     <div className="flex min-h-full flex-col">
-      <PublicCatalogBar onList={!modelId} />
+      <PublicCatalogBar current={modelId ? null : "models"} />
       <main className="mx-auto flex w-full max-w-[112.5rem] flex-col gap-6 px-4 py-5 md:px-6 md:py-6">
         {modelId ? (
           <ModelDetailView modelId={modelId} publicView />

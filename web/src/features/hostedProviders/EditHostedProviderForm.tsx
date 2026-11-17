@@ -30,6 +30,8 @@ import {
 } from "@/shared/api/hostedProviders"
 import { movesToAnotherOrigin } from "./endpointOrigin"
 
+import { PolicyUrlFields } from "./PolicyUrlFields"
+import { policyUrlError, policyUrlValue } from "./policyUrls"
 import { ServesUnlistedModelsField } from "./ServesUnlistedModelsField"
 import { SupportedCountriesField } from "./SupportedCountriesField"
 import { formatCountries, parseCountries } from "./supportedCountries"
@@ -54,6 +56,8 @@ interface EditDraft {
   servesUnlistedModels: boolean
   supportedCountries: string
   zeroDataRetention: boolean
+  termsUrl: string
+  privacyUrl: string
 }
 
 function draftFrom(provider: HostedProvider): EditDraft {
@@ -70,6 +74,8 @@ function draftFrom(provider: HostedProvider): EditDraft {
     servesUnlistedModels: provider.serves_unlisted_models,
     supportedCountries: formatCountries(provider.supported_countries),
     zeroDataRetention: provider.zero_data_retention,
+    termsUrl: provider.terms_url ?? "",
+    privacyUrl: provider.privacy_url ?? "",
   }
 }
 
@@ -113,6 +119,8 @@ export function EditHostedProviderForm({
   const canSubmit =
     parsedClientArgs.ok &&
     countries.ok &&
+    policyUrlError(draft.termsUrl) === undefined &&
+    policyUrlError(draft.privacyUrl) === undefined &&
     Object.keys(credentialErrors).length === 0 &&
     !needsKey
 
@@ -160,6 +168,14 @@ export function EditHostedProviderForm({
             ? {}
             : { zero_data_retention: draft.zeroDataRetention }),
           ...(countriesChanged ? { supported_countries: countries.value } : {}),
+          // Sent only when changed; blank clears the link.
+          ...(policyUrlValue(draft.termsUrl) === (provider.terms_url ?? null)
+            ? {}
+            : { terms_url: policyUrlValue(draft.termsUrl) }),
+          ...(policyUrlValue(draft.privacyUrl) ===
+          (provider.privacy_url ?? null)
+            ? {}
+            : { privacy_url: policyUrlValue(draft.privacyUrl) }),
         },
       },
       { onSuccess: onClose },
@@ -225,6 +241,12 @@ export function EditHostedProviderForm({
         onChange={(supportedCountries) =>
           setDraft({ ...draft, supportedCountries })
         }
+      />
+      <PolicyUrlFields
+        termsUrl={draft.termsUrl}
+        privacyUrl={draft.privacyUrl}
+        onTermsUrlChange={(termsUrl) => setDraft({ ...draft, termsUrl })}
+        onPrivacyUrlChange={(privacyUrl) => setDraft({ ...draft, privacyUrl })}
       />
       <ProviderCredentialFields
         provider={provider.provider}

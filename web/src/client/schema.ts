@@ -1359,6 +1359,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/catalog/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Catalog Providers
+         * @description The provider instances offering a model this caller may use, with each one's policy links.
+         *
+         *     Read from the same grouped catalog as ``GET /catalog/models``, so a provider
+         *     is listed exactly when that listing shows one of its models.
+         */
+        get: operations["catalog-list_catalog_providers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog/providers/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Catalog Provider
+         * @description One provider instance and a page of the models it offers this caller, at the caller's rates.
+         *
+         *     An instance offering the caller nothing answers 404, the same as one that
+         *     does not exist, so the route cannot be used to probe for a restricted provider.
+         */
+        get: operations["catalog-get_catalog_provider"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/catalog/selectors/refresh": {
         parameters: {
             query?: never;
@@ -11393,6 +11439,131 @@ export interface components {
             zero_data_retention: boolean;
         };
         /**
+         * CatalogProviderDetail
+         * @description One provider instance and a page of the models it offers the caller, sorted by name.
+         */
+        CatalogProviderDetail: {
+            /**
+             * Display Name
+             * @description models.dev's name for the implementation, with the instance name after it where the two differ; the instance name where models.dev does not know it.
+             */
+            display_name: string;
+            /**
+             * Model Count
+             * @description Catalog models the caller may see that this instance offers.
+             */
+            model_count: number;
+            /**
+             * Models
+             * @description The requested page; `model_count` is the total.
+             */
+            models: components["schemas"]["CatalogProviderModel"][];
+            /**
+             * Name
+             * @description The instance name a selector starts with, such as `fireworks` or `openai-eu`.
+             */
+            name: string;
+            /**
+             * Privacy Url
+             * @description The provider's privacy policy; null where none is set.
+             */
+            privacy_url?: string | null;
+            /**
+             * Provider
+             * @description The any-llm implementation behind the instance.
+             */
+            provider: string;
+            /**
+             * Terms Url
+             * @description The provider's terms of service; null where none is set.
+             */
+            terms_url?: string | null;
+        };
+        /**
+         * CatalogProviderModel
+         * @description One catalog model as one provider instance offers it.
+         */
+        CatalogProviderModel: {
+            /**
+             * Context Length
+             * @description The largest context window this instance serves.
+             */
+            context_length?: number | null;
+            /**
+             * Id
+             * @description The catalog id, the one `GET /catalog/models/{id}` takes.
+             */
+            id: string;
+            /**
+             * Input Price
+             * @description This instance's input rate for the caller, in USD per million of `price_unit`, as the catalog's `min_input_price_per_million` is. The cheapest where the instance offers the model more than once.
+             */
+            input_price?: number | null;
+            /** Name */
+            name: string;
+            /**
+             * Output Price
+             * @description This instance's output rate for the caller, in the same unit as `input_price`.
+             */
+            output_price?: number | null;
+            /**
+             * Price Unit
+             * @description What the prices are per. Null where nothing on this instance prices the model.
+             */
+            price_unit?: ("token" | "request" | "image" | "character" | "megapixel" | "second" | "minute" | "web_search") | null;
+            /** Vendor */
+            vendor: string | null;
+        };
+        /**
+         * CatalogProviderSummary
+         * @description One provider instance offering at least one model the caller may see.
+         */
+        CatalogProviderSummary: {
+            /**
+             * Display Name
+             * @description models.dev's name for the implementation, with the instance name after it where the two differ; the instance name where models.dev does not know it.
+             */
+            display_name: string;
+            /**
+             * Model Count
+             * @description Catalog models the caller may see that this instance offers.
+             */
+            model_count: number;
+            /**
+             * Name
+             * @description The instance name a selector starts with, such as `fireworks` or `openai-eu`.
+             */
+            name: string;
+            /**
+             * Privacy Url
+             * @description The provider's privacy policy; null where none is set.
+             */
+            privacy_url?: string | null;
+            /**
+             * Provider
+             * @description The any-llm implementation behind the instance.
+             */
+            provider: string;
+            /**
+             * Terms Url
+             * @description The provider's terms of service; null where none is set.
+             */
+            terms_url?: string | null;
+        };
+        /** CatalogProvidersResponse */
+        CatalogProvidersResponse: {
+            /**
+             * Count
+             * @description Providers the caller may see, before paging.
+             */
+            count: number;
+            /**
+             * Providers
+             * @description The requested page, sorted by display name.
+             */
+            providers: components["schemas"]["CatalogProviderSummary"][];
+        };
+        /**
          * CatalogResponse
          * @description The grouped catalog, and the facts a reader needs to interpret its prices.
          */
@@ -14521,6 +14692,9 @@ export interface components {
          *     ``provider_supported_countries``; null serves every country.
          *     ``zero_data_retention`` declares that the upstream keeps no prompt or
          *     completion data; the catalog shows it and nothing enforces it.
+         *     ``terms_url`` and ``privacy_url`` link the upstream's own terms of service
+         *     and privacy policy from the public Providers pages: absolute http(s)
+         *     addresses with no username or password.
          * @example {
          *       "api_key": "<your OpenAI API key>",
          *       "provider": "openai"
@@ -14542,6 +14716,8 @@ export interface components {
             enabled: boolean;
             /** Name */
             name?: string | null;
+            /** Privacy Url */
+            privacy_url?: string | null;
             /** Provider */
             provider: string;
             /** Restricted To Organization Id */
@@ -14553,6 +14729,8 @@ export interface components {
             serves_unlisted_models: boolean;
             /** Supported Countries */
             supported_countries?: string[] | null;
+            /** Terms Url */
+            terms_url?: string | null;
             /**
              * Zero Data Retention
              * @default false
@@ -14581,7 +14759,8 @@ export interface components {
          *     ``serves_unlisted_models`` is true for one that serves a model its roster
          *     does not list. ``supported_countries`` is null for one that serves every
          *     country. ``zero_data_retention`` is the operator's declaration that the
-         *     upstream keeps no prompt or completion data.
+         *     upstream keeps no prompt or completion data. ``terms_url`` and
+         *     ``privacy_url`` are the upstream's policies, null where none is linked.
          */
         HostedProviderPublic: {
             /** Api Base */
@@ -14610,6 +14789,8 @@ export interface components {
             id?: string | null;
             /** Name */
             name: string;
+            /** Privacy Url */
+            privacy_url?: string | null;
             /** Provider */
             provider: string;
             /** Restricted To Organization Id */
@@ -14632,6 +14813,8 @@ export interface components {
             source: "database" | "config";
             /** Supported Countries */
             supported_countries?: string[] | null;
+            /** Terms Url */
+            terms_url?: string | null;
             /** Updated At */
             updated_at?: string | null;
             /**
@@ -14703,7 +14886,8 @@ export interface components {
          *     null clears it, and an entry echoed back as the mask keeps the stored value.
          *     ``restricted_to_organization_id`` reads the same way: omitted keeps the
          *     restriction, null lifts it, and so does ``supported_countries``, where an
-         *     empty list closes the provider to every country.
+         *     empty list closes the provider to every country. ``terms_url`` and
+         *     ``privacy_url`` omitted are left alone; null or an empty string removes the link.
          * @example {
          *       "enabled": false
          *     }
@@ -14719,12 +14903,16 @@ export interface components {
             } | null;
             /** Enabled */
             enabled?: boolean | null;
+            /** Privacy Url */
+            privacy_url?: string | null;
             /** Restricted To Organization Id */
             restricted_to_organization_id?: string | null;
             /** Serves Unlisted Models */
             serves_unlisted_models?: boolean | null;
             /** Supported Countries */
             supported_countries?: string[] | null;
+            /** Terms Url */
+            terms_url?: string | null;
             /** Zero Data Retention */
             zero_data_retention?: boolean | null;
         };
@@ -26201,6 +26389,80 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CatalogModelDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "catalog-list_catalog_providers": {
+        parameters: {
+            query?: {
+                /** @description For a signed-in caller, only the providers a request billed to this workspace may call. */
+                workspace_id?: string | null;
+                /** @description Number of providers to skip. */
+                skip?: number;
+                /** @description Maximum number of providers to return. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProvidersResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "catalog-get_catalog_provider": {
+        parameters: {
+            query?: {
+                /** @description For a signed-in caller, only the models a request billed to this workspace may call. */
+                workspace_id?: string | null;
+                /** @description Number of the provider's models to skip. */
+                skip?: number;
+                /** @description Maximum number of the provider's models to return. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProviderDetail"];
                 };
             };
             /** @description Validation Error */

@@ -31,6 +31,8 @@ import {
 } from "@/shared/api/hostedProviders"
 import { useProviderDetail } from "@/shared/api/providers"
 
+import { PolicyUrlFields } from "./PolicyUrlFields"
+import { policyUrlError, policyUrlValue } from "./policyUrls"
 import { ServesUnlistedModelsField } from "./ServesUnlistedModelsField"
 import { SupportedCountriesField } from "./SupportedCountriesField"
 import { parseCountries } from "./supportedCountries"
@@ -58,6 +60,8 @@ interface ProviderDraft {
   servesUnlistedModels: boolean
   supportedCountries: string
   zeroDataRetention: boolean
+  termsUrl: string
+  privacyUrl: string
 }
 
 const EMPTY_DRAFT: ProviderDraft = {
@@ -70,6 +74,8 @@ const EMPTY_DRAFT: ProviderDraft = {
   servesUnlistedModels: false,
   supportedCountries: "",
   zeroDataRetention: false,
+  termsUrl: "",
+  privacyUrl: "",
 }
 
 export function AddHostedProviderForm({
@@ -107,6 +113,8 @@ export function AddHostedProviderForm({
     (!needsKey || draft.apiKey !== "") &&
     parsedClientArgs.ok &&
     countries.ok &&
+    policyUrlError(draft.termsUrl) === undefined &&
+    policyUrlError(draft.privacyUrl) === undefined &&
     Object.keys(credentialErrors).length === 0
 
   // One body for the save and the test, so the test tries what would be saved.
@@ -143,6 +151,13 @@ export function AddHostedProviderForm({
         ...(countries.value === null
           ? {}
           : { supported_countries: countries.value }),
+        // Left out when blank, which the API stores as no link.
+        ...(policyUrlValue(draft.termsUrl) === null
+          ? {}
+          : { terms_url: policyUrlValue(draft.termsUrl) }),
+        ...(policyUrlValue(draft.privacyUrl) === null
+          ? {}
+          : { privacy_url: policyUrlValue(draft.privacyUrl) }),
       },
       { onSuccess: onClose },
     )
@@ -240,6 +255,12 @@ export function AddHostedProviderForm({
         onChange={(supportedCountries) =>
           setDraft({ ...draft, supportedCountries })
         }
+      />
+      <PolicyUrlFields
+        termsUrl={draft.termsUrl}
+        privacyUrl={draft.privacyUrl}
+        onTermsUrlChange={(termsUrl) => setDraft({ ...draft, termsUrl })}
+        onPrivacyUrlChange={(privacyUrl) => setDraft({ ...draft, privacyUrl })}
       />
       <ProviderCredentialFields
         provider={draft.provider}

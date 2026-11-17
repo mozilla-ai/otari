@@ -21,6 +21,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from gateway.core.addresses import normalized_address
 from gateway.core.env import otari_env
+from gateway.core.link_urls import normalize_link_url
 from gateway.core.settings.api_keys import ApiKeySettings
 from gateway.core.settings.budgets import BudgetSettings
 from gateway.core.settings.feedback import FeedbackSettings
@@ -2301,18 +2302,7 @@ class GatewayConfig(
         so a credential written into any of these would reach every browser that
         asked, which no redaction in the operator-gated config viewer would cover.
         """
-        normalized = (value or "").strip()
-        if not normalized:
-            return None
-        parsed = urlsplit(normalized)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            msg = f"{info.field_name} must be an absolute http(s) URL, got '{value}'"
-            raise ValueError(msg)
-        if parsed.username is not None or parsed.password is not None:
-            # The value is left out of the message: the offending part of it is the credential.
-            msg = f"{info.field_name} must carry no username or password"
-            raise ValueError(msg)
-        return normalized
+        return normalize_link_url(value, info.field_name or "link")
 
     @field_validator("models_dev_base_url")
     @classmethod
