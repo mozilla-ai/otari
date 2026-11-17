@@ -126,7 +126,8 @@ test.describe("dashboard core flows", () => {
 
     // Routing and Tools nest their pages, so each is reached through its group.
     await openNested(page, "Routing", "Policies")
-    await expect(pageHeading(page, "Routing")).toBeVisible()
+    // Routing is a tab of Rules, which titles the page.
+    await expect(pageHeading(page, "Rules")).toBeVisible()
     await openNested(page, "Tools", "Web search")
     await expect(pageHeading(page, "Web search")).toBeVisible()
     // The one Tools child that is not a filtered view of the page above, so

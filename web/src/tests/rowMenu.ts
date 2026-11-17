@@ -3,11 +3,11 @@ import type { UserEvent } from "@testing-library/user-event"
 import { expect } from "vitest"
 
 /**
- * A table row's actions live behind its three-dot trigger (`RowActionRow`),
- * named "Row actions", plus the reasons of any refused item. These open those
- * menus the way a person does.
+ * A table row's actions live behind its three-dot trigger, named "Row
+ * actions" (`RowActionRow`) or "Actions for …" (`RowMenu`), plus the reasons
+ * of any refused item. These open those menus the way a person does.
  */
-const TRIGGER = /^Row actions/
+const TRIGGER = /^(Row actions|Actions for )/
 
 /** The three-dot triggers inside `scope`, one per row. */
 export function rowMenuTriggers(scope: HTMLElement = document.body) {

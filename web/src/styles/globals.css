@@ -3365,3 +3365,185 @@ body {
     }
   }
 }
+
+/*
+ * Rules, as the Sessions table reads (`.otari-sessions-table` above): one-line rows, 28px on a desk and 44px below it, the rule
+ * held while the measures scroll. The lanes are fixed and the rule's name
+ * takes what is left, so a long name ends in an ellipsis instead of pushing
+ * the figures off the row.
+ */
+.otari-rules-table .otari-table.table-root {
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+/* Each view's lanes plus 14rem for the name, which a narrower table would
+   squeeze to nothing: the frame scrolls instead. */
+.otari-rules-table .table__content {
+  table-layout: fixed;
+  width: 100%;
+  min-width: 69.5rem; /* All: 55.5rem of lanes */
+}
+.otari-rules-table:is(.is-spend, .is-access, .is-data) .table__content {
+  min-width: 64.5rem; /* 50.5rem */
+}
+.otari-rules-table.is-people .table__content {
+  min-width: 36rem;
+}
+.otari-rules-table.is-member .table__content {
+  min-width: 67.5rem; /* All: 53.5rem */
+}
+.otari-rules-table.is-member.is-spend .table__content {
+  min-width: 62.5rem; /* 48.5rem */
+}
+.otari-rules-table.is-member.is-access .table__content {
+  min-width: 70.5rem; /* 56.5rem */
+}
+.otari-rules-table .table__row .table__cell {
+  height: 2.75rem;
+  padding-block: 0;
+}
+.otari-rules-table .table__column,
+.otari-rules-table .table__cell[data-column] {
+  white-space: nowrap;
+  overflow: hidden;
+}
+/* Each lane is its widest content plus the cell's padding: "$40.00 each,
+   a month" is 166px, the Enforce chip 59px. */
+.otari-rules-table .table__column[data-key="type"] {
+  width: 5rem;
+}
+.otari-rules-table .table__column[data-key="mode"] {
+  width: 6rem;
+}
+.otari-rules-table .table__column[data-key="scope"] {
+  width: 15rem;
+}
+.otari-rules-table .table__column[data-key="limit"] {
+  width: 12.5rem;
+}
+.otari-rules-table .table__column[data-key="spent"] {
+  width: 5.5rem;
+}
+.otari-rules-table .table__column[data-key="used"] {
+  width: 8.5rem;
+}
+.otari-rules-table .table__column[data-key="models"] {
+  width: 14rem;
+}
+.otari-rules-table .table__column[data-key="tools"] {
+  width: 11rem;
+}
+.otari-rules-table .table__column[data-key="actions"] {
+  width: 3rem;
+}
+.otari-rules-table.is-data .table__column[data-key="scope"] {
+  width: 40rem;
+}
+/* A member's list has no spend lanes, so its words get the room. */
+.otari-rules-table.is-member .table__column[data-key="scope"] {
+  width: 22.5rem;
+}
+.otari-rules-table.is-member .table__column[data-key="limit"] {
+  width: 17rem;
+}
+/* The people under one rule: a name, then two or three figures. */
+.otari-rules-table.is-people .table__column[data-key="spent"],
+.otari-rules-table.is-people .table__column[data-key="limit"] {
+  width: 11rem;
+}
+.otari-rules-table.is-people .table__column[data-key="used"] {
+  width: 12.5rem;
+}
+.otari-rules-table.is-people .table__column[data-key="team"] {
+  width: 12.5rem;
+}
+@media (min-width: 48rem) {
+  .otari-rules-table .table__row .table__cell {
+    height: 1.75rem;
+  }
+  .otari-rules-table .table__column[data-key="name"],
+  .otari-rules-table .table__cell[data-column="name"] {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background-color: var(--color-background);
+  }
+  .otari-rules-table[data-scrolled="true"] .table__column[data-key="name"],
+  .otari-rules-table[data-scrolled="true"] .table__cell[data-column="name"] {
+    border-right: 1px solid var(--color-control-border);
+  }
+}
+/* The row menu's trigger, inside the 28px row on a desk with a pointer: the
+   row's 28px include its 1px divider, so 26px is what fits without growing
+   it. A touch screen keeps the 44px target and the row grows to it. */
+@media (min-width: 48rem) and (pointer: fine) {
+  .otari-rules-table .otari-row-menu-trigger {
+    width: 1.625rem;
+    height: 1.625rem;
+  }
+}
+
+/* On a phone the page's one action stays beside the title. */
+@media (max-width: 39.99rem) {
+  .otari-rules-intro > header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 1rem;
+  }
+  .otari-rules-intro > header > div:first-child {
+    display: contents;
+  }
+  .otari-rules-intro > header > div:last-child:not(:first-child) {
+    grid-row: 1;
+    grid-column: 2;
+  }
+}
+/* One rule's action can be long ("Change the limit for everyone in
+   Platform"), so below md it goes under the title, as PageIntro places an
+   action on a phone, rather than squeezing the title beside it. */
+@media (max-width: 47.99rem) {
+  .otari-rules-intro.is-stacked > header {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .otari-rules-intro.is-stacked > header > div:first-child {
+    display: block;
+  }
+}
+
+/* New rule, "Applies to". The search icon sits inside the field, so the text
+   starts after it; the field's inline padding is set unlayered in otari's
+   globals.css, which a utility at the call site would lose to. */
+.otari-rule-target .input {
+  padding-inline-start: 2.25rem;
+}
+/* The list is the field's width, so a row with a long name and a limit cuts
+   the name short instead of widening the list past the field on a phone. */
+.otari-rule-target__list {
+  width: var(--trigger-width);
+  max-width: var(--trigger-width);
+}
+/* Everyone has no list to search, so its sentence holds the field's height. */
+.otari-rule-everyone {
+  min-height: var(--field-height);
+}
+/* Where the dialog is a sheet, four kinds side by side would scroll, so they
+   stand two by two at the touch height the track already has. */
+@media (width <= 639px) {
+  .otari-rule-kinds [role="radiogroup"] {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+  }
+  .otari-rule-kinds [role="radiogroup"] > label {
+    justify-content: center;
+  }
+  .otari-rule-kinds [role="radiogroup"] > label:nth-child(odd) {
+    border-left-width: 0;
+  }
+  .otari-rule-kinds [role="radiogroup"] > label:nth-child(n + 3) {
+    border-top: 1px solid var(--color-control-border);
+  }
+}

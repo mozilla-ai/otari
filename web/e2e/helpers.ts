@@ -121,7 +121,7 @@ export async function openNested(
 }
 
 /**
- * A table row's actions are one three-dot menu (`RowActionRow`). Opens the
+ * A table row's actions are one three-dot menu (`RowActionRow` or `RowMenu`). Opens the
  * menu inside `scope` (a row, or anything holding several rows) that has an
  * item named `name`, and returns that item, left open. Names match the way
  * Playwright matches any name: a case-insensitive substring unless `exact`.
@@ -134,7 +134,10 @@ export async function rowMenuItem(
   options: { exact?: boolean } = {},
 ): Promise<Locator> {
   const page = scope.page()
-  const triggers = scope.getByRole("button", { name: /^Row actions/ })
+  // `RowActionRow`'s trigger, or `RowMenu`'s, which names its row.
+  const triggers = scope.getByRole("button", {
+    name: /^(Row actions|Actions for )/,
+  })
   await triggers.first().waitFor()
   const count = await triggers.count()
   for (let index = 0; index < count; index++) {

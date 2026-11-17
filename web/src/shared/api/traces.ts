@@ -381,3 +381,103 @@ export function useBreakGlassLog() {
     staleTime: 30_000,
   })
 }
+
+const SINCE_PAGE = 100
+/** Past this many sessions the read stops and says it is incomplete. */
+const SINCE_MOST = 2_000
+
+/**
+ * The organization's sessions surface, whoever asks. The caller-derived
+ * `/traces` is the whole deployment for its operator, every tenant's sessions
+ * paged through to count one organization's.
+ */
+const ORGANIZATION_TRACES = "/organizations/me/traces"
+
+/**
+ * Every session active at or after `start`. Nothing counts sessions per
+ * person, so People counts from the rows themselves. The list carries no
+ * total, so the count is read beside the first page, and every page after it
+ * at once.
+ *
+ * The list can only be ordered by what changes while it is read (a session's
+ * last activity, its latency, tokens, cost or errors), so a session that moves
+ * between two page reads is on both pages or on neither. Rows are kept by
+ * session, so a repeat counts once, and the first page is read again at the
+ * end: a session touched mid-read has moved to the front of it.
+ */
+export function useSessionsSince(
+  start: string,
+  workspaceId?: string,
+  isEnabled = true,
+) {
+  const scope: Record<string, string> = workspaceId
+    ? { workspace_id: workspaceId }
+    : {}
+  return useQuery({
+    queryKey: [TRACES, "since", ORGANIZATION_TRACES, start, workspaceId ?? ""],
+    queryFn: async () => {
+      const page = (skip: number) =>
+        apiFetch<TraceList>(
+          `${ORGANIZATION_TRACES}?${new URLSearchParams({
+            start,
+            skip: String(skip),
+            limit: String(SINCE_PAGE),
+            sort: "last_activity",
+            order: "desc",
+            ...scope,
+          })}`,
+        )
+      const [{ count }, first] = await Promise.all([
+        apiFetch<TraceCount>(
+          `${ORGANIZATION_TRACES}/count?${new URLSearchParams({ start, ...scope })}`,
+        ),
+        page(0),
+      ])
+      const rest: Promise<TraceList>[] = []
+      for (
+        let skip = SINCE_PAGE;
+        skip < Math.min(count, SINCE_MOST);
+        skip += SINCE_PAGE
+      ) {
+        rest.push(page(skip))
+      }
+      const pages = [first, ...(await Promise.all(rest))]
+      if (pages.length > 1) pages.push(await page(0))
+      const sessions = new Map<string, TraceSummary>()
+      for (const one of pages) {
+        for (const session of one.items) {
+          sessions.set(session.trace_id, session)
+        }
+      }
+      return {
+        sessions: [...sessions.values()],
+        isComplete: count <= SINCE_MOST,
+      }
+    },
+    enabled: isEnabled,
+    staleTime: 30_000,
+  })
+}
+
+/**
+ * How many sessions one person has had active at or after `start`: one count,
+ * where the list would be read page by page to find it.
+ */
+export function useSessionCountSince(
+  start: string,
+  userId: string | null | undefined,
+  isEnabled = true,
+) {
+  return useQuery({
+    queryKey: [TRACES, "count-since", ORGANIZATION_TRACES, start, userId ?? ""],
+    queryFn: () =>
+      apiFetch<TraceCount>(
+        `${ORGANIZATION_TRACES}/count?${new URLSearchParams({
+          start,
+          user_id: userId ?? "",
+        })}`,
+      ),
+    enabled: isEnabled && Boolean(userId),
+    staleTime: 30_000,
+  })
+}

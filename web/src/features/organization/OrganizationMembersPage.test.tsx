@@ -342,7 +342,7 @@ describe("OrganizationMembersPage", () => {
     await user.keyboard("{Escape}")
     expect(
       within(owner).getByRole("button", {
-        name: /^Row actions.*This is the last active owner/,
+        name: /^Actions for .*This is the last active owner/,
       }),
     ).toBeInTheDocument()
     expect(within(owner).getByText("ACTIVE")).toBeInTheDocument()
@@ -354,7 +354,7 @@ describe("OrganizationMembersPage", () => {
     renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
-    await pressRowAction(user, "Remove…", rowFor("Analyst"))
+    await pressRowAction(user, /^Remove…/, rowFor("Analyst"))
     expect(
       screen.getByText(/suspended rather than\s+deleted/),
     ).toBeInTheDocument()
@@ -579,7 +579,7 @@ describe("OrganizationMembersPage", () => {
     await user.keyboard("{Escape}")
     expect(
       within(analyst).getByRole("button", {
-        name: /^Row actions.*Only organization owners and admins/,
+        name: /^Actions for .*Only organization owners and admins/,
       }),
     ).toBeInTheDocument()
     expect(
@@ -919,7 +919,7 @@ describe("OrganizationMembersPage", () => {
     await screen.findByText("pending@example.com")
     const row = rowFor("pending@example.com")
     expect(await findRowMenuItem(user, /^Remove/, row)).toBeNull()
-    await pressRowAction(user, "Revoke", row)
+    await pressRowAction(user, /^Revoke invitation…/, row)
     await user.click(screen.getByRole("button", { name: "Revoke invitation" }))
 
     const revoke = requests.find((request) => request.method === "DELETE")
@@ -945,11 +945,7 @@ describe("OrganizationMembersPage", () => {
     await screen.findByText("pending@example.com")
     const row = rowFor("pending@example.com")
     expect(within(row).getByText("INVITED")).toBeInTheDocument()
-    await pressRowAction(
-      user,
-      "Reissue the invitation to pending@example.com",
-      row,
-    )
+    await pressRowAction(user, /^Reissue invitation/, row)
 
     const reissue = requests.find((request) => request.method === "POST")
     expect(reissue?.url).toContain(
@@ -984,17 +980,12 @@ describe("OrganizationMembersPage", () => {
     await screen.findByText("late@example.com")
     const row = rowFor("late@example.com")
     expect(within(row).getByText("INVITE EXPIRED")).toBeInTheDocument()
-    expect(await getRowMenuItem(user, "Revoke", row)).not.toHaveAttribute(
-      "aria-disabled",
-      "true",
-    )
+    expect(
+      await getRowMenuItem(user, /^Revoke invitation…/, row),
+    ).not.toHaveAttribute("aria-disabled", "true")
     await user.keyboard("{Escape}")
     expect(
-      await getRowMenuItem(
-        user,
-        "Reissue the invitation to late@example.com",
-        row,
-      ),
+      await getRowMenuItem(user, /^Reissue invitation/, row),
     ).not.toHaveAttribute("aria-disabled", "true")
     await user.keyboard("{Escape}")
     expect(await findRowMenuItem(user, /^Edit/, row)).toBeNull()
@@ -1252,7 +1243,7 @@ describe("OrganizationMembersPage", () => {
     await screen.findByText("Pending")
     const row = rowFor("Pending")
     expect(within(row).queryByText("All models")).not.toBeInTheDocument()
-    expect(await findRowMenuItem(user, "Block", row)).toBeNull()
+    expect(await findRowMenuItem(user, /^Block/, row)).toBeNull()
   })
 
   it("blocks a member through their spend row, not their membership", async () => {
@@ -1273,7 +1264,7 @@ describe("OrganizationMembersPage", () => {
     await screen.findByText("Analyst")
     // Block lives in the Actions column but reads the spend row, so like the
     // two operator-only columns it arrives with the organization context.
-    await pressRowAction(actor, "Block", rowFor("Analyst"))
+    await pressRowAction(actor, /^Block/, rowFor("Analyst"))
 
     const patch = requests.find(
       (r) => r.method === "PATCH" && r.url.includes(`${API_ROOT}/users/`),
@@ -1287,7 +1278,7 @@ describe("OrganizationMembersPage", () => {
     renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
-    await pressRowAction(actor, "Edit…", rowFor("Analyst"))
+    await pressRowAction(actor, /^Edit…/, rowFor("Analyst"))
 
     // A dialog rather than a band above the roster: the row keeps its place,
     // and the page under it does not shift by the height of a form
@@ -1337,7 +1328,7 @@ describe("OrganizationMembersPage", () => {
 
     await screen.findByText("Analyst")
     const row = rowFor("Analyst")
-    await pressRowAction(actor, "Edit…", row)
+    await pressRowAction(actor, /^Edit…/, row)
     await screen.findByText("Workspace access")
 
     // Already in Default Workspace on the Small budget; move to Large and join
@@ -1417,7 +1408,7 @@ describe("OrganizationMembersPage", () => {
     renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
-    await pressRowAction(actor, "Edit…", rowFor("Analyst"))
+    await pressRowAction(actor, /^Edit…/, rowFor("Analyst"))
     await screen.findByText("Workspace access")
     await pickOption(actor, "Budget in Default Workspace", "Large")
     await actor.click(screen.getByRole("button", { name: "Save" }))
@@ -1560,7 +1551,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
-    await pressRowAction(actor, "Edit…", rowFor("Analyst"))
+    await pressRowAction(actor, /^Edit…/, rowFor("Analyst"))
     await screen.findByText("Workspace access")
     await pickOption(actor, "Budget in Default Workspace", "Team cap")
     await actor.click(screen.getByRole("button", { name: "Save" }))
@@ -1613,7 +1604,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
-    await pressRowAction(actor, "Edit…", rowFor("Analyst"))
+    await pressRowAction(actor, /^Edit…/, rowFor("Analyst"))
     await screen.findByText("Workspace access")
     expect(selectTrigger("Budget in Default Workspace")).toHaveTextContent(
       "Set by the deployment",
@@ -1634,7 +1625,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
-    await pressRowAction(actor, "Edit…", rowFor("Analyst"))
+    await pressRowAction(actor, /^Edit…/, rowFor("Analyst"))
     await screen.findByText("Workspace access")
 
     expect(screen.queryByText(/Model access/)).not.toBeInTheDocument()
@@ -1652,7 +1643,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
-    await pressRowAction(actor, "Edit…", rowFor("Analyst"))
+    await pressRowAction(actor, /^Edit…/, rowFor("Analyst"))
     await screen.findByText("Workspace access")
 
     expect(screen.getByText(/Model access/)).toBeInTheDocument()
@@ -1672,7 +1663,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
-    await pressRowAction(actor, "Edit…", rowFor("Analyst"))
+    await pressRowAction(actor, /^Edit…/, rowFor("Analyst"))
     await screen.findByText("Workspace access")
 
     await actor.click(screen.getByRole("button", { name: "No tool" }))

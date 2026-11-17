@@ -25,15 +25,12 @@ afterEach(() => {
 })
 
 /**
- * The page's own create action, scoped to the heading's header: once the
- * dialog is open its submit says "Create policy" too.
+ * The page's own create action, the first of its name: it leads the view,
+ * above the empty state's, and once the dialog is open its submit says
+ * "Create policy" too.
  */
-const createTrigger = async () => {
-  const heading = await screen.findByRole("heading", { name: "Routing" })
-  const header = heading.closest("header")
-  if (!header) throw new Error("PageIntro's header is gone")
-  return within(header).findByRole("button", { name: "Create policy" })
-}
+const createTrigger = async () =>
+  (await screen.findAllByRole("button", { name: "Create policy" }))[0]
 
 type TestUser = ReturnType<typeof userEvent.setup>
 

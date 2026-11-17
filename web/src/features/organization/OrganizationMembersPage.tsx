@@ -1,8 +1,11 @@
 import { Button } from "@heroui/react"
+import { useNavigate } from "@tanstack/react-router"
 import { useMemo, useState } from "react"
 import {
   FiCheckCircle,
+  FiDollarSign,
   FiEdit2,
+  FiLayers,
   FiSend,
   FiSlash,
   FiUserMinus,
@@ -24,7 +27,7 @@ import type {
   WorkspaceMemberRole,
 } from "@/client"
 import { CopyableValue } from "@/design-system/actions/CopyField"
-import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
+import { RowMenu } from "@/design-system/actions/RowMenu"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { TablePagination } from "@/design-system/data/TablePagination"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
@@ -48,8 +51,16 @@ import {
   accessLabel,
   ModelScopeControl,
 } from "@/features/models/ModelScopeControl"
+import { limitDialogCopy } from "@/features/spend/limitCopy"
+import {
+  type LimitTarget,
+  limitLine,
+  limitsOnPerson,
+} from "@/features/spend/limits"
+import { SetLimitDialog } from "@/features/spend/SetLimitDialog"
 import { ToolScopeControl } from "@/features/tools/ToolScopeControl"
 import {
+  useAllSpendCeilings,
   useBudgets,
   useMemberCeilingWriter,
   useOrganizationBudgets,
@@ -765,8 +776,8 @@ function MemberEditor({
       {!isOperator ? null : spendRow ? (
         <>
           <ModelScopeControl
-            title="Model access (default for this member's keys)"
-            description="The models this member's keys may list and call by default. A key can narrow this, but never exceed it."
+            title="Model access (default for this member’s keys)"
+            description="The models this member’s keys may list and call by default. A key can narrow this, but never exceed it."
             initial={spendRow.allowed_models ?? undefined}
             onChange={(value, isValid) => {
               setAllowedModels(value)
@@ -774,8 +785,8 @@ function MemberEditor({
             }}
           />
           <ToolScopeControl
-            title="Tool access (default for this member's keys)"
-            description="The search and fetch tools this member's keys may run on /v1/search and /v1/fetch by default. Left on its default, a key follows its own model access, or the member's when it has none: unrestricted runs every tool, restricted only a search tool named there as provider:tool (deprecated). A key can narrow this, but never exceed it."
+            title="Tool access (default for this member’s keys)"
+            description="The search and fetch tools this member’s keys may run on /v1/search and /v1/fetch by default. Left on its default, a key follows its own model access, or the member’s when it has none: unrestricted runs every tool, restricted only a search tool named there as provider:tool (deprecated). A key can narrow this, but never exceed it."
             inheritLabel="Default"
             initial={spendRow.allowed_tools ?? undefined}
             onChange={(value, isValid) => {
@@ -894,6 +905,9 @@ export function OrganizationMembersPage() {
 
   const [editingMember, setEditingMember] = useState<string>()
   const [removing, setRemoving] = useState<OrganizationMember>()
+  // A person's spend limit is set from their row's menu.
+  const [limiting, setLimiting] = useState<LimitTarget>()
+  const navigate = useNavigate()
   const [revoking, setRevoking] = useState<OrganizationMember>()
   const [joining, setJoining] = useState(false)
   const [joinCount, setJoinCount] = useState(0)
@@ -960,6 +974,21 @@ export function OrganizationMembersPage() {
   )
   const editingRow = editing.held
 
+  // The limits a row's menu reads and changes, every one rather than a page
+  // of them. Owners and admins only: anyone else is refused the read, so it
+  // is not made.
+  const ceilings = useAllSpendCeilings(manages)
+  const ceilingList = useMemo(
+    () => (manages ? (ceilings.data ?? []) : []),
+    [manages, ceilings.data],
+  )
+  // Until the limits are read, nobody is offered a limit they may already
+  // have.
+  const ceilingsUnread = ceilings.data
+    ? null
+    : ceilings.isError
+      ? "Could not read"
+      : "Loading…"
   const columns = useMemo<DataTableColumn<OrganizationMember>[]>(() => {
     // Annotated here rather than inferred through the filter below, which would
     // otherwise widen every cell callback's parameter to `any`.
@@ -1117,7 +1146,8 @@ export function OrganizationMembersPage() {
       },
       {
         id: "actions",
-        header: "Actions",
+        // The menu names its row, so the header is for screen readers.
+        header: <span className="sr-only">Actions</span>,
         align: "end",
         cell: (member) => {
           const blocked = membershipChangeBlockedReason({
@@ -1132,71 +1162,125 @@ export function OrganizationMembersPage() {
           if (member.status === "invited" && member.invitation_id) {
             const invitationId = member.invitation_id
             return (
-              <RowActionRow>
-                <RowAction
-                  icon={FiSend}
-                  label="Reissue"
-                  ariaLabel={`Reissue the invitation to ${memberLabel(member)}`}
-                  isDisabled={!manages || reissue.isPending}
-                  onPress={() =>
-                    reissue.mutate(invitationId, { onSuccess: setReissued })
-                  }
-                />
-                <RowAction
-                  icon={FiXCircle}
-                  label="Revoke"
-                  isDestructive
-                  isDisabled={!manages}
-                  onPress={() => setRevoking(member)}
-                />
-              </RowActionRow>
+              <RowMenu
+                label={`Actions for ${memberLabel(member)}`}
+                actions={[
+                  {
+                    id: "reissue",
+                    label: "Reissue invitation",
+                    hint: "Sends a new link; the old one stops working",
+                    icon: FiSend,
+                    isDisabled: !manages || reissue.isPending,
+                    run: () =>
+                      reissue.mutate(invitationId, { onSuccess: setReissued }),
+                  },
+                  {
+                    id: "revoke",
+                    label: "Revoke invitation…",
+                    hint: "Withdraws the link before it is used",
+                    icon: FiXCircle,
+                    isDisabled: !manages,
+                    isDestructive: true,
+                    run: () => setRevoking(member),
+                  },
+                ]}
+              />
             )
           }
           // Blocking stops this person's keys from making requests without
           // touching their membership or their spend history, which is a
           // different act from removing them from the organization. It writes
           // the gateway's `users` row, so a member with no attribution row has
-          // nothing to block and the control is absent rather than disabled.
+          // nothing to block and the action is absent rather than disabled.
           const spendRow = member.attribution ?? undefined
+          const sessionsUser = member.attribution_user_id ?? member.user_id
+          const memberId = member.organization_member_id
+          const ownLimit = limitsOnPerson(ceilingList, member).own
           return (
-            <RowActionRow>
-              {manages ? (
-                <RowAction
-                  icon={FiEdit2}
-                  label="Edit…"
-                  onPress={() => setEditingMember(memberRowKey(member))}
-                />
-              ) : null}
-              {manages && spendRow ? (
-                <RowAction
-                  icon={spendRow.blocked ? FiCheckCircle : FiSlash}
-                  label={spendRow.blocked ? "Unblock" : "Block"}
-                  isDisabled={updateUser.isPending}
-                  onPress={() =>
-                    updateUser.mutate({
-                      id: member.attribution_user_id ?? "",
-                      body: { blocked: !spendRow.blocked },
-                    })
-                  }
-                />
-              ) : null}
-              <RowAction
-                icon={FiUserMinus}
-                label="Remove…"
-                isDestructive
-                // See the Role cell: the reason has to be in the name, not only
-                // in the tooltip, to reach anything but a pointer. `RowAction`
-                // puts the same name on a `title` while the action is refused,
-                // which is how the pointer gets it without a wrapper here.
-                ariaLabel={
-                  blocked
-                    ? `Remove ${memberLabel(member)} (${blocked})`
-                    : undefined
-                }
-                isDisabled={Boolean(blocked)}
-                onPress={() => setRemoving(member)}
-              />
-            </RowActionRow>
+            <RowMenu
+              label={`Actions for ${memberLabel(member)}`}
+              actions={[
+                ...(manages
+                  ? [
+                      {
+                        id: "edit",
+                        label: "Edit…",
+                        hint: "Their role and the models they may call",
+                        icon: FiEdit2,
+                        run: () => setEditingMember(memberRowKey(member)),
+                      },
+                    ]
+                  : []),
+                ...(manages && memberId
+                  ? [
+                      {
+                        id: "limit",
+                        label: ownLimit
+                          ? "Change spend limit…"
+                          : "Set spend limit…",
+                        hint:
+                          ceilingsUnread ??
+                          (ownLimit
+                            ? limitLine(ownLimit)
+                            : "What they may spend, across every workspace and key"),
+                        isDisabled: ceilingsUnread !== null,
+                        icon: FiDollarSign,
+                        run: () =>
+                          setLimiting({
+                            scope: "org_member",
+                            scopeId: memberId,
+                            name: memberLabel(member),
+                            own: ownLimit,
+                          }),
+                      },
+                    ]
+                  : []),
+                ...(sessionsUser
+                  ? [
+                      {
+                        id: "sessions",
+                        label: "See their sessions",
+                        hint: "Everything their agents ran, in Sessions",
+                        icon: FiLayers,
+                        run: () =>
+                          void navigate({
+                            to: "/sessions",
+                            search: { range: "30d", user_id: sessionsUser },
+                          }),
+                      },
+                    ]
+                  : []),
+                ...(manages && spendRow
+                  ? [
+                      {
+                        id: "block",
+                        label: spendRow.blocked ? "Unblock" : "Block",
+                        hint: spendRow.blocked
+                          ? "Their requests go through again"
+                          : "Their requests are refused until you unblock them",
+                        icon: spendRow.blocked ? FiCheckCircle : FiSlash,
+                        isDisabled: updateUser.isPending,
+                        run: () =>
+                          updateUser.mutate({
+                            id: member.attribution_user_id ?? "",
+                            body: { blocked: !spendRow.blocked },
+                          }),
+                      },
+                    ]
+                  : []),
+                {
+                  id: "remove",
+                  label: "Remove…",
+                  // The reason a removal is refused is the hint, so it reaches
+                  // everyone who opens the menu and not only a pointer.
+                  hint: blocked || "Takes them out of the organization",
+                  icon: FiUserMinus,
+                  isDisabled: Boolean(blocked),
+                  isDestructive: true,
+                  run: () => setRemoving(member),
+                },
+              ]}
+            />
           )
         },
       },
@@ -1216,6 +1300,9 @@ export function OrganizationMembersPage() {
     reissue.isPending,
     reissue.mutate,
     placementsByUser,
+    ceilingList,
+    ceilingsUnread,
+    navigate,
   ])
 
   return (
@@ -1356,6 +1443,14 @@ export function OrganizationMembersPage() {
         label="members"
       />
 
+      {limiting ? (
+        <SetLimitDialog
+          key={limiting.scopeId}
+          target={limiting}
+          {...limitDialogCopy(limiting)}
+          onClose={() => setLimiting(undefined)}
+        />
+      ) : null}
       <ConfirmDialog
         isOpen={removing !== undefined}
         onOpenChange={(open) => {

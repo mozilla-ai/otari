@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query"
+import { keepPreviousData, useQueries, useQuery } from "@tanstack/react-query"
 import type {
   InFlightResponse,
   SummaryDimension,
@@ -423,5 +423,102 @@ export function useUsageGroupedSeries(
     // the page falls back to the ungrouped view with a notice instead.
     retry: (failureCount, error) =>
       !(error instanceof ApiError && error.status === 404) && failureCount < 3,
+  })
+}
+
+/**
+ * Requests the gateway refused since `start`, by person. The gateway records
+ * its own refusals with the status it answered, and 403 is the one it gives an
+ * over-budget or blocked caller and a model outside a key's allow-list.
+ */
+export function useRefusalsSince(
+  start: string,
+  workspaceId?: string,
+  isEnabled = true,
+) {
+  const scope = useUsageScope("organization")
+  return useQuery({
+    queryKey: [USAGE, "refusals", scope.base, start, workspaceId ?? ""],
+    queryFn: () =>
+      apiFetch<UsageSummary>(
+        `${scope.base}/summary?${new URLSearchParams({
+          start_date: start,
+          status_code: "403",
+          bucket: "day",
+          dimensions: "user",
+          ...(workspaceId ? { workspace_id: workspaceId } : {}),
+        })}`,
+      ),
+    enabled: scope.isReady && isEnabled,
+    staleTime: 30_000,
+  })
+}
+
+/**
+ * Each workspace's spend since `start`, by model. The summary has no workspace
+ * breakdown, so this asks once per workspace: a handful, read in parallel.
+ */
+export function useWorkspaceSpendSummaries(
+  workspaceIds: readonly string[],
+  start: string,
+  isEnabled: boolean,
+) {
+  const scope = useUsageScope("organization")
+  return useQueries({
+    queries: workspaceIds.map((workspaceId) => ({
+      queryKey: [
+        USAGE,
+        "workspace-spend",
+        scope.base,
+        workspaceId,
+        start,
+        "model",
+      ],
+      queryFn: () =>
+        apiFetch<UsageSummary>(
+          `${scope.base}/summary?${new URLSearchParams({
+            workspace_id: workspaceId,
+            start_date: start,
+            bucket: "day",
+            dimensions: "model",
+          })}`,
+        ),
+      enabled: isEnabled && scope.isReady,
+      staleTime: 30_000,
+    })),
+  })
+}
+
+/**
+ * Requests the gateway refused with a 403 since `start`, newest first, for the
+ * people, keys or workspace named, or the whole organization when none is.
+ * The usage log does not say which limit refused a request.
+ */
+export function useRefusedUsage(
+  subject: {
+    userIds?: readonly string[]
+    apiKeyIds?: readonly string[]
+    workspaceId?: string
+  },
+  start: string,
+  limit: number,
+  isEnabled: boolean,
+) {
+  const scope = useUsageScope("organization")
+  return useQuery({
+    queryKey: [USAGE, "refused", scope.base, subject, start, limit],
+    queryFn: () => {
+      const params = new URLSearchParams({
+        start_date: start,
+        status_code: "403",
+        limit: String(limit),
+      })
+      for (const id of subject.userIds ?? []) params.append("user_id", id)
+      for (const id of subject.apiKeyIds ?? []) params.append("api_key_id", id)
+      if (subject.workspaceId) params.set("workspace_id", subject.workspaceId)
+      return apiFetch<UsageEntry[]>(`${scope.base}?${params}`)
+    },
+    enabled: scope.isReady && isEnabled,
+    staleTime: 30_000,
   })
 }
