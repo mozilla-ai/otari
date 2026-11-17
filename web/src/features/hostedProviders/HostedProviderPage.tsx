@@ -67,7 +67,7 @@ function ProviderSettings({ provider }: { provider: HostedProvider }) {
   return (
     <dl
       aria-label={`${provider.name} settings`}
-      className="grid grid-cols-1 border border-border sm:grid-cols-3 xl:grid-cols-6"
+      className="grid grid-cols-2 border border-border sm:grid-cols-3 xl:grid-cols-6"
     >
       <Setting label="API key">
         {!provider.decryptable ? (
@@ -119,7 +119,7 @@ function ProviderSettings({ provider }: { provider: HostedProvider }) {
 export function HostedProviderPage({ name }: { name: string }) {
   const access = useDeploymentAdminAccess()
   const isGranted = access.data === true
-  const providers = useHostedProviders(isGranted)
+  const providers = useHostedProviders(isGranted, { isFresh: true })
   const health = useProviderHealth(isGranted)
   const configured = useProviders(isGranted)
   const update = useUpdateHostedProvider()
@@ -172,6 +172,10 @@ export function HostedProviderPage({ name }: { name: string }) {
 
   const provider = providers.data?.data.find((row) => row.name === name)
   if (!provider) {
+    // A cached list read before the provider was added is not an answer.
+    if (providers.isFetching) {
+      return <PageLoading label="Loading hosted provider…" />
+    }
     return (
       <div className="flex flex-col gap-2">
         <BackLink />
@@ -262,11 +266,13 @@ export function HostedProviderPage({ name }: { name: string }) {
             {provider.name === provider.provider ? null : (
               <span>{provider.provider}</span>
             )}
-            {provider.enabled ? (
-              <HealthPill health={healthRow} />
-            ) : (
+            {/* No pill before a check has run: its placeholder dash reads
+                as a stray mark under a title, where a table cell needs one. */}
+            {!provider.enabled ? (
               <span>Switched off</span>
-            )}
+            ) : healthRow ? (
+              <HealthPill health={healthRow} />
+            ) : null}
             {isConfig ? <Badge tone="muted">config.yml</Badge> : null}
             {provider.shadows_config ? (
               <Badge tone="muted">Overrides config.yml</Badge>

@@ -34,8 +34,17 @@ async function ensureOrgProviderKey(page: Page): Promise<void> {
   }
 }
 
+// The models the hosted provider's page draws: three vendors, so the vendor
+// rows show, and one model with no price, so the unpriced badge does too.
+const HOSTED_MODELS: ReadonlyArray<{ model: string; price?: number }> = [
+  { model: "Qwen/Qwen3.5-9B", price: 0.1 },
+  { model: "Qwen/Qwen3-Coder-480B", price: 2 },
+  { model: "deepseek-ai/DeepSeek-V3.2", price: 0.6 },
+  { model: "black-forest-labs/FLUX.1-schnell" },
+]
+
 // A hosted provider for its page to draw. Pointed at the discard port, so the
-// create's model listing fails at once and the page shows an empty catalog.
+// create's model listing fails at once and its models are added by hand.
 async function ensureHostedProvider(page: Page): Promise<void> {
   const created = await page.request.post(`${API_ROOT}/hosted-providers`, {
     headers: authHeaders,
@@ -46,8 +55,24 @@ async function ensureHostedProvider(page: Page): Promise<void> {
       api_base: "http://127.0.0.1:9/v1",
     },
   })
-  if (created.status() !== 409) {
-    await expectOk(created, "create hosted provider")
+  if (created.status() === 409) return
+  await expectOk(created, "create hosted provider")
+  for (const { model, price } of HOSTED_MODELS) {
+    const added = await page.request.post(
+      `${API_ROOT}/hosted-providers/screenshot-hosted/models`,
+      {
+        headers: authHeaders,
+        data:
+          price === undefined
+            ? { model }
+            : {
+                model,
+                input_price_per_million: price,
+                output_price_per_million: price,
+              },
+      },
+    )
+    await expectOk(added, `offer ${model}`)
   }
 }
 

@@ -81,14 +81,24 @@ function useInvalidateHosted() {
   }
 }
 
-export function useHostedProviders(enabled = true) {
+/**
+ * Every hosted provider. `isFresh` reads the list again rather than trusting a
+ * cached one, for a page opened on one provider by name, which must not answer
+ * "not found" from a list cached before that provider was added elsewhere.
+ */
+export function useHostedProviders(
+  enabled = true,
+  { isFresh = false }: { isFresh?: boolean } = {},
+) {
   return useQuery({
     queryKey: [HOSTED_PROVIDERS, "list"],
     queryFn: () =>
       apiFetch<HostedProviders>(
         `/hosted-providers?limit=${PROVIDER_PAGE_LIMIT}`,
       ),
-    staleTime: 30_000,
+    // Zero rather than `refetchOnMount`, which never fires for a query that
+    // is still waiting on the operator gate when the page mounts.
+    staleTime: isFresh ? 0 : 30_000,
     enabled,
   })
 }

@@ -243,7 +243,7 @@ export function HostedProviderModelsPanel({
             model offered without a price starts switched off.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
           <Button
             size="sm"
             className="min-h-11 md:min-h-9"

@@ -698,6 +698,28 @@ describe("HostedProviderPage", () => {
     expect(within(panel).queryByText("Default")).not.toBeInTheDocument()
   })
 
+  it("asks again rather than reading not-found from a list cached before the provider was added", async () => {
+    mockApi({ providers: [hostedProvider({ name: "added-elsewhere" })] })
+    renderHosted(
+      <HostedProviderPage name="added-elsewhere" />,
+      "/admin/hosted-providers/added-elsewhere",
+      {},
+      [],
+      (client) =>
+        client.setQueryData(["hosted-providers", "list"], {
+          data: [],
+          count: 0,
+        }),
+    )
+
+    expect(
+      await screen.findByRole("heading", { name: "added-elsewhere" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText("No hosted provider named added-elsewhere"),
+    ).not.toBeInTheDocument()
+  })
+
   it("says so when no hosted provider has the name, with the way back", async () => {
     mockApi()
     await renderProviderPage("nope")

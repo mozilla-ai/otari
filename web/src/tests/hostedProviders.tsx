@@ -384,10 +384,13 @@ export function renderHosted(
   url: string,
   deployment: Partial<DeploymentBootstrap> = {},
   routes: TestRouterOptions["routes"] = [],
+  /** Fills the cache before the first render, as a page visited earlier would. */
+  seed: (client: QueryClient) => void = () => {},
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
+  seed(client)
   return renderWithRouter(
     <DeploymentProvider value={bootstrap(deployment)}>
       <QueryClientProvider client={client}>{ui}</QueryClientProvider>
