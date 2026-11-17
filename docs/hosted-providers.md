@@ -505,48 +505,31 @@ steps of moving a deployment, see [Upgrading](#upgrading).
 ## The Hosted providers page
 
 The Hosted providers page is in the deployment view, opened from the account
-menu, and is listed only for a deployment operator.
+menu, and is listed only for a deployment operator. It lists the providers;
+each provider's settings and models are on a page of its own.
 
+### The list
+
+- Each row shows the provider, its **Status**, its **Models** ("12 of 18
+  serving", with a badge for vendors switched off and models without a price)
+  and its **Serving** switch, which stops the provider without opening it.
+  Select a provider's name to open its page.
 - **Adding a provider** takes an optional name, which defaults to its
   implementation. The key is optional for a provider that needs none and for
   one pointed at an endpoint of its own. Adding is disabled, with a banner
   saying why, while the server has no `OTARI_SECRET_KEY`. Adding a provider of
   the same name as a `config.yml` one overrides it, which the form warns about.
-- **Test connection**, in the add and edit dialogs, asks the provider what it
-  lists on the dialog's values without saving them, the stored key standing in
-  for a blank key box. **Test** on a provider's row asks the same of what it
-  stores.
-- **Serve models not on its list**, in both dialogs, sets
-  `serves_unlisted_models`.
-- **Zero data retention**, in both dialogs, sets `zero_data_retention`, and a
-  provider declared so carries a badge saying it. The same box is on each
-  key's dialog on the organization's Providers page. See
-  [Zero data retention](#zero-data-retention).
-- **Models** carry a serving switch and a price, set in any unit on
-  [Entering a rate](#entering-a-rate) (a per-second video price
-  goes through `POST /api/v1/pricing` instead); an unpriced model arrives
-  switched off. Tabs show one kind of model at a time (the kind comes from
-  models.dev; `GET /api/v1/hosted-providers/{provider}/models` takes it as
-  `type`), and the search box beside them finds models by name (`search`).
-  See [Who is shown which models](models.md#who-is-shown-which-models).
-- **Refresh models** asks one provider again. **Update catalog** fetches the
-  latest models.dev prices and every provider's listing, and shows the price
-  changes and new models before applying them (see
-  [Keeping the defaults current](configuration.md#keeping-the-defaults-current)).
+  Once added, the provider's page opens.
+- **Update catalog** fetches the latest models.dev prices and every provider's
+  listing, and shows the price changes and new models before applying them
+  (see [Keeping the defaults current](configuration.md#keeping-the-defaults-current)).
   Its optional cleanup removes priced models nothing serves and the model
   lists of providers no longer configured, listing them first.
-- A provider kept to one organization shows which. That restriction is set
-  through `/api/v1/hosted-providers`.
-- The **Countries** column shows the countries a provider serves: two-letter
-  codes, typed in the dialogs or loaded from a JSON file (a list, or one under
-  `supported_countries`); blank serves every country (see
-  [Supported countries](configuration.md#supported-countries)).
-- A provider's name opens Models filtered to it. Above the table, a summary
-  counts the providers reachable, with **Re-check all** to ask them again.
+- Above the table, a summary counts the providers reachable, with
+  **Re-check all** to ask them again.
 - The table also lists the `providers:` instances of `config.yml`, marked
-  config.yml and read-only, with their reachability. A `hosted_providers:` entry
-  carries a `config.yml` badge and cannot be edited, switched or removed here,
-  while its models can.
+  config.yml and read-only, with their reachability. They have no page of
+  their own.
 - With no provider yet, the page walks through adding the first one, and offers
   to enable default pricing when pricing is required and nothing sets it.
 - **Connect otari.ai** is offered beside adding a provider, on the first-run
@@ -555,6 +538,57 @@ menu, and is listed only for a deployment operator.
 - Providers that could not be moved from the retired Deployment providers page
   are listed in a banner with the reason; see
   [From the Deployment providers page](#from-the-deployment-providers-page).
+
+### A provider's page
+
+- The header carries the provider's **Serving** switch, **Test**, which asks
+  the provider what it lists on what it stores, **Edit** and **Remove**.
+- **Test connection**, in the add and edit dialogs, asks the provider what it
+  lists on the dialog's values without saving them, the stored key standing in
+  for a blank key box.
+- **Serve models not on its list**, in both dialogs, sets
+  `serves_unlisted_models`.
+- **Zero data retention**, in both dialogs, sets `zero_data_retention`. The
+  same box is on each key's dialog on the organization's Providers page. See
+  [Zero data retention](#zero-data-retention).
+- Below the header, the provider's settings: **API key**, **Endpoint**,
+  **Serves** (every organization, or the one it is kept to, which is set
+  through `/api/v1/hosted-providers`), **Countries** (two-letter codes, typed
+  in the dialogs or loaded from a JSON file, a list or one under
+  `supported_countries`; blank serves every country, see
+  [Supported countries](configuration.md#supported-countries)), **Zero data
+  retention** and **Models not on its list**.
+- A `hosted_providers:` entry carries a `config.yml` badge, and its settings
+  cannot be edited, switched or removed here, while its models can.
+
+**Models** are listed under their vendors (see [Vendors](#vendors)). A summary
+counts the models, vendors, models serving, models without a price, operator
+prices that differ from the default, and vendors switched off. Each vendor's
+row shows how many of its models it serves, and:
+
+- its own switch, **Serve X models**, which withholds every model of the
+  vendor while keeping each model's own switch
+- a menu with **Serve all models**, **Withhold all models**, **Withhold
+  unpriced models** and **Reset custom prices to default…**
+
+Open a vendor to see its models, each with a serving switch and a price, set
+in any unit on [Entering a rate](#entering-a-rate) with **Edit price** (a
+per-second video price goes through `POST /api/v1/pricing` instead); an
+unpriced model arrives switched off. A provider with one vendor lists its
+models without a vendor row. Tabs show one kind of model at a time (the kind
+comes from models.dev; `GET /api/v1/hosted-providers/{provider}/models` takes
+it as `type`), and the search box finds models by name or vendor (`search`).
+See [Who is shown which models](models.md#who-is-shown-which-models).
+
+Where an operator's price differs from the default, the default is shown under
+the model's rate, and **Use default price** puts the model back on it. **Sync
+prices…** lists every such model with both prices, ticked, and the models
+whose price already matches the default, unticked; **Use default price for N**
+resets the ticked ones. See
+[Going back to the default price](#going-back-to-the-default-price).
+
+**Refresh models** asks the provider again, and **Add model** offers a model
+it does not list.
 
 ## Deployment-paid credentials
 
