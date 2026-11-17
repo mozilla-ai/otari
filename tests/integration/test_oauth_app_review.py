@@ -69,6 +69,37 @@ def test_configured_dashboard_can_approve_across_same_site_origins(
     assert details.json()["issuer"] == "http://testserver"
 
 
+@pytest.mark.parametrize(
+    ("public_base_url", "issuer"),
+    [
+        ("https://otari.example/dashboard", "https://otari.example"),
+        ("https://OTARI.Example:443/dashboard", "https://otari.example"),
+        ("https://user@otari.example", "https://otari.example"),
+        ("https://otari.example:8443", "https://otari.example:8443"),
+        ("http://[::1]:8080", "http://[::1]:8080"),
+    ],
+)
+def test_issuer_is_the_public_origin_behind_a_proxy_that_rewrites_the_host(
+    client: TestClient,
+    world: _World,
+    test_config: GatewayConfig,
+    public_base_url: str,
+    issuer: str,
+) -> None:
+    test_config.public_base_url = public_base_url
+    client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_member"])
+    response = client.post(
+        f"{API_ROOT}/oauth/apps/authorize", json=_consent(world), headers={"Sec-Fetch-Site": "same-origin"}
+    )
+    assert response.status_code == 200, response.text
+    callback = parse_qs(urlsplit(response.json()["redirect_uri"]).query)
+    assert callback["iss"] == [issuer]
+    details = client.get(
+        f"{API_ROOT}/oauth/apps/clients", params={"client_id": "thunderbolt", "redirect_uri": REDIRECT}
+    )
+    assert details.json()["issuer"] == issuer
+
+
 def test_cookie_consent_without_origin_or_fetch_metadata_is_refused(client: TestClient, world: _World) -> None:
     client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_member"])
     response = client.post(f"{API_ROOT}/oauth/apps/authorize", json=_consent(world))

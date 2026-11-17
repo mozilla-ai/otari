@@ -1,6 +1,7 @@
 """Which tenancy identity a request acts as, how it signs in, and whether it may act deployment-wide."""
 
 from typing import Annotated
+from urllib.parse import urlsplit
 
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -220,8 +221,26 @@ def get_oauth_app_service(
         workspaces,
         apps=config.oauth_apps,
         ui_link=config.ui_link,
-        issuer=str(request.base_url.replace(path="", query="", fragment="")).rstrip("/"),
+        issuer=_oauth_app_issuer(request, config),
     )
+
+
+def _oauth_app_issuer(request: Request, config: GatewayConfig) -> str:
+    """The origin of ``public_base_url``, or of the request when it is unset.
+
+    A proxy in front of the gateway can rewrite the host and terminate TLS, so
+    the request alone would name the address behind it, which an app that
+    checks ``iss`` against the address it called refuses. Serialized the way a
+    browser writes an origin: lowercase, and no port where it is the scheme's
+    default.
+    """
+    public = urlsplit(config.public_base_url or "")
+    if not (public.scheme and public.hostname):
+        return str(request.base_url.replace(path="", query="", fragment="")).rstrip("/")
+    scheme = public.scheme.lower()
+    host = f"[{public.hostname}]" if ":" in public.hostname else public.hostname
+    port = "" if public.port in (None, {"http": 80, "https": 443}.get(scheme)) else f":{public.port}"
+    return f"{scheme}://{host}{port}"
 
 
 OAuthAppServiceDep = Annotated[OAuthAppService, Depends(get_oauth_app_service)]

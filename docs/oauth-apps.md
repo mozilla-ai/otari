@@ -61,8 +61,9 @@ and the original state and issuer. Invalid clients and redirects are never follo
 The callback receives `code`, `state`, and `iss`. Validate state and require `iss`
 to equal the authorization API origin (scheme, host and port, without a trailing slash)
 before exchanging the code. This is the authorization host, which may differ from
-the inference or dashboard host. Reverse proxies must preserve the external request
-origin when forwarding requests. POST `application/x-www-form-urlencoded` to `/api/v1/oauth/apps/token`:
+the inference or dashboard host. Otari takes it from `public_base_url` when that is
+set, and from the request otherwise, so set `public_base_url` behind a proxy that
+rewrites the host or terminates TLS. POST `application/x-www-form-urlencoded` to `/api/v1/oauth/apps/token`:
 
 ```text
 grant_type=authorization_code&client_id=thunderbolt&redirect_uri=https%3A%2F%2Fyour-thunderbolt.example%2Foauth%2Fotari&code=the-returned-code&code_verifier=the-original-verifier
