@@ -26,8 +26,12 @@ SESSION_TAG = "session_id"
 
 # Headers in which an agent harness sends its own session id, and the harness each
 # one belongs to. Claude Code sends ``x-claude-code-session-id`` on every request of
-# a session.
-HARNESS_SESSION_HEADERS: Mapping[str, str] = {"x-claude-code-session-id": "claude-code"}
+# a session, and opencode ``x-opencode-session-id``. An opencode subagent runs in a
+# session of its own, so it sends its own id.
+HARNESS_SESSION_HEADERS: Mapping[str, str] = {
+    "x-claude-code-session-id": "claude-code",
+    "x-opencode-session-id": "opencode",
+}
 
 # Headers a harness sends only on a subagent's requests. A subagent shares its parent's
 # session id and works inside the parent's turn, so the task it was handed is no new prompt.

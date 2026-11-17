@@ -24,6 +24,13 @@ from gateway.services.traces._collector import call_id_digest, client_tool_span_
 
 _WORKSPACE = uuid.uuid4()
 _CLAUDE_CODE = {"user-agent": "claude-cli/2.1.291 (external, sdk-cli)", "x-claude-code-session-id": "b57732d4"}
+_OPENCODE_SESSION = "ses_e17323cf5ffesvwVHeHZmSK26l"
+_OPENCODE = {
+    "user-agent": "opencode/1.19.5 ai-sdk/provider-utils/4.0.23 runtime/bun/1.4.4",
+    "x-opencode-session-id": _OPENCODE_SESSION,
+    "x-session-id": _OPENCODE_SESSION,
+    "x-session-affinity": _OPENCODE_SESSION,
+}
 _CODEX_THREAD = "0199e5a1-7c2b-7d4e-9f10-2a3b4c5d6e7f"
 _CODEX_SUBAGENT_THREAD = "0199e5a1-8d3c-7e5f-a021-3b4c5d6e7f80"
 _CODEX = {
@@ -41,6 +48,16 @@ _CODEX = {
 
 def test_claude_codes_own_session_header_names_the_session() -> None:
     assert resolve(_CLAUDE_CODE, session_label=None, tags=None) == SessionRef(source="harness", key="b57732d4")
+
+
+def test_opencodes_own_session_header_names_the_session() -> None:
+    assert resolve(_OPENCODE, session_label=None, tags=None) == SessionRef(source="harness", key=_OPENCODE_SESSION)
+
+
+def test_the_generic_session_headers_opencode_also_sends_name_no_session() -> None:
+    headers = {key: value for key, value in _OPENCODE.items() if key != "x-opencode-session-id"}
+
+    assert resolve(headers, session_label=None, tags=None) is None
 
 
 def test_codexs_own_session_header_names_the_session() -> None:
@@ -131,6 +148,8 @@ def test_only_an_identifier_shaped_key_the_client_chose_names_the_session(ref: S
         (_CLAUDE_CODE, "claude-code"),
         ({"user-agent": "claude-cli/2.1.291"}, "claude-code"),
         (_CODEX, "codex"),
+        (_OPENCODE, "opencode"),
+        ({"user-agent": "my-proxy/2.0", "x-opencode-session-id": _OPENCODE_SESSION}, "opencode"),
         ({"user-agent": "opencode/0.15 ai-sdk"}, "opencode"),
         ({"user-agent": "OpenAI/Python 1.99"}, "openai"),
         ({}, None),
