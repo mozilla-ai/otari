@@ -3020,6 +3020,52 @@ async def test_a_link_that_expires_while_its_sign_in_starts_cannot_sweep_its_own
     assert len(flows) == 1, "the late tab's sign-in is never stored"
 
 
+async def test_a_continue_held_up_past_expiry_cannot_claim_a_link_another_links_purge_freed(
+    async_db: AsyncSession, config: GatewayConfig, postgres_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The late tab is paused before its claim while another link's start sweeps the first use's record."""
+    world = await _world(async_db, config)
+    async_db.add(BillingUser(user_id="alice"))
+    await async_db.commit()
+    ticket = _link_ticket(config, world.server.id)
+    read = read_sign_in_link(ticket)
+    assert read is not None
+    link = dataclasses.replace(read, good_until=datetime.now(UTC) + timedelta(seconds=1))
+    await _connections(async_db, config).start_from_link(ticket)
+    await async_db.execute(update(McpSignInLinkUse).values(expires_at=link.good_until))
+    await async_db.commit()
+
+    paused, resume = asyncio.Event(), asyncio.Event()
+    claim = McpSignInLinkUseRepository.claim
+
+    async def held_up(self: McpSignInLinkUseRepository, ticket_hash: str, *, expires_at: datetime) -> bool:
+        if ticket_hash == link.ticket_hash:
+            paused.set()
+            await resume.wait()
+        return await claim(self, ticket_hash, expires_at=expires_at)
+
+    monkeypatch.setattr(McpSignInLinkUseRepository, "claim", held_up)
+    engine = create_async_engine(_to_async_url(postgres_url))
+    try:
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with factory() as late, factory() as other:
+            late_tab = asyncio.create_task(
+                _connections(late, config).start(
+                    server_id=world.server.id, user_id="alice", browser_token="late-tab", link=link
+                )
+            )
+            await paused.wait()
+            await asyncio.sleep((link.good_until - datetime.now(UTC)).total_seconds() + 0.1)
+            await _connections(other, config).start_from_link(_link_ticket(config, world.server.id))
+            resume.set()
+            with pytest.raises(McpConnectionFlowError, match="expired"):
+                await late_tab
+    finally:
+        await engine.dispose()
+
+    assert link.ticket_hash not in {use.ticket_hash for use in await _link_uses(async_db)}, "the late claim rolled back"
+
+
 async def test_a_spent_link_is_forgotten_once_it_would_have_expired_anyway(
     async_db: AsyncSession, config: GatewayConfig
 ) -> None:

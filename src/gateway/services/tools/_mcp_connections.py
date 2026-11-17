@@ -902,16 +902,16 @@ class McpConnectionService:
         now = datetime.now(UTC)
         async with self._uow:
             if link is not None:
-                # Checked against the same clock as the purge: a link read before it expired, whose
-                # discovery ran past that, would otherwise sweep the record of its own earlier use.
-                if now >= link.good_until:
-                    raise McpConnectionFlowError(_LINK_INVALID)
                 await self._link_uses.purge_expired(now)
                 # Of two Continues on one link, the database lets one claim it, and the other's sign-in
                 # is never stored.
                 if not await self._link_uses.claim(link.ticket_hash, expires_at=link.good_until):
                     logger.warning("MCP sign-in link refused reason=used server_id=%s", server_id)
                     raise McpSignInLinkUsedError
+                # A purge may have swept an earlier use's record once the link expired, so a claim
+                # made by then proves nothing. Raising here rolls back the purge and the claim.
+                if datetime.now(UTC) >= link.good_until:
+                    raise McpConnectionFlowError(_LINK_INVALID)
             # Discovery took seconds. The row is locked and read again, so a sign-in found for the
             # server as it was cannot be stored against the server as a manager has since made it.
             server = await self._server_in_mode(server_id, mode, lock=True)
