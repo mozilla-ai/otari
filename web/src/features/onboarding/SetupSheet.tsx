@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router"
-import { useState } from "react"
+import { useRef, useState } from "react"
 
+import type { ActivationAttempt } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import {
   CONCEALED_SECRET,
@@ -12,6 +13,7 @@ import { Dialog, DialogSection } from "@/design-system/feedback/Dialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { ListeningPanel } from "@/features/onboarding/ListeningPanel"
+import { setupSuccessFace } from "@/features/onboarding/SetupSuccess"
 import type { SetupFailure } from "@/features/onboarding/setupFailureCopy"
 import {
   buildSetupSnippets,
@@ -19,6 +21,7 @@ import {
   SETUP_TABS,
   type SetupSnippetId,
 } from "@/features/onboarding/setupSnippets"
+import { useLandingTransition } from "@/features/onboarding/setupTransition"
 import {
   SNIPPET_KEY_ENV_VAR,
   SNIPPET_MODEL_PLACEHOLDER,
@@ -37,6 +40,11 @@ import {
  * the example and the wait are separated by hairlines that run the width of the
  * frame. A column of gaps would have read as three cards floating in a sheet,
  * which is the thing this design system does not do.
+ *
+ * **One frame for the wait and the payoff.** When the first request lands, the
+ * sheet turns into its success face (`SetupSuccess`) inside the same frame,
+ * carried there by a wave from the listening panel (`setupTransition`), rather
+ * than closing and opening a second dialog.
  *
  * Presentational, and controlled by `SetupGuide` above it: every piece of state
  * here is either the tab somebody picked or whether the key is on screen.
@@ -60,6 +68,7 @@ export function SetupSheet({
   onCheckNow,
   onSkip,
   onLeave,
+  landed,
 }: {
   workspaceName?: string
   /** The issued key's plaintext, or undefined until one is created. */
@@ -85,12 +94,21 @@ export function SetupSheet({
   onSkip: () => void
   /** Retires the guide on the way to a page a guidance link names. */
   onLeave: () => void
+  /** Set once the first request has landed: the sheet then shows its payoff. */
+  landed?: {
+    /** The request that succeeded. Absent if the gateway reported none. */
+    attempt?: ActivationAttempt
+    onDismiss: () => void
+    onOpenActivity: () => void
+  }
 }) {
   const [tab, setTab] = useState<SetupSnippetId>(DEFAULT_SETUP_TAB)
   // One reveal for the whole sheet: the key field and the example built around
   // it hide the same secret, so revealing one and not the other would be a
   // distinction with nothing behind it.
   const [isRevealed, setIsRevealed] = useState(false)
+  const faceRef = useRef<HTMLDivElement>(null)
+  const showsSuccess = useLandingTransition(faceRef, landed !== undefined)
 
   const concealedKey =
     apiKey === undefined
@@ -115,6 +133,27 @@ export function SetupSheet({
       ? undefined
       : buildSetupSnippets({ baseUrl, apiKey, model })
 
+  // The same `Dialog` in the same place as the setup face's, so React keeps the
+  // one frame open across the swap rather than closing and opening another.
+  if (showsSuccess && landed) {
+    return (
+      <Dialog
+        isOpen
+        onOpenChange={(isOpen) => {
+          if (!isOpen) landed.onDismiss()
+        }}
+        size="lg"
+        isAnnouncement
+        faceRef={faceRef}
+        {...setupSuccessFace({
+          attempt: landed.attempt,
+          workspaceName,
+          onOpenActivity: landed.onOpenActivity,
+        })}
+      />
+    )
+  }
+
   return (
     <Dialog
       isOpen
@@ -125,6 +164,7 @@ export function SetupSheet({
       size="lg"
       isAnnouncement
       isDismissable={false}
+      faceRef={faceRef}
       isScanning={!checkFailed}
       scanTone={failure ? "danger" : "accent"}
       title="Send your first request"

@@ -28,6 +28,14 @@ canvas the stylesheet cannot reach, so `SetupOrb` reads the preference itself
 and passes `paused`. Anything else that would animate forever is decoration. See
 [feedback.md](feedback.md).
 
+**One transition answers the wait, on the same surface.** When the request the
+sheet is watching for arrives, a wave rises from the listening panel and carries
+the sheet into its payoff in the same frame (`setupTransition`, on the vendored
+`distortion-waves`). It plays once, because the event it reports happens once,
+and nothing waits for it: the payoff is revealed within 1.5s whether or not the
+wave could start. Under `prefers-reduced-motion` the two faces swap at once and
+the wave's code is never loaded.
+
 ## Press
 
 `scale(0.98)` at every size. One value, not a ladder: the ladder deepened with

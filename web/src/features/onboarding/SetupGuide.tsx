@@ -3,7 +3,6 @@ import { useCallback, useEffect, useRef, useState } from "react"
 
 import type { WorkspaceActivation } from "@/client"
 import { SetupSheet } from "@/features/onboarding/SetupSheet"
-import { SetupSuccess } from "@/features/onboarding/SetupSuccess"
 import { setupFailureCopy } from "@/features/onboarding/setupFailureCopy"
 import {
   useCreateActivationKey,
@@ -153,23 +152,10 @@ function SetupFlow({
 
   if (isFinished) return null
 
-  if (isActivated) {
-    return wasOffered.current ? (
-      <SetupSuccess
-        attempt={data.activation_attempt ?? undefined}
-        onDismiss={() => setIsFinished(true)}
-        onOpenActivity={() => {
-          setIsFinished(true)
-          void navigate({
-            to: "/requests",
-            search: { source: "gateway" },
-          })
-        }}
-      />
-    ) : null
-  }
-
-  if (!isOffered) return null
+  // The payoff is the sheet's second face, so a request that lands while the
+  // sheet is up keeps it mounted rather than swapping in another dialog.
+  const hasLanded = isActivated && wasOffered.current
+  if (!isOffered && !hasLanded) return null
 
   // Recorded once the server has retired the guide, so a Skip that fails and
   // is pressed again is one dismissal rather than two.
@@ -226,6 +212,21 @@ function SetupFlow({
       onCheckNow={() => void checkNow()}
       onSkip={skip}
       onLeave={leave}
+      landed={
+        hasLanded
+          ? {
+              attempt: data.activation_attempt ?? undefined,
+              onDismiss: () => setIsFinished(true),
+              onOpenActivity: () => {
+                setIsFinished(true)
+                void navigate({
+                  to: "/requests",
+                  search: { source: "gateway" },
+                })
+              },
+            }
+          : undefined
+      }
     />
   )
 }
