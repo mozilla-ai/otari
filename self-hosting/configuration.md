@@ -1,16 +1,19 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/145a3f6d99e8afda5e544c26c5271c7ebbd0cc4b/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/4a6e4a2d002c6c7ecf3b77b8b0a4cf8c551df85e/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
 ## Config file
 
-Pass a file explicitly:
+Pass a file explicitly, or name it in `OTARI_CONFIG_PATH`, which a container or
+service manager can set without changing the command. `--config` wins when both
+are given.
 
 ```bash
 otari serve --config config.yml
+OTARI_CONFIG_PATH=config.yml otari serve
 ```
 
 A small configuration looks like this:
@@ -859,7 +862,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/145a3f6d99e8afda5e544c26c5271c7ebbd0cc4b/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/4a6e4a2d002c6c7ecf3b77b8b0a4cf8c551df85e/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -1895,7 +1898,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/145a3f6d99e8afda5e544c26c5271c7ebbd0cc4b/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/4a6e4a2d002c6c7ecf3b77b8b0a4cf8c551df85e/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Contacting the Otari team
