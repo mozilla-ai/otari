@@ -87,6 +87,9 @@ export function KeyScopeFields({
                       <span className="flex flex-col">
                         <span className="text-foreground">{info.label}</span>
                         <code className="text-caption">{scope}</code>
+                        {info.hint ? (
+                          <span className="text-caption">{info.hint}</span>
+                        ) : null}
                         {info.risk ? (
                           <span className="text-caption text-warning">
                             {info.risk}
