@@ -942,11 +942,11 @@ COMPOSITION_ROOT_SCOPE = "gateway/api/deps"
 # session-taking service functions take a Unit of Work instead.
 COMPOSITION_ROOT_BEHAVIOR_BASELINE: tuple[tuple[str, str], ...] = (
     ("gateway/api/deps/__init__.py", "_BatchAccountingClaim"),
-    ("gateway/api/deps/__init__.py", "_CodeExecutionEnvironmentPrices"),
-    ("gateway/api/deps/__init__.py", "_DirectToolAccounts"),
-    ("gateway/api/deps/__init__.py", "_DirectToolGates"),
-    ("gateway/api/deps/__init__.py", "_KeySearchCatalogCaller"),
-    ("gateway/api/deps/__init__.py", "_ledger_on.Ledger"),
+    ("gateway/api/deps/tools.py", "_CodeExecutionEnvironmentPrices"),
+    ("gateway/api/deps/tools.py", "_DirectToolAccounts"),
+    ("gateway/api/deps/tools.py", "_DirectToolGates"),
+    ("gateway/api/deps/tools.py", "_KeySearchCatalogCaller"),
+    ("gateway/api/deps/tools.py", "_ledger_on.Ledger"),
     ("gateway/api/deps/traces.py", "DatabaseSessionOwners"),
     ("gateway/api/deps/traces.py", "NoSessionOwners"),
 )
