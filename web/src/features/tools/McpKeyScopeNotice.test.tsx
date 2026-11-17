@@ -166,6 +166,26 @@ describe("McpKeyScopeNotice", () => {
     expect(screen.queryByText(/can call them/)).toBeNull()
   })
 
+  it("drops the count when a later refresh of the keys fails", async () => {
+    mockApi({ keys: [key("a", ["mcp:execute"]), key("b", ["inference:run"])] })
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    renderNotice(client)
+    expect(
+      await screen.findByText(/1 of the 2 keys in this workspace/),
+    ).toBeInTheDocument()
+
+    vi.restoreAllMocks()
+    mockApi({ keysStatus: 500 })
+    await client.refetchQueries()
+
+    await vi.waitFor(() =>
+      expect(screen.queryByText(/can call them/)).toBeNull(),
+    )
+    expect(screen.getByText("mcp:execute")).toBeInTheDocument()
+  })
+
   it("drops the count, not the notice, when the keys cannot be read", async () => {
     mockApi({ keysStatus: 403 })
     renderNotice()

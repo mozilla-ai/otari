@@ -48,14 +48,17 @@ export function McpKeyScopeNotice({ workspaceId }: { workspaceId: string }) {
   const keys = useKeys(workspaceId)
   if (keys.isPending) return null
 
-  const usable = (keys.data ?? []).filter((key) => isUsable(key, Date.now()))
+  // A failed refresh keeps the last answer in `keys.data`; a count from it
+  // could be out of date, so a failed read of any kind shows no count.
+  const read = keys.isError ? undefined : keys.data
+  const usable = (read ?? []).filter((key) => isUsable(key, Date.now()))
   const holders = usable.filter((key) =>
     key.scopes.includes("mcp:execute"),
   ).length
-  if (keys.data && usable.length > 0 && holders === usable.length) return null
+  const isCounted = usable.length > 0
+  if (isCounted && holders === usable.length) return null
 
-  const isWarning =
-    keys.data !== undefined && usable.length > 0 && holders === 0
+  const isWarning = isCounted && holders === 0
 
   return (
     <InfoBanner tone={isWarning ? "warning" : "info"}>
@@ -68,7 +71,7 @@ export function McpKeyScopeNotice({ workspaceId }: { workspaceId: string }) {
         server's id or its sign-in link, also needs{" "}
         <span className="text-foreground">{SCOPE_INFO["mcp:read"].label}</span>{" "}
         (<code>mcp:read</code>).
-        {keys.data && usable.length > 0
+        {isCounted
           ? ` ${holdersSentence(holders, usable.length, scope.isDeploymentWide)}`
           : null}{" "}
         Change a key's access on{" "}
