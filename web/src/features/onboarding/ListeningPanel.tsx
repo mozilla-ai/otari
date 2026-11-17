@@ -4,6 +4,7 @@ import { Button } from "@/design-system/actions/Button"
 import { SetupOrb, type SetupOrbPhase } from "@/features/onboarding/SetupOrb"
 import type { SetupFailure } from "@/features/onboarding/setupFailureCopy"
 import type { SetupSnippetId } from "@/features/onboarding/setupSnippets"
+import { LANDING_SOURCE } from "@/features/onboarding/setupTransition"
 import { formatRelative } from "@/shared/helpers/format"
 
 /** Shown under every cause but the fallback, which carries its own advice. */
@@ -54,7 +55,11 @@ export function ListeningPanel({
   const hint = failure?.hint
 
   return (
-    <div className="flex w-full flex-wrap items-center justify-between gap-4">
+    // Where the landing wave rises from.
+    <div
+      {...{ [LANDING_SOURCE]: "" }}
+      className="flex w-full flex-wrap items-center justify-between gap-4"
+    >
       <div className="flex min-w-0 flex-1 items-center gap-3.5">
         <SetupOrb phase={phase} />
         {/* `role="status"` on the copy column alone: the orb beside it is

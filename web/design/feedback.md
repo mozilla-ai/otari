@@ -181,10 +181,12 @@ get-started strip, a first-run panel".
 
 ## Dialog isScanning
 
-The one piece of decorative motion in this system, and it earns its place by
-being literally true: an arc travels the frame's edge **only while the product is
-watching for something that has not arrived**, and stops when it has. Anywhere
-else, motion on an edge is noise.
+The one piece of decorative motion in this system, with the wave that ends it,
+and it earns its place by being literally true: an arc travels the frame's edge
+**only while the product is watching for something that has not arrived**, and
+stops when it has. When it has, the first-run sheet carries itself into its
+payoff in the same frame (see [motion-and-access.md](motion-and-access.md)).
+Anywhere else, motion on an edge is noise.
 
 It is a masked conic gradient on an `::after`, with the angle animated through
 an `@property`, so there is no dependency behind it and at radius 0 there is no

@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { DeploymentBootstrap, WorkspaceActivation } from "@/client"
 import { SetupGuide } from "@/features/onboarding/SetupGuide"
-import { resetSetupConfetti } from "@/features/onboarding/setupConfetti"
 import { API_ROOT } from "@/shared/api/client"
 import {
   SelectedWorkspaceProvider,
@@ -22,6 +21,16 @@ import {
 } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
+
+// The wave between the sheet and its payoff has tests of its own
+// (setupTransition.test.ts). Here the faces swap at once, which is what the
+// flow decides; how they are carried is not this file's subject.
+vi.mock("@/features/onboarding/setupTransition", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/features/onboarding/setupTransition")
+  >()),
+  useLandingTransition: (_face: unknown, landed: boolean) => landed,
+}))
 
 vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
   const { telemetrySpy } = await import("@/tests/telemetry")
@@ -185,7 +194,6 @@ function guideEvents() {
 
 describe("SetupGuide", () => {
   beforeEach(() => {
-    resetSetupConfetti()
     resetTelemetrySpy()
   })
 
@@ -536,7 +544,9 @@ describe("SetupGuide", () => {
     const user = userEvent.setup()
     await renderGuide()
 
-    await screen.findByRole("heading", { name: "Send your first request" })
+    const sheet = await screen.findByRole("dialog", {
+      name: "Send your first request",
+    })
     // The request lands while the sheet is open. The poll interval is longer
     // than a test should sleep for, and "Check now" is the same refetch an
     // operator can trigger.
@@ -555,6 +565,11 @@ describe("SetupGuide", () => {
       }),
     ).toBeInTheDocument()
     expect(screen.getByText(/412 ms/)).toBeInTheDocument()
+    // The payoff is the sheet's second face: the same frame, never closed
+    // and reopened, which is what lets the wave carry one into the other.
+    expect(
+      screen.getByRole("dialog", { name: "Your first call went through" }),
+    ).toBe(sheet)
   })
 
   it("does not congratulate a workspace that had already activated on arrival", async () => {
