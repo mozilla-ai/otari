@@ -45,6 +45,7 @@ from gateway.log_config import logger
 from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT
 from gateway.services._tool_loop import (
     INVALID_ARGUMENTS_ERROR,
+    AnsweredRounds,
     MaxToolIterationsExceeded,
     RoundGate,
     StreamAction,
@@ -83,6 +84,7 @@ __all__ = [
     "MAX_TOOL_ITERATIONS_CAP",
     "PURPOSE_HINT_HEADER",
     "TOOL_ACTIVITY_FIELD",
+    "AnsweredRounds",
     "MaxToolIterationsExceeded",
     "RoundGate",
     "ToolBackend",

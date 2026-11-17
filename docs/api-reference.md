@@ -427,6 +427,10 @@ To tag a request with a free-form end-user ID, put it in `metadata`
   disconnected. A provider failure before the first chunk is an ordinary
   error, and a client disconnect that writes no row (above) records nothing.
   The field is null on any row whose stream was not cut.
+- A request whose gateway tool loop (MCP servers, web search or fetch, code
+  execution) fails after the provider answered one or more of its rounds is
+  billed for the rounds the provider answered, streamed or not. The row stays
+  an `error`.
 
 `GET /api/v1/usage/requests/{request_id}` returns what a request was billed,
 looked up by its `Otari-Request-ID`:
@@ -511,8 +515,9 @@ What a retry costs depends on how the first attempt ended:
 
 | First attempt | Billed | A retry |
 |---|---|---|
-| Refused by the provider or the gateway (a 429, a 529, any other error) | No: its budget hold is refunded | Can be sent as it is. |
-| A stream that failed or that the client disconnected from | The tokens the provider reported before it ended, and nothing more (see [Cost of a failed or interrupted request](#cost-of-a-failed-or-interrupted-request)) | Is a new request, billed on its own. |
+| Refused by the provider or the gateway (a 429, a 529, any other error) | No: its budget hold is refunded, unless its gateway tool loop had rounds the provider answered (see [Cost of a failed or interrupted request](#cost-of-a-failed-or-interrupted-request)) | Can be sent as it is. |
+| A stream that failed | The tokens the provider reported before it ended, plus the gateway tool loop rounds the provider answered; under `estimate`, a stream the provider cut may be topped up to an estimate of what it streamed (see [Cost of a failed or interrupted request](#cost-of-a-failed-or-interrupted-request)) | Is a new request, billed on its own. |
+| A stream the client disconnected from | The tokens the provider reported before it ended, and under `estimate` an estimate of what it did not report (the request's input, the output already streamed) (see [Cost of a failed or interrupted request](#cost-of-a-failed-or-interrupted-request)) | Is a new request, billed on its own. |
 | A non-streaming request that succeeded while its response was lost (a dropped connection, a client timeout) | Yes | Calls the provider again and is billed again, unless both carry the same `Idempotency-Key`. |
 
 #### `Idempotency-Key`
