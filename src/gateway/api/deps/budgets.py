@@ -7,9 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps._base import (
     get_unit_of_work,
-    get_user_access,
 )
 from gateway.api.deps.api_keys import get_api_key_service
+from gateway.api.deps.organizations import get_user_access
 from gateway.core.database import get_db
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.repositories.budgets import BudgetRepositories

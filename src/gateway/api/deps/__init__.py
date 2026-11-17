@@ -20,7 +20,6 @@ from gateway.api.deps._base import (
     get_log_writer,
     get_membership_listener,
     get_unit_of_work,
-    get_user_access,
     reset_config,
     set_config,
 )
@@ -71,6 +70,7 @@ from gateway.api.deps.identity import (
     get_current_identity,
     require_deployment_operator_or_absent,
 )
+from gateway.api.deps.organizations import get_user_access
 from gateway.api.deps.ports import (
     AgentModelRecommenderPortDep,
     BillingPortDep,

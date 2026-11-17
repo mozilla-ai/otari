@@ -8,9 +8,9 @@ from fastapi import Depends, Request
 from gateway.api.deps._base import (
     get_config,
     get_unit_of_work,
-    get_user_access,
 )
 from gateway.api.deps.auth import federated_token_verifier
+from gateway.api.deps.organizations import get_user_access
 from gateway.api.deps.ports import ApiKeyFormatPortDep, get_api_key_format_port
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
