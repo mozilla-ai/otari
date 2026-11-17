@@ -2244,6 +2244,7 @@ describe("KeysPage", () => {
     )
     await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
     await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: /Advanced scopes/ }))
     await user.click(
       screen.getByRole("checkbox", { name: "All coding agents scopes" }),
     )

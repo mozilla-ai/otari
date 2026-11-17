@@ -25,6 +25,9 @@ function renderFields(initial: KeyScope[], isServiceKey = false) {
   return seen
 }
 
+const openAdvanced = (user: ReturnType<typeof userEvent.setup>) =>
+  user.click(screen.getByRole("button", { name: /Advanced scopes/ }))
+
 describe("heldScopes", () => {
   it("orders the scopes as the gateway does, once each", () => {
     expect(
@@ -54,6 +57,31 @@ describe("KeyScopeFields", () => {
     expect(seen.at(-1)).toEqual(["inference:run", "code:execute"])
   })
 
+  it("keeps models and the built-in tools in view and folds the rest under Advanced", async () => {
+    const user = userEvent.setup()
+    renderFields(["inference:run"])
+
+    expect(
+      screen.getByRole("checkbox", { name: /Search the web/ }),
+    ).toBeVisible()
+    expect(
+      screen.queryByRole("checkbox", { name: "All files scopes" }),
+    ).not.toBeInTheDocument()
+    await openAdvanced(user)
+    expect(
+      screen.getByRole("checkbox", { name: "All files scopes" }),
+    ).toBeVisible()
+  })
+
+  it("opens Advanced from the start on a key that holds a scope there", () => {
+    renderFields(["inference:run", "usage:read"])
+
+    expect(
+      screen.getByRole("button", { name: /Advanced scopes/ }),
+    ).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByText("1 granted")).toBeInTheDocument()
+  })
+
   it("checks or clears a whole group from its own box", async () => {
     const user = userEvent.setup()
     const seen = renderFields(["inference:run", "files:read"])
@@ -67,8 +95,10 @@ describe("KeyScopeFields", () => {
     expect(seen.at(-1)).toEqual(["inference:run"])
   })
 
-  it("says under the MCP scopes what leaving them off turns off", () => {
+  it("says under the MCP scopes what leaving them off turns off", async () => {
+    const user = userEvent.setup()
     renderFields(["inference:run"])
+    await openAdvanced(user)
 
     expect(
       screen.getByText(
@@ -80,8 +110,10 @@ describe("KeyScopeFields", () => {
     ).toBeInTheDocument()
   })
 
-  it("flags the scopes a leaked key could do lasting harm with", () => {
+  it("flags the scopes a leaked key could do lasting harm with", async () => {
+    const user = userEvent.setup()
     renderFields(["inference:run"])
+    await openAdvanced(user)
 
     expect(screen.getByText("Runs arbitrary code")).toBeInTheDocument()
     expect(
@@ -89,8 +121,10 @@ describe("KeyScopeFields", () => {
     ).toBeInTheDocument()
   })
 
-  it("offers the end-user scopes only to a service key", () => {
+  it("offers the end-user scopes only to a service key", async () => {
+    const user = userEvent.setup()
     renderFields(["inference:run"])
+    await openAdvanced(user)
     expect(
       screen.queryByRole("checkbox", { name: /end users/ }),
     ).not.toBeInTheDocument()
@@ -99,6 +133,7 @@ describe("KeyScopeFields", () => {
   it("offers the end-user group on a service key", async () => {
     const user = userEvent.setup()
     const seen = renderFields(["inference:run"], true)
+    await openAdvanced(user)
 
     await user.click(
       screen.getByRole("checkbox", { name: "All end users scopes" }),
