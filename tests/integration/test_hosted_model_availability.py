@@ -19,7 +19,7 @@ from gateway.services.mail import MailDelivery, Mailer, MailMessage
 from gateway.services.model_discovery_service import ModelCache, ProviderDiscovery
 from gateway.services.secret_box import generate_secret_key
 
-from .conftest import shared_test_config
+from .conftest import app_for, shared_test_config
 
 
 @pytest.fixture(scope="module")
@@ -206,6 +206,23 @@ def test_an_embeddings_refusal_switches_the_model_off(client: TestClient, hosted
     assert row["disabled_reason"] == "unavailable"
 
 
+def test_an_embeddings_refusal_switches_the_model_off_for_a_workspace_with_no_organization(
+    client: TestClient, hosted: dict[str, str]
+) -> None:
+    refusal = AsyncMock(side_effect=_UpstreamError(400, NOT_SERVERLESS.replace("gpt-4o", "embedder")))
+
+    with (
+        patch("gateway.api.routes._passthrough.organization_for_workspace_id", new=AsyncMock(return_value=None)),
+        patch("gateway.api.routes.embeddings.aembedding", new=refusal),
+    ):
+        response = client.post(
+            f"{API_ROOT}/embeddings", json={"model": "openai:embedder", "input": "hi", "user": "u1"}, headers=hosted
+        )
+
+    assert response.status_code == 400
+    assert _until_switched_off(client, hosted, "embedder")["disabled_reason"] == "unavailable"
+
+
 def test_a_refusal_that_may_be_the_requests_fault_switches_nothing_off(
     client: TestClient, hosted: dict[str, str]
 ) -> None:
@@ -263,3 +280,9 @@ def test_the_model_list_says_what_kind_each_model_is(
 
     assert models["embedder"]["type"] == "embedding"
     assert models["openai/gpt-4o"]["type"] == "chat"
+
+
+def test_an_app_reused_for_another_test_reports_with_that_tests_config(test_config: GatewayConfig) -> None:
+    earlier = app_for(test_config).state.unavailable_model_reporter
+
+    assert app_for(test_config.model_copy(deep=True)).state.unavailable_model_reporter is not earlier

@@ -714,6 +714,64 @@ def _cached_segments(command: str, segment_cache: dict[str, list[list[str]]]) ->
     return segments if segments is not None else _command_segments(command)
 
 
+# git's global options, which sit between `git` and its subcommand. Those in the
+# first set take the next word as their value, and an option written with its
+# value after `=` is read by its prefix.
+_GIT_OPTIONS_WITH_VALUE = frozenset(
+    {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--attr-source"}
+)
+_GIT_OPTION_VALUE_PREFIXES = (
+    "--git-dir=",
+    "--work-tree=",
+    "--namespace=",
+    "--config-env=",
+    "--attr-source=",
+    "--exec-path=",
+)
+_GIT_FLAGS = frozenset(
+    {
+        "-p",
+        "--paginate",
+        "-P",
+        "--no-pager",
+        "--bare",
+        "--no-replace-objects",
+        "--no-lazy-fetch",
+        "--no-optional-locks",
+        "--no-advice",
+        "--literal-pathspecs",
+        "--glob-pathspecs",
+        "--noglob-pathspecs",
+        "--icase-pathspecs",
+    }
+)
+
+
+def _without_git_global_options(segment: list[str]) -> list[str] | None:
+    """`segment` with git's global options removed, when it runs `git` with any before its subcommand.
+
+    `git -C repo reset --hard` runs `git reset --hard` in another directory, so it is
+    the same command to a phrase. None when the segment is not git, or names no
+    option before the subcommand. Also None when git would stop before reaching a
+    subcommand: an option that ends it (`--version`, a bare `--exec-path`), or one
+    it does not know, which it refuses.
+    """
+    if _basename(segment[0]) != "git":
+        return None
+    position = 1
+    while position < len(segment):
+        token = segment[position]
+        if token in _GIT_OPTIONS_WITH_VALUE:
+            position += 2
+        elif token in _GIT_FLAGS or token.startswith(_GIT_OPTION_VALUE_PREFIXES):
+            position += 1
+        else:
+            break
+    if position == 1 or position >= len(segment) or segment[position].startswith("-"):
+        return None
+    return [segment[0], *segment[position:]]
+
+
 def _contains_subsequence(segment: list[str], phrase: list[str]) -> bool:
     """Whether `phrase`'s tokens appear, in order and unbroken, inside `segment`.
 
@@ -740,7 +798,18 @@ def _contains_subsequence(segment: list[str], phrase: list[str]) -> bool:
     executable sits at `segment[1]`, not `segment[0]`, for that segment; and
     `npm install ./local-package` does not match a phrase naming just
     `local-package`, since an argument's path is not a command position.
+
+    A `git` segment is also tried with git's global options removed, so
+    `git reset --hard` matches `git -C repo reset --hard`.
     """
+    if _contains_run(segment, phrase):
+        return True
+    without_options = _without_git_global_options(segment) if segment else None
+    return without_options is not None and _contains_run(without_options, phrase)
+
+
+def _contains_run(segment: list[str], phrase: list[str]) -> bool:
+    """The window search behind `_contains_subsequence`, on one spelling of a segment."""
     if not phrase or len(phrase) > len(segment):
         return False
     for start in range(len(segment) - len(phrase) + 1):

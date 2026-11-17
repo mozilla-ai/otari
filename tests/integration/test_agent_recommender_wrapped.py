@@ -25,7 +25,7 @@ from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.services.routing.recommend import RECOMMENDATION_QUESTION
 from gateway.services.secret_box import generate_secret_key
 
-from .conftest import build_test_client
+from .conftest import ALL_KEY_SCOPES, build_test_client
 
 MODULE = "probe_wrapped_recommender"
 WRAPPER_BOOTSTRAP = """
@@ -125,7 +125,7 @@ def test_the_wrapper_relabels_the_stored_routers_quote_and_keeps_its_price(
         headers=MASTER,
     )
     assert stored.status_code == 201, stored.text
-    key = client.post(f"{API_ROOT}/keys", json={"key_name": "probe"}, headers=MASTER).json()
+    key = client.post(f"{API_ROOT}/keys", json={"scopes": ALL_KEY_SCOPES, "key_name": "probe"}, headers=MASTER).json()
 
     with patch("gateway.adapters.agent_model_recommender_adapter.request_decision", AsyncMock(return_value=ANSWER)):
         response = client.post(RECOMMEND, json=SPAWN, headers={API_KEY_HEADER: f"Bearer {key['key']}"})
@@ -156,7 +156,7 @@ def test_the_wrapper_sees_the_core_refusal_with_every_router_off(wrapped: tuple[
         headers=MASTER,
     ).json()
     assert client.patch(f"{ROUTERS}/{stored['id']}", json={"enabled": False}, headers=MASTER).status_code == 200
-    key = client.post(f"{API_ROOT}/keys", json={"key_name": "probe"}, headers=MASTER).json()
+    key = client.post(f"{API_ROOT}/keys", json={"scopes": ALL_KEY_SCOPES, "key_name": "probe"}, headers=MASTER).json()
 
     response = client.post(RECOMMEND, json=SPAWN, headers={API_KEY_HEADER: f"Bearer {key['key']}"})
 

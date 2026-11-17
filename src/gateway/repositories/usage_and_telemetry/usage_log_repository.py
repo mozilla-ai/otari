@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Never, cast
 
-from sqlalchemy import ColumnElement, Select, and_, case, false, func, null, or_, select
+from sqlalchemy import ColumnElement, Select, and_, case, false, func, null, or_, select, update
 
 from gateway.core.metered_pricing import ChargeLine
 from gateway.core.sql import bucket_expr, canonical_bucket, dialect_name, match_any, utc_bound
@@ -49,6 +49,7 @@ def new_usage_row(
     prompt_tokens: int | None = None,
     completion_tokens: int | None = None,
     total_tokens: int | None = None,
+    deployment_paid: bool = False,
 ) -> UsageLog:
     """A new usage row holding these values, with a fresh id and the current time."""
     return UsageLog(
@@ -70,6 +71,7 @@ def new_usage_row(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         total_tokens=total_tokens,
+        deployment_paid=deployment_paid,
     )
 
 
@@ -191,6 +193,10 @@ class RequestRows:
     total_tokens: int
     served: int
     errors: int
+    incomplete: int
+    tool_cost: Decimal | None
+    # Priced rows that recorded how much of their cost is tool charges.
+    tool_costed_rows: int
 
 
 # The columns a breakdown can group by, named by the summary's dimension vocabulary.
@@ -431,6 +437,28 @@ class UsageLogRepository(BaseRepository[UsageLog, Never, Never]):
         self.db.add(row)
         await self.db.flush()
 
+    async def reassign_owner(self, user_ids: Collection[str], to_user_id: str) -> None:
+        """Stage moving these users' rows onto ``to_user_id``, without the fields that could name a person.
+
+        The caller's tags, the session label, the provider-facing end-user
+        identifier and the upstream error text are cleared; the counts and costs stay.
+        """
+        if not user_ids:
+            return
+        await self.db.execute(
+            update(UsageLog)
+            .where(UsageLog.user_id.in_(list(user_ids)))
+            .values(user_id=to_user_id, tags=None, source_label=None, safety_identifier=None, error_message=None)
+            .execution_options(synchronize_session=False)
+        )
+
+    async def add_many(self, rows: list[UsageLog]) -> None:
+        """Stage usage rows together in the current transaction."""
+        if not rows:
+            return
+        self.db.add_all(rows)
+        await self.db.flush()
+
     async def served_traffic(self, *, workspace_ids: Collection[uuid.UUID], since: datetime) -> list[ServedTraffic]:
         """The requests served here since ``since`` in these workspaces, by name sent, offering reached and key.
 
@@ -503,6 +531,9 @@ class UsageLogRepository(BaseRepository[UsageLog, Never, Never]):
             # call runs and is the only one with no latency, so it settles nothing.
             func.count(case(((UsageLog.status == "success") & UsageLog.latency_ms.is_not(None), 1))),
             func.count(case((UsageLog.status == "error", 1))),
+            func.count(case((UsageLog.status == "incomplete", 1))),
+            func.sum(UsageLog.tool_cost),
+            func.count(case((UsageLog.cost.is_not(None) & UsageLog.tool_cost.is_not(None), 1))),
         ).where(*conditions)
         row = (await self.db.execute(stmt)).one()
         return RequestRows(
@@ -514,6 +545,9 @@ class UsageLogRepository(BaseRepository[UsageLog, Never, Never]):
             total_tokens=int(row[5] or 0),
             served=int(row[6]),
             errors=int(row[7]),
+            incomplete=int(row[8]),
+            tool_cost=row[9],
+            tool_costed_rows=int(row[10]),
         )
 
     async def cost_and_requests(self, filters: UsageFilters, scope: UsageScope) -> tuple[float, int]:

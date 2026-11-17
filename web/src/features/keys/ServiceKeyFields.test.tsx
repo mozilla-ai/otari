@@ -94,11 +94,17 @@ describe("ServiceKeyFields", () => {
     const user = userEvent.setup()
     renderFields()
 
-    expect(screen.queryByText("End-user budgets")).not.toBeInTheDocument()
+    expect(
+      screen.queryByText("Budget for each end user"),
+    ).not.toBeInTheDocument()
     await user.click(screen.getByLabelText("Service key"))
 
-    expect(await screen.findByText("AI")).toBeInTheDocument()
-    expect(screen.getByText("Memories")).toBeInTheDocument()
+    expect(
+      await screen.findByRole("checkbox", { name: "AI eu-ai" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("checkbox", { name: "Memories eu-memories" }),
+    ).toBeInTheDocument()
     expect(screen.queryByText("Tenant's")).not.toBeInTheDocument()
   })
 
@@ -109,7 +115,9 @@ describe("ServiceKeyFields", () => {
 
     await user.click(screen.getByLabelText("Service key"))
 
-    expect(await screen.findByText("Free tier")).toBeInTheDocument()
+    expect(
+      await screen.findByRole("checkbox", { name: "Free tier org-free" }),
+    ).toBeInTheDocument()
     expect(screen.queryByText("AI")).not.toBeInTheDocument()
   })
 
@@ -142,20 +150,24 @@ describe("ServiceKeyFields", () => {
     stubBudgets()
     await user.click(screen.getByRole("button", { name: "Retry" }))
 
-    expect(await screen.findByText("AI")).toBeInTheDocument()
+    expect(
+      await screen.findByRole("checkbox", { name: "AI eu-ai" }),
+    ).toBeInTheDocument()
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
   })
 
-  it("picks the list and a default from it", async () => {
+  it("puts the budget for each end user on the list and offers the rest beside it", async () => {
     stubBudgets()
     const user = userEvent.setup()
     const { latest } = renderFields({ ...NO_SERVICE_KEY, isServiceKey: true })
 
-    await user.click(await screen.findByRole("checkbox", { name: "AI eu-ai" }))
+    await pickOption(user, "Budget for each end user", "AI")
+    expect(
+      screen.queryByRole("checkbox", { name: "AI eu-ai" }),
+    ).not.toBeInTheDocument()
     await user.click(
       screen.getByRole("checkbox", { name: "Memories eu-memories" }),
     )
-    await pickOption(user, "Default end-user budget", "AI")
 
     expect(latest()).toEqual({
       isServiceKey: true,
@@ -165,27 +177,7 @@ describe("ServiceKeyFields", () => {
     })
   })
 
-  it("clears the default when its budget leaves the list", async () => {
-    stubBudgets()
-    const user = userEvent.setup()
-    const { latest } = renderFields({
-      isServiceKey: true,
-      budgetIds: ["eu-ai", "eu-memories"],
-      defaultBudgetId: "eu-ai",
-      maxEndUsers: "",
-    })
-
-    await user.click(await screen.findByRole("checkbox", { name: "AI eu-ai" }))
-
-    expect(latest()).toEqual({
-      isServiceKey: true,
-      budgetIds: ["eu-memories"],
-      defaultBudgetId: "",
-      maxEndUsers: "",
-    })
-  })
-
-  it("names no default by its label, and picks it back as an empty value", async () => {
+  it("swaps the previous budget for each end user off the list", async () => {
     stubBudgets()
     const user = userEvent.setup()
     const { latest } = renderFields({
@@ -195,12 +187,42 @@ describe("ServiceKeyFields", () => {
       maxEndUsers: "",
     })
 
-    await pickOption(user, "Default end-user budget", /^None: uncapped/)
+    await pickOption(user, "Budget for each end user", "Memories")
 
-    expect(latest()?.defaultBudgetId).toBe("")
+    expect(latest()).toEqual({
+      isServiceKey: true,
+      budgetIds: ["eu-memories"],
+      defaultBudgetId: "eu-memories",
+      maxEndUsers: "",
+    })
+  })
+
+  it("says end users are uncapped when no budget is picked for them", async () => {
+    stubBudgets()
+    const user = userEvent.setup()
+    const { latest } = renderFields({
+      isServiceKey: true,
+      budgetIds: ["eu-ai", "eu-memories"],
+      defaultBudgetId: "eu-ai",
+      maxEndUsers: "",
+    })
+
+    await pickOption(user, "Budget for each end user", /^None: end users/)
+
+    expect(latest()).toEqual({
+      isServiceKey: true,
+      budgetIds: ["eu-memories"],
+      defaultBudgetId: "",
+      maxEndUsers: "",
+    })
     expect(
-      screen.getByRole("button", { name: /Default end-user budget/ }),
-    ).toHaveTextContent("None: uncapped unless a request names one")
+      screen.getByRole("button", { name: /Budget for each end user/ }),
+    ).toHaveTextContent("None: end users are uncapped")
+    expect(
+      screen.getByText(
+        "New end users have no limit of their own, only the key's.",
+      ),
+    ).toBeInTheDocument()
   })
 
   it("starts an organization's key at the default cap and refuses it empty", async () => {

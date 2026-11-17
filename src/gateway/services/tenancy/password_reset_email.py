@@ -5,8 +5,8 @@ to ``services.mail``; what lives here is each message's own values and the
 wording around them, the same split ``invitation_email`` makes for its message.
 """
 
+from gateway.core.tokens import format_expiry
 from gateway.services.mail import MailMessage, render_email
-from gateway.services.tenancy.tokens import format_expiry
 
 
 def render_password_reset_email(*, reset_link: str, expiry_hours: int, asset_root: str | None) -> MailMessage:

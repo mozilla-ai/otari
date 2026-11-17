@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from gateway.api.deps import build_model_metadata_override_service
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.providers_exceptions import HostedCatalogEmptyError, HostedProviderReadOnlyError
@@ -102,6 +103,7 @@ def _service(db: AsyncSession, config: GatewayConfig) -> HostedProviderService:
         ),
         live_byo_pairs=OrgProviderKeyRepository(uow).live_provider_pairs,
         organization_exists=OrganizationRepository(uow).exists,
+        metadata_overrides=build_model_metadata_override_service(uow),
     )
 
 

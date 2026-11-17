@@ -50,7 +50,7 @@ mozilla-ai/otari#661.
 import re
 import typing
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_FLOOR, ROUND_HALF_UP, Decimal
 
 from any_llm.types.completion import CompletionUsage
 
@@ -176,6 +176,29 @@ def quantize_cost(value: Decimal) -> Decimal:
     engine happens to be underneath, which round differently from each other.
     """
     return value.quantize(COST_QUANTUM, rounding=ROUND_HALF_UP)
+
+
+def allocate_rounded_total(line_costs: list[Decimal | None]) -> tuple[Decimal | None, list[Decimal | None]]:
+    """Round the sum of ``line_costs`` once and split it across the priced lines.
+
+    Each line is floored to :data:`COST_QUANTUM` and the quanta the total has
+    left over go to the lines with the largest remainders, ties to the earlier
+    line, so the lines add up to the total exactly. A ``None`` line stays
+    ``None``, and the total is ``None`` when no line is priced.
+    """
+    allocations: list[Decimal | None] = [None] * len(line_costs)
+    priced = [(index, cost) for index, cost in enumerate(line_costs) if cost is not None]
+    if not priced:
+        return None, allocations
+    total = quantize_cost(sum((cost for _, cost in priced), Decimal(0)))
+    floored = {index: cost.quantize(COST_QUANTUM, rounding=ROUND_FLOOR) for index, cost in priced}
+    remaining = int((total - sum(floored.values(), Decimal(0))) / COST_QUANTUM)
+    by_remainder = sorted(priced, key=lambda entry: (entry[1] - floored[entry[0]], -entry[0]), reverse=True)
+    for index, _ in by_remainder[:remaining]:
+        floored[index] += COST_QUANTUM
+    for index, amount in floored.items():
+        allocations[index] = amount
+    return total, allocations
 
 
 def quantize_rate(value: Decimal) -> Decimal:

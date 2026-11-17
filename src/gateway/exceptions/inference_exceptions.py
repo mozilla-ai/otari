@@ -18,6 +18,18 @@ class EmbeddingOptionUnsupportedError(TenancyValidationError):
         super().__init__(f"'{option}' is not supported for model '{selector}'")
 
 
+class StoredStateOnManagedCredentialError(TenancyValidationError):
+    """A request continued stored provider state on a provider account this gateway shares across workspaces."""
+
+    def __init__(self, field: str) -> None:
+        super().__init__(
+            f"{field} cannot be used on this route: it resolves to a provider account this gateway manages "
+            "on behalf of many workspaces, and the id addresses state stored on that account rather than on "
+            "your workspace. Send the previous turns in input instead, or use a model served by your own "
+            "provider key."
+        )
+
+
 class CountryDatabaseInvalidError(TenancyValidationError):
     """An uploaded file is no MaxMind DB country file. The file stored before stays in place."""
 

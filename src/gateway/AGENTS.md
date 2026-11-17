@@ -38,7 +38,7 @@ does not commit.
 
 Completion requests follow this order:
 
-1. Extract and verify the API key or master key in `api/deps.py`.
+1. Extract and verify the API key or master key in `api/deps/`.
 2. Resolve the billed user, workspace, and organization.
 3. Compile routing into an attempt plan.
 4. Resolve pricing and reserve applicable budgets.
@@ -282,6 +282,10 @@ tenant.
 Features import `Mailer`, ask `can_send_links` before offering a mail-only
 flow, and inspect the `MailDelivery` returned by `send`. They do not select
 transports or catch transport exceptions.
+
+A send that no person watches, such as a background worker's, asks
+`can_deliver_links` instead. It is false for the console transport, which shows
+an email to the deployment operator and delivers it to nobody.
 
 Mail is optional. A flow with a manual fallback, such as invitations, continues
 and returns the link. A flow with no fallback is hidden or refuses before doing

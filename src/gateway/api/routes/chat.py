@@ -26,32 +26,28 @@ from gateway.api.deps import (
     get_log_writer,
     get_unit_of_work,
 )
+from gateway.api.key_scopes import key_scope, may_read_files
 from gateway.api.routes._guardrail_targets import chat_targets
 from gateway.api.routes._helpers import routing_signal, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuard, IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
     DeclaredTools,
-    ErrorKind,
     ToolBackends,
     ToolContext,
-    classify_provider_error,
     log_usage,
     prepare_gateway_tools,
-    provider_error_headers,
-    provider_failure_detail,
     resolve_dispatch_provider,
     resolve_request_context,
     run_non_stream,
     run_single_attempt_stream,
     scope_prompt_cache_key,
-    stream_error_code,
-    stream_error_message,
 )
 from gateway.api.routes._request_tags import RequestMetadata, RequestTagsHeader, resolved_tags
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
+from gateway.core.error_codes import ErrorKind
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage, cache_write_1h_tokens_of, provider_web_searches_of, reasoning_tokens_of
 from gateway.log_config import logger
@@ -64,6 +60,7 @@ from gateway.provider_fields import surface_provider_fields
 from gateway.schemas.inference import SettledCost
 from gateway.services.files import FileService, StagedFile
 from gateway.services.inference import (
+    UpstreamFailure,
     bind_upstream_user,
     chat_user_fields,
     is_chat_stream_cost_carrier,
@@ -74,6 +71,7 @@ from gateway.services.inference import (
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import (
     MAX_TOOL_ITERATIONS_CAP,
+    RoundGate,
     ToolBackend,
     inject_purpose_hints,
     mcp_tool_loop,
@@ -96,6 +94,7 @@ from gateway.services.tools import (
 from gateway.services.traces import read_context, read_turn
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt
+from gateway.types.key_scope import KeyScope
 from gateway.types.normalization_target import NormalizationTarget
 from gateway.types.session_principal import SessionPrincipal
 
@@ -256,11 +255,22 @@ class _ChatAdapter:
     stream_format: StreamFormat = OPENAI_STREAM_FORMAT
     log_success_without_usage = True
 
-    def __init__(self, endpoint: str = USAGE_ENDPOINT) -> None:
-        # The only thing that varies between instances, and the only reason
-        # there is more than one: the Playground's rows carry their own label.
-        # Everything else about the format is identical, which is the point.
+    def __init__(self, endpoint: str = USAGE_ENDPOINT, *, forwards_usage_chunk: bool = True) -> None:
+        # What varies between instances: the Playground's rows carry their own
+        # label, and a stream whose caller turned include_usage off keeps the
+        # usage chunk off the wire. Everything else about the format is identical.
         self.endpoint = endpoint
+        self.forwards_usage_chunk = forwards_usage_chunk
+
+    def for_stream_options(self, stream_options: dict[str, Any] | None) -> "_ChatAdapter":
+        """This adapter, or one that drops the usage chunk when the caller set ``include_usage`` off.
+
+        The provider is asked for that chunk regardless (``prepare_stream_kwargs``), since the
+        stream is billed on it; the caller still gets the stream it asked for.
+        """
+        if stream_options is None or stream_options.get("include_usage"):
+            return self
+        return _ChatAdapter(self.endpoint, forwards_usage_chunk=False)
 
     def error(
         self,
@@ -272,16 +282,17 @@ class _ChatAdapter:
         return HTTPException(status_code=status_code, detail=message, headers=headers)
 
     def provider_error(self, exc: BaseException, model: str | None = None) -> HTTPException:
-        mapping = classify_provider_error(exc, model=model)
+        failure = UpstreamFailure(exc, model=model)
+        mapping = failure.mapping
         if mapping is not None:
             return HTTPException(
                 status_code=mapping.status_code,
                 detail=mapping.detail,
-                headers=with_retry_hint(exc, mapping.status_code, provider_error_headers(exc, mapping.status_code)),
+                headers=with_retry_hint(exc, mapping.status_code, failure.headers),
             )
         return HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=provider_failure_detail(exc),
+            detail=failure.unclassified_detail(),
             headers=with_retry_hint(exc, status.HTTP_502_BAD_GATEWAY, None),
         )
 
@@ -290,14 +301,17 @@ class _ChatAdapter:
 
     def stream_error_payload(self, exc: BaseException, provider: str | None = None) -> str:
         failure = provider_failure(exc, provider)
+        upstream = UpstreamFailure(exc)
         return openai_error_event(
             self.stream_format,
-            stream_error_code(exc),
-            stream_error_message(exc),
+            upstream.stream_code,
+            upstream.stream_message,
             failure.as_dict() if failure is not None else None,
         )
 
     def format_chunk(self, chunk: ChatCompletionChunk) -> str:
+        if not self.forwards_usage_chunk and chunk.usage is not None and not chunk.choices:
+            return ""
         return f"data: {json.dumps(_without_nulls(chunk), separators=(',', ':'))}\n\n"
 
     def extract_stream_usage(self, chunk: ChatCompletionChunk) -> CompletionUsage | None:
@@ -334,12 +348,7 @@ class _ChatAdapter:
     ) -> bool:
         if value.usage is None:
             return False
-        value.usage = value.usage.model_copy(
-            update={
-                "cost_usd": settlement.cost_usd,
-                "pricing_source": settlement.pricing_source,
-            }
-        )
+        value.usage = value.usage.model_copy(update=settlement.usage_fields())
         return True
 
     def is_stream_cost_carrier(self, chunk: ChatCompletionChunk) -> bool:
@@ -353,8 +362,8 @@ class _ChatAdapter:
         return await acompletion(**_with_upstream_user(kwargs))  # type: ignore[return-value]
 
     def prepare_stream_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        if kwargs.get("stream_options") is None:
-            kwargs["stream_options"] = {"include_usage": True}
+        # The usage chunk is what the stream is billed on, so it is asked for whatever the caller sent.
+        kwargs["stream_options"] = {**(kwargs.get("stream_options") or {}), "include_usage": True}
         return kwargs
 
     async def run_tool_loop(
@@ -366,6 +375,7 @@ class _ChatAdapter:
         *,
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
+        round_gate: RoundGate | None = None,
     ) -> ChatCompletion:
         # ``native_tools`` names the built-in tools whose calls the answer reports in
         # ``otari_tool_calls``; ``use_budget`` caps what the caller is billed for.
@@ -375,6 +385,8 @@ class _ChatAdapter:
             extra["on_first_response"] = on_first_response
         if use_budget is not None:
             extra["use_budget"] = use_budget
+        if round_gate is not None:
+            extra["round_gate"] = round_gate
         if native_tools:
             extra["native_tools"] = native_tools
         return await mcp_tool_loop(
@@ -392,6 +404,7 @@ class _ChatAdapter:
         *,
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
+        round_gate: RoundGate | None = None,
         on_first_response: Callable[[], None] | None = None,
     ) -> AsyncIterator[ChatCompletionChunk]:
         extra: dict[str, Any] = {}
@@ -399,6 +412,8 @@ class _ChatAdapter:
             extra["on_first_response"] = on_first_response
         if use_budget is not None:
             extra["use_budget"] = use_budget
+        if round_gate is not None:
+            extra["round_gate"] = round_gate
         if native_tools:
             extra["native_tools"] = native_tools
         if reports_tool_activity(self.endpoint):
@@ -479,7 +494,7 @@ _MASTER_KEY_USER_REQUIRED = "When using master key, 'user' field is required in 
 _USER_FORBIDDEN = "'user' field does not match the authenticated API key's user"
 
 
-@router.post("/completions", response_model=None)
+@router.post("/completions", response_model=None, openapi_extra=key_scope(KeyScope.INFERENCE_RUN))
 async def chat_completions(
     raw_request: Request,
     response: Response,
@@ -555,7 +570,9 @@ async def run_chat_completion(
     also what picks the usage row's endpoint label, so a Playground request is
     countable separately from a customer's (``PLAYGROUND_USAGE_ENDPOINT``).
     """
-    adapter = _PLAYGROUND_ADAPTER if session_principal is not None else _ADAPTER
+    adapter = (_PLAYGROUND_ADAPTER if session_principal is not None else _ADAPTER).for_stream_options(
+        request.stream_options
+    )
     if not request.model.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -576,8 +593,7 @@ async def run_chat_completion(
     async def _normalize(target: NormalizationTarget) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the wire payload (extract to
         # text for text-only models, inline for natively-capable ones) before
-        # the cost estimate. A no-op when the files feature is off or the
-        # request has no attachments.
+        # the cost estimate. A no-op when the request has no attachments.
         request.messages, stats = await normalize_request_messages(
             request.messages,
             fmt="openai",
@@ -585,7 +601,8 @@ async def run_chat_completion(
             provider=target.provider,
             model=target.model,
             files=files,
-            user_id=target.user_id,
+            user_id=target.file_user_id,
+            may_read_files=target.may_read_files,
             instance=target.instance,
             workspace_id=target.file_workspace_id,
             candidates=target.candidate_providers,
@@ -606,6 +623,19 @@ async def run_chat_completion(
         return len(str(request.messages)), stats.vision_usage()
 
     output_cap = _effective_output_cap(request.max_tokens, request.max_completion_tokens)
+
+    declared = DeclaredTools(
+        guardrails=request.guardrails,
+        guardrail_targets=lambda: chat_targets(request.messages),
+        tools=request.tools,
+        mcp_servers=request.mcp_servers,
+        mcp_server_ids=request.mcp_server_ids,
+        max_tool_iterations=request.max_tool_iterations,
+        tools_header=request.tools_header,
+        code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
+        web_fetch_header=raw_request.headers.get(WEB_FETCH_HEADER),
+        web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
+    )
 
     try:
         ctx = await resolve_request_context(
@@ -628,7 +658,7 @@ async def run_chat_completion(
             streaming=bool(request.stream),
             routing_signal=lambda: routing_signal(raw_request),
             normalize_messages=_normalize,
-            tools=request.tools,
+            declared=declared,
             code_execution_policies=tool_ports.code_execution_policy,
             model_provider=model_provider,
             idempotency=None if request.stream else idempotency,
@@ -645,18 +675,7 @@ async def run_chat_completion(
         adapter=adapter,
         ctx=ctx,
         response=response,
-        declared=DeclaredTools(
-            guardrails=request.guardrails,
-            guardrail_targets=lambda: chat_targets(request.messages),
-            tools=request.tools,
-            mcp_servers=request.mcp_servers,
-            mcp_server_ids=request.mcp_server_ids,
-            max_tool_iterations=request.max_tool_iterations,
-            tools_header=request.tools_header,
-            code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
-            web_fetch_header=raw_request.headers.get(WEB_FETCH_HEADER),
-            web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
-        ),
+        declared=declared,
         backends=ToolBackends(
             ports=tool_ports,
             sandbox_containers=build_sandbox_container_registry(
@@ -665,6 +684,7 @@ async def run_chat_completion(
                 user_id=ctx.user_id,
                 workspace_id=ctx.workspace_id,
                 port=tool_ports.code_execution,
+                may_read_stored_files=may_read_files(ctx.api_key),
             ),
             sandbox_files=build_sandbox_file_bridge(
                 raw_request=raw_request,

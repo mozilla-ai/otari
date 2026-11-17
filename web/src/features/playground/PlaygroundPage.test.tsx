@@ -782,7 +782,13 @@ describe("sending a question", () => {
         web_search: { configured: true, enabled: true, reason: null },
         code_execution: { configured: true, enabled: true, reason: null },
         mcp_servers: [
-          { id: "srv-1", name: "Docs", purpose_hint: null, enabled: true },
+          {
+            id: "srv-1",
+            name: "Docs",
+            purpose_hint: null,
+            enabled: true,
+            sign_in_required: false,
+          },
         ],
       },
     })
@@ -810,6 +816,45 @@ describe("sending a question", () => {
       tools: [{ type: "otari_web_search" }, { type: "otari_code_execution" }],
       mcp_server_ids: ["srv-1"],
     })
+  })
+
+  it("shows a server the caller has not signed in to as unavailable, and never attaches it", async () => {
+    mockApi({
+      tools: {
+        ...NO_TOOLS,
+        mcp_servers: [
+          {
+            id: "srv-1",
+            name: "Drive",
+            purpose_hint: null,
+            enabled: true,
+            sign_in_required: true,
+          },
+        ],
+      },
+    })
+    const stream = mockStream([delta("ok"), "[DONE]"])
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("Try a prompt.")
+
+    await user.click(await screen.findByRole("button", { name: "Add tools" }))
+    expect(
+      await screen.findByRole("checkbox", { name: "Drive" }),
+    ).toBeDisabled()
+    expect(
+      screen.getByText(
+        "Connect your account under Tools, MCP servers, to use it.",
+      ),
+    ).toBeVisible()
+    await user.keyboard("{Escape}")
+
+    await user.type(await screen.findByLabelText("Message"), "hi")
+    await user.click(screen.getByRole("button", { name: "Send message" }))
+    await screen.findByText("ok")
+
+    const [, init] = stream.mock.calls[0] ?? []
+    expect(JSON.parse(String(init?.body))).not.toHaveProperty("mcp_server_ids")
   })
 
   it("stops on request, keeping what had arrived and reporting no failure", async () => {

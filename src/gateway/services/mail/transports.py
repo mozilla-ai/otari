@@ -20,7 +20,7 @@ from email.charset import Charset
 from email.errors import MessageError
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.utils import formataddr
+from email.utils import formataddr, parseaddr
 from typing import Protocol
 
 from gateway.core.addresses import normalized_address
@@ -46,11 +46,19 @@ def sanitize_header_value(value: str) -> str:
     return value.replace("\r", " ").replace("\n", " ")
 
 
+def _is_sent_as_given(address: str) -> bool:
+    """Whether ``address`` is an email address that an email to it reaches as exactly that text."""
+    return normalized_address(address) == address.lower() and parseaddr(address) == ("", address)
+
+
 def redact_email(email: str) -> str:
-    """An email address safe to put in a log line: first character, then the domain."""
-    local, _, domain = email.partition("@")
-    if not domain:
+    """An email address safe to put in a log line: first character, then the domain.
+
+    Text that is not a plain email address is shown as ``***``.
+    """
+    if not _is_sent_as_given(email):
         return "***"
+    local, _, domain = email.partition("@")
     return f"{local[:1]}***@{domain}"
 
 
@@ -78,7 +86,9 @@ def build_mime(envelope: MailEnvelope) -> MIMEMultipart:
     one SMTP would send is precisely the bug a local preview exists to catch.
     """
     message = MIMEMultipart("alternative")
-    message["Subject"] = sanitize_header_value(envelope.message.subject)
+    subject = sanitize_header_value(envelope.message.subject)
+    # A subject that holds "=?" is encoded, because a mail client would decode it as an encoded word.
+    message["Subject"] = Charset("utf-8").header_encode(subject) if "=?" in subject else subject
     # sender_name is not a value a caller would already have sanitized (unlike
     # the subject): a stray CR/LF in it would raise HeaderParseError on every
     # send, silently and from then on, with one warning line that never points
@@ -96,6 +106,35 @@ def build_mime(envelope: MailEnvelope) -> MIMEMultipart:
     return message
 
 
+_REFUSED_STEPS: tuple[tuple[type[smtplib.SMTPResponseException], str], ...] = (
+    (smtplib.SMTPAuthenticationError, "the sign-in"),
+    (smtplib.SMTPConnectError, "the connection"),
+    (smtplib.SMTPDataError, "the message"),
+    (smtplib.SMTPHeloError, "the greeting"),
+    (smtplib.SMTPSenderRefused, "the sender"),
+)
+
+
+def _failure_reason(exc: Exception) -> str:
+    """Say why a send failed, without an email address and without the email server's reply text."""
+    if isinstance(exc, smtplib.SMTPRecipientsRefused):
+        codes = sorted({code for code, _reply in exc.recipients.values()})
+        return f"The email server refused the recipient ({', '.join(map(str, codes))})."
+    if isinstance(exc, smtplib.SMTPResponseException):
+        step = next((step for kind, step in _REFUSED_STEPS if isinstance(exc, kind)), "the request")
+        return f"The email server refused {step} ({exc.smtp_code})."
+    if isinstance(exc, smtplib.SMTPNotSupportedError):
+        return f"The email server lacks a feature this send needs: {exc}"
+    if isinstance(exc, smtplib.SMTPServerDisconnected):
+        return "The email server closed the connection."
+    if isinstance(exc, smtplib.SMTPException):
+        return "The email server could not complete the send."
+    if isinstance(exc, OSError):
+        detail = str(exc)
+        return f"The connection to the email server failed: {detail}" if detail else "The email server did not answer."
+    return "The message could not be prepared for sending."
+
+
 class MailTransport(Protocol):
     """One way of delivering a message.
 
@@ -107,6 +146,8 @@ class MailTransport(Protocol):
     """
 
     name: str
+    # False for a transport that shows an email to the deployment operator and delivers it to nobody.
+    delivers_to_recipients: bool
 
     def deliver(self, envelope: MailEnvelope) -> None: ...
 
@@ -115,6 +156,7 @@ class SmtpTransport:
     """Delivers through an SMTP server."""
 
     name = "smtp"
+    delivers_to_recipients = True
 
     def __init__(self, *, host: str, port: int, use_tls: bool, user: str | None, password: str | None) -> None:
         self._host = host
@@ -124,6 +166,10 @@ class SmtpTransport:
         self._password = password
 
     def deliver(self, envelope: MailEnvelope) -> None:
+        if not _is_sent_as_given(envelope.to):
+            raise MailDeliveryError("The recipient is not a plain email address.")
+        if envelope.reply_to and not _is_sent_as_given(envelope.reply_to):
+            raise MailDeliveryError("The reply address is not a plain email address.")
         try:
             with smtplib.SMTP(self._host, self._port, timeout=SMTP_TIMEOUT_SECONDS) as client:
                 if self._use_tls:
@@ -140,25 +186,17 @@ class SmtpTransport:
                 # the message above only stages the values); MessageError is in
                 # the except clause as defense in depth, since build_mime
                 # already sanitizes every header this codebase produces.
-                # Sanitized here as well as in the header: smtplib puts these
-                # two straight into MAIL FROM / RCPT TO, and a newline in either
-                # raises ValueError out of sendmail rather than failing message
-                # assembly. Sanitizing only the header left the addresses clean
-                # in the message and raw on the wire, which is how a CR/LF in a
-                # recipient escaped every guard above it.
+                # The sender is sanitized here as well as in the header,
+                # because smtplib raises ValueError for a newline in MAIL FROM.
                 client.sendmail(
                     sanitize_header_value(envelope.sender_email),
-                    [sanitize_header_value(envelope.to)],
+                    [envelope.to],
                     build_mime(envelope).as_string(),
                 )
-        # ValueError is smtplib's own refusal to put a newline on the wire, and
-        # it is caught for the same reason the rest are: this method's contract
-        # is that it raises MailDeliveryError or nothing, so a caller never has
-        # a mail failure become a request failure. It should now be unreachable
-        # given the sanitizing above, which is exactly why it is caught rather
-        # than relied upon to stay unreachable.
+        # NOTE: This method raises MailDeliveryError or nothing.
+        # ValueError is how smtplib refuses a newline in an address.
         except (OSError, smtplib.SMTPException, MessageError, UnicodeError, ValueError) as exc:
-            raise MailDeliveryError(f"{type(exc).__name__}: {exc}") from exc
+            raise MailDeliveryError(_failure_reason(exc)) from exc
 
 
 class ConsoleTransport:
@@ -175,6 +213,7 @@ class ConsoleTransport:
     """
 
     name = "console"
+    delivers_to_recipients = False
 
     def deliver(self, envelope: MailEnvelope) -> None:
         logger.info(

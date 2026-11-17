@@ -471,6 +471,8 @@ def test_cache_control_survives_route_level_purpose_hint_injection(
     captured: dict[str, Any] = {}
 
     class FakePool:
+        signed_out: tuple[()] = ()
+
         @property
         def openai_tools(self) -> list[dict[str, Any]]:
             return [
@@ -557,7 +559,7 @@ def test_mcp_servers_dispatches_through_anthropic_tool_loop(
         patch("gateway.api.routes.messages.amessages", new=fake_amessages),
         patch(
             "gateway.services.mcp_client.MCPClientPool.__aenter__",
-            new=AsyncMock(return_value=AsyncMock(purpose_hints=lambda: [])),
+            new=AsyncMock(return_value=AsyncMock(purpose_hints=lambda: [], signed_out=())),
         ),
         patch("gateway.services.mcp_client.MCPClientPool.__aexit__", new=AsyncMock(return_value=None)),
     ):
@@ -615,7 +617,7 @@ def test_web_search_replay_is_stripped_when_interception_is_off(
         patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
         patch(
             "gateway.services.mcp_client.MCPClientPool.__aenter__",
-            new=AsyncMock(return_value=AsyncMock(purpose_hints=lambda: [])),
+            new=AsyncMock(return_value=AsyncMock(purpose_hints=lambda: [], signed_out=())),
         ),
         patch("gateway.services.mcp_client.MCPClientPool.__aexit__", new=AsyncMock(return_value=None)),
     ):
@@ -712,8 +714,10 @@ def test_managed_web_tool_dispatches_through_the_gateways_web_backend(
 
     with (
         patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
-        patch("gateway.api.routes._pipeline.build_web_search_backends", return_value=[opened(search_backend)]),
-        patch("gateway.api.routes._pipeline._build_web_retrieval_backend", return_value=opened(fetch_backend)),
+        patch(
+            "gateway.api.routes._pipeline.build_web_search_backends",
+            new=lambda _config, search, **_kwargs: [opened(search_backend if search is not None else fetch_backend)],
+        ),
     ):
         resp = client.post(
             f"{API_ROOT}/messages",
@@ -728,7 +732,7 @@ def test_managed_web_tool_dispatches_through_the_gateways_web_backend(
 
     assert resp.status_code == 200
     assert resp.json()["content"][0]["text"] == "via-web-search-loop"
-    # The search runs on its instance's backend, and a fetch alone on the shared one.
+    # The search runs on its instance's backend, and a fetch alone on the fetch backend.
     served = search_backend if tool_type == "otari_web_search" else fetch_backend
     assert pool_seen == [served], "loop didn't receive the web backend"
 
@@ -1126,7 +1130,8 @@ def test_echoed_gateway_activity_is_removed_before_prompt_estimation(
         captured.update(kwargs)
         await kwargs["normalize_messages"](
             NormalizationTarget(
-                user_id="user",
+                file_user_id="user",
+                may_read_files=True,
                 provider=None,
                 model="model",
                 instance=None,
@@ -1372,7 +1377,7 @@ def test_stream_mcp_servers_dispatches_through_tool_loop_stream(
         patch("gateway.api.routes.messages.amessages", new=fake_amessages),
         patch(
             "gateway.services.mcp_client.MCPClientPool.__aenter__",
-            new=AsyncMock(return_value=AsyncMock(purpose_hints=lambda: [])),
+            new=AsyncMock(return_value=AsyncMock(purpose_hints=lambda: [], signed_out=())),
         ),
         patch("gateway.services.mcp_client.MCPClientPool.__aexit__", new=AsyncMock(return_value=None)),
     ):
@@ -1467,6 +1472,8 @@ def test_stream_mcp_activity_requires_beta(
         return next(streams)
 
     class ActivityPool:
+        signed_out: tuple[()] = ()
+
         @property
         def openai_tools(self) -> list[dict[str, Any]]:
             return [
@@ -2070,7 +2077,7 @@ def _post_fetch_keyword(
     with (
         patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
         patch("gateway.api.routes.messages.amessages", new=fake_amessages),
-        patch("gateway.api.routes._pipeline._build_web_retrieval_backend", return_value=fake_builder_result),
+        patch("gateway.api.routes._pipeline.build_web_search_backends", return_value=[fake_builder_result]),
     ):
         return client.post(
             f"{API_ROOT}/messages",

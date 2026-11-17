@@ -27,7 +27,6 @@ from gateway.services.tenancy.organization_service import (
 )
 from gateway.services.tenancy.password_reset_email import render_password_reset_email
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
-from gateway.services.tenancy.tokens import generate_shared_token, generate_token, hash_token
 from gateway.services.tenancy.user_service import (
     describe_caller,
     forget_unproven_access,
@@ -54,9 +53,6 @@ __all__ = [
     "describe_caller",
     "ensure_bootstrap_identity",
     "forget_unproven_access",
-    "generate_shared_token",
-    "generate_token",
-    "hash_token",
     "render_password_reset_email",
     "report_new_account",
     "report_sign_in",

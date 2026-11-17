@@ -10,6 +10,7 @@ from gateway.core.oauth_apps import redirect_matches
 from gateway.core.settings.identity import IdentitySettings, OAuthAppConfig
 from gateway.schemas.identity import AppAuthorizationRequest
 from gateway.schemas.identity.oauth_apps import AppAuthorizationParameters, AppTokenRequest
+from gateway.types.key_scope import KeyScope
 
 
 def test_rfc7636_s256_vector() -> None:
@@ -138,7 +139,21 @@ def test_dashboard_consent_has_its_own_workspace_and_extra_field_contract() -> N
     assert wire.model_dump() == {**payload, "response_type": "code"}
     with pytest.raises(ValidationError, match="workspace_id"):
         AppAuthorizationRequest.model_validate(payload)
-    consent = {**payload, "workspace_id": str(uuid.uuid4())}
+    consent = {**payload, "workspace_id": str(uuid.uuid4()), "scopes": ["inference:run"]}
     assert str(AppAuthorizationRequest.model_validate(consent).workspace_id) == consent["workspace_id"]
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         AppAuthorizationRequest.model_validate({**consent, "scope": "models"})
+
+
+def test_an_app_key_calls_models_alone_unless_its_registration_says_more() -> None:
+    assert OAuthAppConfig(name="App", redirect_uris=["https://app.example/cb"]).scopes == [KeyScope.INFERENCE_RUN]
+    widened = OAuthAppConfig.model_validate(
+        {"name": "App", "redirect_uris": ["https://app.example/cb"], "scopes": ["usage:read", "inference:run"]}
+    )
+    assert widened.scopes == [KeyScope.INFERENCE_RUN, KeyScope.USAGE_READ]
+
+
+@pytest.mark.parametrize("scopes", [[], ["end-users:read"], ["keys:write"]], ids=["none", "end-users", "unknown"])
+def test_an_app_registration_refuses_scopes_an_app_key_cannot_hold(scopes: list[str]) -> None:
+    with pytest.raises(ValidationError):
+        OAuthAppConfig.model_validate({"name": "App", "redirect_uris": ["https://app.example/cb"], "scopes": scopes})

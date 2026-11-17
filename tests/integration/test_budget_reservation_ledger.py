@@ -739,7 +739,7 @@ async def test_the_sweep_returns_what_a_move_took(async_db: AsyncSession, tenanc
 @pytest.mark.asyncio
 async def test_a_top_up_that_first_holds_the_user_leg_marks_its_row(async_db: AsyncSession, tenancy: Fixture) -> None:
     """A move writes the row of a request that held nothing, and the sweep must release what a top-up adds to it."""
-    await _with_budget(async_db, tenancy)
+    await _with_budget(async_db, tenancy, max_budget=None)
     anthropic = await _scoped(
         async_db,
         scope_type="workspace",

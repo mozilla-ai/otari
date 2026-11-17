@@ -707,6 +707,7 @@ def test_a_commit_or_rollback_outside_the_unit_of_work_is_flagged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str, call: str
 ) -> None:
     monkeypatch.setattr(check, "TRANSACTION_CONTROL_BASELINE", ())
+    monkeypatch.setattr(check, "SAVEPOINT_BASELINE", ())
     _write(tmp_path, "gateway/services/thing_service.py", source)
     line = source.count("\n")
     assert check.check_transaction_control(tmp_path) == [
@@ -716,6 +717,7 @@ def test_a_commit_or_rollback_outside_the_unit_of_work_is_flagged(
 
 def test_the_unit_of_work_may_commit_and_roll_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(check, "TRANSACTION_CONTROL_BASELINE", ())
+    monkeypatch.setattr(check, "SAVEPOINT_BASELINE", ())
     _write(
         tmp_path,
         "gateway/core/unit_of_work.py",
@@ -726,23 +728,69 @@ def test_the_unit_of_work_may_commit_and_roll_back(tmp_path: Path, monkeypatch: 
 
 def test_a_module_on_the_transaction_baseline_may_commit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(check, "TRANSACTION_CONTROL_BASELINE", ("gateway/services/thing_service.py",))
+    monkeypatch.setattr(check, "SAVEPOINT_BASELINE", ())
     _write(
         tmp_path, "gateway/services/thing_service.py", "async def save(db: object) -> None:\n    await db.commit()\n"
     )
     assert check.check_transaction_control(tmp_path) == []
 
 
-@pytest.mark.parametrize("source", ["async def save(db: object) -> None:\n    await db.flush()\n", None])
+@pytest.mark.parametrize(
+    "source",
+    [
+        "async def save(db: object) -> None:\n    await db.flush()\n",
+        # A savepoint alone does not keep a module on the baseline, or its later commits would pass unchecked.
+        "async def save(db: object) -> None:\n    async with db.begin_nested():\n        pass\n",
+        None,
+    ],
+)
 def test_a_transaction_baseline_entry_that_ends_no_transaction_must_leave_the_baseline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str | None
 ) -> None:
     monkeypatch.setattr(check, "TRANSACTION_CONTROL_BASELINE", ("gateway/services/thing_service.py",))
+    monkeypatch.setattr(check, "SAVEPOINT_BASELINE", ())
     _write(tmp_path, "gateway/services/other_service.py", "")
     if source is not None:
         _write(tmp_path, "gateway/services/thing_service.py", source)
     assert check.check_transaction_control(tmp_path) == [
         "gateway/services/thing_service.py is on the transaction control baseline but calls neither commit nor "
         "rollback; remove it from the baseline"
+    ]
+
+
+_SAVEPOINT_REMEDY = "a repository opens a savepoint only to diagnose a refusal of its own write"
+_SAVEPOINT_SOURCE = "async def add(db: object) -> None:\n    async with db.begin_nested():\n        pass\n"
+
+
+def test_a_savepoint_off_the_savepoint_baseline_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "TRANSACTION_CONTROL_BASELINE", ())
+    monkeypatch.setattr(check, "SAVEPOINT_BASELINE", ())
+    _write(tmp_path, "gateway/repositories/thing_repository.py", _SAVEPOINT_SOURCE)
+    assert check.check_transaction_control(tmp_path) == [
+        f"gateway/repositories/thing_repository.py:2 calls begin_nested; {_SAVEPOINT_REMEDY}"
+    ]
+
+
+def test_the_savepoint_baseline_allows_a_savepoint_and_nothing_else(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "TRANSACTION_CONTROL_BASELINE", ())
+    monkeypatch.setattr(check, "SAVEPOINT_BASELINE", ("gateway/repositories/thing_repository.py",))
+    _write(tmp_path, "gateway/repositories/thing_repository.py", _SAVEPOINT_SOURCE + "    await db.commit()\n")
+    assert check.check_transaction_control(tmp_path) == [
+        f"gateway/repositories/thing_repository.py:4 calls commit; {_TRANSACTION_REMEDY}"
+    ]
+
+
+def test_a_savepoint_baseline_entry_that_opens_no_savepoint_must_leave_the_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "TRANSACTION_CONTROL_BASELINE", ())
+    monkeypatch.setattr(check, "SAVEPOINT_BASELINE", ("gateway/repositories/thing_repository.py",))
+    _write(tmp_path, "gateway/repositories/thing_repository.py", "async def add(db: object) -> None:\n    pass\n")
+    assert check.check_transaction_control(tmp_path) == [
+        "gateway/repositories/thing_repository.py is on the savepoint baseline but opens no savepoint; "
+        "remove it from the baseline"
     ]
 
 
@@ -794,7 +842,7 @@ _FACTORY_SOURCE = "def get_unit_of_work(db: object) -> UnitOfWork:\n    return U
 
 
 def test_the_request_factory_may_construct_a_unit_of_work(tmp_path: Path) -> None:
-    _write(tmp_path, "gateway/api/deps.py", _FACTORY_SOURCE)
+    _write(tmp_path, "gateway/api/deps/_base.py", _FACTORY_SOURCE)
     assert check.check_unit_of_work_construction(tmp_path) == []
 
 
@@ -808,7 +856,7 @@ def test_the_unit_of_work_module_may_construct_one(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "relative_path", ["gateway/api/routes/things.py", "gateway/services/thing_service.py", "gateway/api/deps.py"]
+    "relative_path", ["gateway/api/routes/things.py", "gateway/services/thing_service.py", "gateway/api/deps/_base.py"]
 )
 def test_constructing_a_unit_of_work_elsewhere_is_flagged(tmp_path: Path, relative_path: str) -> None:
     _write(tmp_path, relative_path, "def build(db: object) -> UnitOfWork:\n    return UnitOfWork(db)\n")
@@ -818,7 +866,7 @@ def test_constructing_a_unit_of_work_elsewhere_is_flagged(tmp_path: Path, relati
 
 
 def test_a_unit_of_work_reached_through_its_module_is_flagged(tmp_path: Path) -> None:
-    _write(tmp_path, "gateway/api/deps.py", _FACTORY_SOURCE)
+    _write(tmp_path, "gateway/api/deps/_base.py", _FACTORY_SOURCE)
     _write(
         tmp_path,
         "gateway/services/thing_service.py",
@@ -830,7 +878,7 @@ def test_a_unit_of_work_reached_through_its_module_is_flagged(tmp_path: Path) ->
 
 
 def test_naming_the_unit_of_work_as_a_type_is_not_a_construction(tmp_path: Path) -> None:
-    _write(tmp_path, "gateway/api/deps.py", _FACTORY_SOURCE)
+    _write(tmp_path, "gateway/api/deps/_base.py", _FACTORY_SOURCE)
     _write(
         tmp_path,
         "gateway/services/thing_service.py",
@@ -859,16 +907,16 @@ def test_main_fails_on_a_unit_of_work_built_outside_the_factory(
 def test_only_the_module_level_factory_is_exempt(tmp_path: Path) -> None:
     _write(
         tmp_path,
-        "gateway/api/deps.py",
+        "gateway/api/deps/_base.py",
         "class Deps:\n    def get_unit_of_work(self, db: object) -> UnitOfWork:\n        return UnitOfWork(db)\n",
     )
     assert check.check_unit_of_work_construction(tmp_path) == [
-        f"gateway/api/deps.py:3 constructs a UnitOfWork; {_UNIT_OF_WORK_REMEDY}"
+        f"gateway/api/deps/_base.py:3 constructs a UnitOfWork; {_UNIT_OF_WORK_REMEDY}"
     ]
 
 
 def test_renaming_the_unit_of_work_on_import_is_flagged(tmp_path: Path) -> None:
-    _write(tmp_path, "gateway/api/deps.py", _FACTORY_SOURCE)
+    _write(tmp_path, "gateway/api/deps/_base.py", _FACTORY_SOURCE)
     _write(
         tmp_path,
         "gateway/services/thing_service.py",
@@ -882,7 +930,7 @@ def test_renaming_the_unit_of_work_on_import_is_flagged(tmp_path: Path) -> None:
 
 
 def test_importing_the_unit_of_work_under_its_own_name_is_clean(tmp_path: Path) -> None:
-    _write(tmp_path, "gateway/api/deps.py", _FACTORY_SOURCE)
+    _write(tmp_path, "gateway/api/deps/_base.py", _FACTORY_SOURCE)
     _write(
         tmp_path,
         "gateway/services/thing_service.py",
@@ -893,7 +941,7 @@ def test_importing_the_unit_of_work_under_its_own_name_is_clean(tmp_path: Path) 
 
 
 def test_renaming_the_unit_of_work_on_a_relative_import_is_flagged(tmp_path: Path) -> None:
-    _write(tmp_path, "gateway/api/deps.py", _FACTORY_SOURCE)
+    _write(tmp_path, "gateway/api/deps/_base.py", _FACTORY_SOURCE)
     _write(
         tmp_path,
         "gateway/services/thing_service.py",
@@ -1300,7 +1348,7 @@ def test_main_fails_on_a_new_module_in_a_package_on_the_domain_name_baseline(
 
 _DOMAINS = {"gadgets", "things", "widgets"}
 _REPOSITORY_REMEDY = (
-    "only the domain's own service and repository packages and the builders in gateway/api/deps.py import its "
+    "only the domain's own service and repository packages and the builders in gateway/api/deps/ import its "
     "repositories"
 )
 
@@ -1352,7 +1400,7 @@ def test_importing_another_domains_repositories_is_flagged(
     [
         ("gateway/services/things/_service.py", "from gateway.repositories.things import ThingRepository\n"),
         ("gateway/repositories/things/other_repository.py", "from .thing_repository import ThingRepository\n"),
-        ("gateway/api/deps.py", "from gateway.repositories.things import ThingRepository\n"),
+        ("gateway/api/deps/__init__.py", "from gateway.repositories.things import ThingRepository\n"),
         ("gateway/api/routes/things.py", "from gateway.repositories.base_repository import BaseRepository\n"),
         ("gateway/api/routes/things.py", "from gateway.repositories.legacy import LegacyRepository\n"),
     ],
@@ -1420,7 +1468,7 @@ def _write_things_service(src_root: Path) -> None:
             "from gateway.services.things import _store\n",
             "gateway.services.things._store",
         ),
-        ("gateway/api/deps.py", "import gateway.services.things.store\n", "gateway.services.things.store"),
+        ("gateway/api/deps/_base.py", "import gateway.services.things.store\n", "gateway.services.things.store"),
         ("gateway/services/widgets/_service.py", "from ..things.store import Store\n", "gateway.services.things.store"),
         (
             "gateway/services/thing_service.py",
@@ -1949,3 +1997,392 @@ def test_a_circular_re_export_does_not_recurse_forever(tmp_path: Path, monkeypat
         'from gateway.services.things._a import looping\n\n__all__ = ["looping"]\n',
     )
     assert check.check_service_root_exports(tmp_path) == []
+
+
+def test_a_root_star_importing_a_free_function_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A star import binds every public name of its source, so it hides none of them."""
+    _use_empty_service_root_export_baseline(monkeypatch)
+    _write(tmp_path, "gateway/services/__init__.py", "")
+    _write(tmp_path, "gateway/services/things/_thing.py", f"class ThingService:\n    pass\n\n\n{_FREE_FUNCTION}")
+    _write(tmp_path, "gateway/services/things/__init__.py", "from gateway.services.things._thing import *\n")
+    assert check.check_service_root_exports(tmp_path) == [
+        "gateway/services/things/__init__.py exports names_a_thing, which is neither the service nor a type its "
+        "public methods use; make it a method on what owns it, move it below the domain, or stop exporting it"
+    ]
+
+
+def test_a_star_import_binds_only_what_the_source_lists_in_dunder_all(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Where the source declares __all__, a star import binds those names and no others."""
+    _use_empty_service_root_export_baseline(monkeypatch)
+    _write(tmp_path, "gateway/services/__init__.py", "")
+    _write(
+        tmp_path,
+        "gateway/services/things/_thing.py",
+        f'class ThingService:\n    pass\n\n\n{_FREE_FUNCTION}\n__all__ = ["ThingService"]\n',
+    )
+    _write(tmp_path, "gateway/services/things/__init__.py", "from gateway.services.things._thing import *\n")
+    assert check.check_service_root_exports(tmp_path) == []
+
+
+def test_a_star_import_at_an_intermediate_hop_is_followed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The root names the function, and the module it names it from only star-imports it."""
+    _use_empty_service_root_export_baseline(monkeypatch)
+    _write(tmp_path, "gateway/services/__init__.py", "")
+    _write(tmp_path, "gateway/services/things/_inner/_leaf.py", _FREE_FUNCTION)
+    _write(tmp_path, "gateway/services/things/_inner/__init__.py", "from ._leaf import *\n")
+    _write(
+        tmp_path,
+        "gateway/services/things/__init__.py",
+        'from gateway.services.things._inner import names_a_thing\n\n__all__ = ["names_a_thing"]\n',
+    )
+    assert len(check.check_service_root_exports(tmp_path)) == 1
+
+
+def test_a_circular_star_import_does_not_recurse_forever(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_empty_service_root_export_baseline(monkeypatch)
+    _write(tmp_path, "gateway/services/__init__.py", "")
+    _write(tmp_path, "gateway/services/things/_a.py", "from gateway.services.things._b import *\n")
+    _write(tmp_path, "gateway/services/things/_b.py", "from gateway.services.things._a import *\n")
+    _write(tmp_path, "gateway/services/things/__init__.py", "from gateway.services.things._a import *\n")
+    assert check.check_service_root_exports(tmp_path) == []
+
+
+def test_a_relative_import_in_the_root_is_resolved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_empty_service_root_export_baseline(monkeypatch)
+    _write(tmp_path, "gateway/services/__init__.py", "")
+    _write(tmp_path, "gateway/services/things/_thing.py", _FREE_FUNCTION)
+    _write(tmp_path, "gateway/services/things/__init__.py", "from ._thing import names_a_thing\n")
+    assert len(check.check_service_root_exports(tmp_path)) == 1
+
+
+# ---------------------------------------------------------------------------
+# Rule 25: import cycles
+# ---------------------------------------------------------------------------
+
+
+def test_two_sibling_modules_importing_each_other_is_flagged(tmp_path: Path) -> None:
+    _write(tmp_path, "gateway/api/deps/__init__.py", "")
+    _write(tmp_path, "gateway/api/deps/one.py", "from gateway.api.deps.two import thing\n")
+    _write(tmp_path, "gateway/api/deps/two.py", "from gateway.api.deps.one import other\n")
+
+    violations = check.check_import_cycles(tmp_path)
+
+    assert len(violations) == 1
+    assert "gateway.api.deps.one, gateway.api.deps.two" in violations[0]
+
+
+def test_a_package_and_its_own_member_may_import_each_other(tmp_path: Path) -> None:
+    """The package body binds what the member needs before the member runs, so one of them finishes."""
+    _write(tmp_path, "gateway/services/widgets/__init__.py", "from gateway.services.widgets._store import Store\n")
+    _write(tmp_path, "gateway/services/widgets/_store.py", "from gateway.services.widgets import Thing\n")
+
+    assert check.check_import_cycles(tmp_path) == []
+
+
+def test_a_cycle_through_three_siblings_is_flagged(tmp_path: Path) -> None:
+    _write(tmp_path, "gateway/services/widgets/__init__.py", "")
+    _write(tmp_path, "gateway/services/widgets/a.py", "from gateway.services.widgets.b import b\n")
+    _write(tmp_path, "gateway/services/widgets/b.py", "from gateway.services.widgets.c import c\n")
+    _write(tmp_path, "gateway/services/widgets/c.py", "from gateway.services.widgets.a import a\n")
+
+    violations = check.check_import_cycles(tmp_path)
+
+    assert len(violations) == 1
+    assert "widgets.a, gateway.services.widgets.b, gateway.services.widgets.c" in violations[0]
+
+
+def test_an_import_that_does_not_run_at_import_time_is_not_a_cycle(tmp_path: Path) -> None:
+    """A deferred import is how a cycle is broken, so reading one as an edge would refuse the fix."""
+    _write(tmp_path, "gateway/api/deps/__init__.py", "")
+    _write(tmp_path, "gateway/api/deps/one.py", "from gateway.api.deps.two import thing\n")
+    _write(
+        tmp_path,
+        "gateway/api/deps/two.py",
+        "from typing import TYPE_CHECKING\n\nif TYPE_CHECKING:\n    from gateway.api.deps.one import other\n",
+    )
+
+    assert check.check_import_cycles(tmp_path) == []
+
+
+def test_a_module_importing_itself_is_not_reported(tmp_path: Path) -> None:
+    _write(tmp_path, "gateway/api/deps/__init__.py", "")
+    _write(tmp_path, "gateway/api/deps/one.py", "from gateway.api.deps.one import thing\n")
+
+    assert check.check_import_cycles(tmp_path) == []
+
+
+def test_a_cycle_through_a_package_initializer_is_flagged(tmp_path: Path) -> None:
+    """Importing a.b runs a's body first, so a package a module reaches through is on the cycle."""
+    _write(tmp_path, "gateway/__init__.py", "")
+    _write(tmp_path, "gateway/a.py", "from gateway.pkg.child import C\n\nA = 1\n")
+    _write(tmp_path, "gateway/pkg/__init__.py", "from gateway.a import A\n")
+    _write(tmp_path, "gateway/pkg/child.py", "C = 2\n")
+
+    violations = check.check_import_cycles(tmp_path)
+
+    assert len(violations) == 1
+    assert "gateway.a, gateway.pkg" in violations[0]
+
+
+def test_a_cycle_group_holding_a_module_from_outside_the_package_is_flagged(tmp_path: Path) -> None:
+    """The package and its member may close a cycle, so the module from outside must not hide behind them."""
+    _write(tmp_path, "gateway/__init__.py", "")
+    _write(tmp_path, "gateway/p/__init__.py", "from gateway.p.m import M\n\nP = 1\n")
+    _write(tmp_path, "gateway/p/m.py", "from gateway.p import P\nfrom gateway.q import Q\n\nM = 2\n")
+    _write(tmp_path, "gateway/q.py", "from gateway.p.m import M\n\nQ = 3\n")
+
+    violations = check.check_import_cycles(tmp_path)
+
+    assert len(violations) == 1
+    assert "gateway.q" in violations[0]
+
+
+def test_a_dependency_alias_naming_a_model_is_not_a_use(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``Dep = Annotated[Model, Depends(...)]`` names a type, so it must not hold a module on the baseline."""
+    monkeypatch.setattr(
+        check,
+        "MODEL_ACCESS",
+        {
+            "gateway.models.things.Thing": {
+                "repository": "gateway/repositories/things/thing_repository.py",
+                "baseline": (),
+            }
+        },
+    )
+    _write(tmp_path, "gateway/models/things.py", "class Thing:\n    __tablename__ = 'thing'\n")
+    _write(tmp_path, "gateway/repositories/things/__init__.py", "")
+    _write(
+        tmp_path,
+        "gateway/repositories/things/thing_repository.py",
+        "from gateway.models.things import Thing\n\n\ndef all_things(db):\n    return db.execute(select(Thing))\n",
+    )
+    _write(
+        tmp_path,
+        "gateway/api/deps/things.py",
+        "from typing import Annotated\n\nfrom gateway.models.things import Thing\n\n"
+        "ThingDep = Annotated[Thing, Depends(get_thing)]\n",
+    )
+
+    assert check.check_model_access(tmp_path) == []
+
+
+def test_an_import_in_a_module_level_block_is_a_cycle(tmp_path: Path) -> None:
+    """An if, a try or a loop at module level runs as the body does, so an import inside one counts."""
+    _write(tmp_path, "gateway/__init__.py", "")
+    _write(tmp_path, "gateway/a.py", "if True:\n    from gateway.b import B\n\nA = 1\n")
+    _write(tmp_path, "gateway/b.py", "from gateway.a import A\n\nB = 2\n")
+
+    violations = check.check_import_cycles(tmp_path)
+
+    assert len(violations) == 1
+    assert "gateway.a, gateway.b" in violations[0]
+
+
+def test_an_import_in_a_function_body_is_not_a_cycle(tmp_path: Path) -> None:
+    """Deferring an import is how a cycle is broken, so reading one as an edge would refuse the fix."""
+    _write(tmp_path, "gateway/__init__.py", "")
+    _write(tmp_path, "gateway/a.py", "def later():\n    from gateway.b import B\n\n    return B\n")
+    _write(tmp_path, "gateway/b.py", "from gateway.a import later\n\nB = 2\n")
+
+    assert check.check_import_cycles(tmp_path) == []
+
+
+def test_a_model_built_in_annotated_metadata_is_still_a_use(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only the type in ``Annotated[T, ...]`` names a type; the metadata beside it runs on import."""
+    monkeypatch.setattr(
+        check,
+        "MODEL_ACCESS",
+        {
+            "gateway.models.things.Thing": {
+                "repository": "gateway/repositories/things/thing_repository.py",
+                "baseline": (),
+            }
+        },
+    )
+    _write(tmp_path, "gateway/models/things.py", "class Thing:\n    __tablename__ = 'thing'\n")
+    _write(tmp_path, "gateway/repositories/things/__init__.py", "")
+    _write(
+        tmp_path,
+        "gateway/repositories/things/thing_repository.py",
+        "from gateway.models.things import Thing\n\n\ndef all_things(db):\n    return db.execute(select(Thing))\n",
+    )
+    _write(
+        tmp_path,
+        "gateway/api/deps/things.py",
+        "from typing import Annotated\n\nfrom gateway.models.things import Thing\n\nAlias = Annotated[str, Thing()]\n",
+    )
+
+    violations = check.check_model_access(tmp_path)
+
+    assert len(violations) == 1
+    assert "gateway/api/deps/things.py" in violations[0]
+
+
+def test_a_renamed_annotated_import_still_names_a_type(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``Annotated`` resolves through the module's bindings, so an alias for it is recognized."""
+    monkeypatch.setattr(
+        check,
+        "MODEL_ACCESS",
+        {
+            "gateway.models.things.Thing": {
+                "repository": "gateway/repositories/things/thing_repository.py",
+                "baseline": (),
+            }
+        },
+    )
+    _write(tmp_path, "gateway/models/things.py", "class Thing:\n    __tablename__ = 'thing'\n")
+    _write(tmp_path, "gateway/repositories/things/__init__.py", "")
+    _write(
+        tmp_path,
+        "gateway/repositories/things/thing_repository.py",
+        "from gateway.models.things import Thing\n\n\ndef all_things(db):\n    return db.execute(select(Thing))\n",
+    )
+    _write(
+        tmp_path,
+        "gateway/api/deps/things.py",
+        "from typing import Annotated as Ann\n\nfrom gateway.models.things import Thing\n\n"
+        "ThingDep = Ann[Thing, Depends(get_thing)]\n",
+    )
+
+    assert check.check_model_access(tmp_path) == []
+
+
+_COMPOSITION_ROOT_MODULE = "gateway/api/deps/__init__.py"
+
+
+def _composition_root_behavior(line: int, name: str, methods: int, path: str = _COMPOSITION_ROOT_MODULE) -> str:
+    return (
+        f"{path}:{line} defines {name} with {methods} method(s); the composition root builds "
+        "things and holds no implementation, so this belongs to the domain whose work it does"
+    )
+
+
+def test_a_class_with_a_method_in_the_composition_root_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_BEHAVIOR_BASELINE", ())
+    _write(tmp_path, _COMPOSITION_ROOT_MODULE, "class Claim:\n    def claim(self) -> None: ...\n")
+    assert check.check_composition_root_behavior(tmp_path) == [_composition_root_behavior(1, "Claim", 1)]
+
+
+def test_a_class_with_no_methods_in_the_composition_root_is_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_BEHAVIOR_BASELINE", ())
+    _write(tmp_path, _COMPOSITION_ROOT_MODULE, "class Ports:\n    search: object\n    files: object\n")
+    assert check.check_composition_root_behavior(tmp_path) == []
+
+
+def test_a_dataclass_of_data_in_the_composition_root_is_clean(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_BEHAVIOR_BASELINE", ())
+    _write(
+        tmp_path,
+        _COMPOSITION_ROOT_MODULE,
+        "@dataclass(frozen=True, kw_only=True)\nclass Ports:\n    search: object\n",
+    )
+    assert check.check_composition_root_behavior(tmp_path) == []
+
+
+def test_a_dataclass_that_grows_a_method_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_BEHAVIOR_BASELINE", ())
+    _write(
+        tmp_path,
+        _COMPOSITION_ROOT_MODULE,
+        "@dataclass(frozen=True)\nclass Ports:\n    search: object\n\n    def pick(self) -> None: ...\n",
+    )
+    assert check.check_composition_root_behavior(tmp_path) == [_composition_root_behavior(2, "Ports", 1)]
+
+
+def test_a_class_nested_in_a_builder_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_BEHAVIOR_BASELINE", ())
+    _write(
+        tmp_path,
+        _COMPOSITION_ROOT_MODULE,
+        "def ledger_on(db: object) -> object:\n"
+        "    class Ledger:\n"
+        "        def rate(self) -> None: ...\n\n"
+        "        def spend(self) -> None: ...\n\n"
+        "    return Ledger()\n",
+    )
+    assert check.check_composition_root_behavior(tmp_path) == [_composition_root_behavior(2, "ledger_on.Ledger", 2)]
+
+
+def test_a_baselined_class_in_the_composition_root_is_clean(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_BEHAVIOR_BASELINE", ((_COMPOSITION_ROOT_MODULE, "Claim"),))
+    _write(tmp_path, _COMPOSITION_ROOT_MODULE, "class Claim:\n    def claim(self) -> None: ...\n")
+    assert check.check_composition_root_behavior(tmp_path) == []
+
+
+def test_a_baselined_class_that_moved_out_fails_until_its_entry_goes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_BEHAVIOR_BASELINE", ((_COMPOSITION_ROOT_MODULE, "Claim"),))
+    _write(tmp_path, _COMPOSITION_ROOT_MODULE, "def get_claim() -> object:\n    return object()\n")
+    assert check.check_composition_root_behavior(tmp_path) == [
+        f"{_COMPOSITION_ROOT_MODULE} is on the composition root behavior baseline for Claim, "
+        "which no longer defines a method there; remove it from the baseline"
+    ]
+
+
+def test_a_class_with_a_method_outside_the_composition_root_is_not_checked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_BEHAVIOR_BASELINE", ())
+    _write(tmp_path, "gateway/services/tools/_claim.py", "class Claim:\n    def claim(self) -> None: ...\n")
+    assert check.check_composition_root_behavior(tmp_path) == []
+
+
+def test_a_method_under_a_conditional_in_a_class_body_counts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_BEHAVIOR_BASELINE", ())
+    _write(
+        tmp_path,
+        _COMPOSITION_ROOT_MODULE,
+        "class Claim:\n    if TYPE_CHECKING:\n        def claim(self) -> None: ...\n",
+    )
+    assert check.check_composition_root_behavior(tmp_path) == [_composition_root_behavior(1, "Claim", 1)]
+
+
+def test_a_class_under_a_conditional_in_a_builder_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_BEHAVIOR_BASELINE", ())
+    _write(
+        tmp_path,
+        _COMPOSITION_ROOT_MODULE,
+        "def ledger_on(db: object) -> object:\n"
+        "    if db is not None:\n"
+        "        class Ledger:\n"
+        "            def rate(self) -> None: ...\n\n"
+        "        return Ledger()\n"
+        "    return None\n",
+    )
+    assert check.check_composition_root_behavior(tmp_path) == [_composition_root_behavior(3, "ledger_on.Ledger", 1)]
+
+
+def test_a_class_under_an_exception_handler_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_BEHAVIOR_BASELINE", ())
+    _write(
+        tmp_path,
+        _COMPOSITION_ROOT_MODULE,
+        "try:\n    import fast\nexcept ImportError:\n    class Fallback:\n        def run(self) -> None: ...\n",
+    )
+    assert check.check_composition_root_behavior(tmp_path) == [_composition_root_behavior(4, "Fallback", 1)]
+
+
+def test_a_nested_class_does_not_count_toward_the_class_holding_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_BEHAVIOR_BASELINE", ())
+    _write(
+        tmp_path,
+        _COMPOSITION_ROOT_MODULE,
+        "class Outer:\n"
+        "    def mine(self) -> None: ...\n\n"
+        "    class Inner:\n"
+        "        def theirs(self) -> None: ...\n\n"
+        "        def also(self) -> None: ...\n",
+    )
+    assert check.check_composition_root_behavior(tmp_path) == [
+        _composition_root_behavior(1, "Outer", 1),
+        _composition_root_behavior(4, "Outer.Inner", 2),
+    ]

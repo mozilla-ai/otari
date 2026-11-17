@@ -12,7 +12,7 @@ from anthropic.types import (
     WebSearchToolResultError,
 )
 
-from gateway.services.tools._native import SERVER_TOOL_USE_ID_PREFIX, NativeCall
+from gateway.services.tools._native import SERVER_TOOL_USE_ID_PREFIX, NativeCall, Refusal
 from gateway.services.tools._web_display import hits_to_show, search_query, take_last_hits
 from gateway.services.tools._web_names import (
     WEB_RETRIEVAL_RESULT_MAX_BYTES,
@@ -117,8 +117,8 @@ class MessagesWebSearchRendering:
             _append_bounded_citation(citations, tool_use_id=tool_use_id, url=url, title=title, page_age=page_age)
         return [_server_tool_use(tool_use_id, search_query(call.arguments)), _result_block(tool_use_id, citations)]
 
-    def refused(self, call: NativeCall) -> list[Any]:
-        """The pair for a search the use cap refused, in the vocabulary's own error shape."""
+    def refused(self, call: NativeCall, reason: Refusal) -> list[Any]:
+        """The pair for a search refused before it ran, in the vocabulary's own error shape."""
         tool_use_id = f"{SERVER_TOOL_USE_ID_PREFIX}{uuid.uuid4().hex}"
         return [
             _server_tool_use(tool_use_id, search_query(call.arguments)),
@@ -127,7 +127,7 @@ class MessagesWebSearchRendering:
                 type="web_search_tool_result",
                 content=WebSearchToolResultError(
                     type="web_search_tool_result_error",
-                    error_code="max_uses_exceeded",
+                    error_code="max_uses_exceeded" if reason is Refusal.CALL_LIMIT else "invalid_tool_input",
                 ),
             ),
         ]

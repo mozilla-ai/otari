@@ -33,6 +33,7 @@ export const EMPTY_DRAFT: RecommenderDraft = {
 export const DECISION_PROVIDERS: readonly { value: string; label: string }[] = [
   { value: "typesafe", label: "TypeSafe" },
   { value: "openrouter", label: "OpenRouter" },
+  { value: "gemini", label: "Google Gemini" },
   { value: "llamacpp", label: "llama.cpp server" },
 ]
 

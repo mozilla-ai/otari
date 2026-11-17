@@ -8,6 +8,7 @@ from gateway.api.routes import (
     agent_telemetry,
     aliases,
     audio,
+    auth_account,
     auth_oauth,
     auth_password,
     auth_password_reset,
@@ -40,7 +41,10 @@ from gateway.api.routes import (
     mail,
     maintenance_mode,
     mcp,
+    mcp_connections,
+    mcp_server_requests,
     messages,
+    model_overrides,
     models,
     moderations,
     org_provider_keys,
@@ -137,6 +141,7 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     admin.router,
     auth_session.router,
     auth_password.router,
+    auth_account.router,
     auth_profile.router,
     auth_signup.router,
     auth_password_reset.router,
@@ -160,6 +165,7 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     search.router,
     fetch.router,
     code_execution.router,
+    code_execution.catalog_router,
     batches.router,
     videos.router,
     # Discovery rather than dispatch, so these are not operator-gated. The
@@ -171,6 +177,9 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     # listed flat for an SDK.
     catalog.router,
     catalog.operator_router,
+    # The deployment's half of the model metadata overrides; an organization's
+    # half sits with its provider keys below.
+    model_overrides.router,
     playground.router,
     # Split from the operator router because the organization provider-key
     # form is read by a tenant's owners and admins, who operate nothing.
@@ -213,12 +222,17 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     workspace_member_budget_policies.router,
     workspace_activation.router,
     workspace_mcp_servers.router,
+    mcp_connections.router,
+    mcp_connections.session_router,
+    mcp_connections.callback_router,
+    mcp_server_requests.router,
     workspace_code_execution_policy.router,
     workspace_web_search.router,
     web_search_keys.org_router,
     web_search_keys.workspace_router,
     org_provider_keys.org_router,
     org_provider_keys.workspace_router,
+    model_overrides.org_router,
     workspace_hosted_providers.router,
     workspace_hosted_providers.policy_router,
     budgets.router,

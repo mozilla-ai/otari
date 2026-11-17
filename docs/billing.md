@@ -20,8 +20,8 @@ balance minus what running requests hold.
 When nothing is available, new requests paid from the balance are refused until funds arrive. Requests on your own provider keys are not affected.
 Requests already running finish, so the balance can end slightly below zero.
 
-A new organization gets $2 once its creator answers every question in the
-welcome questionnaire.
+The organization created for you at signup starts with a one-time $2 credit,
+so its first request can run before you add funds.
 
 ## Three ways to add funds
 
@@ -32,7 +32,8 @@ welcome questionnaire.
 | **Recurring top-up** | Every day, every week, or on a day of the month | The cardholder |
 
 Payment happens on Stripe. Each charge adds a 4.5% service fee and VAT based on
-the billing address; only the amount itself goes to the balance. The person who
+the billing address; only the amount itself goes to the balance. **Add funds**
+shows the amount, the fee and the total before you continue to Stripe. The person who
 paid gets the receipt by email, and each deposit is listed under
 **Transactions**.
 
@@ -94,6 +95,7 @@ on-call inbox or shared alias, invite it to the organization as an admin.
 | --- | --- |
 | **Requests are being refused** | The balance is used up. At most once an hour. All-clear: **Requests are being served again**. |
 | **Monthly limit reached** | An auto top-up would pass the monthly limit. |
+| **Auto top-up declined** | The first decline in a row. Sent to the cardholder only, with the reason when the bank gives one; the Billing page shows the failed attempt until a charge goes through. |
 | **Auto top-up paused** | One of the pause reasons above. |
 | **Waiting on the bank** | The cardholder's bank asked for confirmation. The cardholder gets a separate email with the link. |
 | **Last auto top-up this month**, **One auto top-up left**, **On pace to reach the limit** | The monthly limit is getting close. At most once a month each. |

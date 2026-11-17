@@ -32,10 +32,11 @@ Create `end-user-budget-memories` the same way.
 ## Create the service key
 
 Signed in as the deployment operator, open **API keys**, click **Create key**,
-click **Advanced** and tick **Service key**. Pick both budgets under
-**End-user budgets** and `end-user-budget-ai` as the **Default end-user
-budget**, or end users a request starts without a budget header are uncapped,
-and stay uncapped when the key gains a default later.
+click **Advanced** and tick **Service key**. Pick `end-user-budget-ai` as the
+**Budget for each end user** and tick the other budget under **Other budgets a
+request may choose**. With **None** as the budget for each end user, end users a
+request starts without a budget header are uncapped, and stay uncapped when the
+key gains one later.
 Through the API, only a deployment
 operator can set `is_service_key` on `POST` or `PATCH /api/v1/keys`. List the
 budgets the key may start its end users on in `end_user_budget_ids`, and set

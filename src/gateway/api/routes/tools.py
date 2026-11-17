@@ -33,6 +33,7 @@ from gateway.api.deps import (
     get_config,
     verify_catalog_reader,
 )
+from gateway.api.key_scopes import key_scope
 from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
 from gateway.models.api_keys import APIKey
@@ -202,7 +203,7 @@ def _managed_tools(config: GatewayConfig, switches: _WorkspaceSwitches) -> list[
     ]
 
 
-@router.get("/tools")
+@router.get("/tools", openapi_extra=key_scope(None))
 async def list_tools(
     config: Annotated[GatewayConfig, Depends(get_config)],
     auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],

@@ -6,14 +6,12 @@ Table-driven over both orders, with the libraries' ``fake`` and ``exa`` metadata
 import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
-from types import MappingProxyType
 from typing import Any
 
 import pytest
 
 import any_search
 from gateway.core.config import GatewayConfig
-from gateway.core.settings import tools as settings_tools
 from gateway.exceptions.tools_exceptions import (
     SearchToolMisconfiguredError,
     SearchToolNotFoundError,
@@ -127,14 +125,14 @@ _SEARCH_CASES = [
         {
             "name": "tavily",
             "provider": "tavily",
-            "runner": "old",
+            "runner": "library",
             "api_key": "tvly-deploy",
             "api_base": "",
             "label": "otari:web_search",
             "rate_keys": ("otari:web_search",),
             "timeout": 15.0,
         },
-        options={},
+        options={"include_raw_content": True},
     ),
     _SearchCase(
         "the legacy URL, with the four engines",
@@ -194,15 +192,14 @@ _SEARCH_CASES = [
         policy=_policy(credential=WebSearchCredential(provider="fake", source=_ORG)),
     ),
     _SearchCase(
-        "a Tavily key on the old backend",
+        "an organization's Tavily key, with Tavily's own defaults",
         {"search_tools": {"test": _FAKE}},
         {
             "provider": "tavily",
-            "runner": "old",
+            "runner": "library",
             "api_key": "tvly-org",
-            "api_base": "",
-            # Design L: the old backend keeps recording the call under otari:web_search, with no label.
-            "label": None,
+            "api_base": "https://api.tavily.com",
+            "label": "org:tavily",
             "rate_keys": ("otari:web_search",),
         },
         policy=_policy(credential=WebSearchCredential(provider="tavily", source=_ORG, api_key="tvly-org")),
@@ -261,7 +258,7 @@ _SEARCH_CASES = [
         {
             "name": "exa",
             "provider": "tavily",
-            "runner": "old",
+            "runner": "library",
             "api_key": "tvly-org",
             "timeout": 30.0,
             "label": "org:tavily",
@@ -494,7 +491,6 @@ def test_a_credential_for_a_provider_this_gateway_cannot_call_is_ignored(caplog:
         WebSearchCredential(provider="tavily", source=_ORG),
         WebSearchCredential(provider="searxng", source=_ORG),
         WebSearchCredential(provider="searxng", source=_ORG, api_base=" / "),
-        WebSearchCredential(provider="tavily", source=_ORG, api_key="k", api_base="https://tavily-proxy.example"),
     ],
     ids=[
         "exa-without-key",
@@ -502,7 +498,6 @@ def test_a_credential_for_a_provider_this_gateway_cannot_call_is_ignored(caplog:
         "tavily-without-key",
         "searxng-without-endpoint",
         "searxng-with-a-blank-endpoint",
-        "tavily-with-an-endpoint",
     ],
 )
 def test_a_credential_its_provider_cannot_be_called_with_is_refused(
@@ -571,24 +566,14 @@ def test_layers_apply_lowest_first() -> None:
     assert dict(resolved.options) == {"cost": 1, "delay": 0.2, "error": "c"}
 
 
-def test_otaris_defaults_sit_below_every_layer(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Design E, rule 5. No provider a library serves has defaults yet, so the test gives ``fake`` some."""
-    defaults = MappingProxyType({"fake": MappingProxyType({"cost": 1, "delay": 0.1, "error": "default"})})
-    monkeypatch.setattr(settings_tools, "PROVIDER_DEFAULT_OPTIONS", defaults)
-    monkeypatch.setattr(_resolve, "PROVIDER_DEFAULT_OPTIONS", defaults)
-    config = GatewayConfig(search_tools={"test": {"provider": "fake", "options": {"delay": 0.2}}})
-    credential = WebSearchCredential(provider="fake", source=_ORG, options={"delay": 0.3})
-
-    assert dict(_in_loop(config, request={"error": "request"}).options) == {"cost": 1, "delay": 0.2, "error": "request"}
-    assert dict(_in_loop(config, credential=credential).options) == {"cost": 1, "delay": 0.3, "error": "default"}
-
-
-def test_the_old_code_takes_the_layers_without_otaris_defaults() -> None:
+def test_the_legacy_settings_options_sit_below_every_layer() -> None:
+    """Only the legacy pair sends ``include_raw_content``; an organization's Tavily key sends Tavily's own defaults."""
+    legacy = GatewayConfig(web_search_provider="tavily", web_search_provider_api_key="tvly")
     credential = WebSearchCredential(provider="tavily", source=_ORG, api_key="k", options={"topic": "news"})
 
-    resolved = _in_loop(GatewayConfig(), credential=credential, workspace={"topic": "finance", "search_depth": "basic"})
-
-    assert dict(resolved.options) == {"topic": "finance", "search_depth": "basic"}
+    layered = _in_loop(legacy, workspace={"topic": "finance"}, request={"include_raw_content": False})
+    assert dict(layered.options) == {"include_raw_content": False, "topic": "finance"}
+    assert dict(_in_loop(GatewayConfig(), credential=credential).options) == {"topic": "news"}
 
 
 def test_the_count_is_taken_out_of_the_options_uncapped() -> None:
@@ -609,16 +594,6 @@ def test_a_workspace_count_the_library_refuses_leaves_the_instances_count(caplog
 
     assert resolved.max_results == 3
     assert "'max_results'" in _warnings(caplog)
-
-
-@pytest.mark.parametrize("count", [0, True, "5", 2.5])
-def test_on_the_old_code_a_count_that_is_not_a_positive_whole_number_sets_no_count(count: object) -> None:
-    config = GatewayConfig(web_search_provider="brave", web_search_provider_api_key="brv")
-
-    resolved = _in_loop(config, request={"max_results": count})
-
-    assert resolved.max_results is None
-    assert "max_results" not in resolved.options
 
 
 @pytest.mark.parametrize(
@@ -811,15 +786,6 @@ def test_the_direct_endpoint_leaves_the_workspace_layer_out() -> None:
 
     assert resolved is not None
     assert dict(resolved.options) == {"delay": 0.1}
-
-
-def test_what_runs_on_the_old_backend_takes_its_options_unchecked() -> None:
-    config = GatewayConfig(web_search_provider="brave", web_search_provider_api_key="brv")
-
-    resolved = _in_loop(config, workspace={"anything": 1}, request={"whatever": 2, "max_chars": 3})
-
-    assert resolved.runner == "old"
-    assert dict(resolved.options) == {"anything": 1, "whatever": 2, "max_chars": 3}
 
 
 # --------------------------------------------------------------------------- #

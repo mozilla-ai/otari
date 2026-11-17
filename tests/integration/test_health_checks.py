@@ -13,7 +13,7 @@ from any_llm.exceptions import ModelNotFoundError
 from any_llm.types.model import Model
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from gateway.api.deps import build_hosted_provider_service
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
@@ -26,14 +26,15 @@ from gateway.repositories.health_checks import (
     HealthCheckSettingsRepository,
 )
 from gateway.schemas.health_checks import HealthCheckSettingsUpdate
-from gateway.services.health_checks import HealthCheckOffering, HealthCheckService, list_hosted_offerings
+from gateway.services.health_checks import HealthCheckOffering, HealthCheckService
+from gateway.services.health_checks._offerings import list_hosted_offerings
 from gateway.services.health_checks._service import HostedRoster
 from gateway.services.mail import MailDelivery, Mailer, MailMessage
 from gateway.services.model_discovery_service import get_model_cache
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.types.models_dev import parse_catalog_v2
 
-from .conftest import build_test_client
+from .conftest import _to_async_url, build_test_client
 
 _MASTER = {API_KEY_HEADER: "Bearer test-master-key"}
 _CHECKS = f"{API_ROOT}/health-checks"
@@ -515,9 +516,7 @@ async def test_a_run_checks_what_the_hosted_providers_serve_on_their_own_keys(
     )
     await async_db.flush()
 
-    offerings = await list_hosted_offerings(
-        build_hosted_provider_service(UnitOfWork(async_db), config=test_config), test_config
-    )
+    offerings = await list_hosted_offerings(build_hosted_provider_service(UnitOfWork(async_db), config=test_config))
 
     assert [(o.selector, o.provider, o.implementation, o.model) for o in offerings] == [
         ("openai-eu:gpt-test", "openai-eu", "openai", "gpt-test")
@@ -590,7 +589,7 @@ async def test_a_run_asks_the_models_kind_rather_than_its_id(
     try:
         with patch(f"{_OFFERINGS_MODULE}.cached_models_dev_catalog", return_value=catalog):
             offerings = await list_hosted_offerings(
-                build_hosted_provider_service(UnitOfWork(async_db), config=test_config), test_config
+                build_hosted_provider_service(UnitOfWork(async_db), config=test_config)
             )
     finally:
         get_model_cache().clear("openai-eu")
@@ -743,7 +742,7 @@ async def test_disable_all_switches_the_hosted_rows_off(
 
     await service.request_run()
     with patch(f"{_PROBE}.acompletion", new=broken_only):
-        await service.run_if_due(lambda: list_hosted_offerings(hosted, test_config))
+        await service.run_if_due(lambda: list_hosted_offerings(hosted))
 
     assert await service.disable_failing() == 1
     assert await hosted.serveable_models(organization_id=None) == {"openai": frozenset({"gpt-fine"})}
@@ -806,3 +805,26 @@ async def test_the_settings_row_survives_a_lost_insert_race(async_db: AsyncSessi
 
     assert row.id == 1
     assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_a_first_read_of_the_settings_waits_for_a_concurrent_one_and_returns_its_row(postgres_url: str) -> None:
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def first_read(session: AsyncSession) -> datetime:
+        return (await HealthCheckSettingsRepository(session).get_or_create()).updated_at
+
+    try:
+        async with sessions() as first, sessions() as second:
+            first_updated_at = await first_read(first)
+            waiting = asyncio.create_task(first_read(second))
+            # The first read has not committed, so the second cannot finish.
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(asyncio.shield(waiting), timeout=0.5)
+            await first.commit()
+            second_updated_at = await waiting
+    finally:
+        await engine.dispose()
+
+    assert second_updated_at == first_updated_at

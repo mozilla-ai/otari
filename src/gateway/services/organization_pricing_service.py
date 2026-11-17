@@ -26,7 +26,7 @@ every writer and none of them can be expressed in the schema at all:
   owns its rate. A bare ``provider:model`` key gets the same refusal when a
   workspace lacks a usable BYO key and the bound ``ModelProviderPort`` would
   serve it on a deployment-owned hosted credential. A search or fetch tool's
-  rate, and ``otari:code_execution``, get the same refusal, since the
+  rate, and ``otari:code_execution`` with its environments' rows, get the same refusal, since the
   deployment's own account runs those calls. See
   :meth:`OrganizationPricingService.raise_if_deployment_supplied`.
 
@@ -87,6 +87,8 @@ from gateway.types.tool_charges import gateway_tool_pricing_key
 # Every spelling a lookup reads code execution's rate under. Each run is on the
 # deployment's sandbox, so only the operator's rate prices it.
 _CODE_EXECUTION_KEYS = frozenset(pricing_key_forms(gateway_tool_pricing_key(CODE_EXECUTION_TOOL_NAME)))
+# An environment's own row, ``otari:code_execution:<image>``, in either spelling.
+_CODE_EXECUTION_ENVIRONMENT_PREFIXES = tuple(f"{key}:" for key in sorted(_CODE_EXECUTION_KEYS))
 
 
 @dataclass(frozen=True)
@@ -283,7 +285,7 @@ class OrganizationPricingService:
             return
         if kind != MODEL_KIND:
             raise OrganizationPricingToolRateError(kind, model_key)
-        if model_key in _CODE_EXECUTION_KEYS:
+        if model_key in _CODE_EXECUTION_KEYS or model_key.startswith(_CODE_EXECUTION_ENVIRONMENT_PREFIXES):
             raise OrganizationPricingToolRateError("code execution", model_key)
         if model_key in await self.deployment_supplied_keys(organization_id, [model_key]):
             raise OrganizationPricingManagedModelError(model_key)

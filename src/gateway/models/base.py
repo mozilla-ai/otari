@@ -4,11 +4,13 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import DateTime, func
+from sqlalchemy import JSON, DateTime, func
 from sqlalchemy.engine.interfaces import Dialect
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.types import TypeDecorator
 from sqlmodel import Field, SQLModel
+
+from gateway.types.key_scope import KeyScopeSet
 
 
 class Base(DeclarativeBase):
@@ -24,6 +26,29 @@ class Base(DeclarativeBase):
     """
 
     metadata = SQLModel.metadata
+
+
+class KeyScopeColumn(TypeDecorator[KeyScopeSet]):
+    """The scopes a key or a grant holds, stored as the JSON list of their names.
+
+    A row reads back as a :class:`~gateway.types.key_scope.KeyScopeSet`, whose
+    constructors are the only way to make one, so code between the column and
+    the wire cannot hold a list nothing checked. A name this gateway does not
+    know is left out on the way in, which is what lets an older worker read a
+    row a newer one wrote.
+
+    The rendered DDL is exactly ``impl``'s, so this changes no migration and
+    ``compare_metadata`` stays clean.
+    """
+
+    impl = JSON()
+    cache_ok = True
+
+    def process_bind_param(self, value: KeyScopeSet | None, dialect: Dialect) -> list[str] | None:
+        return None if value is None else value.stored
+
+    def process_result_value(self, value: list[str] | None, dialect: Dialect) -> KeyScopeSet | None:
+        return None if value is None else KeyScopeSet.read(value)
 
 
 class UtcDateTime(TypeDecorator[datetime]):

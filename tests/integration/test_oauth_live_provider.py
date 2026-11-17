@@ -29,14 +29,11 @@ To run it for Google::
     #      OTARI_OAUTH_GOOGLE_CLIENT_SECRET=...
     #      OTARI_DATABASE_URL=...   (the same one this test will read)
     # 2. Call GET /api/v1/auth/oauth/google/authorize with curl -c so the flow
-    #    cookie (otari_oauth_flow) it sets is kept, open the URL it returns and
-    #    complete the consent screen. The browser lands on
+    #    cookie (otari_oauth_flow_<digest>) it sets is kept, open the URL it
+    #    returns and complete the consent screen. The browser lands on
     #    /#/auth/google/callback?code=...&state=...; copy both out of the
-    #    address bar, and the whole cookie value out of the jar. The state
-    #    finds the verifier. The cookie holds one browser token per sign-in the
-    #    browser has in flight, keyed by state, and this test selects the one
-    #    for that state the way the callback route does, so copy it whole
-    #    rather than picking a token out of it.
+    #    address bar, and the cookie's value out of the jar. The state finds
+    #    the verifier, and the cookie's value is that sign-in's browser token.
     # 3. Run immediately, since the code expires in minutes and is single-use,
     #    and the pending state expires in ten.
     OTARI_OAUTH_LIVE_TESTS=1 \\
@@ -91,23 +88,11 @@ def _live_state(provider: str) -> str:
     return state
 
 
-def _live_browser_token(provider: str, state: str) -> str:
-    """The browser token the flow cookie holds for ``state``, or skip.
-
-    The cookie carries one token per sign-in the browser has in flight, keyed
-    by state, so the token is selected from it rather than used whole. Selected
-    through the same function the callback route uses, because a test that read
-    the cookie its own way would stop proving the route can read it.
-    """
-    cookie = os.environ.get(f"OTARI_OAUTH_LIVE_{provider.upper()}_FLOW_COOKIE", "")
-    if not cookie:
+def _live_browser_token(provider: str) -> str:
+    """The browser token the sign-in's flow cookie holds, or skip."""
+    token = os.environ.get(f"OTARI_OAUTH_LIVE_{provider.upper()}_FLOW_COOKIE", "")
+    if not token:
         pytest.skip(f"OTARI_OAUTH_LIVE_{provider.upper()}_FLOW_COOKIE is required")
-    token = oauth_service.browser_token_for(cookie, state)
-    if token is None:
-        pytest.skip(
-            f"OTARI_OAUTH_LIVE_{provider.upper()}_FLOW_COOKIE holds no token for that state. "
-            "Copy the cookie value whole, and take the state from the same round trip."
-        )
     return token
 
 
@@ -137,7 +122,7 @@ async def test_a_real_authorization_code_exchanges_for_an_identity(provider: str
     config = _live_config(provider)
     code = _live_code(provider)
     state = _live_state(provider)
-    browser_token = _live_browser_token(provider, state)
+    browser_token = _live_browser_token(provider)
 
     init_db(config)
     async with create_session() as db:

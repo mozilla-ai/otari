@@ -263,16 +263,6 @@ class OrganizationDomainService:
 
         domain = self._validated_claim(request.domain)
 
-        # Only a *live* proof blocks a new claim. An unproven claim by anyone
-        # else is no obstacle (it grants nothing, and refusing on it would let
-        # whoever claimed a domain first lock its real owner out for good), and
-        # neither is a proof that has aged out: that claim has stopped admitting
-        # anyone, so treating it as exclusive would be the same permanent
-        # lockout wearing a different hat, for an organization that has by then
-        # walked away from the domain.
-        holder = await self.domains.get_verified_by_domain(domain)
-        if holder is not None and not holder.proof_expired(now=datetime.now(UTC)):
-            raise OrganizationDomainAlreadyClaimedError(domain)
         if await self.domains.get_by_domain_and_organization(domain, organization.id) is not None:
             raise OrganizationDomainClaimedHereError(domain)
         # Counted and inserted without serializing the pair, so two concurrent

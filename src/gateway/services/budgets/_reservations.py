@@ -404,7 +404,7 @@ class ReservationHandle:
     scoped_token_estimate: int = 0
     request_estimate: int = 0
     scoped_request_estimate: int = 0
-    # This is None when the request holds nothing: a free model, a budget-exempt key, or no budget and no ceiling.
+    # This is None when the request holds nothing: a free model under no cap, a budget-exempt key, or nothing capped.
     reservation_id: str | None = None
     # The time to live of a ledger row written for this reservation after admission.
     reservation_ttl_sec: int = DEFAULT_RESERVATION_TTL_SEC
@@ -962,18 +962,21 @@ async def reserve_budget(
     # spend. Priced at the caller's organization's rate, so "free" means free at
     # what this request will settle at rather than at the deployment's list price.
     #
-    # It still spends tokens and is still a request, so a budget capping either of
-    # those holds and gates them here as it would for any other request. Only when
-    # nothing caps a count does the whole reservation drop away, which keeps the
-    # hot path for a free model on a dollars-only budget exactly what it was.
+    # It still takes a hold wherever anything is capped, dollars included. A budget
+    # capping tokens or requests gates them here as for any other request, and a
+    # dollar cap needs the hold for the gateway-run tools: each priced call grows it
+    # through the dollar gate, and settlement records their spend on the ceilings
+    # the hold names. The model call itself is never refused on dollars.
     usd: Decimal | None = held
     if model_is_free is None and model:
         model_is_free = await _is_model_free(
             db, model, pricing_provider=pricing_provider, organization_id=organization_id
         )
     if model_is_free:
-        budget_caps_counts = budget is not None and (budget.token_limit is not None or budget.request_limit is not None)
-        if not budget_caps_counts and not any(ceiling.caps_counts for ceiling in scoped):
+        budget_caps_anything = budget is not None and (
+            budget.max_budget is not None or budget.token_limit is not None or budget.request_limit is not None
+        )
+        if not budget_caps_anything and not scoped:
             return no_reservation
         usd = None
 
@@ -984,7 +987,7 @@ async def reserve_budget(
     #
     # Deliberately here rather than earlier, so it costs a query only on a request
     # that is actually about to take a hold. Everything above this line returns a
-    # handle holding nothing (no budget and no ceiling, a free model, a disabled
+    # handle holding nothing (no budget and no ceiling, an uncapped free model, a disabled
     # strategy, an exempt key), and none of those can be refused by a leak, so
     # sweeping for one would be a read per request bought for nothing. Skipped on
     # a top-up too, which runs inside a request whose own hold is live.
@@ -1421,15 +1424,17 @@ async def increase_reservation(
     if not handle.counts_toward_budget:
         return
     if additional > ZERO or grown_tokens > 0:
+        # A free model's growth adds no dollars, so the dollar axis is not asked, as at admission.
+        scoped_usd = None if model_is_free and additional <= ZERO else additional
         refused = await reserve_scoped(
-            db, handle.scoped_budgets, additional, tokens=grown_tokens, requests=0, new_request=False
+            db, handle.scoped_budgets, scoped_usd, tokens=grown_tokens, requests=0, new_request=False
         )
         if refused is not None:
             BUDGET_EXCEEDED.inc()
             blocked = await blocked_axis(
                 db,
                 refused,
-                amount=additional,
+                amount=scoped_usd,
                 tokens=grown_tokens,
                 requests=0,
                 new_request=False,
@@ -1518,9 +1523,19 @@ async def increase_reservation(
 
 
 async def hold_tool_call(
-    db: AsyncSession, handle: ReservationHandle, amount: Decimal, *, strategy: str, calls: int = 1
+    db: AsyncSession,
+    handle: ReservationHandle,
+    amount: Decimal,
+    *,
+    strategy: str,
+    calls: int = 1,
+    tokens: int = 0,
+    model_is_free: bool = False,
 ) -> Decimal | None:
-    """Grow every leg of ``handle`` by ``amount`` for each of ``calls`` calls before they run, and commit.
+    """Grow every leg of ``handle`` by ``amount`` and ``tokens`` for each of ``calls`` calls, and commit.
+
+    A gateway tool call holds dollars; a tool loop's next model round holds its
+    prompt's tokens too, and on a ``model_is_free`` model only its tokens.
 
     One hold for all of them, all or nothing: the amount held, or ``None`` where
     a budget or a ceiling has no room for it, with the ceilings that had room
@@ -1534,6 +1549,7 @@ async def hold_tool_call(
             caller rolls ``db`` back.
     """
     held = max(to_usd(amount), ZERO) * calls
+    held_tokens = max(tokens, 0) * calls
     before = replace(handle)
     try:
         try:
@@ -1541,15 +1557,21 @@ async def hold_tool_call(
                 db,
                 handle,
                 estimate=max(handle.estimate, handle.scoped_estimate) + held,
-                model_is_free=False,
+                tokens=max(handle.token_estimate, handle.scoped_token_estimate) + held_tokens if held_tokens else 0,
+                model_is_free=model_is_free,
                 strategy=strategy,
             )
         except HTTPException:
             # The ceilings are grown before the per-user leg, so a refusal there leaves them grown.
             await release_scoped(
-                db, handle.scoped_budget_ids, handle.scoped_estimate - before.scoped_estimate, commit=False
+                db,
+                handle.scoped_budget_ids,
+                handle.scoped_estimate - before.scoped_estimate,
+                tokens=handle.scoped_token_estimate - before.scoped_token_estimate,
+                commit=False,
             )
             handle.scoped_estimate = before.scoped_estimate
+            handle.scoped_token_estimate = before.scoped_token_estimate
             await db.commit()
             return None
         await db.commit()

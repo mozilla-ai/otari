@@ -29,12 +29,18 @@ cannot be deleted.
 1. Open **API keys** and click **Create key**.
 2. Enter a **Name**, such as `mlpa`.
 3. Click **Advanced** and tick **Service key**.
-4. Under **End-user budgets**, pick the budgets the key may start end users on.
-5. Pick the **Default end-user budget**, used when a request names none. It
-   must be one of the budgets you picked.
+4. Pick the **Budget for each end user**: every new end user starts on its own
+   copy of it. Picking **None** leaves new end users uncapped, limited only by
+   the key's own ceiling.
+5. Optionally, tick **Other budgets a request may choose**, which a request
+   names in the `Otari-End-User-Budget` header instead.
 6. Set **Max end users**, or keep 10,000; see
    [Capping a key's end users](#capping-a-keys-end-users).
-7. Click **Create key** and copy the key.
+7. To manage end users with the key (step 4), check the scopes it needs in the
+   **End users** group under **Access**. With only **Call models** checked, the
+   key makes model calls for its end users but cannot list, change or delete
+   them.
+8. Click **Create key** and copy the key.
 
 The key belongs to the organization, not to you:
 
@@ -52,10 +58,16 @@ Through the API, a service key is created with `is_service_key`,
 `end_user_budget_ids`, `end_user_budget_id` and `max_end_users`; see the
 [OpenAPI specification](public/openapi.json).
 
+A service key created without naming scopes can make model calls for its end
+users but cannot manage them: the routes in [Manage end users](#4-manage-end-users) need
+the `end-users` [scopes](api-keys.md#scopes). Give the key only those it uses.
+Most services need `end-users:read` and `end-users:write`; `end-users:delete`
+also erases an end user's records, so leave it off a key that never deletes.
+
 ## 3. Name the end user on each request
 
 Send the end user's id in the request's `user` field (`metadata.user_id` on
-Messages). A new end user starts on the key's **Default end-user budget**, or
+Messages). A new end user starts on the key's **Budget for each end user**, or
 with no budget of its own when the key has none. To start it on another budget on the key's
 list, name that budget in the `Otari-End-User-Budget` header:
 
@@ -74,16 +86,23 @@ Otari-End-User-Budget: <memories budget id>
   id counts as naming no one.
 - The header only matters when the request creates the end user. An existing end
   user keeps its budget; to change it, [move the end user](#4-manage-end-users).
-- A budget not on the key's list is refused with `403`
-  (`end_user_budget_not_allowed`), even for an existing end user.
+- The header takes a budget's id, not its name: `GET /api/v1/end-user-budgets`
+  lists the key's budgets with both. A budget not on the key's list is refused
+  with `403` (`end_user_budget_not_allowed`), even for an existing end user.
 - The response's `Otari-End-User-Budget` header names the budget the end user is
   actually on, including on a `403` (`budget_exceeded`) from that budget.
 
 A request that names no one, or the key's own user, bills the key's user as on
 any other key.
 
-End users work on `/v1/chat/completions`, `/v1/responses`, `/v1/search` and
-`/v1/messages`. Other endpoints treat a service key as an ordinary key, so a
+End users work on `/v1/chat/completions`, `/v1/responses`, `/v1/messages`,
+`/v1/search`, `/v1/fetch` and `/v1/code/execute`, and on `/v1/files`, where the
+file belongs to the end user ([Who can see an uploaded file](files.md#who-can-see-an-uploaded-file)).
+On the first six, a request
+that sends `Otari-End-User-Budget` without naming an end user, or sends it on a
+key that is not a service key, is refused with `400`
+(`end_user_budget_without_end_user`), since there is no end user for the budget
+to apply to. Other endpoints treat a service key as an ordinary key, so a
 `user` naming someone else there follows the key's
 [mismatched `user` field](api-keys.md#mismatched-user-fields) setting.
 
@@ -165,13 +184,20 @@ guests), keep separate caps:
   a place, and is refused when the key is full.
 - A key that assigns no budget counts every end user of its user.
 
-The cap holds across replicas.
+The cap holds across replicas. To see it coming, open the key's **End users**
+in **API keys**, which shows how many end users the cap counts against it, or
+read `end_users` from `GET /api/v1/key/budget` with the key itself, for example
+`{"count": 19, "max_end_users": 20}`.
 
 ## End-user routes
 
-All of these take only the service key. Another API key, the master key and a
-dashboard session are refused, and so is a service key whose own user is blocked
-or deleted.
+All of these take only the service key, holding the `end-users` scope each
+route names below. Another API key, the master key and a dashboard session are
+refused, and so is a service key whose own user is blocked or deleted.
+
+- `GET` routes need `end-users:read`.
+- `PUT` and `PATCH` routes need `end-users:write`.
+- `DELETE` routes need `end-users:delete`.
 
 | Request | Does |
 |---|---|
@@ -184,8 +210,8 @@ or deleted.
 | `GET /api/v1/end-user-budgets` | Lists the key's budgets, with each one's limits, period and end-user count |
 
 - An id the key does not own answers 404, as one that does not exist does.
-- A budget set through these routes must be on the key's list, or the request is
-  refused with `403` (`end_user_budget_not_allowed`).
+- `budget_id` takes a budget's id, not its name. The budget must be on the key's
+  list, or the request is refused with `403` (`end_user_budget_not_allowed`).
 - `GET /api/v1/end-users` takes `skip` and `limit` (up to 1000), filters on
   `budget_id`, `blocked` and `external_id`, and with `include_total=true` puts
   the match count in the `Otari-Total-Count` header. Lists and counts leave out

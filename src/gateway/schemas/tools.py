@@ -16,6 +16,7 @@ from sqlmodel import Field, SQLModel
 from gateway.core.settings.tools import ToolKind
 from gateway.models.secret_fields import redact_secret_like_values
 from gateway.models.tools import OrgWebSearchKey, SearchToolCredential
+from gateway.schemas.mcp_catalog import McpCatalogServerPublic
 
 
 class OrgWebSearchKeyCreateRequest(SQLModel):
@@ -35,7 +36,7 @@ class OrgWebSearchKeyCreateRequest(SQLModel):
         max_length=255,
         description=(
             "The provider the key is for: one the provider catalog, GET /api/v1/search-tools/providers, "
-            "lists for the key's kind, other than searxng, or tavily or brave for a search key."
+            "lists for the key's kind, other than searxng."
         ),
     )
     name: str = Field(max_length=255, description="How the organization tells this key apart from its others.")
@@ -389,6 +390,35 @@ class SearchToolsResponse(pydantic.BaseModel):
     config: list[ConfigSearchToolSchema]
 
 
+class SearchToolCatalogEntry(pydantic.BaseModel):
+    """One search tool a direct search may name, as any caller may see it: never its key, endpoint or options."""
+
+    id: str = pydantic.Field(description="The tool's name, to send as 'search_tool_name' or in /api/v1/search/{tool}.")
+    object: Literal["search_tool"] = "search_tool"
+    provider: str = pydantic.Field(description="The search provider the tool runs on.")
+    label: str = pydantic.Field(description="A display name for the tool: its provider's name, capitalized.")
+    price_per_call: float | None = pydantic.Field(
+        description=(
+            "USD the caller's organization is charged for one search on the tool when the provider reports no "
+            "cost of its own: the organization's override, else the deployment's price list. Null when no row "
+            "prices it."
+        )
+    )
+    default: bool = pydantic.Field(
+        description=(
+            "True for the deployment's default, the tool a direct search that names none runs on unless the "
+            "caller's organization brings its own search key."
+        )
+    )
+
+
+class SearchToolCatalogResponse(pydantic.BaseModel):
+    """The search tools a direct search may name."""
+
+    object: Literal["list"] = "list"
+    data: list[SearchToolCatalogEntry]
+
+
 class CreateSearchToolRequest(pydantic.BaseModel):
     """Create a stored search or fetch instance. ``api_key`` is write-only and requires OTARI_SECRET_KEY."""
 
@@ -702,6 +732,16 @@ class CodeExecuteRequest(pydantic.BaseModel):
             "or 60 seconds when it sets none."
         ),
     )
+    environment: str | None = pydantic.Field(
+        default=None,
+        max_length=255,
+        pattern=r"^[A-Za-z0-9._:/@-]+$",
+        description=(
+            "The sandbox environment to run in: a name GET /api/v1/code/environments lists. Omitted, the "
+            "workspace's pinned environment, else the deployment's default. A held container keeps the "
+            "environment it was created in."
+        ),
+    )
     file_ids: list[str] | None = pydantic.Field(
         default=None,
         max_length=_MAX_CODE_EXECUTION_INPUTS,
@@ -739,6 +779,27 @@ class CodeExecuteResponse(pydantic.BaseModel):
     files: list[CodeExecutionOutputFile] = pydantic.Field(
         description="The files the code wrote. Empty when it wrote none, or where the Files API is off."
     )
+
+
+class CodeExecutionEnvironment(pydantic.BaseModel):
+    """A sandbox environment a direct code execution may name: what it contains, and what a run in it costs."""
+
+    object: Literal["code_execution.environment"] = "code_execution.environment"
+    name: str = pydantic.Field(description="What POST /api/v1/code/execute's environment field takes.")
+    label: str = pydantic.Field(description="A display name; the name itself when the operator gave none.")
+    description: str | None = pydantic.Field(description="What it contains and how big it is, when the operator said.")
+    price_per_run: float | None = pydantic.Field(
+        description="USD per run for the caller's organization: the environment's own price, else code execution's. "
+        "Null when unpriced."
+    )
+    default: bool = pydantic.Field(description="Whether a run that names no environment runs in this one.")
+
+
+class CodeExecutionEnvironmentList(pydantic.BaseModel):
+    """The sandbox environments the caller's workspace may run code in."""
+
+    object: Literal["list"] = "list"
+    data: list[CodeExecutionEnvironment]
 
 
 class OtariToolCallSource(pydantic.BaseModel):
@@ -812,3 +873,210 @@ class SandboxCredentialRequest(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(json_schema_extra={"example": {"api_key": "e2b_0123456789abcdef"}})
 
     api_key: str = pydantic.Field(min_length=1)
+
+
+class McpConnectionStart(pydantic.BaseModel):
+    """What a caller sends to start their own sign-in to a per-user MCP server."""
+
+    return_to: str | None = pydantic.Field(
+        default=None,
+        max_length=2048,
+        description="A dashboard path to land on once signed in, such as /tools/mcp-servers. "
+        "Anything that is not a path inside the dashboard is refused",
+    )
+
+
+class McpConnectionStarted(pydantic.BaseModel):
+    """Where to send the caller's browser to sign in."""
+
+    authorization_url: str = pydantic.Field(
+        description="The MCP server's authorization page. It carries a single-use state that expires in ten minutes"
+    )
+
+
+class McpConnectionComplete(pydantic.BaseModel):
+    """What the authorization server sent back, as the dashboard received it."""
+
+    state: str = pydantic.Field(min_length=1, max_length=512, description="The state from the redirect")
+    code: str = pydantic.Field(min_length=1, max_length=4096, description="The authorization code from the redirect")
+    iss: str | None = pydantic.Field(
+        default=None,
+        max_length=2048,
+        description="The redirect's iss, the authorization server's own name, if it sent one",
+    )
+
+
+class McpConnectionCompleted(pydantic.BaseModel):
+    """A finished sign-in: which server it connected, and where to land."""
+
+    server_id: uuid.UUID
+    workspace_id: uuid.UUID
+    server_name: str
+    return_to: str | None = pydantic.Field(description="The dashboard path the sign-in was started with, if any")
+    checked: bool = pydantic.Field(
+        default=False,
+        description="The sign-in was made only to check the server: its health was recorded and nothing was connected",
+    )
+    shared: bool = pydantic.Field(
+        default=False,
+        description="The sign-in was a manager's for everyone: it is now the shared server's account",
+    )
+
+
+class McpConnectionPublic(pydantic.BaseModel):
+    """One of the caller's own connections. Never carries a token."""
+
+    server_id: uuid.UUID
+    connected_at: datetime
+    updated_at: datetime
+    expires_at: datetime | None = pydantic.Field(
+        description="When the current access token expires; null when the server stated no lifetime"
+    )
+    renewable: bool = pydantic.Field(
+        description="Whether Otari can renew the token on its own; false means signing in again once it expires"
+    )
+
+
+class McpConnectionsPublic(pydantic.BaseModel):
+    data: list[McpConnectionPublic]
+    count: int = pydantic.Field(description="How many of the workspace's servers the caller is connected to in all")
+
+
+class McpServerConnectionPublic(pydantic.BaseModel):
+    """One user connected to a per-user MCP server, as a workspace manager sees them. Never carries a token."""
+
+    user_id: str = pydantic.Field(description="The request-plane user the connection belongs to")
+    email: str | None = pydantic.Field(description="The dashboard account's email, when the user is one's")
+    full_name: str | None
+    connected_at: datetime
+    updated_at: datetime
+
+
+class McpServerConnectionsPublic(pydantic.BaseModel):
+    data: list[McpServerConnectionPublic]
+    count: int = pydantic.Field(description="How many users are connected in all")
+
+
+MAX_MCP_SERVER_REQUEST_NOTE_LENGTH = 500
+McpServerRequestStatusValue = Literal["pending", "approved", "declined", "withdrawn"]
+
+
+class McpServerRequestCreate(pydantic.BaseModel):
+    """A member asking the workspace's admins to add one server of the MCP catalog."""
+
+    catalog_name: str = pydantic.Field(
+        min_length=1, max_length=512, description="The catalog server's `name`, such as `com.example/mcp`"
+    )
+    note: str | None = pydantic.Field(
+        default=None,
+        max_length=MAX_MCP_SERVER_REQUEST_NOTE_LENGTH,
+        description="What the member needs the server for, shown to the admins",
+    )
+
+
+class McpServerRequestPublic(pydantic.BaseModel):
+    """One of the caller's own requests for a catalog server."""
+
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    catalog_name: str
+    title: str = pydantic.Field(description="The catalog's title for the server when it was requested")
+    url: str = pydantic.Field(description="The server's endpoint when it was requested")
+    note: str | None
+    status: McpServerRequestStatusValue
+    decision_reason: str | None = pydantic.Field(description="An admin's reason for declining, when they gave one")
+    decided_at: datetime | None
+    server_id: uuid.UUID | None = pydantic.Field(description="The stored server an approval produced")
+    catalog_server: McpCatalogServerPublic | None = pydantic.Field(
+        description="The catalog's entry as it is now; null once the catalog no longer lists the server"
+    )
+    created_at: datetime
+
+
+class McpServerRequestsPublic(pydantic.BaseModel):
+    """The caller's pending requests in a workspace, and the answers they have not acknowledged, newest first."""
+
+    data: list[McpServerRequestPublic]
+
+
+class McpServerRequesterPublic(pydantic.BaseModel):
+    """One member who asked for a server, as a workspace manager sees them."""
+
+    request_id: uuid.UUID
+    user_id: uuid.UUID
+    full_name: str | None
+    email: str | None
+    note: str | None
+    requested_at: datetime
+
+
+class McpServerRequestGroupPublic(pydantic.BaseModel):
+    """Everyone waiting for one catalog server in a workspace."""
+
+    catalog_name: str
+    title: str
+    url: str
+    catalog_server: McpCatalogServerPublic | None = pydantic.Field(
+        description="The catalog's entry as it is now; null once the catalog no longer lists the server"
+    )
+    requesters: list[McpServerRequesterPublic] = pydantic.Field(
+        description="Who asked, earliest first, up to 5. Past that, the requesters list of this server has the rest"
+    )
+    requester_count: int = pydantic.Field(description="How many pending requests ask for this server in all")
+    first_requested_at: datetime
+
+
+class McpServerRequestersPublic(pydantic.BaseModel):
+    """A page of the members waiting for one catalog server in a workspace."""
+
+    data: list[McpServerRequesterPublic] = pydantic.Field(description="Who asked, earliest first")
+    count: int = pydantic.Field(description="How many pending requests ask for this server in all")
+
+
+class McpServerRequestGroupsPublic(pydantic.BaseModel):
+    """A workspace's pending requests, one entry per catalog server, the longest-waiting first."""
+
+    data: list[McpServerRequestGroupPublic]
+    count: int = pydantic.Field(description="How many requests are pending in all")
+    server_count: int = pydantic.Field(description="How many catalog servers have a request pending, for paging `data`")
+
+
+class McpServerRequestDecline(pydantic.BaseModel):
+    """Declines every pending request for one catalog server."""
+
+    catalog_name: str = pydantic.Field(min_length=1, max_length=512)
+    reason: str | None = pydantic.Field(
+        default=None, max_length=MAX_MCP_SERVER_REQUEST_NOTE_LENGTH, description="Shown to each requester"
+    )
+
+
+class McpServerRequestsDeclined(pydantic.BaseModel):
+    declined: int = pydantic.Field(description="How many requests were declined")
+
+
+class WorkspaceMcpServerLogoPublic(pydantic.BaseModel):
+    """How the dashboard shows one of a workspace's MCP servers."""
+
+    server_id: uuid.UUID
+    logo_url: str | None = pydantic.Field(
+        description=(
+            "Where this gateway serves the server's logo: an admin's upload, else the catalog's logo for its URL, "
+            "else one found on its host. Null when none was found; the dashboard shows the server's initial."
+        )
+    )
+    logo_tone: Literal["dark", "light", "tile"] | None = pydantic.Field(
+        description=(
+            "Where the logo needs a tile to stay visible: `dark` ink on a dark background, `light` ink on a light "
+            "background, `tile` on every background. Null when it reads on both, or the tile is `never`."
+        )
+    )
+    logo_tile: Literal["auto", "always", "never"] = pydantic.Field(
+        description="An admin's choice: a tile only where the logo would fade out, always, or never."
+    )
+    has_logo_override: bool = pydantic.Field(description="An admin uploaded this server's logo.")
+
+
+class WorkspaceMcpServerLogosPublic(pydantic.BaseModel):
+    """The logo of each of a workspace's MCP servers."""
+
+    data: list[WorkspaceMcpServerLogoPublic]

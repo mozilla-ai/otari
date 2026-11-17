@@ -9,6 +9,7 @@ from sqlalchemy import delete, select
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.identity import OAuthAppGrant
 from gateway.repositories.base_repository import BaseRepository
+from gateway.types.key_scope import KeyScopeSet
 
 
 class OAuthAppGrantRepository(BaseRepository[OAuthAppGrant, Never, Never]):
@@ -24,6 +25,7 @@ class OAuthAppGrantRepository(BaseRepository[OAuthAppGrant, Never, Never]):
         challenge: str,
         user_id: uuid.UUID,
         workspace_id: uuid.UUID,
+        scopes: KeyScopeSet,
         expires_at: datetime,
     ) -> None:
         """Stage an approval without minting or retaining a credential."""
@@ -35,6 +37,7 @@ class OAuthAppGrantRepository(BaseRepository[OAuthAppGrant, Never, Never]):
                 challenge=challenge,
                 user_id=user_id,
                 workspace_id=workspace_id,
+                scopes=scopes,
                 expires_at=expires_at,
             )
         )

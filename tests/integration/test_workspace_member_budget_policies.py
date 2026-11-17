@@ -169,6 +169,7 @@ async def test_member_added_via_organization_workspace_assignment_is_materialize
             role="member",
             workspace_assignments=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role="member")],
         ),
+        open_signup=False,
         blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
 
@@ -224,6 +225,7 @@ async def test_reviving_a_suspended_workspace_membership_is_materialized(async_d
             role="member",
             workspace_assignments=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role="member")],
         ),
+        open_signup=False,
         blocked_addresses=NO_BLOCKED_ADDRESSES,
     )
 

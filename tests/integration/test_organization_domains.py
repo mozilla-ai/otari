@@ -231,23 +231,6 @@ async def test_a_value_that_is_not_a_domain_is_refused(async_db: AsyncSession, d
 
 
 @pytest.mark.asyncio
-async def test_a_domain_another_organization_holds_is_a_conflict(async_db: AsyncSession) -> None:
-    theirs = await _organization(async_db, slug="theirs")
-    mine = await _organization(async_db, slug="mine")
-    await _claim(async_db, theirs, domain="contested.example")
-    admin = await _identity(async_db, mine, role="admin", email="admin@mine.example")
-
-    with pytest.raises(OrganizationDomainAlreadyClaimedError) as raised:
-        await OrganizationDomainService(async_db).create_domain_for_user(
-            user=admin,
-            request=OrganizationDomainCreateRequest(domain="contested.example"),
-        )
-    # The holder is deliberately absent: naming it would make this endpoint a
-    # probe for which domains other tenants have registered.
-    assert "theirs" not in str(raised.value).lower()
-
-
-@pytest.mark.asyncio
 async def test_a_claim_lands_unverified_and_carries_the_record_to_publish(async_db: AsyncSession) -> None:
     organization = await _organization(async_db, slug="acme")
     admin = await _identity(async_db, organization, role="admin", email="admin@acme.example")
@@ -863,20 +846,21 @@ async def test_a_domain_whose_proof_aged_out_can_be_taken_over(
 
 
 @pytest.mark.asyncio
-async def test_a_proven_domain_cannot_then_be_claimed_by_anyone_else(
+async def test_a_domain_another_organization_proved_can_be_added_and_stays_unproven(
     async_db: AsyncSession,
 ) -> None:
-    real = await _organization(async_db, slug="real")
-    latecomer = await _organization(async_db, slug="latecomer")
-    await _claim(async_db, real, domain="contested.example", verified=True)
-    admin = await _identity(async_db, latecomer, role="admin", email="admin@latecomer.example")
+    proven = await _organization(async_db, slug="proven")
+    challenger = await _organization(async_db, slug="challenger")
+    await _claim(async_db, proven, domain="contested.example", verified=True)
+    admin = await _identity(async_db, challenger, role="admin", email="admin@challenger.example")
 
-    with pytest.raises(OrganizationDomainAlreadyClaimedError) as raised:
-        await OrganizationDomainService(async_db).create_domain_for_user(
-            user=admin,
-            request=OrganizationDomainCreateRequest(domain="contested.example"),
-        )
-    assert "real" not in str(raised.value).lower()
+    added = await OrganizationDomainService(async_db).create_domain_for_user(
+        user=admin,
+        request=OrganizationDomainCreateRequest(domain="contested.example"),
+    )
+
+    assert added.organization_id == challenger.id
+    assert added.verified_at is None
 
 
 @pytest.mark.asyncio

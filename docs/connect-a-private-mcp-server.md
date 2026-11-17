@@ -20,6 +20,8 @@ gateway probe that network, so Otari refuses these by default:
   IPv6 `fd00::/8` style addresses);
 - link-local addresses such as `169.254.169.254`, the cloud metadata address;
 - multicast, unspecified and reserved addresses;
+- any other address outside the public address space, such as `100.64.0.0/10`,
+  the range Tailscale and carrier-grade NAT use for devices;
 - a hostname that does not resolve when Otari checks it.
 
 Loopback (`127.0.0.1`, `localhost`) is allowed by default, for a server running
@@ -53,8 +55,8 @@ provider, and the provider forwards requests back down that connection.
 
 **The server is on the public internet once you do this.** Anyone who learns the
 address can send it requests. So the server must require a token on every
-request, and you should add the token to Otari (see
-[Store the token in Otari](#store-the-token-in-otari)). Do not publish a server
+request, and you should add the credentials to Otari (see
+[Store the credentials in Otari](#store-the-credentials-in-otari)). Do not publish a server
 that answers without one.
 
 The two examples below are third-party products. They have their own accounts,
@@ -114,15 +116,19 @@ prerequisites and the flags.
 
 - Speak MCP over streamable HTTP. Otari does not use the older SSE transport for
   stored servers.
-- Check a bearer token on every request and answer `401` without one.
+- Ask for credentials on every request and answer `401` without them, whichever
+  way you give Otari the credentials: a token you paste in, or a sign-in (see
+  [Store the credentials in Otari](#store-the-credentials-in-otari)).
 - Be reachable by the URL you give Otari with no redirect to a different host or
   port.
 
-Some servers do not fit. Home Assistant's built-in MCP server (`/api/mcp`) is
-documented to sign users in with OAuth, and its page does not describe a static
-bearer token. Otari sends a token you store; it does not run an OAuth sign-in
-with the server. So do not assume Home Assistant works with this guide until you
-have tried it. The test button in the next section tells you in one click.
+Some servers only offer a sign-in. Home Assistant's built-in MCP server
+(`/api/mcp`) is documented to sign users in with OAuth, and its page does not
+describe a static bearer token. Otari can sign in to an MCP server with OAuth, so
+this may work, but it has not been tried with Home Assistant here. Whether Home
+Assistant's sign-in satisfies what Otari asks of a server (see
+[Connect your account to an MCP server](connect-your-account-to-an-mcp-server.md))
+is unconfirmed. Try it with **Test connection** or a sign-in before you rely on it.
 
 ## Route 2: let your own gateway reach the private address
 
@@ -172,37 +178,62 @@ for the guardrail endpoints that share the same check. That includes addresses
 like the cloud metadata address. It also lets a hostname that fails to resolve
 through. Anyone who can name a server URL can then aim the gateway at your network: not
 only workspace admins, but also any API key holder in a workspace where
-**Let requests name their own MCP servers** is on. New workspaces start with it
-off, but a workspace that existed before access lists keeps it on. Check that
-switch in every workspace before you turn the setting on, and keep the gateway's
+**Allow servers outside this list** is on (it sits under the page title on
+**Tools**, then **MCP servers**). New workspaces start with it off, but a
+workspace that existed before access lists keeps it on. Check that switch in
+every workspace before you turn the setting on, and keep the gateway's
 own network rules (a firewall or an egress policy) as the real limit on where it
 can connect.
 
 These two settings are shown on the dashboard's settings page for reference but
 cannot be changed there. Change them through the environment or the config file.
 
-A literal address in `100.64.0.0/10`, the range Tailscale uses for devices, is
-not in a blocked range, and passes the check without the setting. That matters if
-your gateway is itself on your tailnet. A MagicDNS name that resolves there has
-not been tested here.
+A Tailscale address (`100.x.x.x`, or a MagicDNS name that resolves to one) is
+refused as "outside the public address space", so a gateway on your tailnet needs
+this setting too to reach a server by its tailnet address.
 
-## Store the token in Otari
+## Store the credentials in Otari
 
 On either route, add the server as usual (**Tools**, then **MCP servers**, then
-**Add MCP server**) and put the server's token in **Authorization token**.
+**Add MCP server**; [MCP servers](mcp-servers.md) has the steps). **Sign-in mode**
+decides what you store:
 
-- Otari sends it as a bearer token. It is encrypted before it is stored, using
-  `OTARI_SECRET_KEY`, and it is never shown again. The server's page shows only
-  that a token is set. To change it, enter a new one; to remove it, clear the
-  field.
+- **Shared account** with a token: put the server's token in **Authorization
+  token**. Otari sends it as a bearer token. It is encrypted before it is stored,
+  using `OTARI_SECRET_KEY`, and it is never shown again. The server's page shows
+  only that a token is set. To change it, enter a new one; to remove it, clear
+  the field.
+- **Shared account** with a sign-in: leave the token blank, add the server, and
+  sign in for everyone on its page
+  ([Set up a Shared server's account](mcp-servers.md#set-up-a-shared-servers-account)).
+- **Personal accounts**: each member signs in with their own account
+  ([Connect your account to an MCP server](connect-your-account-to-an-mcp-server.md)).
+
+A sign-in needs `public_base_url` and `OTARI_SECRET_KEY` set on the deployment,
+or adding the server is refused. See
+[Before you start](connect-your-account-to-an-mcp-server.md#before-you-start)
+there; it is not repeated here.
+
+What that means on a private network:
+
 - A token requires an `https://` URL. This holds even for loopback or a private
-  address: `http://127.0.0.1:8123/mcp` with a token is refused. So a private
-  server that needs a token also needs TLS on the address Otari dials. Whether
-  Otari accepts a self-signed certificate there has not been verified for this
-  guide.
+  address: `http://127.0.0.1:8123/mcp` with a token is refused. A personal
+  server needs `https://` too. So a private server that needs a credential also
+  needs TLS on the address Otari dials. Whether Otari accepts a self-signed
+  certificate there has not been verified for this guide.
+- The addresses a sign-in discovers (the server's authorization, token,
+  registration and revocation endpoints) must be `https://` and pass the same
+  address check as the server's own URL. If your server's sign-in lives at a
+  private address, it is refused the same way, and
+  `OTARI_MCP_ALLOW_PRIVATE_HOSTS=true` lifts that too. Through a tunnel, a
+  sign-in server on a public address is checked like any other public address.
+  A full sign-in against a server on a private network has not been run for
+  this guide.
 
-Use **Test connection** before you save. It connects once, lists the tools, and
-tells you what failed if it did.
+Use **Test connection** in the add dialog before you save. It connects once,
+lists the tools, and tells you what failed if it did. A **Personal accounts**
+server has no token to test with, so the dialog offers no test; check it from
+its page once it is saved.
 
 ## Lock it down
 
@@ -214,9 +245,19 @@ A reachable server is not a safe one until you decide who may use it.
 2. Set the **Default policy** to **Deny**, then add rules for the keys or users
    who need it. [Control who can use it](mcp-servers.md#control-who-can-use-it)
    has the steps.
-3. Turn off **Let requests name their own MCP servers** unless you need it, so
-   requests cannot reach the server with a URL and token of their own.
-4. On a server you control, make the token a dedicated one with the narrowest
+3. Choose **Availability** with care. **Every request** adds the server to every
+   model request made with a workspace key that holds the `mcp:execute` scope,
+   so a coding agent reaches it without naming it. A key without that scope does
+   not get it. If an attached server stops answering (a timeout, or it cannot be
+   reached), Otari leaves it out of requests for 60 seconds and then tries it
+   again. See [Attached to every request](mcp.md#attached-to-every-request).
+4. Turn off **Allow servers outside this list** unless you need it, so
+   requests cannot reach a server with a URL and token of their own.
+5. If you rely on **Read tools** to keep callers to reads, set them yourself.
+   Otari takes the labels from the server's first tool listing and does not
+   change them afterward, so a server you do not trust to describe its own tools
+   should not be left to label them. See [Read tools](mcp.md#read-tools).
+6. On a server you control, make the token a dedicated one with the narrowest
    rights it can have, so you can revoke it without touching anything else.
 
 ## Troubleshooting
@@ -224,12 +265,16 @@ A reachable server is not a safe one until you decide who may use it.
 | Message or state | Cause and fix |
 | --- | --- |
 | `... resolves to <address> which is in a private range (RFC 1918 / ULA); rejecting to prevent SSRF` | The URL points at a private address. Use a tunnel, or on your own gateway set `OTARI_MCP_ALLOW_PRIVATE_HOSTS=true`. |
-| `... which is link-local`, `... which is loopback`, `... which is multicast`, `... which is in a reserved range` | Same check, different range. Loopback is refused only when `OTARI_MCP_ALLOW_LOOPBACK` is off. |
+| `... which is link-local`, `... which is loopback`, `... which is multicast`, `... which is in a reserved range`, `... which is outside the public address space` | Same check, different range. Loopback is refused only when `OTARI_MCP_ALLOW_LOOPBACK` is off. A Tailscale `100.x.x.x` address lands in the last one. |
 | `... could not be resolved at validation time; rejecting to avoid DNS-rebinding` | The gateway cannot look up the name. For a tunnel, check the DNS record exists. For a private name, use `OTARI_MCP_ALLOW_PRIVATE_HOSTS=true` or the address itself. |
 | `MCP server URL must use https when a credential travels with it` | A token is set and the URL starts with `http://`. Use an `https://` address. |
-| Health `unreachable` or `timeout` | The gateway passed the address check but could not connect. Check the tunnel is healthy and the server is running. |
+| `Signing in to an MCP server needs public_base_url set ...` | A sign-in needs the deployment's `public_base_url`. Set it, as [Before you start](connect-your-account-to-an-mcp-server.md#before-you-start) says. |
+| `The authorization endpoint URL failed its safety check` (or `token endpoint`, `registration endpoint`, `revocation endpoint`) | A sign-in address the server published is not `https://` or is on a private address. Fix the server's sign-in address, or use `OTARI_MCP_ALLOW_PRIVATE_HOSTS=true` for the private case. The gateway log says which check failed. |
+| Health `unsafe_url` | The stored URL failed the address check, before any connection was tried. |
+| Health `unreachable` or `timeout` | The gateway passed the address check but could not connect. Check the tunnel is healthy and the server is running. On a server set to **Every request**, these also make requests skip it for 60 seconds. |
 | Health `tls_failed` | The certificate on the address is not one the gateway trusts. |
-| Health `unauthorized` or `forbidden` | The server rejected the token. Re-enter it. |
+| Health `unauthorized` or `forbidden` | The server rejected the credential. Re-enter the token, or sign in again. |
+| Health `server_error` or `http_error` | The server answered with a 5xx or another unexpected status. Look at the server's own log. |
 | Health `not_found` | The path is wrong. Use the exact MCP path your server documents. |
 | Health `not_mcp` | The address answered, but not as a streamable HTTP MCP server. |
 | Health `redirected` | The server redirected to another host or port. Use the final URL. |

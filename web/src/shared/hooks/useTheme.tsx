@@ -148,3 +148,11 @@ export function useTheme(): Theme {
   }
   return value
 }
+
+/**
+ * The theme on screen, or light outside a provider. For a component that only
+ * adapts to the theme, where a test rendering it alone has no provider.
+ */
+export function useResolvedTheme(): ThemePreference {
+  return useContext(Context)?.resolved ?? "light"
+}

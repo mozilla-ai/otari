@@ -36,6 +36,8 @@ from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 
+from .conftest import ALL_KEY_SCOPES
+
 # One probe per deployment-wide router family, each the cheapest request that
 # reaches its handler. A GET where the router has one, so a member's refusal is
 # never confused with a validation error; a write where every route on the
@@ -59,7 +61,13 @@ _DEPLOYMENT_WIDE_PROBES: list[tuple[str, str]] = [
     ("GET", f"{API_ROOT}/health-checks"),
     # A run spends the deployment's provider credit.
     ("POST", f"{API_ROOT}/health-checks/run"),
+    ("GET", f"{API_ROOT}/update-check"),
+    # Turns on a daily request from the deployment to otari.ai.
+    ("PUT", f"{API_ROOT}/update-check"),
     ("POST", f"{API_ROOT}/pricing"),
+    # Changes what every caller is told about a deployment provider's model.
+    ("PUT", f"{API_ROOT}/model-overrides/cairn:qwen"),
+    ("DELETE", f"{API_ROOT}/model-overrides/cairn:qwen"),
 ]
 
 # The subset whose reach is worse than reading somebody else's rows: two that
@@ -126,6 +134,9 @@ _TENANT_SCOPED_PROBES: list[tuple[str, str]] = [
     ("GET", f"{API_ROOT}/workspaces"),
     ("GET", f"{API_ROOT}/admin/access"),
     ("GET", f"{API_ROOT}/tool-settings"),
+    ("GET", f"{API_ROOT}/mcp-catalog/servers"),
+    ("GET", f"{API_ROOT}/mcp-catalog/popular"),
+    ("GET", f"{API_ROOT}/mcp-catalog/sync"),
 ]
 
 
@@ -530,7 +541,9 @@ def test_an_api_key_still_reaches_the_data_plane(
 ) -> None:
     """The control for the refusals above: nothing changed for a real credential."""
     _provision(client, master_key_header)
-    created = client.post(f"{API_ROOT}/keys", json={"key_name": "data-plane"}, headers=master_key_header)
+    created = client.post(
+        f"{API_ROOT}/keys", json={"scopes": ALL_KEY_SCOPES, "key_name": "data-plane"}, headers=master_key_header
+    )
     assert created.status_code == 200, created.text
     secret = created.json()["key"]
 

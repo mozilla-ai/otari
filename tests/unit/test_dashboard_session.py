@@ -21,7 +21,6 @@ from sqlalchemy import create_engine, text, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
-from gateway.api import deps
 from gateway.api.routes import auth_session as auth_session_route
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.main import create_app
@@ -453,7 +452,8 @@ def test_the_cookie_still_reads_the_catalog(tmp_path: Path) -> None:
     two are one decision and a change to either should have to look at both. The
     built-in guardrail catalog is the one an organization's own form reads rather
     than a page of the operator's, and it is on this plane for the same reasons.
-    So is the guardrail profiles read, which names what any caller may send.
+    So is the guardrail profiles read, which names what any caller may send, and
+    the sandbox environments a run may name.
     """
     with TestClient(create_app(_config(tmp_path))) as client:
         _sign_in(client)
@@ -463,6 +463,7 @@ def test_the_cookie_still_reads_the_catalog(tmp_path: Path) -> None:
         assert client.get(f"{API_ROOT}/tools").status_code == 200
         assert client.get(f"{API_ROOT}/tool-settings/guardrails/catalog").status_code == 200
         assert client.get(f"{API_ROOT}/tool-settings/guardrails/profiles").status_code == 200
+        assert client.get(f"{API_ROOT}/code/environments").status_code == 200
 
 
 def test_the_request_plane_still_refuses_anonymous_and_cross_site_callers(tmp_path: Path) -> None:
@@ -639,7 +640,7 @@ def test_a_failed_revocation_leaves_the_request_session_alone(tmp_path: Path, mo
             seen.append(f"{id(db):x}")
             return await real_resolve(db, token)  # type: ignore[arg-type]
 
-        monkeypatch.setattr(deps, "resolve_dashboard_session", _capture)
+        monkeypatch.setattr("gateway.api.deps.auth.resolve_dashboard_session", _capture)
 
         assert client.get(f"{API_ROOT}/settings").status_code == 401
         assert used and seen, (used, seen)

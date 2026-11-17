@@ -13,7 +13,7 @@ from typing import Any
 import httpx
 import pytest
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import COST_USD_HEADER, PRICING_SOURCE_HEADER, GatewayConfig
 from gateway.core.error_codes import ERROR_CODE_HEADER, PRICING_REQUIRED
 from gateway.exceptions.tools_exceptions import (
     DirectToolCallError,
@@ -24,7 +24,7 @@ from gateway.exceptions.tools_exceptions import (
 from gateway.models.tools import ResolvedWebSearchConfig
 from gateway.ports.billing_port import FUNDS_CHECK_UNAVAILABLE_DETAIL, ToolUse
 from gateway.schemas.tools import FetchRequest, SearchRequest
-from gateway.services.tools import DirectCaller, DirectToolCall, DirectToolService, DirectToolUsage
+from gateway.services.tools import DirectCaller, DirectToolCall, DirectToolRate, DirectToolService, DirectToolUsage
 from gateway.services.upstream_redaction import PASSTHROUGH_PROVIDER_ERROR_DETAIL
 
 WORKSPACE = uuid.uuid4()
@@ -51,9 +51,13 @@ class _Accounts:
 
 
 class _Ledger:
-    def __init__(self, *, rate: Decimal | None = Decimal("0.01"), funding: Exception | None = None) -> None:
+    def __init__(
+        self, *, rate: Decimal | None = Decimal("0.01"), funding: Exception | None = None, admits: bool = True
+    ) -> None:
         self.rate = rate
         self.funding = funding
+        # False is a call with no organization to charge, which is admitted with nothing to settle.
+        self.admits = admits
         self.committed = True
         self.steps: list[Any] = []
 
@@ -63,8 +67,8 @@ class _Ledger:
     async def organization_of(self, api_key_id: str | None) -> None:
         return None
 
-    async def unit_rate(self, call: DirectToolCall[Any], *, organization_id: uuid.UUID | None) -> Decimal | None:
-        return self.rate
+    async def unit_rate(self, call: DirectToolCall[Any], *, organization_id: uuid.UUID | None) -> DirectToolRate | None:
+        return DirectToolRate(self.rate, "deployment") if self.rate is not None else None
 
     async def hold(self, user_id: str, amount: Decimal, **_: Any) -> str:
         self.steps.append(("hold", user_id, amount))
@@ -76,11 +80,11 @@ class _Ledger:
     async def settle(self, hold: object, cost: Decimal) -> None:
         self.steps.append(("settle", hold, cost))
 
-    async def admit_funding(self, **_: Any) -> str:
+    async def admit_funding(self, **_: Any) -> str | None:
         if self.funding is not None:
             raise self.funding
         self.steps.append(("admit_funding",))
-        return "funding"
+        return "funding" if self.admits else None
 
     async def settle_funding(
         self, funding: object, cost: Decimal, *, tools: Mapping[str, ToolUse], model: str, description: str
@@ -168,7 +172,7 @@ async def test_a_served_call_settles_its_hold_at_the_reported_cost() -> None:
     outcome = await _search(ledger=ledger, gates=gates)
 
     assert outcome.response.search_tool == "fake-search"
-    assert outcome.headers == RATE_LIMIT
+    assert outcome.headers == {**RATE_LIMIT, COST_USD_HEADER: "0.007000", PRICING_SOURCE_HEADER: "reported"}
     assert ledger.steps == [
         ("hold", "billed", Decimal("0.01")),
         ("admit_funding",),
@@ -186,15 +190,39 @@ async def test_a_served_call_settles_its_hold_at_the_reported_cost() -> None:
     (row,) = gates.rows
     assert (row.status, row.cost, row.total_tokens, row.request_group_id) == ("success", Decimal("0.007"), 0, "r1")
     assert (row.workspace_id, row.model, row.provider, row.endpoint) == (WORKSPACE, "fake-search", "fake", "/v1/search")
+    assert row.deployment_paid is True
+
+
+@pytest.mark.asyncio
+async def test_a_call_admitted_with_nothing_to_charge_is_not_marked_deployment_paid() -> None:
+    ledger, gates = _Ledger(admits=False), _Gates()
+
+    await _search(ledger=ledger, gates=gates)
+
+    assert ("settle_funding",) not in [step[:1] for step in ledger.steps]
+    (row,) = gates.rows
+    assert (row.status, row.deployment_paid) == ("success", False)
 
 
 @pytest.mark.asyncio
 async def test_a_call_whose_provider_reports_no_cost_settles_at_the_rate() -> None:
     ledger = _Ledger()
 
-    await _search(tool="fake-free", ledger=ledger)
+    outcome = await _search(tool="fake-free", ledger=ledger)
 
     assert ledger.steps[-1] == ("settle", "hold", Decimal("0.01"))
+    assert outcome.headers[COST_USD_HEADER] == "0.010000"
+    assert outcome.headers[PRICING_SOURCE_HEADER] == "deployment"
+
+
+@pytest.mark.asyncio
+async def test_an_unpriced_call_answers_without_a_cost() -> None:
+    ledger = _Ledger(rate=None)
+
+    outcome = await _search(tool="fake-free", ledger=ledger)
+
+    assert ledger.steps[-1] == ("settle", "hold", Decimal(0))
+    assert outcome.headers == RATE_LIMIT
 
 
 @pytest.mark.asyncio
@@ -312,6 +340,8 @@ async def test_a_provider_failure_is_a_502_with_its_safe_fields_and_a_refund() -
     assert ledger.steps[-1] == ("refund", "hold")
     (row,) = gates.rows
     assert (row.status, row.status_code, row.cost, row.counts_toward_budget) == ("error", 503, None, True)
+    # The provider was called on admitted funds, so the failed call is still the deployment's.
+    assert row.deployment_paid is True
 
 
 @pytest.mark.asyncio
@@ -365,7 +395,17 @@ async def test_a_served_fetch_settles_at_its_reported_cost_and_asks_for_the_fetc
     assert accounts.kinds == ["fetch"]
     assert ledger.steps[-1] == ("settle", "hold", Decimal("0.002"))
     (row,) = gates.rows
-    assert (row.status, row.endpoint, row.request_group_id) == ("success", "/v1/fetch", "r2")
+    assert (row.status, row.endpoint, row.request_group_id, row.deployment_paid) == ("success", "/v1/fetch", "r2", True)
+
+
+@pytest.mark.asyncio
+async def test_a_fetch_admitted_with_nothing_to_charge_is_not_marked_deployment_paid() -> None:
+    gates = _Gates()
+
+    await _fetch(ledger=_Ledger(admits=False), gates=gates)
+
+    (row,) = gates.rows
+    assert (row.status, row.deployment_paid) == ("success", False)
 
 
 @pytest.mark.asyncio

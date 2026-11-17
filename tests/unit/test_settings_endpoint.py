@@ -205,6 +205,7 @@ def test_settings_includes_full_config_view(tmp_path: Path) -> None:
         "database_url",
         "db_pool_size",
         "cors_allow_origins",
+        "cors_inference_origins",
         "budget_strategy",
         "rate_limit_rpm",
     )
@@ -224,7 +225,6 @@ def test_settings_includes_full_config_view(tmp_path: Path) -> None:
         "model_discovery_timeout_seconds",
         "models_dev_metadata",
         "models_dev_cache_ttl_seconds",
-        "file_understanding_enabled",
         "vision_strategy",
         "vision_describe_model",
         "vision_describe_max_tokens",

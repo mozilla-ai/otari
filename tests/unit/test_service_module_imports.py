@@ -33,6 +33,7 @@ _MODULES = [
     # workspace_web_search_service is here for the same two reasons: it reaches
     # authorization and organization_service, and the request pipeline imports it.
     "gateway.services.tenancy.workspace_web_search_service",
+    "gateway.services.organizations",
 ]
 
 

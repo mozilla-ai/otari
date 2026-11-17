@@ -359,7 +359,8 @@ A request naming a model or an alias reports `1` and `false`. Streaming response
 carry the same values: failover happens before the stream opens, so the serving
 candidate and the attempt count are already known when the headers are sent. A
 failure later in the stream is reported in the stream and changes neither. The
-request's cost is `usage.cost_usd` in the body, as described in the
+request's cost is `usage.cost_usd` in the body, and the part of it that is
+tool charges `usage.tool_cost_usd`, as described in the
 [API reference](api-reference.md#request-id-and-inline-cost).
 
 Built-in tool charges settle on the final row. Before each attempt, Otari checks

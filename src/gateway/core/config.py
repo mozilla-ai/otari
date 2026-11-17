@@ -3,6 +3,7 @@ import binascii
 import json
 import os
 import re
+import secrets
 import types
 import typing
 from collections.abc import Callable, Container
@@ -26,12 +27,14 @@ from gateway.core.settings.feedback import FeedbackSettings
 from gateway.core.settings.health_checks import HealthCheckFeatureSettings
 from gateway.core.settings.identity import IdentitySettings
 from gateway.core.settings.inference import InferenceSettings
+from gateway.core.settings.mcp_catalog import McpCatalogSettings
 from gateway.core.settings.organizations import OrganizationSettings
 from gateway.core.settings.pricing import PricingSettings
 from gateway.core.settings.providers import ProviderSettings
 from gateway.core.settings.routing import RoutingSettings
 from gateway.core.settings.tools import ToolSettings
 from gateway.core.settings.traces import TraceSettings
+from gateway.core.settings.update_check import UpdateCheckSettings
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 from gateway.log_config import logger
 from gateway.models.routing import RoutingConfig
@@ -117,7 +120,7 @@ OTLP_ROOT = "/otlp"
 # OTARI_PORT), which is also the native pydantic prefix below.
 OTARI_ENV_PREFIX = "OTARI_"
 # Full structured config supplied through the environment, for PaaS platforms
-# (Railway, Render, Fly.io, Kubernetes) where mounting a config.yml is awkward.
+# (Render, Fly.io, Kubernetes) where mounting a config.yml is awkward.
 # These carry the entire YAML schema (providers, pricing, etc.), not just the
 # scalar fields reachable via OTARI_<FIELD>. Raw YAML wins when both are set.
 # Instance names a ``providers:`` entry may not take. ``otari`` is the reserved
@@ -175,13 +178,14 @@ VISION_STRATEGIES = ("describe", "ocr", "off")
 # even when it is. See GatewayConfig.mail_transport.
 MAIL_TRANSPORT_SETTINGS = ("auto", "smtp", "console", "none")
 
-# Upstreams POST /api/v1/decisions can dispatch to. All take TypeSafe's
+# Upstreams POST /api/v1/decisions can dispatch to. All answer TypeSafe's
 # question-and-answer shape, which OpenRouter's alpha Decisions API and
-# llama-server's /v1/systemone adopted, and none is an any-llm provider, so they
+# llama-server's /v1/systemone adopted and Gemini's Decisions API is translated
+# to and from, and none is an any-llm provider, so they
 # are declared under ``decision_providers`` rather than ``providers``. Declared
 # here, as the search providers are in ``core/settings/tools.py``, so startup
 # validation needs no service module.
-DECISION_PROVIDERS = ("typesafe", "openrouter", "llamacpp")
+DECISION_PROVIDERS = ("typesafe", "openrouter", "gemini", "llamacpp")
 # Self-hosted servers: no endpoint of their own to default to, and normally no key.
 DECISION_PROVIDERS_SELF_HOSTED = ("llamacpp",)
 
@@ -471,6 +475,17 @@ def _canonical_model(rule_name: str, entry: str) -> str:
     return f"{instance}:{model}"
 
 
+class SandboxEnvironmentConfig(BaseModel):
+    """How the environment listing describes one sandbox image: what it contains and how big it is."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str | None = Field(default=None, max_length=100, description="Display name, such as 'Python data'.")
+    description: str | None = Field(
+        default=None, max_length=500, description="What the image contains and its size, in a sentence."
+    )
+
+
 class ModelCapabilityConfig(BaseModel):
     """Per-model multimodal capability override.
 
@@ -572,6 +587,37 @@ def _default_database_url() -> str:
     return otari_env("DEFAULT_DATABASE_URL") or "sqlite:///./otari.db"
 
 
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _is_origin(value: str) -> bool:
+    """Whether ``value`` is an http(s) origin as a browser sends it in ``Origin``.
+
+    That is a scheme and a lowercase ASCII host, a port only when it is not the
+    scheme's default, and nothing else: a browser never sends any other spelling,
+    so an entry written another way could never match. Origins are compared
+    whole, so a ``*`` inside a host is a literal that no page has.
+    """
+    try:
+        parts = urlsplit(value)
+        port = parts.port
+    except ValueError:
+        return False
+    host = parts.hostname
+    if not host or parts.scheme not in _DEFAULT_PORTS:
+        return False
+    if ":" in host:
+        host = f"[{host}]"
+    return (
+        value.isascii()
+        and "*" not in host
+        and port != _DEFAULT_PORTS[parts.scheme]
+        # urlsplit lowercases the host and drops userinfo and an empty port, so any of those leaves a difference.
+        and parts.netloc == (host if port is None else f"{host}:{port}")
+        and value == f"{parts.scheme}://{parts.netloc}"
+    )
+
+
 class GatewayConfig(
     RoutingSettings,
     InferenceSettings,
@@ -581,10 +627,12 @@ class GatewayConfig(
     ProviderSettings,
     FeedbackSettings,
     HealthCheckFeatureSettings,
+    McpCatalogSettings,
     IdentitySettings,
     OrganizationSettings,
     ToolSettings,
     TraceSettings,
+    UpdateCheckSettings,
     BaseSettings,
 ):
     """Gateway configuration with support for YAML files and environment variables."""
@@ -611,7 +659,7 @@ class GatewayConfig(
             "X-Forwarded-Proto headers `otari serve` trusts, or '*' for any peer. The per-IP sign-in "
             "and public-catalog limits key on the address these headers resolve to, so behind a "
             "proxy that is not listed every visitor shares the proxy's address. Use '*' only where "
-            "the proxy is the sole path to the server, as on Railway. Unset leaves it to uvicorn: "
+            "the proxy is the sole path to the server. Unset leaves it to uvicorn: "
             "FORWARDED_ALLOW_IPS if set, otherwise 127.0.0.1."
         ),
     )
@@ -755,6 +803,13 @@ class GatewayConfig(
     )
     cors_allow_origins: Annotated[list[str], Shown(SettingsGroup.RATE_LIMITING)] = Field(
         default_factory=list, description="Allowed CORS origins (empty list disables CORS)"
+    )
+    cors_inference_origins: Annotated[list[str], Shown(SettingsGroup.RATE_LIMITING)] = Field(
+        default_factory=list,
+        description=(
+            "Origins whose pages may call the model endpoints from a browser with an API key, or '*' for any. "
+            "Never with credentials, and no other route: the dashboard's origin belongs in cors_allow_origins."
+        ),
     )
     enable_metrics: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
         default=False,
@@ -1008,7 +1063,7 @@ class GatewayConfig(
         description=(
             "Upstreams served by POST /api/v1/decisions, keyed by the selector prefix callers "
             "write ('typesafe:jev-latest'). Each entry may declare a 'provider' (one of: typesafe, "
-            "openrouter, llamacpp; defaults to the key), an 'api_key' (required except for llamacpp), "
+            "openrouter, gemini, llamacpp; defaults to the key), an 'api_key' (required except for llamacpp), "
             "an 'api_base' (required for llamacpp; https whenever a key is set), and a 'timeout' "
             "in seconds."
         ),
@@ -1278,14 +1333,6 @@ class GatewayConfig(
             "left rather than uploading the same file again."
         ),
     )
-    file_understanding_enabled: Annotated[bool, Shown(SettingsGroup.VISION)] = Field(
-        default=True,
-        description=(
-            "Normalize file/image content blocks before the provider call: pass through for "
-            "natively-capable models, extract to text for text-only models. When False, content "
-            "blocks are forwarded unchanged (legacy pass-through)."
-        ),
-    )
     vision_strategy: Annotated[str, Shown(SettingsGroup.VISION)] = Field(
         default="describe",
         description=(
@@ -1371,20 +1418,28 @@ class GatewayConfig(
         max_length=255,
         description=(
             "Sandbox image this deployment asks the code-execution backend to run "
-            "(e.g. 'mzdotai/otari-sandbox-container:latest'). When unset, nothing is asked for and "
-            "the backend runs whatever it runs by default. A workspace policy may name a different "
-            "image only if sandbox_allowed_session_images lists it."
+            "(e.g. 'mzdotai/otari-sandbox-container:latest'), or with sandbox_provider 'e2b' the E2B "
+            "template's name or id. When unset, nothing is asked for and the backend runs whatever it "
+            "runs by default. A workspace policy or a direct run may name a different image only if "
+            "sandbox_allowed_session_images lists it."
         ),
     )
     sandbox_allowed_session_images: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
         default=None,
         description=(
-            "Comma-separated sandbox images a workspace's code-execution policy may pin "
-            "(e.g. 'mzdotai/otari-sandbox-container:latest,ghcr.io/acme/sandbox:2'). Deliberately "
-            "not editable from the dashboard: it is the operator's supply-chain allow-list, and "
-            "sandbox_session_image is always pinnable whether or not it appears here. When unset, a "
-            "workspace may not pin an image at all. Applies to the 'protocol' sandbox provider: a hosted "
-            "provider names its workspaces its own way and ignores this."
+            "Comma-separated sandbox images a workspace's code-execution policy may pin and a direct run "
+            "may name as its environment (e.g. 'mzdotai/otari-sandbox-container:latest,ghcr.io/acme/sandbox:2', "
+            "or E2B template names with sandbox_provider 'e2b'). Deliberately not editable from the "
+            "dashboard: it is the operator's supply-chain allow-list, and sandbox_session_image is always "
+            "pinnable whether or not it appears here. When unset, a workspace may not pin an image at all."
+        ),
+    )
+    sandbox_environments: Annotated[dict[str, SandboxEnvironmentConfig], OMITTED] = Field(
+        default_factory=dict,
+        description=(
+            "How GET /api/v1/code/environments describes each image sandbox_session_image and "
+            "sandbox_allowed_session_images offer (image -> {label, description}). An image with no entry "
+            "is listed under its own name; an entry for an image neither setting offers lists nothing."
         ),
     )
     sandbox_provider: Annotated[SandboxProvider, Shown(SettingsGroup.TOOLS)] = Field(
@@ -1486,6 +1541,13 @@ class GatewayConfig(
     # configured, so ``verify_master_key`` can authenticate the generated key
     # without the plaintext ever living in config.
     _master_key_hash: str | None = PrivateAttr(default=None)
+
+    def is_master_key(self, token: str) -> bool:
+        """Whether ``token`` is the configured master key, in constant time.
+
+        Compared as UTF-8 bytes: ``compare_digest`` raises on a non-ASCII str, and a pasted key can hold one.
+        """
+        return self.master_key is not None and secrets.compare_digest(token.encode(), self.master_key.encode())
 
     @property
     def effective_ui_base_url(self) -> str:
@@ -2196,6 +2258,20 @@ class GatewayConfig(
             return None
         return value
 
+    @field_validator("cors_inference_origins")
+    @classmethod
+    def _validate_inference_origins(cls, origins: list[str]) -> list[str]:
+        """Accept ``*`` or an origin as a browser sends it, so an entry that could never match is refused at load."""
+        for origin in origins:
+            if origin != "*" and not _is_origin(origin):
+                msg = (
+                    f"cors_inference_origins entry {origin!r} is not an origin: give scheme and host, "
+                    "in lowercase, with a port only when it is not the scheme's default and nothing after it, "
+                    "such as https://app.example.com, or '*' alone, since an origin is matched whole"
+                )
+                raise ValueError(msg)
+        return origins
+
     @field_validator("rate_limits")
     @classmethod
     def _validate_rate_limit_names(cls, rules: list[RateLimitRule]) -> list[RateLimitRule]:
@@ -2356,19 +2432,12 @@ class GatewayConfig(
                 "Set them, or leave mail_transport at its 'auto' default to run without mail."
             )
             raise ValueError(msg)
-        # Shape-checked here for the same reason the transport is: a typo in the
-        # from-address is a misconfiguration, and letting it through means the
-        # first anyone hears of it is a recipient's server rejecting the
-        # envelope, which is the send-time failure this design exists to avoid.
-        # Every recipient address already goes through the same check.
-        #
-        # Only under an explicit 'smtp', never under 'auto'. That asymmetry is
-        # deliberate and costs nothing: mail_transport is new here, so no
-        # existing deployment can be holding the value this refuses, while a
-        # deployment that has had a working odd-looking address under the
-        # implicit path keeps booting.
+        # NOTE: Checked only under an explicit 'smtp'. Under 'auto', a from-address that is not plain still starts.
         if self.mail_from_email and normalized_address(self.mail_from_email) is None:
-            msg = f"mail_from_email is not a valid email address: {self.mail_from_email!r}"
+            msg = (
+                f"mail_from_email is not a plain email address: {self.mail_from_email!r}. "
+                "Set the address alone, such as otari@example.com, and put the display name in mail_from_name."
+            )
             raise ValueError(msg)
 
     def warn_about_half_configured_oauth(self) -> None:

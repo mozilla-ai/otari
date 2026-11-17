@@ -15,6 +15,8 @@ import type {
   CatalogResponse,
   DeploymentBootstrap,
   DeploymentUser,
+  McpCatalogServer,
+  McpCatalogSyncStatus,
   OidcConnection,
   OidcConnectionDomain,
   Organization,
@@ -34,6 +36,7 @@ import type {
   PendingOrganizationInvitation,
   PricingResponse,
   ScopedBudget,
+  UpdateCheckStatus,
   UsageSeriesPoint,
   UsageTotals,
   User,
@@ -163,6 +166,7 @@ export const SURFACES = [
   "health_checks",
   "hosted_providers",
   "keys",
+  "mcp_catalog",
   "models",
   "organization_guardrails",
   "organization_providers",
@@ -173,6 +177,7 @@ export const SURFACES = [
   "routing",
   "settings",
   "tools",
+  "update_check",
   "usage",
   "users",
   "workspaces",
@@ -510,6 +515,7 @@ export function apiKey(overrides: Partial<ApiKey> = {}): ApiKey {
     operator_can_enable: true,
     allowed_models: null,
     allowed_tools: null,
+    scopes: ["inference:run"],
     exclude_from_budget: false,
     reject_user_mismatch: null,
     is_service_key: false,
@@ -996,12 +1002,69 @@ export function workspaceMcpServer(
     // defaults to.
     everyone_tools: ["*"],
     read_tools: [],
+    // A builder that names read tools is a manager's labels; one that names
+    // none follows the server, as a fresh row does.
+    read_tools_from_server: overrides.read_tools === undefined,
+    needs_setup: false,
     // The token is write-only, so this is all a response ever says about it.
     has_token: false,
+    // One workspace token for every caller, as a create defaults to.
+    credential_mode: "shared",
+    oauth_client_id: null,
+    has_oauth_client_secret: false,
+    // Reached only by a request that names it, as a create defaults to.
+    attach_by_default: false,
     // Never checked, which is how a row stored before checks existed reads.
     health: null,
     created_at: "2026-08-01T00:00:00+00:00",
     updated_at: "2026-08-01T00:00:00+00:00",
+    ...overrides,
+  }
+}
+
+/** A server the MCP catalog lists. */
+export function mcpCatalogServer(
+  overrides: Partial<McpCatalogServer> = {},
+): McpCatalogServer {
+  return {
+    id: "66666666-6666-6666-6666-666666666666",
+    name: "io.example/sentry",
+    title: "Sentry",
+    description: "Read issues and events.",
+    url: "https://mcp.sentry.example/mcp",
+    requires_token: false,
+    website_url: null,
+    icon_url: null,
+    logo_url: null,
+    logo_tone: null,
+    publisher_kind: "vendor",
+    version: "1.0.0",
+    source: "registry",
+    ...overrides,
+  }
+}
+
+/** The catalog's sync status on a deployment that has never synced. */
+export function mcpCatalogSyncStatus(
+  overrides: Partial<McpCatalogSyncStatus> = {},
+): McpCatalogSyncStatus {
+  return {
+    mode: "manual",
+    running: false,
+    requested: false,
+    outcome: null,
+    error: null,
+    started_at: null,
+    finished_at: null,
+    last_completed_at: null,
+    next_sync_at: null,
+    pages: 0,
+    fetched: 0,
+    kept: 0,
+    removed: 0,
+    server_count: 0,
+    is_stale: true,
+    next_request_at: null,
     ...overrides,
   }
 }
@@ -1038,6 +1101,28 @@ export function workspaceMcpServerGrant(
     tools: ["*"],
     created_at: "2026-08-01T00:00:00+00:00",
     updated_at: "2026-08-01T00:00:00+00:00",
+    ...overrides,
+  }
+}
+
+/** The update check as a new install reports it: nobody has answered yet. */
+export function updateCheckStatus(
+  overrides: Partial<UpdateCheckStatus> = {},
+): UpdateCheckStatus {
+  return {
+    enabled: null,
+    answered_by: null,
+    preset_by: null,
+    current_version: "v0.30.1",
+    checkable: true,
+    install_id: "2f1c7e0e-8a43-4f53-9a6e-2c1d4f1e9b70",
+    endpoint: "https://api.otari.ai/api/v1/update-checks",
+    last_checked_at: null,
+    next_check_at: null,
+    latest_version: null,
+    release_url: null,
+    update_available: false,
+    advisories: [],
     ...overrides,
   }
 }

@@ -18,6 +18,7 @@ from fastapi import HTTPException, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import gateway.api.routes._pipeline as pipeline
+from _unavailable_model_support import reporter_with_null_listener
 from gateway.api.routes import chat
 from gateway.container import build_container
 from gateway.core.config import API_ROOT, GatewayConfig
@@ -26,6 +27,7 @@ from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.services import pricing_service
 from gateway.services.budgets import ReservationHandle, estimate_tokens
 from gateway.services.tools import WorkspaceCodeExecutionPolicies
+from gateway.types.key_scope import KeyScopeSet
 from gateway.types.normalization_target import NormalizationTarget
 
 _VISION_USAGE = CompletionUsage(prompt_tokens=200, completion_tokens=50, total_tokens=250)
@@ -55,6 +57,7 @@ class _Recorder:
                 reject_user_mismatch=None,
                 is_service_key=False,
                 workspace_id=uuid.uuid4(),
+                scopes=KeyScopeSet.unscoped(is_service_key=False),
             ), False
 
         async def fake_find_pricing(*args: Any, **kwargs: Any) -> None:
@@ -117,7 +120,11 @@ async def _normalize_with_vision(target: NormalizationTarget) -> tuple[int, Comp
 
 
 async def _resolve(config: GatewayConfig) -> pipeline.RequestContext:
-    app = SimpleNamespace(state=SimpleNamespace(container=build_container(config=GatewayConfig())))
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            container=build_container(config=GatewayConfig()), unavailable_model_reporter=reporter_with_null_listener()
+        )
+    )
     request = Request(
         {
             "type": "http",
@@ -144,6 +151,15 @@ async def _resolve(config: GatewayConfig) -> pipeline.RequestContext:
         code_execution_policies=cast(WorkspaceCodeExecutionPolicies, object()),
         model_provider=cast(ModelProviderPort, object()),
         normalize_messages=_normalize_with_vision,
+        declared=pipeline.DeclaredTools(
+            guardrails=None,
+            guardrail_targets=tuple,
+            tools=None,
+            mcp_servers=None,
+            mcp_server_ids=None,
+            max_tool_iterations=None,
+            tools_header=None,
+        ),
     )
 
 

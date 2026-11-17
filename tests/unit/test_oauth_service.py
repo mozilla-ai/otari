@@ -14,10 +14,8 @@ check, behind an opt-in flag.
 """
 
 import logging
-import string
 from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
-from http.cookies import SimpleCookie
 from types import SimpleNamespace
 from typing import Any, cast
 from urllib.parse import parse_qs, urlsplit
@@ -27,7 +25,6 @@ from apron_auth.errors import IdentityFetchError, TokenExchangeError
 from apron_auth.models import OAuthPendingState as PendingState
 from apron_auth.providers import github as apron_github
 from apron_auth.providers import google as apron_google
-from fastapi import Response
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -580,87 +577,6 @@ class TestBrowserToken:
 
         assert "cookie" in lines[0]
         assert lines[0] != lines[1]
-
-
-def flow_cookie(response: Response) -> str | None:
-    """The flow cookie's value as the browser would hold it, or ``None`` where the response deletes it."""
-    jar: SimpleCookie = SimpleCookie()
-    for header in response.raw_headers:
-        if header[0] == b"set-cookie":
-            jar.load(header[1].decode())
-    cookie = jar[oauth_service.FLOW_COOKIE_NAME]
-    return None if cookie["max-age"] == "0" else cookie.value
-
-
-def authorization(state: str) -> oauth_service.BrowserAuthorization:
-    """One authorization, named so a test can tell its flow from the others."""
-    return oauth_service.BrowserAuthorization(
-        url="https://provider.example.com/consent", state=state, browser_token=f"token-for-{state}"
-    )
-
-
-def with_flows(*states: str) -> str | None:
-    """The cookie a browser holds after starting an authorization per name, in order."""
-    value: str | None = None
-    for state in states:
-        response = Response()
-        oauth_service.apply_flow_cookie(response, value, authorization(state), secure=True)
-        value = flow_cookie(response)
-    return value
-
-
-class TestFlowCookie:
-    def test_every_live_flow_keeps_its_own_token(self) -> None:
-        value = with_flows("first", "second")
-
-        assert oauth_service.browser_token_for(value, "first") == "token-for-first"
-        assert oauth_service.browser_token_for(value, "second") == "token-for-second"
-
-    def test_a_state_the_cookie_does_not_name_has_no_token(self) -> None:
-        assert oauth_service.browser_token_for(with_flows("first"), "second") is None
-
-    def test_the_oldest_flow_goes_once_a_browser_starts_one_too_many(self) -> None:
-        names = [f"flow-{index}" for index in range(oauth_service.MAX_LIVE_FLOWS + 1)]
-        value = with_flows(*names)
-
-        assert oauth_service.browser_token_for(value, names[0]) is None
-        assert all(oauth_service.browser_token_for(value, name) is not None for name in names[1:])
-
-    def test_a_finished_flow_leaves_the_others_behind(self) -> None:
-        response = Response()
-        oauth_service.drop_finished_flow(response, with_flows("first", "second"), "first", secure=True)
-        value = flow_cookie(response)
-
-        assert oauth_service.browser_token_for(value, "first") is None
-        assert oauth_service.browser_token_for(value, "second") == "token-for-second"
-
-    def test_the_last_flow_finishing_deletes_the_cookie(self) -> None:
-        response = Response()
-        oauth_service.drop_finished_flow(response, with_flows("only"), "only", secure=True)
-
-        assert flow_cookie(response) is None
-
-    @pytest.mark.parametrize("value", ["not-base-64-at-all-$$$", "YWJj", "WyJhIiwiYiJd", "x"])
-    def test_a_cookie_that_cannot_be_read_carries_no_flows(self, value: str) -> None:
-        # A mangled or stale cookie costs a sign-in to start again, never a failed request.
-        assert oauth_service.browser_token_for(value, "first") is None
-
-    def test_a_cookie_longer_than_this_deployment_writes_carries_no_flows(self) -> None:
-        # The bound belongs here rather than on the request, because a cookie a
-        # route refuses is one no route rewrites, and this one is HttpOnly.
-        state = "s" * oauth_service.MAX_FLOW_COOKIE_CHARS
-        value = with_flows(state)
-
-        assert value is not None
-        assert len(value) > oauth_service.MAX_FLOW_COOKIE_CHARS
-        assert oauth_service.browser_token_for(value, state) is None
-
-    def test_the_value_is_one_a_browser_hands_back_unchanged(self) -> None:
-        # Quoting or re-encoding a cookie value is how a round trip loses it.
-        value = with_flows("first", "second")
-
-        assert value is not None
-        assert set(value) <= set(string.ascii_letters + string.digits + "-_")
 
 
 class TestState:

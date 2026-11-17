@@ -436,7 +436,7 @@ def test_api_key_last_used_tracking_throttles_db_writes(
     first_use = datetime(2026, 1, 1, tzinfo=UTC)
     second_use = first_use + timedelta(seconds=60)
 
-    with patch("gateway.api.deps.datetime") as mock_datetime:
+    with patch("gateway.api.deps.auth.datetime") as mock_datetime:
         mock_datetime.now.return_value = first_use
         response = client.get(
             f"{API_ROOT}/models",
@@ -447,7 +447,7 @@ def test_api_key_last_used_tracking_throttles_db_writes(
     first_state = client.get(f"{API_ROOT}/keys/{api_key['id']}", headers=master_key_header)
     first_last_used = first_state.json()["last_used_at"]
 
-    with patch("gateway.api.deps.datetime") as mock_datetime:
+    with patch("gateway.api.deps.auth.datetime") as mock_datetime:
         mock_datetime.now.return_value = second_use
         response = client.get(
             f"{API_ROOT}/models",

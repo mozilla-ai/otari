@@ -220,3 +220,10 @@ def test_every_rule_in_the_bundled_catalog_is_a_condition_models_dev_allows() ->
 def test_every_fact_otari_answers_is_a_condition_models_dev_lists() -> None:
     assert set(PriceFacts().values()) <= set(MODELS_DEV_CONDITION_KEYS)
     assert {key for when in _bundled_conditions() for key in condition_keys(when)} <= set(MODELS_DEV_CONDITION_KEYS)  # type: ignore[arg-type]
+
+
+def test_the_bundled_prices_outlive_the_catalog_they_were_read_from() -> None:
+    generation = bundled_generation()
+
+    assert bundled_catalog() is not bundled_catalog()
+    assert bundled_generation() is generation

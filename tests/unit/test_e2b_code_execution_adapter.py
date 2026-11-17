@@ -194,17 +194,27 @@ async def test_a_session_is_one_sandbox_and_is_killed_on_exit(monkeypatch: pytes
 
 
 @pytest.mark.asyncio
-async def test_a_pinned_container_image_is_ignored_rather_than_sent_as_a_template(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_the_session_image_is_created_as_the_e2b_template(monkeypatch: pytest.MonkeyPatch) -> None:
     sdk = _stub_sdk()
-    adapter = _adapter(monkeypatch, sdk)
-    async with adapter.open_session(image="mzdotai/otari-sandbox-container:latest", timeout_s=30, session_ttl_s=120):
+    async with _adapter(monkeypatch, sdk).open_session(image="python-data", timeout_s=30, session_ttl_s=120):
         pass
-    # sandbox_session_image is a container image reference, the published
-    # protocol's vocabulary; E2B names templates of its own, so sending it
-    # through would fail every creation.
+    assert sdk.made.created_with["template"] == "python-data"
+
+
+@pytest.mark.asyncio
+async def test_no_session_image_leaves_the_template_to_e2b(monkeypatch: pytest.MonkeyPatch) -> None:
+    sdk = _stub_sdk()
+    async with _adapter(monkeypatch, sdk).open_session(timeout_s=30, session_ttl_s=120):
+        pass
     assert "template" not in sdk.made.created_with
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_template_fails_the_creation_as_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    adapter = _adapter(monkeypatch, _stub_sdk(create_error=_NotFoundException("template not found")))
+    with pytest.raises(SandboxNotReachableError, match="failed to create an E2B sandbox"):
+        async with adapter.open_session(image="no-such-template", timeout_s=30, session_ttl_s=120):
+            pass
 
 
 @pytest.mark.asyncio

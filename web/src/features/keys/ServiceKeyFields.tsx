@@ -108,7 +108,7 @@ const NO_BUDGETS: readonly LabelableBudget[] = []
 
 // The "no default" choice. `Select` shows "" as nothing chosen, so this label is
 // also the placeholder that names it while it is the value.
-const NO_DEFAULT_BUDGET_LABEL = "None: uncapped unless a request names one"
+const NO_DEFAULT_BUDGET_LABEL = "None: end users are uncapped"
 
 /**
  * The budgets a service key in this scope may start end users on. The
@@ -152,21 +152,30 @@ export function ServiceKeyFields({
   const budgets = useEndUserBudgets(scope, value.isServiceKey)
   const { offered } = budgets
   const label = budgetLabeler(offered)
-  const labelOf = (budgetId: string) => {
-    const budget = offered.find((candidate) => candidate.budget_id === budgetId)
-    return budget ? label(budget) : budgetId
-  }
 
   const toggle = (budgetId: string, isSelected: boolean) => {
     const budgetIds = isSelected
       ? [...value.budgetIds, budgetId]
       : value.budgetIds.filter((listed) => listed !== budgetId)
-    // The default has to be on the list, so taking it off clears it.
-    const defaultBudgetId = budgetIds.includes(value.defaultBudgetId)
-      ? value.defaultBudgetId
-      : ""
-    onChange({ ...value, budgetIds, defaultBudgetId })
+    onChange({ ...value, budgetIds })
   }
+
+  // The default is always on the key's list, so picking one swaps it for the
+  // previous default there.
+  const pickDefault = (defaultBudgetId: string) => {
+    const others = value.budgetIds.filter(
+      (listed) =>
+        listed !== value.defaultBudgetId && listed !== defaultBudgetId,
+    )
+    onChange({
+      ...value,
+      budgetIds: defaultBudgetId ? [defaultBudgetId, ...others] : others,
+      defaultBudgetId,
+    })
+  }
+  const others = offered.filter(
+    (budget) => budget.budget_id !== value.defaultBudgetId,
+  )
 
   return (
     <div className="flex flex-col gap-3 border border-control-border p-3">
@@ -206,68 +215,71 @@ export function ServiceKeyFields({
       </div>
       {value.isServiceKey ? (
         <>
-          <fieldset className="flex flex-col gap-2">
-            <legend className="text-body">End-user budgets</legend>
-            <p className="text-caption">
-              The budgets a request may start a new end user on, named in the{" "}
-              <code>Otari-End-User-Budget</code> header.
-            </p>
-            {budgets.isError && !budgets.data ? (
-              <div className="flex flex-col items-start gap-2">
-                <ErrorBanner error={budgets.error} />
-                <Button onPress={() => budgets.refetch()}>Retry</Button>
-              </div>
-            ) : budgets.isPending && !budgets.data ? (
-              <p className="text-caption">Loading budgets…</p>
-            ) : offered.length === 0 ? (
-              <p className="text-caption">
-                {scope === "deployment"
-                  ? "No deployment budgets yet."
-                  : "No organization budgets yet."}{" "}
-                Create one under Spend &amp; budgets.
-              </p>
-            ) : (
-              <div className="flex max-h-48 flex-col gap-1 overflow-y-auto">
-                {offered.map((budget) => (
-                  <Checkbox
-                    key={budget.budget_id}
-                    isSelected={value.budgetIds.includes(budget.budget_id)}
-                    onChange={(isSelected) =>
-                      toggle(budget.budget_id, isSelected)
-                    }
-                    hasTouchTarget
-                  >
-                    <span className="text-foreground">{label(budget)}</span>
-                    {/* The id is what a request names, so it is shown unless the label already is it. */}
-                    {label(budget) === budget.budget_id ? null : (
-                      <>
-                        {" "}
-                        <code className="text-caption">{budget.budget_id}</code>
-                      </>
-                    )}
-                  </Checkbox>
-                ))}
-              </div>
-            )}
-          </fieldset>
-          <Select
-            label="Default end-user budget"
-            value={value.defaultBudgetId}
-            onChange={(defaultBudgetId) =>
-              onChange({ ...value, defaultBudgetId })
-            }
-            placeholder={NO_DEFAULT_BUDGET_LABEL}
-            // Nothing to say beside it and nothing that can be invalid, so no
-            // message line to hold open under it.
-            shouldReserveMessage={false}
-            options={[
-              { value: "", label: NO_DEFAULT_BUDGET_LABEL },
-              ...value.budgetIds.map((budgetId) => ({
-                value: budgetId,
-                label: labelOf(budgetId),
-              })),
-            ]}
-          />
+          {budgets.isError && !budgets.data ? (
+            <div className="flex flex-col items-start gap-2">
+              <ErrorBanner error={budgets.error} />
+              <Button onPress={() => budgets.refetch()}>Retry</Button>
+            </div>
+          ) : budgets.isPending && !budgets.data ? (
+            <p className="text-caption">Loading budgets…</p>
+          ) : (
+            <>
+              <Select
+                label="Budget for each end user"
+                value={value.defaultBudgetId}
+                onChange={pickDefault}
+                placeholder={NO_DEFAULT_BUDGET_LABEL}
+                description={
+                  value.defaultBudgetId
+                    ? "Each new end user gets its own copy of this budget."
+                    : offered.length === 0
+                      ? `${scope === "deployment" ? "No deployment budgets yet" : "No organization budgets yet"}: create one under Spend & budgets.`
+                      : "New end users have no limit of their own, only the key's."
+                }
+                options={[
+                  { value: "", label: NO_DEFAULT_BUDGET_LABEL },
+                  ...offered.map((budget) => ({
+                    value: budget.budget_id,
+                    label: label(budget),
+                  })),
+                ]}
+              />
+              {others.length === 0 ? null : (
+                <fieldset className="flex flex-col gap-2">
+                  <legend className="text-body">
+                    Other budgets a request may choose
+                  </legend>
+                  <p className="text-caption">
+                    Named by id in the <code>Otari-End-User-Budget</code> header
+                    to start a new end user on it instead.
+                  </p>
+                  <div className="flex max-h-48 flex-col gap-1 overflow-y-auto">
+                    {others.map((budget) => (
+                      <Checkbox
+                        key={budget.budget_id}
+                        isSelected={value.budgetIds.includes(budget.budget_id)}
+                        onChange={(isSelected) =>
+                          toggle(budget.budget_id, isSelected)
+                        }
+                        hasTouchTarget
+                      >
+                        <span className="text-foreground">{label(budget)}</span>
+                        {/* The id is what a request names, so it is shown unless the label already is it. */}
+                        {label(budget) === budget.budget_id ? null : (
+                          <>
+                            {" "}
+                            <code className="text-caption">
+                              {budget.budget_id}
+                            </code>
+                          </>
+                        )}
+                      </Checkbox>
+                    ))}
+                  </div>
+                </fieldset>
+              )}
+            </>
+          )}
           <Field
             label="Max end users"
             value={value.maxEndUsers}

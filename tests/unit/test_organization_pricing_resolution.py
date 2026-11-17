@@ -1196,6 +1196,40 @@ def test_one_calls_rate_keys_resolve_through_the_same_lookup() -> None:
     _run(scenario)
 
 
+def test_an_environment_rate_takes_its_own_row_else_the_general_one() -> None:
+    """Each environment resolves its own row, else the fallback, the operator's override ahead of both."""
+    own = ("otari:code_execution:python-data", "otari:code_execution")
+    fallback = ("otari:code_execution:python", "otari:code_execution")
+    overridden = ("otari:code_execution:python-gpu", "otari:code_execution")
+
+    async def scenario(session: AsyncSession) -> None:
+        organization_id = await _organization(session)
+        await _tool_price(session, "otari:code_execution", 5_000.0)
+        await _tool_price(session, "otari:code_execution:python-data", 9_000.0)
+        await _tool_price(session, "otari:code_execution:python-gpu", 50_000.0)
+        await _override(
+            session, organization_id, rate=40_000.0, model_key="otari:code_execution:python-gpu", origin=OPERATOR_ORIGIN
+        )
+        # A deployment-paid run does not take the organization's own rate.
+        await _override(session, organization_id, rate=0.0, model_key="otari:code_execution:python-data")
+
+        rates = {
+            keys: await resolve_tool_rate(
+                session, keys, deployment_paid=True, as_of=_NOW, organization_id=organization_id
+            )
+            for keys in (own, fallback, overridden)
+        }
+
+        assert {keys: rate.unit_rate if rate else None for keys, rate in rates.items()} == {
+            own: Decimal("0.009"),
+            fallback: Decimal("0.005"),
+            overridden: Decimal("0.04"),
+        }
+        assert await resolve_tool_rate(session, ("tabstack:tabstack",), deployment_paid=True, as_of=_NOW) is None
+
+    _run(scenario)
+
+
 # =============================================================================
 # The import path (external usage ingest)
 #

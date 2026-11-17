@@ -1,11 +1,12 @@
 """Which email domains an organization has claimed."""
 
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from gateway.models.tenancy import OrganizationDomain
+from gateway.models.tenancy import DOMAIN_PROOF_TTL, OrganizationDomain
 from gateway.repositories.tenancy import OrganizationDomainRepository
 
 
@@ -53,3 +54,17 @@ class OrganizationClaimedDomains:
     async def get_verified_by_domain(self, domain: str) -> OrganizationDomain | None:
         """Return the one proven claim on ``domain``, or None where nobody holds one."""
         return await self._domains.get_verified_by_domain(domain)
+
+
+def proven_domains(claims: Iterable[ClaimedDomain], *, now: datetime) -> tuple[str, ...]:
+    """Return the domain of each claim in ``claims`` whose proof is still within ``DOMAIN_PROOF_TTL`` of ``now``.
+
+    A claim that has never been verified is left out.
+    A disabled claim is returned the same as an enabled one.
+    The claims keep the order they were given in.
+    """
+    return tuple(
+        claim.domain
+        for claim in claims
+        if claim.verified_at is not None and now - claim.verified_at <= DOMAIN_PROOF_TTL
+    )

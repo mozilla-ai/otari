@@ -12,9 +12,10 @@ caller gets, and it may not import SQLAlchemy to recognize one.
 """
 
 import uuid
+from collections.abc import Collection
 from typing import Never
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from gateway.core.unit_of_work import UnitOfWork
@@ -164,3 +165,22 @@ class OrganizationGuardrailDefinitionRepository(BaseRepository[OrganizationGuard
             .order_by(OrganizationGuardrail.profile)
         )
         return list(result.scalars().all())
+
+    async def forget_secrets(
+        self, organization_ids: Collection[uuid.UUID], workspace_ids: Collection[uuid.UUID]
+    ) -> None:
+        """Stage clearing the secrets of every guardrail definition and mandate these organizations hold."""
+        if not organization_ids:
+            return
+        await self.db.execute(
+            update(OrganizationGuardrailDefinition)
+            .where(OrganizationGuardrailDefinition.organization_id.in_(list(organization_ids)))
+            .values(encrypted_create_secrets=None)
+            .execution_options(synchronize_session=False)
+        )
+        await self.db.execute(
+            update(OrganizationGuardrail)
+            .where(OrganizationGuardrail.organization_id.in_(list(organization_ids)))
+            .values(encrypted_credential=None)
+            .execution_options(synchronize_session=False)
+        )

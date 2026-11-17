@@ -1,5 +1,6 @@
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { AvatarCard } from "@/features/account/avatar/AvatarCard"
+import { DeleteAccountCard } from "@/features/account/DeleteAccountCard"
 import { PasskeysCard } from "@/features/account/PasskeysCard"
 import { PasswordCard } from "@/features/account/PasswordCard"
 import { ProfileCard } from "@/features/account/ProfileCard"
@@ -34,6 +35,7 @@ export function AccountPage() {
           routes that are not there. A deployment that merely has not set them
           up still shows it, saying so. */}
       {passkeys_enabled ? <PasskeysCard /> : null}
+      <DeleteAccountCard />
     </div>
   )
 }

@@ -219,7 +219,7 @@ class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     # whatever the hosted platform's production column still expects of it.
     # These four follow the invitation token's own shape instead
     # (`Invitation.token_hash`): only a SHA-256 hash is ever stored
-    # (`gateway.services.tenancy.tokens`), and single-use is enforced by
+    # (`gateway.core.tokens`), and single-use is enforced by
     # clearing the hash and expiry to NULL on success rather than by a status
     # column, so a replayed token simply matches no row.
     email_verification_token_hash: str | None = Field(default=None, unique=True, index=True, max_length=64)
@@ -1256,7 +1256,10 @@ class InviteOrganizationMemberResultPublic(SQLModel):
         default=None,
         description=(
             "The link to share with the invitee yourself, set only when mail_sent is false. A "
-            "delivered link goes to the invitee's mailbox alone, so the inviter cannot open it as them."
+            "delivered link goes to the invitee's mailbox alone, so the inviter cannot open it as them. "
+            "Where open_signup is on it is never set for an inviter who is not a deployment operator: the "
+            "invitee accepts from their pending invitations once signed in, and one who has no way to "
+            "sign in yet can get a password link from a deployment operator."
         ),
     )
     expires_at: datetime

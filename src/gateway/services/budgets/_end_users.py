@@ -19,7 +19,7 @@ from gateway.models.api_keys import APIKey
 from gateway.models.budgets import Budget
 from gateway.models.users import User
 from gateway.repositories.budgets import BudgetRepositories
-from gateway.schemas.budgets import EndUserBudgetPublic, EndUserPublic
+from gateway.schemas.budgets import EndUserBudgetPublic, EndUserPublic, KeyEndUsersPublic
 from gateway.services.budgets._periods import budget_window
 
 # Long enough for an email address or an opaque id, short enough that a caller
@@ -161,6 +161,15 @@ class _EndUsers:
         return await self._repositories.end_users.count_matching(
             str(api_key.user_id), external_id=external_id, budget_id=budget_id, blocked=blocked
         )
+
+    async def seats(self, api_key: APIKey) -> KeyEndUsersPublic:
+        """How many end users the key's ``max_end_users`` counts, and the cap itself."""
+        _require_service_key(api_key)
+        counted, unbudgeted = _counted(api_key)
+        live = await self._repositories.end_users.count_live_on_budgets(
+            str(api_key.user_id), counted, with_unbudgeted=unbudgeted
+        )
+        return KeyEndUsersPublic(count=live, max_end_users=api_key.max_end_users)
 
     async def budgets(self, api_key: APIKey) -> list[EndUserBudgetPublic]:
         """The budgets the key may assign, with their limits and how many of its owner's end users are on each."""

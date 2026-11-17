@@ -17,8 +17,9 @@ ModelType = Literal[
 ]
 
 # models.dev's v2 ``type``. ``reranking`` is ``rerank``, the word ``/v1/models``
-# already uses. ``audio`` is in the data though not among the values models.dev
-# filters by; it is a model that writes audio, as a ``speech`` model does.
+# already uses. ``audio`` and ``moderation`` are in the data though not among the
+# values models.dev filters by; ``audio`` is a model that writes audio, as a
+# ``speech`` model does, and ``moderation`` a guardrail such as Llama Guard.
 _MODELS_DEV_TYPES: dict[str, ModelType] = {
     "chat": "chat",
     "image": "image",
@@ -30,6 +31,7 @@ _MODELS_DEV_TYPES: dict[str, ModelType] = {
     "speech": "speech",
     "realtime": "realtime",
     "audio": "speech",
+    "moderation": "moderation",
 }
 
 

@@ -162,11 +162,21 @@ def catalog_source_changed() -> bool:
 
 
 _MISS = object()
+_bundled: ModelsDevCatalog | None = None
 
 
 def _fallback() -> ModelsDevCatalog | None:
-    """The catalog a worker serves before it has downloaded one: the bundled one."""
-    return bundled_catalog()
+    """The catalog a worker serves before it has downloaded one: the bundled one, kept until another serves."""
+    global _bundled
+    if _bundled is None:
+        _bundled = bundled_catalog()
+    return _bundled
+
+
+def load_bundled_fallback() -> None:
+    """Read the bundled catalog before a request needs it, unless another serves; run it off the loop."""
+    if _cache.data is None:
+        _fallback()
 
 
 def _served() -> ModelsDevCatalog | None:
@@ -185,9 +195,11 @@ def cached_models_dev_catalog() -> ModelsDevCatalog | None:
 
 def serve_catalog(catalog: ModelsDevCatalog, fetched_at: datetime, source: str | None) -> None:
     """Serve ``catalog``, downloaded at ``fetched_at`` from ``source``: a stored copy, or one this worker fetched."""
+    global _bundled
     _cache.data = catalog
     _cache.fetched_at = fetched_at
     _cache.source = source
+    _bundled = None
 
 
 def clear_catalog_cache() -> None:

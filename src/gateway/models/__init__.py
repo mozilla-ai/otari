@@ -17,6 +17,8 @@ from gateway.models import (  # noqa: F401
     health_checks,
     identity,
     inference,
+    mcp_catalog,
+    organizations,
     platform,
     playground,
     pricing,
@@ -27,6 +29,7 @@ from gateway.models import (  # noqa: F401
     tenancy,
     tools,
     traces,
+    update_check,
     usage,
     users,
 )

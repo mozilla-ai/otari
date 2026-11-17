@@ -133,6 +133,12 @@ class UsageLog(Base):
     # (mozilla-ai/otari-ai#1751). Exact to the micro-dollar; see
     # ``models/money.py`` for what that costs on each engine.
     cost: Mapped[Decimal | None] = mapped_column(UsdCost())
+    # The part of ``cost`` that is per-call tool charges (gateway-run tools and
+    # searches the model's provider ran), so a caller can split a request's bill
+    # into tokens and tools. Zero where no tool was charged; null where ``cost``
+    # is, where looking up the tools' prices failed, and on every row written
+    # before the column existed.
+    tool_cost: Mapped[Decimal | None] = mapped_column(UsdCost())
 
     # Why ``cost`` is the amount it is, which the row cannot re-derive on its own:
     # ``pricing_source`` names the price list that settled it ("organization",
@@ -260,6 +266,7 @@ class UsageLog(Base):
             "billing_meters": self.billing_meters,
             "pricing_breakdown": self.pricing_breakdown,
             "cost": self.cost,
+            "tool_cost": self.tool_cost,
             "status": self.status,
             "error_message": self.error_message,
             "stream_cut_by": self.stream_cut_by,

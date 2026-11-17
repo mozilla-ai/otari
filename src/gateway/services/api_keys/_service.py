@@ -36,6 +36,7 @@ from gateway.services.model_access import (
     validate_allowed_tools,
 )
 from gateway.services.organizations import AccessLists, UserAccess
+from gateway.types.key_scope import KeyScope, KeyScopeSet
 
 
 class KeySummary(NamedTuple):
@@ -61,14 +62,31 @@ class ApiKeyService:
         self._federation_rules = repositories.federation_rules
         self._users = users
 
+    async def revoke_in_workspaces(self, workspace_ids: Collection[uuid.UUID]) -> None:
+        """Revoke every key in these workspaces, so none of them can be enabled again."""
+        async with self._uow:
+            await self._keys.revoke_in_workspaces(workspace_ids)
+
     async def get_workspace_id_for_key(self, key_id: str) -> uuid.UUID | None:
         """Return the ID of the workspace that owns a key, or None when no key has that ID."""
         return await self._keys.get_workspace_id_for_key(key_id)
 
     async def issue_app_key(
-        self, *, user: User, workspace_id: uuid.UUID, client_id: str, app_name: str, key_format: ApiKeyFormatPort
+        self,
+        *,
+        user: User,
+        workspace_id: uuid.UUID,
+        client_id: str,
+        app_name: str,
+        scopes: Iterable[KeyScope],
+        key_format: ApiKeyFormatPort,
     ) -> str:
-        """Mint a budget-enforced app credential inside the caller's authority transaction."""
+        """Mint a budget-enforced app credential inside the caller's authority transaction.
+
+        Raises:
+            ValueError: ``scopes`` is empty or names one an app key may not hold.
+        """
+        held = KeyScopeSet.checked(scopes, is_service_key=False)
         if not await self._users.ensure_app_key_owner(str(user.id), user.full_name or user.email or "OAuth app user"):
             raise AppKeyOwnerInactiveError
         key = key_format.mint()
@@ -81,6 +99,7 @@ class ApiKeyService:
             user_id=str(user.id),
             workspace_id=workspace_id,
             client_id=client_id,
+            scopes=held,
         )
         return key
 
@@ -303,6 +322,22 @@ class ApiKeyService:
         """
         if api_key is None:
             return None
+        allowed, owner = await self._tool_access(config, api_key)
+        if is_tool_allowed(allowed, tool):
+            return None
+        # With no allowed_tools on either, the answer was read off the model lists, the deprecated way.
+        legacy_models: list[list[str]] = []
+        if api_key.allowed_tools is None and owner.tools is None:
+            legacy_models = [models for models in (api_key.allowed_models, owner.models) if models is not None]
+        return tool_not_allowed_detail(tool, f"{provider}:{tool}", legacy_models, kind=kind)
+
+    async def tool_allowlist(self, config: GatewayConfig, api_key: APIKey) -> list[str] | None:
+        """The search and fetch tools ``api_key`` may run, as :meth:`tool_refusal` decides; ``None`` for all."""
+        allowed, _owner = await self._tool_access(config, api_key)
+        return allowed
+
+    async def _tool_access(self, config: GatewayConfig, api_key: APIKey) -> tuple[list[str] | None, AccessLists]:
+        """The key's tool allow-list and its owner's lists, read only when the key has no ``allowed_tools``."""
         owner = AccessLists(None, None)
         if api_key.allowed_tools is None and api_key.user_id is not None:
             async with self._uow:
@@ -314,13 +349,7 @@ class ApiKeyService:
             user_tools=owner.tools,
             user_models=owner.models,
         )
-        if is_tool_allowed(allowed, tool):
-            return None
-        # With no allowed_tools on either, the answer was read off the model lists, the deprecated way.
-        legacy_models: list[list[str]] = []
-        if api_key.allowed_tools is None and owner.tools is None:
-            legacy_models = [models for models in (api_key.allowed_models, owner.models) if models is not None]
-        return tool_not_allowed_detail(tool, f"{provider}:{tool}", legacy_models, kind=kind)
+        return allowed, owner
 
     async def pin_before_user_grant(
         self, config: GatewayConfig, user_id: str, *, before: AccessLists, user_tools: list[str] | None

@@ -1,4 +1,9 @@
-"""What the legacy SearXNG settings become in the breaking release that removes them.
+"""What the legacy search settings become in the breaking release that removes them.
+
+``web_search_provider`` and its key, set in the configuration file or the
+environment, name the Tavily or Brave account the in-loop search uses when no
+search tool is its default. They are deprecated, and that release refuses to
+start while they are set: :func:`provider_pair_warning` says what replaces them.
 
 ``web_search_url`` and ``web_search_engines`` name the SearXNG instance and
 engines the in-loop search uses when no search tool is its default, and a
@@ -32,7 +37,7 @@ from gateway.services.tools._search_tool_overlay import (
     stored_search_tool_names,
     stored_tool_names,
 )
-from gateway.services.tools._web_search import in_loop_default, unnamed_direct_search_tool
+from gateway.services.tools._web_search import in_loop_default, legacy_search_instance, unnamed_direct_search_tool
 
 # The name the breaking release gives the search tool a stored web_search_url becomes, and its provider.
 CONVERTED_TOOL = "searxng"
@@ -65,6 +70,29 @@ class LegacySearchValues:
             config.web_search_url or otari_env("WEB_SEARCH_URL"),
             config.web_search_engines or otari_env("WEB_SEARCH_ENGINES"),
         )
+
+
+def provider_pair_warning(provider: str, *, searched: bool) -> str:
+    """What replaces ``web_search_provider`` and its key.
+
+    ``searched`` says a search runs on them: then a search tool named after the
+    provider, as the default, takes their place; else they are only unset.
+    """
+    warning = (
+        "web_search_provider is set in the configuration file or the environment (OTARI_WEB_SEARCH_PROVIDER). "
+        f"{_REMOVAL} refuses to start while it is set. "
+    )
+    if not searched:
+        return warning + "No search runs on it, so unset web_search_provider and web_search_provider_api_key."
+    page_text = (
+        " with include_raw_content: true in its options, so it keeps returning page text,"
+        if provider == "tavily"
+        else ""
+    )
+    return warning + (
+        f"Add a search tool named {provider} with provider {provider}, its key{page_text} and a price, name it in "
+        "web_search_default_tool, then unset web_search_provider and web_search_provider_api_key."
+    )
 
 
 def converted_engines(stored: LegacySearchValues) -> tuple[str, ...]:
@@ -113,7 +141,6 @@ def legacy_search_settings_warnings(
     if stored.url:
         conversion, refused = _stored_url_conversion(
             stored,
-            inherited,
             configured_tools,
             stored_tools,
             other_tool_names,
@@ -219,7 +246,6 @@ def file_value_warnings(
 
 def _stored_url_conversion(
     stored: LegacySearchValues,
-    inherited: LegacySearchValues,
     configured_tools: Mapping[str, Mapping[str, Any]],
     stored_tools: Mapping[str, Mapping[str, Any]],
     other_tool_names: Collection[str],
@@ -338,7 +364,7 @@ def warn_about_legacy_search_settings(
     stored_settings: Mapping[str, object],
     stored_tools_loaded: bool,
 ) -> None:
-    """Log what the breaking release does with the legacy SearXNG settings in effect, once stored tools have loaded.
+    """Log what the breaking release does with the legacy search settings in effect, once stored tools have loaded.
 
     ``from_file`` is read before the dashboard's stored settings apply, and
     ``stored_settings`` are those settings. Whether the conversion moves the
@@ -347,6 +373,11 @@ def warn_about_legacy_search_settings(
     tools did not load, only the configuration file's and the environment's
     values are accounted for, since the rest depends on those tools.
     """
+    if config.web_search_provider_configured() and config.web_search_provider:
+        searched = isinstance(in_loop_default(config), SynthesizedSearchInstance) or bool(
+            legacy_search_instance(config)
+        )
+        logger.warning("%s", provider_pair_warning(config.web_search_provider, searched=searched))
     stored = LegacySearchValues.of(stored_settings.get("web_search_url"), stored_settings.get("web_search_engines"))
     inherited = LegacySearchValues.of(config.web_search_url, config.web_search_engines)
     if not any((from_file.url, from_file.engines, stored.url, stored.engines, inherited.url, inherited.engines)):
@@ -392,8 +423,10 @@ def _moves_unnamed_calls(
     """Whether converting the stored web_search_url changes the tool a direct search naming none runs on.
 
     A search that had no tool to run on before is not moved: the converted
-    tool serves it after.
+    tool serves it after. Nor is one on the legacy backend, which that release removes.
     """
+    if legacy_search_instance(config) is not None:
+        return False
     before = unnamed_direct_search_tool(config)
     if before is None:
         return False

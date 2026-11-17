@@ -112,6 +112,13 @@ providers. It is a paid service, and a request served on it leaves this gateway
 for otari.ai. A gateway connects to it as a hosted provider named `otari-ai`, of
 the `otari` implementation.
 
+The first time a deployment operator opens the dashboard in a browser, on a
+gateway not yet connected, a **Welcome to Otari** dialog offers otari.ai, with a
+link to its plans. It is remembered per browser, not per account: skip it or
+close it and that browser does not show it again, while a new browser, or an
+existing operator after upgrading, sees it once. It is not shown where
+`platform_url` is empty or the gateway cannot encrypt a provider key.
+
 On the Hosted providers page, **Connect otari.ai** is offered beside adding a
 provider of your own:
 
@@ -507,6 +514,13 @@ organization is charged.
 Requests on other credentials skip billing, except a gateway tool run on the
 deployment's account, whose calls are gated and charged the same way (see
 [Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool)).
+
+A deployment-paid credential's provider account is shared by every
+organization the deployment serves, so a request on one cannot name state
+stored on that account. A provider `container` id, `previous_response_id`,
+`conversation` and an `item_reference` input item are refused with `400`, and a
+routing plan passes over the candidate to the next one. Send the previous turns
+in `input` instead, or use a model on the organization's own key.
 
 This covers every provider path: Chat Completions, Messages, Responses, the
 Playground, the pass-through endpoints (embeddings, images, audio, rerank,

@@ -3,13 +3,15 @@
 import uuid
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tenancy import Organization, OrganizationCreate, OrganizationUpdate
 from gateway.repositories.base_repository import BaseRepository
+
+DELETED_ORGANIZATION_NAME = "Deleted organization"
 
 
 class OrganizationRepository(BaseRepository[Organization, OrganizationCreate, OrganizationUpdate]):
@@ -46,6 +48,15 @@ class OrganizationRepository(BaseRepository[Organization, OrganizationCreate, Or
         """
         await self.db.execute(
             select(col(Organization.id)).where(col(Organization.id) == organization_id).with_for_update()
+        )
+
+    async def anonymize(self, organization_id: uuid.UUID) -> None:
+        """Stage replacing the organization's name and slug, which a signup derives from its founder's."""
+        await self.db.execute(
+            update(Organization)
+            .where(col(Organization.id) == organization_id)
+            .values(name=DELETED_ORGANIZATION_NAME, slug=f"deleted-{organization_id.hex}")
+            .execution_options(synchronize_session=False)
         )
 
     async def lock_settings(self, organization_id: uuid.UUID) -> None:

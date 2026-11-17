@@ -221,7 +221,7 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
     async def get_by_verification_token_hash(self, token_hash: str) -> User | None:
         """Return the identity a hashed email-verification token names, or None.
 
-        Exact match: the hash is the key `otari.services.tenancy.tokens.hash_token`
+        Exact match: the hash is the key `gateway.core.tokens.hash_token`
         produces, and it either matches the one live row that column holds or it
         does not, the same way an invitation resolves by ``token_hash``.
         """
@@ -338,6 +338,13 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
     async def get_ids_by_active_organization(self, organization_id: uuid.UUID) -> list[uuid.UUID]:
         """Return the ID of every identity whose active organization is this one, member or not."""
         result = await self.db.execute(select(col(User.id)).where(col(User.active_organization_id) == organization_id))
+        return list(result.scalars().all())
+
+    async def get_by_ids(self, user_ids: Collection[uuid.UUID]) -> list[User]:
+        """Return the identities these IDs name, in one query."""
+        if not user_ids:
+            return []
+        result = await self.db.execute(select(User).where(col(User.id).in_(list(user_ids))))
         return list(result.scalars().all())
 
     async def get_active_ids(self, user_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:

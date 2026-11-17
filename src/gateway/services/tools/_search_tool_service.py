@@ -7,9 +7,10 @@ synchronously, so a write takes effect at once on the worker that served it,
 and on the others within the refresh interval.
 """
 
+import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from decimal import Decimal
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Protocol
 
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
@@ -31,12 +32,15 @@ from gateway.schemas.tools import (
     CreateSearchToolRequest,
     ListedSearchToolSchema,
     ReencryptSearchToolsResponse,
+    SearchToolCatalogEntry,
+    SearchToolCatalogResponse,
     SearchToolsResponse,
     SearchToolTestRequest,
     StoredSearchToolSchema,
     ToolPriceSource,
     UpdateSearchToolRequest,
 )
+from gateway.services.model_access import is_tool_allowed
 from gateway.services.runtime_settings_service import SettingValue
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
@@ -63,7 +67,12 @@ from gateway.services.tools._search_tool_writes import (
     check_tool_write,
     default_to_pin,
 )
-from gateway.types.tool_charges import InstanceRateKey, instance_rate_key
+from gateway.services.tools._web_search import (
+    direct_search_rate_key,
+    servable_direct_search_instances,
+    unnamed_direct_search_tool,
+)
+from gateway.types.tool_charges import RateKey, instance_rate_key
 
 # The runtime tool settings as stored, every valid one.
 ReadToolSettings = Callable[[], Awaitable[dict[str, SettingValue]]]
@@ -80,8 +89,21 @@ class ToolRateInForce(NamedTuple):
     under_old_key: bool
 
 
-# The rate in force for an instance's rate key on the deployment's price list, or None when no row prices it.
-ReadToolRate = Callable[[InstanceRateKey], Awaitable[ToolRateInForce | None]]
+# The rate in force for an instance's rate key, or None when no row prices it: the organization's override
+# when one is named and has one, else the deployment's price list.
+ReadToolRate = Callable[[RateKey, uuid.UUID | None], Awaitable[ToolRateInForce | None]]
+
+
+class SearchCatalogCaller(Protocol):
+    """An API key reading the search tool catalog: what its workspace and its own lists let it name."""
+
+    async def web_search_allowed(self) -> bool:
+        """Whether the key's workspace allows web search."""
+        ...
+
+    async def tool_allowlist(self) -> list[str] | None:
+        """The search tools the key may name, as a direct search decides; ``None`` for every one."""
+        ...
 
 
 def _encrypted_key(api_key: str | None) -> tuple[str | None, str | None]:
@@ -189,6 +211,37 @@ class SearchToolService:
                     )
                 )
         return SearchToolsResponse(stored=listed, config=configured)
+
+    async def catalog(
+        self, organization_id: uuid.UUID | None, caller: SearchCatalogCaller | None, *, skip: int, limit: int
+    ) -> SearchToolCatalogResponse:
+        """The page of search tools ``caller`` may name in a direct search, each priced for ``organization_id``.
+
+        ``caller`` is ``None`` for the master key or a dashboard session, which see the deployment's list.
+        An API key sees nothing when its workspace has web search off, and otherwise only the tools a
+        direct search would not refuse it with ``403``.
+        """
+        servable = servable_direct_search_instances(self.config)
+        if caller is not None:
+            if not await caller.web_search_allowed():
+                return SearchToolCatalogResponse(data=[])
+            allowlist = await caller.tool_allowlist()
+            servable = [instance for instance in servable if is_tool_allowed(allowlist, instance.name)]
+        default = unnamed_direct_search_tool(self.config)
+        entries: list[SearchToolCatalogEntry] = []
+        async with self.uow:
+            for instance in servable[skip : skip + limit]:
+                rate = await self.read_rate(direct_search_rate_key(self.config, instance.name), organization_id)
+                entries.append(
+                    SearchToolCatalogEntry(
+                        id=instance.name,
+                        provider=instance.provider,
+                        label=instance.provider.capitalize(),
+                        price_per_call=float(rate.unit_rate) if rate is not None else None,
+                        default=instance.name == default,
+                    )
+                )
+        return SearchToolCatalogResponse(data=entries)
 
     async def create(self, request: CreateSearchToolRequest) -> CreatedSearchToolSchema:
         """Store a search or fetch instance, pinning the in-loop default first when it adds a second one.
@@ -452,7 +505,7 @@ class SearchToolService:
 
         ``set_in_config`` marks a tool whose own row each start writes from its ``price_per_call``.
         """
-        rate = await self.read_rate(instance_rate_key(kind, name, provider))
+        rate = await self.read_rate(instance_rate_key(kind, name, provider), None)
         if rate is None:
             return None, "none"
         if rate.under_old_key:

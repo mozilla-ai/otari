@@ -25,7 +25,7 @@ browser's binds a callback to the tab that started the flow, and this one binds
 it to a flow this deployment started.
 
 **And to the browser that started it.** ``/authorize`` also sets an HttpOnly
-flow cookie holding one token per live flow. The callback presents the token its
+flow cookie holding that flow's token. The callback presents the token its
 own state names, and a state that token does not match is refused. The code and
 the state share one redirect URL that the access log and browser history both
 record; the cookie is the half of the flow that neither does.
@@ -39,7 +39,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, Path, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,6 +51,7 @@ from gateway.api.deps import (
     get_db,
     record_auth_failure,
 )
+from gateway.api.routes._flow_cookies import FlowCookies
 from gateway.api.routes._helpers import database_error
 from gateway.api.routes._public_auth import throttle_public_auth
 
@@ -58,7 +59,7 @@ from gateway.api.routes._public_auth import throttle_public_auth
 # restated: the freeze is one deployment-wide state, and three sign-in routes
 # wording it differently would tell a person the doors closed for three reasons.
 from gateway.api.routes.auth_session import MAINTENANCE_MODE_REFUSAL
-from gateway.core.config import OAUTH_PROVIDERS, GatewayConfig
+from gateway.core.config import API_ROOT, OAUTH_PROVIDERS, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.exceptions import TenancyError
 from gateway.exceptions.identity_exceptions import (
@@ -75,19 +76,16 @@ from gateway.services.dashboard_session_service import (
 )
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.oauth_service import (
-    FLOW_COOKIE_NAME,
-    OAUTH_ROUTE_PREFIX,
-    apply_flow_cookie,
     authorization_url,
-    browser_token_for,
-    drop_finished_flow,
     exchange_code,
     provider_label,
     require_configured,
 )
 from gateway.services.tenancy import report_new_account, report_sign_in
 
-router = APIRouter(prefix=OAUTH_ROUTE_PREFIX, tags=["auth"])
+router = APIRouter(prefix="/auth/oauth", tags=["auth"])
+
+_FLOWS = FlowCookies(prefix="otari_oauth_flow", path=f"{API_ROOT}{router.prefix}")
 
 # A code is a provider-issued opaque string, a few hundred characters at most;
 # this is a sanity ceiling on an unauthenticated request body rather than a
@@ -102,9 +100,6 @@ _MAX_SUBMITTED_STATE = 512
 # answers at all, so an unknown segment is the framework's own 422 rather than a
 # handler deciding what to do with it. Spelled from the config vocabulary so the
 # two cannot drift.
-# The browser's flow cookie, when it sent one.
-FlowCookie = Annotated[str | None, Cookie(alias=FLOW_COOKIE_NAME, include_in_schema=False)]
-
 ProviderPath = Annotated[
     str,
     Path(
@@ -235,7 +230,6 @@ async def authorize(
     response: Response,
     config: Annotated[GatewayConfig, Depends(get_config)],
     db: Annotated[AsyncSession, Depends(get_db)],
-    flow_cookie: FlowCookie = None,
 ) -> AuthorizeResponse:
     """Start an OAuth sign-in: where to send the browser, and the state to keep.
 
@@ -255,7 +249,7 @@ async def authorize(
     except SQLAlchemyError as exc:
         await db.rollback()
         raise database_error(f"record a pending {provider} sign-in", exc) from None
-    apply_flow_cookie(response, flow_cookie, started, secure=request_is_https(request))
+    _FLOWS.start(request, response, state=started.state, browser_token=started.browser_token)
     return AuthorizeResponse(authorization_url=started.url, state=started.state)
 
 
@@ -274,7 +268,6 @@ async def callback(
     background_tasks: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-    flow_cookie: FlowCookie = None,
 ) -> OAuthSessionResponse:
     """Exchange an authorization code and set the HttpOnly session cookie.
 
@@ -315,7 +308,7 @@ async def callback(
             provider,
             code=body.code,
             state=body.state,
-            browser_token=browser_token_for(flow_cookie, body.state),
+            browser_token=_FLOWS.browser_token(request, body.state),
             db=db,
         )
         signed_in = await identities.sign_in_with_oauth(external, terms_accepted=body.terms_accepted)
@@ -335,9 +328,10 @@ async def callback(
     logger.info("Signed in %s with %s", identity.id, provider_label(provider))
     await report_new_account(growth, identity, background_tasks=background_tasks, new_account=signed_in.new_account)
     await report_sign_in(growth, identity, background_tasks=background_tasks)
-    secure = request_is_https(request)
-    drop_finished_flow(response, flow_cookie, body.state, secure=secure)
-    apply_session_cookie(response, signed_in.session_token, signed_in.session_expires_at, secure=secure)
+    _FLOWS.finish(request, response, body.state)
+    apply_session_cookie(
+        response, signed_in.session_token, signed_in.session_expires_at, secure=request_is_https(request)
+    )
     return OAuthSessionResponse(
         expires_at=signed_in.session_expires_at,
         user_id=identity.id,

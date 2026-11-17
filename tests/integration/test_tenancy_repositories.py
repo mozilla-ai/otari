@@ -464,6 +464,22 @@ async def test_workspace_name_is_unique_within_its_organization(async_db: AsyncS
         )
 
 
+async def test_get_by_organization_and_ids_excludes_a_workspace_of_another_organization(
+    async_db: AsyncSession,
+) -> None:
+    organization = await _organization(async_db, slug="acme")
+    other_organization = await _organization(async_db, slug="globex")
+    repository = WorkspaceRepository(async_db)
+    own = await repository.create_workspace(name="Own", organization_id=organization.id, created_by_user_id=None)
+    foreign = await repository.create_workspace(
+        name="Foreign", organization_id=other_organization.id, created_by_user_id=None
+    )
+
+    rows = await repository.get_by_organization_and_ids(organization.id, [own.id, foreign.id])
+
+    assert {row.id for row in rows} == {own.id}
+
+
 async def test_workspaces_list_newest_first_with_a_total(async_db: AsyncSession) -> None:
     organization = await _organization(async_db)
     repository = WorkspaceRepository(async_db)

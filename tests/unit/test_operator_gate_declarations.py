@@ -42,6 +42,7 @@ from gateway.api.routes import (
     budgets,
     calling_key,
     catalog,
+    code_execution,
     country_database,
     end_users,
     health_checks,
@@ -52,6 +53,7 @@ from gateway.api.routes import (
     keys,
     mail,
     maintenance_mode,
+    mcp_catalog,
     models,
     pricing,
     providers,
@@ -61,6 +63,7 @@ from gateway.api.routes import (
     settings,
     tool_settings,
     tools,
+    update_check,
     usage,
     users,
 )
@@ -84,6 +87,7 @@ _DEPLOYMENT_WIDE_ROUTERS: list[tuple[str, APIRouter]] = [
     ("search_tools", search_tools.router),
     ("settings", settings.router),
     ("tool_settings", tool_settings.operator_router),
+    ("update_check", update_check.router),
     ("usage", usage.operator_router),
     ("users", users.router),
 ]
@@ -100,8 +104,10 @@ _DEPLOYMENT_WIDE_ROUTERS: list[tuple[str, APIRouter]] = [
 # to be added by hand.
 _NON_OPERATOR_ROUTERS: list[tuple[str, APIRouter, Callable[..., Any]]] = [
     ("catalog", catalog.router, verify_catalog_reader_or_public),
+    ("code_execution.catalog", code_execution.catalog_router, verify_catalog_reader),
     ("end_users", end_users.router, verify_service_key),
     ("end_users.budgets", end_users.budgets_router, verify_service_key),
+    ("mcp_catalog", mcp_catalog.router, verify_master_key),
     ("models.catalog", models.catalog_router, verify_catalog_reader),
     ("pricing.catalog", pricing.catalog_router, verify_catalog_reader),
     ("providers.catalog", providers.catalog_router, verify_catalog_reader),
@@ -112,7 +118,7 @@ _NON_OPERATOR_ROUTERS: list[tuple[str, APIRouter, Callable[..., Any]]] = [
     ("identity_apps", identity_apps.router, verify_master_key),
     ("usage.key", usage.key_router, verify_api_key_or_master_key),
     ("calling_key", calling_key.router, verify_api_key),
-    ("hooks", hooks.router, hooks.verify_hook_caller),
+    ("hooks", hooks.router, verify_api_key_or_master_key),
     ("hook_guardrails", hook_guardrails.router, verify_api_key_or_master_key),
     # Operator-only, with the 404 the admin surface answers rather than the 403:
     # the deployment's own credentials are not a surface to confirm to a member.
@@ -141,6 +147,10 @@ _UNGATED_ROUTERS: dict[str, str] = {
     "files.router": _DATA_PLANE,
     "images.router": _DATA_PLANE,
     "mcp.router": _DATA_PLANE,
+    "mcp_connections.callback_router": (
+        "an authorization server's redirect: the session cookie does not travel on it, and the single-use "
+        "state in the query is what it acts on"
+    ),
     "messages.router": _DATA_PLANE,
     "moderations.router": _DATA_PLANE,
     "otlp.router": _DATA_PLANE,
@@ -172,7 +182,6 @@ _UNGATED_ROUTERS: dict[str, str] = {
 # then authorize the caller against the organization or workspace themselves.
 _ROUTER_LEVEL_GATES: frozenset[Callable[..., Any]] = frozenset(
     {
-        hooks.verify_hook_caller,
         require_deployment_operator,
         verify_api_key,
         verify_api_key_or_master_key,

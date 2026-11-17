@@ -237,7 +237,6 @@ def selection_consults_router(
 def _select_head(
     spec: PolicySpec,
     *,
-    policy_name: str,
     user_id: str | None,
     key_id: str | None,
     budget: BudgetState,
@@ -320,7 +319,6 @@ def compile_policy(
     budget = budget or BudgetState()
     selected = _select_head(
         spec,
-        policy_name=policy_name,
         user_id=user_id,
         key_id=key_id,
         budget=budget,

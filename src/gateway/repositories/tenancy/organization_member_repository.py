@@ -2,19 +2,21 @@
 
 import uuid
 from collections.abc import Collection, Iterable
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from gateway.core.addresses import stored_address
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.budgets import Budget, ScopedBudget
 from gateway.models.tenancy import (
     Organization,
     OrganizationMember,
     OrganizationMemberCreate,
+    OrganizationMemberRole,
     OrganizationMemberUpdate,
     User,
     Workspace,
@@ -65,6 +67,23 @@ class OrganizationMemberRepository(
         )
         return result.scalars().first()
 
+    async def active_role(self, organization_id: uuid.UUID, user_id: uuid.UUID) -> OrganizationMemberRole | None:
+        """Return the role of the active membership joining a user to an organization, read from the row.
+
+        A read rather than an attribute of an instance already in hand,
+        because an in-hand instance may predate the write that changed its role,
+        and the attribute would still hold the old value.
+        """
+        result = await self.db.execute(
+            select(col(OrganizationMember.role)).where(
+                col(OrganizationMember.organization_id) == organization_id,
+                col(OrganizationMember.user_id) == user_id,
+                col(OrganizationMember.status) == "active",
+            )
+        )
+        role = result.scalar_one_or_none()
+        return cast(OrganizationMemberRole, role) if role is not None else None
+
     async def get_active_roles(
         self, organization_ids: Collection[uuid.UUID], user_ids: Collection[uuid.UUID]
     ) -> dict[tuple[uuid.UUID, uuid.UUID], str]:
@@ -81,6 +100,26 @@ class OrganizationMemberRepository(
             )
         )
         return {(organization_id, user_id): role for organization_id, user_id, role in result.tuples().all()}
+
+    async def active_member_addresses(self, organization_id: uuid.UUID, emails: Collection[str]) -> set[str]:
+        """Which of these addresses belong to an account with an active membership of the organization.
+
+        Matched case-insensitively, and against a stored address stripped of stray edge whitespace.
+        """
+        normalized = {address for email in emails if (address := stored_address(email)) is not None}
+        if not normalized:
+            return set()
+        result = await self.db.execute(
+            select(func.lower(func.trim(col(User.email))))
+            .select_from(OrganizationMember)
+            .join(User, col(OrganizationMember.user_id) == col(User.id))
+            .where(
+                col(OrganizationMember.organization_id) == organization_id,
+                col(OrganizationMember.status) == "active",
+                func.lower(func.trim(col(User.email))).in_(normalized),
+            )
+        )
+        return {address for address in result.scalars().all() if address is not None}
 
     async def get_by_id_and_organization(
         self,
@@ -122,12 +161,21 @@ class OrganizationMemberRepository(
         )
         return result.scalars().first()
 
-    async def get_by_user(self, user_id: uuid.UUID, *, active_only: bool = False) -> list[OrganizationMember]:
-        """Return a user's memberships, oldest first."""
+    async def get_by_user(
+        self, user_id: uuid.UUID, *, active_only: bool = False, refresh: bool = False
+    ) -> list[OrganizationMember]:
+        """Return a user's memberships, oldest first.
+
+        ``refresh`` overwrites memberships this session already loaded with what is committed now,
+        for a read taken again under a lock.
+        """
         statement = select(OrganizationMember).where(col(OrganizationMember.user_id) == user_id)
         if active_only:
             statement = statement.where(col(OrganizationMember.status) == "active")
-        result = await self.db.execute(statement.order_by(col(OrganizationMember.created_at)))
+        statement = statement.order_by(col(OrganizationMember.created_at))
+        if refresh:
+            statement = statement.execution_options(populate_existing=True)
+        result = await self.db.execute(statement)
         return list(result.scalars().all())
 
     async def get_first_active_for_user(self, user_id: uuid.UUID, *, lock: bool = False) -> OrganizationMember | None:
@@ -160,20 +208,45 @@ class OrganizationMemberRepository(
         return result.scalars().first()
 
     async def active_with_roles(
-        self, organization_id: uuid.UUID, user_ids: Collection[uuid.UUID], roles: Collection[str]
+        self,
+        organization_id: uuid.UUID,
+        user_ids: Collection[uuid.UUID],
+        roles: Collection[str],
+        *,
+        lock: bool = False,
     ) -> set[uuid.UUID]:
-        """Which of ``user_ids`` hold an active membership of one of ``roles`` in the organization, in one query."""
+        """Which of ``user_ids`` hold an active membership of one of ``roles`` in the organization, in one query.
+
+        ``lock`` holds the memberships found until the caller's transaction ends, so a removal or a
+        demotion that changes one waits for it (PostgreSQL only).
+        """
         if not user_ids or not roles:
             return set()
+        statement = select(col(OrganizationMember.user_id)).where(
+            col(OrganizationMember.organization_id) == organization_id,
+            col(OrganizationMember.user_id).in_(list(user_ids)),
+            col(OrganizationMember.status) == "active",
+            col(OrganizationMember.role).in_(list(roles)),
+        )
+        if lock:
+            statement = statement.with_for_update()
+        result = await self.db.execute(statement)
+        return set(result.scalars().all())
+
+    async def active_user_ids_with_roles(self, organization_id: uuid.UUID, roles: Collection[str]) -> list[uuid.UUID]:
+        """The users holding an active membership of one of ``roles`` in an organization, oldest membership first."""
+        if not roles:
+            return []
         result = await self.db.execute(
-            select(col(OrganizationMember.user_id)).where(
+            select(col(OrganizationMember.user_id))
+            .where(
                 col(OrganizationMember.organization_id) == organization_id,
-                col(OrganizationMember.user_id).in_(list(user_ids)),
                 col(OrganizationMember.status) == "active",
                 col(OrganizationMember.role).in_(list(roles)),
             )
+            .order_by(col(OrganizationMember.created_at), col(OrganizationMember.id))
         )
-        return set(result.scalars().all())
+        return list(result.scalars().all())
 
     async def get_active_by_user_with_organizations(
         self, user_id: uuid.UUID

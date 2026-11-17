@@ -76,7 +76,8 @@ export function usePlaygroundToolSelection(
     }
     const attachable = new Set(
       tools.mcp_servers
-        .filter((server) => server.enabled)
+        // One the caller is no longer signed in to would refuse the message.
+        .filter((server) => server.enabled && !server.sign_in_required)
         .map((tool) => tool.id),
     )
     setSelectedMcpIds((prev) => keepAttachableMcpIds(prev, attachable))

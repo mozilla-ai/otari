@@ -9,8 +9,8 @@ Otari can run three tools during Chat Completions, Messages, and Responses:
 Code execution needs a sandbox: a `sandbox_url` for the default `protocol`
 provider, or a hosted `sandbox_provider` such as `e2b`, which needs none. Search
 needs a search tool (see [Search tools](configuration.md#search-tools)), a
-workspace's [organization search key](#organization-search-keys), or a legacy
-setting: `web_search_provider` with its key, or the deprecated `web_search_url`.
+workspace's [organization search key](#organization-search-keys), or a
+deprecated legacy setting: `web_search_provider` with its key, or `web_search_url`.
 Fetch runs in the gateway.
 One request may declare any of them together, and MCP servers beside them: see
 [Combining tools](#combining-tools).
@@ -167,7 +167,10 @@ otari:web_search
 otari:web_fetch
 ```
 
-- `otari:code_execution` prices code execution.
+- `otari:code_execution` prices code execution. A run in an
+  [environment](#sandbox-environments) with a price of its own,
+  `otari:code_execution:<image>`, is priced at that one instead, in the tool
+  loop and on a direct run alike.
 - `otari:web_search` and `otari:web_fetch` price the calls on a workspace's
   [organization search or fetch key](#organization-search-keys).
   `otari:web_search` also prices a search on the legacy settings.
@@ -190,7 +193,8 @@ Where the prices are set and read:
   organization's calls instead.
 - An organization's owner or admin may override `otari:web_search` and
   `otari:web_fetch` on `/api/v1/organizations/me/pricing`, for the calls on the
-  organization's own keys. Overriding `otari:code_execution` or a price of kind
+  organization's own keys. Overriding `otari:code_execution`, an environment's
+  `otari:code_execution:<image>`, or a price of kind
   `search` or `fetch` is refused with `403`, since those calls run on the
   deployment's account.
 
@@ -221,9 +225,9 @@ rate before it runs, on top of the hold the model call took:
   fit, no page is read, the results show their snippets, and the search itself
   is billed as usual.
 - A hold stays until the request settles, as the model call's does.
-- A request on a free model whose budgets and ceilings cap only dollars holds
-  nothing for its model call or its tool calls; they are charged at settlement,
-  and the request can still end past the cap.
+- A model priced at zero is served to a user with no dollars left, but its
+  tool calls are held like any other request's, so a priced call that does not
+  fit is refused.
 
 The usage row's pricing breakdown has one line per tool and label, and the
 dashboard's request detail shows each line with its label. The label says what
@@ -270,13 +274,17 @@ request that may run a tool on the deployment's account is refused with `402`
 funds paid in, and so is a direct search on one of the deployment's tools. The
 `detail` names the tool, which tells it apart from the refusal of a model the
 deployment pays for, and `GET /api/v1/tools` lists the tool as unavailable with
-the same reason.
+the same reason. A direct search, fetch or code run that reached its provider on
+the deployment's account is recorded as deployment-paid on its usage row, as a
+model call on a deployment-paid credential is. A call from a workspace with no
+organization is admitted with nothing to charge, so its usage row is not marked
+deployment-paid.
 
 Every fetch is labeled by the instance that served it, `builtin:builtin_fetch`
 when `web_fetch_default_tool` names none, and so is every in-loop search on a
-search instance. A search on the legacy settings or on a Tavily or Brave
-organization key is labeled `otari:web_search`: `web_search_url` searches on
-any-search's SearXNG adapter, and the older backend runs the rest. Searches a
+search instance. A search on the legacy settings is labeled `otari:web_search`:
+`web_search_url` searches on any-search's SearXNG adapter, and
+`web_search_provider` on the adapter of the provider it names. Searches a
 model's provider runs itself carry the provider's label, as the next section
 says.
 
@@ -292,12 +300,9 @@ instance that read them, `builtin_fetch` included:
 - A page that cannot be read is neither billed nor counted.
 - Pages read on an [organization fetch key](#organization-search-keys) are
   labeled `org:<provider>` and priced under `otari:web_fetch`.
-- A search the older backend runs (`web_search_provider` with its key, or a
-  Tavily or Brave organization key) reads its pages on the built-in fetcher
-  and records no fetch, until that backend is removed.
 - With `require_pricing` on, a search whose pages would be read through a
   fetch instance with no price is refused with `402` before it runs, the detail
-  naming that instance's row. A search the older backend runs is not.
+  naming that instance's row.
 - `web_search_extract: false` turns the reading of pages off.
 
 ### Searches a provider runs itself
@@ -361,6 +366,13 @@ tools the client must execute are preserved.
 A call to one of Otari's tools that the model was still writing when it ran out
 of output tokens is neither run nor returned. The response ends with the provider's
 stop reason, such as `length` or `max_tokens`, and holds no call the client cannot run.
+A call to one of Otari's tools whose arguments are not a JSON object (cut off
+mid-stream, or a list, a string or `null`) is not run either, and spends none of
+the request's tool allowance: the model reads `[tool error] invalid_input: ...` as
+its result and can try again, and Otari logs a warning naming the tool, never the
+arguments. Empty arguments still mean no arguments. An `otari_tool_calls` entry
+for the call is `failed` with `"tag": "invalid_input"`, and a native Messages
+block carries `error_code: invalid_tool_input`.
 The dashboard Playground's own completion route is the one exception: its stream
 also reports every gateway-run call and its result in an `otari_tool_activity`
 field, on a chunk of its own before and after each call, so the page can show
@@ -394,6 +406,15 @@ bounds the rounds of the whole request, and so does a workspace code policy's
 `max_tool_iterations` allows offers none of Otari's tools and tells the model to
 answer from the results it already has, so a model that keeps searching ends with
 an answer rather than a failed request ([MCP](mcp.md) says the same of its loop).
+A round the request's budget cannot hold ends the loop the same way, earlier
+([Budget enforcement](budget-enforcement.md#holds-and-settlement)); in either
+case, a model that still calls one of Otari's tools fails the request.
+
+A `tool_choice` that forces a tool (`required`, or one tool by name, such as
+`code_execution` for Otari's sandbox) applies to the first round only. Once that
+round has run the tool, the model is free to answer, so forcing the sandbox no
+longer makes it run on every round. A later round may still call the sandbox or
+another tool if the model chooses to.
 
 A tool declared in a provider's own words is still [decided per
 attempt](#who-runs-a-tool), so on a fallback chain one attempt may run the
@@ -458,8 +479,10 @@ sandbox but no model, such as rerunning a script to check its output:
 
 The code reaches the sandbox exactly as sent. The run is admitted as an
 `otari_code_execution` call is: the [workspace policy](#per-workspace-code-policy)
-can turn it off, and its `exec_timeout_s` and pinned image apply. It is priced
-under `otari:code_execution` and held against the caller's budgets. Every run
+can turn it off, and its `exec_timeout_s` and pinned image apply. `environment`
+names the [sandbox environment](#sandbox-environments) to run in. It is priced
+at the environment's own price, else `otari:code_execution`, and held against
+the caller's budgets. Every run
 that reached the sandbox is billed, including code that failed, unlike a model's
 failed call in the tool loop: here the caller asked for the run and reads its
 exit status itself. `file_ids` puts uploads from the [Files API](files.md) in the
@@ -467,6 +490,31 @@ working directory, and each file the code writes comes back in `files` with a
 `file_id` to download. `container` works as on the completion routes (below),
 with the id in `Otari-Container-Id`. The request, the response and the errors
 are in the [API reference](api-reference.md#code-execution).
+
+### Sandbox environments
+
+An environment is the image a sandbox runs, so a caller can choose one for what
+it contains and how big it is. The deployment's `sandbox_session_image` is the
+default, and `sandbox_allowed_session_images` lists the others
+([Sandbox environments](configuration.md#sandbox-environments)). On `e2b`, each
+is the name or id of a template in the provider's account, and the sandbox is
+created from it.
+
+`GET /api/v1/code/environments` lists the environments the caller's workspace
+may run code in, for any API key, as `GET /api/v1/models` lists models: each
+one's `name`, a `label` and `description`, its `price_per_run` for the caller's
+organization (null when unpriced), and whether it is the `default`. A workspace
+whose policy is off lists none, and one that pins an image lists that one alone.
+A deployment that names no image lists none either: its runs go to the backend's
+own default. A master key or a dashboard session belongs to no single
+workspace, so it gets the deployment's whole list at the deployment's prices.
+`skip` and `limit` (at most `1000`, default `100`) page the list.
+
+A direct run names one in `environment`. One the deployment does not offer is a
+`400`, and one other than the workspace's pin a `403`. A held sandbox keeps the
+environment it was created in: resuming it while naming another is a `400`, as
+is naming any on a sandbox held from before environments were recorded, and a
+resume that names none runs, and is priced, in the one it has.
 
 ### Reusing a sandbox across requests
 
@@ -538,6 +586,12 @@ provider serves the code execution (see
 `container: "auto"` is best-effort: a deployment that holds nothing (TTL set to
 0) serves the request and reports no container. An id is a requirement, so the
 same deployment refuses it.
+
+A container keeps what earlier runs staged into it, so re-entering one reads
+those files. An API key therefore needs `files:read` as well as `code:execute`
+to send an id back, and is refused with a 403 naming the scope. A key without
+it is served normally and reports no container, because one it could never
+re-enter is worth nothing to it.
 
 The provider's own timer does the reclaiming: the gateway tells it the idle
 timeout when the request ends, and a periodic sweep only drops the rows that
@@ -664,7 +718,8 @@ Manage it under
 execution page sets `enabled` and `executor`; every other field is set through the API. A policy
 cannot enable a missing deployment backend or exceed the deployment limits.
 Workspace-selected images must come from
-`sandbox_allowed_session_images` or the deployment's own session image.
+`sandbox_allowed_session_images` or the deployment's own session image, as
+[environments](#sandbox-environments) a direct run names must.
 
 The authenticating API key determines the workspace. A workspace with no policy
 gets what `code_execution_workspace_default` says: `true`, deployment defaults
@@ -720,13 +775,6 @@ search's results does not. A call past it gets
 `[tool error] web search call limit reached for this request` (or `web fetch`),
 which the model can recover from, and a Chat Completions client sees the call in
 `otari_tool_calls` as `failed` with the tag `call_limit`.
-
-A request the older search backend serves keeps a fixed limit of 10 instead:
-one whose search runs on the legacy settings or on a Tavily or Brave organization
-key, and one that declares Fetch alone. There, an eleventh call aborts the tool
-loop rather than returning a `[tool error]`. Non-streaming requests return HTTP
-`422`; a response that is already streaming emits an error event and ends
-without a completed answer.
 
 Successful Fetch calls are billed as [Pricing a gateway-run
 tool](#pricing-a-gateway-run-tool) says: at the price of the fetch instance that
@@ -841,10 +889,11 @@ provider such as Tabstack answers a site's error page as the page's text. A page
 that cannot be fetched, or that the domain checks refuse, leaves the result its
 snippet.
 
-On the legacy settings, Otari reaches a licensed search API directly. Set
-`web_search_provider` to `tavily` or `brave` and `web_search_provider_api_key` to
-that provider's key; the key stays in the gateway process and never reaches a
-caller.
+On the legacy settings, which are deprecated, Otari reaches a licensed search
+API directly: `web_search_provider` set to `tavily` or `brave` and
+`web_search_provider_api_key` to that provider's key. A search tool on that
+provider replaces them; see the upgrade note
+[From 0.47](#from-047-brave-and-tavily-search-on-any-search).
 `web_search_url`, which is deprecated (see
 [The legacy SearXNG settings](configuration.md#the-legacy-searxng-settings)),
 points at a SearXNG instance, such as the bundled one
@@ -867,8 +916,8 @@ JavaScript), and text-bearing PDFs. HTML and PDF parsing runs in a supervised
 single-worker process with fixed time, memory, queue, page, and intermediate
 output limits. Unsafe, unreachable, unsupported, empty, timed-out, or
 unextractable results fall back to the search provider's snippet. Page text
-the provider already returned, such as Tavily's on the legacy settings, is used
-and not fetched again.
+the provider already returned, such as Tavily's with `include_raw_content`, is
+used and not fetched again.
 
 Each complete `web_search` tool result is limited to 50 KiB of valid UTF-8,
 including any truncation notice. The 1,500-character per-result content limit
@@ -944,7 +993,7 @@ kind, fixed when it is added:
 
 - a `search` key serves model-initiated search and a
   [direct search](#direct-search) that names no tool. Its provider is one
-  `GET /api/v1/search-tools/providers` lists, or `tavily` or `brave`. A
+  `GET /api/v1/search-tools/providers` lists. A
   `searxng` key names its own instance in `api_base`, since a key never takes
   the deployment's `web_search_url`;
 - a `fetch` key serves the fetch tool and the enrichment of search hits. Its
@@ -966,9 +1015,7 @@ any environment proxy, as calls to a workspace's own model endpoint do. Moving
 a key that holds a secret to another `api_base` needs the secret in the same
 request (`api_key`, and any masked `options` entry), since the next call sends
 it there. An organization's model provider keys follow the same rule, with
-`client_args` in place of `options`. A
-`tavily` or `brave` key takes neither, since the older backend that runs them
-calls their public endpoints.
+`client_args` in place of `options`.
 A key's calls never fall back to the deployment's own key or endpoint for its
 provider.
 
@@ -1003,9 +1050,7 @@ declaration goes to the model's provider.
 
 A key's calls are labeled `org:<provider>` and priced under `otari:web_search`
 or `otari:web_fetch`, at the cost the provider reported when it reports one (see
-[Pricing a gateway-run tool](#pricing-a-gateway-run-tool)). A `tavily` or `brave`
-key's in-loop searches are labeled `otari:web_search` while the older backend runs
-them.
+[Pricing a gateway-run tool](#pricing-a-gateway-run-tool)).
 
 ### Try web search with the bundled SearXNG
 
@@ -1048,9 +1093,24 @@ the deployment's default tool. The request is still checked against the key's
 `allowed_tools`, rate-limited and timed out as that tool and logged under its
 name, or, with no default tool to pick, as `web_search` on the key's provider
 with a 30 second timeout. The search is priced under `otari:web_search`. A search that names a tool, in the path or in
-`search_tool_name`, runs on that tool with its own key. A
-Brave key localizes results to the request's `country`; Tavily takes a country by
-its full name, so a Tavily key does not.
+`search_tool_name`, runs on that tool with its own key.
+
+A deployment with no search tool falls back to the search backend the legacy
+settings describe (`web_search_provider` with its key, else `web_search_url`),
+as the in-loop tool does. A direct search serves it as a tool named after its
+provider, such as `tavily`, on the deployment's account: priced under
+`otari:web_search`, charged to the organization's funds, and granted in
+`allowed_tools` by that name. Tavily keeps returning page text, as it does in
+the loop. Adding any search tool ends the fallback; one named after the same
+provider replaces it without callers changing what they name.
+
+`GET /api/v1/search-tools/catalog` lists the tools a direct search may name,
+with each one's configured rate for the caller's organization (what a call is
+charged when its provider reports no cost; `null` when no rate row prices it)
+and which is the default,
+and any API key may read it, as it reads `GET /api/v1/models`. An API key sees
+only the tools its `allowed_tools` grants, and nothing when its workspace has
+web access off. It never returns a tool's key, endpoint or options.
 
 The request, the response and the errors are in the
 [API reference](api-reference.md#search).
@@ -1081,6 +1141,16 @@ tool does not take it as its default, its connection test is refused, and a
 fetch tool is left out, as if nothing named it. The dashboard and the API
 refuse such a value when a tool is saved.
 
+- **Brave** (`brave`) needs an API key, read from the tool's `api_key`, such as
+  `${BRAVE_API_KEY}`. Brave takes the query in the request URL, which Otari keeps
+  out of its logs. It reports no cost, so a search is billed at the tool's own
+  rate (its `price_per_call`, or a `search` price set on the dashboard's Web
+  search page or through the API). Brave's
+  [pricing](https://brave.com/search/api/), read 2026-11-14, is $5 per 1,000
+  successful requests, with $5 of free credit a month. A search returns at most
+  20 results, and its hits carry a snippet but no page text. In the tool's
+  `options`, `result_filter: web` keeps the answer to web results, and
+  `text_decorations: false` keeps HTML out of the snippets.
 - **DeepSeek** (`deepseek`) needs an API key, read from the tool's `api_key`, such
   as `${DEEPSEEK_API_KEY}`, the key DeepSeek's models take too. It reports no
   cost, so a search is billed at the tool's own rate (its `price_per_call`, or a
@@ -1166,6 +1236,17 @@ refuse such a value when a tool is saved.
   takes no result count and no recency filter: Otari keeps at most 10 results and,
   for a `time_range`, drops the hits dated before it. Its hits carry page text but
   no snippet.
+- **Tavily** (`tavily`) needs an API key, read from the tool's `api_key`, such as
+  `${TAVILY_API_KEY}`. It reports credits, not dollars, so a search is billed at
+  the tool's own rate (its `price_per_call`, or a `search` price set on the
+  dashboard's Web search page or through the API). Tavily's
+  [pricing](https://docs.tavily.com/documentation/api-credits), read 2026-11-16, is
+  $0.008 a credit pay-as-you-go, $0.005 to $0.0075 on a monthly plan.
+  `search_depth` is its cost tier: `basic` (its default), `fast` and `ultra-fast`
+  cost 1 credit a search, `advanced` 2, so configure one tool per depth you
+  offer, each at its own price. A search returns at most 20 results, with a
+  snippet; set `include_raw_content: true` in the tool's `options` for each
+  page's full text, which spares the in-loop tool reading the pages itself.
 - **SearXNG** (`searxng`) is self-hosted and reports no cost, so a search is billed
   at the tool's rate. The tool's `api_base` is the instance's root URL, and the
   instance must list `json` under `search.formats`, or every search fails with
@@ -1213,6 +1294,77 @@ The request, the response and the errors are in the
 ## Upgrading
 
 Each note applies when upgrading from the release it names to a later one.
+
+### From 0.48: a request that declares only Fetch
+
+A request that declares `otari_web_fetch` without `otari_web_search` draws on
+`web_search_max_calls`, as every other request does, and a call past it gets a
+`[tool error]` the model can recover from. It had a fixed limit of 10 calls,
+and an eleventh failed the whole request with `422`, or ended a stream with an
+error event. Its fetches are labeled, priced and checked by `require_pricing`
+as before.
+
+### From 0.47: Brave and Tavily search on any-search
+
+Brave and Tavily run on any-search's adapters wherever Otari searches with them:
+`web_search_provider` and its key, an organization key, and a search tool on
+`brave` or `tavily`, which is new. For a deployment or an organization that
+already searches with either:
+
+- In the loop, a failed search is a `[tool error]` the model can recover from,
+  rather than a `502` for the whole request, and the call limit is
+  `web_search_max_calls`, with a `[tool error]` past it, rather than a fixed 10
+  and a `422`.
+- `web_search_provider: tavily` keeps asking Tavily for each page's full text.
+  So do the organization Tavily keys that exist at the upgrade, which adds
+  `include_raw_content: true` to their options. A Tavily key or search tool
+  added later gets snippets only, Tavily's own default, unless its options set
+  `include_raw_content`.
+- Hits without page text, Brave's always and Tavily's without
+  `include_raw_content`, have their pages read through the fetch tool and
+  billed as fetches, as for any search tool (see
+  [Pricing a gateway-run tool](#pricing-a-gateway-run-tool)). With
+  `require_pricing` on, a search whose pages would be read through an unpriced
+  fetch tool is refused with `402`, so price that tool, `builtin_fetch` unless
+  `web_fetch_default_tool` or an organization fetch key names another; the
+  startup log names it while it has no price. `web_search_extract: false` reads
+  no pages. This holds for `web_search_provider: tavily` too: Tavily returns page
+  text for nearly every hit, but the check runs before the search, so the fetch
+  tool needs a price, which can be `0`.
+- An organization key's in-loop searches are labeled `org:brave` or
+  `org:tavily`, where they were labeled `otari:web_search`, and are still priced
+  under `otari:web_search`. A key may carry its own `api_base` and its
+  provider's options, checked when it is written.
+- `provider_options` are checked against the provider's options, where the
+  older backend forwarded a few (Brave's `time_range` and `country`; Tavily's
+  `search_depth`, `topic`, `time_range` and `include_answer`) and dropped the
+  rest silently. A workspace's option the provider does not take is left out
+  with a warning; the same option in a request's `otari_web_search` declaration
+  is refused with `400`. `time_range` takes `day`, `week`, `month` or `year`.
+  Brave's `country` is sent as written, so Brave answers a full country name
+  such as `Germany` with an error.
+- Tavily's `search_depth` is a cost tier (`advanced` costs twice `basic`), so
+  only a search tool's or an organization key's options set it: a request that
+  sets it is refused with `400`, and a workspace's is left out with a warning.
+- On [direct search](#direct-search), `include_raw` and `provider_options` are
+  taken, and the request's `country` reaches neither provider; pass it in
+  `provider_options`, such as `{"country": "DE"}` for Brave. A result's `date`
+  is in ISO 8601 form with its zone, such as `2026-11-12T22:37:39+00:00`.
+- `web_search_provider` and `web_search_provider_api_key` are deprecated, and
+  the startup log says what replaces them: a search tool named after the
+  provider, with the key (and `include_raw_content: true` for Tavily) and a
+  price, named in `web_search_default_tool`. A coming breaking release refuses
+  to start while they are set.
+
+### From 0.46: E2B creates each sandbox from the session image
+
+With `sandbox_provider: e2b`, a `sandbox_session_image`, or an image a workspace
+pinned, used to be logged as ignored, and every sandbox was E2B's default. Each
+is now the name or id of the E2B template the sandbox is created from, so one
+that names a container image, such as `mzdotai/otari-sandbox-container:latest`,
+fails every run with a `502`. Before upgrading, clear it or set it to a template
+in your E2B account, and do the same with `sandbox_allowed_session_images` and
+any workspace policy's `image`.
 
 ### From 0.38: only the operator prices code execution
 

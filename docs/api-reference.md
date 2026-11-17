@@ -13,6 +13,11 @@ parameters, and schemas.
 | otari.ai, an account in the European Union | `https://eu.api.otari.ai/api` |
 | Your own gateway | `https://<your-otari-host>/api`, or `http://localhost:8000/api` on your own machine |
 
+The dashboard reaches the API at `https://otari.ai/api` as well, but programs
+use the hosts above: the CDN in front of the dashboard's host ends a response
+it has waited about 30 seconds for with an HTML `504` and no `Otari-Request-ID`,
+while the gateway finishes the request and bills it.
+
 Every endpoint lives under the base URL, at `/v1/...`: an OpenAI-style request
 goes to `<base URL>/v1/chat/completions`, an Anthropic-style one to
 `<base URL>/v1/messages`. SDKs append their own paths, so each takes the base
@@ -57,15 +62,27 @@ operations, a separately scoped endpoint serves it to the caller's own
 organization: `/api/v1/organizations/me/usage` for usage, and
 `/api/v1/organizations/me/keys` for a member's own API keys.
 
-An API key reaches:
+An API key reaches the routes its [scopes](api-keys.md#scopes) name, and is
+refused the others with `403` naming the scope it lacks (the MCP routes answer
+with a fixed `forbidden` error that names none):
 
-- the inference routes;
-- `GET /api/v1/usage/requests/{request_id}` for its own requests;
-- [`/api/v1/key`](#a-keys-own-budget-and-usage) for its own budget and usage;
-- the catalog reads: `GET /api/v1/models`, `/pricing`, `/tools`,
-  `/providers/catalog`, `/tool-settings/guardrails/catalog`,
-  `/tool-settings/guardrails/profiles` and `/search-tools/providers`;
-- for a [service key](end-users.md), the end-user routes.
+- the inference routes (`inference:run`), files, batches, search, fetch, code
+  execution, MCP, OpenTelemetry ingest and the coding-agent hooks, each under a
+  scope of its own;
+- `GET /api/v1/usage/requests/{request_id}` and
+  [`/api/v1/key`](#a-keys-own-budget-and-usage) for its own requests, budget and
+  usage (`usage:read`);
+- for a [service key](end-users.md), the end-user routes (the `end-users`
+  scopes).
+
+A model call that declares a web, code execution or MCP tool needs that tool's
+scope as well as `inference:run`, whichever of Otari and the provider runs it.
+
+Every key, whatever its scopes, reaches the catalog reads: `GET /api/v1/models`,
+`/pricing`, `/tools`, `/providers/catalog`, `/tool-settings/guardrails/catalog`,
+`/tool-settings/guardrails/profiles`, `/search-tools/providers`,
+`/search-tools/catalog` and `/code/environments`, each with its by-id or
+by-key variant where it has one.
 
 The rest of the management API, including `/api/v1/usage`, `/api/v1/budgets`
 and everything under `/api/v1/organizations/me`, takes the master key or a
@@ -136,7 +153,9 @@ Chat, Messages, and Responses responses carry an `Otari-Request-ID` header,
 streaming or not, and so do the responses of the embeddings, rerank, images,
 audio, moderations, decisions and search endpoints. A request rejected before
 the gateway handles it (a failed authentication `401`, or a body that does not
-validate, `422`) carries none. The gateway mints the id, sends it on its own
+validate, `422`) carries none, and so does an answer from a proxy or load
+balancer in front of the gateway, such as a `502` or `504` page on a timeout,
+since the gateway did not send it. The gateway mints the id, sends it on its own
 refusals as well, and records it on the request's usage rows, so
 [`GET /api/v1/usage/requests/{request_id}`](#cost-of-a-failed-or-interrupted-request)
 finds the request's cost by it.
@@ -160,7 +179,9 @@ carries neither.
   - Chat Completions: the last chunk that reports usage and either has no
     choices (OpenAI's `stream_options.include_usage` chunk) or finishes a
     choice (providers such as Cohere and Gemini report usage on the chunk
-    carrying `finish_reason`);
+    carrying `finish_reason`). Otari asks the provider for that chunk even when
+    a request sets `include_usage` to `false`, since it is what the request is
+    billed on, and leaves it out of the stream that request receives;
   - Messages: `message_delta`;
   - Responses: `response.completed`.
 
@@ -171,6 +192,16 @@ rate that priced the model: `organization` (an organization's override),
 accepted models.dev snapshot), or `reported` (the charge the provider stated,
 which settles a completion in place of a rate nobody set; see
 [Configuration](configuration.md#keeping-the-defaults-current)).
+
+A completion (Chat Completions, Messages, Responses) also carries
+`usage.tool_cost_usd` beside them, in the same format: the part of `cost_usd`
+that is per-call tool charges. That is every gateway-run tool call
+(`otari_web_search`, `otari_web_fetch`, `otari_code_execution`, MCP tools) plus
+the searches the model's own provider ran and billed per search, so
+`cost_usd` less `tool_cost_usd` is what the model's tokens cost. It is
+`"0.000000"` when no tool was charged (a tool with no price is not charged), and
+left out when looking up the tools' prices failed during settlement, since the
+gateway then cannot say how much of the cost they are.
 
 Each request's cost is settled to the micro-dollar, half-up, so a request that
 costs less than half a micro-dollar, such as a few tokens of a cheap embedding
@@ -190,6 +221,14 @@ A speech model with no rate is refused with `402` `pricing_required` under
 `require_pricing`; see
 [Each endpoint in its unit](configuration.md#each-endpoint-in-its-unit) for
 which rates price it.
+
+The direct [search](#search), [fetch](#fetch) and
+[code execution](#code-execution) endpoints return no `usage` object, so a
+served call carries its settled cost in `Otari-Cost-USD` and
+`Otari-Pricing-Source` too, under the same rule. `Otari-Pricing-Source` is
+`reported` when the provider stated what the call cost, which is what it
+settled at, and otherwise names the rate. A refused or failed call is not
+charged and carries neither.
 
 ### Who runs a built-in tool
 
@@ -215,7 +254,7 @@ apply to its type is left out:
 |---|---|
 | `id` | The call's ID: `otari_ws_…` for a search, `otari_wf_…` for a fetch, `otari_ci_…` for code execution, `otari_mcp_…` for an MCP call. |
 | `type` | `web_search`, `web_fetch`, `code_execution` or `mcp`. |
-| `status` | `in_progress`, `completed` or `failed`. A run that exits non-zero, a code execution called with no code (which never reaches the sandbox), and an MCP call that returned a tool error, are `failed`. |
+| `status` | `in_progress`, `completed` or `failed`. A run that exits non-zero, a code execution called with no code or with arguments that are not a JSON object (neither reaches the sandbox), and an MCP call that returned a tool error, are `failed`. |
 | `query` | A search's query. |
 | `url` | The URL the model asked a fetch for, without its query string and fragment. A redirect does not change it. |
 | `sources` | A completed search's results, each with its `url`, `title` and `published_date` (an ISO date, or date and time, for a search on a search instance; the provider's own date string on the legacy search settings; or `null`); empty when it found none. Never page text. |
@@ -225,7 +264,7 @@ apply to its type is left out:
 | `server`, `name` | The MCP server and the tool the model called on it. |
 | `output` | The text an ended MCP call gave the model. A failed call's is Otari's own `[tool error] …` text, never the server's exception. |
 | `truncated` | `true` when `stdout`, `stderr` or `output` was cut to 64 KiB. The model read it whole. |
-| `error` | Why a failed call failed, when Otari can say: `provider`, `status`, `tag` and `retryable`, the same four fields the [Search](#search) endpoint's `Otari-Error-*` headers carry. A call refused past its declaration's `max_uses`, or past the request's `web_search_max_calls`, has `"tag": "call_limit"` and a `null` provider. Absent when Otari can say no more than that the call failed. |
+| `error` | Why a failed call failed, when Otari can say: `provider`, `status`, `tag` and `retryable`, the same four fields the [Search](#search) endpoint's `Otari-Error-*` headers carry. A call refused past its declaration's `max_uses`, or past the request's `web_search_max_calls`, has `"tag": "call_limit"` and a `null` provider, and a call whose arguments were not a JSON object has `"tag": "invalid_input"`. Absent when Otari can say no more than that the call failed. |
 
 A response that is not streamed carries the ended entry of every call, across
 all of the tool loop's rounds:
@@ -371,12 +410,12 @@ To tag a request with a free-form end-user ID, put it in `metadata`
   that ran no gateway tools, writes no usage row under the `fail` and
   `allow_free` policies. Under `estimate` (the default of
   `stream_missing_usage_policy`) it writes an `incomplete` row billed on an
-  estimate from the request and the text streamed so far: tokens only, with
-  no per-request charge.
+  estimate from the request and the output streamed so far (text, tool-call
+  arguments and reasoning): tokens only, with no per-request charge.
 - A stream the provider cut after it started answering, with no usage
   reported or only the input tokens (an Anthropic stream), is billed the same
   way under `estimate`: the reported input tokens, or an estimate of the
-  request, plus an estimate of the text already streamed, never a projected
+  request, plus an estimate of the output already streamed, never a projected
   full answer. The row stays an `error` with its error message, so it counts
   in the error totals, and its estimated cost counts in spend. A stream the
   client abandoned after the provider reported only its input tokens is
@@ -397,6 +436,7 @@ looked up by its `Otari-Request-ID`:
   "request_id": "5f0c…",
   "status": "error",
   "cost_usd": "0.012400",
+  "tool_cost_usd": "0.000000",
   "prompt_tokens": 4100,
   "completion_tokens": 0,
   "total_tokens": 4100,
@@ -408,19 +448,22 @@ looked up by its `Otari-Request-ID`:
 |---|---|
 | Totals | The sum of every usage row the request wrote. A request routed through a policy writes one per attempt, all sharing the id as their `request_group_id`, so the total covers the attempts it fell over from as well as the one that served. |
 | `cost_usd` | The [inline cost](#request-id-and-inline-cost) format; `null` when nothing was priced. |
+| `tool_cost_usd` | The part of `cost_usd` that is tool charges, as `usage.tool_cost_usd` reports it, summed over the rows. `null` when `cost_usd` is, for a request that is not a completion, and when any priced row does not record it: one written before the gateway recorded it, or one where looking up the tools' prices failed. |
+| `status` | `error` if any row is an error, `incomplete` for a stream the client abandoned before the provider reported any usage (billed on an estimate), otherwise `success`. |
 | Access | An API key sees only its own requests; the master key sees any. |
 | `404` | Until the request has settled (usage rows are written in the background), for an unknown id, for another key's id, and for a request that wrote no row. |
 
 ### A key's own budget and usage
 
 These routes answer for the API key a request authenticates with, and take no
-parameter that names a user, a key or a workspace. The master key and a dashboard
-session get `401`: neither has a key of its own.
+parameter that names a user, a key or a workspace. They need the key's
+`usage:read` scope. The master key and a dashboard session get `401`: neither
+has a key of its own.
 
 | Route | Returns |
 |---|---|
-| `GET /api/v1/key/budget` | What the key may still spend, and every cap that decides it. |
-| `GET /api/v1/key/usage/summary` | The `/api/v1/usage/summary` response over the key's own requests, with the same filters, `dimensions` and `group_by_tag`. |
+| `GET /api/v1/key/budget` | What the key may still spend, and every cap that decides it. On a service key, `end_users` also gives how many end users its cap counts and the cap (`max_end_users`, `null` for none); `null` on any other key. |
+| `GET /api/v1/key/usage/summary` | The `/api/v1/usage/summary` response over the key's own requests, with the same filters, `dimensions` and `group_by_tag`. The key's own user is listed in `by_user` with `label: null`; a service key's end users keep the label the service gave them. |
 | `GET /api/v1/key/usage/series` | The `/api/v1/usage/series` response over the key's own requests. |
 
 ```json
@@ -442,7 +485,8 @@ session get `401`: neither has a key of its own.
       "used_requests": null,
       "remaining_requests": null
     }
-  ]
+  ],
+  "end_users": null
 }
 ```
 
@@ -486,7 +530,7 @@ provider or billing again.
 | Scope | A key belongs to the API key that sent it (or, for the master key, to the billed user), so two callers never see each other's responses. |
 | Same request | The same body, and the same `Otari-Code-Execution`, `Otari-Web-Search`, `Otari-Web-Fetch`, `Otari-Router`, `Otari-Conversation-Id`, `Otari-Tags` and `anthropic-beta` headers, since those change what the request does. Key order and whitespace in the JSON body do not count as a difference. |
 | Different request, same key | `422`. |
-| Original still running | `409` with `Retry-After`, at once, as the IETF `Idempotency-Key` draft and Stripe's API answer. |
+| Original still running | `409` with `Retry-After`, at once, as the IETF `Idempotency-Key` draft and Stripe's API answer, for as long as the original runs (a slow model writing a long answer can take minutes), unless its claim lapses, as the list below says. |
 | Original failed | The next retry runs in its place. Only a successful response is kept. |
 | Long-running original | The request holding a key renews its claim while it runs, so a retry never runs it a second time. If the worker running it dies, its key frees up within `idempotency_lease_sec` (a minute by default). |
 | Retention | A response, generated content included, is kept for `idempotency_retention_sec` (a day by default; `0` ignores the header) and then deleted. Expired responses are still deleted after the header is turned off. |
@@ -510,8 +554,14 @@ was not stored or can no longer be read:
 1. Generate a UUID for the request and send it as `Idempotency-Key`.
 2. On a lost response, resend the identical request with the same key.
 3. On a `409`, wait for `Retry-After` and retry with the same key, backing off
-   exponentially.
+   exponentially. Keep the same key until the original settles: a new key runs
+   the request again and bills it again.
 4. For a new or changed request, generate a new key; reusing one is a `422`.
+
+The same retry recovers what a lost response would have said: the replay
+carries the original's `Otari-Request-ID`, and its `usage.cost_usd` where the
+original had one. An answer from a proxy in front of the gateway carries
+neither (see [Request ID and inline cost](#request-id-and-inline-cost)).
 
 ## Rerank
 
@@ -653,6 +703,14 @@ for it works against Otari with its base URL changed. `include_raw` and
 - Where there is no tool to pick (none configured, or several and no default),
   a call that names none still runs on the organization key, as the tool
   `web_search` on the key's provider, with a 30 second timeout.
+- A deployment with no search tool, whose legacy settings describe a backend
+  (`web_search_provider` with its key, else `web_search_url`), serves that
+  backend as a tool named after its provider, such as `tavily` or `searxng`.
+  A call that names none runs on it when the workspace has no organization key;
+  a call that names it runs on it in any case; any other name is a 400 listing
+  it. The deployment pays: it is priced under `otari:web_search`, and an
+  `allowed_tools` grants it by that name. Once any search tool exists, the
+  legacy backend is neither served nor listed here.
 - The access check reads the key's `allowed_tools`, else its user's, for the
   tool's name or `*`. With neither set, it follows the key's model access, or
   its user's when the key has none: unrestricted model access runs every search
@@ -673,9 +731,6 @@ for it works against Otari with its base URL changed. `include_raw` and
 | `include_raw` | boolean | Also return `raw`, the provider's whole response. Default `false`. |
 | `provider_options` | object | Native options of the provider serving the call, under its own names, as `GET /api/v1/search-tools/providers` lists them. They win over the tool's own options; the fields above win over them. An option the provider does not take, or takes only from the deployment, is a 400 naming it. A call that names no tool may be served by an organization key on another provider, so name the tool when the options are meant for one provider. |
 | `user` | string | Who the search is billed to; see below. |
-
-Until any-search has their adapters, `include_raw` and `provider_options` are a
-400 on a call a Tavily or Brave organization key serves; `false` and `{}` pass.
 
 **Response.**
 
@@ -712,6 +767,8 @@ of kind `search` keyed by the tool's name (`POST /api/v1/pricing` takes a
 `search` or `fetch` override). A row written under the old
 `<provider>:<tool>` key is read after it, until a later release. See
 [Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool) for the order and the organization key's rate.
+A served search carries what it settled at in `Otari-Cost-USD` and
+`Otari-Pricing-Source` ([inline cost](#request-id-and-inline-cost)).
 
 **Errors.** Where a refusal carries a stable code, it is in the
 `Otari-Error-Code` header and the body's `code`; see [Error codes](#error-codes).
@@ -730,7 +787,8 @@ of kind `search` keyed by the tool's name (`POST /api/v1/pricing` takes a
 | A `user` naming another user, where the key rejects a mismatch | 403 | |
 | A service key's `Otari-End-User-Budget` is not one it may use | 403 | `end_user_budget_not_allowed` |
 | A budget refuses the search | 403 | `budget_exceeded` |
-| `require_pricing` is on and the search has no price (a row of kind `search` keyed by the tool's name, or its `price_per_call`; `otari:web_search` for a search the workspace's organization key serves); the detail names it | 402 | `pricing_required` |
+| `require_pricing` is on and the search has no price (a row of kind `search` keyed by the tool's name, or its `price_per_call`; `otari:web_search` for a search the workspace's organization key or the legacy settings serve); the detail names it | 402 | `pricing_required` |
+| The tool runs on the deployment's account and the organization has no funds paid in | 402 | `insufficient_funds` |
 | A rate limit is full | 429 | `rate_limited` |
 | The workspace's organization search key cannot be used as it is | 502 | |
 | The provider failed the search, or could not be reached | 502 | |
@@ -753,6 +811,35 @@ provider. A 502 for a failure that is not the provider's, such as an organizatio
 key this gateway cannot call, carries none of them.
 The completion routes send the same headers when a provider fails a completion;
 see [Provider failures](#provider-failures).
+
+**Listing the tools.** `GET /api/v1/search-tools/catalog` lists the tools the
+calling key may name, as `GET /api/v1/models` lists the models it may call: a
+tool its `allowed_tools` does not grant is left out. Each entry carries the
+tool's name as `id`, its `provider`, a display `label`, its `price_per_call`,
+and `default`, true for the deployment's default tool. `price_per_call` is the
+configured rate in USD for the caller's organization (its override, else the
+deployment's price list), not what a call is charged: a provider that reports a
+search's cost, such as Exa, is charged that cost, and the rate prices only a
+call whose provider reports none. It is `null` when no rate row prices the
+tool, which says nothing of whether its provider reports a cost. A call that
+names no tool runs on the default, unless the workspace has an organization
+search key, which then serves it; a call that names the default tool runs on that tool's own key and price. A tool a direct
+search cannot run on is left out, and no key, endpoint or option is returned.
+On a deployment with no search tool, the backend the legacy settings describe
+is the one entry, named after its provider, the default, and priced at the
+`otari:web_search` rate.
+An API key whose workspace has web access off gets an empty list;
+`GET /api/v1/tools` says why. The list takes `skip` and `limit` (at most 1000,
+100 by default).
+
+```json
+{
+  "object": "list",
+  "data": [
+    {"id": "exa", "object": "search_tool", "provider": "exa", "label": "Exa", "price_per_call": 0.008, "default": true}
+  ]
+}
+```
 
 Search-tool management lives under `/api/v1/search-tools`. The generated OpenAPI
 document describes the supported providers, filters, and management schemas.
@@ -832,7 +919,9 @@ provider's, or `max_chars` cut it. `raw` appears only when the request set
 price row of kind `fetch` keyed by the tool's name, `builtin_fetch` included.
 A fetch the workspace's organization fetch key served is priced under
 `otari:web_fetch` instead. See
-[Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool).
+[Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool). A served
+fetch carries what it settled at in `Otari-Cost-USD` and `Otari-Pricing-Source`
+([inline cost](#request-id-and-inline-cost)).
 
 **Errors.** Where a refusal carries a stable code, it is in the
 `Otari-Error-Code` header and the body's `code`; see [Error codes](#error-codes).
@@ -882,6 +971,7 @@ output, with no model involved. It is admitted, priced and budgeted as an
 | `code` | string | Python source to run. Required, and sent to the sandbox unchanged. Code that is empty or only whitespace is a `422`. |
 | `container` | string | `auto` to hold the sandbox after the run, or an `otari_cntr_…` id from an earlier `Otari-Container-Id` to run in that sandbox again, with its files and interpreter state. Omitted, the sandbox is released when the run ends. |
 | `timeout_seconds` | integer | How long the code may run. Capped at the workspace's `exec_timeout_s`, or 60 seconds when it sets none. |
+| `environment` | string | The sandbox environment to run in, a `name` from `GET /api/v1/code/environments`. Omitted, the workspace's pinned environment, else the deployment's default. A held `container` keeps the environment it was created in. |
 | `file_ids` | array of strings | Uploads from `POST /api/v1/files` to put in the working directory before the code runs, each under its own filename. At most 32. |
 | `user` | string | The billed user, as on the completion routes ([the `user` field](#the-user-field)). Required with the master key. |
 
@@ -901,18 +991,51 @@ Code that fails is still a `200`, and is billed: its `return_code` is nonzero,
 or its `stderr` carries the error. `files` lists each file the code wrote,
 stored in the Files API, so `GET /api/v1/files/{file_id}/content` downloads it;
 it is empty where the Files API is off. A held sandbox is named in
-`Otari-Container-Id` and `Otari-Container-Expires-At`.
+`Otari-Container-Id` and `Otari-Container-Expires-At`. A priced run carries what
+it settled at in `Otari-Cost-USD` and `Otari-Pricing-Source`
+([inline cost](#request-id-and-inline-cost)); an unpriced one carries neither.
 
 **Errors.**
 
 | Status | When |
 |---|---|
-| `400` | No sandbox is configured, `container` names a sandbox that has expired or does not exist, or a `file_ids` entry is not an upload the caller can read (or the Files API is off). |
-| `402` | `require_pricing` is on and `otari:code_execution` has no price (`pricing_required`), or the organization's funds are exhausted. |
-| `403` | The workspace's code execution policy is off, or the billed user's budget is spent. |
+| `400` | No sandbox is configured, `container` names a sandbox that has expired or does not exist, a `file_ids` entry is not an upload the caller can read (or the Files API is off), `environment` is not one the gateway offers, or `container` names a sandbox created in another environment, or in one it did not record. |
+| `402` | `require_pricing` is on and neither the environment's `otari:code_execution:<image>` nor `otari:code_execution` has a price (`pricing_required`), or the organization's funds are exhausted. |
+| `403` | The workspace's code execution policy is off or pins another environment, the billed user's budget is spent, or the key lacks `files:read` and the request stages a `file_ids` entry or names a `container` to re-enter. |
 | `409` | The named container is running another request. |
 | `502` | The sandbox could not be reached. |
 | `503` | The sandbox is temporarily out of capacity, with `Retry-After` when it gave one. |
+
+### Environments
+
+`GET /api/v1/code/environments` lists the sandbox environments the caller's
+workspace may run code in, for any API key; a master key or a dashboard
+session gets the deployment's whole list. See
+[Sandbox environments](tools.md#sandbox-environments).
+
+```json
+{
+  "object": "list",
+  "data": [
+    {
+      "object": "code_execution.environment",
+      "name": "python-data",
+      "label": "Python data",
+      "description": "pandas, numpy and matplotlib, 2 vCPU, 4 GB",
+      "price_per_run": 0.05,
+      "default": false
+    }
+  ]
+}
+```
+
+`price_per_run` is USD per run for the caller's organization, the
+environment's own price else `otari:code_execution`'s, and null when neither is
+set. The list is empty where no sandbox is configured, the deployment names no
+image, or the workspace's code execution policy is off.
+
+`skip` (default `0`) and `limit` (default `100`, at most `1000`) page the list
+in the operator's order; a value out of range is a `422`.
 
 ## Decisions
 
@@ -920,7 +1043,8 @@ it is empty where the Files API is off. A held sandbox is named in
 probabilities rather than generated text: `noul` (the probability of yes),
 `choice` (one of the named options) and `score` (a level on an ordered scale).
 The body is TypeSafe's System One shape, which OpenRouter's alpha Decisions API
-and llama-server also take:
+and llama-server also take, and which Otari translates for Google's Gemini
+Decisions API:
 
 ```json
 {
@@ -940,8 +1064,9 @@ and llama-server also take:
 `model` is `<provider>:<model>`, where the provider is an entry under
 [`decision_providers`](configuration.md#decision-providers). The answer comes back
 as the provider returned it, keyed like the questions, with `probabilities`,
-`confidence` and `usage`. `images` takes data URLs for a vision decision model
-served by llama-server; other providers refuse it.
+`confidence` and `usage` (a Gemini answer also gets `model`, and its token counts
+as `usage.input_tokens` and `usage.output_tokens`). `images` takes data URLs for a
+vision decision model served by llama-server or Gemini; other providers refuse it.
 
 `POST /api/v1/systemone` serves the same request at the path TypeSafe's SDK and
 llama-server use, so a client written for either works against Otari with its
@@ -1152,6 +1277,7 @@ at the top level of the body.
 | `provider_not_configured` | 424 | Nothing declares the model's provider, or its declaration names no key the provider needs, so nothing was sent upstream. Not a 5xx, so a client does not retry it: an operator adds the provider as a [hosted provider](hosted-providers.md) (switching on the model), or the organization adds its own provider key. A provider's environment variable alone serves nothing | |
 | `provider_credential_rejected` | 424 | The provider refused the credential the gateway holds for it (an upstream 401, or a 403 other than one rejecting the request, which is a 400). It is the gateway's key, not the caller's, so it is never a 401 or 403; and not a 5xx, because no retry makes the key valid. Replace or fix the provider credential. The usage row keeps the provider's own status. A routing policy moves on to its next candidate first, and answers with this code when every candidate either had no credential or had it rejected, and at least one was rejected | |
 | `end_user_budget_not_allowed` | 403 | A service key named an end-user budget that is not on its `end_user_budget_ids` | |
+| `end_user_budget_without_end_user` | 400 | The request sent `Otari-End-User-Budget` but its `user` field (`metadata.user_id` on Messages) names no end user of a service key (the key is not a service key, or the request names no one or the key's own user), so the budget would apply to no one | |
 | `end_user_limit_reached` | 403 | A service key already has as many end users as its `max_end_users` allows, so a request that would create a new end user or revive a deleted one is refused. End users it already has are unaffected | |
 | `terms_not_accepted` | 400 | The deployment publishes terms (`terms_url`), and creating or first claiming the account needs them accepted: send `terms_accepted` with the signup, the invitation's first password, the password reset, or the OAuth callback | |
 | `invalid_request` | 422, or 400 on the Messages routes | The request body or a parameter failed schema validation. `detail` lists the failing fields, each with `loc`, `msg` and `type`; on the Messages routes, `error.message` names them instead | |

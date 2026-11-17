@@ -391,6 +391,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Own Account
+         * @description Delete the caller's account and sign them out.
+         *
+         *     Erases the account's sign-in identity, sessions, passkeys, Playground
+         *     conversations, agent traces, telemetry, files and keys. Usage rows are
+         *     kept for the deployment's totals under a new id that does not identify
+         *     the person, and an organization nobody else is active in is renamed, its
+         *     keys revoked and its stored credentials cleared. Invitations to the
+         *     account's address are withdrawn everywhere. Refused while the account is the last active owner of
+         *     an organization other people are active in.
+         */
+        delete: operations["auth-delete_own_account"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/oauth/{provider}/authorize": {
         parameters: {
             query?: never;
@@ -1284,7 +1312,7 @@ export interface paths {
          *     A model the caller may not see answers 404, the same as one that does not
          *     exist, so the route cannot be used to probe the catalog behind an allow-list.
          *     A signed-in caller's offerings also carry their organization's own usage of
-         *     each over the last 30 days.
+         *     each over the last 30 days, and so do an API key's when it holds ``usage:read``.
          */
         get: operations["catalog-get_catalog_model"];
         put?: never;
@@ -1343,6 +1371,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/code/environments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Code Execution Environments
+         * @description List the sandbox environments the caller's workspace may run code in, with their prices.
+         *
+         *     The code execution counterpart of ``GET /api/v1/models``: each environment's
+         *     ``name``, which ``POST /api/v1/code/execute`` takes as ``environment``, a
+         *     ``label`` and ``description``, ``price_per_run`` for the caller's
+         *     organization, and whether it is the ``default`` a run that names none gets.
+         *     A workspace whose code execution policy is off lists none, and one that
+         *     pins an environment lists that one alone. A gateway with no sandbox lists
+         *     none, as does one that names no image, whose runs go to the backend's own
+         *     default. A master key or a dashboard session belongs to no single workspace,
+         *     so it gets the deployment's whole list at the deployment's prices.
+         *     ``skip`` and ``limit`` page the list in the operator's order.
+         */
+        get: operations["code-execution-list_code_execution_environments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/code/execute": {
         parameters: {
             query?: never;
@@ -1358,12 +1417,15 @@ export interface paths {
          *
          *     The run is admitted as an ``otari_code_execution`` call is: a workspace whose
          *     code execution policy is off is refused, and its execution ceiling and pinned
-         *     image apply. It is priced under ``otari:code_execution`` and reserved against
-         *     the caller's budgets. ``file_ids`` puts uploads in the working directory, and
+         *     image apply. ``environment`` names one of the environments
+         *     ``GET /api/v1/code/environments`` lists. The run is priced under
+         *     ``otari:code_execution:<environment>``, else ``otari:code_execution``, and
+         *     reserved against the caller's budgets. ``file_ids`` puts uploads in the working directory, and
          *     each file the code writes comes back with a ``file_id``. ``container: "auto"``
          *     holds the sandbox after the run and names it in ``Otari-Container-Id``;
          *     sending that id back runs in the same sandbox, with its files and
-         *     interpreter state.
+         *     interpreter state. A priced run answers with its settled cost in
+         *     ``Otari-Cost-USD`` and the rate's source in ``Otari-Pricing-Source``.
          *
          *     Authentication modes:
          *     - Master key: the ``user`` field is required and may name any existing user.
@@ -2399,7 +2461,8 @@ export interface paths {
          *     requests in flight. A period that has ended reads as the fresh one the next
          *     request starts. ``remaining_usd`` is the least any cap on every provider
          *     leaves, which is what a request can still spend before a 403. Caps shared with
-         *     the rest of the workspace or organization report only what they leave.
+         *     the rest of the workspace or organization report only what they leave. On a
+         *     service key, ``end_users`` counts its end users against its ``max_end_users``.
          */
         get: operations["key-get_key_budget"];
         put?: never;
@@ -2447,7 +2510,8 @@ export interface paths {
          *     The same summary as ``GET /api/v1/usage/summary``, over the rows this key
          *     wrote alone: the same bounded window (default last 30 days), breakdowns, tag
          *     filters and ``group_by_tag``. Tag a request with ``metadata`` and pass
-         *     ``group_by_tag`` to read what each kind of request cost.
+         *     ``group_by_tag`` to read what each kind of request cost. The key's own user
+         *     is listed in ``by_user`` without a ``label``.
          */
         get: operations["key-get_key_usage_summary"];
         put?: never;
@@ -2530,6 +2594,26 @@ export interface paths {
          *     Requires master key authentication.
          */
         patch: operations["keys-update_key"];
+        trace?: never;
+    };
+    "/api/v1/keys/{key_id}/end-user-count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get End User Count
+         * @description How many end users a service key's ``max_end_users`` counts, and the cap itself.
+         */
+        get: operations["keys-get_end_user_count"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/keys/{key_id}/end-users": {
@@ -2685,6 +2769,110 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/mcp-catalog/popular": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Popular Mcp Servers
+         * @description Well-known remote MCP servers, from a list bundled with Otari, that the catalog holds now.
+         *
+         *     Each is matched to the catalog by its URL, so the list is empty until a sync has run.
+         */
+        get: operations["mcp-catalog-list_popular_mcp_servers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mcp-catalog/servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Mcp Catalog
+         * @description Search the catalog of remote MCP servers, or page through all of it with no `q`.
+         *
+         *     A title that starts with `q` comes first, then a title that contains it, then a
+         *     match in the name or description alone; within each, a server whose
+         *     `publisher_kind` is `vendor` comes first. The catalog is
+         *     empty until a sync has run, and stays empty on a deployment whose
+         *     `mcp_catalog_sync` is `off`. Listing a server here permits nothing: a
+         *     workspace reaches a server only once it is added to that workspace.
+         */
+        get: operations["mcp-catalog-search_mcp_catalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mcp-catalog/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Mcp Catalog Sync
+         * @description Whether the catalog syncs from the MCP Registry, and what the sync in progress or the last one did.
+         */
+        get: operations["mcp-catalog-get_mcp_catalog_sync"];
+        put?: never;
+        /**
+         * Request Mcp Catalog Sync
+         * @description Start a sync within a minute. Refused with a 409 while `mcp_catalog_sync` is `off`.
+         *
+         *     An operator may always ask. Anyone else names a `workspace_id` they may add MCP
+         *     servers to, and waits out `next_request_at` after the last sync: an hour after
+         *     a complete one, five minutes after any other. A sync already running or asked
+         *     for is left to finish, and this request returns its status.
+         */
+        post: operations["mcp-catalog-request_mcp_catalog_sync"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mcp-connections/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete Mcp Connection
+         * @description Finish a sign-in to a per-user MCP server, from the code its authorization server returned.
+         *
+         *     The dashboard calls this from the page the callback lands on. The state
+         *     is consumed whatever happens next, so it finishes one sign-in at most, and
+         *     it must be one the caller started: another person's is refused with a 400.
+         *     Send the redirect's `iss` too when it had one: an answer naming another
+         *     authorization server is refused (RFC 9207).
+         */
+        post: operations["mcp-connections-complete_mcp_connection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/mcp/execute": {
         parameters: {
             query?: never;
@@ -2732,6 +2920,11 @@ export interface paths {
          *     owner's, else the server's `everyone_tools`. Each has the `id` to send in `mcp_server_ids`
          *     (or to the tool discovery and execution routes), its `name`, and its `purpose_hint`. The URL and
          *     the token are never returned. A master key has no workspace and is refused with a 404.
+         *
+         *     A server that sends each user's own credential is listed with `sign_in_required` true until this
+         *     key's user has signed in to it, with a `sign_in_url` to the page that starts their sign-in, and is
+         *     left out for a key that has no user. Tool discovery and execution answer such a server with a 403, the code
+         *     `mcp_sign_in_required` and the same `sign_in_url`. Making a link stores nothing, so listing is free.
          */
         get: operations["mcp-list_mcp_servers"];
         put?: never;
@@ -2818,6 +3011,30 @@ export interface paths {
          */
         post: operations["messages-count_message_tokens"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model-overrides/{selector}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Model Override
+         * @description Replace the deployment's override of a model; every field null clears it.
+         */
+        put: operations["model-overrides-set_model_override"];
+        post?: never;
+        /**
+         * Clear Model Override
+         * @description Drop the deployment's override of a model.
+         */
+        delete: operations["model-overrides-clear_model_override"];
         options?: never;
         head?: never;
         patch?: never;
@@ -3319,11 +3536,10 @@ export interface paths {
          * Create Active Organization Domain
          * @description Claim an email domain for the caller's organization. Owners and admins only.
          *
-         *     The claim lands unverified and does nothing until ``POST
-         *     /me/domains/{id}/verify`` finds the record in ``verification_record``
-         *     published at the domain's apex. A public email provider is refused outright,
-         *     and a domain another organization already claims answers 409 without saying
-         *     who holds it.
+         *     The claim starts unverified and does nothing.
+         *     ``POST /me/domains/{id}/verify`` verifies it by finding the record in ``verification_record`` at the domain's apex.
+         *     Verifying is refused while another organization has a current proof of the same domain.
+         *     A public email provider is refused, and so is a domain this organization has already claimed.
          */
         post: operations["organizations-create_active_organization_domain"];
         delete?: never;
@@ -3666,6 +3882,28 @@ export interface paths {
         patch: operations["organization-keys-update_own_key"];
         trace?: never;
     };
+    "/api/v1/organizations/me/keys/{key_id}/end-user-count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Own Key End User Count
+         * @description How many end users one of the caller's service keys counts against its ``max_end_users``, and the cap.
+         *
+         *     The same keys as listing their end users: the caller's own, or for an owner or admin the organization's.
+         */
+        get: operations["organization-keys-get_own_key_end_user_count"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/keys/{key_id}/end-users": {
         parameters: {
             query?: never;
@@ -3787,9 +4025,11 @@ export interface paths {
          *     once the recipient accepts (``POST /api/v1/invitations/accept``). When the
          *     email did not go out (``mail_sent`` is false: mail is not configured, the
          *     send failed, or the invitation mail limit was reached), the response
-         *     carries the accept link so the caller can share it themselves. An address
-         *     whose invitation is still pending is refused; reissue that invitation to
-         *     send a new link.
+         *     carries the accept link so the caller can share it themselves, except under
+         *     ``open_signup`` to a caller who is not a deployment operator, whose invitee
+         *     accepts from their pending invitations once signed in. An address whose
+         *     invitation is still pending is refused; reissue that invitation to send a
+         *     new link.
          */
         post: operations["organizations-invite_active_organization_member"];
         delete?: never;
@@ -3816,7 +4056,8 @@ export interface paths {
          *     would check it, and an address that is refused lands in ``failed`` with the
          *     reason rather than failing the request, so the answer is 200 even when some
          *     or all were refused. Each invited entry carries its own ``mail_sent``, and
-         *     its accept link when that is false.
+         *     its accept link when that is false, on the terms ``POST /me/member-invitations``
+         *     returns one.
          */
         post: operations["organizations-bulk_invite_active_organization_members"];
         delete?: never;
@@ -3862,8 +4103,9 @@ export interface paths {
          * @description Give a pending or expired invitation a new accept link. Organization owners and admins only.
          *
          *     The old link stops working. The new one is emailed as an invitation is, and
-         *     returned in ``accept_link`` when it was not, so a lost link can be
-         *     recovered whether or not the deployment sends mail.
+         *     returned in ``accept_link`` when it was not, on the terms
+         *     ``POST /me/member-invitations`` returns one. Where the link was neither emailed
+         *     nor returned, the invitee accepts from their pending invitations once signed in.
          */
         post: operations["organizations-reissue_active_organization_member_invitation"];
         delete?: never;
@@ -3900,6 +4142,10 @@ export interface paths {
          *     GitHub sign-in; on a deployment with no mail and no provider it waits for
          *     an operator's password link, so invite it instead
          *     (``POST /me/member-invitations``), whose link can set its first password.
+         *
+         *     On a deployment with ``open_signup`` on, only a deployment operator may add
+         *     members this way (403 for anyone else, who invites instead). An address at an
+         *     email domain another organization has verified is refused with 409.
          */
         post: operations["organizations-create_active_organization_member"];
         delete?: never;
@@ -3928,6 +4174,9 @@ export interface paths {
         /**
          * Update Active Organization Member
          * @description Change a member's role or status. Organization owners and admins only.
+         *
+         *     On a deployment with ``open_signup`` on, only a deployment operator may make
+         *     active a member who never accepted an invitation (403 for anyone else).
          */
         patch: operations["organizations-update_active_organization_member"];
         trace?: never;
@@ -3953,6 +4202,32 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/model-overrides/{selector}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Organization Model Override
+         * @description Replace the organization's override of a model one of its keys serves; every field null clears it.
+         *
+         *     Organization owners and admins only.
+         */
+        put: operations["model-overrides-set_organization_model_override"];
+        post?: never;
+        /**
+         * Clear Organization Model Override
+         * @description Drop the organization's override of a model. Organization owners and admins only.
+         */
+        delete: operations["model-overrides-clear_organization_model_override"];
         options?: never;
         head?: never;
         patch?: never;
@@ -4188,6 +4463,8 @@ export interface paths {
         /**
          * Delete Org Provider Key
          * @description Permanently delete an archived key. Organization owners and admins only.
+         *
+         *     The model details the organization set under the key's prefix go with its last key there.
          */
         delete: operations["provider-keys-delete_org_provider_key"];
         options?: never;
@@ -6251,7 +6528,8 @@ export interface paths {
          *     The tool is taken from ``search_tool_name``, which may be omitted when the
          *     deployment's ``web_search_default_tool`` names one, or when exactly one
          *     tool is configured. Such a call runs on the workspace's organization search
-         *     key when it has one.
+         *     key when it has one. A deployment with no search tool serves the backend its
+         *     legacy search settings describe, named after its provider.
          *
          *     Authentication modes:
          *     - Master key: the ``user`` field is required and may name any existing user.
@@ -6301,6 +6579,37 @@ export interface paths {
          *     configuration file until it is cleared.
          */
         post: operations["search-tools-create_search_tool"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/search-tools/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Search Tool Catalog
+         * @description List the search tools a direct search may name, with what one search costs the caller.
+         *
+         *     Each entry is a tool ``POST /api/v1/search/{tool}`` serves, with its
+         *     provider, a display name, its price per search for the caller's
+         *     organization, and whether it is the deployment's default. Tools a direct
+         *     search cannot run on are left out, and no key, endpoint or option is
+         *     returned.
+         *
+         *     Called with an API key, a tool the key's ``allowed_tools`` does not grant is
+         *     left out, and the list is empty when its workspace does not allow web
+         *     search; ``GET /api/v1/tools`` says why. A master key or a dashboard session
+         *     gets the deployment's list.
+         */
+        get: operations["search-tools-list_search_tool_catalog"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -7064,6 +7373,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/update-check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Update Check
+         * @description Whether checks are on and who decided, what a check sends, and what the last one heard.
+         */
+        get: operations["update-check-get_update_check"];
+        /**
+         * Answer Update Check
+         * @description Turn the checks on or off. A yes is checked within a minute.
+         *
+         *     Refused with 409 when the deployment's configuration answers instead.
+         */
+        put: operations["update-check-answer_update_check"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/usage": {
         parameters: {
             query?: never;
@@ -7215,8 +7550,8 @@ export interface paths {
          *     no way to tell those apart. A stream that failed, including one the provider
          *     cut, always writes an error row. A stream the client abandoned before the
          *     provider reported usage, with no gateway tool work, writes a row only under
-         *     the ``estimate`` policy, billed on an estimate; otherwise it writes none, so
-         *     its id stays 404.
+         *     the ``estimate`` policy, billed on an estimate, and settles as
+         *     ``incomplete``; otherwise it writes none, so its id stays 404.
          */
         get: operations["usage-get_request_settlement"];
         put?: never;
@@ -7724,6 +8059,222 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/mcp-connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List My Mcp Connections
+         * @description List the caller's own connections to this workspace's MCP servers.
+         *
+         *     A connection is the caller's sign-in to a server whose `credential_mode`
+         *     is `per_user`. Any member who can see the workspace may call this, oldest
+         *     connection first; `count` is the total. Tokens are never included.
+         */
+        get: operations["mcp-connections-list_my_mcp_connections"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-connections/{server_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Mcp Connection
+         * @description Start the caller's own sign-in to a per-user MCP server.
+         *
+         *     Returns the server's authorization page to send the browser to. Otari
+         *     discovers the server's authorization server, registers itself as a client
+         *     where the server holds no client ID, and uses the authorization code flow
+         *     with S256 PKCE. The sign-in is bound to the caller: it finishes only in
+         *     their own dashboard session, once, within ten minutes. The connection then
+         *     belongs to the caller's user, so every key they own in this workspace
+         *     reaches the server as them.
+         *
+         *     Any member who can see the workspace may call this. A server in `shared`
+         *     mode is refused with a 409, and a deployment with no `public_base_url`
+         *     with a 400, because the address the authorization server returns to is
+         *     derived from it.
+         */
+        post: operations["mcp-connections-start_mcp_connection"];
+        /**
+         * End My Mcp Connection
+         * @description End the caller's own connection to an MCP server.
+         *
+         *     The stored tokens are deleted, and the authorization server is asked to
+         *     revoke them where it publishes a revocation endpoint. The caller's keys
+         *     then get `mcp_sign_in_required` from this server until they sign in again.
+         */
+        delete: operations["mcp-connections-end_my_mcp_connection"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-server-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Mcp Server Requests
+         * @description The workspace's pending requests, one entry per catalog server, the longest-waiting first.
+         *
+         *     Organization owners/admins or this workspace's owners/admins. Each entry names the first five
+         *     who asked, with their notes, and `requester_count` says how many asked in all; the
+         *     `requesters` list pages through the rest. Each also carries the catalog's entry for the server
+         *     as it is now. A page holds `limit` servers after the first `skip`; `count` says how many
+         *     requests wait in all, and `server_count` how many servers they ask for.
+         */
+        get: operations["mcp-servers-list_mcp_server_requests"];
+        put?: never;
+        /**
+         * Request Mcp Server
+         * @description Ask the workspace's owners and admins to add a server the MCP catalog lists.
+         *
+         *     Any member who can see the workspace, a viewer included. The request keeps the title and URL
+         *     the catalog gives the server now. Where this deployment can send mail, the workspace's owners
+         *     and admins and its organization's are told, at most 20 of them; otherwise they find the
+         *     request on the MCP servers page. A caller holds one pending request per server.
+         */
+        post: operations["mcp-servers-request_mcp_server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-server-requests/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decline Mcp Server Requests
+         * @description Decline every pending request for one catalog server.
+         *
+         *     Organization owners/admins or this workspace's owners/admins. Each requester sees the
+         *     `reason`, and is mailed it where this deployment can send mail. To approve instead, add the
+         *     server to the workspace: storing a server at the requested URL approves every pending request
+         *     for it.
+         */
+        post: operations["mcp-servers-decline_mcp_server_requests"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-server-requests/mine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List My Mcp Server Requests
+         * @description The caller's own requests in this workspace: the pending ones, and the answers they have not acknowledged.
+         *
+         *     Any member who can see the workspace. Pending requests come first, then the answers, each
+         *     newest first, so a first page of 10 or more holds every pending one. An answer, approved or
+         *     declined, is listed until the caller acknowledges it. A declined request also leaves the list
+         *     when the caller asks for the server again or the server is added, and an approved one when its
+         *     server is deleted.
+         */
+        get: operations["mcp-servers-list_my_mcp_server_requests"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-server-requests/requesters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Mcp Server Requesters
+         * @description Everyone waiting for one catalog server, a page at a time, the earliest first.
+         *
+         *     Organization owners/admins or this workspace's owners/admins. For a server whose entry in the
+         *     list above names fewer requesters than its `requester_count`.
+         */
+        get: operations["mcp-servers-list_mcp_server_requesters"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-server-requests/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Withdraw Mcp Server Request
+         * @description Withdraw one of the caller's own pending requests. Someone else's request is a 404.
+         */
+        delete: operations["mcp-servers-withdraw_mcp_server_request"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-server-requests/{request_id}/acknowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Acknowledge Mcp Server Request
+         * @description Record that the caller has seen the answer to one of their own requests, so it is no longer listed for them.
+         *
+         *     Repeating it changes nothing. Someone else's request is a 404.
+         */
+        post: operations["mcp-servers-acknowledge_mcp_server_request"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/mcp-servers": {
         parameters: {
             query?: never;
@@ -7778,8 +8329,10 @@ export interface paths {
          *
          *     What a form's Test button calls before it saves. Answers with what a stored
          *     server's `health` would say, and records nothing. Pass `server_id` and omit
-         *     `authorization_token` to test with that server's stored token. The URL is
-         *     checked for SSRF safety first, with the same 400 a create gets.
+         *     `authorization_token` to test with that server's stored credential, which is
+         *     only sent to a URL on that server's own origin (scheme, host and port): any
+         *     other is a 400. The URL is checked for SSRF safety first, with the same 400
+         *     a create gets.
          */
         post: operations["mcp-servers-check_workspace_mcp_server_connection"];
         delete?: never;
@@ -7806,6 +8359,31 @@ export interface paths {
          *     ceiling. A key of another workspace is answered with a 404.
          */
         get: operations["mcp-servers-get_workspace_mcp_key_access"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/logos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workspace Mcp Server Logos
+         * @description The logo of each of the workspace's MCP servers, and whether it needs a tile to stay visible.
+         *
+         *     Paged as the server list is, oldest server first. Readable by any member who can
+         *     see the workspace, as the servers are. A logo is an admin's upload, else the
+         *     catalog's for the server's URL, else one the gateway found on the server's host.
+         *     Listing them makes the gateway fetch nothing.
+         */
+        get: operations["mcp-servers-list_workspace_mcp_server_logos"];
         put?: never;
         post?: never;
         delete?: never;
@@ -7970,10 +8548,176 @@ export interface paths {
          *     Opens one session, lists the server's tools, and stores the outcome as
          *     `health`. A server that fails is still a 200, with `health.status` set to
          *     `failing`. A 429 means every check slot on this gateway was busy and
-         *     nothing was recorded.
+         *     nothing was recorded. A per-user server holds no token to check with and
+         *     is refused with a 409: start its check with `POST .../check/sign-in`.
          */
         post: operations["mcp-servers-check_workspace_mcp_server"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/check/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Workspace Mcp Server Check Sign In
+         * @description Start a sign-in made only to check a per-user server. Organization or workspace owners/admins.
+         *
+         *     Returns the authorization page to send the browser to, as starting a connection does. The
+         *     caller signs in with any account; finishing the sign-in (`POST /mcp-connections/complete`)
+         *     lists the server's tools once with the token it returns, stores the outcome as `health`, and
+         *     drops the token, revoking it where the authorization server allows. No connection is created,
+         *     and the caller's own connection, if they have one, is left as it was. A server in `shared` mode
+         *     is refused with a 409.
+         */
+        post: operations["mcp-servers-start_workspace_mcp_server_check_sign_in"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Mcp Server Connections
+         * @description List who is connected to a per-user MCP server. Organization owners/admins or this workspace's owners/admins.
+         *
+         *     Each entry names the user the connection belongs to and, when that user
+         *     is a dashboard account, its email and name: the caller's own connection
+         *     first, then the rest oldest first.
+         *     `count` is the total. Tokens are never included.
+         */
+        get: operations["mcp-connections-list_mcp_server_connections"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/connections/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Mcp Server Connection
+         * @description End one user's connection to an MCP server. Organization owners/admins or this workspace's owners/admins.
+         *
+         *     The stored tokens are deleted and the authorization server is asked to
+         *     revoke them. That user's keys get `mcp_sign_in_required` from this server
+         *     until they sign in again.
+         */
+        delete: operations["mcp-connections-remove_mcp_server_connection"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Workspace Mcp Server Logo
+         * @description Set how a server's logo shows: the tile choice, and an uploaded PNG in place of its own logo.
+         *
+         *     Organization owners/admins or this workspace's owners/admins. The upload is kept
+         *     apart from the logo the gateway fetches, so no fetch or catalog sync replaces it.
+         */
+        put: operations["mcp-servers-set_workspace_mcp_server_logo"];
+        post?: never;
+        /**
+         * Remove Workspace Mcp Server Logo
+         * @description Remove a server's uploaded logo, so it shows its own again. The tile choice stays.
+         *
+         *     Organization owners/admins or this workspace's owners/admins.
+         */
+        delete: operations["mcp-servers-remove_workspace_mcp_server_logo"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/my-tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get My Workspace Mcp Server Tools
+         * @description The tools the caller may use on a server. Any member who can see the workspace.
+         *
+         *     Applies the caller's own rule: their user's grant, else the server's `everyone_tools`, within
+         *     its `allowed_tools`; a disabled server admits nothing. The tool list comes from the server's
+         *     last passing check; where there is none and the server is per-user, it is listed with the
+         *     caller's own connection and not stored. `known` is false when neither is available.
+         */
+        get: operations["mcp-servers-get_my_workspace_mcp_server_tools"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/shared-account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Workspace Mcp Server Shared Sign In
+         * @description Start a sign-in for everyone, to a shared server. Organization or workspace owners/admins.
+         *
+         *     Returns the authorization page to send the browser to, as starting a connection does. The
+         *     caller signs in with the account the whole workspace should act as, so a service account is
+         *     the better choice. Finishing the sign-in (`POST /mcp-connections/complete`) stores that
+         *     account as the server's `shared_account`: every caller's call then carries its token, which
+         *     Otari renews as it does a user's own, and a stored `authorization_token` is removed. A server
+         *     in `per_user` mode is refused with a 409.
+         */
+        post: operations["mcp-servers-start_workspace_mcp_server_shared_sign_in"];
+        /**
+         * End Workspace Mcp Server Shared Account
+         * @description End a shared server's account. Organization owners/admins or this workspace's owners/admins.
+         *
+         *     The stored tokens are deleted, and the authorization server is asked to revoke them where it
+         *     publishes a revocation endpoint. The server is then checked again with no credential, and
+         *     comes back with `needs_setup` when it asks for one. A server with no shared account is a 404.
+         */
+        delete: operations["mcp-servers-end_workspace_mcp_server_shared_account"];
         options?: never;
         head?: never;
         patch?: never;
@@ -8814,7 +9558,7 @@ export interface components {
             output_price_per_million: number;
             /**
              * Provider
-             * @description The decision provider: typesafe, openrouter or llamacpp.
+             * @description The decision provider: typesafe, openrouter, gemini or llamacpp.
              */
             provider: string;
         };
@@ -9380,6 +10124,11 @@ export interface components {
              * @constant
              */
             response_type: "code";
+            /**
+             * Scopes
+             * @description The scopes the consent screen showed. The key holds these and what the registration still names, so one added since the screen was drawn is left out and one removed since takes effect.
+             */
+            scopes: components["schemas"]["KeyScope"][];
             /** State */
             state: string;
             /**
@@ -9393,7 +10142,10 @@ export interface components {
             /** Redirect Uri */
             redirect_uri: string;
         };
-        /** AppDetails */
+        /**
+         * AppDetails
+         * @description What the consent screen shows about an app before a person approves it.
+         */
         AppDetails: {
             /** Issuer */
             issuer: string;
@@ -9401,6 +10153,11 @@ export interface components {
             name: string;
             /** Redirect Uri */
             redirect_uri: string;
+            /**
+             * Scopes
+             * @description The scopes each key this app is issued will hold, from its registration.
+             */
+            scopes: components["schemas"]["KeyScope"][];
         };
         /** AppRevocationRequest */
         AppRevocationRequest: {
@@ -9428,10 +10185,18 @@ export interface components {
             /** Redirect Uri */
             redirect_uri: string;
         };
-        /** AppTokenResponse */
+        /**
+         * AppTokenResponse
+         * @description A minted app key, as RFC 6749 section 5.1 shapes it.
+         */
         AppTokenResponse: {
             /** Access Token */
             access_token: string;
+            /**
+             * Scope
+             * @description The scopes the key holds, space delimited. Fewer than the registration names where the person approved it before an operator narrowed it.
+             */
+            scope: string;
             /**
              * Token Type
              * @default Bearer
@@ -10533,6 +11298,8 @@ export interface components {
             metadata_input_price_per_million?: number | null;
             /** Metadata Output Price Per Million */
             metadata_output_price_per_million?: number | null;
+            /** @description What whoever holds the serving key set in place of the server's and models.dev's word: the organization for an `organization` offering, the operator otherwise. Null when nothing is set. */
+            metadata_override?: components["schemas"]["ModelMetadataOverrideRequest"] | null;
             /**
              * Price Reference
              * @description For a default, the `models.dev:<provider>/<model>` entry that matched; the selector otherwise.
@@ -10755,7 +11522,7 @@ export interface components {
          *     server said. The first two are decided before any connection is opened.
          * @enum {string}
          */
-        CheckFailure: "unsafe_url" | "credentials_unavailable" | "unreachable" | "tls_failed" | "timeout" | "redirected" | "unauthorized" | "forbidden" | "not_found" | "server_error" | "http_error" | "not_mcp" | "limits_exceeded" | "connection_failed";
+        CheckFailure: "unsafe_url" | "credentials_unavailable" | "unreachable" | "tls_failed" | "timeout" | "redirected" | "unauthorized" | "forbidden" | "not_found" | "server_error" | "http_error" | "not_mcp" | "limits_exceeded" | "connection_failed" | "sign_in_unsupported" | "sign_in_unavailable";
         /**
          * CheckVerdictRequest
          * @description One verifier gate's verdict, as the caller's own verifier run produced it.
@@ -10826,6 +11593,11 @@ export interface components {
              */
             container?: string | null;
             /**
+             * Environment
+             * @description The sandbox environment to run in: a name GET /api/v1/code/environments lists. Omitted, the workspace's pinned environment, else the deployment's default. A held container keeps the environment it was created in.
+             */
+            environment?: string | null;
+            /**
              * File Ids
              * @description Uploads from POST /api/v1/files to put in the working directory before the code runs, each under its own filename.
              */
@@ -10866,6 +11638,57 @@ export interface components {
             stderr: string;
             /** Stdout */
             stdout: string;
+        };
+        /**
+         * CodeExecutionEnvironment
+         * @description A sandbox environment a direct code execution may name: what it contains, and what a run in it costs.
+         */
+        CodeExecutionEnvironment: {
+            /**
+             * Default
+             * @description Whether a run that names no environment runs in this one.
+             */
+            default: boolean;
+            /**
+             * Description
+             * @description What it contains and how big it is, when the operator said.
+             */
+            description: string | null;
+            /**
+             * Label
+             * @description A display name; the name itself when the operator gave none.
+             */
+            label: string;
+            /**
+             * Name
+             * @description What POST /api/v1/code/execute's environment field takes.
+             */
+            name: string;
+            /**
+             * Object
+             * @default code_execution.environment
+             * @constant
+             */
+            object: "code_execution.environment";
+            /**
+             * Price Per Run
+             * @description USD per run for the caller's organization: the environment's own price, else code execution's. Null when unpriced.
+             */
+            price_per_run: number | null;
+        };
+        /**
+         * CodeExecutionEnvironmentList
+         * @description The sandbox environments the caller's workspace may run code in.
+         */
+        CodeExecutionEnvironmentList: {
+            /** Data */
+            data: components["schemas"]["CodeExecutionEnvironment"][];
+            /**
+             * Object
+             * @default list
+             * @constant
+             */
+            object: "list";
         };
         /**
          * CodeExecutionOutputFile
@@ -11271,6 +12094,11 @@ export interface components {
              */
             reject_user_mismatch?: boolean | null;
             /**
+             * Scopes
+             * @description The endpoint groups the key may reach. Omitted, the key gets 'inference:run' alone, which calls models and nothing else. The end-users scopes are a service key's alone.
+             */
+            scopes?: components["schemas"]["KeyScope"][];
+            /**
              * User Id
              * @description Optional user ID to associate with this key
              */
@@ -11329,6 +12157,8 @@ export interface components {
             };
             /** Reject User Mismatch */
             reject_user_mismatch: boolean | null;
+            /** Scopes */
+            scopes: components["schemas"]["KeyScope"][];
             /** User Id */
             user_id: string | null;
         };
@@ -11400,6 +12230,11 @@ export interface components {
              * @description Per-key override of the deployment-wide reject_user_mismatch setting: null (default) inherits it, true always rejects a request naming a different 'user', false always accepts it. Spend binds to your own user either way.
              */
             reject_user_mismatch?: boolean | null;
+            /**
+             * Scopes
+             * @description The endpoint groups the key may reach. Omitted, the key gets 'inference:run' alone, which calls models and nothing else. The end-users scopes are a service key's alone.
+             */
+            scopes?: components["schemas"]["KeyScope"][];
             /**
              * Workspace Id
              * @description Workspace this key belongs to, which must be one you may see in your active organization. Omitted means that organization's default workspace, refused when you are not a member of it.
@@ -11755,6 +12590,26 @@ export interface components {
             output_tokens: number;
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * DeleteAccountRequest
+         * @description The confirmation an account deletion needs.
+         * @example {
+         *       "confirm_email": "ada@example.com",
+         *       "current_password": "..."
+         *     }
+         */
+        DeleteAccountRequest: {
+            /**
+             * Confirm Email
+             * @description The account's email address, typed to confirm the deletion.
+             */
+            confirm_email: string;
+            /**
+             * Current Password
+             * @description The account's password. Required when the account has one.
+             */
+            current_password?: string | null;
         };
         /**
          * DeploymentAdminAccessPublic
@@ -14016,7 +14871,7 @@ export interface components {
         InviteOrganizationMemberResultPublic: {
             /**
              * Accept Link
-             * @description The link to share with the invitee yourself, set only when mail_sent is false. A delivered link goes to the invitee's mailbox alone, so the inviter cannot open it as them.
+             * @description The link to share with the invitee yourself, set only when mail_sent is false. A delivered link goes to the invitee's mailbox alone, so the inviter cannot open it as them. Where open_signup is on it is never set for an inviter who is not a deployment operator: the invitee accepts from their pending invitations once signed in, and one who has no way to sign in yet can get a password link from a deployment operator.
              */
             accept_link?: string | null;
             /**
@@ -14089,6 +14944,8 @@ export interface components {
              * @description False when budgets are off for this key: it is budget-exempt, or the deployment runs with budget_strategy disabled. True otherwise, even when no cap applies
              */
             budgets_enforced: boolean;
+            /** @description A service key's end users against its cap; null for any other key */
+            end_users?: components["schemas"]["KeyEndUsersPublic"] | null;
             /**
              * Limits
              * @description The key's user's budget first, then each spend ceiling, the most specific first
@@ -14099,6 +14956,22 @@ export interface components {
              * @description The fewest dollars any dollar cap on every provider leaves; null when none applies. A token, request or provider-narrowed cap in limits can refuse a request sooner
              */
             remaining_usd: number | null;
+        };
+        /**
+         * KeyEndUsersPublic
+         * @description How many end users a service key has, against its ``max_end_users``.
+         */
+        KeyEndUsersPublic: {
+            /**
+             * Count
+             * @description The live end users the cap counts: those on the budgets the key assigns, and those on none when the key has a list and no default. A key that assigns no budget counts every live end user of its user
+             */
+            count: number;
+            /**
+             * Max End Users
+             * @description The key's cap; null when it has none. A request naming a new end user is refused with end_user_limit_reached once count reaches it
+             */
+            max_end_users: number | null;
         };
         /**
          * KeyInfo
@@ -14153,6 +15026,8 @@ export interface components {
             operator_can_enable: boolean;
             /** Reject User Mismatch */
             reject_user_mismatch: boolean | null;
+            /** Scopes */
+            scopes: components["schemas"]["KeyScope"][];
             /** User Id */
             user_id: string | null;
             /**
@@ -14214,6 +15089,16 @@ export interface components {
              */
             used_usd: number | null;
         };
+        /**
+         * KeyScope
+         * @description One group of endpoints an API key may be granted, named ``resource:action``.
+         *
+         *     Ordered by resource, not A-Z: the order is what a stored list is normalized
+         *     to and what the dashboard renders, and the end-user scopes come last because
+         *     only a service key may hold them.
+         * @enum {string}
+         */
+        KeyScope: "inference:run" | "files:read" | "files:write" | "batches:read" | "batches:write" | "web:search" | "web:fetch" | "code:execute" | "mcp:read" | "mcp:execute" | "telemetry:write" | "agents:write" | "usage:read" | "usage:write" | "end-users:read" | "end-users:write" | "end-users:delete";
         /**
          * KnownProviderSchema
          * @description A selected provider's autofill hints for the add-provider form.
@@ -14456,6 +15341,287 @@ export interface components {
             reason?: ("not_configured" | "workspace_disabled" | "insufficient_funds") | null;
         };
         /**
+         * McpCatalogServerPublic
+         * @description One remote MCP server the catalog lists.
+         */
+        McpCatalogServerPublic: {
+            /** Description */
+            description: string | null;
+            /**
+             * Icon Url
+             * @description The https image the registry entry names as the server's icon, null when it names none.
+             */
+            icon_url: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Logo Tone
+             * @description Where the logo needs a tile to stay visible: `dark` ink on a dark background, `light` ink on a light background, `tile` on every background. Null when it reads on both.
+             */
+            logo_tone: ("dark" | "light" | "tile") | null;
+            /**
+             * Logo Url
+             * @description Where this gateway serves the server's logo, which it fetched once and keeps. Null when it looked and found none. A URL without `v` has not been looked for yet, and asking for it starts the look.
+             */
+            logo_url: string | null;
+            /**
+             * Name
+             * @description The source's own identifier, such as `com.example/mcp`.
+             */
+            name: string;
+            /**
+             * Publisher Kind
+             * @description `vendor` when the server is its maker's own: the endpoint lives on the domain the registry verified for the publisher's namespace, the server is named for that domain and nothing else, and the domain is not a hosting platform's. A website or title the publisher writes never earns it, and neither does a GitHub namespace. A few makers' servers the rule cannot recognize are listed by hand. `community` for every other, such as a gateway to another company's API.
+             * @enum {string}
+             */
+            publisher_kind: "vendor" | "community";
+            /**
+             * Requires Token
+             * @description The source says a call needs an Authorization header. False means nothing was declared, not that the server is open: one that signs users in with OAuth declares nothing.
+             */
+            requires_token: boolean;
+            /**
+             * Source
+             * @description Where the entry came from. `registry` is the official MCP Registry; `curated` is a short list bundled with Otari of well-known servers the registry does not list.
+             */
+            source: string;
+            /** Title */
+            title: string;
+            /**
+             * Url
+             * @description The server's streamable HTTP endpoint.
+             */
+            url: string;
+            /** Version */
+            version: string | null;
+            /** Website Url */
+            website_url: string | null;
+        };
+        /**
+         * McpCatalogServersPublic
+         * @description A page of catalog servers. `count` is how many match in all.
+         */
+        McpCatalogServersPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["McpCatalogServerPublic"][];
+        };
+        /**
+         * McpCatalogSyncRequest
+         * @description Who asks for a sync, for a caller who does not operate the deployment.
+         */
+        McpCatalogSyncRequest: {
+            /**
+             * Workspace Id
+             * @description A workspace the caller may add MCP servers to. Required unless the caller operates the deployment.
+             */
+            workspace_id?: string | null;
+        };
+        /**
+         * McpCatalogSyncStatus
+         * @description Whether the catalog syncs, what the sync in progress or the last one did, and how many servers it holds.
+         */
+        McpCatalogSyncStatus: {
+            /**
+             * Error
+             * @description Why the last sync was partial or failed.
+             */
+            error: string | null;
+            /**
+             * Fetched
+             * @description Registry entries read.
+             */
+            fetched: number;
+            /** Finished At */
+            finished_at: string | null;
+            /**
+             * Is Stale
+             * @description The catalog is empty, or no sync has read the whole registry into it in the last day.
+             */
+            is_stale: boolean;
+            /**
+             * Kept
+             * @description Entries stored: remote servers Otari can connect to.
+             */
+            kept: number;
+            /**
+             * Last Completed At
+             * @description When a sync last read the whole registry.
+             */
+            last_completed_at: string | null;
+            /**
+             * Mode
+             * @description The deployment's `mcp_catalog_sync` setting.
+             * @enum {string}
+             */
+            mode: "off" | "manual" | "scheduled";
+            /**
+             * Next Request At
+             * @description Before this time a workspace admin's sync request is refused with a 429, because a sync ended recently. Null when one may be asked for now. An operator is not held to it.
+             */
+            next_request_at: string | null;
+            /**
+             * Next Sync At
+             * @description When the next scheduled sync is due, if the mode is scheduled.
+             */
+            next_sync_at: string | null;
+            /**
+             * Outcome
+             * @description How the last sync ended, null before the first. `partial` kept the pages it read and removed nothing; the next sync resumes where it stopped.
+             */
+            outcome: ("complete" | "partial" | "failed") | null;
+            /** Pages */
+            pages: number;
+            /**
+             * Removed
+             * @description Servers a complete sync deleted because the registry no longer lists them.
+             */
+            removed: number;
+            /**
+             * Requested
+             * @description A sync was asked for and no worker has started it yet.
+             */
+            requested: boolean;
+            /** Running */
+            running: boolean;
+            /**
+             * Server Count
+             * @description Servers in the catalog now.
+             */
+            server_count: number;
+            /** Started At */
+            started_at: string | null;
+        };
+        /**
+         * McpConnectionComplete
+         * @description What the authorization server sent back, as the dashboard received it.
+         */
+        McpConnectionComplete: {
+            /**
+             * Code
+             * @description The authorization code from the redirect
+             */
+            code: string;
+            /**
+             * Iss
+             * @description The redirect's iss, the authorization server's own name, if it sent one
+             */
+            iss?: string | null;
+            /**
+             * State
+             * @description The state from the redirect
+             */
+            state: string;
+        };
+        /**
+         * McpConnectionCompleted
+         * @description A finished sign-in: which server it connected, and where to land.
+         */
+        McpConnectionCompleted: {
+            /**
+             * Checked
+             * @description The sign-in was made only to check the server: its health was recorded and nothing was connected
+             * @default false
+             */
+            checked: boolean;
+            /**
+             * Return To
+             * @description The dashboard path the sign-in was started with, if any
+             */
+            return_to: string | null;
+            /**
+             * Server Id
+             * Format: uuid
+             */
+            server_id: string;
+            /** Server Name */
+            server_name: string;
+            /**
+             * Shared
+             * @description The sign-in was a manager's for everyone: it is now the shared server's account
+             * @default false
+             */
+            shared: boolean;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /**
+         * McpConnectionPublic
+         * @description One of the caller's own connections. Never carries a token.
+         */
+        McpConnectionPublic: {
+            /**
+             * Connected At
+             * Format: date-time
+             */
+            connected_at: string;
+            /**
+             * Expires At
+             * @description When the current access token expires; null when the server stated no lifetime
+             */
+            expires_at: string | null;
+            /**
+             * Renewable
+             * @description Whether Otari can renew the token on its own; false means signing in again once it expires
+             */
+            renewable: boolean;
+            /**
+             * Server Id
+             * Format: uuid
+             */
+            server_id: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * McpConnectionStart
+         * @description What a caller sends to start their own sign-in to a per-user MCP server.
+         */
+        McpConnectionStart: {
+            /**
+             * Return To
+             * @description A dashboard path to land on once signed in, such as /tools/mcp-servers. Anything that is not a path inside the dashboard is refused
+             */
+            return_to?: string | null;
+        };
+        /**
+         * McpConnectionStarted
+         * @description Where to send the caller's browser to sign in.
+         */
+        McpConnectionStarted: {
+            /**
+             * Authorization Url
+             * @description The MCP server's authorization page. It carries a single-use state that expires in ten minutes
+             */
+            authorization_url: string;
+        };
+        /** McpConnectionsPublic */
+        McpConnectionsPublic: {
+            /**
+             * Count
+             * @description How many of the workspace's servers the caller is connected to in all
+             */
+            count: number;
+            /** Data */
+            data: components["schemas"]["McpConnectionPublic"][];
+        };
+        /**
+         * McpCredentialMode
+         * @description Whose credential the gateway sends to a stored MCP server.
+         * @enum {string}
+         */
+        McpCredentialMode: "shared" | "per_user";
+        /**
          * McpErrorBody
          * @description The one error shape both stored-server endpoints return.
          */
@@ -14467,6 +15633,11 @@ export interface components {
             execution_state: components["schemas"]["ExecutionState"];
             /** Request Id */
             request_id: string;
+            /**
+             * Sign In Url
+             * @description With mcp_sign_in_required: a link that starts this key's user's own sign-in to the server. It works for 30 minutes and stores nothing until it is opened
+             */
+            sign_in_url?: string | null;
         };
         /**
          * McpExecuteRequest
@@ -14540,6 +15711,233 @@ export interface components {
             url: string;
         };
         /**
+         * McpServerConnectionPublic
+         * @description One user connected to a per-user MCP server, as a workspace manager sees them. Never carries a token.
+         */
+        McpServerConnectionPublic: {
+            /**
+             * Connected At
+             * Format: date-time
+             */
+            connected_at: string;
+            /**
+             * Email
+             * @description The dashboard account's email, when the user is one's
+             */
+            email: string | null;
+            /** Full Name */
+            full_name: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * User Id
+             * @description The request-plane user the connection belongs to
+             */
+            user_id: string;
+        };
+        /** McpServerConnectionsPublic */
+        McpServerConnectionsPublic: {
+            /**
+             * Count
+             * @description How many users are connected in all
+             */
+            count: number;
+            /** Data */
+            data: components["schemas"]["McpServerConnectionPublic"][];
+        };
+        /**
+         * McpServerRequestCreate
+         * @description A member asking the workspace's admins to add one server of the MCP catalog.
+         */
+        McpServerRequestCreate: {
+            /**
+             * Catalog Name
+             * @description The catalog server's `name`, such as `com.example/mcp`
+             */
+            catalog_name: string;
+            /**
+             * Note
+             * @description What the member needs the server for, shown to the admins
+             */
+            note?: string | null;
+        };
+        /**
+         * McpServerRequestDecline
+         * @description Declines every pending request for one catalog server.
+         */
+        McpServerRequestDecline: {
+            /** Catalog Name */
+            catalog_name: string;
+            /**
+             * Reason
+             * @description Shown to each requester
+             */
+            reason?: string | null;
+        };
+        /**
+         * McpServerRequestGroupPublic
+         * @description Everyone waiting for one catalog server in a workspace.
+         */
+        McpServerRequestGroupPublic: {
+            /** Catalog Name */
+            catalog_name: string;
+            /** @description The catalog's entry as it is now; null once the catalog no longer lists the server */
+            catalog_server: components["schemas"]["McpCatalogServerPublic"] | null;
+            /**
+             * First Requested At
+             * Format: date-time
+             */
+            first_requested_at: string;
+            /**
+             * Requester Count
+             * @description How many pending requests ask for this server in all
+             */
+            requester_count: number;
+            /**
+             * Requesters
+             * @description Who asked, earliest first, up to 5. Past that, the requesters list of this server has the rest
+             */
+            requesters: components["schemas"]["McpServerRequesterPublic"][];
+            /** Title */
+            title: string;
+            /** Url */
+            url: string;
+        };
+        /**
+         * McpServerRequestGroupsPublic
+         * @description A workspace's pending requests, one entry per catalog server, the longest-waiting first.
+         */
+        McpServerRequestGroupsPublic: {
+            /**
+             * Count
+             * @description How many requests are pending in all
+             */
+            count: number;
+            /** Data */
+            data: components["schemas"]["McpServerRequestGroupPublic"][];
+            /**
+             * Server Count
+             * @description How many catalog servers have a request pending, for paging `data`
+             */
+            server_count: number;
+        };
+        /**
+         * McpServerRequestPublic
+         * @description One of the caller's own requests for a catalog server.
+         */
+        McpServerRequestPublic: {
+            /** Catalog Name */
+            catalog_name: string;
+            /** @description The catalog's entry as it is now; null once the catalog no longer lists the server */
+            catalog_server: components["schemas"]["McpCatalogServerPublic"] | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Decided At */
+            decided_at: string | null;
+            /**
+             * Decision Reason
+             * @description An admin's reason for declining, when they gave one
+             */
+            decision_reason: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Note */
+            note: string | null;
+            /**
+             * Server Id
+             * @description The stored server an approval produced
+             */
+            server_id: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "approved" | "declined" | "withdrawn";
+            /**
+             * Title
+             * @description The catalog's title for the server when it was requested
+             */
+            title: string;
+            /**
+             * Url
+             * @description The server's endpoint when it was requested
+             */
+            url: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /**
+         * McpServerRequesterPublic
+         * @description One member who asked for a server, as a workspace manager sees them.
+         */
+        McpServerRequesterPublic: {
+            /** Email */
+            email: string | null;
+            /** Full Name */
+            full_name: string | null;
+            /** Note */
+            note: string | null;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /**
+             * Requested At
+             * Format: date-time
+             */
+            requested_at: string;
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+        };
+        /**
+         * McpServerRequestersPublic
+         * @description A page of the members waiting for one catalog server in a workspace.
+         */
+        McpServerRequestersPublic: {
+            /**
+             * Count
+             * @description How many pending requests ask for this server in all
+             */
+            count: number;
+            /**
+             * Data
+             * @description Who asked, earliest first
+             */
+            data: components["schemas"]["McpServerRequesterPublic"][];
+        };
+        /** McpServerRequestsDeclined */
+        McpServerRequestsDeclined: {
+            /**
+             * Declined
+             * @description How many requests were declined
+             */
+            declined: number;
+        };
+        /**
+         * McpServerRequestsPublic
+         * @description The caller's pending requests in a workspace, and the answers they have not acknowledged, newest first.
+         */
+        McpServerRequestsPublic: {
+            /** Data */
+            data: components["schemas"]["McpServerRequestPublic"][];
+        };
+        /**
          * McpServerSummary
          * @description A stored server as a caller sees it: enough to name it in ``mcp_server_ids``, never its URL or token.
          */
@@ -14553,6 +15951,17 @@ export interface components {
             name: string;
             /** Purpose Hint */
             purpose_hint: string | null;
+            /**
+             * Sign In Required
+             * @description The server sends each user's own credential and this key's user has not signed in to it, so a call is refused with mcp_sign_in_required until they do
+             * @default false
+             */
+            sign_in_required: boolean;
+            /**
+             * Sign In Url
+             * @description With sign_in_required: a link that starts this key's user's own sign-in to the server, working for 30 minutes
+             */
+            sign_in_url?: string | null;
         };
         /**
          * McpServersResponse
@@ -14563,13 +15972,32 @@ export interface components {
             servers: components["schemas"]["McpServerSummary"][];
         };
         /**
+         * McpSharedAccountPublic
+         * @description The account a manager signed in to for everyone on a shared server. Never carries a token.
+         */
+        McpSharedAccountPublic: {
+            /**
+             * Renewable
+             * @description Whether Otari can renew the token on its own; false means signing in again once it expires
+             */
+            renewable: boolean;
+            /** Signed In At */
+            signed_in_at: string;
+            /**
+             * Signed In By
+             * @description The name, or else the email, of the dashboard account that signed in; null once it is gone
+             */
+            signed_in_by: string | null;
+        };
+        /**
          * McpToolDefinition
          * @description One live tool a caller-orchestrated application may expose to its model.
          *
          *     ``annotations`` is the remote server's own metadata, passed through as
-         *     untrusted data. Otari never turns ``readOnlyHint`` into an authorization
-         *     decision; each application owns its risk policy, and a server
-         *     cannot waive an application's approval gate by labeling itself read-only.
+         *     untrusted data. Otari reads ``readOnlyHint`` in one place only, as the
+         *     default for a stored server's read tools until a manager sets them; each
+         *     application owns its risk policy, and a server cannot waive an
+         *     application's approval gate by labeling itself read-only.
          */
         McpToolDefinition: {
             /**
@@ -14596,6 +16024,25 @@ export interface components {
              * @description The remote MCP tool name to send back to /api/v1/mcp/execute.
              */
             name: string;
+        };
+        /**
+         * McpToolSummary
+         * @description One tool of a server: its name and, where the server described it, the first line of that description.
+         */
+        McpToolSummary: {
+            /**
+             * Description
+             * @description Untrusted text the server wrote; null when it has none
+             */
+            description?: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Read Only
+             * @description Whether the tool is one of the server's read tools
+             * @default false
+             */
+            read_only: boolean;
         };
         /**
          * McpToolWarning
@@ -14901,6 +16348,71 @@ export interface components {
              * @description What kind of model models.dev says it is. Null where the catalog gives no kind.
              */
             type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | null;
+        };
+        /**
+         * ModelMetadataOverridePublic
+         * @description An override as stored, under the selector it describes.
+         */
+        ModelMetadataOverridePublic: {
+            /** Context Window */
+            context_window?: number | null;
+            /**
+             * Input Modalities
+             * @description What the model reads; `text` unless it says otherwise.
+             */
+            input_modalities?: ("text" | "image" | "audio" | "video" | "pdf")[] | null;
+            /** Max Output Tokens */
+            max_output_tokens?: number | null;
+            /**
+             * Reasoning
+             * @description Whether the model reasons: `reasoning`.
+             */
+            reasoning?: boolean | null;
+            /**
+             * Selector
+             * @description The `provider:model` the override describes.
+             */
+            selector: string;
+            /**
+             * Structured Output
+             * @description Whether the model takes `response_format`. Never offered where Otari cannot send it.
+             */
+            structured_output?: boolean | null;
+            /**
+             * Tool Call
+             * @description Whether the model calls tools: `tools`, `tool_choice`.
+             */
+            tool_call?: boolean | null;
+        };
+        /**
+         * ModelMetadataOverrideRequest
+         * @description What to say about a model in place of its server and models.dev. A null field is not overridden.
+         */
+        ModelMetadataOverrideRequest: {
+            /** Context Window */
+            context_window?: number | null;
+            /**
+             * Input Modalities
+             * @description What the model reads; `text` unless it says otherwise.
+             */
+            input_modalities?: ("text" | "image" | "audio" | "video" | "pdf")[] | null;
+            /** Max Output Tokens */
+            max_output_tokens?: number | null;
+            /**
+             * Reasoning
+             * @description Whether the model reasons: `reasoning`.
+             */
+            reasoning?: boolean | null;
+            /**
+             * Structured Output
+             * @description Whether the model takes `response_format`. Never offered where Otari cannot send it.
+             */
+            structured_output?: boolean | null;
+            /**
+             * Tool Call
+             * @description Whether the model calls tools: `tools`, `tool_choice`.
+             */
+            tool_call?: boolean | null;
         };
         /**
          * ModelMetadataResponse
@@ -15662,7 +17174,7 @@ export interface components {
             } | null;
             /**
              * Provider
-             * @description The provider the key is for: one the provider catalog, GET /api/v1/search-tools/providers, lists for the key's kind, other than searxng, or tavily or brave for a search key.
+             * @description The provider the key is for: one the provider catalog, GET /api/v1/search-tools/providers, lists for the key's kind, other than searxng.
              */
             provider: string;
         };
@@ -17321,6 +18833,12 @@ export interface components {
             name: string;
             /** Purpose Hint */
             purpose_hint?: string | null;
+            /**
+             * Sign In Required
+             * @description The server sends each user's own credential and the caller has not signed in to it, so a message that attaches it is refused with mcp_sign_in_required until they do
+             * @default false
+             */
+            sign_in_required: boolean;
         };
         /**
          * PlaygroundMessageCreate
@@ -18327,7 +19845,13 @@ export interface components {
          *     the describe call, all sharing the ``Otari-Request-ID`` the caller was sent as
          *     their ``request_group_id``, so this is the request's whole bill rather than one
          *     attempt's. ``cost_usd`` uses the inline ``usage.cost_usd`` format and is null
-         *     when no row was priced.
+         *     when no row was priced. ``tool_cost_usd`` is the part of it that is per-call
+         *     tool charges, in the same format, for a completion (Chat Completions,
+         *     Messages, Responses); it is null where ``cost_usd`` is, for any other kind
+         *     of request, and where a priced row does not record it (written before the
+         *     gateway did, or where looking up its tools' prices failed). ``status`` is
+         *     ``error`` if any row is an error, and ``incomplete`` for a stream the client
+         *     abandoned before the provider reported any usage.
          */
         RequestSettlement: {
             /** Completion Tokens */
@@ -18344,7 +19868,9 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "success" | "error";
+            status: "success" | "error" | "incomplete";
+            /** Tool Cost Usd */
+            tool_cost_usd: string | null;
             /** Total Tokens */
             total_tokens: number;
         };
@@ -19046,6 +20572,57 @@ export interface components {
             title: string;
             /** Url */
             url: string;
+        };
+        /**
+         * SearchToolCatalogEntry
+         * @description One search tool a direct search may name, as any caller may see it: never its key, endpoint or options.
+         */
+        SearchToolCatalogEntry: {
+            /**
+             * Default
+             * @description True for the deployment's default, the tool a direct search that names none runs on unless the caller's organization brings its own search key.
+             */
+            default: boolean;
+            /**
+             * Id
+             * @description The tool's name, to send as 'search_tool_name' or in /api/v1/search/{tool}.
+             */
+            id: string;
+            /**
+             * Label
+             * @description A display name for the tool: its provider's name, capitalized.
+             */
+            label: string;
+            /**
+             * Object
+             * @default search_tool
+             * @constant
+             */
+            object: "search_tool";
+            /**
+             * Price Per Call
+             * @description USD the caller's organization is charged for one search on the tool when the provider reports no cost of its own: the organization's override, else the deployment's price list. Null when no row prices it.
+             */
+            price_per_call: number | null;
+            /**
+             * Provider
+             * @description The search provider the tool runs on.
+             */
+            provider: string;
+        };
+        /**
+         * SearchToolCatalogResponse
+         * @description The search tools a direct search may name.
+         */
+        SearchToolCatalogResponse: {
+            /** Data */
+            data: components["schemas"]["SearchToolCatalogEntry"][];
+            /**
+             * Object
+             * @default list
+             * @constant
+             */
+            object: "list";
         };
         /**
          * SearchToolTestRequest
@@ -20274,6 +21851,89 @@ export interface components {
             tpm_limit?: number | null;
         };
         /**
+         * UpdateCheckAdvisory
+         * @description A published security advisory for otari that covers the version this deployment ran when it checked.
+         */
+        UpdateCheckAdvisory: {
+            /** Fixed In */
+            fixed_in?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "low" | "medium" | "high" | "critical";
+            /** Summary */
+            summary: string;
+            /** Url */
+            url: string;
+        };
+        /**
+         * UpdateCheckAnswer
+         * @description An operator's answer to whether this deployment checks for new releases.
+         * @example {
+         *       "enabled": true
+         *     }
+         */
+        UpdateCheckAnswer: {
+            /** Enabled */
+            enabled: boolean;
+        };
+        /**
+         * UpdateCheckStatus
+         * @description Whether this deployment checks for new releases, who decided, what it sends, and what it last heard.
+         */
+        UpdateCheckStatus: {
+            /**
+             * Advisories
+             * @description Security advisories that affect the version running now, as of the last check.
+             */
+            advisories: components["schemas"]["UpdateCheckAdvisory"][];
+            /**
+             * Answered By
+             * @description Who decided: config.yml or the environment (the dashboard cannot change it), an operator in the dashboard, or nobody yet.
+             */
+            answered_by: ("config" | "operator") | null;
+            /**
+             * Checkable
+             * @description Whether this build carries a release version. A development build is never checked.
+             */
+            checkable: boolean;
+            /** Current Version */
+            current_version: string;
+            /**
+             * Enabled
+             * @description Whether checks are sent. Null until an operator answers.
+             */
+            enabled: boolean | null;
+            /**
+             * Endpoint
+             * @description Where checks are sent.
+             */
+            endpoint: string;
+            /**
+             * Install Id
+             * @description The random id sent with each check.
+             */
+            install_id: string;
+            /** Last Checked At */
+            last_checked_at: string | null;
+            /** Latest Version */
+            latest_version: string | null;
+            /** Next Check At */
+            next_check_at: string | null;
+            /**
+             * Preset By
+             * @description When the configuration decided, the setting that did: the OTARI_UPDATE_CHECK variable, update_check in config.yml, or DO_NOT_TRACK or CI answering no. Null otherwise.
+             */
+            preset_by: ("OTARI_UPDATE_CHECK" | "update_check" | "DO_NOT_TRACK" | "CI") | null;
+            /** Release Url */
+            release_url: string | null;
+            /** Update Available */
+            update_available: boolean;
+        };
+        /**
          * UpdateKeyRequest
          * @description Request model for updating a key.
          */
@@ -20306,6 +21966,11 @@ export interface components {
             } | null;
             /** Reject User Mismatch */
             reject_user_mismatch?: boolean | null;
+            /**
+             * Scopes
+             * @description The endpoint groups the key may reach, replacing the ones it holds; omitted or null leaves them unchanged. Takes effect on the key's next request. The end-users scopes are a service key's alone.
+             */
+            scopes?: components["schemas"]["KeyScope"][] | null;
         };
         /**
          * UpdateMaintenanceModeRequest
@@ -20356,6 +22021,11 @@ export interface components {
             } | null;
             /** Reject User Mismatch */
             reject_user_mismatch?: boolean | null;
+            /**
+             * Scopes
+             * @description The endpoint groups the key may reach, replacing the ones it holds; omitted or null leaves them unchanged. Takes effect on the key's next request. The end-users scopes are a service key's alone.
+             */
+            scopes?: components["schemas"]["KeyScope"][] | null;
         };
         /**
          * UpdateProfileRequest
@@ -20429,8 +22099,6 @@ export interface components {
             budget_estimate_default_output_tokens?: number | null;
             /** Default Pricing */
             default_pricing?: boolean | null;
-            /** File Understanding Enabled */
-            file_understanding_enabled?: boolean | null;
             /** Model Cache Ttl Seconds */
             model_cache_ttl_seconds?: number | null;
             /** Model Discovery */
@@ -21568,9 +23236,10 @@ export interface components {
          * WorkspaceMcpServerCheckRequest
          * @description Connection details to check without storing them, for a form to test before it saves.
          *
-         *     ``server_id`` names a stored server whose token stands in when
-         *     ``authorization_token`` is omitted, so an edit form can test a new URL with
-         *     a token it was never shown. ``""`` checks with no token at all.
+         *     ``server_id`` names a stored server whose credential stands in when
+         *     ``authorization_token`` is omitted, so an edit form can test a new path with
+         *     a token it was never shown. The credential is only sent to that server's own
+         *     origin. ``""`` checks with no token at all.
          */
         WorkspaceMcpServerCheckRequest: {
             /**
@@ -21585,7 +23254,7 @@ export interface components {
             authorization_token?: string | null;
             /**
              * Server Id
-             * @description A stored server whose token to use
+             * @description A stored server whose credential to use, when `url` is on that server's origin
              */
             server_id?: string | null;
             /**
@@ -21609,10 +23278,21 @@ export interface components {
              */
             allowed_tools?: string[] | null;
             /**
+             * Attach By Default
+             * @description Add this server to every model request from the workspace's keys, as if the request named it in mcp_server_ids. A key the server's access rules grant nothing is left without it
+             * @default false
+             */
+            attach_by_default: boolean;
+            /**
              * Authorization Token
              * @description Bearer token for the server; requires an https URL. Encrypted at rest, never returned
              */
             authorization_token?: string | null;
+            /**
+             * @description Whose credential a call carries: 'shared' sends one credential for every caller, authorization_token or the account a manager signs in to for everyone once the server is stored; 'per_user' sends the calling user's own token, which each user gets by signing in to the server, and takes no authorization_token
+             * @default shared
+             */
+            credential_mode: components["schemas"]["McpCredentialMode"];
             /**
              * Enabled
              * @description Whether a request naming this server actually reaches it
@@ -21630,15 +23310,25 @@ export interface components {
              */
             name: string;
             /**
+             * Oauth Client Id
+             * @description For a server whose authorization server does not register clients on its own: the OAuth client ID a sign-in goes through. Omit it to let Otari register itself
+             */
+            oauth_client_id?: string | null;
+            /**
+             * Oauth Client Secret
+             * @description The secret of oauth_client_id, when it has one. Encrypted at rest, never returned
+             */
+            oauth_client_secret?: string | null;
+            /**
              * Purpose Hint
              * @description Hint prepended to the system message to help the model choose
              */
             purpose_hint?: string | null;
             /**
              * Read Tools
-             * @description The tool names a manager labeled read, which '@read' in an access rule stands for. The server's own readOnlyHint is never read as one
+             * @description The tool names a manager labeled read, which '@read' in an access rule stands for. Omit it, or send null, and the labels follow the tools the server itself marks readOnlyHint
              */
-            read_tools?: string[];
+            read_tools?: string[] | null;
             /**
              * Url
              * @description Streamable HTTP MCP endpoint
@@ -21715,11 +23405,11 @@ export interface components {
         };
         /**
          * WorkspaceMcpServerHealth
-         * @description The last connection check: whether the gateway reached the server, and what it found.
+         * @description The last time the gateway talked to the server: whether it answered, and what it found.
          *
-         *     Describes the server as the gateway saw it at ``checked_at``, not now: a
-         *     server that answered then can be down since, and the request path checks
-         *     nothing in advance on the strength of this.
+         *     Written by a manager's check and by real requests that reach the server. Describes the server
+         *     as the gateway saw it at ``checked_at``, not now: a server that answered then can be down
+         *     since, and the request path checks nothing in advance on the strength of this.
          */
         WorkspaceMcpServerHealth: {
             /** Checked At */
@@ -21738,7 +23428,7 @@ export interface components {
             missing_allowed_tools?: string[];
             /**
              * Read Only Hinted Tools
-             * @description Those of tools the server annotates readOnlyHint: untrusted, a suggestion for labeling read_tools and never applied as one
+             * @description Those of tools the server annotates readOnlyHint in this listing: untrusted, and never what '@read' stands for after the server's first listing
              */
             read_only_hinted_tools?: string[];
             /**
@@ -21748,9 +23438,16 @@ export interface components {
             status: "healthy" | "failing";
             /**
              * Tool Count
-             * @description Live tools the allow-list admits; null when the check failed
+             * @description Live tools the allow-list admits; null when the check failed, or when the server answered a request that did not list its tools and no listing is on record
              */
             tool_count?: number | null;
+            /**
+             * Tool Descriptions
+             * @description The first line of each offered tool's own description, where it has one: untrusted text the server wrote, for a person to read
+             */
+            tool_descriptions?: {
+                [key: string]: string;
+            };
             /**
              * Tools
              * @description Every tool name the server offers, allowed or not, up to 200; empty on a failure
@@ -21795,6 +23492,87 @@ export interface components {
             tools: string[];
         };
         /**
+         * WorkspaceMcpServerLogoPublic
+         * @description How the dashboard shows one of a workspace's MCP servers.
+         */
+        WorkspaceMcpServerLogoPublic: {
+            /**
+             * Has Logo Override
+             * @description An admin uploaded this server's logo.
+             */
+            has_logo_override: boolean;
+            /**
+             * Logo Tile
+             * @description An admin's choice: a tile only where the logo would fade out, always, or never.
+             * @enum {string}
+             */
+            logo_tile: "auto" | "always" | "never";
+            /**
+             * Logo Tone
+             * @description Where the logo needs a tile to stay visible: `dark` ink on a dark background, `light` ink on a light background, `tile` on every background. Null when it reads on both, or the tile is `never`.
+             */
+            logo_tone: ("dark" | "light" | "tile") | null;
+            /**
+             * Logo Url
+             * @description Where this gateway serves the server's logo: an admin's upload, else the catalog's logo for its URL, else one found on its host. Null when none was found; the dashboard shows the server's initial.
+             */
+            logo_url: string | null;
+            /**
+             * Server Id
+             * Format: uuid
+             */
+            server_id: string;
+        };
+        /**
+         * WorkspaceMcpServerLogosPublic
+         * @description The logo of each of a workspace's MCP servers.
+         */
+        WorkspaceMcpServerLogosPublic: {
+            /** Data */
+            data: components["schemas"]["WorkspaceMcpServerLogoPublic"][];
+        };
+        /**
+         * WorkspaceMcpServerMyTools
+         * @description The tools the caller may use on one server, under the access rules that apply to them.
+         *
+         *     The rule is the caller's own: their user's grant, else the server's ``everyone_tools``. A key
+         *     with a grant of its own can reach more or less than this.
+         */
+        WorkspaceMcpServerMyTools: {
+            /**
+             * Access
+             * @description 'all' when the rule admits every tool the server offers, 'none' when it admits nothing
+             * @enum {string}
+             */
+            access: "all" | "some" | "none";
+            /**
+             * Checked At
+             * @description When the tool list was read; null when it is not known
+             */
+            checked_at: string | null;
+            /**
+             * Decided By
+             * @description The caller's own grant, the server's everyone_tools, or the server itself when it is disabled
+             * @enum {string}
+             */
+            decided_by: "user" | "everyone" | "server";
+            /**
+             * Known
+             * @description Whether the server's tool list is known: from its last passing check, or listed just now with the caller's own connection to a per-user server
+             */
+            known: boolean;
+            /**
+             * Server Id
+             * Format: uuid
+             */
+            server_id: string;
+            /**
+             * Tools
+             * @description The tools the caller may use, in the server's order; empty when not known
+             */
+            tools: components["schemas"]["McpToolSummary"][];
+        };
+        /**
          * WorkspaceMcpServerPublic
          * @description The API-facing shape. Never carries the token, only whether one is set.
          *
@@ -21806,8 +23584,25 @@ export interface components {
         WorkspaceMcpServerPublic: {
             /** Allowed Tools */
             allowed_tools: string[] | null;
+            /**
+             * Attach By Default
+             * @description Whether every model request from the workspace's keys gets this server without naming it
+             */
+            attach_by_default: boolean;
+            /**
+             * Caller Access
+             * @description On a read of one server or of the list: what the access rules give the caller's own user. 'all' every tool, 'read' the read tools only, 'some' a named subset, 'none' nothing. A key with a rule of its own can differ
+             */
+            caller_access?: ("all" | "read" | "some" | "none") | null;
+            /**
+             * Connected Users
+             * @description On a per_user server, for a caller who may manage the workspace: how many users have connected their own account. Null on a shared server, and for a caller who may not manage
+             */
+            connected_users?: number | null;
             /** Created At */
             created_at: string;
+            /** @description 'shared': one workspace credential for every caller. 'per_user': each user's own connection */
+            credential_mode: components["schemas"]["McpCredentialMode"];
             /** Enabled */
             enabled: boolean;
             /**
@@ -21815,9 +23610,11 @@ export interface components {
              * @description What every key of the workspace may call; [] denies everyone
              */
             everyone_tools: string[];
+            /** Has Oauth Client Secret */
+            has_oauth_client_secret: boolean;
             /** Has Token */
             has_token: boolean;
-            /** @description The last connection check; null until one has run */
+            /** @description What the gateway last learned by talking to the server, from a check or from a real request; null until either has happened */
             health: components["schemas"]["WorkspaceMcpServerHealth"] | null;
             /**
              * Id
@@ -21826,13 +23623,31 @@ export interface components {
             id: string;
             /** Name */
             name: string;
+            /**
+             * Needs Setup
+             * @description A shared server with no token and no shared account, whose server asked for a credential when last reached. Requests skip it, as they skip a disabled server, until it has one
+             * @default false
+             */
+            needs_setup: boolean;
+            /**
+             * Oauth Client Id
+             * @description The OAuth client ID a manager supplied for sign-ins; null when Otari registers itself
+             */
+            oauth_client_id: string | null;
             /** Purpose Hint */
             purpose_hint: string | null;
             /**
              * Read Tools
-             * @description The tool names a manager labeled read, which '@read' stands for
+             * @description The tool names '@read' stands for: a manager's labels, or until one edits them the tools the server marked readOnlyHint when its tools were first listed. A later listing never adds to them
              */
             read_tools: string[];
+            /**
+             * Read Tools From Server
+             * @description True while no manager has edited read_tools, so they are the readOnlyHint of the server's first listing
+             */
+            read_tools_from_server: boolean;
+            /** @description On a shared server: the account a manager signed in to for everyone, which every call carries in place of a token; null when it has none */
+            shared_account?: components["schemas"]["McpSharedAccountPublic"] | null;
             /** Updated At */
             updated_at: string;
             /** Url */
@@ -21852,23 +23667,42 @@ export interface components {
          *     ``""`` to clear it, send a value to rotate it. An explicit ``null`` also
          *     leaves it alone, matching the platform: a client that serializes its whole
          *     form back, with an empty token box it never filled in, must not destroy a
-         *     token it was never shown.
+         *     token it was never shown. ``oauth_client_secret`` follows the same three
+         *     states, and so does ``oauth_client_id``, where ``""`` goes back to letting
+         *     Otari register itself.
+         *
+         *     Changing ``credential_mode``, the URL, or the OAuth client ends every
+         *     sign-in to the server, each user's own and the shared account: the tokens
+         *     were issued for the server and the client as they were. Setting a token on
+         *     a shared server ends its shared account too, since a server sends one
+         *     credential.
          */
         WorkspaceMcpServerUpdate: {
             /** Allowed Tools */
             allowed_tools?: string[] | null;
+            /** Attach By Default */
+            attach_by_default?: boolean;
             /** Authorization Token */
             authorization_token?: string | null;
+            /** Credential Mode */
+            credential_mode?: components["schemas"]["McpCredentialMode"];
             /** Enabled */
             enabled?: boolean;
             /** Everyone Tools */
             everyone_tools?: string[];
             /** Name */
             name?: string;
+            /** Oauth Client Id */
+            oauth_client_id?: string | null;
+            /** Oauth Client Secret */
+            oauth_client_secret?: string | null;
             /** Purpose Hint */
             purpose_hint?: string | null;
-            /** Read Tools */
-            read_tools?: string[];
+            /**
+             * Read Tools
+             * @description The tool names a manager labeled read. An explicit null goes back to following the tools the server marks readOnlyHint; omit it to leave the labels as they are
+             */
+            read_tools?: string[] | null;
             /** Url */
             url?: string;
         };
@@ -22921,6 +24755,37 @@ export interface operations {
             };
             /** @description The audio upload exceeds the maximum request size. */
             413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "auth-delete_own_account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteAccountRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -24287,6 +26152,40 @@ export interface operations {
             };
         };
     };
+    "code-execution-list_code_execution_environments": {
+        parameters: {
+            query?: {
+                /** @description Number of environments to skip */
+                skip?: number;
+                /** @description Maximum number of environments to return */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodeExecutionEnvironmentList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "code-execution-execute_code": {
         parameters: {
             query?: never;
@@ -24303,6 +26202,10 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description What the call cost, as a six-decimal USD string; absent when it was not priced */
+                    "Otari-Cost-USD"?: string;
+                    /** @description What priced it: organization, deployment or defaults (a rate), or reported (the provider's own charge); absent when it was not priced */
+                    "Otari-Pricing-Source"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -24787,6 +26690,10 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description What the call cost, as a six-decimal USD string; absent when it was not priced */
+                    "Otari-Cost-USD"?: string;
+                    /** @description What priced it: organization, deployment or defaults (a rate), or reported (the provider's own charge); absent when it was not priced */
+                    "Otari-Pricing-Source"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -24823,6 +26730,10 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description What the call cost, as a six-decimal USD string; absent when it was not priced */
+                    "Otari-Cost-USD"?: string;
+                    /** @description What priced it: organization, deployment or defaults (a rate), or reported (the provider's own charge); absent when it was not priced */
+                    "Otari-Pricing-Source"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -26279,6 +28190,37 @@ export interface operations {
             };
         };
     };
+    "keys-get_end_user_count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KeyEndUsersPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "keys-list_end_users": {
         parameters: {
             query?: {
@@ -26636,6 +28578,187 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CreateKeyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-catalog-list_popular_mcp_servers": {
+        parameters: {
+            query?: {
+                /** @description A workspace the caller can see. The servers it already has are left out. */
+                workspace_id?: string | null;
+                /** @description Catalog names to leave out, such as the servers a caller has already picked. At most 50. The count leaves them out too, so it pages the same rows the caller sees. */
+                exclude?: string[] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpCatalogServersPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-catalog-search_mcp_catalog": {
+        parameters: {
+            query?: {
+                /** @description Text to find in a server's title, name or description */
+                q?: string;
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+                /** @description A workspace the caller can see. The servers it already has are left out. */
+                workspace_id?: string | null;
+                /** @description Catalog names to leave out, such as the servers a caller has already picked. At most 50. The count leaves them out too, so it pages the same rows the caller sees. */
+                exclude?: string[] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpCatalogServersPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-catalog-get_mcp_catalog_sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpCatalogSyncStatus"];
+                };
+            };
+        };
+    };
+    "mcp-catalog-request_mcp_catalog_sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["McpCatalogSyncRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpCatalogSyncStatus"];
+                };
+            };
+            /** @description The caller does not operate the deployment and may not add MCP servers to the workspace. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The sync is switched off on this deployment; nothing was started. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description A sync ended too recently for a workspace admin to ask for another; see next_request_at. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    "mcp-connections-complete_mcp_connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpConnectionComplete"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpConnectionCompleted"];
                 };
             };
             /** @description Validation Error */
@@ -27043,6 +29166,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AnthropicErrorResponse"];
+                };
+            };
+        };
+    };
+    "model-overrides-set_model_override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                selector: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelMetadataOverrideRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelMetadataOverridePublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "model-overrides-clear_model_override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                selector: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -28517,6 +30704,37 @@ export interface operations {
             };
         };
     };
+    "organization-keys-get_own_key_end_user_count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KeyEndUsersPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "organization-keys-list_own_key_end_users": {
         parameters: {
             query?: {
@@ -28971,6 +31189,84 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["CallerOrganizationMembershipsPublic"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "model-overrides-set_organization_model_override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                selector: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelMetadataOverrideRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelMetadataOverridePublic"];
+                };
+            };
+            /** @description No key serves the prefix. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "model-overrides-clear_organization_model_override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                selector: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No key serves the prefix. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -33047,6 +35343,10 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description What the call cost, as a six-decimal USD string; absent when it was not priced */
+                    "Otari-Cost-USD"?: string;
+                    /** @description What priced it: organization, deployment or defaults (a rate), or reported (the provider's own charge); absent when it was not priced */
+                    "Otari-Pricing-Source"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -33116,6 +35416,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CreatedSearchToolSchema"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "search-tools-list_search_tool_catalog": {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchToolCatalogResponse"];
                 };
             };
             /** @description Validation Error */
@@ -33332,6 +35666,10 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description What the call cost, as a six-decimal USD string; absent when it was not priced */
+                    "Otari-Cost-USD"?: string;
+                    /** @description What priced it: organization, deployment or defaults (a rate), or reported (the provider's own charge); absent when it was not priced */
+                    "Otari-Pricing-Source"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -34140,6 +36478,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TraceDetailPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "update-check-get_update_check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateCheckStatus"];
+                };
+            };
+        };
+    };
+    "update-check-answer_update_check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateCheckAnswer"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateCheckStatus"];
                 };
             };
             /** @description Validation Error */
@@ -35363,6 +37754,390 @@ export interface operations {
             };
         };
     };
+    "mcp-connections-list_my_mcp_connections": {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpConnectionsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-connections-start_mcp_connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpConnectionStart"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpConnectionStarted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-connections-end_my_mcp_connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-list_mcp_server_requests": {
+        parameters: {
+            query?: {
+                /** @description Number of catalog servers to skip */
+                skip?: number;
+                /** @description Maximum number of catalog servers to return */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerRequestGroupsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-request_mcp_server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpServerRequestCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerRequestPublic"];
+                };
+            };
+            /** @description The catalog lists no server by that name. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The workspace already has the server, or the caller's request for it is already waiting. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The caller has 10 requests waiting in this workspace, or made 10 there in the last day. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    "mcp-servers-decline_mcp_server_requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpServerRequestDecline"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerRequestsDeclined"];
+                };
+            };
+            /** @description Nobody is waiting for that server in this workspace. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-list_my_mcp_server_requests": {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerRequestsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-list_mcp_server_requesters": {
+        parameters: {
+            query: {
+                /** @description The catalog server asked for */
+                catalog_name: string;
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerRequestersPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-withdraw_mcp_server_request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request was already answered or withdrawn. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-acknowledge_mcp_server_request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is still waiting for an answer. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "mcp-servers-list_workspace_mcp_servers": {
         parameters: {
             query?: {
@@ -35458,7 +38233,7 @@ export interface operations {
                     "application/json": components["schemas"]["WorkspaceMcpServerHealth"];
                 };
             };
-            /** @description The URL failed the SSRF or TLS check; nothing was sent to it. */
+            /** @description The URL failed the SSRF or TLS check, or is on another origin than the stored server whose credential was asked for; nothing was sent to it. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -35502,6 +38277,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspaceMcpServerKeyAccess"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-list_workspace_mcp_server_logos": {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerLogosPublic"];
                 };
             };
             /** @description Validation Error */
@@ -35826,6 +38637,291 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    "mcp-servers-start_workspace_mcp_server_check_sign_in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpConnectionStart"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpConnectionStarted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-connections-list_mcp_server_connections": {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerConnectionsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-connections-remove_mcp_server_connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-set_workspace_mcp_server_logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** @description A PNG of at most 512 KB to show instead of the server's own logo. Leave out to keep it. */
+                    file?: string;
+                    /**
+                     * @description Whether the logo sits on a tile: where it would fade out, always, or never.
+                     * @enum {string}
+                     */
+                    tile: "auto" | "always" | "never";
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerLogoPublic"];
+                };
+            };
+            /** @description The body is larger than the logo limit. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The file is not a PNG, or the tile is not one of the choices. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    "mcp-servers-remove_workspace_mcp_server_logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerLogoPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-get_my_workspace_mcp_server_tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerMyTools"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-start_workspace_mcp_server_shared_sign_in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpConnectionStart"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpConnectionStarted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-end_workspace_mcp_server_shared_account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

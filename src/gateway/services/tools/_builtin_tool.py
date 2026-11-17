@@ -7,6 +7,7 @@ from typing import Any, Protocol
 
 from gateway.core.config import GatewayConfig
 from gateway.services.tools._native import Dialect, NativeRendering
+from gateway.types.key_scope import KeyScope
 
 
 class NativeCheck(Protocol):
@@ -33,10 +34,15 @@ class BuiltinTool:
     declaration of the tool itself. ``None`` for the provider reads as not native.
     ``native`` holds the tool's rendering for each dialect it is announced in, and omits the
     rest. A dialect that is absent announces nothing through the registry.
+    ``declares`` answers whether a request's tools ask for this tool, in any vocabulary.
+    ``key_scope`` is the scope a key needs to ask for it, which is the scope its own
+    endpoint needs: a caller asks for the tool, and who runs it is this deployment's answer.
     """
 
     name: str
     definition: Callable[[], dict[str, Any]]
     configured: Callable[[GatewayConfig], bool]
+    declares: Callable[[list[dict[str, Any]] | None], bool] = field(compare=False)
+    key_scope: KeyScope
     runs_natively: NativeCheck = field(compare=False)
     native: Mapping[Dialect, NativeRendering] = field(default=MappingProxyType({}), compare=False)

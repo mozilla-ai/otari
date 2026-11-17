@@ -3,7 +3,7 @@ import { Button } from "../actions/Button"
 import { Field } from "../forms/Field"
 import { Toggle } from "../forms/Toggle"
 import { SettingRow } from "./SettingRow"
-import { SettingsGroup } from "./SettingsGroup"
+import { SettingsBlock, SettingsGroup } from "./SettingsGroup"
 
 /**
  * A titled band of related rows, which is what a settings page is made of.
@@ -129,6 +129,27 @@ export const Bounded: Story = {
           configKey="web_search_max_uses"
           control={<Field label="Max uses" value="5" onChange={() => {}} />}
         />
+      </SettingsGroup>
+    </div>
+  ),
+}
+
+/**
+ * Content that is not a row (a status line, a summary) goes in a
+ * `SettingsBlock`, which insets it to the rows' left edge rather than leaving
+ * it flush against the frame.
+ */
+export const BoundedBlock: Story = {
+  render: () => (
+    <div className="flex max-w-2xl flex-col gap-6">
+      <SettingsGroup
+        isBounded
+        title="Your account"
+        description="Each member connects their own account."
+      >
+        <SettingsBlock>
+          <p className="text-body">Not connected</p>
+        </SettingsBlock>
       </SettingsGroup>
     </div>
   ),

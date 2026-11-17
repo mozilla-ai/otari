@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import (
     ApiKeyServiceDep,
     CallerOrganization,
+    McpConnectionServiceDep,
     TelemetryStoragePortDep,
     TraceServiceDep,
     get_config,
@@ -435,6 +436,7 @@ async def delete_user(
     storage: TelemetryStoragePortDep,
     traces: TraceServiceDep,
     organization_id: CallerOrganization,
+    connections: McpConnectionServiceDep,
 ) -> None:
     """Delete a user in the caller's organization, and erase their telemetry and agent traces."""
     user = await _load_user_in_organization(db, user_id, organization_id)
@@ -461,9 +463,10 @@ async def delete_user(
     user.deleted_at = datetime.now(UTC)
 
     try:
-        await db.commit()
+        # Its block commits the deletion staged above with the connections it removes, and asks the
+        # authorization servers to end them only once that has committed.
+        await connections.end_for_deleted_user(user_id)
     except DATABASE_ERRORS as exc:
-        await db.rollback()
         raise database_error("delete user", exc) from None
 
 

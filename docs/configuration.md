@@ -84,7 +84,11 @@ the corresponding startup value after the database is available.
 | `pricing_refresh` | Whether the catalog updates itself on a schedule, and whether its price changes wait for review: `manual`, `review`, or `auto`. |
 | `feedback_enabled` | Offer **Contact**, which sends a message to the Otari team. Defaults to `false`; startup setting. See [Contacting the Otari team](#contacting-the-otari-team). |
 | `platform_url` | The otari.ai address **Connect otari.ai** asks for a key. Defaults to `https://api.otari.ai`; an empty value removes the option. Startup setting. See [Connecting otari.ai](hosted-providers.md#connecting-otariai). |
+| `update_check` | Check otari.ai daily for new releases and security fixes, sending the version and a random install id. Unset (the default) asks an operator in the dashboard, except that `DO_NOT_TRACK` (`1`, `true` or `yes`) or a non-empty `CI` then answers `false` and nothing is asked; `true` or `false` answers for them and wins over both. See [Update check](update-check.md). |
 | `health_checks_enabled` | Offer the Health page and its scheduled checks of the hosted providers' models. Defaults to `true`; startup setting. See [Health checks](health-checks.md). |
+| `mcp_catalog_enabled` | Offer the MCP server catalog. Defaults to `true`; startup setting. See [MCP server catalog](mcp-catalog.md). |
+| `mcp_catalog_sync` | Whether Otari copies the MCP Registry into the catalog: `off`, `manual` (the default, loaded from **Browse catalog**), or `scheduled`. `off` suits a deployment with no outbound access. |
+| `mcp_catalog_sync_interval_hours` | Hours between syncs when `mcp_catalog_sync` is `scheduled`, from 1 to 720. Defaults to 24. |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
 | `rate_limit_rpm` | Per-user request limit. Unset disables it. |
@@ -115,6 +119,8 @@ the corresponding startup value after the database is available.
 | `trace_content_tool_output` | Also keep what each tool returned, on a request routed through Otari that keeps content. A workspace can still turn it off for itself. Defaults to `false`. |
 | `trace_platform_break_glass_enabled` | Let the deployment's operator open any organization's session content, recorded with a reason and a reference. Defaults to `false`. See [Who reads content](sessions-reference.md#who-reads-content). |
 | `trace_content_key_backend` | What seals that content: `secret_key` (the default, `OTARI_SECRET_KEY`), `aws_kms`, or `aws_kms_only`, which opens nothing `OTARI_SECRET_KEY` sealed. See [Sealing content with AWS KMS](trace-storage.md#sealing-content-with-aws-kms). |
+| `cors_allow_origins` | Origins whose pages may call any route, with credentials, so a dashboard served from another host keeps its session. `*` opens every route to any origin without credentials, so a dashboard session needs its origin named. Empty, the default, sends no CORS headers. Startup setting. |
+| `cors_inference_origins` | Origins whose pages may call the model endpoints from a browser with an API key, or `*` for any. Never with credentials. Empty, the default, opens none. Startup setting. See [Calling models from a browser](#calling-models-from-a-browser). |
 | `accept_incoming_trace_context` | Join spans the gateway creates to the caller's trace. Defaults to `false`. See [Trace context propagation](#trace-context-propagation). |
 | `enable_docs` | Serve OpenAPI, Swagger UI, and ReDoc. |
 
@@ -297,6 +303,40 @@ service-to-service callers, ideally behind a proxy that strips these headers at
 the edge. Browsers cannot send them cross-origin: they are not in the CORS
 allow-list.
 
+### Calling models from a browser
+
+`cors_inference_origins` lets a web page call a model directly with an API key,
+the way a script outside a browser already can:
+
+```yaml
+cors_inference_origins: ["*"]
+```
+
+It opens these endpoints, and no others: chat completions, responses,
+messages and message token counts, embeddings, rerank, moderations, the audio
+and image endpoints, and the model list (`GET /api/v1/models`), which a page
+reads to offer its models. The rest of the API, the dashboard's included,
+answers a page on another origin as it did before.
+
+A browser never sends credentials under it, so a page cannot use the session
+of someone signed in to the dashboard: only the API key the page itself holds.
+That key sits in the page, where its scripts and the browser's extensions can
+read it. Give a browser a key you can afford to lose: one that expires soon,
+with a small spend ceiling and only the models it needs. See
+[API keys](api-keys.md).
+
+Name origins instead of `*` to open the endpoints to those pages alone. Each
+entry is an origin as a browser sends it: a scheme and a host in lowercase, with
+a port only when it is not the scheme's default, and nothing after it, such as
+`https://app.example.com` or `http://localhost:5173`. An entry that is not one,
+`https://app.example.com:443` for instance, is refused at startup. So is a
+wildcard inside an origin, such as `https://*.example.com`: an origin is matched
+whole, so list each subdomain, or use `*` alone.
+
+An origin listed in `cors_allow_origins` keeps that list's policy on every
+path, the model endpoints included. With `*` there, every origin does, and
+this setting changes nothing.
+
 ## Budgets and API keys in config
 
 A deployment can declare its budgets and API keys in config.yml instead of
@@ -341,6 +381,7 @@ the next start. It takes:
 | `ceiling` | Budget that caps the key as a whole, across all of its end users: a scoped budget with `scope_type: api_token` on the key. |
 | `exclude_from_budget` | Log the key's cost without enforcing any budget. |
 | `reject_user_mismatch` | Per-key override of the deployment setting. |
+| `scopes` | The endpoint groups the key may reach; see [Scopes](api-keys.md#scopes). Unset gives every scope that existed when scopes were introduced (the end-user scopes only to a service key) and never one added since. |
 
 Unknown fields are refused, so a misspelled limit stops the start rather than
 leaving a budget uncapped. A key may name a budget declared here or one that
@@ -975,8 +1016,8 @@ or turning the fallback on. Two other refusals take precedence:
   `invalid_model`
 
 With `require_pricing: false`, such a request is served with no cost on its
-model tokens and no inline `cost_usd`; priced gateway tools it ran are still
-charged. On an organization's own provider keys, an unpriced model is then
+model tokens and no inline `cost_usd` or `tool_cost_usd`; priced gateway tools
+it ran are still charged. On an organization's own provider keys, an unpriced model is then
 switched on and served free, where `require_pricing: true` keeps it off until
 priced (see [Who is shown which models](models.md#who-is-shown-which-models)).
 
@@ -1491,7 +1532,8 @@ file or environment, then to the built-in default.
   describe (`web_search_provider` with its key, else `web_search_url`), else the
   only search instance, when there is exactly one and the in-loop tool can search
   with its provider. Several search instances with neither log a warning at
-  startup.
+  startup. A deployment with no search instance also serves the legacy backend
+  to [direct search](tools.md#direct-search), under its provider's name.
 - `web_fetch_default_tool`: the fetch instance for the fetch tool and for
   enrichment. Default `builtin_fetch`.
 - `web_search_max_calls`: how many search and fetch calls one request may make
@@ -1571,20 +1613,22 @@ OTARI_WEB_SEARCH_URL=
 A variable exported in the shell that runs Docker Compose wins over `.env`, so
 unset an exported `OTARI_WEB_SEARCH_URL` there too.
 
-### The older in-loop backend
+### The legacy provider settings
 
-The older in-loop backend still serves some requests until it is removed: a
-search on `web_search_provider`, or on a Tavily or Brave organization key, and a
-request that declares only the fetch tool. `web_fetch_default_tool` governs every
-fetch tool call, while `web_search_max_calls` and `fetch_tool` apply only where a
-search instance serves the request: the older backend keeps its fixed limit of 10
-calls, its 422 past it, and its own enrichment through the built-in fetcher.
+`web_search_provider` and `web_search_provider_api_key` are deprecated, and a
+coming breaking release refuses to start while they are set. They name the
+Tavily or Brave account the in-loop tool searches with when no search instance
+is its default. Replace them with a search instance named after the provider,
+with the key and a price, and name it in `web_search_default_tool`; for Tavily,
+add `include_raw_content: true` to its options to keep each page's full text.
+The startup log says the same while they are set.
 
 ## Decision providers
 
 `decision_providers` configures the upstreams behind `POST /api/v1/decisions`. The
 key is the prefix callers write in `model`, so the entry below serves
-`typesafe:jev-latest`, `openrouter:typesafe/jev-1.13` and `local:openjev`:
+`typesafe:jev-latest`, `openrouter:typesafe/jev-1.13`, `gemini:gemini-decision-1`
+and `local:openjev`:
 
 ```yaml
 decision_providers:
@@ -1592,16 +1636,29 @@ decision_providers:
     api_key: ${TYPESAFE_API_KEY}
   openrouter:
     api_key: ${OPENROUTER_API_KEY}
+  gemini:
+    api_key: ${GEMINI_API_KEY}
   local:
     provider: llamacpp
     api_base: "http://127.0.0.1:8080"
 ```
 
-`provider` is one of `typesafe`, `openrouter` or `llamacpp`, and defaults to the
-key. TypeSafe and OpenRouter need an `api_key`, and their default `api_base` can be
-replaced with another https root. A `llamacpp` entry points at a `llama-server`
+`provider` is one of `typesafe`, `openrouter`, `gemini` or `llamacpp`, and defaults
+to the key. TypeSafe, OpenRouter and Gemini need an `api_key`, and their default
+`api_base` can be replaced with another https root. A `llamacpp` entry points at a `llama-server`
 running a decision model and needs an `api_base`; it may use plain http only when
 it has no `api_key`. `timeout` sets the seconds to wait for an answer (default 30).
+
+A `gemini` entry calls Google's
+[Decisions API](https://aistudio.google.com/docs/decisions-api) with a Gemini API
+key. Callers keep sending the same request body: the gateway translates it to
+Gemini's shape (`state` becomes `input`, a `noul` question's `true` and `false`
+criteria become `true_description` and `false_description`, structured JSON is
+serialized to text, and each data URL in `images` becomes an inline image block)
+and returns Gemini's answer with its token counts as `usage.input_tokens` and
+`usage.output_tokens`. Question fields Gemini has no counterpart for are not sent.
+Gemini reports no cost, so price its model in `pricing` (as
+`gemini:gemini-decision-1`) to have its requests charged against budgets.
 
 These entries are separate from `providers` because none of these upstreams serves
 chat: they never appear in `/api/v1/models` or provider health. Price a decision
@@ -1655,6 +1712,10 @@ smtp_user: ${SMTP_USER}
 smtp_password: ${SMTP_PASSWORD}
 ```
 
+`mail_from_email` is the address alone, with no display name, comment or quoted text.
+`mail_from_name` sets the name shown beside it.
+With `mail_transport: smtp`, Otari does not start when `mail_from_email` is anything else.
+
 `mail_transport: console` writes complete messages to logs for local testing.
 Those messages can contain invitation or password-reset tokens, so never use it
 where logs are shared. Test delivery from Settings or
@@ -1702,9 +1763,11 @@ settings, and the deployment's Web search page shows the web-search ones. Common
 
 - `sandbox_provider` and `sandbox_url`
 - `sandbox_container_idle_ttl_sec` and `sandbox_container_max_lifetime_sec`
+- `sandbox_session_image`, `sandbox_allowed_session_images` and
+  `sandbox_environments` (see [Sandbox environments](#sandbox-environments))
 - `code_execution_executor`
 - `web_search_url` (deprecated, see [The legacy SearXNG settings](#the-legacy-searxng-settings))
-- `web_search_provider` and `web_search_provider_api_key`
+- `web_search_provider` and `web_search_provider_api_key` (deprecated, see [The legacy provider settings](#the-legacy-provider-settings))
 - `web_search_default_tool`, `web_fetch_default_tool` and `web_search_max_calls`
   (see [Search tools](#search-tools))
 - `guardrails_url`
@@ -1718,6 +1781,27 @@ settings, and the deployment's Web search page shows the web-search ones. Common
 
 See [Built-in tools](tools.md), [MCP](mcp.md), and
 [Guardrails](guardrails-reference.md) for behavior and security boundaries.
+
+### Sandbox environments
+
+An environment is the image a sandbox runs: a container image on a `protocol`
+backend, a template's name or id on `e2b`. `sandbox_session_image` is the
+default, and `sandbox_allowed_session_images` lists the others a workspace may
+pin and a direct run may name. `sandbox_environments` describes them for
+`GET /api/v1/code/environments`; an image with no entry is listed under its own
+name.
+
+```yaml
+sandbox_session_image: python
+sandbox_allowed_session_images: python-data
+sandbox_environments:
+  python-data:
+    label: Python data
+    description: pandas, numpy and matplotlib, 2 vCPU, 4 GB
+```
+
+Each environment may have a price of its own, `otari:code_execution:<image>`;
+see [Pricing a gateway-run tool](tools.md#pricing-a-gateway-run-tool).
 
 ### What a workspace with no tool policy gets
 

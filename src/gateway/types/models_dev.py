@@ -18,6 +18,7 @@ snapshot is cut with the same rules as every snapshot the gateway stores.
 """
 
 import math
+import sys
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import MISSING, dataclass, field, fields, is_dataclass
 from decimal import Decimal
@@ -435,6 +436,11 @@ class ModelsDevCatalog:
         return None
 
 
+def _shared(text: str) -> str:
+    """One object per distinct string, freed with its last reference, so catalogs read apart share their text."""
+    return sys.intern(text) if type(text) is str else text
+
+
 def _number(value: object) -> Number | None:
     return value if isinstance(value, (int, float, Decimal)) and not isinstance(value, bool) else None
 
@@ -474,7 +480,7 @@ class _Reader:
     def text(self, raw: dict[str, Any], name: str, path: str) -> str | None:
         value = raw.get(name)
         if value is None or isinstance(value, str):
-            return value or None
+            return _shared(value) if value else None
         self.note(f"{path}.{name}", "a string")
         return None
 
@@ -489,7 +495,7 @@ class _Reader:
         value = raw.get(name)
         if value is None:
             return ()
-        items = tuple(item for item in value if isinstance(item, str)) if isinstance(value, list) else ()
+        items = tuple(_shared(item) for item in value if isinstance(item, str)) if isinstance(value, list) else ()
         if not isinstance(value, list) or len(items) != len(value):
             self.note(f"{path}.{name}", "a list of strings")
         return items
@@ -781,6 +787,8 @@ class _Reader:
 
 
 def _frozen(value: object) -> object:
+    if isinstance(value, str):
+        return _shared(value)
     if isinstance(value, dict):
         return _frozen_mapping(value)
     if isinstance(value, list):
@@ -800,7 +808,7 @@ def _v1_modality(media_type: str) -> str | None:
     if media_type in ("decision", "embedding", "reranking"):
         return "text"
     base = media_type.partition("/")[0]
-    return base if base in ("text", "image", "audio", "video") else None
+    return _shared(base) if base in ("text", "image", "audio", "video") else None
 
 
 def condition_keys(when: Mapping[str, object]) -> list[str]:
@@ -1103,12 +1111,13 @@ def _parse(raw: object, read_model: Callable[[_Reader, str, dict[str, Any], str]
             before = reader.count
             model_path = f"{path}.models.{_segment(model_key)}"
             if isinstance(model, dict):
-                models[str(model_key)] = read_model(reader, str(model_key), model, model_path)
+                name = _shared(str(model_key))
+                models[name] = read_model(reader, name, model, model_path)
             else:
                 reader.note(model_path, "an object")
             damaged += reader.count > before
         providers[str(key)] = ModelsDevProvider(
-            id=reader.text(provider, "id", path) or str(key),
+            id=reader.text(provider, "id", path) or _shared(str(key)),
             name=reader.text(provider, "name", path),
             doc=reader.text(provider, "doc", path),
             models=MappingProxyType(models),
@@ -1266,7 +1275,7 @@ def _each[T](read: Callable[[Any], T]) -> Callable[[Any], tuple[T, ...]]:
 
 
 def _keyed[T](read: Callable[[Any], T]) -> Callable[[Any], Mapping[str, T]]:
-    return lambda raw: MappingProxyType({str(key): read(item) for key, item in raw.items()})
+    return lambda raw: MappingProxyType({_shared(str(key)): read(item) for key, item in raw.items()})
 
 
 def _stored_rates(raw: object) -> ModelsDevRates:

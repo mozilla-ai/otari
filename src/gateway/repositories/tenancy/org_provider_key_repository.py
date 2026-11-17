@@ -142,6 +142,25 @@ class OrgProviderKeyRepository(
         )
         return result.scalars().first()
 
+    async def any_under_prefix(
+        self, organization_id: uuid.UUID, prefix: str, *, live: bool = False, excluding: uuid.UUID | None = None
+    ) -> bool:
+        """Whether the organization holds a key that a selector names by ``prefix``.
+
+        Archived keys count unless ``live``; ``excluding`` leaves one key out.
+        """
+        named = (col(OrgProviderKey.slug) == prefix) | (
+            col(OrgProviderKey.slug).is_(None) & (col(OrgProviderKey.provider) == prefix)
+        )
+        query = (
+            select(col(OrgProviderKey.id)).where(col(OrgProviderKey.organization_id) == organization_id, named).limit(1)
+        )
+        if live:
+            query = query.where(col(OrgProviderKey.archived_at).is_(None))
+        if excluding is not None:
+            query = query.where(col(OrgProviderKey.id) != excluding)
+        return (await self.db.execute(query)).first() is not None
+
     async def list_live_keys(self, organization_id: uuid.UUID) -> Sequence[OrgProviderKey]:
         """Every non-archived key this organization holds, oldest-first per provider.
 
@@ -280,6 +299,19 @@ class OrgProviderKeyRepository(
         await self.db.flush()
         await self.db.refresh(key)
         return key
+
+    async def forget_secrets(
+        self, organization_ids: Collection[uuid.UUID], workspace_ids: Collection[uuid.UUID]
+    ) -> None:
+        """Stage clearing the API key and client arguments of every key these organizations hold."""
+        if not organization_ids:
+            return
+        await self.db.execute(
+            update(OrgProviderKey)
+            .where(col(OrgProviderKey.organization_id).in_(list(organization_ids)))
+            .values(encrypted_api_key=None, last4=None, client_args=None)
+            .execution_options(synchronize_session=False)
+        )
 
 
 class WorkspaceProviderKeyOverrideRepository:

@@ -153,7 +153,7 @@ export function McpGrantsTable({
   return (
     <TableScrollFrame className="otari-mcp-grants-table">
       <DataTable
-        ariaLabel="ACL"
+        ariaLabel="Access rules"
         columns={columns}
         rows={rows}
         getRowKey={(row) => (row.kind === "rule" ? row.grant.id : "default")}

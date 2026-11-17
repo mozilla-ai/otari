@@ -51,7 +51,7 @@ def test_files_off_keeps_a_store_it_can_build(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_lifespan_starts_with_files_off_and_no_bucket(tmp_path: Path) -> None:
-    """End to end: the opt-out an operator does on Railway, files off and the bucket gone."""
+    """End to end: the opt-out of an operator on object storage, files off and the bucket gone."""
     config = GatewayConfig(
         database_url=f"sqlite:///{tmp_path / 'files-off.db'}",
         master_key="sk-test-master",

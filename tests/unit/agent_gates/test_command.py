@@ -402,6 +402,45 @@ def test_sudo_prefixed_path_qualified_command_is_a_documented_gap() -> None:
     assert result.outcome is Outcome.PASS
 
 
+# --- git's global options ---------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git -C /tmp/x reset --hard",
+        "git --no-pager reset --hard",
+        "git -c core.x=y reset --hard",
+        "git --git-dir=/tmp/x/.git reset --hard",
+        "git --work-tree /tmp/x reset --hard",
+        "git --config-env core.pager=HOME reset --hard",
+        "git --exec-path=/tmp reset --hard",
+        "git -C x -c a.b=c --no-pager -P reset --hard",
+        "/usr/bin/git -C x reset --hard",
+    ],
+)
+def test_a_git_command_matches_with_its_global_options_between(command: str) -> None:
+    """Each runs `git reset --hard`, checked against real git: the options only change where and how it runs."""
+    gate = _gate(id="no-hard-reset", forbidden=("git reset --hard",), message="m")
+    assert evaluate_command(gate, CommandEvidence(commands=(command,))).outcome is Outcome.FAIL
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo reset --hard",
+        "git --version reset --hard",
+        "git --exec-path reset --hard",
+        "git --list-cmds=main reset --hard",
+        "git -Cx reset --hard",
+    ],
+)
+def test_a_git_option_that_stops_git_before_its_subcommand_matches_nothing(command: str) -> None:
+    """None of these resets: git prints its version, exec path or command list and exits, or refuses `-Cx`."""
+    gate = _gate(id="no-hard-reset", forbidden=("git reset --hard",), message="m")
+    assert evaluate_command(gate, CommandEvidence(commands=(command,))).outcome is Outcome.PASS
+
+
 # --- Unquoted newlines as command-segment boundaries ------------------------
 
 

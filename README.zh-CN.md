@@ -24,12 +24,6 @@
 
 </div>
 
-> [!NOTE]
-> **我们的 AI 黑客松 Developers Wilding（在 MozFest 举办）将持续到 11 月 11 日。**
-> 用 Otari 和开放权重模型构建项目，即有机会赢得 1000 美元奖金（另设亚军奖），
-> 并获得与我们 AI 工程师专门交流的时间。
-> [详情与提交](https://otari.ai/devs-wilding)。
-
 > 本页是 README 的简体中文译本。完整文档目前仅提供英文版，下文中的文档链接均指向英文页面。
 
 <p align="center">
@@ -119,8 +113,6 @@ docker compose --profile code-exec --profile web-search up -d
 
 控制台地址为 `http://localhost:8000/`。如需在 PostgreSQL 上通过控制台保存提供商密钥，请将 `OTARI_SECRET_KEY` 设置为由
 `otari gen-secret-key` 生成的 Fernet 密钥。
-
-[Railway](deploy/railway/README.md) 提供一键部署模板。
 
 ## API 与控制台
 

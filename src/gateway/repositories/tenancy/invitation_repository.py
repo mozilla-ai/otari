@@ -211,5 +211,14 @@ class InvitationRepository(BaseRepository[Invitation, InvitationCreate, Invitati
         await self.db.refresh(invitation)
         return invitation
 
+    async def get_statuses_by_organization_member(self, organization_member_id: uuid.UUID) -> set[str]:
+        """Return the distinct statuses of every invitation ever issued for one membership."""
+        result = await self.db.execute(
+            select(col(Invitation.status))
+            .where(col(Invitation.organization_member_id) == organization_member_id)
+            .distinct()
+        )
+        return set(result.scalars().all())
+
 
 __all__ = ["InvitationRepository"]

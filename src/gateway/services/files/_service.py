@@ -24,7 +24,7 @@ from gateway.exceptions.files_exceptions import (
 )
 from gateway.log_config import logger
 from gateway.models.files import FileObject, new_file_id
-from gateway.ports.file_storage_port import FileStoragePort
+from gateway.ports.file_storage_port import FILE_STORE_ERRORS, FileStoragePort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.repositories.files import FilePageQuery, FileRepositories
 from gateway.services.files._attachment_uploads import upload_attachment, uploads_attachments
@@ -185,6 +185,14 @@ class FileService:
         self._default_workspace = default_workspace
         self._provider_copies = ProviderCopies(uow, repositories.provider_copies, backends, config)
 
+    async def release_owned(self, user_ids: Collection[str], to_user_id: str) -> None:
+        """Move these users' files onto ``to_user_id`` as deleted and unnamed, for the sweep to give their bytes back.
+
+        Their rows outlive the users, so the sweep still finds the bytes once the users are gone.
+        """
+        async with self._uow:
+            await self._files.release_owned(user_ids, to_user_id, datetime.now(UTC))
+
     async def store(self, upload: NewFile) -> FileObject:
         """Store an upload's bytes and record the file, and return the row.
 
@@ -276,7 +284,7 @@ class FileService:
             raise FileNotServedError
         try:
             chunks = await _primed(self._file_store.get_stream(record.storage_ref))
-        except OSError as exc:
+        except FILE_STORE_ERRORS as exc:
             logger.error("Failed to read blob for file %s (ref=%s): %s", file_id, record.storage_ref, exc)
             raise FileStorageError(f"Could not read the bytes of {file_id}") from exc
         return FileContent(chunks=chunks, filename=record.filename, mime_type=record.mime_type)
@@ -285,8 +293,7 @@ class FileService:
         """The stored upload under ``file_id``, ready to be read or handed to a sandbox, or None.
 
         None whenever the file cannot be served to this caller, and for a row
-        whose bytes are not in the store, so that a reference to one is dropped
-        rather than failing the request that carried it.
+        whose bytes are not in the store.
 
         It answers whether or not the deployment serves the Files API, because
         it resolves a reference a request already holds rather than serving that
@@ -329,7 +336,7 @@ class FileService:
         if storage_ref is not None:
             try:
                 await self._file_store.delete(storage_ref)
-            except OSError as exc:
+            except FILE_STORE_ERRORS as exc:
                 logger.warning("Discarded file %s but failed to remove its blob %s: %s", file_id, storage_ref, exc)
 
     async def existing_output_ids(self, file_ids: Collection[str]) -> set[str]:
@@ -426,7 +433,7 @@ class FileService:
                 # An abandoned row may never have had bytes, and a blob already
                 # gone is the outcome this wanted.
                 pass
-            except OSError as exc:
+            except FILE_STORE_ERRORS as exc:
                 logger.warning("File sweep could not remove bytes for %s: %s", file_id, exc)
                 continue
             reclaimed.append(file_id)
@@ -450,7 +457,7 @@ class FileService:
                 await self._file_store.delete(record.storage_ref)
             except FileNotFoundError:
                 pass
-            except OSError as exc:
+            except FILE_STORE_ERRORS as exc:
                 logger.warning("Could not remove the bytes of the abandoned file %s: %s", record.id, exc)
                 return
         try:

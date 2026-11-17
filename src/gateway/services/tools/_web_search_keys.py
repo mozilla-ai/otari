@@ -13,7 +13,7 @@ off for it, and any member can see which keys the workspace uses.
 """
 
 import uuid
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import MappingProxyType
@@ -235,6 +235,12 @@ class WebSearchKeyService:
     # ------------------------------------------------------------------
     # The organization's keys: owners and admins only
     # ------------------------------------------------------------------
+
+    async def forget_secrets(
+        self, organization_ids: Collection[uuid.UUID], workspace_ids: Collection[uuid.UUID]
+    ) -> None:
+        """Stage clearing the web search keys these organizations hold, for the caller's transaction."""
+        await self.keys.forget_secrets(organization_ids, workspace_ids)
 
     async def list_keys(self, *, user: User, include_archived: bool, skip: int, limit: int) -> OrgWebSearchKeysPublic:
         organization_id = await self._managed_organization(user)
@@ -537,8 +543,8 @@ def _key_providers(kind: ToolKind) -> tuple[str, ...]:
     """The providers a key of ``kind`` may name, sorted.
 
     The libraries' providers for the kind, other than the ones that exist only for
-    tests and, for fetch, ``builtin``; and, for search, ``tavily`` and ``brave``,
-    which run on the old search code.
+    tests and, for fetch, ``builtin``; and, for search, those of
+    :data:`WEB_SEARCH_PROVIDERS` any-search does not serve, which run on the old search code.
     """
     if kind == "fetch":
         served: tuple[str, ...] = supported_fetch_providers()
@@ -559,7 +565,7 @@ def _validated_provider(kind: ToolKind, provider: str) -> str:
 def _requirements(kind: ToolKind, provider: str) -> tuple[bool, bool, bool]:
     """Whether the old search code runs the provider, and whether a key on it needs an API key and an endpoint.
 
-    The old search code calls Tavily and Brave at their public endpoints, with no options of a key's.
+    The old search code calls its providers at their public endpoints, with no options of a key's.
     """
     if (
         kind == "search"

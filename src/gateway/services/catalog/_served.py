@@ -2,8 +2,10 @@
 
 vLLM and SGLang list each model with ``max_model_len``, the context length the
 server runs it at, and ``root``, the model it loaded under whatever name it is
-served by. SGLang also answers ``/model_info`` with the tool-call and reasoning
-parsers it was started with and what it reads besides text. Discovery reports
+served by. A server built on vLLM keeps ``max_model_len`` under an ``owned_by``
+of its own, and may describe the model's reasoning options in ``reasoning``.
+SGLang also answers ``/model_info`` with the tool-call and reasoning parsers it
+was started with and what it reads besides text. Discovery reports
 each listing here; a listing is the same whichever way the provider was
 connected, so a configured instance and a hosted provider are covered alike,
 and an organization's own key reports its listings under its organization.
@@ -28,7 +30,8 @@ from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.log_config import logger
 from gateway.models.catalog import SERVED_ENGINES, ServedModel
-from gateway.repositories.catalog import ServedModelRepository
+from gateway.repositories.catalog import ModelMetadataOverrideRepository, ServedModelRepository
+from gateway.services.catalog._overrides import overrides_generation, replace_overrides
 
 SERVED_MODEL_REFRESH_SECONDS = 60.0
 
@@ -72,6 +75,7 @@ class ServedFacts:
     reasoning_parser: str | None = None
     tool_call_parser: str | None = None
     input_modalities: tuple[str, ...] | None = None
+    reasoning: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,10 +99,15 @@ def served_facts(provider: str, model_id: str, organization_id: uuid.UUID | None
 
 
 def _engine(model: Model) -> str | None:
-    """The engine that listed ``model``, known by the ``owned_by`` each one stamps and the fields only they add."""
+    """The engine whose listing format ``model`` is in, known by the fields only they add.
+
+    Any other ``owned_by`` with ``max_model_len`` is a server built on vLLM.
+    """
     extra = model.model_extra or {}
     if model.owned_by in SERVED_ENGINES and ("max_model_len" in extra or "root" in extra):
         return model.owned_by
+    if "max_model_len" in extra:
+        return "vllm"
     return None
 
 
@@ -115,7 +124,7 @@ def _text(value: object, limit: int) -> str | None:
 
 
 def facts_from_listing(model: Model, settings: EngineSettings | None) -> ServedFacts | None:
-    """What a vLLM or SGLang listing entry says about its model, or ``None`` for any other listing."""
+    """What a vLLM-format or SGLang listing entry says about its model, or ``None`` for any other listing."""
     engine = _engine(model)
     if engine is None or len(model.id) > _MAX_MODEL_CHARS:
         return None
@@ -124,6 +133,7 @@ def facts_from_listing(model: Model, settings: EngineSettings | None) -> ServedF
         engine=engine,
         context_window=_positive_int(extra.get("max_model_len")),
         root=_text(extra.get("root"), _MAX_MODEL_CHARS),
+        reasoning=isinstance(extra.get("reasoning"), dict),
     )
     if engine != "sglang" or settings is None:
         return facts
@@ -214,6 +224,7 @@ def _facts(row: ServedModel) -> ServedFacts:
         reasoning_parser=row.reasoning_parser,
         tool_call_parser=row.tool_call_parser,
         input_modalities=tuple(row.input_modalities) if row.input_modalities is not None else None,
+        reasoning=row.reasoning,
     )
 
 
@@ -277,11 +288,14 @@ async def _replace(uow: UnitOfWork, provider: str, columns: dict[str, dict[str, 
 
 
 async def refresh_served_models(uow: UnitOfWork) -> None:
-    """Reload every row in one query and swap the copy in one step."""
+    """Reload every row, and the metadata overrides beside them, and swap each copy in one step."""
     global _served  # noqa: PLW0603
 
+    generation = overrides_generation()
     async with uow:
         rows = await ServedModelRepository(uow).list_all()
+        overrides = await ModelMetadataOverrideRepository(uow).list_all()
+    replace_overrides(overrides, generation)
     served: dict[tuple[uuid.UUID | None, str], dict[str, ServedFacts]] = {}
     for row in rows:
         served.setdefault((row.organization_id, row.provider), {})[row.model] = _facts(row)
@@ -289,10 +303,11 @@ async def refresh_served_models(uow: UnitOfWork) -> None:
 
 
 def reset_served_models() -> None:
-    """Drop the copy so the next load starts clean (startup and tests)."""
+    """Drop the copy, and the overrides', so the next load starts clean (startup and tests)."""
     global _served  # noqa: PLW0603
 
     _served = {}
+    replace_overrides(())
 
 
 async def _refresh_on_a_session_of_its_own() -> None:

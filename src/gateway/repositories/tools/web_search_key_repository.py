@@ -1,7 +1,7 @@
 """Data access for an organization's web search and fetch keys and its workspaces' overrides."""
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import Any
 
 from sqlalchemy import Select, func, select, update
@@ -161,6 +161,19 @@ class OrgWebSearchKeyRepository(
             await self.db.flush()
             await self.db.refresh(key)
         return key
+
+    async def forget_secrets(
+        self, organization_ids: Collection[uuid.UUID], workspace_ids: Collection[uuid.UUID]
+    ) -> None:
+        """Stage clearing the API key of every key these organizations hold."""
+        if not organization_ids:
+            return
+        await self.db.execute(
+            update(OrgWebSearchKey)
+            .where(OrgWebSearchKey.organization_id.in_(list(organization_ids)))
+            .values(encrypted_api_key=None, last4=None)
+            .execution_options(synchronize_session=False)
+        )
 
 
 class WorkspaceWebSearchKeyOverrideRepository:

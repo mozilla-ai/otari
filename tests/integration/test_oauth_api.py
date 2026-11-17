@@ -36,6 +36,7 @@ from sqlalchemy.orm import Session
 from sqlmodel import col, delete, update
 
 from gateway.api.routes import auth_oauth
+from gateway.api.routes._flow_cookies import MAX_LIVE_FLOWS
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.exceptions.identity_exceptions import OAuthIdentityLinkConflictError, OAuthProviderUnavailableError
 from gateway.log_config import logger as gateway_logger
@@ -46,13 +47,6 @@ from gateway.repositories.tenancy import UserRepository
 from gateway.services import oauth_service
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
 from gateway.services.identity import IdentityService
-from gateway.services.oauth_service import (
-    FLOW_COOKIE_NAME,
-    FLOW_COOKIE_PATH,
-    MAX_FLOW_COOKIE_CHARS,
-    MAX_LIVE_FLOWS,
-    browser_token_for,
-)
 from gateway.services.tenancy.organization_service import OrganizationService, SignupRegistration
 
 from .conftest import build_test_client
@@ -217,7 +211,8 @@ def test_the_flow_cookie_reaches_every_route_that_reads_it(client: TestClient, o
     jar: SimpleCookie = SimpleCookie()
     for header in response.headers.get_list("set-cookie"):
         jar.load(header)
-    cookie_path = jar[FLOW_COOKIE_NAME]["path"]
+    (cookie,) = jar.values()
+    cookie_path = cookie["path"]
     assert cookie_path, "the flow cookie is unscoped, so this check would hold vacuously"
 
     app = cast(FastAPI, client.app)
@@ -2079,9 +2074,9 @@ def test_authorize_sets_the_flow_cookie_the_callback_requires(
 
     assert started.status_code == 200, started.text
     cookie = started.headers["set-cookie"]
-    assert cookie.startswith(f"{FLOW_COOKIE_NAME}=")
+    assert cookie.startswith("otari_oauth_flow_")
     assert "HttpOnly" in cookie
-    assert f"Path={FLOW_COOKIE_PATH}" in cookie
+    assert f"Path={API_ROOT}/auth/oauth;" in cookie
     assert "samesite=lax" in cookie.lower()
 
 
@@ -2100,8 +2095,8 @@ def test_a_callback_from_a_browser_that_did_not_start_the_flow_is_refused(
     """
     add_member(client, master_key_header, email="ada@example.com")
     posted = stub_token_endpoint(monkeypatch).posted
-    state = client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()["state"]
-    victims_cookie = client.cookies[FLOW_COOKIE_NAME]
+    started = client.get(f"{API_ROOT}/auth/oauth/google/authorize")
+    state = started.json()["state"]
 
     client.cookies.clear()
     without = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": state})
@@ -2109,13 +2104,12 @@ def test_a_callback_from_a_browser_that_did_not_start_the_flow_is_refused(
     assert posted == []
 
     client.get(f"{API_ROOT}/auth/oauth/google/authorize")  # a different browser's own cookie
-    assert client.cookies[FLOW_COOKIE_NAME] != victims_cookie
     other = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": state})
     assert other.status_code == 400, other.text
     assert posted == []
 
     # The refusals rolled the claim back, so the browser that started it can still finish.
-    client.cookies.set(FLOW_COOKIE_NAME, victims_cookie)
+    client.cookies.extract_cookies(started)
     finished = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": state})
     assert finished.status_code == 200, finished.text
 
@@ -2126,7 +2120,7 @@ def test_two_tabs_in_one_browser_both_finish(
     master_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The cookie holds a token per live flow, keyed by the state that flow sends.
+    """The browser holds a token per live flow, under a name the state that flow sends derives.
 
     Two tabs is something a person does without meaning to, and a sign-in the
     browser started and then cannot finish looks like a broken product.
@@ -2143,15 +2137,38 @@ def test_two_tabs_in_one_browser_both_finish(
     assert later.status_code == 200, later.text
 
 
+def test_two_tabs_that_start_together_both_finish(
+    client: TestClient,
+    oauth_configured: None,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Neither authorize response has landed when the other request is sent."""
+    add_member(client, master_key_header, email="ada@example.com")
+    stub_token_endpoint(monkeypatch)
+    first = client.get(f"{API_ROOT}/auth/oauth/google/authorize")
+    client.cookies.clear()
+    second = client.get(f"{API_ROOT}/auth/oauth/google/authorize")
+    client.cookies.extract_cookies(first)
+
+    for started in (first, second):
+        finished = client.post(
+            f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": started.json()["state"]}
+        )
+        assert finished.status_code == 200, finished.text
+
+
 def test_a_browser_that_starts_one_flow_too_many_loses_its_oldest(
     client: TestClient,
     oauth_configured: None,
     master_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A cookie a browser keeps adding to needs a bound, and the oldest flow is the one to drop."""
+    """The cookies a browser keeps adding need a bound, and the oldest flow is the one to drop."""
     add_member(client, master_key_header, email="ada@example.com")
     posted = stub_token_endpoint(monkeypatch).posted
+    # The bound takes more calls to reach than the throttle allows in a minute.
+    monkeypatch.setattr(cast(FastAPI, client.app).state, "public_auth_rate_limiter", None)
     states = [client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()["state"] for _ in range(MAX_LIVE_FLOWS + 1)]
 
     evicted = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c1", "state": states[0]})
@@ -2174,23 +2191,27 @@ def test_a_state_the_cookie_does_not_name_is_left_to_the_library_to_refuse(
     """
     add_member(client, master_key_header, email="ada@example.com")
     posted = stub_token_endpoint(monkeypatch).posted
-    elsewhere = client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()["state"]
-    elsewheres_cookie = client.cookies[FLOW_COOKIE_NAME]
+    started_elsewhere = client.get(f"{API_ROOT}/auth/oauth/google/authorize")
+    elsewhere = started_elsewhere.json()["state"]
     client.cookies.clear()
     client.get(f"{API_ROOT}/auth/oauth/google/authorize")
-    assert browser_token_for(client.cookies[FLOW_COOKIE_NAME], elsewhere) is None
 
     refused = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": elsewhere})
 
     assert refused.status_code == 400, refused.text
     assert posted == []
     client.cookies.clear()
-    client.cookies.set(FLOW_COOKIE_NAME, elsewheres_cookie, path=FLOW_COOKIE_PATH)
+    client.cookies.extract_cookies(started_elsewhere)
     finished = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": elsewhere})
     assert finished.status_code == 200, finished.text
 
 
-def test_a_finished_sign_in_takes_its_own_flow_out_of_the_cookie(
+def _flow_cookies(client: TestClient) -> list[str]:
+    """The name of each flow cookie the browser holds."""
+    return [cookie.name for cookie in client.cookies.jar if cookie.name.startswith("otari_oauth_flow_")]
+
+
+def test_a_finished_sign_in_takes_its_own_flow_out_of_the_browser(
     client: TestClient,
     oauth_configured: None,
     master_key_header: dict[str, str],
@@ -2200,29 +2221,31 @@ def test_a_finished_sign_in_takes_its_own_flow_out_of_the_cookie(
     add_member(client, master_key_header, email="ada@example.com")
     stub_token_endpoint(monkeypatch)
     first = client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()["state"]
+    (first_cookie,) = _flow_cookies(client)
     second = client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()["state"]
+    assert len(_flow_cookies(client)) == 2
 
     assert client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c1", "state": first}).status_code == 200
-    held = client.cookies[FLOW_COOKIE_NAME]
-    assert browser_token_for(held, first) is None
-    assert browser_token_for(held, second) is not None
+    assert first_cookie not in _flow_cookies(client)
+    assert len(_flow_cookies(client)) == 1
 
     assert (
         client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c2", "state": second}).status_code == 200
     )
-    assert FLOW_COOKIE_NAME not in client.cookies
+    assert _flow_cookies(client) == []
 
 
-def test_a_cookie_this_deployment_cannot_read_refuses_the_sign_in_and_nothing_else(
+def test_a_flow_cookie_holding_another_token_refuses_the_sign_in_and_nothing_else(
     client: TestClient,
     oauth_configured: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A mangled or stale cookie costs a sign-in to start again, never a failed request."""
+    """A stale or planted cookie costs a sign-in to start again, never a failed request."""
     posted = stub_token_endpoint(monkeypatch).posted
     state = client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()["state"]
+    (name,) = _flow_cookies(client)
     client.cookies.clear()
-    client.cookies.set(FLOW_COOKIE_NAME, "a-cookie-this-deployment-never-set", path=FLOW_COOKIE_PATH)
+    client.cookies.set(name, "a-token-this-deployment-never-minted", path=f"{API_ROOT}/auth/oauth")
 
     refused = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": state})
 
@@ -2230,21 +2253,18 @@ def test_a_cookie_this_deployment_cannot_read_refuses_the_sign_in_and_nothing_el
     assert posted == []
 
 
-def test_a_browser_holding_an_over_long_cookie_can_still_start_a_sign_in(
+def test_a_state_that_carries_a_header_is_refused_like_any_unknown_state(
     client: TestClient,
     oauth_configured: None,
 ) -> None:
-    """A cookie no route would accept is one no route rewrites, and this one is HttpOnly."""
-    client.cookies.set(FLOW_COOKIE_NAME, "x" * (MAX_FLOW_COOKIE_CHARS + 1), path=FLOW_COOKIE_PATH)
+    """The callback's state is the caller's own text, and it names the cookie the callback reads."""
+    refused = client.post(
+        f"{API_ROOT}/auth/oauth/google/callback",
+        json={"code": "c", "state": "state\r\nSet-Cookie: otari_session=planted"},
+    )
 
-    started = client.get(f"{API_ROOT}/auth/oauth/google/authorize")
-
-    assert started.status_code == 200, started.text
-    jar: SimpleCookie = SimpleCookie()
-    for header in started.headers.get_list("set-cookie"):
-        jar.load(header)
-    rewritten = jar[FLOW_COOKIE_NAME].value
-    assert browser_token_for(rewritten, started.json()["state"]) is not None
+    assert refused.status_code == 400, refused.text
+    assert "set-cookie" not in refused.headers
 
 
 def test_a_callback_stating_no_code_is_refused_rather_than_called_an_outage(
