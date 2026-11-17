@@ -41,5 +41,9 @@ class MembershipOriginRepository(BaseRepository[OrganizationMembershipOrigin, Ne
                 )
             ],
             conflict=[OrganizationMembershipOrigin.organization_member_id],
-            replace=["invited_at", "invited_by_user_id", "joined_at"],
+            replace=[
+                OrganizationMembershipOrigin.invited_at,
+                OrganizationMembershipOrigin.invited_by_user_id,
+                OrganizationMembershipOrigin.joined_at,
+            ],
         )
