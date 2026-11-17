@@ -227,6 +227,31 @@ describe("AppShell responsive layout", () => {
     expect(aside?.className).toContain("translate-x-0")
   })
 
+  it("lists Playground in the mobile drawer under Build, after Models", async () => {
+    // Below `md` the top bar that links Playground is hidden.
+    mockMatchMedia(true)
+    await renderShell()
+
+    const build = await screen.findByRole("region", { name: "Build" })
+    await within(build).findByRole("link", { name: "Playground" })
+    const rows = within(build)
+      .getAllByRole("link")
+      .map((link) => link.textContent)
+    expect(rows.indexOf("Playground")).toBe(rows.indexOf("Models") + 1)
+  })
+
+  it("leaves Playground out of the desktop rail", async () => {
+    // The top bar links it there.
+    mockMatchMedia(false)
+    await renderShell()
+
+    const build = await screen.findByRole("region", { name: "Build" })
+    await within(build).findByRole("link", { name: "Models" })
+    expect(
+      within(build).queryByRole("link", { name: "Playground" }),
+    ).not.toBeInTheDocument()
+  })
+
   it("keeps the mobile drawer controls usable while pricing needs attention", async () => {
     mockMatchMedia(true)
     const user = userEvent.setup()

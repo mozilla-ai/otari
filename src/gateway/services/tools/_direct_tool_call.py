@@ -635,7 +635,7 @@ class DirectToolService:
                 raise await refused_after_hold(
                     unfunded_tool_detail([tool.name], exc.public_message, declared=False),
                     HTTPStatus.PAYMENT_REQUIRED,
-                    error_headers(INSUFFICIENT_FUNDS),
+                    error_headers(INSUFFICIENT_FUNDS, billing_url=exc.action_url),
                 ) from exc
             except FundsCheckFailedError as exc:
                 logger.error(

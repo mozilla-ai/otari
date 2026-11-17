@@ -8,6 +8,7 @@ import { formatUnitRate } from "@/shared/helpers/format"
 import { providerDisplayName } from "@/shared/helpers/providers"
 import {
   buildTokenComposition,
+  calledPath,
   computeToolCost,
   describeSkip,
   describeSource,
@@ -107,7 +108,7 @@ export function RequestDetail({
         <DetailField label="Provider">
           {entry.provider ? providerDisplayName(entry.provider) : "—"}
         </DetailField>
-        <DetailField label="Endpoint">{entry.endpoint}</DetailField>
+        <DetailField label="Endpoint">{calledPath(entry)}</DetailField>
         <DetailField label="Source">{describeSource(entry.source)}</DetailField>
         {entry.source_label ? (
           <DetailField label="Session">{entry.source_label}</DetailField>

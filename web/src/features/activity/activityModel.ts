@@ -15,6 +15,7 @@
 import type { ChargeLine, UsageEntry } from "@/client"
 import { isUnitChargeLine } from "@/client"
 import { formatDuration } from "@/features/traces/format"
+import { API_ROOT } from "@/shared/api/client"
 import {
   formatCost,
   formatNumber,
@@ -263,6 +264,20 @@ const SOURCE_LABELS: Record<string, string> = {
 
 export function describeSource(source: string): string {
   return SOURCE_LABELS[source] ?? source
+}
+
+/**
+ * The path a request was called on. A row this gateway served stores its
+ * endpoint as an identifier without the API's mount (`/v1/chat/completions`,
+ * which is also a pricing key), so the mount is put back for display; an
+ * imported row's endpoint is whatever its source reported.
+ */
+export function calledPath(
+  entry: Pick<UsageEntry, "endpoint" | "source">,
+): string {
+  return entry.source === "gateway" && entry.endpoint.startsWith("/v1/")
+    ? `${API_ROOT}${entry.endpoint.slice("/v1".length)}`
+    : entry.endpoint
 }
 
 // ---------- token composition ----------

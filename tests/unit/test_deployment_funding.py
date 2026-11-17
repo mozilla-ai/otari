@@ -415,3 +415,21 @@ async def test_a_port_that_fails_reads_as_funded_and_is_logged(gateway_logs: pyt
     assert await _funding(_Billing(fail=True)).funded(WORKSPACE_ID, None, SANDBOX)
     assert "BillingPort failed to read an organization's funds" in gateway_logs.text
     assert "billing down" not in gateway_logs.text
+
+
+def test_a_refusal_with_no_billing_link_says_only_what_the_organization_has() -> None:
+    refusal = InsufficientFundsError(Decimal("0"))
+
+    assert refusal.public_message == "Insufficient funds ($0.00) to serve this request."
+    assert refusal.action_url is None
+
+
+def test_a_refusal_with_a_billing_link_names_it_after_the_adapters_own_wording() -> None:
+    url = "https://otari.example/billing"
+
+    assert InsufficientFundsError(Decimal("1.5"), action_url=url).public_message == (
+        f"Insufficient funds ($1.50) to serve this request. Add funds at {url}."
+    )
+    assert InsufficientFundsError(Decimal("0"), "Your plan has run out.", action_url=url).public_message == (
+        f"Your plan has run out. Add funds at {url}."
+    )

@@ -37,6 +37,19 @@ import {
 } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
+// The error-action seam, replaced the way a superset build's alias replaces it,
+// so what a failed turn hands it is observable. It answers only a refusal that
+// carries a code, so the failures elsewhere in this file render as the base does.
+vi.mock("@/features/playground/overlayErrorAction", () => ({
+  PlaygroundErrorAction: ({
+    status,
+    code,
+  }: {
+    status: number | null
+    code: string | null
+  }) => (code ? <p>{`action for ${status} ${code}`}</p> : null),
+}))
+
 /** Mirrors `RATING_ACKNOWLEDGEMENT_MS` in `hooks/usePlayground.ts`. */
 const RATING_ACKNOWLEDGEMENT_MS = 3000
 
@@ -902,6 +915,33 @@ describe("sending a question", () => {
     expect(
       screen.queryByRole("button", { name: "Copy response" }),
     ).not.toBeInTheDocument()
+  })
+
+  it("hands a refusal's status and code to the error action", async () => {
+    mockApi()
+    vi.spyOn(apiClient, "apiStream").mockRejectedValue(
+      new apiClient.ApiError(
+        402,
+        "Insufficient funds ($0.00) to serve this request.",
+        "insufficient_funds",
+      ),
+    )
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("Try a prompt.")
+
+    await user.type(await screen.findByLabelText("Message"), "hi")
+    await user.click(screen.getByRole("button", { name: "Send message" }))
+
+    // The base text stays as it was; the action is beneath it.
+    expect(
+      await screen.findByText(
+        "Insufficient funds ($0.00) to serve this request.",
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText("action for 402 insufficient_funds"),
+    ).toBeInTheDocument()
   })
 
   it("reports a mid-stream failure on the conversation", async () => {

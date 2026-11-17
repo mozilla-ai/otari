@@ -21,8 +21,11 @@ import {
   lastRailContext,
   rememberLocation,
 } from "@/app/nav/navigationHistory"
+// Seams by their `@/…` specifiers, never relatively: those are the alias keys.
+import { MobileWalletNavSlot } from "@/app/nav/overlayMobileWalletSlot"
 import {
   DEPLOYMENT_NAV_SECTIONS,
+  DRAWER_NAV_SECTIONS,
   isPathVisible,
   NAV_SECTIONS,
   type NavContext,
@@ -49,6 +52,7 @@ import {
 import { WorkspaceSwitcher } from "@/app/nav/WorkspaceSwitcher"
 import { EntitlementResolver } from "@/app/overlayEntitlementResolver"
 import { PostSignInGate } from "@/app/overlayPostSignInGate"
+import { ShellBanner } from "@/app/overlayShellBanner"
 import { PendingPage } from "@/app/PendingPage"
 import { TelemetryIdentity } from "@/app/TelemetryIdentity"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
@@ -666,7 +670,9 @@ function AppShellChrome() {
   // Filtered before it is indexed, so the divider and top margin below key off
   // the first *rendered* section rather than the first registered one.
   const visibleSections = visibleNavSections(
-    RAIL_SECTIONS[railContext],
+    isMobile && railContext === "workspace"
+      ? DRAWER_NAV_SECTIONS
+      : RAIL_SECTIONS[railContext],
     isVisible,
   )
 
@@ -825,6 +831,7 @@ function AppShellChrome() {
       <AutoUpdate />
       <ConnectionStatus />
       <PricingWarning />
+      <ShellBanner />
       <UnpricedUsageWarning />
       <UpdateNotice />
       <UpdateCheckPrompt />
@@ -1214,6 +1221,12 @@ function AppShellChrome() {
                 <FiSidebar aria-hidden="true" className="size-4" />
               </button>
               <Breadcrumbs pathname={pathname} />
+            </div>
+            {/* The phone's balance: `TopBarActions` and the wallet slot in it
+                are hidden below `md`. `empty:` keeps an empty slot out of the
+                header's gap. */}
+            <div className="flex shrink-0 items-center empty:hidden md:hidden">
+              <MobileWalletNavSlot />
             </div>
             <TopBarActions
               onOpenFeedback={() => setFeedbackOpen(true)}

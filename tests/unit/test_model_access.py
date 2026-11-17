@@ -8,6 +8,7 @@ import pytest
 from gateway.core.config import GatewayConfig
 from gateway.core.error_codes import INVALID_MODEL, MODEL_NOT_ALLOWED, MODEL_NOT_FOUND, MODEL_NOT_SERVING
 from gateway.core.settings.tools import ALL_SEARCH_TOOLS
+from gateway.services.catalog import OfferingRow, build_selector_index, reset_selector_index, set_selector_index
 from gateway.services.model_access import (
     effective_allowlist,
     effective_tool_allowlist,
@@ -18,6 +19,7 @@ from gateway.services.model_access import (
     is_tool_allowlist_subset,
     key_model_refusal,
     legacy_tool_grants,
+    misspelled_model_refusal,
     org_model_refusal,
     tool_not_allowed_detail,
     tools_within_user,
@@ -357,7 +359,7 @@ def test_a_restricted_key_is_told_an_unresolvable_selector_is_invalid_not_forbid
     assert refusal is not None
     assert (refusal.code, refusal.status_code) == (INVALID_MODEL, 400)
     assert "no-such-model" in refusal.detail
-    assert "'provider:model' selector, an alias, or a model id from the catalog" in refusal.detail
+    assert "Send a model id from the catalog (GET /api/v1/models) such as 'vendor/model'" in refusal.detail
 
 
 def test_a_restricted_key_is_refused_a_model_its_list_excludes() -> None:
@@ -442,3 +444,38 @@ def test_intersect_allowlists_permits_exactly_what_both_permit(
 
 def test_intersect_allowlists_of_two_unrestricted_lists_is_unrestricted() -> None:
     assert intersect_allowlists(None, None) is None
+
+
+@pytest.fixture
+def gpt_oss_catalog() -> Iterator[None]:
+    """Two gpt-oss models offered on groq."""
+    offerings = {"openai/gpt-oss-120b": "groq:openai/gpt-oss-120b", "openai/gpt-oss-20b": "groq:openai/gpt-oss-20b"}
+    rows = [OfferingRow(selector, "groq", "groq", 0.15) for selector in offerings.values()]
+    models = {model: (model, (selector,)) for model, selector in offerings.items()}
+    set_selector_index(build_selector_index(rows, models))
+    yield
+    reset_selector_index()
+
+
+@pytest.mark.usefixtures("gpt_oss_catalog")
+def test_a_misspelled_model_is_refused_naming_the_nearest_ids() -> None:
+    refusal = misspelled_model_refusal(
+        None, instance="openai", provider="openai", model="gpt-oss-12", selector="OpenAI/gpt-oss-12"
+    )
+
+    assert refusal is not None
+    assert (refusal.code, refusal.status_code) == (MODEL_NOT_FOUND, 404)
+    assert refusal.detail == (
+        "Unknown model 'OpenAI/gpt-oss-12'. Did you mean openai/gpt-oss-120b or openai/gpt-oss-20b?"
+        " See GET /api/v1/models."
+    )
+
+
+@pytest.mark.usefixtures("gpt_oss_catalog")
+@pytest.mark.parametrize(
+    ("instance", "model"),
+    [("openai", "gpt-oss-120b"), ("mistral", "no-such-model")],
+    ids=["a model the catalog has", "a prefix the catalog has nothing under"],
+)
+def test_a_model_that_does_not_look_misspelled_is_not_refused(instance: str, model: str) -> None:
+    assert misspelled_model_refusal(None, instance=instance, provider=instance, model=model, selector=model) is None

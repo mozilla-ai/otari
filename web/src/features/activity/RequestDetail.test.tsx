@@ -2,6 +2,7 @@ import { screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import { API_ROOT } from "@/shared/api/client"
 import { entry, mockApi, renderPage } from "@/tests/activity"
 import { flushRouter } from "@/tests/router"
 import { RequestDetail } from "./RequestDetail"
@@ -164,6 +165,33 @@ describe("RequestDetail", () => {
     expect(
       screen.getByText("Reasoning tokens").parentElement,
     ).toHaveTextContent("—")
+  })
+
+  it("shows the path a served request was called on", async () => {
+    mockApi()
+    renderPage(<RequestDetail entry={entry()} />)
+    await flushRouter()
+
+    expect(screen.getByText("Endpoint").parentElement).toHaveTextContent(
+      `${API_ROOT}/chat/completions`,
+    )
+  })
+
+  it("shows an imported row's endpoint as its source reported it", async () => {
+    mockApi()
+    renderPage(
+      <RequestDetail
+        entry={entry({ source: "claude_code", endpoint: "/v1/messages" })}
+      />,
+    )
+    await flushRouter()
+
+    expect(screen.getByText("Endpoint").parentElement).toHaveTextContent(
+      "/v1/messages",
+    )
+    expect(screen.getByText("Endpoint").parentElement).not.toHaveTextContent(
+      API_ROOT,
+    )
   })
 
   it("names a row's tool calls and what they cost", async () => {

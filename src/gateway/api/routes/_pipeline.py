@@ -294,6 +294,7 @@ from gateway.services.mcp_stateless import failure_class
 from gateway.services.model_access import (
     McpAccess,
     key_model_refusal,
+    misspelled_model_refusal,
     model_not_allowed_detail,
     organization_key_refusal,
     owned_endpoint_refusal,
@@ -1081,7 +1082,7 @@ async def resolve_dispatch_provider(
     """
     if ctx.resolved_provider is not None:
         return await _prepare_for_dispatch(
-            ctx, ctx.resolved_provider, adapter=adapter, port=model_provider, billing=billing
+            ctx, ctx.resolved_provider, model_selector, adapter=adapter, port=model_provider, billing=billing
         )
     try:
         resolved = resolve_provider_selector(
@@ -1106,12 +1107,15 @@ async def resolve_dispatch_provider(
             safety_identifier=ctx.upstream_user,
         )
         _raise_for_unresolvable_model(model_selector, exc)
-    return await _prepare_for_dispatch(ctx, resolved, adapter=adapter, port=model_provider, billing=billing)
+    return await _prepare_for_dispatch(
+        ctx, resolved, model_selector, adapter=adapter, port=model_provider, billing=billing
+    )
 
 
 async def _prepare_for_dispatch(
     ctx: RequestContext,
     resolved: ResolvedProvider,
+    model_selector: str,
     *,
     adapter: FormatAdapter[Any, Any],
     port: ModelProviderPort,
@@ -1125,7 +1129,7 @@ async def _prepare_for_dispatch(
         # and follows no redirect; see ``services/providers``.
         client_args = {"http_client": owned_endpoint_sdk_client(resolved.provider)}
         return replace(resolved, kwargs={**resolved.kwargs, "client_args": client_args})
-    served = await _serve_from_hosted_credential(ctx, resolved, adapter=adapter, port=port)
+    served = await _serve_from_hosted_credential(ctx, resolved, model_selector, adapter=adapter, port=port)
     ctx.deployment_paid = served.deployment_paid
     if served.deployment_paid:
         await _hold_at_deployment_paid_rate(ctx, served, adapter=adapter)
@@ -1181,6 +1185,54 @@ async def _refuse_if_hosted_model_switched_off(
         detail,
         ErrorKind.API,
         headers=error_headers(PROVIDER_NOT_CONFIGURED),
+    )
+
+
+async def _refuse_if_model_unknown(
+    ctx: RequestContext, resolved: ResolvedProvider, model_selector: str, *, adapter: FormatAdapter[Any, Any]
+) -> None:
+    """Refuse a model of a vendor in the caller's catalog that neither the catalog nor models.dev knows.
+
+    That is most often a misspelled catalog id (``openai/gpt-oss-12``), which
+    would otherwise be told its provider is not configured. The refusal names
+    the nearest catalog ids. A known model keeps the provider's own answer, as
+    do an alias, whose target stays hidden, and a prefix the catalog has
+    nothing under, such as an undeclared local provider. Called after
+    :func:`_refuse_if_hosted_model_switched_off`, so a hosted provider's own
+    roster keeps answering for its models.
+    """
+    if resolved.alias is not None:
+        return
+    refusal = misspelled_model_refusal(
+        ctx.organization_id,
+        instance=resolved.instance,
+        provider=resolved.provider.value,
+        model=resolved.model,
+        selector=model_selector,
+    )
+    if refusal is None:
+        return
+    await release_reservation(ctx)
+    await log_gateway_rejection(
+        db=ctx.db,
+        log_writer=ctx.log_writer,
+        api_key_id=ctx.api_key_id,
+        user_id=ctx.user_id,
+        model=resolved.model,
+        provider=resolved.instance,
+        endpoint=adapter.endpoint,
+        detail=refusal.detail,
+        status_code=refusal.status_code,
+        started_at=ctx.started_at,
+        request_id=ctx.request_id,
+        tags=ctx.tags,
+        safety_identifier=ctx.upstream_user,
+    )
+    raise adapter.error(
+        refusal.status_code,
+        refusal.detail,
+        ErrorKind.from_status(refusal.status_code),
+        headers=error_headers(refusal.code),
     )
 
 
@@ -1257,7 +1309,8 @@ async def _admit_or_refuse(
         await _record_funding_refusal(
             ctx, resolved, adapter=adapter, detail=detail, status_code=status.HTTP_402_PAYMENT_REQUIRED
         )
-        raise adapter.error(402, detail, ErrorKind.INVALID_REQUEST, headers=error_headers(INSUFFICIENT_FUNDS)) from exc
+        headers = error_headers(INSUFFICIENT_FUNDS, billing_url=exc.action_url)
+        raise adapter.error(402, detail, ErrorKind.INVALID_REQUEST, headers=headers) from exc
     except Exception as exc:
         # As for a ModelProviderPort failure: a funding check is expected to read
         # a database or a service, and nothing above this catches what it raises.
@@ -1524,7 +1577,7 @@ def _hosted_candidate(
                 HTTPException(
                     status_code=status.HTTP_402_PAYMENT_REQUIRED,
                     detail=exc.public_message,
-                    headers=error_headers(INSUFFICIENT_FUNDS),
+                    headers=error_headers(INSUFFICIENT_FUNDS, billing_url=exc.action_url),
                 )
             ) from exc
         except Exception as exc:
@@ -1559,6 +1612,7 @@ def _hosted_candidate(
 async def _serve_from_hosted_credential(
     ctx: RequestContext,
     resolved: ResolvedProvider,
+    model_selector: str,
     *,
     adapter: FormatAdapter[Any, Any],
     port: ModelProviderPort,
@@ -1690,6 +1744,7 @@ async def _serve_from_hosted_credential(
 
     if credential is None and not lookup.own_name_only:
         await _refuse_if_hosted_model_switched_off(ctx, resolved, adapter=adapter, port=port)
+        await _refuse_if_model_unknown(ctx, resolved, model_selector, adapter=adapter)
     if credential is None or not lookup.accepts(credential.response_provider, resolved.instance):
         raise await _provider_not_configured(ctx, resolved, missing, adapter=adapter)
     try:
@@ -4166,9 +4221,8 @@ async def _admit_tool_funding(
                 list(dict.fromkeys(tool.type for tool in paid)), refusal.public_message, declared=True
             )
             last_refusal = (gateway_tool_pricing_key(paid[0].name), refusal, detail)
-            unfunded[claimed] = _ToolRefusal(
-                adapter.error(402, detail, ErrorKind.INVALID_REQUEST, headers=error_headers(INSUFFICIENT_FUNDS))
-            )
+            headers = error_headers(INSUFFICIENT_FUNDS, billing_url=refusal.action_url)
+            unfunded[claimed] = _ToolRefusal(adapter.error(402, detail, ErrorKind.INVALID_REQUEST, headers=headers))
     if last_refusal is not None and len(unfunded) == len(admitted):
         tool_key, refused, detail = last_refusal
         logger.info(
@@ -4178,7 +4232,10 @@ async def _admit_tool_funding(
         )
         await _refuse_tool_funding(ctx, adapter, tool_key, detail, status.HTTP_402_PAYMENT_REQUIRED)
         raise adapter.error(
-            402, detail, ErrorKind.INVALID_REQUEST, headers=error_headers(INSUFFICIENT_FUNDS)
+            402,
+            detail,
+            ErrorKind.INVALID_REQUEST,
+            headers=error_headers(INSUFFICIENT_FUNDS, billing_url=refused.action_url),
         ) from refused
     # The commit also lands any credit admission granted, so a request whose
     # admission did not commit is not served on it, as at the model's gate.

@@ -611,6 +611,23 @@ export const PLAYGROUND_NAV_ITEM = {
   icon: FiMessageSquare,
 } as const satisfies NavItem
 
+/**
+ * The workspace rail as the mobile drawer draws it: Playground after Models in
+ * Build. The top bar links Playground on the desk, and below `md` that bar is
+ * hidden, so the drawer is where a phone finds it.
+ */
+export const DRAWER_NAV_SECTIONS: readonly NavSection[] = NAV_SECTIONS.map(
+  (section) =>
+    section.id === "gateway"
+      ? {
+          ...section,
+          items: section.items.flatMap((item) =>
+            item.to === "/models" ? [item, PLAYGROUND_NAV_ITEM] : [item],
+          ),
+        }
+      : section,
+)
+
 /** Route lookup includes chrome destinations as well as all three sidebar scopes. */
 export const NAV_ITEMS: readonly NavItem[] = [
   PLAYGROUND_NAV_ITEM,

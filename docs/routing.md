@@ -49,7 +49,10 @@ A candidate nothing declares that one of the deployment's hosted providers
 serves is sent on the deployment's own credential, as a single model is
 ([hosted providers](hosted-providers.md#deployment-paid-credentials)). On
 otari.ai, such an entry is billed to the organization's balance at the same rate
-as a direct request, and is skipped when the balance cannot cover it.
+as a direct request, and is skipped when the balance cannot cover it. When the
+balance covers no candidate, the request is refused once with
+`402 insufficient_funds`, recorded against the plan's first model. A provider's
+own `402` is a provider failure like any other, and the plan moves on.
 
 When no candidate is left:
 

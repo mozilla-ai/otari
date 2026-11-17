@@ -962,7 +962,15 @@ describe("ModelDetailPage", () => {
       expect(
         within(grid).getByRole("columnheader", { name: "Yours, 30d" }),
       ).toBeInTheDocument()
-      expect(within(grid).getByText("42 req · cache 25%")).toBeInTheDocument()
+      expect(
+        within(grid).getByText("42 requests · cache 25%"),
+      ).toBeInTheDocument()
+      // Spend over every token, so the rate names its unit and what it is.
+      expect(within(grid).getByText("$0.40 / 1M effective")).toBeInTheDocument()
+      // Said on the page too, since a tooltip never opens on a phone.
+      expect(
+        screen.getByText(/Yours, 30d is the blended input and output price/),
+      ).toBeInTheDocument()
     } finally {
       GLM_DETAIL.offerings[0] = offering({})
     }

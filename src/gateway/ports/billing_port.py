@@ -70,13 +70,16 @@ class InsufficientFundsError(Exception):
     carrying its own wording; ``available`` is the amount the decision was made
     against, in USD, and is zero when the organization has no funding record at
     all. ``public_message`` is what the caller is told, and so carries nothing
-    an adapter would not show them.
+    an adapter would not show them. ``action_url`` is where the organization
+    adds funds, when the adapter knows one; the refusal then names it.
     """
 
-    def __init__(self, available: Decimal, message: str | None = None) -> None:
-        self.public_message = message or f"Insufficient funds (${available:.2f}) to serve this request."
+    def __init__(self, available: Decimal, message: str | None = None, *, action_url: str | None = None) -> None:
+        message = message or f"Insufficient funds (${available:.2f}) to serve this request."
+        self.public_message = message if action_url is None else f"{message} Add funds at {action_url}."
         super().__init__(self.public_message)
         self.available = available
+        self.action_url = action_url
 
 
 class BillingPort(Protocol):
