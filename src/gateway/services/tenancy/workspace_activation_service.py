@@ -49,7 +49,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
-from gateway.core.sql import utc_bound, utc_iso
+from gateway.core.sql import utc_iso
 from gateway.exceptions.organizations_exceptions import (
     WorkspaceActivationUnavailableError,
     WorkspaceAlreadyActivatedError,
@@ -61,6 +61,7 @@ from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT, SERVED_HERE_SLUG, Us
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.growth_signal_port import GrowthAction, GrowthSignalPort
 from gateway.repositories.users_repository import get_or_create_attribution_user
+from gateway.services.api_keys import key_refusal
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.types.key_scope import DEFAULT_KEY_SCOPES, KeyScopeSet
@@ -203,8 +204,9 @@ class WorkspaceActivationPublic(BaseModel):
         default=None,
         description=(
             "The setup key the guide already issued, so a reopened guide can offer it instead of "
-            "rotating it. Null until one is issued, once it is revoked, deleted or expired, and "
-            "whenever the guide is not offered to this caller."
+            "rotating it. Null until one is issued, once it is revoked, deleted or expired, when "
+            "the caller is not the one it was issued to, and whenever the guide is not offered to "
+            "this caller."
         ),
     )
 
@@ -272,7 +274,7 @@ class WorkspaceActivationService:
             latest_attempt=_attempt_public(latest) if latest is not None else None,
             experience_eligible=eligible,
             dismissed=dismissed,
-            issued_key=await self._usable_issued_key(state) if eligible else None,
+            issued_key=await self._usable_issued_key(state, user=user) if eligible else None,
         )
 
     # ------------------------------------------------------------------
@@ -350,8 +352,10 @@ class WorkspaceActivationService:
             # against the first one's ceilings.
             record.user_id = owner.user_id
             # A key the operator revoked from the Keys page and then asked the
-            # guide for again is being asked for deliberately.
+            # guide for again is being asked for deliberately, and a new
+            # plaintext must not be born expired.
             record.is_active = True
+            record.expires_at = None
 
         now = datetime.now(UTC)
         if state.first_presented_at is None:
@@ -490,13 +494,18 @@ class WorkspaceActivationService:
             return None
         return await self.db.get(APIKey, state.api_key_id)
 
-    async def _usable_issued_key(self, state: WorkspaceActivationState | None) -> ActivationIssuedKeyPublic | None:
-        """The issued key while it still authenticates, which is the only one worth offering back."""
+    async def _usable_issued_key(
+        self, state: WorkspaceActivationState | None, *, user: User
+    ) -> ActivationIssuedKeyPublic | None:
+        """The issued key, offered back only to the caller holding its plaintext while it still authenticates.
+
+        Rotation moves the row to whoever asked last, so another manager is
+        offered a key of their own instead of one they never saw.
+        """
         record = await self._existing_key(state)
-        if record is None or not record.is_active:
+        if record is None or record.user_id != str(user.id):
             return None
-        expires_at = utc_bound(record.expires_at)
-        if expires_at is not None and expires_at <= datetime.now(UTC):
+        if key_refusal(record, datetime.now(UTC)) is not None:
             return None
         return ActivationIssuedKeyPublic(key_id=record.id, key_prefix=record.key_prefix, key_suffix=record.key_suffix)
 

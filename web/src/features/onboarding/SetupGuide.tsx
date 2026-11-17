@@ -1,7 +1,7 @@
 import { useNavigate } from "@tanstack/react-router"
 import { useCallback, useEffect, useRef, useState } from "react"
 
-import type { WorkspaceActivation } from "@/client"
+import type { ActivationIssuedKey, WorkspaceActivation } from "@/client"
 import { SetupSheet } from "@/features/onboarding/SetupSheet"
 import { setupFailureCopy } from "@/features/onboarding/setupFailureCopy"
 import {
@@ -80,6 +80,10 @@ export function SetupGuide({
   )
 }
 
+function keyFingerprint({ key_prefix, key_suffix }: ActivationIssuedKey) {
+  return `${key_prefix ?? ""}••${key_suffix ?? ""}`
+}
+
 function SetupFlow({
   workspaceId,
   workspaceName,
@@ -112,7 +116,9 @@ function SetupFlow({
   // Someone who left after taking a key and came back keeps it unless they ask
   // for a new one: minting rotates it, and the old one may already be pasted
   // somewhere.
-  const [isUsingIssuedKey, setIsUsingIssuedKey] = useState(false)
+  // Held as the fingerprint chosen, because a rotation elsewhere keeps the row
+  // and changes the key: the choice no longer stands once it stops matching.
+  const [keptKey, setKeptKey] = useState<string | null>(null)
   // The flow only celebrates a first request it was present for. Without this
   // latch, somebody who never opened the guide would be congratulated on the
   // traffic they already had, on the next page load after it arrived.
@@ -197,8 +203,12 @@ function SetupFlow({
       // The mint refreshes this state, so a key minted here is described by
       // both; the plaintext in hand is the one to show.
       issuedKey={createKey.data ? undefined : (data.issued_key ?? undefined)}
-      isUsingIssuedKey={isUsingIssuedKey}
-      onUseIssuedKey={() => setIsUsingIssuedKey(true)}
+      isUsingIssuedKey={
+        data.issued_key != null && keptKey === keyFingerprint(data.issued_key)
+      }
+      onUseIssuedKey={() =>
+        setKeptKey(data.issued_key ? keyFingerprint(data.issued_key) : null)
+      }
       baseUrl={baseUrl}
       // The first model the gateway can serve, so the examples are runnable as
       // pasted. With none the placeholder stands and the sheet says what to do.

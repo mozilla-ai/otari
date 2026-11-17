@@ -127,10 +127,8 @@ export function SetupSheet({
     (issuedKey && isUsingIssuedKey ? `$${SNIPPET_KEY_ENV_VAR}` : undefined)
 
   const instruction = SETUP_TABS.find(({ id }) => id === tab)?.instruction ?? ""
-  // Built from the stand-in whenever the key is not on screen, which includes
-  // the moment before it exists: what is rendered needs no key, so the examples
-  // are here from the first frame rather than appearing under the operator once
-  // the mint lands. Only the copy waits for the real thing.
+  // A minted key shows its stand-in until revealed, a kept key the variable,
+  // and no key yet the stand-in, so the examples are there from the first frame.
   const shown = buildSetupSnippets({
     baseUrl,
     apiKey:
@@ -141,9 +139,8 @@ export function SetupSheet({
           : concealedKey,
     model,
   })
-  // What a copy yields, always the real key: an operator who copies without
-  // revealing still gets something that runs. Undefined until there is a key,
-  // and `CodeBlock` then offers no copy control rather than a dead one.
+  // A copy always runs: the minted key itself or the kept key's variable. With
+  // neither, `CodeBlock` offers no copy control rather than a dead one.
   const copied =
     keyInUse === undefined
       ? undefined
@@ -254,19 +251,19 @@ export function SetupSheet({
             </Button>
           </div>
         )}
-        <p className="text-caption text-subtle">
-          {apiKey === undefined && issuedKey ? (
-            <>
+        {apiKey === undefined && issuedKey ? (
+          isUsingIssuedKey ? (
+            <p className="text-caption text-subtle">
               The examples read it from <code>{SNIPPET_KEY_ENV_VAR}</code> in
               your environment.
-            </>
-          ) : (
-            <>
-              Shown once. Reveal it to read it, or copy it without. Set it as{" "}
-              <code>{SNIPPET_KEY_ENV_VAR}</code> in your environment.
-            </>
-          )}
-        </p>
+            </p>
+          ) : null
+        ) : (
+          <p className="text-caption text-subtle">
+            Shown once. Reveal it to read it, or copy it without. Set it as{" "}
+            <code>{SNIPPET_KEY_ENV_VAR}</code> in your environment.
+          </p>
+        )}
       </DialogSection>
 
       <DialogSection>
