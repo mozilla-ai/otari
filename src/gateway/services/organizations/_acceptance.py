@@ -5,8 +5,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from pydantic import ValidationError
-
 from gateway.core.addresses import same_address
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.organizations_exceptions import (
@@ -21,6 +19,7 @@ from gateway.services.organizations._admission import MembershipAdmission
 from gateway.services.organizations._invitation_facts import InvitationFacts, InvitationFactsReader
 from gateway.services.organizations._invitation_link import InvitationLink
 from gateway.services.organizations._sso_enforcement import SsoEnforcement
+from gateway.services.organizations._workspace_assignments import workspace_id_of
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -32,18 +31,16 @@ class AcceptingPerson:
 
 
 def _offered_workspaces(invitation: OrganizationInvitation) -> list[WorkspaceAssignmentRequest]:
-    """The workspace grants an invitation offers, skipping any its stored row does not describe.
+    """The workspace grants an invitation offers, skipping any whose stored id is not one.
 
-    The column holds whatever was written to it, so a grant naming no workspace or no role it could
-    give is left out rather than refusing the whole invitation.
+    The same reading of the column the preview makes, so the page and the acceptance offer the
+    same workspaces.
     """
-    offered = []
-    for assignment in invitation.workspace_assignments:
-        try:
-            offered.append(WorkspaceAssignmentRequest.model_validate(assignment))
-        except ValidationError:
-            continue
-    return offered
+    return [
+        WorkspaceAssignmentRequest(workspace_id=workspace_id, role=assignment["role"])
+        for assignment in invitation.workspace_assignments
+        if (workspace_id := workspace_id_of(assignment)) is not None
+    ]
 
 
 def _require_the_invited_address(invited: str, by: AcceptingPerson) -> None:
