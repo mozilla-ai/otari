@@ -749,24 +749,22 @@ class OIDCConnectionService:
         )
 
     async def blocks_joining(
-        self, *, organization: Organization, role: OrganizationMemberRole, user_id: uuid.UUID
+        self, *, organization_id: uuid.UUID, role: OrganizationMemberRole, user_id: uuid.UUID
     ) -> bool:
-        """Whether ``organization``'s own SSO enforcement refuses this person joining it as ``role``.
+        """Whether this organization's own SSO enforcement refuses this person joining it as ``role``.
 
-        An organization requiring nothing refuses nobody, which is answered off the row already in hand.
         An account this deployment does not hold is refused, because it can hold no link either.
         """
-        if not organization.sso_required:
-            return False
         async with self._uow:
+            organization = await self._organizations.organizations.get(organization_id)
             user = await self._users.get(user_id)
-            if user is None:
+            if organization is None or user is None:
                 return True
             linked = await has_link_to_organization(
                 organization, user_id, connections=self._connections, links=self._links
             )
             return await self._organizations.sso_refuses_joining(
-                organization=organization, is_linked=linked, role=role, user=user
+                organization_id=organization_id, is_linked=linked, role=role, user=user
             )
 
     async def refuses_every_membership(self, *, user: User) -> bool:

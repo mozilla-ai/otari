@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlmodel import col
 
@@ -1929,7 +1929,7 @@ async def test_the_rule_refuses_a_person_with_no_link_joining(async_db: AsyncSes
     service = OrganizationService(async_db, membership_listener=None)
 
     refused = await service.sso_refuses_joining(
-        organization=organization, is_linked=False, role="member", user=stranger
+        organization_id=organization.id, is_linked=False, role="member", user=stranger
     )
 
     assert refused is True
@@ -1944,7 +1944,9 @@ async def test_the_rule_admits_a_person_joining_with_a_link(async_db: AsyncSessi
     )
     service = OrganizationService(async_db, membership_listener=None)
 
-    refused = await service.sso_refuses_joining(organization=organization, is_linked=True, role="member", user=joiner)
+    refused = await service.sso_refuses_joining(
+        organization_id=organization.id, is_linked=True, role="member", user=joiner
+    )
 
     assert refused is False
 
@@ -1961,8 +1963,12 @@ async def test_the_rule_admits_the_break_glass_owner_joining_as_owner_alone(asyn
     await async_db.flush()
     service = OrganizationService(async_db, membership_listener=None)
 
-    as_owner = await service.sso_refuses_joining(organization=organization, is_linked=False, role="owner", user=owner)
-    as_member = await service.sso_refuses_joining(organization=organization, is_linked=False, role="member", user=owner)
+    as_owner = await service.sso_refuses_joining(
+        organization_id=organization.id, is_linked=False, role="owner", user=owner
+    )
+    as_member = await service.sso_refuses_joining(
+        organization_id=organization.id, is_linked=False, role="member", user=owner
+    )
 
     assert (as_owner, as_member) == (False, True)
 
@@ -1981,4 +1987,30 @@ async def test_the_port_answers_for_a_person_who_is_not_a_member_yet(async_db: A
     service = _connection_service(async_db)
 
     assert await service.blocks_membership(user=stranger, organization=organization) is False
-    assert await service.blocks_joining(organization=organization, role="member", user_id=stranger.id) is True
+    assert await service.blocks_joining(organization_id=organization.id, role="member", user_id=stranger.id) is True
+
+
+async def test_the_port_reads_the_enforcement_as_it_stands_not_as_an_instance_holds_it(
+    async_db: AsyncSession,
+) -> None:
+    """The decision is made under a lock a caller took after resolving the organization.
+
+    An instance resolved before that lock holds whatever was true then, so the row decides.
+    """
+    organization = await create_organization(async_db, slug="turned-on-later")
+    stranger = await UserRepository(async_db).create_local_identity(
+        full_name="Stranger", active_organization_id=organization.id, email="later@acme.example"
+    )
+    await async_db.flush()
+    service = _connection_service(async_db)
+    assert await service.blocks_joining(organization_id=organization.id, role="member", user_id=stranger.id) is False
+
+    await async_db.execute(
+        update(Organization)
+        .where(col(Organization.id) == organization.id)
+        .values(sso_required=True, sso_break_glass_waived=True)
+        .execution_options(synchronize_session=False)
+    )
+
+    assert organization.sso_required is False, "the instance in hand is stale, which is the point"
+    assert await service.blocks_joining(organization_id=organization.id, role="member", user_id=stranger.id) is True

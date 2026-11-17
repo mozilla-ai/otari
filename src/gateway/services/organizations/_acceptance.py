@@ -126,7 +126,9 @@ class InvitationAcceptance:
             organization = await self._organizations.get(invitation.organization_id)
             if organization is None:
                 raise InvitationNoLongerValidError()
-            if await self._sso.blocks_joining(organization=organization, role=invitation.role, user_id=by.user_id):
+            if await self._sso.blocks_joining(
+                organization_id=invitation.organization_id, role=invitation.role, user_id=by.user_id
+            ):
                 raise InvitationNeedsSsoSignInError(invitation.email)
             # Removing the row is what makes the link work once, and settles two acceptances at once.
             accepted = await self._invitations.delete_by_token_hash(invitation.token_hash)

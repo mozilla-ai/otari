@@ -28,11 +28,13 @@ class SsoEnforcement(Protocol):
         ...
 
     async def blocks_joining(
-        self, *, organization: Organization, role: OrganizationMemberRole, user_id: uuid.UUID
+        self, *, organization_id: uuid.UUID, role: OrganizationMemberRole, user_id: uuid.UUID
     ) -> bool:
-        """Whether ``organization``'s own SSO enforcement refuses this person joining it as ``role``.
+        """Whether this organization's own SSO enforcement refuses this person joining it as ``role``.
 
-        Asked about somebody who holds no membership yet, which is why it takes a role rather than reading one.
+        Asked about somebody who holds no membership yet, which is why it takes a role rather than
+        reading one, and by id rather than by instance, because the enforcement is read where it is
+        decided rather than taken off an instance a caller resolved earlier.
         """
         ...
 

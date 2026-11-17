@@ -112,6 +112,7 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
+from gateway.repositories.tenancy.organization_repository import SsoSettings
 from gateway.repositories.users_repository import (
     attribution_spend,
     get_or_create_attribution_user,
@@ -447,16 +448,22 @@ class OrganizationService:
         return None if bootstrap is None else bootstrap.id
 
     async def sso_refuses_joining(
-        self, *, organization: Organization, is_linked: bool, role: OrganizationMemberRole, user: User
+        self, *, organization_id: uuid.UUID, is_linked: bool, role: OrganizationMemberRole, user: User
     ) -> bool:
         """Whether this organization's SSO enforcement refuses this person joining it as ``role``.
 
         The same rule as for a membership that exists, asked of somebody who holds none yet.
         ``is_linked`` is whether they hold a sign-in link to this organization's own connection,
         which the identity domain owns and this service cannot read.
+
+        NOTE: The settings are read here. A caller deciding this under a lock resolved the
+        organization before taking it, and the instance holds whatever was true then.
         """
-        return organization.sso_required and _sso_would_block_joining(
-            organization=organization,
+        settings = await self.organizations.sso_settings(organization_id)
+        if settings is None or not settings.required:
+            return False
+        return _sso_would_block_joining(
+            settings=settings,
             is_deployment_operator=await self.is_deployment_operator(user),
             is_linked=is_linked,
             role=role,
@@ -3033,7 +3040,7 @@ def sso_would_block_membership(
 
 def _sso_would_block_joining(
     *,
-    organization: Organization,
+    settings: SsoSettings,
     is_deployment_operator: bool,
     is_linked: bool,
     role: str,
@@ -3047,7 +3054,7 @@ def _sso_would_block_joining(
     return _sso_would_block(
         is_deployment_operator=is_deployment_operator,
         is_linked=is_linked,
-        break_glass=organization.sso_break_glass_user_id == user_id and role == OWNER_ROLE,
+        break_glass=settings.break_glass_user_id == user_id and role == OWNER_ROLE,
     )
 
 

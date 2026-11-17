@@ -84,9 +84,9 @@ class _Sso:
         self.asked: list[tuple[uuid.UUID, str, uuid.UUID]] = []
 
     async def blocks_joining(
-        self, *, organization: Organization, role: OrganizationMemberRole, user_id: uuid.UUID
+        self, *, organization_id: uuid.UUID, role: OrganizationMemberRole, user_id: uuid.UUID
     ) -> bool:
-        self.asked.append((organization.id, role, user_id))
+        self.asked.append((organization_id, role, user_id))
         return self._refuses
 
 
@@ -432,7 +432,6 @@ async def test_accept_is_refused_where_single_sign_on_does_not_admit_the_account
     user_id, member_id = await store.member(organization)
     admission = _RecordingAdmission(member_id)
     sso = _Sso(refuses=True)
-    # Read before the call: the refusal rolls the block back, and a rollback expires every instance.
     organization_id = organization.id
 
     with pytest.raises(InvitationNeedsSsoSignInError, match="ada@example.com"):

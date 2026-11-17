@@ -84,9 +84,9 @@ class _NoSsoEnforcement:
         return False
 
     async def blocks_joining(
-        self, *, organization: Organization, role: OrganizationMemberRole, user_id: uuid.UUID
+        self, *, organization_id: uuid.UUID, role: OrganizationMemberRole, user_id: uuid.UUID
     ) -> bool:
-        del organization, role, user_id
+        del organization_id, role, user_id
         return False
 
     async def revoke_refused_sessions(self, *, organization: Organization) -> None:
