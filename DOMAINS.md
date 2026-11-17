@@ -214,7 +214,8 @@ and nothing proxies MCP traffic. A stored server sends one workspace credential
 (a token, or the account a manager signed in to for everyone) or, in per-user
 mode, each user's own: `McpConnectionService` runs a sign-in to such a server
 and ends a connection, and `McpUserTokens` reads the token a request carries
-(`mcp_user_connections`, `mcp_shared_connections`, `mcp_oauth_flows`). The web search policy says who may search and
+(`mcp_user_connections`, `mcp_shared_connections`, `mcp_oauth_flows`,
+`mcp_sign_in_link_uses`). The web search policy says who may search and
 how far, and carries the workspace's own search key where its organization
 brought one; a tools service applies it to a request with one rule everywhere.
 The code execution policy says who may run code and within which limits, and

@@ -36,7 +36,11 @@ from gateway.api.routes._mcp_sign_in_pages import (
 )
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.exceptions import TenancyError
-from gateway.exceptions.tools_exceptions import McpConnectionFlowError, McpSignInLinkNeedsSessionError
+from gateway.exceptions.tools_exceptions import (
+    McpConnectionFlowError,
+    McpSignInLinkNeedsSessionError,
+    McpSignInLinkUsedError,
+)
 from gateway.log_config import logger
 from gateway.models.tenancy import User as TenancyUser
 from gateway.schemas.tools import (
@@ -202,6 +206,8 @@ async def _sign_in_link_page(
     """The page a sign-in link shows before anything starts, and whether it offers to continue."""
     try:
         preview = await service.sign_in_link_preview(ticket=ticket, opened_by=opened_by)
+    except McpSignInLinkUsedError:
+        return conversation_page(SignInPage.LINK_USED), False
     except McpConnectionFlowError:
         return conversation_page(SignInPage.LINK_EXPIRED), False
     except TenancyError as exc:
@@ -269,16 +275,20 @@ async def start_mcp_sign_in_from_link(
     forged, altered or expired gets a plain page saying to ask for a new one.
 
     Only Continue on that question starts the sign-in, and only from this gateway's own page: a
-    POST from anywhere else is answered with the question again. A dashboard session it arrives in
-    must be the link's own user, and the sign-in is then bound to that session. A link made for a
-    dashboard account needs that session. Any other sign-in is bound to this browser by a cookie,
-    and the callback finishes it only where the cookie comes back.
+    POST from anywhere else is answered with the question again. Starting it spends the link, so a
+    link that has started a sign-in gets a page saying to ask for a new one, its question included.
+    A dashboard session it arrives in must be the link's own user, and the sign-in is then bound to
+    that session. A link made for a dashboard account needs that session. Any other sign-in is bound
+    to this browser by a cookie, and the callback finishes it only where the cookie comes back.
     """
     page, offered = await _sign_in_link_page(service, ticket, opened_by)
     if step != CONTINUE_STEP or not offered or not _posted_from_this_gateway(request, config):
         return page
     try:
         started = await service.start_from_sign_in_link(ticket=ticket, opened_by=opened_by)
+    except McpSignInLinkUsedError:
+        # Another tab's Continue on this link won the race.
+        return conversation_page(SignInPage.LINK_USED)
     except McpConnectionFlowError:
         return conversation_page(SignInPage.LINK_EXPIRED)
     except McpSignInLinkNeedsSessionError:

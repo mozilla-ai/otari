@@ -398,12 +398,20 @@ new connection.
 
 - **The link is minted for the key's own user, and only when the model reaches
   for the server.** Making one stores nothing: it carries the server and the user
-  sealed with `OTARI_SECRET_KEY` and works for 30 minutes.
+  sealed with `OTARI_SECRET_KEY` and works once, for 30 minutes.
 - **Opening the link starts nothing.** The page it shows starts the sign-in only
   when the person clicks **This is me, continue**, and only that page can ask:
   a request from another site gets the page again. So a link previewer, a mail
-  scanner or another site cannot start a sign-in for someone. Continuing again
-  with no dashboard session replaces the sign-in started before.
+  scanner or another site cannot start a sign-in for someone.
+- **Continuing spends the link.** It starts one sign-in, and from then on the
+  link opens a page saying it was already used, whether that sign-in finishes,
+  fails or is abandoned. Two tabs that continue on one link at the same moment
+  start one sign-in between them. A sign-in that could not start at all (the
+  server could not be reached, say) leaves the link unspent. For a failed or
+  abandoned sign-in the person asks again and the model gets a new link; one
+  continued with no dashboard session replaces the sign-in an earlier link
+  started and nobody finished. Otari records a hash of each spent link, never the
+  link, and deletes the record once the link would have expired anyway.
 - **The sign-in finishes only in the browser that continued.** Continuing gives
   that browser a cookie for this one sign-in, and the server's redirect back to
   Otari finishes it only when the same browser brings the cookie back. So the
@@ -416,10 +424,10 @@ new connection.
   the page says to sign in first and open the link again. A session that belongs
   to a different user than the link's is refused. A link for a user with no
   dashboard login (a user that exists only for API keys) needs no session.
-- **Treat a link like a short-lived invitation.** The link can be opened more
-  than once within its 30 minutes. For a user with no dashboard login, whoever
-  opens it and continues connects the account they sign in with to that user, so
-  nobody should open a sign-in link someone else sent them. It never carries a
+- **Treat a link like a short-lived invitation.** For a user with no dashboard
+  login, whoever is first to open it and continue connects the account they sign
+  in with to that user, so nobody should open a sign-in link someone else sent
+  them. It never carries a
   token or the sign-in's state, and the log masks it.
 - **Only Otari makes the link.** It always starts with the deployment's own
   `public_base_url`, and the stand-in tool tells the model to show no sign-in
@@ -746,7 +754,7 @@ The enabled stored servers of the key's workspace whose
 `mcp_server_ids`. A shared server that `needs_setup` is left out.
 `sign_in_required` is true for a
 [per-user server](#credential-mode) the key's user has not signed in to yet, and
-`sign_in_url` is then a link to the page that starts their sign-in, good for 30 minutes.
+`sign_in_url` is then a link to the page that starts their sign-in, good once, for 30 minutes.
 Making the link stores nothing, so listing costs nothing. A key with no user
 cannot sign in, so such a server is not in `servers` for it; `left_out` names it
 instead, with `reason` `key_has_no_user` and a sentence in `detail`, so a person

@@ -233,6 +233,7 @@ from gateway.repositories.tenancy import (
 from gateway.repositories.tools import (
     McpOAuthFlowRepository,
     McpServerRequestRepository,
+    McpSignInLinkUseRepository,
     McpUserConnectionRepository,
     WorkspaceMcpServerLogoRepository,
     WorkspaceMcpServerRepository,
@@ -565,6 +566,7 @@ def get_mcp_connection_service(
         WorkspaceMcpServerRepository(uow),
         McpUserConnectionRepository(uow),
         McpOAuthFlowRepository(uow),
+        McpSignInLinkUseRepository(uow),
         config,
         eligibility=WorkspaceMcpConnectionEligibility(
             uow,

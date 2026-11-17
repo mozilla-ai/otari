@@ -47,6 +47,7 @@ from gateway.exceptions.tools_exceptions import (
     McpConnectionUpstreamError,
     McpOAuthIssuerChangedError,
     McpSignInLinkOtherUserError,
+    McpSignInLinkUsedError,
     McpSignInRequiredError,
     WorkspaceMcpServerNotFoundError,
 )
@@ -54,6 +55,7 @@ from gateway.log_config import logger
 from gateway.models.tools import McpCredentialMode, McpSharedConnection, McpUserConnection, WorkspaceMcpServer
 from gateway.repositories.tools import (
     McpOAuthFlowRepository,
+    McpSignInLinkUseRepository,
     McpUserConnectionRepository,
     WorkspaceMcpServerRepository,
 )
@@ -91,7 +93,8 @@ RENEWAL_DEADLINE_SECONDS = 20.0
 CALLBACK_PATH = "/mcp-connections/callback"
 # The gateway's own path a sign-in link opens, under the API root: a page that asks before the sign-in starts.
 SIGN_IN_LINK_PATH = "/mcp-connections/sign-in"
-# How long a sign-in link handed to a conversation can be clicked. Nothing is stored until it is.
+# How long a sign-in link handed to a conversation can be clicked. Nothing is stored until its Continue
+# starts a sign-in, which spends it.
 SIGN_IN_LINK_LIFETIME = timedelta(minutes=30)
 _SIGN_IN_LINK_PURPOSE = "mcp-sign-in"
 _LINK_FLOW_STATE_PURPOSE = b"otari-mcp-link-flow:"
@@ -314,9 +317,10 @@ def sign_in_link(config: GatewayConfig, *, server_id: uuid.UUID, user_id: str) -
 
     Minting stores nothing: the link carries the server and the user sealed with ``OTARI_SECRET_KEY``,
     and the sign-in, with its single-use state, starts only when somebody opens it and confirms on
-    the page it shows, within ``SIGN_IN_LINK_LIFETIME``. It always points at this gateway, never at an
-    authorization server, so a conversation can tell it apart from any other link by its address. The
-    caller has decided that this user may sign in to this server.
+    the page it shows, within ``SIGN_IN_LINK_LIFETIME``. It starts one sign-in at most. It always
+    points at this gateway, never at an authorization server, so a conversation can tell it apart
+    from any other link by its address. The caller has decided that this user may sign in to this
+    server.
 
     Raises:
         McpConnectionSetupError: ``public_base_url`` is unset, or the user is the shared ``default`` one.
@@ -339,17 +343,31 @@ def sign_in_link_prefix(config: GatewayConfig) -> str | None:
     return f"{base}{API_ROOT}{SIGN_IN_LINK_PATH}#ticket=" if base else None
 
 
-def read_sign_in_link(ticket: str) -> tuple[uuid.UUID, str] | None:
-    """The server and the user a sign-in link's ticket names, or ``None`` for one that is forged, altered or old."""
+@dataclass(frozen=True, slots=True)
+class SignInLinkTicket:
+    """What a sign-in link's ticket names, and the hash it is recorded under once it has been used."""
+
+    server_id: uuid.UUID
+    user_id: str
+    ticket_hash: str = field(repr=False)
+
+
+def read_sign_in_link(ticket: str) -> SignInLinkTicket | None:
+    """What a sign-in link's ticket names, or ``None`` for one that is forged, altered or old."""
     if not ticket or len(ticket) > 1024:
         return None
     try:
-        sealed = ticket + "=" * (-len(ticket) % 4)
-        plain = get_secret_box().decrypt(sealed.encode(), ttl=int(SIGN_IN_LINK_LIFETIME.total_seconds()))
+        sealed = (ticket + "=" * (-len(ticket) % 4)).encode()
+        plain = get_secret_box().decrypt(sealed, ttl=int(SIGN_IN_LINK_LIFETIME.total_seconds()))
         payload = json.loads(plain)
         if not isinstance(payload, dict) or payload.get("p") != _SIGN_IN_LINK_PURPOSE:
             return None
-        return uuid.UUID(payload["s"]), str(payload["u"])
+        # The hash is of the token's bytes, which its signature covers, not of the text: base64 decoding
+        # skips stray characters, so many spellings of one link decrypt alike and only the bytes are one.
+        raw = base64.urlsafe_b64decode(sealed)
+        return SignInLinkTicket(
+            server_id=uuid.UUID(payload["s"]), user_id=str(payload["u"]), ticket_hash=hashlib.sha256(raw).hexdigest()
+        )
     except (InvalidToken, SecretBoxUnavailableError, ValueError, KeyError, TypeError):
         return None
 
@@ -781,6 +799,7 @@ class McpConnectionService:
         servers: WorkspaceMcpServerRepository,
         connections: McpUserConnectionRepository,
         flows: McpOAuthFlowRepository,
+        link_uses: McpSignInLinkUseRepository,
         config: GatewayConfig,
         *,
         eligibility: McpConnectionEligibility,
@@ -790,6 +809,7 @@ class McpConnectionService:
         self._servers = servers
         self._connections = connections
         self._flows = flows
+        self._link_uses = link_uses
         self._config = config
         self._eligibility = eligibility
         self._users = users
@@ -804,6 +824,7 @@ class McpConnectionService:
         for_check: bool = False,
         for_shared: bool = False,
         browser_token: str | None = None,
+        link: SignInLinkTicket | None = None,
     ) -> str:
         """Start a user's sign-in to a per-user server, and return the URL to send their browser to.
 
@@ -820,6 +841,10 @@ class McpConnectionService:
         token of the browser that started it, and the sign-in finishes only for a callback that
         browser brings back.
 
+        ``link`` is the sign-in link this sign-in was started from, when it was: it is spent in the
+        same transaction that stores the sign-in, so it starts this one and no other, and stays
+        usable when the sign-in could not start at all.
+
         The state is single-use and expires after ``FLOW_LIFETIME``.
 
         Raises:
@@ -831,6 +856,7 @@ class McpConnectionService:
             McpOAuthIssuerChangedError: the server names another authorization server than the one
                 its saved OAuth client was first used with.
             McpConnectionUpstreamError: the server's authorization setup could not be discovered.
+            McpSignInLinkUsedError: ``link`` has already started a sign-in.
         """
         if user_id == DEFAULT_USER_ID:
             raise McpConnectionSetupError("The shared default user stands for keys with no owner and cannot sign in")
@@ -865,6 +891,13 @@ class McpConnectionService:
         verifier = _mcp_oauth.new_code_verifier()
         now = datetime.now(UTC)
         async with self._uow:
+            if link is not None:
+                await self._link_uses.purge_expired(now)
+                # Of two Continues on one link, the database lets one claim it, and the other's sign-in
+                # is never stored.
+                if not await self._link_uses.claim(link.ticket_hash, expires_at=now + SIGN_IN_LINK_LIFETIME):
+                    logger.warning("MCP sign-in link refused reason=used server_id=%s", server_id)
+                    raise McpSignInLinkUsedError
             # Discovery took seconds. The row is locked and read again, so a sign-in found for the
             # server as it was cannot be stored against the server as a manager has since made it.
             server = await self._server_in_mode(server_id, mode, lock=True)
@@ -874,8 +907,8 @@ class McpConnectionService:
             _pin_issuer(server, current, metadata)
             await self._flows.purge_expired(now)
             if identity_id is None:
-                # A link opened again replaces the sign-in it started before, so opening one
-                # repeatedly holds one pending sign-in rather than one per click.
+                # A new link for the same user and server replaces the sign-in an earlier one started,
+                # so asking again holds one pending sign-in rather than one per link.
                 await self._flows.remove_unbound(server_id, user_id)
             await self._flows.add(
                 state_hash=_state_hash(state),
@@ -908,18 +941,21 @@ class McpConnectionService:
 
         Raises:
             McpConnectionFlowError: the link is forged, altered or older than ``SIGN_IN_LINK_LIFETIME``.
+            McpSignInLinkUsedError: the link has already started a sign-in.
             WorkspaceMcpServerNotFoundError: the server is gone.
             McpConnectionModeError: the server no longer takes each user's own sign-in.
         """
-        server_id, user_id = self._named_by(ticket)
+        link = self._named_by(ticket)
         async with self._uow:
-            server = await self._server_in_mode(server_id, McpCredentialMode.PER_USER)
-            alias = (await self._users.aliases([user_id])).get(user_id)
+            if await self._link_uses.used(link.ticket_hash):
+                raise McpSignInLinkUsedError
+            server = await self._server_in_mode(link.server_id, McpCredentialMode.PER_USER)
+            alias = (await self._users.aliases([link.user_id])).get(link.user_id)
             return SignInLinkTarget(
                 server_id=server.id,
                 server_name=server.name,
                 server_host=urlsplit(server.url).hostname or "",
-                user_id=user_id,
+                user_id=link.user_id,
                 user_alias=alias,
             )
 
@@ -933,26 +969,35 @@ class McpConnectionService:
         finishes the sign-in only where it is shown, landing on a page telling the person to go
         back to their conversation. The caller has shown them whose link it is and they confirmed.
 
+        The link starts one sign-in: starting it spends it, whether or not that sign-in then finishes.
+
         Raises:
             McpConnectionFlowError: the link is forged, altered or older than ``SIGN_IN_LINK_LIFETIME``.
+            McpSignInLinkUsedError: the link has already started a sign-in.
             McpSignInLinkOtherUserError: ``opened_by`` is not the user the link was made for.
             WorkspaceMcpServerNotFoundError: the server is gone.
             McpConnectionModeError: the server no longer takes each user's own sign-in.
             McpConnectionSetupError: the sign-in cannot start on this deployment.
             McpConnectionUpstreamError: the server's authorization setup could not be discovered.
         """
-        server_id, user_id = self._named_by(ticket)
-        if opened_by is not None and not sign_in_link_is_for(user_id, opened_by):
-            logger.warning("MCP sign-in link refused reason=other_identity server_id=%s", server_id)
+        link = self._named_by(ticket)
+        if opened_by is not None and not sign_in_link_is_for(link.user_id, opened_by):
+            logger.warning("MCP sign-in link refused reason=other_identity server_id=%s", link.server_id)
             raise McpSignInLinkOtherUserError
         browser_token = secrets.token_urlsafe(32) if opened_by is None else None
-        url = await self.start(server_id=server_id, user_id=user_id, identity_id=opened_by, browser_token=browser_token)
+        url = await self.start(
+            server_id=link.server_id,
+            user_id=link.user_id,
+            identity_id=opened_by,
+            browser_token=browser_token,
+            link=link,
+        )
         if browser_token is None:
             return LinkSignIn(url=url)
         return LinkSignIn(url=url, state=_link_flow_state(browser_token), browser_token=browser_token)
 
     @staticmethod
-    def _named_by(ticket: str) -> tuple[uuid.UUID, str]:
+    def _named_by(ticket: str) -> SignInLinkTicket:
         named = read_sign_in_link(ticket)
         if named is None:
             raise McpConnectionFlowError("This sign-in link is not valid or has expired. Ask again for a new one.")

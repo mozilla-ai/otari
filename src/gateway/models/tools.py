@@ -365,6 +365,21 @@ class McpOAuthFlow(Base):
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
 
 
+class McpSignInLinkUse(Base):
+    """A conversation's sign-in link that has started its sign-in, so it cannot start another.
+
+    Keyed on the SHA-256 of the link's sealed ticket, never the ticket itself, so a database read
+    gives nobody a link to open. ``expires_at`` is no earlier than the moment the link itself stops
+    working, after which the row records nothing a link could still need and is deleted.
+    """
+
+    __tablename__ = "mcp_sign_in_link_uses"
+
+    ticket_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
+
+
 class McpServerRequestStatus(StrEnum):
     """Where a member's request for a catalog server stands."""
 

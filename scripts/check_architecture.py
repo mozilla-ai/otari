@@ -2621,6 +2621,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/tools/mcp_oauth_flow_repository.py",
         "baseline": (),
     },
+    "gateway.models.tools.McpSignInLinkUse": {
+        "repository": "gateway/repositories/tools/mcp_sign_in_link_use_repository.py",
+        "baseline": (),
+    },
     "gateway.models.tools.McpServerRequest": {
         "repository": "gateway/repositories/tools/mcp_server_request_repository.py",
         "baseline": (),

@@ -58,7 +58,21 @@ def test_a_link_names_its_server_and_user_and_points_at_this_gateway() -> None:
     assert link.startswith(cast(str, sign_in_link_prefix(_config())))
     assert "=" not in _ticket(link), "no padding for a chat to mangle"
     assert "alice" not in link
-    assert read_sign_in_link(_ticket(link)) == (SERVER, "alice")
+    read = read_sign_in_link(_ticket(link))
+    assert read is not None and (read.server_id, read.user_id) == (SERVER, "alice")
+
+
+def test_a_link_is_known_by_its_token_however_its_text_is_spelled() -> None:
+    """Base64 decoding skips stray characters, so one link can be written many ways and must be spent once."""
+    ticket = _ticket(sign_in_link(_config(), server_id=SERVER, user_id="alice"))
+    again = _ticket(sign_in_link(_config(), server_id=SERVER, user_id="alice"))
+    respelled = f"{ticket[:10]}....{ticket[10:]}"
+
+    first, other, same = read_sign_in_link(ticket), read_sign_in_link(again), read_sign_in_link(respelled)
+    assert first is not None and other is not None and same is not None
+    assert same.ticket_hash == first.ticket_hash, "a respelled link is the same link"
+    assert other.ticket_hash != first.ticket_hash, "each link minted is a link of its own"
+    assert ticket not in repr(first) and first.ticket_hash not in repr(first)
 
 
 def test_a_link_is_refused_once_altered_forged_or_old(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -196,7 +210,9 @@ async def test_a_connection_removed_mid_conversation_is_answered_as_final_with_a
     assert f"works for {int(SIGN_IN_LINK_LIFETIME.total_seconds() // 60)} minutes" in told
     assert "Show the link exactly as written" in told
     assert "never open a sign-in link someone else sent them" in told
-    assert read_sign_in_link(_ticket(link)) == (SERVER, "alice") and minted == [(SERVER, "alice")]
+    read = read_sign_in_link(_ticket(link))
+    assert read is not None and (read.server_id, read.user_id) == (SERVER, "alice")
+    assert minted == [(SERVER, "alice")]
     # A plain result, not a tool error: an error reads as something to retry.
     assert not is_tool_error(told)
 
