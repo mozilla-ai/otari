@@ -28,7 +28,7 @@ cannot be deleted.
 
 1. Open **API keys** and click **Create key**.
 2. Enter a **Name**, such as `mlpa`.
-3. Click **Advanced** and tick **Service key**.
+3. Click **More options** and tick **Service key**.
 4. Pick the **Budget for each end user**: every new end user starts on its own
    copy of it. Picking **None** leaves new end users uncapped, limited only by
    the key's own ceiling.
@@ -37,7 +37,7 @@ cannot be deleted.
 6. Set **Max end users**, or keep 10,000; see
    [Capping a key's end users](#capping-a-keys-end-users).
 7. To manage end users with the key (step 4), check the scopes it needs in the
-   **End users** group under **Access**. With only **Call models** checked, the
+   **End users** group under **Access** → **Advanced scopes**. With only **Call models** checked, the
    key makes model calls for its end users but cannot list, change or delete
    them.
 8. Click **Create key** and copy the key.
@@ -56,7 +56,7 @@ spend of all its end users together, give the key its own spend ceiling (see
 
 Through the API, a service key is created with `is_service_key`,
 `end_user_budget_ids`, `end_user_budget_id` and `max_end_users`; see the
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/3725f96fbf75df78434f6cfe6b312792d5555312/docs/public/openapi.json).
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/12be23b15a2bfc233d98ec5ab4718a249078e2a2/docs/public/openapi.json).
 
 A service key created without naming scopes can make model calls for its end
 users but cannot manage them: the routes in [Manage end users](#4-manage-end-users) need

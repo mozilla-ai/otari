@@ -31,7 +31,7 @@ A key reaches the workspace's servers only if it holds the `mcp:execute` scope,
 and lists them only with `mcp:read`. A new key holds neither. While a key you
 can see in the workspace lacks `mcp:execute`, **Tools** → **MCP servers** says
 how many do, with a link to **API keys**, where you change a key under
-**Access**. See [Scopes](api-keys.md#scopes).
+**Access** → **Advanced scopes**. See [Scopes](api-keys.md#scopes).
 
 The top of the page says whether the server is **Shared** or **Personal**. To
 change that, or its name, URL, token or OAuth client, click **Settings** there

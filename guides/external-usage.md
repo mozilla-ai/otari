@@ -15,11 +15,11 @@ never blocks a request. So it is sent with a key that is exempt from budgets,
 which only the deployment's operator can create.
 
 1. Signed in as the operator, open **API keys** and click **Create key**.
-2. Name the key for the importer, and under **Access** check **Send
-   OpenTelemetry data** and **Report usage observed elsewhere**, and clear
-   **Call models**. Those are the two [scopes](api-keys.md#scopes) importing
-   needs, `telemetry:write` and `usage:write`, and no model calls.
-3. Open **Advanced** and tick **Exempt from budget**.
+2. Name the key for the importer. Under **Access**, open **Advanced scopes**,
+   check **Send OpenTelemetry data** and **Report usage observed elsewhere**,
+   and clear **Call models**. Those are the two [scopes](api-keys.md#scopes)
+   importing needs, `telemetry:write` and `usage:write`, and no model calls.
+3. Open **More options** and tick **Exempt from budget**.
 4. Click **Create key** and copy the key.
 
 Through the API, the same key is

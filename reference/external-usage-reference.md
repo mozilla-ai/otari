@@ -8,7 +8,7 @@ Imported usage is after the fact. It never counts toward a budget and never
 blocks live traffic. That is why an import key must be budget-exempt.
 
 - **Create a dedicated import key.** The operator ticks **Exempt from budget**
-  under **Advanced** in the key form. Members cannot exempt their own keys.
+  under **More options** in the key form. Members cannot exempt their own keys.
 - **Do not use it for inference.** The exemption also lifts budget and pricing
   checks on live traffic sent with that key.
 - **Do not import what you route.** Proxied and imported events cannot be
@@ -42,7 +42,7 @@ event takes:
 
 Only metadata and token counts are accepted; prompt, completion and tool fields
 are rejected. The exact schema is in the
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/3725f96fbf75df78434f6cfe6b312792d5555312/docs/public/openapi.json).
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/12be23b15a2bfc233d98ec5ab4718a249078e2a2/docs/public/openapi.json).
 
 Sending a batch again is safe: events already stored come back as duplicates.
 When the database is busy or unreachable, this endpoint and the OTLP endpoints
