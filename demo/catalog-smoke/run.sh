@@ -79,7 +79,7 @@ trap 'kill "$GATEWAY" 2>/dev/null; wait "$GATEWAY" 2>/dev/null' EXIT INT TERM
 
 READY=0
 for _ in $(seq 1 90); do
-  if curl -sf "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
+  if curl -sf "http://127.0.0.1:$PORT/api/v1/health" >/dev/null 2>&1; then
     READY=1
     break
   fi
