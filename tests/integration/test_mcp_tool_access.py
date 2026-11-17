@@ -389,7 +389,8 @@ def test_a_server_that_relabels_a_tool_read_only_later_does_not_widen_read(
     assert [tool["name"] for tool in discovered.json()["tools"]] == ["list_issues", "delete_issue"]
     assert created.status_code == 403 and created.json()["code"] == CODE_TOOL_NOT_ALLOWED
     test_db.expire_all()
-    assert test_db.get(WorkspaceMcpServer, row.id).read_tools_hinted == ["list_issues", "delete_issue"]
+    stored = test_db.get(WorkspaceMcpServer, row.id)
+    assert stored is not None and stored.read_tools_hinted == ["list_issues", "delete_issue"]
 
     # A manager taking the new label is what widens it.
     taken = client.patch(url, json={"read_tools": list(TOOL_NAMES)}, headers=master_key_header)
