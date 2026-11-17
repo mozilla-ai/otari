@@ -224,11 +224,63 @@ Adding a provider offers every model its key lists:
 Refreshing a provider's models:
 
 - moves an unchanged seeded rate to the current default, and leaves an
-  operator-set rate alone
+  operator-set rate alone (to put one back on the default, see
+  [Going back to the default price](#going-back-to-the-default-price))
 - never switches on a model the operator switched off
 - keeps on a model switched on without a price on purpose (one a moved or
   copied provider lists, one an operator switched on unpriced, and every model
   of a provider that serves unlisted models)
+
+### Vendors
+
+A provider that routes to others (Together, OpenRouter, otari.ai) serves models
+from many vendors. Each model on the roster is listed under its vendor, taken
+from, in order:
+
+1. the maker models.dev names for the model
+2. the part of the model's id before `/` (`black-forest-labs` for
+   `black-forest-labs/FLUX.1-schnell`)
+3. the vendor whose own provider this is (OpenAI for `openai`)
+
+A model none of these names is listed under **Other**.
+
+Each vendor has a switch of its own, per hosted provider:
+
+- Off withholds every model of that vendor on that provider, at dispatch
+  (`424`) and in the catalog, including models a later refresh offers.
+- Each model keeps its own switch, which applies again once the vendor is
+  switched back on.
+- A model's price can still be set while its vendor is off.
+
+Through the API:
+
+| Route | Does |
+| --- | --- |
+| `GET /api/v1/hosted-providers/{provider}/models` | Lists each model's `vendor`, and in `vendors` counts each vendor's models across the whole provider with the vendor's switch. Takes `vendor` to list one vendor's models; `search` matches a model's name or its vendor. |
+| `PATCH /api/v1/hosted-providers/{provider}/vendors` | Switches one vendor on or off: `{"vendor": "Alibaba", "enabled": false}`. |
+| `POST /api/v1/hosted-providers/{provider}/models/switch` | Sets every model's own switch for one vendor at once. Switching on serves the models that have a price and leaves the rest off; `only_unpriced` with switching off withholds only the models served without a price. |
+
+### Going back to the default price
+
+A rate an operator set stays until someone changes it, so a model priced by
+hand while models.dev had no price for it keeps that price after models.dev
+lists one. To put it back on the default:
+
+- The model list shows the default beside an operator's rate wherever the two
+  differ (`default_rates`), and each vendor counts those models
+  (`custom_differs`).
+- `POST /api/v1/hosted-providers/{provider}/models/reset-prices` puts the
+  models named in `models`, or every operator-priced model (of one `vendor`,
+  when given), back on the default. With `dry_run` it returns what it would
+  change and writes nothing.
+
+The default is the models.dev rate, or for a provider of the `otari`
+implementation the price its listing names (see
+[Connecting otari.ai](#connecting-otariai)). A reset stores it as a new
+version, so later refreshes keep it current and requests already billed keep
+the cost they were billed at. A model the default does not price keeps its
+rate and is listed in `skipped_no_default`. With `default_pricing` off, only an
+`otari` provider has a default to go back to.
 
 ### Workspace access
 
