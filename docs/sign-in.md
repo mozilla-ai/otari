@@ -322,7 +322,7 @@ bootstrap operator or the master key may call it, so no other operator can take
 the role for themselves. From a dashboard session it takes the caller's
 `current_password`, as a password change does, and a session whose account has
 no password is refused: set one first, or use the master key. It is refused with 400 for a
-target that is not an active operator with a verified, unblocked email address
+target that is not an active operator with a verified (not only vouched for), unblocked email address
 and a password, which is what keeps master-key sign-in retired.
 
 After a handover:

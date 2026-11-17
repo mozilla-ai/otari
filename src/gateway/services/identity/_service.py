@@ -446,6 +446,11 @@ class IdentityService:
             raise BootstrapHandoverRefusedError("This account has no password; its owner sets one first")
         if target.email_verified_at is None:
             raise BootstrapHandoverRefusedError("This account's email address is not verified yet")
+        if target.email_vouched_at is not None:
+            # Its first provider sign-in would remove the password that keeps master-key sign-in retired.
+            raise BootstrapHandoverRefusedError(
+                "This account's email address is only vouched for; its owner proves it by email first"
+            )
         if await self.blocked_among([target.email]):
             raise BootstrapHandoverRefusedError("This account's address is blocked")
 

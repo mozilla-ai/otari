@@ -95,8 +95,9 @@ The bootstrap operator is the account the master key acts as (see
 [The bootstrap operator](sign-in.md#the-bootstrap-operator)). To give the role to
 someone else:
 
-1. Make sure their account is active, has a verified email address and a
-   password, and is not blocked.
+1. Make sure their account is active, has a password and an email address it
+   verified by email (not one only vouched for by a passed-on link), and is not
+   blocked.
 2. On **Accounts**, click **Make operator** on their row if they are not an
    operator yet.
 3. Signed in as the bootstrap operator, click **Make bootstrap operator** on

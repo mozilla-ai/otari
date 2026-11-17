@@ -666,6 +666,7 @@ def _operator(
     is_active: bool = True,
     with_password: bool = True,
     verified: bool = True,
+    vouched: bool = False,
 ) -> uuid.UUID:
     """An identity that can take the role unless a flag says otherwise."""
     session = session_factory()
@@ -678,6 +679,7 @@ def _operator(
             is_active=is_active,
             hashed_password=hash_password(_PASSWORD) if with_password else None,
             email_verified_at=datetime.now(UTC) if verified else None,
+            email_vouched_at=datetime.now(UTC) if vouched else None,
         )
         session.add(user)
         session.commit()
@@ -878,6 +880,7 @@ def test_another_operator_cannot_take_the_role(
         ({"is_active": False}, "Reactivate this account"),
         ({"with_password": False}, "no password"),
         ({"verified": False}, "not verified"),
+        ({"vouched": True}, "only vouched for"),
     ],
 )
 def test_a_target_that_could_not_hold_the_role_is_refused(

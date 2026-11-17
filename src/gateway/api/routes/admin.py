@@ -157,8 +157,8 @@ async def hand_over_bootstrap_operator(
 
     Refused with 400 when the caller is another operator, when the current password is
     missing or wrong, for a session whose account has no password, and for a target that
-    is the caller, deactivated, not an operator, or without a verified and unblocked email
-    address and a password.
+    is the caller, deactivated, not an operator, or without an unblocked email address that
+    is verified rather than only vouched for, and a password.
 
     The master key keeps working and now acts as the new bootstrap operator, including
     resetting their password, so rotate it when whoever held it should no longer.
