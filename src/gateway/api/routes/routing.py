@@ -48,6 +48,7 @@ from gateway.services.routing import (
     compile_policy,
     explain_router_ordering,
 )
+from gateway.services.tenancy import OrgProviderKeyService
 
 router = APIRouter(
     prefix="/routing/policies",
@@ -232,7 +233,9 @@ def validated_spec(name: str, spec: dict[str, Any]) -> PolicySpec:
         ) from exc
 
 
-def _validate_write(config: GatewayConfig, name: str, spec: PolicySpec, user_id: str | None) -> None:
+def _validate_write(
+    config: GatewayConfig, name: str, spec: PolicySpec, user_id: str | None, own_prefixes: frozenset[str]
+) -> None:
     """Apply the startup policy rules to a runtime write, as a 400.
 
     A configured policy wins over a *workspace-wide* stored one during resolution,
@@ -265,7 +268,13 @@ def _validate_write(config: GatewayConfig, name: str, spec: PolicySpec, user_id:
     indirections = all_policy_names(config) | all_alias_names(config) | {name}
     for selector in spec.static_selectors():
         try:
-            config.validate_alias(name, selector, alias_names=indirections, hosted_implementation=hosted_implementation)
+            config.validate_alias(
+                name,
+                selector,
+                alias_names=indirections,
+                hosted_implementation=hosted_implementation,
+                own_prefixes=own_prefixes,
+            )
         except ValueError as exc:
             # `validate_alias` phrases both its target errors and its *name* errors
             # in alias terms, so both are rewritten; otherwise a policy named "a:b"
@@ -433,7 +442,8 @@ async def upsert_policy_in_workspace(
         await _require_user(db, request.user_id)
     spec = validated_spec(request.name, request.spec)
     await refresh_policy_cache(db)
-    _validate_write(config, request.name, spec, request.user_id)
+    own_prefixes = await OrgProviderKeyService(db, config).get_workspace_byo_providers(workspace_id=workspace_id)
+    _validate_write(config, request.name, spec, request.user_id, own_prefixes)
 
     # Both scopes are part of the identity: the upsert must not turn one
     # workspace's policy into another's, nor a workspace-wide policy into a
