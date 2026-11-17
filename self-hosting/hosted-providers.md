@@ -59,6 +59,15 @@ Whose declaration counts depends on whose key serves the offering:
   may serve a request.
 - A `providers:` instance from `config.yml` is never declared.
 
+### Terms and privacy links
+
+A hosted provider can link the upstream's own terms of service (`terms_url`)
+and privacy policy (`privacy_url`). The public Providers pages show both beside
+the provider's models (see [A public catalog](configuration.md#a-public-catalog)).
+Each is an absolute `http` or `https` address with no username or password, and
+anything else is refused with 422. On an update, an omitted link is kept, and
+`null` or an empty string removes it.
+
 ### Hosted provider names
 
 A hosted provider is named after its provider by default. A name of its own,
@@ -356,6 +365,7 @@ hosted_providers:
 | `models` | Model ids a refresh offers when the provider cannot list its own. |
 | `supported_countries` | The two-letter country codes whose requests it serves. Unset serves every country. See [Supported countries](configuration.md#supported-countries). |
 | `zero_data_retention` | `true` declares that the provider keeps no prompts or completions. Defaults to `false`. See [Zero data retention](#zero-data-retention). |
+| `terms_url`, `privacy_url` | The provider's terms of service and privacy policy, shown on the public Providers pages. See [Terms and privacy links](#terms-and-privacy-links). |
 
 `api_key` may be left out for:
 
