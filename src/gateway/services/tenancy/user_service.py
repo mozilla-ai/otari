@@ -51,6 +51,7 @@ below is what gives it a way to sign in.
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 
 from fastapi import BackgroundTasks
 from sqlalchemy.exc import IntegrityError
@@ -368,6 +369,16 @@ class _SignupRaceLostError(Exception):
     """Another write claimed this address first, so the signup's block rolls back and answers as a no-op."""
 
 
+class AddressProof(StrEnum):
+    """How a signup proved the address it claims, where it proved one at all."""
+
+    MAILBOX = "mailbox"
+    """An invitation emailed to the address, so its holder receives mail there."""
+
+    VOUCHED = "vouched"
+    """An invitation handed over as a link, so an organization vouches for the address and nobody else does."""
+
+
 async def create_user_for_signup(
     db: AsyncSession,
     config: GatewayConfig,
@@ -380,7 +391,7 @@ async def create_user_for_signup(
     blocked_addresses: BlockedAddresses,
     full_name: str | None = None,
     terms_accepted: bool = False,
-    address_proven: bool = False,
+    proof: AddressProof | None = None,
 ) -> User | None:
     """Claim an identity ``organization_service`` already put on the roster, register a new
     one where the deployment allows it, or do nothing.
@@ -415,9 +426,11 @@ async def create_user_for_signup(
     verification link: a signup that could never be verified would strand the
     caller in the unverified, hard-blocked state #650's sign-in gate enforces.
 
-    ``address_proven`` says the caller already proved the mailbox (an invitation
-    sent to it, through ``SignupInvitePort``): the identity is then verified as it
-    is claimed, and no verification email is sent, so the caller can sign in at once.
+    ``proof`` says the caller already proved the address (an invitation naming it,
+    through ``SignupInvitePort``): the identity is then verified as it is claimed, and
+    no verification email is sent, so the caller can sign in at once. A vouched proof is
+    recorded as such, because an organization vouching for an address is weaker than the
+    address answering and does not satisfy every rule a verified address does.
 
     ``organizations`` must be built on ``uow``, with the listeners a
     registration's membership and workspace need.
@@ -427,7 +440,7 @@ async def create_user_for_signup(
     durable whether or not the message goes out.
     """
     mailer = Mailer(config)
-    if not address_proven:
+    if proof is None:
         mailer.require_ready()
     validate_new_password(password)
     if config.terms_url is not None and not terms_accepted:
@@ -482,8 +495,10 @@ async def create_user_for_signup(
 
             token = generate_token()
             values: dict[str, str | datetime | None] = {"full_name": identity.full_name or full_name}
-            if address_proven:
+            if proof is not None:
                 values["email_verified_at"] = datetime.now(UTC)
+                if proof is AddressProof.VOUCHED:
+                    values["email_vouched_at"] = datetime.now(UTC)
             else:
                 values["email_verification_token_hash"] = hash_token(token)
                 values["email_verification_token_expires_at"] = datetime.now(UTC) + timedelta(
@@ -504,7 +519,7 @@ async def create_user_for_signup(
     except _SignupRaceLostError:
         return None
     await db.refresh(identity)
-    if address_proven:
+    if proof is not None:
         return identity
 
     background_tasks.add_task(

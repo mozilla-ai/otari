@@ -4,6 +4,7 @@ Most of it is still in ``services/tenancy``; code new to the domain lands here.
 """
 
 from gateway.repositories.users_repository import AccessLists, BudgetUse
+from gateway.services.organizations._acceptance import InvitedAddresses
 from gateway.services.organizations._account_release import AccountRelease, ReleasedOrganizations
 from gateway.services.organizations._admission import AdmittedMember, MembershipAdmission
 from gateway.services.organizations._blocked_addresses import BlockedAddresses
@@ -36,6 +37,7 @@ __all__ = [
     "InvitationFactsReader",
     "InvitationMailLimit",
     "ReleasedOrganizations",
+    "InvitedAddresses",
     "MembershipAdmission",
     "OrganizationClaimedDomains",
     "SsoEnforcement",

@@ -56,6 +56,14 @@ class OrganizationInvitation(Base):
     delivery_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC), nullable=False)
 
+    def can_still_be_used(self, *, now: datetime) -> bool:
+        """Whether the link this invitation was sent in still opens it.
+
+        True while the invitation has not expired and was not declined. Whether the deployment would
+        deliver to the address is a separate question, asked where it matters.
+        """
+        return now < self.expires_at and self.declined_at is None
+
 
 class OrganizationMembershipOrigin(Base):
     """An audit record of who invited a member, when they were invited, and when they joined."""

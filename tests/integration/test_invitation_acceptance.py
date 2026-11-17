@@ -25,7 +25,12 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.services.mail import Mailer
-from gateway.services.organizations import DeliveryRule, InvitationFactsReader, OrganizationClaimedDomains
+from gateway.services.organizations import (
+    DeliveryRule,
+    InvitationFactsReader,
+    InvitedAddresses,
+    OrganizationClaimedDomains,
+)
 from gateway.services.organizations._acceptance import AcceptingPerson, InvitationAcceptance
 from gateway.services.tenancy import OrganizationService
 
@@ -395,3 +400,38 @@ async def test_an_accept_that_would_leave_no_active_owner_is_refused_and_keeps_t
 
     assert len(survived) == 1
     assert role == "owner"
+
+
+def _invited_addresses(session: AsyncSession) -> InvitedAddresses:
+    uow = UnitOfWork(session)
+    return InvitedAddresses(uow, OrganizationRepositories.on(uow), clock=lambda: _NOW)
+
+
+async def test_signup_is_told_the_address_an_invitation_was_sent_to(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="lookup-live")
+    await _invite(async_db, organization, email="ada@example.com")
+
+    assert await _invited_addresses(async_db).invited_email(_TOKEN) == "ada@example.com"
+
+
+async def test_signup_is_told_nothing_by_a_token_no_invitation_still_opens(async_db: AsyncSession) -> None:
+    """An expired invitation, a declined one and an unknown token each prove nothing."""
+    organization = await create_organization(async_db, slug="lookup-dead")
+    await _invite(async_db, organization, email="expired@example.com", token="expired-token")
+    await _invite(async_db, organization, email="declined@example.com", token="declined-token")
+    uow = UnitOfWork(async_db)
+    invitations = OrganizationInvitationRepository(uow)
+    async with uow:
+        expired = await invitations.get_by_token_hash(hash_token("expired-token"))
+        assert expired is not None
+        expired.expires_at = _NOW - timedelta(seconds=1)
+        await invitations.decline_by_token_hash(hash_token("declined-token"), at=_NOW)
+    lookup = _invited_addresses(async_db)
+
+    answers = [
+        await lookup.invited_email("expired-token"),
+        await lookup.invited_email("declined-token"),
+        await lookup.invited_email("a-token-nobody-was-sent"),
+    ]
+
+    assert answers == [None, None, None]

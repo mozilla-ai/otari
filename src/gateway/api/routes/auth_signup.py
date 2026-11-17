@@ -38,13 +38,15 @@ from gateway.api.routes._public_auth import (
     refuse_exhausted_verification_attempts,
     throttle_public_auth,
 )
-from gateway.core.addresses import MAX_STORED_ADDRESS_LENGTH
+from gateway.core.addresses import MAX_STORED_ADDRESS_LENGTH, normalized_address
 from gateway.core.config import GatewayConfig
+from gateway.core.tokens import is_shared_token
 from gateway.exceptions.identity_exceptions import VerificationTokenInvalidError
 from gateway.models.tenancy import MAX_FULL_NAME_LENGTH
 from gateway.services.mail import MailNotConfiguredError
 from gateway.services.tenancy import report_new_account
 from gateway.services.tenancy.user_service import (
+    AddressProof,
     create_user_for_signup,
     resend_verification_email,
     verify_email,
@@ -141,6 +143,21 @@ _INVITED_MESSAGE = "Your account is ready. Sign in to continue."
 _RESEND_MESSAGE = "If this address is registered and unverified, a verification email is on its way."
 
 
+def _address_proof(invited: str | None, claimed: str, *, token: str | None) -> AddressProof | None:
+    """Which proof of ``claimed`` an invitation to ``invited`` carries, or None where it proves nothing.
+
+    Both addresses are compared in normal form, and a value that is not an address matches nothing,
+    including another value that is not an address. A link handed over rather than emailed vouches for
+    the address instead of proving the mailbox answers.
+    """
+    if invited is None or token is None:
+        return None
+    invited_address = normalized_address(invited)
+    if invited_address is None or normalized_address(claimed) != invited_address:
+        return None
+    return AddressProof.VOUCHED if is_shared_token(token) else AddressProof.MAILBOX
+
+
 @router.post("/signup")
 async def signup(
     body: SignupRequest,
@@ -171,7 +188,7 @@ async def signup(
     """
     throttle_public_auth(request)
     invited = await invites.invited_email(body.invite) if body.invite else None
-    address_proven = invited is not None and invited.strip().lower() == body.email.strip().lower()
+    proof = _address_proof(invited, body.email, token=body.invite)
     try:
         claimed = await create_user_for_signup(
             db,
@@ -184,12 +201,12 @@ async def signup(
             blocked_addresses=identities,
             full_name=body.full_name,
             terms_accepted=body.terms_accepted,
-            address_proven=address_proven,
+            proof=proof,
         )
     except MailNotConfiguredError as exc:
         raise mail_unavailable(exc) from None
     await report_new_account(growth, claimed, background_tasks=background_tasks)
-    if address_proven and claimed is not None:
+    if proof is not None and claimed is not None:
         return SignupResponse(message=_INVITED_MESSAGE, verified=True)
     return SignupResponse(message=_OPEN_SIGNUP_MESSAGE if config.open_signup else _SIGNUP_MESSAGE)
 

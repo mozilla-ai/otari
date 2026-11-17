@@ -70,6 +70,36 @@ class InvitationPreview:
     invited_email: str
 
 
+class InvitedAddresses:
+    """Answers which address an invitation was sent to, while its link still opens it.
+
+    Signup asks this of a token somebody arrived with, so a link that reached a mailbox stands in for
+    the verification email that would otherwise prove the address.
+    """
+
+    def __init__(
+        self,
+        uow: UnitOfWork,
+        repositories: OrganizationRepositories,
+        *,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    ) -> None:
+        self._uow = uow
+        self._invitations = repositories.invitations
+        self._clock = clock
+
+    async def invited_email(self, token: str) -> str | None:
+        """The address this token was sent to, or None when no invitation it still opens holds it.
+
+        NOTE: Callers must not call this from inside an already-open Unit of Work block.
+        """
+        async with self._uow:
+            invitation = await self._invitations.get_by_token_hash(hash_token(token))
+            if invitation is None or not invitation.can_still_be_used(now=self._clock()):
+                return None
+            return invitation.email
+
+
 class InvitationAcceptance:
     """Answers an invitation link: the facts it offers, and the invitee's decline.
 
@@ -175,7 +205,7 @@ class InvitationAcceptance:
         """
         now = self._clock()
         invitation = await self._invitations.get_by_token_hash(hash_token(token))
-        if invitation is None or invitation.expires_at <= now or invitation.declined_at is not None:
+        if invitation is None or not invitation.can_still_be_used(now=now):
             raise InvitationNoLongerValidError()
         if await self._refuses_the_address(invitation, now=now):
             raise InvitationNoLongerValidError()
