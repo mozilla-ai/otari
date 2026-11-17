@@ -43,8 +43,10 @@ from gateway.models.api_keys import APIKey
 from gateway.models.users import User
 from gateway.repositories.tenancy import WorkspaceRepository
 from gateway.repositories.tools import WorkspaceMcpServerGrantRepository, WorkspaceMcpServerRepository
+from gateway.repositories.users_repository import DEFAULT_USER_ID
 from gateway.services.alias_service import all_alias_names
 from gateway.services.catalog import dated_builds
+from gateway.services.mcp_stateless import reads_as_pattern
 from gateway.services.provider_kwargs import reaches_organization_key, split_selector
 from gateway.services.tenancy.org_provider_key_service import (
     cached_org_key_offer,
@@ -284,7 +286,8 @@ MAX_MCP_TOOL_PATTERN_LENGTH = 256
 McpAccessSource = Literal["key", "user", "everyone"]
 
 MCP_READ_PRESET = "@read"
-"""The tool pattern naming a server's read tools: the ones its managers labeled read, never the server's own hints."""
+"""The tool pattern naming a server's read tools: the ones its managers labeled read, or, until they edit that
+list, the ones the server marked read-only when its tools were first listed. A later listing never adds to them."""
 
 
 def is_mcp_tool_allowed(patterns: Sequence[str], tool: str) -> bool:
@@ -304,6 +307,25 @@ def expand_mcp_tool_patterns(patterns: Sequence[str], read_tools: Sequence[str])
         return list(patterns)
     expanded = [pattern for pattern in patterns if pattern != MCP_READ_PRESET]
     return expanded + [name for name in read_tools if name not in expanded]
+
+
+def mcp_read_tools(labeled: Sequence[str] | None, hinted: Sequence[object] | None) -> list[str]:
+    """A server's read tools: a manager's labels once they set them, else the tools the server marked read-only.
+
+    ``labeled`` is the stored labels, ``None`` until a manager edits them. Until then the answer is
+    ``hinted``, the read-only hints of the server's first tool listing, kept from then on, and names
+    only whole tool names.
+    """
+    if labeled is not None:
+        return list(labeled)
+    if hinted is None:
+        return []
+    names = [
+        name
+        for name in dict.fromkeys(hinted)
+        if isinstance(name, str) and not reads_as_pattern(name) and len(name) <= MAX_MCP_TOOL_PATTERN_LENGTH
+    ]
+    return names[:MAX_MCP_TOOL_PATTERNS]
 
 
 def validate_mcp_tool_patterns(patterns: object) -> list[str]:
@@ -360,10 +382,14 @@ class McpAccess:
 
     ``key_grants`` and ``user_grants`` are the tool patterns the caller's key and its owner hold on
     each server, by server id. A key's grant decides over its owner's, and either over the server's
-    ``everyone_tools``. ``unrestricted`` is the master key, which no rule binds.
+    ``everyone_tools``. ``unrestricted`` is the master key, which no rule binds. ``user_id`` is the user
+    the caller acts as on a per-user server, whose own connection its calls carry: a key's owner, or a
+    session's user. A caller with none, which includes a key of the shared ``default`` user, cannot
+    use such a server.
     """
 
     unrestricted: bool = False
+    user_id: str | None = None
     key_grants: Mapping[uuid.UUID, tuple[str, ...]] = field(default_factory=dict)
     user_grants: Mapping[uuid.UUID, tuple[str, ...]] = field(default_factory=dict)
     request_servers_allowed: bool = True
@@ -411,6 +437,9 @@ async def resolve_request_mcp_access(
         (key_grants if grant.api_key_id is not None else user_grants)[grant.server_id] = tuple(grant.tools)
     workspace = await WorkspaceRepository(db).get(workspace_id) if workspace_id is not None else None
     return McpAccess(
+        # The shared ``default`` user stands for "no owner": every key created without one belongs
+        # to it, so a connection of its own would be one account behind all of them.
+        user_id=user_id if user_id != DEFAULT_USER_ID else None,
         key_grants=key_grants,
         user_grants=user_grants,
         request_servers_allowed=workspace is None or workspace.request_mcp_servers_allowed,
@@ -418,7 +447,11 @@ async def resolve_request_mcp_access(
 
 
 async def revoke_user_mcp_grants(db: AsyncSession, user_id: str) -> None:
-    """Stage the removal of a deleted user's MCP grants, which a soft delete leaves behind otherwise."""
+    """Stage the removal of a deleted user's MCP grants, which a soft delete leaves behind otherwise.
+
+    Their connections and pending sign-ins are the tools service's to end
+    (``McpConnectionService.end_for_deleted_user``).
+    """
     await WorkspaceMcpServerGrantRepository(db).remove_for_user(user_id)
 
 

@@ -63,7 +63,17 @@ describe("McpServerDetailPage, Access", () => {
 
     expect(screen.getByText(/Issues for our repos/)).toBeVisible()
     expect(screen.getByText(SERVER.url)).toBeVisible()
-    expect(screen.getByText("ENABLED")).toBeVisible()
+    expect(
+      screen.getByRole("button", { name: /Availability/ }),
+    ).toHaveTextContent("On request")
+    // Its id is at the top, with how a request asks for it.
+    expect(screen.getByText(SERVER.id)).toBeVisible()
+    expect(
+      screen.getByRole("button", { name: `Copy id for ${SERVER.name}` }),
+    ).toBeVisible()
+    expect(screen.getByText("mcp_server_ids").parentElement).toHaveTextContent(
+      "Add this id to mcp_server_ids in your request.",
+    )
     // One page, in the order a call meets the server.
     expect(
       screen
@@ -72,14 +82,47 @@ describe("McpServerDetailPage, Access", () => {
     ).toEqual(
       expect.arrayContaining([
         "Exposed tools",
-        "ACL",
+        "Access rules",
         "Trace a call",
         "Connection",
       ]),
     )
+    // The mode is said at the top, beside the server's state.
+    expect(screen.getByText("SHARED")).toBeVisible()
+    // What the rules are for, without a connected-users list to point at on a Shared server.
     expect(
-      screen.getByRole("link", { name: "← MCP servers" }),
-    ).toBeInTheDocument()
+      screen.getByText(
+        /A rule can name any member or API key, including people who have not connected yet\.$/,
+      ),
+    ).toBeVisible()
+  })
+
+  it("explains each Availability choice, in the list and behind the icon", async () => {
+    mockMcpServerApi({ server: SERVER })
+    const user = userEvent.setup()
+    await openPage()
+
+    await user.click(
+      screen.getByRole("button", { name: "Explain the three choices" }),
+    )
+    const tip = await screen.findByRole("tooltip")
+    for (const line of [
+      "Off: Nobody can use it.",
+      "On request: Available to people building things, invisible to coding agents.",
+      "Every request: Available everywhere.",
+    ]) {
+      expect(tip).toHaveTextContent(line)
+    }
+
+    await user.click(screen.getByRole("button", { name: /Availability/ }))
+    expect(
+      await screen.findByRole("option", { name: "On request" }),
+    ).toHaveAccessibleDescription(
+      "Available to people building things, invisible to coding agents",
+    )
+    expect(
+      screen.getByRole("option", { name: "Off" }),
+    ).not.toHaveAccessibleDescription()
   })
 
   it("edits the default policy to allow specific tools", async () => {
@@ -133,7 +176,9 @@ describe("McpServerDetailPage, Access", () => {
     })
     // Nothing is labeled on this server, which the choice says before it is made.
     expect(
-      within(dialog).getByText(/No tool is labeled read on this server yet/),
+      within(dialog).getByText(
+        "Allows nothing yet: no tool is labeled read on this server.",
+      ),
     ).toBeVisible()
     await user.click(
       within(dialog).getByRole("radio", { name: /Read tools only/ }),
@@ -168,7 +213,7 @@ describe("McpServerDetailPage, Access", () => {
     )
   })
 
-  it("lists the ACL in match order: key rules, user rules, the default policy", async () => {
+  it("lists the access rules in match order: key rules, user rules, the default policy", async () => {
     mockMcpServerApi({
       server: SERVER,
       members: MEMBERS,
@@ -197,7 +242,7 @@ describe("McpServerDetailPage, Access", () => {
     })
     await openPage()
 
-    const table = await screen.findByRole("grid", { name: "ACL" })
+    const table = await screen.findByRole("grid", { name: "Access rules" })
     expect(await within(table).findByText("Bo's laptop")).toBeVisible()
     expect(within(table).getByText("key of Bo")).toBeVisible()
     expect(within(table).getByText("inactive")).toBeVisible()
@@ -211,16 +256,14 @@ describe("McpServerDetailPage, Access", () => {
       expect.stringMatching(/^Alice.*DENY/),
       expect.stringMatching(/^Default policy.*ALLOW/),
     ])
-    expect(
-      screen.getByText(/Rules are matched from the most specific/),
-    ).toBeVisible()
+    expect(screen.getByText(/The most specific rule wins/)).toBeVisible()
   })
 
   it("shows only the default policy when there are no rules", async () => {
     mockMcpServerApi({ server: SERVER })
     await openPage()
 
-    const table = await screen.findByRole("grid", { name: "ACL" })
+    const table = await screen.findByRole("grid", { name: "Access rules" })
     expect(within(table).getByText("Default policy")).toBeVisible()
     expect(within(table).getAllByRole("row")).toHaveLength(2)
     expect(
@@ -274,9 +317,9 @@ describe("McpServerDetailPage, Access", () => {
     )
     // The answer is the whole list, which the table shows without a refetch.
     expect(
-      await within(await screen.findByRole("grid", { name: "ACL" })).findByText(
-        "ci-bot",
-      ),
+      await within(
+        await screen.findByRole("grid", { name: "Access rules" }),
+      ).findByText("ci-bot"),
     ).toBeVisible()
   })
 
@@ -404,7 +447,9 @@ describe("McpServerDetailPage, Access", () => {
     )
     await waitFor(() =>
       expect(
-        within(screen.getByRole("grid", { name: "ACL" })).queryByText("ci-bot"),
+        within(screen.getByRole("grid", { name: "Access rules" })).queryByText(
+          "ci-bot",
+        ),
       ).not.toBeInTheDocument(),
     )
   })
@@ -528,7 +573,7 @@ describe("McpServerDetailPage, Access", () => {
       ),
     ).toBe(true)
     // Managing follows the role in the linked workspace, not the selected one.
-    expect(screen.getByRole("button", { name: "Disable" })).toBeVisible()
+    expect(screen.getByRole("button", { name: /Availability/ })).toBeVisible()
   })
 
   it("does not find a server of another workspace without a link naming it", async () => {
@@ -544,7 +589,7 @@ describe("McpServerDetailPage, Access", () => {
     ).toBeVisible()
   })
 
-  it("is read-only for someone who cannot manage the workspace", async () => {
+  it("shows a member none of the admin sections, and asks nothing of them", async () => {
     const calls = mockMcpServerApi({
       server: workspaceMcpServer({
         workspace_id: WORKSPACE,
@@ -556,23 +601,83 @@ describe("McpServerDetailPage, Access", () => {
     })
     await openPage()
 
-    const table = screen.getByRole("grid", { name: "ACL" })
-    expect(within(table).getByText("Default policy")).toBeVisible()
-    expect(within(table).getByText("DENY")).toBeVisible()
     expect(
-      screen.getByText(/can see and change the rules for keys and users/),
+      screen
+        .getAllByRole("heading", { level: 2 })
+        .map((heading) => heading.textContent),
+    ).toEqual(["Shared account", "Your tools"])
+    expect(screen.getByText(/nothing for you to connect/)).toBeVisible()
+    expect(
+      await screen.findByText(/don't let you use any tool on this server/),
     ).toBeVisible()
-    expect(
-      screen.queryByRole("button", { name: "Edit the default policy" }),
-    ).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole("button", { name: "Add rule" }),
-    ).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole("button", { name: "Disable" }),
-    ).not.toBeInTheDocument()
+    for (const name of ["Check", "Add rule", "Edit the default policy"]) {
+      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument()
+    }
     // The access list is a manager's read, so it is not asked for at all.
     expect(calls.some((call) => call.url.includes("/access"))).toBe(false)
+  })
+
+  it("shows a member the tools their own rule lets them use", async () => {
+    mockMcpServerApi({
+      server: workspaceMcpServer({ workspace_id: WORKSPACE }),
+      role: "member",
+      workspaceRole: "member",
+      deploymentOperator: false,
+      myTools: {
+        server_id: SERVER.id,
+        decided_by: "user",
+        access: "some",
+        known: true,
+        checked_at: "2026-11-10T10:00:00+00:00",
+        tools: [
+          {
+            name: "list_issues",
+            description: "List the open issues.",
+            read_only: true,
+          },
+          { name: "create_issue", description: null, read_only: false },
+        ],
+      },
+    })
+    const user = userEvent.setup()
+    await openPage()
+
+    const list = await screen.findByRole("list", {
+      name: `Your tools on ${SERVER.name}`,
+    })
+    expect(within(list).getByText("list_issues")).toBeVisible()
+    expect(within(list).getByText("List the open issues.")).toBeVisible()
+    expect(within(list).getByText("create_issue")).toBeVisible()
+    // Only the tool labeled read wears the chip.
+    expect(within(list).getAllByText("Read-only")).toHaveLength(1)
+
+    // The search reads names and descriptions.
+    const search = screen.getByRole("searchbox", { name: "Search your tools" })
+    await user.type(search, "open issues")
+    expect(within(list).getByText("list_issues")).toBeVisible()
+    expect(within(list).queryByText("create_issue")).not.toBeInTheDocument()
+    await user.clear(search)
+    await user.type(search, "nothing like this")
+    expect(
+      screen.getByText('No tool matches "nothing like this".'),
+    ).toBeVisible()
+  })
+
+  it("says why a member's tools are not known yet", async () => {
+    mockMcpServerApi({
+      server: workspaceMcpServer({
+        workspace_id: WORKSPACE,
+        credential_mode: "per_user",
+      }),
+      role: "member",
+      workspaceRole: "member",
+      deploymentOperator: false,
+    })
+    await openPage()
+
+    expect(
+      await screen.findByText(/Connect your account above to see the tools/),
+    ).toBeVisible()
   })
 
   it("falls back to read-only when the access list is refused", async () => {
@@ -580,12 +685,86 @@ describe("McpServerDetailPage, Access", () => {
     await openPage()
 
     expect(
-      await screen.findByText(
-        /can see and change the rules for keys and users/,
-      ),
+      await screen.findByText("Only an owner or admin can see these rules."),
     ).toBeVisible()
     expect(
       screen.queryByRole("button", { name: "Add rule" }),
     ).not.toBeInTheDocument()
+  })
+
+  it("opens a connected user's access rule from Connected users", async () => {
+    const personal = workspaceMcpServer({
+      workspace_id: WORKSPACE,
+      credential_mode: "per_user",
+      health: health({ tools: ["list_issues"] }),
+    })
+    mockMcpServerApi({
+      server: personal,
+      members: MEMBERS,
+      connections: [
+        {
+          user_id: BO,
+          full_name: "Bo",
+          email: null,
+          connected_at: "2026-11-01T00:00:00Z",
+          updated_at: "2026-11-01T00:00:00Z",
+        },
+      ],
+    })
+    const user = userEvent.setup()
+    await openPage()
+
+    const table = await screen.findByRole("grid", {
+      name: "Users connected to github",
+    })
+    await user.click(await within(table).findByText("Bo"))
+
+    const dialog = await screen.findByRole("dialog", { name: "Add rule" })
+    expect(
+      within(dialog).getByRole("checkbox", { name: "Bo, all their keys" }),
+    ).toBeChecked()
+  })
+
+  it("edits the rule a connected user already has", async () => {
+    const personal = workspaceMcpServer({
+      workspace_id: WORKSPACE,
+      credential_mode: "per_user",
+    })
+    mockMcpServerApi({
+      server: personal,
+      members: MEMBERS,
+      access: {
+        everyone_tools: ["*"],
+        grants: [
+          grant({
+            id: "g-bo",
+            subject: "user",
+            user_id: BO,
+            api_key_id: null,
+            key_name: null,
+          }),
+        ],
+      },
+      connections: [
+        {
+          user_id: BO,
+          full_name: "Bo",
+          email: null,
+          connected_at: "2026-11-01T00:00:00Z",
+          updated_at: "2026-11-01T00:00:00Z",
+        },
+      ],
+    })
+    const user = userEvent.setup()
+    await openPage()
+
+    const table = await screen.findByRole("grid", {
+      name: "Users connected to github",
+    })
+    // Wait for the rules, so the click finds Bo's.
+    await screen.findByRole("button", { name: "Edit the rule for Bo" })
+    await user.click(within(table).getByText("Bo"))
+
+    expect(await screen.findByRole("dialog", { name: "Edit Bo" })).toBeVisible()
   })
 })

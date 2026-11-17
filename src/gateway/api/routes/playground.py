@@ -57,6 +57,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import (
     CurrentIdentity,
     FileServiceDep,
+    McpSignedInServersDep,
     PlaygroundToolOfferDep,
     RequestSessionBillingPortDep,
     RequestSessionModelProviderPortDep,
@@ -157,6 +158,11 @@ class PlaygroundMcpServer(BaseModel):
     name: str
     purpose_hint: str | None = None
     enabled: bool
+    sign_in_required: bool = Field(
+        default=False,
+        description="The server sends each user's own credential and the caller has not signed in to it, "
+        "so a message that attaches it is refused with mcp_sign_in_required until they do",
+    )
 
 
 class PlaygroundToolsResponse(BaseModel):
@@ -234,6 +240,7 @@ async def read_playground_tools(
     config: Annotated[GatewayConfig, Depends(get_config)],
     offer: PlaygroundToolOfferDep,
     code_execution_policies: WorkspaceCodeExecutionPoliciesDep,
+    signed_in: McpSignedInServersDep,
     workspace_id: Annotated[uuid.UUID | None, _WORKSPACE_QUERY] = None,
 ) -> PlaygroundToolsResponse:
     """The gateway-run tools the caller's workspace may attach to a message.
@@ -251,6 +258,7 @@ async def read_playground_tools(
         config=config,
         offer=offer,
         code_execution_policies=code_execution_policies,
+        signed_in=signed_in,
         workspace_id=resolved,
         user_id=str(identity.id),
     )
@@ -264,6 +272,7 @@ async def read_playground_tools(
                 name=server.name,
                 purpose_hint=server.purpose_hint,
                 enabled=server.enabled,
+                sign_in_required=server.sign_in_required,
             )
             for server in availability.mcp_servers
         ],

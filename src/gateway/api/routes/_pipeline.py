@@ -178,8 +178,10 @@ from gateway.exceptions.tools_exceptions import (
     CodeExecutionRefusedError,
     ContainerOnManagedCredentialError,
     GatewayToolPricingRequiredError,
+    McpConnectionUnavailableError,
     McpServerConfigurationError,
     McpServerDeclarationError,
+    McpSignInRequiredError,
     SearchToolMisconfiguredError,
     WebAccessRefusedError,
     WebSearchCredentialRefusedError,
@@ -391,12 +393,17 @@ from gateway.services.tools import (
     WEB_FETCH_TOOL_NAME,
     WEB_SEARCH_TOOL_NAME,
     AdmittedCodeExecution,
+    AdmittedMcpServers,
     AdmittedWebTools,
     CandidateTools,
     CombinedToolBackend,
     DeclaredCodeExecution,
     DeclaredWebTools,
     Dialect,
+    McpConnectionService,
+    McpSignInBackend,
+    McpSignInNeeded,
+    McpSignInReason,
     PricedTool,
     ProviderToolDeclaration,
     ToolUseBudget,
@@ -415,6 +422,7 @@ from gateway.services.tools import (
     declares_code_execution,
     declares_provider_mcp,
     extract_web_tools,
+    mcp_server_contacts,
     native_rendering,
     read_web_declarations,
     read_web_fetch_max_uses,
@@ -3232,6 +3240,7 @@ class ToolContext:
         self,
         *,
         mcp_server_configs: list[McpServerConfig] | None,
+        mcp_sign_in: Sequence[McpSignInNeeded] = (),
         use_sandbox: bool,
         sandbox_tool_entry: dict[str, Any] | None,
         code_execution_port: CodeExecutionPort | None,
@@ -3257,6 +3266,8 @@ class ToolContext:
         # through; None where the request runs none.
         self.guardrails = guardrails
         self.mcp_server_configs = mcp_server_configs
+        # The per-user servers the loop offers a sign-in link for instead of opening.
+        self.mcp_sign_in = tuple(mcp_sign_in)
         self.use_sandbox = use_sandbox
         # The uploads a sandbox session is seeded with, and the store the outputs
         # of Otari's or a provider's sandbox land in. None when files are disabled.
@@ -3464,7 +3475,13 @@ class ToolContext:
 
     @property
     def use_tool_loop(self) -> bool:
-        return bool(self.mcp_server_configs) or self.use_sandbox or self.use_web_search or self.use_web_fetch
+        return (
+            bool(self.mcp_server_configs)
+            or bool(self.mcp_sign_in)
+            or self.use_sandbox
+            or self.use_web_search
+            or self.use_web_fetch
+        )
 
     def build_web_backends(self) -> Sequence[WebSearchBackend | WebFetchBackend | WebRetrievalBackend]:
         """Build the request's web tool backends: on the libraries, else the old backend for a search.
@@ -3780,7 +3797,7 @@ async def prepare_gateway_tools(
     try:
         web_candidates = await _admit_web_declarations(adapter, ctx, declared, web_policy)
         guardrails = await _admit_guardrails(adapter, ctx, response, declared)
-        mcp_servers = await _admit_mcp_servers(adapter, ctx, declared, backends.ports.mcp_server)
+        mcp = await _admit_mcp_servers(adapter, ctx, declared, backends.ports.mcp_server)
         code = await _declare_code_execution(adapter, ctx, declared, backends)
         candidates = _combined(web_candidates, _decide_for_candidates(adapter, ctx, [code.provider_declaration()]))
         answers = await _admit_candidates(adapter, ctx, code, candidates, web_policy=web_policy)
@@ -3803,8 +3820,14 @@ async def prepare_gateway_tools(
     except DATABASE_ERRORS:
         # A database failure is not an HTTPException, so the reservation is released here too.
         # The rollback comes first, because a failed statement leaves the session unusable for the release.
+        await ctx.uow.abandon()
         with contextlib.suppress(*DATABASE_ERRORS):
-            await ctx.db.rollback()
+            await release_reservation(ctx)
+        raise
+    except asyncio.CancelledError:
+        # The client disconnected during an admission step's I/O. Released as a database failure is,
+        # rolling back first, because an interrupted statement leaves the session unusable.
+        await ctx.uow.abandon()
         with contextlib.suppress(*DATABASE_ERRORS):
             await release_reservation(ctx)
         raise
@@ -3832,7 +3855,8 @@ async def prepare_gateway_tools(
         code, web, web_access = answer.code, answer.web, answer.web_access
         return ToolContext(
             config=ctx.config,
-            mcp_server_configs=mcp_servers,
+            mcp_server_configs=mcp.servers,
+            mcp_sign_in=mcp.sign_in,
             use_sandbox=code.use_sandbox,
             sandbox_tool_entry=code.tool_entry,
             code_execution_port=backends.ports.code_execution,
@@ -4277,16 +4301,26 @@ async def _admit_guardrails(
 
 async def _admit_mcp_servers(
     adapter: FormatAdapter[Any, Any], ctx: RequestContext, declared: DeclaredTools, servers: WorkspaceMcpServers
-) -> list[McpServerConfig] | None:
-    """The MCP servers the request may reach: its own, then the stored ones its IDs name."""
+) -> AdmittedMcpServers:
+    """The MCP servers the request may reach: its own, the stored ones its IDs name, and its workspace's attached ones.
+
+    Only a request made with an API key that may call MCP tools gets the attached servers. The Playground
+    names the servers it uses, and a master key belongs to no workspace.
+    """
     provider_mcp = declares_provider_mcp(declared.tools)
     declares_mcp = _declares_mcp(declared)
     try:
+        attach = (
+            ctx.api_key is not None
+            and not ctx.session
+            and KeyScope.MCP_EXECUTE in ctx.api_key.scopes
+            and await servers.any_attached(ctx.workspace_id)
+        )
         access = (
             await resolve_request_mcp_access(
                 ctx.db, ctx.api_key, ctx.workspace_id, session_user_id=ctx.user_id if ctx.session else None
             )
-            if declares_mcp
+            if declares_mcp or attach
             else McpAccess()
         )
         return await admit_mcp_servers(
@@ -4296,12 +4330,16 @@ async def _admit_mcp_servers(
             workspace_id=ctx.workspace_id,
             access=access,
             provider_mcp=provider_mcp,
+            attach=attach,
         )
-    except (McpServerDeclarationError, WorkspaceMcpServerNotFoundError) as exc:
+    except (
+        McpServerDeclarationError,
+        WorkspaceMcpServerNotFoundError,
+        McpSignInRequiredError,
+        McpServerConfigurationError,
+        McpConnectionUnavailableError,
+    ) as exc:
         raise domain_error(adapter, exc) from exc
-    except McpServerConfigurationError as exc:
-        # Not `domain_error`, which would hide a 5xx's fixed message behind a generic one.
-        raise adapter.error(exc.status_code, exc.message, ErrorKind.API) from exc
 
 
 async def _web_declarations(
@@ -5483,14 +5521,18 @@ async def _open_tool_backends(
     """
     mcp: MCPClientPool | None = None
     if tool_ctx.mcp_server_configs:
-        mcp = await stack.enter_async_context(
-            MCPClientPool(
-                tool_ctx.mcp_server_configs,
-                tally=tool_ctx.tally,
-                trace=tool_ctx.trace,
-                ceded_tool_names=tool_ctx.reserved_tool_names | _declared_tool_names(tool_ctx.remaining_user_tools),
+        try:
+            mcp = await stack.enter_async_context(
+                MCPClientPool(
+                    tool_ctx.mcp_server_configs,
+                    tally=tool_ctx.tally,
+                    trace=tool_ctx.trace,
+                    ceded_tool_names=tool_ctx.reserved_tool_names | _declared_tool_names(tool_ctx.remaining_user_tools),
+                    contacts=mcp_server_contacts,
+                )
             )
-        )
+        except McpConnectionUnavailableError as exc:
+            raise domain_error(adapter, exc) from exc
         try:
             refuse_shadowed_builtin_tools(mcp, tool_ctx.reserved_tool_names)
         except McpServerDeclarationError as exc:
@@ -5504,6 +5546,29 @@ async def _open_tool_backends(
         backends.append(sandbox)
     if mcp is not None:
         backends.append(mcp)
+    # A server that refused the user's token at connect time, whose sign-in is over, gets a stand-in too.
+    signed_out = [
+        McpSignInNeeded(
+            server_id=exc.mcp_server_id,
+            name=cfg.name,
+            purpose_hint=cfg.purpose_hint,
+            user_id=exc.user_id,
+            reason=McpSignInReason.NOT_SIGNED_IN,
+        )
+        for cfg, exc in (mcp.signed_out if mcp is not None else [])
+    ]
+    if tool_ctx.mcp_sign_in or signed_out:
+        taken = {tool["function"]["name"] for backend in backends for tool in backend.openai_tools}
+        backends.append(
+            McpSignInBackend(
+                [*tool_ctx.mcp_sign_in, *signed_out],
+                mint=lambda server_id, user_id: McpConnectionService.sign_in_link(
+                    tool_ctx.config, server_id=server_id, user_id=user_id
+                ),
+                link_prefix=McpConnectionService.sign_in_link_prefix(tool_ctx.config),
+                taken=taken | tool_ctx.reserved_tool_names | _declared_tool_names(tool_ctx.remaining_user_tools),
+            )
+        )
     if (guardrails := tool_ctx.guardrails) is not None and guardrails.guards_tools:
         backends = [screened_backend(backend, guardrails) for backend in backends]
     return _OpenedTools(pool=backends[0] if len(backends) == 1 else CombinedToolBackend(backends), sandbox=sandbox)
@@ -5595,7 +5660,7 @@ class _ToolBackendKind(StrEnum):
         declared = [
             kind
             for kind, used in (
-                (cls.MCP, bool(tool_ctx.mcp_server_configs)),
+                (cls.MCP, bool(tool_ctx.mcp_server_configs) or bool(tool_ctx.mcp_sign_in)),
                 (cls.SANDBOX, tool_ctx.use_sandbox),
                 (cls.WEB_RETRIEVAL, tool_ctx.use_web_search or tool_ctx.use_web_fetch),
             )

@@ -648,6 +648,8 @@ def test_a_responses_stream_that_reaches_its_terminal_event_ends_cleanly(
 class _LookupPool:
     """An MCP pool whose server owns ``lookup``, so the gateway runs that tool itself."""
 
+    signed_out: tuple[()] = ()
+
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
 

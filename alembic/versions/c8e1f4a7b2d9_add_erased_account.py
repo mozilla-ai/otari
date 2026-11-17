@@ -4,7 +4,7 @@
 nothing that names the person.
 
 Revision ID: c8e1f4a7b2d9
-Revises: a6c9fa1da92a
+Revises: d4a8e1f6b3c9
 Create Date: 2026-11-16
 """
 
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "c8e1f4a7b2d9"
-down_revision: str | Sequence[str] | None = "a6c9fa1da92a"
+down_revision: str | Sequence[str] | None = "d4a8e1f6b3c9"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

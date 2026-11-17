@@ -15,9 +15,10 @@ from gateway.services.model_access import (
     validate_mcp_read_tools,
     validate_mcp_tool_patterns,
 )
-from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServers
+from gateway.services.tenancy.workspace_mcp_server_service import RequestMcpServers, WorkspaceMcpServers
 from gateway.services.tools import admit_mcp_servers
 from gateway.services.tools._mcp_admission import INLINE_MCP_SERVER_REFUSED_DETAIL
+from gateway.services.tools._mcp_sign_in import McpSignInNeeded, McpSignInReason
 
 GITHUB = uuid.UUID(int=1)
 JIRA = uuid.UUID(int=2)
@@ -109,11 +110,13 @@ class _Servers:
     def __init__(self) -> None:
         self.asked: list[McpAccess | None] = []
 
-    async def resolve_many(
-        self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID], access: McpAccess | None = None
-    ) -> list[McpServerConfig]:
+    async def resolve_for_request(
+        self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID], access: McpAccess, *, attach: bool
+    ) -> RequestMcpServers:
         self.asked.append(access)
-        return [McpServerConfig(name="github", url="https://93.184.216.34/mcp", caller_tool_patterns=["list_*"])]
+        return RequestMcpServers(
+            servers=[McpServerConfig(name="github", url="https://93.184.216.34/mcp", caller_tool_patterns=["list_*"])]
+        )
 
     async def resolve_one(
         self, workspace_id: uuid.UUID, server_id: uuid.UUID, access: object = None
@@ -153,8 +156,8 @@ async def test_admission_passes_the_callers_access_to_the_stored_servers_and_cle
     )
 
     assert fake.asked == [access]
-    assert admitted is not None
-    assert [(server.name, server.caller_tool_patterns) for server in admitted] == [
+    assert admitted.servers is not None
+    assert [(server.name, server.caller_tool_patterns) for server in admitted.servers] == [
         ("mine", None),
         ("github", ["list_*"]),
     ]
@@ -172,8 +175,8 @@ async def test_a_callers_inline_servers_pass_where_the_workspace_allows_them() -
         access=McpAccess(),
     )
 
-    assert admitted is not None
-    assert [server.name for server in admitted] == ["mine"]
+    assert admitted.servers is not None
+    assert [server.name for server in admitted.servers] == ["mine"]
 
 
 def test_the_callers_patterns_are_off_the_wire_the_schema_and_the_revision() -> None:
@@ -184,3 +187,96 @@ def test_the_callers_patterns_are_off_the_wire_the_schema_and_the_revision() -> 
     plain = ResolvedMcpServer(id=uuid.UUID(int=1), name="s", url="https://93.184.216.34/mcp")
     other = ResolvedMcpServer(id=uuid.UUID(int=1), name="s", url="https://93.184.216.34/mcp", everyone_tools=[])
     assert plain.revision == other.revision
+
+
+@pytest.mark.asyncio
+async def test_an_attached_server_gives_way_to_a_request_server_of_the_same_name() -> None:
+    class _Attached:
+        async def resolve_for_request(
+            self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID], access: McpAccess, *, attach: bool
+        ) -> RequestMcpServers:
+            return RequestMcpServers(
+                servers=[McpServerConfig(name="mine", url="https://93.184.216.34/mcp", attached=True)]
+            )
+
+    admitted = await admit_mcp_servers(
+        [McpServerConfig(name="mine", url="https://93.184.216.35/mcp")],
+        None,
+        servers=cast(WorkspaceMcpServers, _Attached()),
+        workspace_id=uuid.uuid4(),
+        access=McpAccess(),
+        attach=True,
+    )
+
+    assert admitted.servers is not None
+    assert [server.url for server in admitted.servers] == ["https://93.184.216.35/mcp"]
+
+
+@pytest.mark.asyncio
+async def test_an_attached_sign_in_gives_way_to_a_request_server_of_the_same_name() -> None:
+    """No sign-in tool is offered for a name the request's own server already answers to; a named one collides."""
+
+    def need(name: str, *, attached: bool) -> McpSignInNeeded:
+        return McpSignInNeeded(
+            server_id=uuid.uuid4(),
+            name=name,
+            purpose_hint=None,
+            user_id="u",
+            reason=McpSignInReason.NOT_SIGNED_IN,
+            attached=attached,
+        )
+
+    class _SignIns:
+        async def resolve_for_request(
+            self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID], access: McpAccess, *, attach: bool
+        ) -> RequestMcpServers:
+            return RequestMcpServers(
+                sign_in=[need("mine", attached=True), need("drive", attached=True), need("named", attached=False)]
+            )
+
+    admitted = await admit_mcp_servers(
+        [McpServerConfig(name="mine", url="https://93.184.216.35/mcp")],
+        [uuid.uuid4()],
+        servers=cast(WorkspaceMcpServers, _SignIns()),
+        workspace_id=uuid.uuid4(),
+        access=McpAccess(),
+        attach=True,
+    )
+
+    assert [entry.name for entry in admitted.sign_in] == ["drive", "named"]
+    # A server the request named, waiting on a sign-in, collides with a request server as a connected one does.
+    with pytest.raises(McpServerDeclarationError):
+        await admit_mcp_servers(
+            [McpServerConfig(name="named", url="https://93.184.216.36/mcp")],
+            [uuid.uuid4()],
+            servers=cast(WorkspaceMcpServers, _SignIns()),
+            workspace_id=uuid.uuid4(),
+            access=McpAccess(),
+            attach=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_an_attached_server_whose_url_fails_its_check_is_left_out() -> None:
+    class _Attached:
+        async def resolve_for_request(
+            self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID], access: McpAccess, *, attach: bool
+        ) -> RequestMcpServers:
+            return RequestMcpServers(
+                servers=[
+                    McpServerConfig(name="moved", url="https://10.0.0.1/mcp", attached=True),
+                    McpServerConfig(name="fine", url="https://93.184.216.34/mcp", attached=True),
+                ]
+            )
+
+    admitted = await admit_mcp_servers(
+        None,
+        None,
+        servers=cast(WorkspaceMcpServers, _Attached()),
+        workspace_id=uuid.uuid4(),
+        access=McpAccess(),
+        attach=True,
+    )
+
+    assert admitted.servers is not None
+    assert [server.name for server in admitted.servers] == ["fine"]

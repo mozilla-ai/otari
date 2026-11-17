@@ -17,7 +17,6 @@ from gateway.api.deps._base import (
     get_unit_of_work,
 )
 from gateway.api.deps.api_keys import (
-    ApiKeyServiceDep,
     get_api_key_service,
 )
 from gateway.api.deps.auth import (
@@ -50,6 +49,7 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.repositories.tools import (
+    McpUserConnectionRepository,
     OrgWebSearchKeyRepository,
     SearchToolRepository,
     WorkspaceCodeExecutionPolicyRepository,
@@ -89,7 +89,7 @@ from gateway.services.tenancy import (
     OrganizationService,
 )
 from gateway.services.tenancy.authorization import WorkspaceAccess
-from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServers, WorkspaceMcpServerService
+from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServers
 from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchPolicies, WorkspaceWebSearchService
 from gateway.services.tool_settings_service import load_overrides, stage_override
 from gateway.services.tools import (
@@ -100,6 +100,7 @@ from gateway.services.tools import (
     DirectToolRate,
     DirectToolService,
     DirectToolUsage,
+    McpUserTokens,
     SearchCatalogCaller,
     SearchToolService,
     ToolRateInForce,
@@ -192,20 +193,10 @@ CodeExecutionEnvironmentServiceDep = Annotated[
 
 async def get_workspace_mcp_servers(db: Annotated[AsyncSession, Depends(get_db)]) -> WorkspaceMcpServers:
     """Build the request path's reader of a workspace's MCP servers, on the request's session."""
-    return WorkspaceMcpServers(db)
+    return WorkspaceMcpServers(db, McpUserTokens(McpUserConnectionRepository(db), release=lambda: release_session(db)))
 
 
 WorkspaceMcpServersDep = Annotated[WorkspaceMcpServers, Depends(get_workspace_mcp_servers)]
-
-
-def get_workspace_mcp_server_service(
-    db: Annotated[AsyncSession, Depends(get_db)], api_keys: ApiKeyServiceDep
-) -> WorkspaceMcpServerService:
-    """Build the service on the request's session, with the keys its access lists name."""
-    return WorkspaceMcpServerService(db, api_keys)
-
-
-WorkspaceMcpServerServiceDep = Annotated[WorkspaceMcpServerService, Depends(get_workspace_mcp_server_service)]
 
 
 def get_web_provider_client(request: Request) -> httpx.AsyncClient:

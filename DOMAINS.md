@@ -210,7 +210,11 @@ A workspace's MCP servers, web search policy and code execution policy are
 read from this deployment's own rows, by `WorkspaceMcpServers`,
 `WorkspaceWebSearchPolicies` and `WorkspaceCodeExecutionPolicies`, with no port
 between them and their callers. A resolved MCP server is connected to directly,
-and nothing proxies MCP traffic. The web search policy says who may search and
+and nothing proxies MCP traffic. A stored server sends one workspace credential
+(a token, or the account a manager signed in to for everyone) or, in per-user
+mode, each user's own: `McpConnectionService` runs a sign-in to such a server
+and ends a connection, and `McpUserTokens` reads the token a request carries
+(`mcp_user_connections`, `mcp_shared_connections`, `mcp_oauth_flows`). The web search policy says who may search and
 how far, and carries the workspace's own search key where its organization
 brought one; a tools service applies it to a request with one rule everywhere.
 The code execution policy says who may run code and within which limits, and
@@ -218,6 +222,13 @@ the request path and the Playground read it through the same service.
 
 It also owns an organization's web search keys and each workspace's choice
 among them (`org_web_search_keys`, `workspace_web_search_key_overrides`).
+So does a member's request for a catalog server and a manager's answer to it
+(`mcp_server_requests`): `McpServerRequestService` asks mcp-catalog for the
+entry a request names and the tenancy checks for who manages the workspace,
+both through interfaces it is handed.
+A stored server's display belongs here too: an admin's uploaded logo and tile
+choice (`workspace_mcp_server_logos`), kept apart from the catalog's fetched
+logos, which it asks mcp-catalog for through an interface it is handed.
 
 **The tool test.** A tool is something the model calls during a request. The
 domain holds the registry, the loop and each tool's settings. A capability the
@@ -303,6 +314,25 @@ in the dashboard or `update_check` answers in config. A check sends the version
 and a random install id, once a day at a time of day picked by a seed that is
 never sent. Every replica polls, and the conditional update on the state row
 decides which one sends.
+
+### mcp-catalog
+
+The catalog of remote MCP servers a workspace can add: a copy of the official
+MCP Registry, kept only where Otari can connect, the sync that fills it, the
+hand-maintained Popular list matched against it, and server logos: the
+gateway finds one per catalog server, or per host for a server added by URL,
+fetches it once through the pinned retrieval client and serves it itself
+(`mcp_logos`).
+Who may ask for a sync is answered through the tenancy domain's workspace
+checks, passed in rather than imported.
+
+The catalog permits nothing and the model never calls it, so it is not part of
+tools. Being in the catalog gives a workspace no access: a catalog server is
+one the workspace stores only through the tools domain's own create. Whether a
+request may name a server inline instead is that domain's separate policy. Every replica polls, and the
+conditional update on the sync state row decides which one syncs.
+
+Built in the target shape from the start.
 
 ### alerts
 

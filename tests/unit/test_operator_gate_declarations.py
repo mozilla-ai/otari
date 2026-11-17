@@ -53,6 +53,7 @@ from gateway.api.routes import (
     keys,
     mail,
     maintenance_mode,
+    mcp_catalog,
     models,
     pricing,
     providers,
@@ -106,6 +107,7 @@ _NON_OPERATOR_ROUTERS: list[tuple[str, APIRouter, Callable[..., Any]]] = [
     ("code_execution.catalog", code_execution.catalog_router, verify_catalog_reader),
     ("end_users", end_users.router, verify_service_key),
     ("end_users.budgets", end_users.budgets_router, verify_service_key),
+    ("mcp_catalog", mcp_catalog.router, verify_master_key),
     ("models.catalog", models.catalog_router, verify_catalog_reader),
     ("pricing.catalog", pricing.catalog_router, verify_catalog_reader),
     ("providers.catalog", providers.catalog_router, verify_catalog_reader),
@@ -145,6 +147,10 @@ _UNGATED_ROUTERS: dict[str, str] = {
     "files.router": _DATA_PLANE,
     "images.router": _DATA_PLANE,
     "mcp.router": _DATA_PLANE,
+    "mcp_connections.callback_router": (
+        "an authorization server's redirect: the session cookie does not travel on it, and the single-use "
+        "state in the query is what it acts on"
+    ),
     "messages.router": _DATA_PLANE,
     "moderations.router": _DATA_PLANE,
     "otlp.router": _DATA_PLANE,
