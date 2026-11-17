@@ -1,18 +1,42 @@
 """Answering an invitation link: what it offers, and declining it."""
 
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from gateway.core.addresses import normalized_address
 from gateway.core.tokens import hash_token
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.exceptions.organizations_exceptions import InvitationNoLongerValidError
+from gateway.exceptions.organizations_exceptions import (
+    InvitationAddressMismatchError,
+    InvitationNoLongerValidError,
+)
 from gateway.models.organizations import OrganizationInvitation
 from gateway.repositories.organizations import OrganizationRepositories
 from gateway.services.mail import Mailer
 from gateway.services.organizations._blocked_addresses import BlockedAddresses
 from gateway.services.organizations._delivery_rule import DeliveryRule
 from gateway.services.organizations._invitation_facts import InvitationFacts, InvitationFactsReader
+
+
+@dataclass(frozen=True, kw_only=True)
+class AcceptingPerson:
+    """The account accepting an invitation: who is signed in, and the address they hold."""
+
+    email: str
+    user_id: uuid.UUID
+
+
+def _require_the_invited_address(invited: str, by: AcceptingPerson) -> None:
+    """Refuse unless the person accepting holds the invited address.
+
+    Both are read by the one rule for an address that is stored, so a difference of case or
+    surrounding space is the same address. Two values that are not addresses never match.
+    """
+    invited_address = normalized_address(invited)
+    if invited_address is None or normalized_address(by.email) != invited_address:
+        raise InvitationAddressMismatchError(invited)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -96,6 +120,3 @@ class InvitationAcceptance:
         if self._mailer.can_deliver_links:
             return bool(await self._blocked.blocked_among([invitation.email]))
         return not await self._delivery.allows(invitation.email, invitation.organization_id, now=now)
-
-
-__all__ = ["InvitationAcceptance", "InvitationPreview"]

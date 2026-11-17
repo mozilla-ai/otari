@@ -13,7 +13,10 @@ import gateway.models  # noqa: F401  (registers every table on the metadata)
 from gateway.core.config import GatewayConfig
 from gateway.core.tokens import hash_token
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.exceptions.organizations_exceptions import InvitationNoLongerValidError
+from gateway.exceptions.organizations_exceptions import (
+    InvitationAddressMismatchError,
+    InvitationNoLongerValidError,
+)
 from gateway.models.organizations import WorkspaceAssignment
 from gateway.models.tenancy import Organization, OrganizationDomain
 from gateway.repositories.organizations import NewInvitation, OrganizationRepositories
@@ -25,7 +28,11 @@ from gateway.repositories.tenancy import (
 )
 from gateway.services.mail import Mailer
 from gateway.services.organizations import DeliveryRule, InvitationFactsReader, OrganizationClaimedDomains
-from gateway.services.organizations._acceptance import InvitationAcceptance
+from gateway.services.organizations._acceptance import (
+    AcceptingPerson,
+    InvitationAcceptance,
+    _require_the_invited_address,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -257,3 +264,19 @@ async def test_preview_answers_alike_whether_or_not_the_address_holds_an_account
     free = await service.preview("free-token")
 
     assert held.facts == free.facts
+
+
+async def test_a_session_on_another_address_cannot_accept() -> None:
+    with pytest.raises(InvitationAddressMismatchError, match="ada@example.com"):
+        _require_the_invited_address(
+            "ada@example.com", AcceptingPerson(email="grace@example.com", user_id=uuid.uuid4())
+        )
+
+
+async def test_the_invited_address_matches_in_any_spelling() -> None:
+    _require_the_invited_address("ada@example.com", AcceptingPerson(email="  ADA@Example.com  ", user_id=uuid.uuid4()))
+
+
+async def test_two_values_that_are_not_addresses_never_match() -> None:
+    with pytest.raises(InvitationAddressMismatchError):
+        _require_the_invited_address("not an address", AcceptingPerson(email="not an address", user_id=uuid.uuid4()))
