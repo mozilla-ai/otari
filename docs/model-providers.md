@@ -35,7 +35,7 @@ Most organizations use a mix. Hosted providers are convenient for catalog models
 
 A key can point at a compatible endpoint other than the provider's own, such as Synthetic or a vLLM server: enter its **API base URL** when you add the key. Requests then name the key by its **Request prefix** rather than by the provider, for example `synthetic:hf:Qwen/Qwen3.8-27B`.
 
-The prefix is made from the key's name unless you enter one, and never changes once set, because your applications send it. To cap the key's spend, narrow a spend ceiling to its prefix, not to the provider. A key added without a base URL cannot gain one later: add a new key instead.
+The prefix is made from the key's name unless you enter one, and never changes once set, because your applications send it. A [routing policy](routing.md) or an alias can name the key by it too, for example to fall over from one key on the endpoint to another. To cap the key's spend, narrow a spend ceiling to its prefix, not to the provider. A key added without a base URL cannot gain one later: add a new key instead.
 
 ## Set a default key per provider
 

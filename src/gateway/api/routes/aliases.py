@@ -37,6 +37,7 @@ from gateway.repositories.users_repository import get_active_user
 from gateway.services.alias_service import all_alias_names, list_stored_aliases, refresh_alias_cache
 from gateway.services.policy_store import all_policy_names
 from gateway.services.providers import hosted_implementation
+from gateway.services.tenancy import OrgProviderKeyService
 
 router = APIRouter(
     prefix="/aliases",
@@ -98,7 +99,7 @@ class AliasResponse(BaseModel):
         )
 
 
-def _validate(config: GatewayConfig, name: str, target: str, user_id: str | None) -> None:
+def _validate(config: GatewayConfig, name: str, target: str, user_id: str | None, own_prefixes: frozenset[str]) -> None:
     """Apply the startup alias rules to a runtime write, as a 400.
 
     A configured alias wins over a *workspace-wide* stored one during resolution,
@@ -137,7 +138,13 @@ def _validate(config: GatewayConfig, name: str, target: str, user_id: str | None
         )
     alias_names = all_alias_names(config) | {name}
     try:
-        config.validate_alias(name, target, alias_names=alias_names, hosted_implementation=hosted_implementation)
+        config.validate_alias(
+            name,
+            target,
+            alias_names=alias_names,
+            hosted_implementation=hosted_implementation,
+            own_prefixes=own_prefixes,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -219,7 +226,8 @@ async def upsert_alias_in_workspace(
     if request.user_id is not None:
         await _require_user(db, request.user_id)
     await refresh_alias_cache(db)
-    _validate(config, request.name, request.target, request.user_id)
+    own_prefixes = await OrgProviderKeyService(db, config).get_workspace_byo_providers(workspace_id=workspace_id)
+    _validate(config, request.name, request.target, request.user_id, own_prefixes)
 
     # Both scopes are part of the identity: the upsert must not turn one
     # workspace's alias into another's, nor a workspace-wide alias into a

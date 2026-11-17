@@ -258,6 +258,87 @@ def test_every_static_candidate_is_checked_not_only_the_default(client: TestClie
     assert refused.status_code == status.HTTP_400_BAD_REQUEST, refused.text
 
 
+def _slugged_key(db_session_factory: Callable[[], Session], organization_id: uuid.UUID, slug: str) -> None:
+    session = db_session_factory()
+    try:
+        session.add(
+            OrgProviderKey(
+                organization_id=organization_id,
+                provider="openai",
+                name=slug,
+                slug=slug,
+                api_base="https://api.synthetic.new/openai/v1",
+                encrypted_api_key=encrypt_secret(f"sk-{slug}"),
+                last4="1234",
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+
+def test_a_fallback_may_name_the_organizations_keys_by_their_request_prefix(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    for slug in ("synth-a", "synth-b"):
+        _slugged_key(db_session_factory, world.alpha, slug)
+    body = _policy_body(world, name="synthetic")
+    body["spec"] = {"select": [{"default": "synth-a:hf:zai-org/GLM-4.7"}], "on_failure": ["synth-b:hf:zai-org/GLM-4.7"]}
+
+    created = _post(client, world, "alpha_admin", _POLICIES, body)
+
+    assert created.status_code == status.HTTP_200_OK, created.text
+
+
+def test_a_request_prefix_reaches_the_same_key_in_slash_form(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    _slugged_key(db_session_factory, world.alpha, "synth-a")
+
+    created = _post(
+        client,
+        world,
+        "alpha_admin",
+        _POLICIES,
+        _policy_body(world, name="slashed", target="synth-a/hf:zai-org/GLM-4.7"),
+    )
+
+    assert created.status_code == status.HTTP_200_OK, created.text
+
+
+def test_an_alias_elsewhere_named_like_a_request_prefix_does_not_block_it(
+    client: TestClient, master_key_header: dict[str, str], world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    """Alias names span every workspace, so another workspace's alias can share a key's prefix."""
+    _slugged_key(db_session_factory, world.alpha, "synth-a")
+    elsewhere = client.post(
+        f"{API_ROOT}/aliases", json={"name": "synth-a", "target": _ALPHA_TARGET}, headers=master_key_header
+    )
+    assert elsewhere.status_code == status.HTTP_200_OK, elsewhere.text
+
+    created = _post(
+        client,
+        world,
+        "alpha_admin",
+        _POLICIES,
+        _policy_body(world, name="prefixed", target="synth-a:hf:zai-org/GLM-4.7"),
+    )
+
+    assert created.status_code == status.HTTP_200_OK, created.text
+
+
+def test_another_organizations_request_prefix_is_not_a_target(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    _slugged_key(db_session_factory, world.beta, "beta-synth")
+
+    refused = _post(
+        client, world, "alpha_admin", _ALIASES, _alias_body(world, name="borrowed-prefix", target="beta-synth:glm")
+    )
+
+    assert refused.status_code == status.HTTP_400_BAD_REQUEST, refused.text
+
+
 def test_an_admin_deletes_their_own_policy_and_a_member_cannot(client: TestClient, world: _World) -> None:
     assert _post(client, world, "alpha_admin", _POLICIES, _policy_body(world, name="doomed")).status_code == 200
     path = f"{_POLICIES}/doomed?workspace_id={world.workspaces['alpha_one']}"

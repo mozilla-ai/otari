@@ -1805,6 +1805,7 @@ class GatewayConfig(
         *,
         alias_names: Container[str] | None = None,
         hosted_implementation: Callable[[str], str | None] | None = None,
+        own_prefixes: Container[str] = frozenset(),
     ) -> None:
         """Validate a single alias, raising ``ValueError`` with the reason.
 
@@ -1822,7 +1823,9 @@ class GatewayConfig(
         store aliases elsewhere (the runtime ``model_aliases`` table) pass the
         union, so chaining is rejected no matter which side each alias came from.
         ``hosted_implementation`` names the implementation behind a hosted
-        provider's name, so a target may name one.
+        provider's name, so a target may name one. ``own_prefixes`` are the
+        selector prefixes the writing workspace reaches on its organization's own
+        keys, so a target may name a key by its request prefix.
         """
         known_aliases: Container[str] = self.aliases if alias_names is None else alias_names
 
@@ -1844,10 +1847,11 @@ class GatewayConfig(
             msg = f"aliases.{name} target '{target}' must be of the form 'instance:model' or 'provider:model'."
             raise ValueError(msg)
         prefix = target[:cut]
-        if prefix in known_aliases:
+        # Alias names span every workspace, so another workspace's alias may share a key's prefix here.
+        if prefix in known_aliases and prefix not in own_prefixes:
             msg = f"aliases.{name} target '{target}' points at another alias; alias chaining is not supported."
             raise ValueError(msg)
-        if prefix in self.providers:
+        if prefix in self.providers or prefix in own_prefixes:
             return
         # A hosted provider's own name, which the caller passes in where the
         # deployment's database is read: configuration is validated before it is.
