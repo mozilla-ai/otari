@@ -24,6 +24,15 @@ HostedSourceKind = Literal["database", "config"]
 
 
 @dataclass(frozen=True)
+class HostedProviderProfile:
+    """What the public Providers pages say about a hosted provider: its implementation and its policies."""
+
+    implementation: str
+    terms_url: str | None
+    privacy_url: str | None
+
+
+@dataclass(frozen=True)
 class HostedSource:
     """One hosted provider as the deployment serves it, from whichever source won.
 
@@ -78,6 +87,14 @@ class HostedSource:
     def zero_data_retention(self) -> bool:
         """Whether the operator declared that the upstream keeps no prompt or completion data."""
         return self.row.zero_data_retention if self.row is not None else self._entry.zero_data_retention
+
+    @property
+    def terms_url(self) -> str | None:
+        return self.row.terms_url if self.row is not None else self._entry.terms_url
+
+    @property
+    def privacy_url(self) -> str | None:
+        return self.row.privacy_url if self.row is not None else self._entry.privacy_url
 
     @property
     def declared_models(self) -> tuple[str, ...]:
