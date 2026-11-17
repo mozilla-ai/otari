@@ -5,13 +5,7 @@ import { Button } from "@/design-system/actions/Button"
 import { DialogSection } from "@/design-system/feedback/Dialog"
 import { formatCost, formatRelative } from "@/shared/helpers/format"
 
-/**
- * The two figures a first request is judged by, large, over the band where the
- * sheet asked for the key.
- *
- * A cell whose value the gateway did not report is dropped rather than shown
- * empty, and the band goes when both are.
- */
+/** Latency and cost. A figure the gateway did not report is dropped. */
 function Figures({ attempt }: { attempt: ActivationAttempt }) {
   const cells = [
     {
@@ -48,10 +42,7 @@ function Figures({ attempt }: { attempt: ActivationAttempt }) {
   )
 }
 
-/**
- * What the request was, over the band where the sheet showed how to send it.
- * Rows the gateway did not report are dropped.
- */
+/** What the request was. A row the gateway did not report is dropped. */
 function RequestFacts({ attempt }: { attempt: ActivationAttempt }) {
   const facts = [
     ["Model", attempt.model],
@@ -61,8 +52,7 @@ function RequestFacts({ attempt }: { attempt: ActivationAttempt }) {
   ].filter((fact): fact is [string, string] => Boolean(fact[1]))
 
   return (
-    // Takes the rest of the body, so the bands below stay where the sheet's
-    // were and the frame does not resize.
+    // Takes the rest of the body, so the bands below stay where the sheet's were.
     <DialogSection className="flex-1">
       <span className="text-emphasis">The request</span>
       <dl className="flex flex-col">
@@ -82,11 +72,11 @@ function RequestFacts({ attempt }: { attempt: ActivationAttempt }) {
   )
 }
 
-/** The finished counterpart of the listening panel, in the same band. */
+/** The listening panel's counterpart. */
 function SetupComplete({ workspaceName }: { workspaceName?: string }) {
   return (
     <div className="flex min-w-0 flex-1 items-center gap-3.5">
-      {/* The orb's own size, so the copy beside it does not move. */}
+      {/* The orb's size, so the copy beside it stays put. */}
       <span className="bg-success-subtle flex size-10 shrink-0 items-center justify-center rounded-full">
         <FiCheck aria-hidden className="text-success size-5" />
       </span>
@@ -102,18 +92,10 @@ function SetupComplete({ workspaceName }: { workspaceName?: string }) {
 }
 
 /**
- * The payoff, as the second face of the first-run sheet: the workspace's first
- * request landed.
- *
- * The same frame and the same bands as the setup face, each one answering
- * what stood in its place: the figures where the key was, the request where
- * the example was, the finished status where the listening panel was. The
- * frame keeps the sheet's size, and the wave that brings this face in leaves
- * every band where its counterpart stood.
- *
- * Still the quietest screen in the flow. One mark beside the heading, the
- * numbers as proof that the call was observed rather than something to
- * analyze, and one action to the page that does analyze them.
+ * The first-run sheet's second face, once the workspace's first request lands.
+ * Its bands answer the setup face's in the same places: the figures where the
+ * key was, the request where the example was, the finished status where the
+ * listening panel was. One action, to the page that analyzes the request.
  */
 export function setupSuccessFace({
   attempt,

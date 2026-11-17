@@ -24,6 +24,7 @@ type FakeWave = {
   updates: Options[]
   prepare: ReturnType<typeof vi.fn>
   destroy: ReturnType<typeof vi.fn>
+  debug: { progress: number; duration: number }
 }
 
 const { waves, WaveController, prepared } = vi.hoisted(() => {
@@ -45,6 +46,7 @@ const { waves, WaveController, prepared } = vi.hoisted(() => {
       },
       prepare: vi.fn(() => prepared.next()),
       destroy: vi.fn(),
+      debug: { progress: 0, duration: 3.62 },
     }
     waves.push(wave)
     return wave
@@ -80,11 +82,14 @@ function Sheet({ landed }: { landed: boolean }) {
   )
 }
 
-function reduceMotion(reduce: boolean) {
+/** Reduced motion or not, on a floating frame or the phone sheet. */
+function media({ reduce = false, phone = false } = {}) {
   vi.spyOn(window, "matchMedia").mockImplementation(
     (query: string) =>
       ({
-        matches: reduce && query.includes("prefers-reduced-motion"),
+        matches: query.includes("prefers-reduced-motion")
+          ? reduce
+          : !phone && query.includes("639px"),
         media: query,
         addEventListener: () => undefined,
         removeEventListener: () => undefined,
@@ -113,7 +118,7 @@ beforeEach(() => {
   waves.length = 0
   WaveController.mockClear()
   prepared.next = () => Promise.resolve()
-  reduceMotion(false)
+  media()
 })
 afterEach(() => {
   vi.useRealTimers()
@@ -129,6 +134,33 @@ it("lays a still copy of the sheet over the frame, with the payoff hidden under 
   expect(faceIn(frame)).toHaveTextContent("the payoff")
   expect(faceIn(frame)).toHaveAttribute("aria-hidden", "true")
   expect(faceIn(frame)).toHaveAttribute("inert")
+})
+
+it("keeps the copy unreachable while the wave treats it as the live view", async () => {
+  const { frame } = await land()
+  await waitFor(() => expect(waves).toHaveLength(1))
+
+  // What the controller does to the layer it is showing.
+  const copy = copyIn(frame)!
+  copy.toggleAttribute("inert", false)
+  copy.removeAttribute("aria-hidden")
+
+  expect(copy.firstElementChild).toHaveAttribute("inert")
+  expect(copy.firstElementChild).toHaveAttribute("aria-hidden", "true")
+  expect(copy.style.pointerEvents).toBe("none")
+})
+
+it("hands the payoff its input once the front has crossed it, before the colour fades", async () => {
+  const { frame } = await land()
+  await waitFor(() => expect(waves[0]?.updates.at(-1)?.revealed).toBe(true))
+  expect(faceIn(frame)).toHaveAttribute("inert")
+
+  // Past the anticipation and the front's travel, with the colour still on
+  // the edges: the run has not finished.
+  waves[0].debug.progress = 0.6
+
+  await waitFor(() => expect(faceIn(frame)).not.toHaveAttribute("inert"))
+  expect(copyIn(frame)).not.toBeNull()
 })
 
 it("carries the copy into the payoff, rising from the listening panel", async () => {
@@ -207,7 +239,26 @@ it("keeps the frame at the sheet's height, so the payoff does not resize it", as
   )
   const { frame } = await land()
 
-  expect(frame.style.minHeight).toContain("660px")
+  expect(frame.style.height).toBe("660px")
+})
+
+it("leaves the phone sheet's height to the viewport", async () => {
+  media({ phone: true })
+  const { frame } = await land()
+
+  expect(frame.style.height).toBe("")
+})
+
+it("opens the payoff at its top when the sheet had been scrolled", async () => {
+  const view = render(<Sheet landed={false} />)
+  const frame = await screen.findByRole("dialog", { name: "Waiting" })
+  const body = faceIn(frame).querySelector(".overflow-y-auto") as HTMLElement
+  body.scrollTop = 120
+  expect(body.scrollTop).toBe(120)
+
+  view.rerender(<Sheet landed />)
+
+  expect(body.scrollTop).toBe(0)
 })
 
 it("moves focus to the frame, so the new title is announced", async () => {
@@ -217,7 +268,7 @@ it("moves focus to the frame, so the new title is announced", async () => {
 })
 
 it("swaps the faces at once under reduced motion, without loading the wave", async () => {
-  reduceMotion(true)
+  media({ reduce: true })
   const { frame } = await land()
 
   expect(copyIn(frame)).toBeNull()

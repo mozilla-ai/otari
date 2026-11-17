@@ -41,10 +41,8 @@ import {
  * frame. A column of gaps would have read as three cards floating in a sheet,
  * which is the thing this design system does not do.
  *
- * **One frame for the wait and the payoff.** When the first request lands, the
- * sheet turns into its success face (`SetupSuccess`) inside the same frame,
- * carried there by a wave from the listening panel (`setupTransition`), rather
- * than closing and opening a second dialog.
+ * When the first request lands, the sheet turns into its success face
+ * (`SetupSuccess`) in the same frame (`setupTransition`).
  *
  * Presentational, and controlled by `SetupGuide` above it: every piece of state
  * here is either the tab somebody picked or whether the key is on screen.
@@ -133,8 +131,7 @@ export function SetupSheet({
       ? undefined
       : buildSetupSnippets({ baseUrl, apiKey, model })
 
-  // The same `Dialog` in the same place as the setup face's, so React keeps the
-  // one frame open across the swap rather than closing and opening another.
+  // The same `Dialog` in the same place, so the frame stays open across faces.
   if (showsSuccess && landed) {
     return (
       <Dialog

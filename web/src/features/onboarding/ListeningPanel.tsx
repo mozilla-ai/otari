@@ -55,8 +55,7 @@ export function ListeningPanel({
   const hint = failure?.hint
 
   return (
-    // The wave that carries the sheet into its payoff rises from here: the
-    // request is seen here, so this is where the screen starts to change.
+    // Where the landing wave rises from.
     <div
       {...{ [LANDING_SOURCE]: "" }}
       className="flex w-full flex-wrap items-center justify-between gap-4"

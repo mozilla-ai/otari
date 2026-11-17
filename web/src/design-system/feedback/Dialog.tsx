@@ -97,13 +97,7 @@ export interface DialogProps {
    * widths and the control nearest the thumb is the last one written.
    */
   actions?: ReactNode
-  /**
-   * The element holding everything the frame shows, header to footer.
-   *
-   * For a caller that carries one face of the frame into the next with a
-   * transition of its own, which needs the face as one element it can picture
-   * and hide. Nothing in the frame reads it.
-   */
+  /** The one element holding header to footer, for a caller's own transition. */
   faceRef?: Ref<HTMLDivElement>
   /** `DialogSection`s. Each draws the rule above itself. */
   children: ReactNode
@@ -183,8 +177,6 @@ export function Dialog({
               isScanning ? `otari-scan-border ${SCAN_INK[scanTone]}` : ""
             }`}
           >
-            {/* One element around the face, laid out as the frame's own
-                column so the frame looks the same with or without it. */}
             <div ref={faceRef} className="flex min-h-0 flex-1 flex-col">
               <header
                 className={`flex shrink-0 items-start justify-between gap-4 px-6 pt-5 pb-4 ${

@@ -901,14 +901,13 @@ describe("semantic tokens only", () => {
   // share card is rasterized through an <img>-loaded SVG document, where a
   // custom property does not resolve, so its palette has to be literal.
   const EXCEPTIONS = new Set(["features/usage/ShareCard.tsx"])
-  // Vendored packages are left out as well. Each is an upstream library copied
-  // unchanged so it can be swapped for the published one, and what it paints
-  // goes to its own canvas rather than to anything a token could style.
+  // The vendored wave engine is left out too: an upstream library kept
+  // comparable with its source, painting to its own canvas.
   const sources = walk(SRC).filter(
     (name) =>
       /\.tsx?$/.test(name) &&
       !/\.test\.tsx?$/.test(name) &&
-      !name.split("/").includes("vendor") &&
+      !name.startsWith("features/onboarding/vendor/") &&
       !EXCEPTIONS.has(name),
   )
 
