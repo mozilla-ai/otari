@@ -60,16 +60,46 @@ A client ID and secret belong to one host. If you later change the server's
 **URL** to another host, saving clears them, and you enter the new host's
 client or leave it blank for Otari to register itself.
 
+A saved client also stays with the sign-in server it was first used with: the
+server's address and the address Otari sends the client secret to. If the MCP
+server later sends sign-ins to a different one, or moves that second address,
+Otari refuses them before your client's secret goes there, and the message asks
+a workspace admin to save the OAuth client again.
+
+Saving it again approves whatever sign-in server the next sign-in finds, and
+the client secret is then sent there. Before you save, confirm with the
+provider that the new sign-in server is theirs and expected. Then enter the
+**Client secret** again and click **Save**.
+
+A client with no secret has nothing to enter again, and the settings form does
+not save an unchanged client ID. Approve the new sign-in server through the API
+instead: send the same client ID again,
+`PATCH /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}` with
+`{"oauth_client_id": "<the client ID>"}`. Otari keeps each member's
+connection, since it is the same client, and keeps renewing it at the address
+its sign-in recorded. A member is asked to connect again only when that address
+answers that the grant is gone (`invalid_grant`). If it cannot be reached, the
+connection stays, and once its token expires calls fail with
+`mcp_credentials_unavailable` until the member clicks **Reconnect**.
+
+After you save a client secret again, Otari renews no one's sign-in on that
+server until somebody signs in once more, which records the sign-in server the
+secret may go to. A member whose sign-in expires before then is asked to sign
+in again. Once somebody has signed in, renewals resume for every connection
+made through the same sign-in server. If the server moved its sign-in to a new
+address, connections made before the move cannot renew, and each of those
+members signs in again when their sign-in expires.
+
 ## Connect your account
 
 Anyone who can see the workspace can do this.
 
 1. Go to **Tools**, then **MCP servers**. Click **Connect a server** and pick
-   the server, or click a server you already use and, under **Your account**,
-   click **Connect your account**. An owner or admin has no **Your account**
-   section: click **Connect your account** at the top of the server's page.
-   Once connected it reads **Your account: connected**, and opens **Reconnect**
-   and **Disconnect**.
+   the server. An owner or admin can also open the server's page and click
+   **Connect your account** at the top. Once you are connected, the server's
+   page offers **Reconnect** and **Disconnect**: under **Your account** for a
+   member, and behind **Your account: connected** at the top for an owner or
+   admin.
 2. The server's own sign-in opens in a small window. Sign in and approve the
    access it asks for.
 
@@ -87,7 +117,7 @@ only the ones that read. A Shared server an admin has not set up yet is not
 listed. Click a card to open the
 server's page.
 
-The server's page lists **Your tools**: the tools the access rules let you use
+For a member, the server's page lists **Your tools**: the tools the access rules let you use
 on it, with a line about each where the server describes it, a **Read-only**
 mark on the tools that only read, and a search over both.
 
@@ -96,8 +126,8 @@ Connecting does not change who may use the server. Its
 access list denies is told the server does not exist, whether or not you have
 connected.
 
-The link you are sent to works once, for ten minutes, and only in the browser
-session that started it.
+The link you are sent to works once, for ten minutes, and only for the person
+who started it.
 
 A manager checks the server and chooses its tools apart from any connection: on
 the server's page, click **Check** under **Exposed tools**. See
@@ -110,9 +140,18 @@ server's **Availability** to **Every request**, or your client names the server 
 `mcp_server_ids`, just ask your agent for something the server does:
 
 1. Ask, for example "check my open Jira tasks".
-2. The agent answers with a sign-in link. Open it within 30 minutes and sign in
-   with your own account.
-3. A page says you are signed in. Go back to the conversation and ask again.
+2. The agent answers with a sign-in link. Open it within 30 minutes. If you
+   have an Otari dashboard account, open it in a browser where you are signed
+   in to the dashboard.
+3. An Otari page names the server and the Otari user your account will be
+   attached to. Check that the user is you, then click **This is me, continue**
+   and sign in with your own account, in the same browser.
+4. A page says you are signed in. Go back to the conversation and ask again.
+
+If the page says **Sign in to Otari first**, the link is for a dashboard
+account: sign in to the dashboard in that browser, then open the link again.
+The sign-in finishes only in the browser where you clicked **This is me,
+continue**, so do not copy the server's sign-in page into another browser.
 
 The second ask uses your account.
 
@@ -122,9 +161,19 @@ example `https://otari.example.com/api/v1/mcp-connections/sign-in?ticket=...`.
 An address that only starts the same way, such as
 `https://otari.example.com.other.site/...`, is not Otari: do not open it.
 
-Keep the link to yourself. It is made for you, from the key your agent uses, and
-whoever opens it within its 30 minutes connects the account they sign in with to
-you.
+Keep the link to yourself. It is made for you, from the key your agent uses. A
+link for a dashboard account continues only in that account's own dashboard
+session. A link for a user with no dashboard login does not need one, so
+whoever opens it within its 30 minutes and continues connects the account they
+sign in with to you.
+
+Never open a sign-in link someone else sent you. It is made for their Otari
+user, so signing in through it would hand them the use of your account on that
+server. The page the link opens names the user it is for: if that is not you, or
+you did not ask for the link yourself, close the page. If you are signed in to
+the Otari dashboard as a different user, the page refuses to continue. Someone
+who sends you the server's own sign-in page, copied out of their link, gets
+nothing either: that sign-in finishes only in the browser that started it.
 
 ## What your keys see before you connect
 
@@ -139,13 +188,19 @@ instead of getting a generic failure:
 - Tool discovery and execution answer `403` with the code
   `mcp_sign_in_required` and the same `sign_in_url`.
 
+Once you have connected, a token that has expired and cannot be renewed right
+now gets no sign-in link: discovery and execution answer `503`
+[`mcp_credentials_unavailable`](mcp.md#errors), and a model is told to try again
+in a few minutes. Clicking **Reconnect** on the server's page fixes it at once.
+
 A key created without a user cannot use a server set up this way. Listing does
 not show it to such a key, and a model request that names it is told the key
 belongs to nobody. Create the key for a user instead.
 
 ## Ask for a server
 
-**Connect a server** lists the servers the workspace already has. For one it
+**Connect a server** lists the workspace's personal servers you have not
+connected yet, leaving out any that are switched off. For one the workspace
 does not have, ask its admins:
 
 1. Go to **Tools**, then **MCP servers**. Click **Connect a server**, then
@@ -209,3 +264,8 @@ connection is removed and the page says **Not connected** again. Click
 Otari only learns this when it next renews your sign-in. Until then the page can
 still say **Connected** while calls to the server fail. Click **Reconnect** to
 sign in again straight away.
+
+Some servers give Otari nothing to renew with. The server's page then says
+you'll need to connect again when the sign-in expires. Once it has, **Your
+account** reads **Your sign-in has expired**; click **Sign in again** there, or at
+the top of the server's page if you are an owner or admin.

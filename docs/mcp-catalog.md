@@ -25,7 +25,9 @@ time.
 
 Servers the workspace already has are not shown, on Popular or in a search.
 What you tick moves to **Selected**, above both, and stays there when you
-change or clear the search; untick it there to put it back.
+change or clear the search; untick it there to put it back. A ticked server
+leaves the search's pages and its count, so the range under the results counts
+only the servers still listed there.
 
 If a server is not in the catalog, **Add it by URL** at the bottom of the
 dialog opens the form that takes a URL.
@@ -46,35 +48,46 @@ Figma's own server stands out among the gateways named after Figma. Hover it
 to see the host. Among servers that match a search equally well, Official ones
 come first. A server is Official when all of this holds:
 
-- its endpoint lives on a domain of its publisher: its registry namespace, its
-  GitHub organization or its website;
+- its endpoint lives on the domain of its registry namespace: `com.stripe/mcp`
+  on `stripe.com` or one of its subdomains. The namespace is the one thing the
+  registry checks, by asking the publisher to prove they control that domain;
 - that domain is not a hosting platform's, such as `vercel.app` or
   `workers.dev`, where anyone can take a name;
 - its title is that domain's name and nothing more. "Stripe" on `stripe.com`
   and "Figma MCP Server" on `figma.com` are. "Fudge for Shopify" on `fudge.ai`
   is not, so nobody's helper for Shopify reads as Shopify's own.
 
-Two servers the rule cannot recognize are listed by hand: GitHub's, which
-lives on `githubcopilot.com`, and Atlassian's, whose title says more than
-"Atlassian". Every Popular server is Official.
+Nothing else the publisher writes counts. A website or a title of their choosing
+earns no label, so a lookalike domain titled "Stripe" is not Official and does
+not rank first. A namespace under `io.github.` proves only a GitHub account,
+not a domain, so it earns none either.
 
-The label is read from names. Nobody at Otari checked the servers, and the
-rule cannot tell a maker from someone who registered the maker's name under
-another ending (`example.dev` for `example.com`). Check the host before you
-trust a server with a credential. A server with no label is not suspect: many
-are a company's own server for a product with a longer name.
+A few servers the rule cannot recognize are listed by hand, each at the one
+host it was checked on: GitHub's, which lives on `githubcopilot.com`,
+Atlassian's, whose title says more than "Atlassian", Neon's, which lives on
+`neon.tech` under a `com.neon` namespace, and the Popular servers published
+under a GitHub account (Sentry, Context7, Grafana and PostHog). Every Popular
+server is Official.
+
+Nobody at Otari checked the servers themselves. The label says the endpoint is
+on the publisher's verified domain, not that the server is safe. Check the host
+before you trust a server with a credential. A server with no label is not
+suspect: many are a company's own server for a product with a longer name.
 
 ## Loading the catalog
 
 A new deployment starts with an empty catalog. Whoever can add MCP servers to
 the workspace sees **Load catalog** in the dialog. Loading copies the registry,
 which takes a couple of minutes, and the list fills in as it goes. Once the
-catalog is more than a day old, the dialog offers **Refresh** instead.
+catalog is more than a day old, or while no load has completed, the dialog
+offers **Refresh** instead.
 
 To keep the registry from being called over and over, a workspace admin can
 ask again only an hour after a load completes, or five minutes after one that
-failed. That limit covers the whole deployment, however many people click.
-An operator (the master key, or a deployment superuser) is not held to it.
+did not complete, partial included. That limit covers the whole deployment,
+however many people click. An operator (the master key, or a deployment
+superuser) is not held to it through the API; the dashboard keeps **Refresh**
+disabled for them too until the wait is over.
 
 ## Settings
 
@@ -88,8 +101,10 @@ Set these in `config.yml`, or as `OTARI_<NAME>` environment variables.
 
 The three sync modes:
 
-- `off`: Otari never contacts the registry. The dialog says the catalog is
-  turned off on this deployment, and a sync request is refused with a 409. Use
+- `off`: Otari never contacts the registry. While the catalog is empty, the
+  dialog says it is turned off on this deployment; once it holds servers, the
+  dialog lists them and offers neither **Load catalog** nor **Refresh**. A sync
+  request is refused with a 409. Use
   it on a deployment with no outbound access. The catalog keeps whatever it
   already holds, so a fresh deployment has an empty one.
 - `manual`: a sync runs only when someone loads or refreshes the catalog.
@@ -139,16 +154,25 @@ because the saved page may no longer be one the registry accepts. A sync that
 could not read even its first page is `failed` and leaves the catalog as it
 was.
 
-A sync stops early when the registry fails three attempts at a page, when a
+A sync stops early when a page fails three attempts with a 5xx or a network
+error, or once with any other answer than a 200, when a
 page takes more than three minutes, after 5,000 pages, or after 30 minutes. A
 gateway that shuts down mid-sync ends it as `partial` too.
+
+It also stops when the registry's answer points to the next page in a way it
+cannot follow: a cursor that is not a non-empty string, or the same cursor it
+was asked for. Reading the first as the last page would remove every server
+the sync had not reached yet, and following the second would read the same
+page forever. After a repeated cursor, the next sync starts over.
 
 Two answers from the registry are not trusted, because a registry cut short is
 more likely than one that emptied overnight, and both remove nothing:
 
 - a last page reached with no server kept at all, reported as `failed`;
-- a last page reached with fewer than half the servers the catalog holds,
-  reported as `partial`.
+- a last page reached having seen fewer than half the servers the catalog held
+  when the sync began, reported as `partial`. Servers the sync added along the
+  way do not count toward that half, and a sync that resumes keeps the number
+  from when it first began.
 
 In `scheduled` mode, a sync that did not complete is tried again an hour later.
 
@@ -191,17 +215,19 @@ same way: `apple-touch-icon.png`, `favicon.ico`, then the icons the home page
 declares, first on the domain the host belongs to and then on the host itself.
 
 A logo is looked for the first time someone's browser asks for it, never while
-the catalog syncs, and never while `mcp_catalog_sync` is `off`: then only the
-logos shipped with Otari and those an admin uploads show. Each replica runs at most 4 looks at once and starts at most
+the catalog syncs, and never while `mcp_catalog_sync` is `off`: then logos
+already found still show, but no new one is looked for. Each replica runs at most 4 looks at once and starts at most
 30 a minute; past that, the logo shows its first letter and is tried on a later
 view. A logo found is looked for again after a week; one not found is not
-looked for again for a week, so a page view does not keep calling out.
+looked for again for a week, so a page view does not keep calling out. A look
+that ran out of time is tried again after an hour.
 
 Each fetch is held to the rules any outside address is: https only, every
 address the name resolves to must be public, at most three redirects each
 checked the same way, 5 seconds and 256 KB, 512 KB for a home page. The image
 type is read from the bytes, not from the response headers, and an SVG with a
-document type is refused. A logo is served only to a signed-in dashboard, as
+document type is refused. A raster image, fetched or uploaded, that declares
+more than 1,048,576 pixels (1024 by 1024) is refused before it is decoded. A logo is served only to a signed-in dashboard, as
 an image that cannot run a script even when opened on its own.
 
 The gateway also measures how bright a logo is. A dark logo gets a light tile
@@ -214,7 +240,8 @@ On a server's page, an admin clicks the logo to open **Logo for** the server.
 It shows the logo on the light and the dark theme side by side. From there:
 
 - **Choose a PNG or SVG** to upload one. The browser crops it to a square and
-  resizes it to 256 px, up to 512 KB, and the gateway checks it is a PNG again.
+  resizes it to 256 px, up to 512 KB, and the gateway checks it is a PNG again
+  and that its whole image decodes, so a damaged file is refused.
 - **Tile behind the logo**: **Auto** adds a tile only on the theme where the
   logo would fade out, **Always** adds one on both, **Never** on neither.
 - **Remove uploaded logo** goes back to the server's own logo.
@@ -233,11 +260,15 @@ curl "https://otari.example.com/api/v1/mcp-catalog/servers?q=sentry&limit=25" -H
 # The same, without the servers a workspace already has. Works on /popular too.
 curl "https://otari.example.com/api/v1/mcp-catalog/servers?q=sentry&workspace_id=<workspace-id>" -H "Otari-Key: Bearer $OTARI_MASTER_KEY"
 
+# Without servers set aside by name, such as the ones already picked. Works on /popular too.
+curl "https://otari.example.com/api/v1/mcp-catalog/servers?q=sentry&exclude=com.stripe/mcp&exclude=app.linear/linear" -H "Otari-Key: Bearer $OTARI_MASTER_KEY"
+
 # The Popular servers the catalog holds.
 curl "https://otari.example.com/api/v1/mcp-catalog/popular" -H "Otari-Key: Bearer $OTARI_MASTER_KEY"
 
-# The logo of each of a workspace's servers, and whether it needs a tile.
-curl "https://otari.example.com/api/v1/workspaces/<workspace-id>/mcp-servers/logos" -H "Otari-Key: Bearer $OTARI_MASTER_KEY"
+# The logo of each of a workspace's servers, and whether it needs a tile. Pages as the
+# server list does: skip and limit, 100 by default, at most 1000.
+curl "https://otari.example.com/api/v1/workspaces/<workspace-id>/mcp-servers/logos?limit=100" -H "Otari-Key: Bearer $OTARI_MASTER_KEY"
 
 # An admin's own logo for a server, and the tile choice (auto, always or never).
 curl -X PUT "https://otari.example.com/api/v1/workspaces/<workspace-id>/mcp-servers/<server-id>/logo" \
@@ -264,6 +295,10 @@ come first.
 `workspace_id` names a workspace the caller can see, and leaves out the
 servers it already has, matched by URL with or without a trailing slash. A
 workspace the caller cannot see is a 404.
+
+`exclude`, repeated up to 50 times, names catalog servers to leave out as well.
+Both leave the servers out of `count` too, so `skip` pages the same rows the
+caller sees. The dialog sends the servers already picked this way.
 
 The sync status carries the mode, whether a sync is running or waiting to
 start, the last `outcome` (`complete`, `partial` or `failed`) with its `error`,
