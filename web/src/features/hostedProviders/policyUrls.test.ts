@@ -17,6 +17,8 @@ describe("policyUrlError", () => {
     expect(policyUrlError("example.com/terms")).toBeDefined()
     expect(policyUrlError("javascript:alert(1)")).toBeDefined()
     expect(policyUrlError("ftp://example.com/terms")).toBeDefined()
+    // `new URL` would repair this one; the server would not.
+    expect(policyUrlError("https:example.com/terms")).toBeDefined()
   })
 
   it("refuses a username or password", () => {

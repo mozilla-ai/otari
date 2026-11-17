@@ -105,10 +105,11 @@ export function ProvidersView({
           ? `${formatNumber(count)} ${count === 1 ? "provider serves" : "providers serve"} the models on this deployment.`
           : "The providers that serve the models on this deployment."}
       </PageIntro>
-      {providers.isError && !rows ? (
-        <ErrorBanner error={providers.error} />
-      ) : !rows ? (
-        <PageLoading label="Loading providers…" />
+      {providers.isError ? <ErrorBanner error={providers.error} /> : null}
+      {!rows ? (
+        providers.isError ? null : (
+          <PageLoading label="Loading providers…" />
+        )
       ) : rows.length === 0 ? (
         <EmptyMessage>No provider serves models here yet.</EmptyMessage>
       ) : (

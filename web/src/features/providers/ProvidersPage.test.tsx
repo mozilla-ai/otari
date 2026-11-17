@@ -84,17 +84,21 @@ function jsonResponse(body: unknown, status = 200): Response {
 function mockApi({
   list = () => LIST,
   detail = () => FIREWORKS_DETAIL,
+  listStatus = 200,
   workspaceId,
 }: {
   list?: (params: URLSearchParams) => CatalogProvidersResponse
   detail?: (params: URLSearchParams) => CatalogProviderDetail
+  listStatus?: number
   workspaceId?: string
 } = {}) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = new URL(String(input), "http://localhost")
     const path = url.pathname
     if (path.endsWith(`${API_ROOT}/catalog/providers`)) {
-      return jsonResponse(list(url.searchParams))
+      return listStatus === 200
+        ? jsonResponse(list(url.searchParams))
+        : jsonResponse({ detail: "The catalog is unavailable" }, listStatus)
     }
     if (path.endsWith(`${API_ROOT}/catalog/providers/fireworks`)) {
       return jsonResponse(detail(url.searchParams))
@@ -180,6 +184,16 @@ describe("ProvidersPage", () => {
     expect(within(openai).getAllByRole("link")).toHaveLength(1)
     expect(within(openai).queryByText("Terms of service")).toBeNull()
     expect(within(openai).queryByText("Privacy policy")).toBeNull()
+  })
+
+  it("says so when the providers cannot be read", async () => {
+    mockApi({ listStatus: 503 })
+    await renderWithRouter(providers(<ProvidersPage />), { url: "/providers" })
+
+    expect(
+      await screen.findByText(/The catalog is unavailable/),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("Loading providers…")).toBeNull()
   })
 
   it("asks for one page and carries no pager while everything fits on it", async () => {

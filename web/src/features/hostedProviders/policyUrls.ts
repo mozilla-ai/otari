@@ -7,6 +7,11 @@
 export function policyUrlError(value: string): string | undefined {
   const trimmed = value.trim()
   if (trimmed === "") return undefined
+  // \`new URL\` repairs \`https:example.com\`, which the server, parsing the
+  // string as sent, refuses for having no host.
+  if (!/^https?:\/\//i.test(trimmed)) {
+    return "Enter a full http:// or https:// address."
+  }
   let url: URL
   try {
     url = new URL(trimmed)
