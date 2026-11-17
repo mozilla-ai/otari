@@ -96,6 +96,7 @@ SIGN_IN_LINK_PATH = "/mcp-connections/sign-in"
 # How long a sign-in link handed to a conversation can be clicked. Nothing is stored until its Continue
 # starts a sign-in, which spends it.
 SIGN_IN_LINK_LIFETIME = timedelta(minutes=30)
+_LINK_INVALID = "This sign-in link is not valid or has expired. Ask again for a new one."
 _SIGN_IN_LINK_PURPOSE = "mcp-sign-in"
 _LINK_FLOW_STATE_PURPOSE = b"otari-mcp-link-flow:"
 # The gateway's own path its client ID metadata document is read at, under the API root.
@@ -865,6 +866,7 @@ class McpConnectionService:
                 its saved OAuth client was first used with.
             McpConnectionUpstreamError: the server's authorization setup could not be discovered.
             McpSignInLinkUsedError: ``link`` has already started a sign-in.
+            McpConnectionFlowError: ``link`` expired while the sign-in was starting.
         """
         if user_id == DEFAULT_USER_ID:
             raise McpConnectionSetupError("The shared default user stands for keys with no owner and cannot sign in")
@@ -900,6 +902,10 @@ class McpConnectionService:
         now = datetime.now(UTC)
         async with self._uow:
             if link is not None:
+                # Checked against the same clock as the purge: a link read before it expired, whose
+                # discovery ran past that, would otherwise sweep the record of its own earlier use.
+                if now >= link.good_until:
+                    raise McpConnectionFlowError(_LINK_INVALID)
                 await self._link_uses.purge_expired(now)
                 # Of two Continues on one link, the database lets one claim it, and the other's sign-in
                 # is never stored.
@@ -1008,7 +1014,7 @@ class McpConnectionService:
     def _named_by(ticket: str) -> SignInLinkTicket:
         named = read_sign_in_link(ticket)
         if named is None:
-            raise McpConnectionFlowError("This sign-in link is not valid or has expired. Ask again for a new one.")
+            raise McpConnectionFlowError(_LINK_INVALID)
         return named
 
     async def _server_in_mode(

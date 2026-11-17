@@ -2991,6 +2991,35 @@ async def test_two_tabs_pressing_continue_on_one_link_start_one_sign_in(
     assert [flow.user_id for flow in flows] == ["alice"], "the losing tab's sign-in is never stored"
 
 
+async def test_a_link_that_expires_while_its_sign_in_starts_cannot_sweep_its_own_use(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    """A second Continue read the link while it was good, and its discovery ran past the link's expiry."""
+    world = await _world(async_db, config)
+    async_db.add(BillingUser(user_id="alice"))
+    await async_db.commit()
+    connections = _connections(async_db, config)
+    ticket = _link_ticket(config, world.server.id)
+    link = read_sign_in_link(ticket)
+    assert link is not None
+
+    await connections.start_from_link(ticket)
+    expired = datetime.now(UTC) - timedelta(seconds=1)
+    await async_db.execute(update(McpSignInLinkUse).values(expires_at=expired))
+    await async_db.commit()
+
+    with pytest.raises(McpConnectionFlowError, match="expired"):
+        await connections.start(
+            server_id=world.server.id,
+            user_id="alice",
+            browser_token="late-tab",
+            link=dataclasses.replace(link, good_until=expired),
+        )
+    assert len(await _link_uses(async_db)) == 1, "the first Continue's record is still there"
+    flows = (await async_db.execute(select(McpOAuthFlow).execution_options(populate_existing=True))).scalars().all()
+    assert len(flows) == 1, "the late tab's sign-in is never stored"
+
+
 async def test_a_spent_link_is_forgotten_once_it_would_have_expired_anyway(
     async_db: AsyncSession, config: GatewayConfig
 ) -> None:
