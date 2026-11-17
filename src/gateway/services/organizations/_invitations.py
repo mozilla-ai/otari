@@ -235,7 +235,7 @@ class Invitations:
 
         NOTE: Callers must not call this from inside an already-open Unit of Work block.
         """
-        result = await self._invite_many(by, [email], offer)
+        result = await self.invite_many(by, [email], offer)
         if result.refused:
             raise result.refused[0].refusal
         return result.issued[0]
@@ -249,7 +249,68 @@ class Invitations:
 
         NOTE: Callers must not call this from inside an already-open Unit of Work block.
         """
-        return await self._invite_many(by, emails, offer)
+        if len(emails) > MAX_BULK_INVITATIONS:
+            raise InvitationRequestTooLargeError.too_many_addresses(MAX_BULK_INVITATIONS)
+        self._check_offer_shape(offer)
+
+        candidates = [_Candidate(typed_email=email) for email in emails]
+        seen: set[str] = set()
+        for candidate in candidates:
+            address = stored_address(candidate.typed_email)
+            if address is None:
+                candidate.outcome = InvalidEmailError(candidate.typed_email)
+            elif address in seen:
+                candidate.outcome = DuplicateInvitationAddressError(candidate.typed_email)
+            else:
+                seen.add(address)
+                candidate.address = address
+
+        now = self._clock()
+        # Read-only, and before any counting: every refusal a database read alone can decide,
+        # so an address this organization's own state already refuses is never paid for below.
+        async with self._uow:
+            await self._require_inviter(by, offer)
+            await self._check_workspaces(by.organization_id, offer.workspaces)
+            await self._refuse_existing_members_and_invitations(candidates, by=by, now=now)
+
+        async with AsyncExitStack() as stack:
+            # No transaction is open across the store's round trips below.
+            # A caller that holds one open is refused here, rather than counting inside it.
+            await self._uow.release()
+            for candidate in candidates:
+                if candidate.address is None or candidate.outcome is not None:
+                    continue
+                admission = await self._limits.admit(
+                    account_id=by.user_id, email=candidate.address, organization_id=by.organization_id
+                )
+                if isinstance(admission, InvitationLimitCeiling):
+                    candidate.outcome = InvitationLimitError(admission)
+                    continue
+                candidate.admission = await stack.enter_async_context(admission)
+
+            async with self._uow:
+                # Taken first, this lock makes the authority, owner-only and SSO checks below atomic with the write.
+                # A role change takes `organizations.lock`, `FOR UPDATE`,
+                # which conflicts with this call's `FOR NO KEY UPDATE` on the same row.
+                await self._organizations.lock_settings(by.organization_id)
+                await self._require_inviter(by, offer)
+                await self._issue_admitted(candidates, by=by, offer=offer, now=now)
+
+            # Only after the write above has returned (committed):
+            # a failure between the first insert and the commit rolls every row back,
+            # and must roll every count back with it rather than keep one for an invitation that no longer exists.
+            for candidate in candidates:
+                if isinstance(candidate.outcome, IssuedInvitation) and candidate.admission is not None:
+                    candidate.admission.keep()
+
+        return BulkInvitations(
+            issued=[candidate.outcome for candidate in candidates if isinstance(candidate.outcome, IssuedInvitation)],
+            refused=[
+                RefusedAddress(email=candidate.typed_email, refusal=candidate.outcome)
+                for candidate in candidates
+                if isinstance(candidate.outcome, TenancyError)
+            ],
+        )
 
     async def page(self, by: ActingMember, *, skip: int, limit: int) -> tuple[list[InvitationEntry], int]:
         """Return one page of the organization's invitations, oldest first.
@@ -375,79 +436,6 @@ class Invitations:
             notes.append(AddressNote(domain=domain, email=email))
         return notes
 
-    async def _invite_many(self, by: ActingMember, emails: Sequence[str], offer: InvitationOffer) -> BulkInvitations:
-        """Invite every address, owning every Unit of Work block it needs."""
-        if len(emails) > MAX_BULK_INVITATIONS:
-            raise InvitationRequestTooLargeError.too_many_addresses(MAX_BULK_INVITATIONS)
-        self._check_offer_shape(offer)
-
-        candidates = [_Candidate(typed_email=email) for email in emails]
-        seen: set[str] = set()
-        for candidate in candidates:
-            address = stored_address(candidate.typed_email)
-            if address is None:
-                candidate.outcome = InvalidEmailError(candidate.typed_email)
-            elif address in seen:
-                candidate.outcome = DuplicateInvitationAddressError(candidate.typed_email)
-            else:
-                seen.add(address)
-                candidate.address = address
-
-        now = self._clock()
-        # Read-only, and before any counting: every refusal a database read alone can decide,
-        # so an address this organization's own state already refuses is never paid for below.
-        async with self._uow:
-            role = await self._require_management(by)
-            if offer.role == OWNER_ROLE and role != OWNER_ROLE:
-                raise MembershipUpdateError("Only organization owners can grant the owner role")
-            if await self._organizations.is_sso_enforced(by.organization_id):
-                raise InvitationsNeedSsoError()
-            await self._check_workspaces(by.organization_id, offer.workspaces)
-            await self._refuse_existing_members_and_invitations(candidates, by=by, now=now)
-
-        async with AsyncExitStack() as stack:
-            # No transaction is open across the store's round trips below.
-            # A caller that holds one open is refused here, rather than counting inside it.
-            await self._uow.release()
-            for candidate in candidates:
-                if candidate.address is None or candidate.outcome is not None:
-                    continue
-                admission = await self._limits.admit(
-                    account_id=by.user_id, email=candidate.address, organization_id=by.organization_id
-                )
-                if isinstance(admission, InvitationLimitCeiling):
-                    candidate.outcome = InvitationLimitError(admission)
-                    continue
-                candidate.admission = await stack.enter_async_context(admission)
-
-            async with self._uow:
-                # Taken first, this lock makes the authority, owner-only and SSO checks below atomic with the write.
-                # A role change takes `organizations.lock`, `FOR UPDATE`,
-                # which conflicts with this call's `FOR NO KEY UPDATE` on the same row.
-                await self._organizations.lock_settings(by.organization_id)
-                role = await self._require_management(by)
-                if offer.role == OWNER_ROLE and role != OWNER_ROLE:
-                    raise MembershipUpdateError("Only organization owners can grant the owner role")
-                if await self._organizations.is_sso_enforced(by.organization_id):
-                    raise InvitationsNeedSsoError()
-                await self._issue_admitted(candidates, by=by, offer=offer, now=now)
-
-            # Only after the write above has returned (committed):
-            # a failure between the first insert and the commit rolls every row back,
-            # and must roll every count back with it rather than keep one for an invitation that no longer exists.
-            for candidate in candidates:
-                if isinstance(candidate.outcome, IssuedInvitation) and candidate.admission is not None:
-                    candidate.admission.keep()
-
-        return BulkInvitations(
-            issued=[candidate.outcome for candidate in candidates if isinstance(candidate.outcome, IssuedInvitation)],
-            refused=[
-                RefusedAddress(email=candidate.typed_email, refusal=candidate.outcome)
-                for candidate in candidates
-                if isinstance(candidate.outcome, TenancyError)
-            ],
-        )
-
     async def _refuse_existing_members_and_invitations(
         self, candidates: list[_Candidate], *, by: ActingMember, now: datetime
     ) -> None:
@@ -536,6 +524,17 @@ class Invitations:
         if role is None or role not in MANAGEMENT_ROLES:
             raise NotAuthorizedError()
         return role
+
+    async def _require_inviter(self, by: ActingMember, offer: InvitationOffer) -> None:
+        """Refuse unless the caller may manage the organization, grant ``offer``'s role, and invite outside SSO.
+
+        NOTE: Callers must call this inside an open Unit of Work block.
+        """
+        role = await self._require_management(by)
+        if offer.role == OWNER_ROLE and role != OWNER_ROLE:
+            raise MembershipUpdateError("Only organization owners can grant the owner role")
+        if await self._organizations.is_sso_enforced(by.organization_id):
+            raise InvitationsNeedSsoError()
 
     async def _require_invitation(self, by: ActingMember, invitation_id: uuid.UUID) -> OrganizationInvitation:
         """Return the invitation the caller may act on, raising the refusal that stops them.
