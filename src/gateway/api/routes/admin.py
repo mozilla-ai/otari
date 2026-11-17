@@ -74,7 +74,10 @@ async def get_administration_access(
     the same thing without one. It publishes only the caller's own standing,
     which they could establish by trying an endpoint anyway.
     """
-    return DeploymentAdminAccessPublic(granted=await service.has_administration_access(current_identity))
+    return DeploymentAdminAccessPublic(
+        granted=await service.has_administration_access(current_identity),
+        is_bootstrap_operator=await service.is_bootstrap_operator(current_identity),
+    )
 
 
 @router.get("/users")
@@ -128,6 +131,27 @@ async def update_deployment_user(
     if body.is_active is False:
         await traces.end_shares_of(user_id)
     return updated
+
+
+@router.post("/users/{user_id}/bootstrap-operator")
+async def hand_over_bootstrap_operator(
+    service: DeploymentUserServiceDep,
+    current_identity: CurrentIdentity,
+    user_id: uuid.UUID,
+) -> DeploymentUserPublic:
+    """Make another operator the deployment's bootstrap operator.
+
+    The bootstrap operator is the account the master key acts as: master-key sign-in
+    and requests carrying the master key resolve to it, and it cannot be deactivated or
+    lose operator access. Only the current bootstrap operator, or a request carrying the
+    master key, may hand the role on. The previous bootstrap operator stays an operator,
+    which the new one may remove afterwards.
+
+    Refused with 400 when the caller is another operator, and for a target that is the
+    caller, deactivated, not an operator, or without an email and password: the
+    password is what keeps master-key sign-in retired once the deployment is claimed.
+    """
+    return await service.hand_over_bootstrap_operator(actor=current_identity, user_id=user_id)
 
 
 @router.post(

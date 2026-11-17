@@ -60,6 +60,8 @@ page. The master key still works for the management API and can reset the
 operator's password, but only the operator's. For a member who forgot theirs,
 send a password link from **Accounts** (see
 [Deployment-wide account administration](sign-in.md#deployment-wide-account-administration)).
+To make another operator the one the master key acts as, see
+[Handing over the bootstrap operator](sign-in.md#handing-over-the-bootstrap-operator).
 
 Which sign-in forms the page offers is described in
 [Dashboard sessions and identity](sign-in.md#dashboard-sessions-and-identity).

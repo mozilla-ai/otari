@@ -140,6 +140,36 @@ export interface paths {
         patch: operations["admin-update_deployment_user"];
         trace?: never;
     };
+    "/api/v1/admin/users/{user_id}/bootstrap-operator": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Hand Over Bootstrap Operator
+         * @description Make another operator the deployment's bootstrap operator.
+         *
+         *     The bootstrap operator is the account the master key acts as: master-key sign-in
+         *     and requests carrying the master key resolve to it, and it cannot be deactivated or
+         *     lose operator access. Only the current bootstrap operator, or a request carrying the
+         *     master key, may hand the role on. The previous bootstrap operator stays an operator,
+         *     which the new one may remove afterwards.
+         *
+         *     Refused with 400 when the caller is another operator, and for a target that is the
+         *     caller, deactivated, not an operator, or without an email and password: the
+         *     password is what keeps master-key sign-in retired once the deployment is claimed.
+         */
+        post: operations["admin-hand_over_bootstrap_operator"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/users/{user_id}/password-link": {
         parameters: {
             query?: never;
@@ -12624,6 +12654,11 @@ export interface components {
         DeploymentAdminAccessPublic: {
             /** Granted */
             granted: boolean;
+            /**
+             * Is Bootstrap Operator
+             * @default false
+             */
+            is_bootstrap_operator: boolean;
         };
         /**
          * DeploymentBootstrap
@@ -24359,6 +24394,37 @@ export interface operations {
                 "application/json": components["schemas"]["DeploymentUserUpdateRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeploymentUserPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "admin-hand_over_bootstrap_operator": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

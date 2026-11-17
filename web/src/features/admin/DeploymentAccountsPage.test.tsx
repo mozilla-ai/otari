@@ -26,6 +26,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function mockApi(opts: {
   granted?: boolean
+  isBootstrapOperator?: boolean
   accounts?: DeploymentUser[]
   count?: number
   passwordLink?: PasswordLink
@@ -48,7 +49,10 @@ function mockApi(opts: {
     })
 
     if (url.includes(`${API_ROOT}/admin/access`)) {
-      return jsonResponse({ granted })
+      return jsonResponse({
+        granted,
+        is_bootstrap_operator: opts.isBootstrapOperator ?? false,
+      })
     }
     if (url.includes(`${API_ROOT}/admin/blocked-emails`)) {
       const blocked = opts.blocked ?? []
@@ -66,6 +70,9 @@ function mockApi(opts: {
         },
         201,
       )
+    }
+    if (url.endsWith("/bootstrap-operator")) {
+      return jsonResponse({ ...accounts[0], is_bootstrap_operator: true })
     }
     if (url.endsWith("/password-link")) {
       return jsonResponse(opts.passwordLink, 201)
@@ -373,6 +380,54 @@ describe("DeploymentAccountsPage", () => {
     expect(
       await screen.findByLabelText(
         /^Deactivate Anchor \(The bootstrap operator/,
+      ),
+    ).toBeDisabled()
+  })
+
+  it("hands the bootstrap operator role on after a confirmation", async () => {
+    const successor = deploymentUser({ ...ANALYST, is_superuser: true })
+    const requests = mockApi({
+      accounts: [successor, OPERATOR],
+      isBootstrapOperator: true,
+    })
+    await renderPage(<DeploymentAccountsPage />)
+
+    await userEvent.click(
+      await screen.findByLabelText("Make Analyst the bootstrap operator"),
+    )
+    await userEvent.click(
+      screen.getByRole("button", { name: "Hand over role" }),
+    )
+
+    await waitFor(() =>
+      expect(
+        requests.find((request) => request.url.endsWith("/bootstrap-operator"))
+          ?.url,
+      ).toContain(`${API_ROOT}/admin/users/${successor.id}/bootstrap-operator`),
+    )
+    // Not offered on the bootstrap operator's own row.
+    expect(
+      screen.queryByLabelText(/^Make Operator the bootstrap operator/),
+    ).not.toBeInTheDocument()
+  })
+
+  it("offers the handover only to the bootstrap operator", async () => {
+    mockApi({ accounts: [deploymentUser({ ...ANALYST, is_superuser: true })] })
+    await renderPage(<DeploymentAccountsPage />)
+
+    await screen.findByLabelText("Deactivate Analyst")
+    expect(
+      screen.queryByLabelText(/the bootstrap operator$/),
+    ).not.toBeInTheDocument()
+  })
+
+  it("disables the handover to an account that is not an operator, with the reason", async () => {
+    mockApi({ accounts: [ANALYST], isBootstrapOperator: true })
+    await renderPage(<DeploymentAccountsPage />)
+
+    expect(
+      await screen.findByLabelText(
+        "Make Analyst the bootstrap operator (Make this account an operator first)",
       ),
     ).toBeDisabled()
   })

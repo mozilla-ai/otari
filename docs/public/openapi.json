@@ -7518,6 +7518,11 @@
           "granted": {
             "title": "Granted",
             "type": "boolean"
+          },
+          "is_bootstrap_operator": {
+            "default": false,
+            "title": "Is Bootstrap Operator",
+            "type": "boolean"
           }
         },
         "required": [
@@ -33153,6 +33158,58 @@
           }
         ],
         "summary": "Update Deployment User",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/users/{user_id}/bootstrap-operator": {
+      "post": {
+        "description": "Make another operator the deployment's bootstrap operator.\n\nThe bootstrap operator is the account the master key acts as: master-key sign-in\nand requests carrying the master key resolve to it, and it cannot be deactivated or\nlose operator access. Only the current bootstrap operator, or a request carrying the\nmaster key, may hand the role on. The previous bootstrap operator stays an operator,\nwhich the new one may remove afterwards.\n\nRefused with 400 when the caller is another operator, and for a target that is the\ncaller, deactivated, not an operator, or without an email and password: the\npassword is what keeps master-key sign-in retired once the deployment is claimed.",
+        "operationId": "admin-hand_over_bootstrap_operator",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeploymentUserPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Hand Over Bootstrap Operator",
         "tags": [
           "admin"
         ]

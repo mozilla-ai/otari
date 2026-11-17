@@ -298,6 +298,41 @@ operator can:
 - grant or remove operator access.
 - send a password link.
 
+The bootstrap operator can also hand that role to another operator (see
+[Handing over the bootstrap operator](#handing-over-the-bootstrap-operator)).
+
+#### Handing over the bootstrap operator
+
+The bootstrap operator is the account the deployment provisioned on first start,
+or the one the role was last handed to. Every other operator holds operator
+access that can be removed; the bootstrap operator is different in that:
+
+- the master key acts as it, for master-key sign-in and for requests carrying the
+  master key, including tenant management in its active organization;
+- its password is the one that retires master-key sign-in, and the only one the
+  master key can reset;
+- it cannot be deactivated, lose operator access, or have its address blocked.
+
+To give the role to someone else, first grant their account operator access. The
+account must be active and have an email address and a password. Then, signed in
+as the bootstrap operator, click **Make bootstrap operator** on their row in
+**Accounts**. Or, wherever the master key is at hand:
+
+```bash
+OTARI_URL=https://otari.example.com OTARI_MASTER_KEY=otari-mk-... \
+  otari operator handover grace@example.com
+```
+
+The command asks before it acts; `--yes` skips the question. Both call
+`POST /api/v1/admin/users/{user_id}/bootstrap-operator`, which only the bootstrap
+operator or the master key may call. Another operator is refused, so no operator
+can take the role for themselves.
+
+The previous bootstrap operator stays an operator, and the new one can remove that
+access from **Accounts**. Sessions the previous one already holds stay theirs,
+so a session opened with the master key before the handover keeps acting as the
+previous account.
+
 #### Password links
 
 A password link helps someone who cannot sign in, and is the only way back

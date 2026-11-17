@@ -346,6 +346,8 @@ class DeploymentAdminAccessPublic(SQLModel):
     """
 
     granted: bool
+    # Whether the caller is the bootstrap operator, which is who may hand that role on.
+    is_bootstrap_operator: bool = False
 
 
 # =============================================================================

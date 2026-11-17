@@ -10,6 +10,7 @@ import click
 
 from otari_agent import LOADED_NS, __version__
 from otari_agent.hook import guardrails, hook, time_checks_from
+from otari_agent.operator import operator_group
 from otari_agent.usage_import import import_group
 
 # What gateway.cli.register attaches, named here so a light install can say why
@@ -76,6 +77,7 @@ def cli() -> None:
 cli.add_command(hook)
 cli.add_command(guardrails)
 cli.add_command(import_group)
+cli.add_command(operator_group)
 
 
 def main() -> None:

@@ -26,6 +26,7 @@ from gateway.api.deps import get_deployment_user_service
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
+    BootstrapHandoverRefusedError,
     BootstrapOperatorProtectedError,
     DeploymentAdministrationUnavailableError,
     DeploymentUserNotFoundError,
@@ -42,7 +43,8 @@ from gateway.models.tenancy import (
 )
 from gateway.repositories.tenancy import OrganizationMemberRepository, OrganizationRepository, UserRepository
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
-from gateway.services.tenancy.provisioning_service import BOOTSTRAP_IDENTITY_KEY
+from gateway.services.password_service import hash_password
+from gateway.services.tenancy.provisioning_service import BOOTSTRAP_IDENTITY_KEY, move_bootstrap_identity
 
 
 def _list(client: TestClient, headers: dict[str, str]) -> dict[str, Any]:
@@ -388,7 +390,7 @@ def test_the_operator_probe_answers_for_the_bootstrap_caller(
     response = client.get(f"{API_ROOT}/admin/access", headers=master_key_header)
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"granted": True}
+    assert response.json() == {"granted": True, "is_bootstrap_operator": True}
 
 
 def _session_for(
@@ -455,7 +457,7 @@ def test_a_non_operator_session_is_refused_with_404_by_every_route(
     assert listed.status_code == 404, listed.text
     assert patched.status_code == 404, patched.text
     assert access.status_code == 200, access.text
-    assert access.json() == {"granted": False}
+    assert access.json() == {"granted": False, "is_bootstrap_operator": False}
 
 
 def test_an_operator_session_that_is_not_the_bootstrap_one_administers(
@@ -646,3 +648,202 @@ async def test_a_deleted_identity_cached_in_the_session_is_not_found(
             user_id=target.id,
             request=DeploymentUserUpdateRequest(is_active=False),
         )
+
+
+# =============================================================================
+# Handing over the bootstrap operator role
+# =============================================================================
+
+
+def _operator(
+    session_factory: Callable[[], Session],
+    *,
+    organization_id: uuid.UUID,
+    email: str,
+    is_superuser: bool = True,
+    with_password: bool = True,
+) -> uuid.UUID:
+    """An identity that can take the role unless a flag says otherwise."""
+    session = session_factory()
+    try:
+        user = User(
+            email=email,
+            full_name=email.split("@")[0].title(),
+            active_organization_id=organization_id,
+            is_superuser=is_superuser,
+            hashed_password=hash_password("correct horse battery staple") if with_password else None,
+        )
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+        session.add(
+            OrganizationMember(organization_id=organization_id, user_id=user.id, role="member", status="active")
+        )
+        session.commit()
+        return user.id
+    finally:
+        session.close()
+
+
+def _is_superuser(session_factory: Callable[[], Session], user_id: uuid.UUID) -> bool:
+    session = session_factory()
+    try:
+        user = session.get(User, user_id)
+        assert user is not None
+        return user.is_superuser
+    finally:
+        session.close()
+
+
+def test_the_master_key_hands_the_role_to_another_operator(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == 200
+    previous = _bootstrap_user_id(db_session_factory)
+    successor = _operator(
+        db_session_factory, organization_id=_default_organization_id(db_session_factory), email="grace@example.com"
+    )
+
+    response = client.post(f"{API_ROOT}/admin/users/{successor}/bootstrap-operator", headers=master_key_header)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["is_bootstrap_operator"] is True
+    assert _bootstrap_user_id(db_session_factory) == successor
+    # The previous one stays an operator, now an ordinary one the successor may demote.
+    assert _is_superuser(db_session_factory, previous) is True
+    listed = _list(client, master_key_header)
+    assert _row(listed, previous)["is_bootstrap_operator"] is False
+    # The master key now acts as the successor.
+    assert _row(listed, successor)["is_self"] is True
+    demoted = client.patch(
+        f"{API_ROOT}/admin/users/{previous}", headers=master_key_header, json={"is_superuser": False}
+    )
+    assert demoted.status_code == 200, demoted.text
+
+
+def test_the_access_probe_says_who_holds_the_role(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == 200
+    _, token = _session_for(
+        db_session_factory,
+        organization_id=_default_organization_id(db_session_factory),
+        email="operator@example.com",
+        is_superuser=True,
+    )
+
+    as_master_key = client.get(f"{API_ROOT}/admin/access", headers=master_key_header)
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+    try:
+        as_operator = client.get(f"{API_ROOT}/admin/access")
+    finally:
+        client.cookies.clear()
+
+    assert as_master_key.json() == {"granted": True, "is_bootstrap_operator": True}
+    assert as_operator.json() == {"granted": True, "is_bootstrap_operator": False}
+
+
+def test_another_operator_cannot_take_the_role(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """A 400 and not a 403, which would sign an operator in good standing out."""
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == 200
+    previous = _bootstrap_user_id(db_session_factory)
+    operator_id, token = _session_for(
+        db_session_factory,
+        organization_id=_default_organization_id(db_session_factory),
+        email="operator@example.com",
+        is_superuser=True,
+    )
+
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+    try:
+        response = client.post(f"{API_ROOT}/admin/users/{operator_id}/bootstrap-operator")
+    finally:
+        client.cookies.clear()
+
+    assert response.status_code == 400, response.text
+    assert _bootstrap_user_id(db_session_factory) == previous
+
+
+@pytest.mark.parametrize(
+    ("is_superuser", "with_password", "detail"),
+    [
+        (False, True, "Make this account an operator"),
+        (True, False, "no email and password"),
+    ],
+)
+def test_a_target_that_could_not_hold_the_role_is_refused(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    is_superuser: bool,
+    with_password: bool,
+    detail: str,
+) -> None:
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == 200
+    previous = _bootstrap_user_id(db_session_factory)
+    target = _operator(
+        db_session_factory,
+        organization_id=_default_organization_id(db_session_factory),
+        email="grace@example.com",
+        is_superuser=is_superuser,
+        with_password=with_password,
+    )
+
+    response = client.post(f"{API_ROOT}/admin/users/{target}/bootstrap-operator", headers=master_key_header)
+
+    assert response.status_code == 400, response.text
+    assert detail in response.text
+    assert _bootstrap_user_id(db_session_factory) == previous
+
+
+def test_handing_the_role_to_itself_or_nobody_is_refused(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == 200
+    previous = _bootstrap_user_id(db_session_factory)
+
+    itself = client.post(f"{API_ROOT}/admin/users/{previous}/bootstrap-operator", headers=master_key_header)
+    nobody = client.post(f"{API_ROOT}/admin/users/{uuid.uuid4()}/bootstrap-operator", headers=master_key_header)
+
+    assert itself.status_code == 400, itself.text
+    assert nobody.status_code == 404, nobody.text
+
+
+@pytest.mark.asyncio
+async def test_a_deactivated_target_is_refused(async_db: AsyncSession) -> None:
+    anchor, _ = await _identity(async_db, full_name="Operator")
+    await _mark_bootstrap(async_db, anchor)
+    target, _ = await _identity(async_db, full_name="Root", is_superuser=True)
+    target.email = "root@example.com"
+    target.hashed_password = hash_password("correct horse battery staple")
+    target.is_active = False
+    await async_db.commit()
+    service = get_deployment_user_service(async_db, UnitOfWork(async_db))
+
+    with pytest.raises(BootstrapHandoverRefusedError, match="Reactivate"):
+        await service.hand_over_bootstrap_operator(actor=anchor, user_id=target.id)
+
+
+@pytest.mark.asyncio
+async def test_the_marker_moves_only_from_the_identity_it_still_names(async_db: AsyncSession) -> None:
+    """Two handovers racing from the same operator: the second finds the marker moved."""
+    anchor, _ = await _identity(async_db, full_name="Operator")
+    await _mark_bootstrap(async_db, anchor)
+    first, _ = await _identity(async_db, full_name="First", is_superuser=True)
+    second, _ = await _identity(async_db, full_name="Second", is_superuser=True)
+
+    assert await move_bootstrap_identity(async_db, from_user_id=anchor.id, to_user_id=first.id) is True
+    assert await move_bootstrap_identity(async_db, from_user_id=anchor.id, to_user_id=second.id) is False
+    marker = await async_db.get(RuntimeSetting, BOOTSTRAP_IDENTITY_KEY)
+    assert marker is not None
+    assert marker.value == str(first.id)

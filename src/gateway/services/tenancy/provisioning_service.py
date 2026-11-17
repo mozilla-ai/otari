@@ -299,6 +299,28 @@ async def _provision(
     return operator
 
 
+async def move_bootstrap_identity(db: AsyncSession, *, from_user_id: uuid.UUID, to_user_id: uuid.UUID) -> bool:
+    """Point the marker at ``to_user_id`` if it still names ``from_user_id``, under a row lock.
+
+    Flush-only: the caller's Unit of Work commits it. False when the marker names
+    anybody else by the time the lock is held, so two handovers racing from the same
+    operator cannot both land.
+    """
+    marker = (
+        await db.execute(
+            select(RuntimeSetting)
+            .where(col(RuntimeSetting.key) == BOOTSTRAP_IDENTITY_KEY)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if marker is None or marker.value != str(from_user_id):
+        return False
+    marker.value = str(to_user_id)
+    await db.flush()
+    return True
+
+
 __all__ = [
     "BOOTSTRAP_IDENTITY_KEY",
     "DEFAULT_ORGANIZATION_NAME",
@@ -307,5 +329,6 @@ __all__ = [
     "BootstrapIdentityUnavailableError",
     "ensure_bootstrap_identity",
     "load_bootstrap_identity",
+    "move_bootstrap_identity",
     "password_claims_deployment",
 ]

@@ -70,17 +70,27 @@ export function useDashboardBuild() {
 // server-side predicate on a read the shell already makes (otari#836).
 // ---------------------------------------------------------------------------
 
+// No `enabled` parameter: both callers sit behind routes whose surfaces
+// (`admin`, `hosted_providers`, `agent_recommenders`) every gateway publishes. Not inferred from a
+// 404 either: the ordinary retry policy applies, and a failure is a failure.
+const accessQuery = {
+  queryKey: [DEPLOYMENT_ADMIN, "access"],
+  queryFn: () => apiFetch<DeploymentAdminAccess>("/admin/access"),
+  staleTime: 60_000,
+}
+
 export function useDeploymentAdminAccess() {
+  return useQuery({ ...accessQuery, select: (body) => body.granted })
+}
+
+/**
+ * Whether the caller is the bootstrap operator, the one account that may hand
+ * that role on. A gateway older than the field answers `false`.
+ */
+export function useIsBootstrapOperator() {
   return useQuery({
-    queryKey: [DEPLOYMENT_ADMIN, "access"],
-    queryFn: () =>
-      apiFetch<DeploymentAdminAccess>("/admin/access").then(
-        (body) => body.granted,
-      ),
-    staleTime: 60_000,
-    // No `enabled` parameter: both callers sit behind routes whose surfaces
-    // (`admin`, `hosted_providers`, `agent_recommenders`) every gateway publishes. Not inferred from a
-    // 404 either: the ordinary retry policy applies, and a failure is a failure.
+    ...accessQuery,
+    select: (body) => body.is_bootstrap_operator ?? false,
   })
 }
 
@@ -133,6 +143,26 @@ export function useUpdateDeploymentUser() {
       // Deactivating an account ends its sessions and changes what the
       // organization roster may offer it, so the tenancy reads go stale with it.
       void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
+    },
+  })
+}
+
+/**
+ * Make another operator the bootstrap operator.
+ *
+ * Invalidates the access read as well as the list: the caller stops being the
+ * bootstrap operator, so the control that did this goes away.
+ */
+export function useHandOverBootstrapOperator() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<DeploymentUser>(
+        `/admin/users/${encodeURIComponent(id)}/bootstrap-operator`,
+        { method: "POST" },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [DEPLOYMENT_ADMIN] })
     },
   })
 }
