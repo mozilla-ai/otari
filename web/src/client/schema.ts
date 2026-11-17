@@ -14815,7 +14815,7 @@ export interface components {
          *     writes nothing.
          * @example {
          *       "dry_run": true,
-         *       "vendor": "Alibaba"
+         *       "vendor": "Anthropic"
          *     }
          */
         HostedPriceResetRequest: {
@@ -15140,7 +15140,7 @@ export interface components {
          *     models served without a rate.
          * @example {
          *       "enabled": false,
-         *       "vendor": "Alibaba"
+         *       "vendor": "Anthropic"
          *     }
          */
         HostedVendorModelsSwitchRequest: {
@@ -15187,7 +15187,7 @@ export interface components {
          * @description Switch a vendor on or off on one hosted provider.
          * @example {
          *       "enabled": false,
-         *       "vendor": "Alibaba"
+         *       "vendor": "Anthropic"
          *     }
          */
         HostedVendorUpdateRequest: {

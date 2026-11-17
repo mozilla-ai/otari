@@ -939,7 +939,7 @@ class HostedModelsPublic(SQLModel):
 class HostedVendorUpdateRequest(SQLModel):
     """Switch a vendor on or off on one hosted provider."""
 
-    model_config = {"json_schema_extra": {"example": {"vendor": "Alibaba", "enabled": False}}}
+    model_config = {"json_schema_extra": {"example": {"vendor": "Anthropic", "enabled": False}}}
 
     vendor: str = Field(min_length=1, max_length=128)
     enabled: bool
@@ -953,7 +953,7 @@ class HostedVendorModelsSwitchRequest(SQLModel):
     models served without a rate.
     """
 
-    model_config = {"json_schema_extra": {"example": {"vendor": "Alibaba", "enabled": False}}}
+    model_config = {"json_schema_extra": {"example": {"vendor": "Anthropic", "enabled": False}}}
 
     vendor: str = Field(min_length=1, max_length=128)
     enabled: bool
@@ -975,7 +975,7 @@ class HostedPriceResetRequest(SQLModel):
     writes nothing.
     """
 
-    model_config = {"json_schema_extra": {"example": {"vendor": "Alibaba", "dry_run": True}}}
+    model_config = {"json_schema_extra": {"example": {"vendor": "Anthropic", "dry_run": True}}}
 
     models: list[str] | None = Field(default=None, max_length=1000)
     vendor: str | None = Field(default=None, max_length=128)

@@ -32,6 +32,7 @@ from gateway.repositories.pricing import ModelPricingRepository, OrganizationMod
 from gateway.repositories.providers import (
     HostedProviderModelRepository,
     HostedProviderRepository,
+    HostedProviderVendorRepository,
     ProviderEndpointRepository,
 )
 from gateway.repositories.tenancy import OrganizationRepository, OrgProviderKeyRepository
@@ -97,6 +98,7 @@ def _service(db: AsyncSession, config: GatewayConfig) -> HostedProviderService:
         providers=providers,
         sources=HostedSources(config, providers),
         models=HostedProviderModelRepository(uow),
+        vendors=HostedProviderVendorRepository(uow),
         endpoints=ProviderEndpointRepository(uow),
         pricing=DeploymentPricingService(
             uow, pricing=ModelPricingRepository(uow), overrides=OrganizationModelPricingRepository(uow)

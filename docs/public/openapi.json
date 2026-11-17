@@ -11717,7 +11717,7 @@
         "description": "Put models an operator priced back on the default rate.\n\n``models`` names them; null means every model, narrowed to ``vendor``\nwhen one is given. ``dry_run`` answers what a reset would change and\nwrites nothing.",
         "example": {
           "dry_run": true,
-          "vendor": "Alibaba"
+          "vendor": "Anthropic"
         },
         "properties": {
           "dry_run": {
@@ -12412,7 +12412,7 @@
         "description": "Set the switch of every model of one vendor at once.\n\n``enabled`` true serves each model that has a rate, and leaves one with\nnone off. ``only_unpriced`` with ``enabled`` false withholds only the\nmodels served without a rate.",
         "example": {
           "enabled": false,
-          "vendor": "Alibaba"
+          "vendor": "Anthropic"
         },
         "properties": {
           "enabled": {
@@ -12486,7 +12486,7 @@
         "description": "Switch a vendor on or off on one hosted provider.",
         "example": {
           "enabled": false,
-          "vendor": "Alibaba"
+          "vendor": "Anthropic"
         },
         "properties": {
           "enabled": {
