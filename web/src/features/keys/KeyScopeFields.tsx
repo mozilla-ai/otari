@@ -94,7 +94,6 @@ export function KeyScopeFields({
   )
 }
 
-/** One group's scopes, under a box that checks or clears the group when it has more than one. */
 function ScopeGroupFields({
   group,
   held,
