@@ -270,8 +270,11 @@ def test_starting_a_sign_in_is_refused_where_it_cannot_work(
     assert client.post(f"{mine}/{uuid.uuid4()}", json={}, headers=master_key_header).status_code == 404
     outside = client.post(f"{mine}/{per_user}", json={"return_to": "https://evil.example/"}, headers=master_key_header)
     assert outside.status_code == 400, outside.text
+    assert client.get(servers, headers=master_key_header).json()["sign_in_unavailable"] is None
 
     monkeypatch.setattr(test_config, "public_base_url", None)
+    told = client.get(servers, headers=master_key_header).json()["sign_in_unavailable"]
+    assert "public address (public_base_url)" in told and "whoever runs Otari" in told
     unset = client.post(f"{mine}/{per_user}", json={}, headers=master_key_header)
     refused = client.post(
         servers, json={"name": "later", "url": PUBLIC_URL, "credential_mode": "per_user"}, headers=master_key_header
@@ -306,7 +309,7 @@ def test_a_key_is_told_to_sign_in_until_its_user_has(
     for refused in (tools, executed):
         assert refused.status_code == 403, refused.text
         assert refused.json()["code"] == MCP_SIGN_IN_REQUIRED
-        assert refused.json()["sign_in_url"].startswith(f"{ORIGIN}{API_ROOT}/mcp-connections/sign-in?ticket=")
+        assert refused.json()["sign_in_url"].startswith(f"{ORIGIN}{API_ROOT}/mcp-connections/sign-in#ticket=")
 
     _connect(test_db, server_id, "alice")
     seen: list[ResolvedMcpServer] = []
@@ -372,7 +375,7 @@ def test_a_token_refused_mid_call_whose_renewal_needs_a_sign_in_carries_the_link
 
     assert tools.status_code == 403, tools.text
     assert tools.json()["code"] == MCP_SIGN_IN_REQUIRED
-    assert tools.json()["sign_in_url"].startswith(f"{ORIGIN}{API_ROOT}/mcp-connections/sign-in?ticket=")
+    assert tools.json()["sign_in_url"].startswith(f"{ORIGIN}{API_ROOT}/mcp-connections/sign-in#ticket=")
 
     _connect(test_db, server_id, "alice")
     executed = client.post(
@@ -381,15 +384,21 @@ def test_a_token_refused_mid_call_whose_renewal_needs_a_sign_in_carries_the_link
 
     assert executed.status_code == 403, executed.text
     assert executed.json()["code"] == MCP_SIGN_IN_REQUIRED
-    assert executed.json()["sign_in_url"].startswith(f"{ORIGIN}{API_ROOT}/mcp-connections/sign-in?ticket=")
+    assert executed.json()["sign_in_url"].startswith(f"{ORIGIN}{API_ROOT}/mcp-connections/sign-in#ticket=")
 
 
-def test_a_key_with_no_owner_is_told_a_per_user_server_does_not_exist(
+def test_a_key_with_no_owner_cannot_reach_a_per_user_server_and_the_list_says_why(
     client: TestClient, master_key_header: dict[str, str], test_db: Session, api_key_obj: dict[str, Any]
 ) -> None:
     """A key created without a user belongs to the shared default one, which is nobody's account."""
     workspace = _workspace(test_db, api_key_obj)
     server_id = _per_user_server(client, master_key_header, workspace)
+    closed = client.post(
+        f"{API_ROOT}/workspaces/{workspace}/mcp-servers",
+        json={"name": "closed", "url": PUBLIC_URL, "credential_mode": "per_user", "everyone_tools": []},
+        headers=master_key_header,
+    )
+    assert closed.status_code == 201, closed.text
     row = test_db.get(APIKey, api_key_obj["id"])
     assert row is not None and row.user_id == "default"
     # Even a connection stored under that user is not used: it would be one account behind every such key.
@@ -399,7 +408,10 @@ def test_a_key_with_no_owner_is_told_a_per_user_server_does_not_exist(
     listed = client.get(f"{API_ROOT}/mcp/servers", headers=headers)
     tools = client.get(f"{API_ROOT}/mcp/servers/{server_id}/tools", headers=headers)
 
-    assert listed.json() == {"servers": []}
+    assert listed.json()["servers"] == []
+    [left_out] = listed.json()["left_out"]
+    assert (left_out["id"], left_out["name"], left_out["reason"]) == (server_id, "drive", "key_has_no_user")
+    assert "created without a user" in left_out["detail"]
     assert tools.status_code == 404, tools.text
     assert tools.json()["code"] == "mcp_server_not_found"
 

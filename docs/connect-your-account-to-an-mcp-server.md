@@ -126,7 +126,7 @@ Connecting does not change who may use the server. Its
 access list denies is told the server does not exist, whether or not you have
 connected.
 
-The link you are sent to works once, for ten minutes, and only for the person
+The link you are sent to works once, for 30 minutes, and only for the person
 who started it.
 
 A manager checks the server and chooses its tools apart from any connection: on
@@ -156,8 +156,8 @@ continue**, so do not copy the server's sign-in page into another browser.
 The second ask uses your account.
 
 Before you open the link, check where it goes. A real one is on your own Otari
-address, exactly, followed by `/api/v1/mcp-connections/sign-in?ticket=`, for
-example `https://otari.example.com/api/v1/mcp-connections/sign-in?ticket=...`.
+address, exactly, followed by `/api/v1/mcp-connections/sign-in#ticket=`, for
+example `https://otari.example.com/api/v1/mcp-connections/sign-in#ticket=...`.
 An address that only starts the same way, such as
 `https://otari.example.com.other.site/...`, is not Otari: do not open it.
 
@@ -193,9 +193,10 @@ now gets no sign-in link: discovery and execution answer `503`
 [`mcp_credentials_unavailable`](mcp.md#errors), and a model is told to try again
 in a few minutes. Clicking **Reconnect** on the server's page fixes it at once.
 
-A key created without a user cannot use a server set up this way. Listing does
-not show it to such a key, and a model request that names it is told the key
-belongs to nobody. Create the key for a user instead.
+A key created without a user cannot use a server set up this way. Listing the
+servers with such a key puts it under `left_out`, with the reason, rather than
+with the servers the key can use, and a model request that names it is told the
+key belongs to nobody. Create the key for a user instead.
 
 ## Ask for a server
 

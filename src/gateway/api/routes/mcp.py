@@ -29,7 +29,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.exceptions import RequestValidationError
@@ -588,10 +588,33 @@ class McpToolsResponse(BaseModel):
     warnings: list[McpToolWarning]
 
 
+class McpServerLeftOut(BaseModel):
+    """A server the key's access list grants and that is still not listed, and why."""
+
+    id: uuid.UUID
+    name: str
+    reason: Literal["key_has_no_user"] = Field(
+        description="`key_has_no_user`: the server signs each person in with their own account, and this key "
+        "belongs to no person, so there is nobody to sign in as"
+    )
+    detail: str = Field(description="The reason in a sentence, for a person reading the response")
+
+
 class McpServersResponse(BaseModel):
     """The enabled stored servers the authenticated key can reach."""
 
     servers: list[McpServerSummary]
+    left_out: list[McpServerLeftOut] = Field(
+        default_factory=list,
+        description="Servers the key's access list grants that are not in `servers`, each with the reason. "
+        "Empty for a key that belongs to a user.",
+    )
+
+
+_NO_USER_DETAIL = (
+    "This server signs each person in with their own account. This API key was created without a user, "
+    "so it has nobody to sign in as. Use a key created for a user to reach this server."
+)
 
 
 @router.get(
@@ -620,12 +643,14 @@ async def list_mcp_servers(
     the token are never returned. A master key has no workspace and is refused with a 404.
 
     A server that sends each user's own credential is listed with `sign_in_required` true until this
-    key's user has signed in to it, with a `sign_in_url` to the page that starts their sign-in, and is
-    left out for a key that has no user. Tool discovery and execution answer such a server with a 403, the code
-    `mcp_sign_in_required` and the same `sign_in_url`. Making a link stores nothing, so listing is free.
+    key's user has signed in to it, with a `sign_in_url` to the page that starts their sign-in. Tool
+    discovery and execution answer such a server with a 403, the code `mcp_sign_in_required` and the
+    same `sign_in_url`. Making a link stores nothing, so listing is free. A key that has no user cannot
+    sign in, so such a server is not in `servers` for it: it is in `left_out` instead, with the reason.
     """
     principal = await _authenticate(raw_request, db, config)
     listed = await servers.list_reachable(principal.workspace_id, principal.mcp_access)
+    needing_a_user = await servers.list_needing_a_user(principal.workspace_id, principal.mcp_access)
     user_id = principal.mcp_access.user_id
     return McpServersResponse(
         servers=[
@@ -633,7 +658,11 @@ async def list_mcp_servers(
             if summary.sign_in_required
             else summary
             for summary in listed
-        ]
+        ],
+        left_out=[
+            McpServerLeftOut(id=summary.id, name=summary.name, reason="key_has_no_user", detail=_NO_USER_DETAIL)
+            for summary in needing_a_user
+        ],
     )
 
 

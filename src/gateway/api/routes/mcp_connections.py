@@ -26,10 +26,12 @@ from gateway.api.deps import (
 )
 from gateway.api.routes._flow_cookies import FlowCookies
 from gateway.api.routes._mcp_sign_in_pages import (
+    CONTINUE_STEP,
     SignInPage,
     confirm_page,
     conversation_page,
     leaving_page,
+    opener_page,
     other_user_page,
 )
 from gateway.core.config import API_ROOT, GatewayConfig
@@ -69,7 +71,11 @@ callback_router = APIRouter(prefix="/mcp-connections", tags=["mcp-connections"])
 
 # A sign-in a link starts outside a dashboard session finishes only in the browser that pressed Continue,
 # which holds its flow's token here. The path covers the confirmation page and the callback.
-_FLOWS = FlowCookies(prefix="otari_mcp_flow", path=f"{API_ROOT}{callback_router.prefix}")
+_FLOWS = FlowCookies(
+    prefix="otari_mcp_flow",
+    path=f"{API_ROOT}{callback_router.prefix}",
+    max_age=int(McpConnectionService.FLOW_LIFETIME.total_seconds()),
+)
 
 
 @router.get("/mcp-connections")
@@ -103,7 +109,7 @@ async def start_mcp_connection(
     discovers the server's authorization server, registers itself as a client
     where the server holds no client ID, and uses the authorization code flow
     with S256 PKCE. The sign-in is bound to the caller: it finishes only in
-    their own dashboard session, once, within ten minutes. The connection then
+    their own dashboard session, once, within 30 minutes. The connection then
     belongs to the caller's user, so every key they own in this workspace
     reaches the server as them.
 
@@ -236,20 +242,14 @@ def _posted_from_this_gateway(request: Request, config: GatewayConfig) -> bool:
 
 
 @callback_router.get("/sign-in", include_in_schema=False)
-async def open_mcp_sign_in_link(
-    service: WorkspaceMcpServerServiceDep,
-    opened_by: Annotated[TenancyUser | None, Depends(get_session_identity)],
-    ticket: Annotated[str, Query(max_length=1024)] = "",
-) -> Response:
-    """Open a sign-in link a conversation showed: say whose it is and which server, and ask before starting.
+async def open_mcp_sign_in_link() -> Response:
+    """Open a sign-in link a conversation showed: a page that posts the link's ticket back here.
 
-    Nothing starts and nothing is stored here, so a link previewer or a scanner that fetches the
-    link does nothing. The link names its server and user itself, so no session is needed; one
-    opened in the dashboard session of another user is refused. A link that is forged, altered or
-    expired gets a plain page saying to ask for a new one.
+    The ticket is in the link's fragment, which the browser keeps to itself, so this address is
+    all an access log or a proxy sees. Nothing starts and nothing is read here, so a link previewer
+    or a scanner that fetches the link does nothing.
     """
-    page, _ = await _sign_in_link_page(service, ticket, opened_by)
-    return page
+    return opener_page()
 
 
 @callback_router.post("/sign-in", include_in_schema=False)
@@ -259,17 +259,23 @@ async def start_mcp_sign_in_from_link(
     config: Annotated[GatewayConfig, Depends(get_config)],
     opened_by: Annotated[TenancyUser | None, Depends(get_session_identity)],
     ticket: Annotated[str, Form(max_length=1024)] = "",
+    step: Annotated[str, Form(max_length=32)] = "",
 ) -> Response:
-    """Start the sign-in a link names, once the person pressed Continue on the page the link opened.
+    """Ask before a link's sign-in starts, then start it once the person pressed Continue.
 
-    Only that page can ask: a POST from anywhere else is answered with the page itself, as a GET
-    would be. A dashboard session it arrives in must be the link's own user, and the sign-in is
-    then bound to that session. A link made for a dashboard account needs that session. Any other
-    sign-in is bound to this browser by a cookie, and the callback finishes it only where the
-    cookie comes back.
+    Without ``step``, as the link's opening page posts it, this answers with the question: whose
+    link it is and which server. The link names its server and user itself, so no session is
+    needed; one opened in the dashboard session of another user is refused. A link that is
+    forged, altered or expired gets a plain page saying to ask for a new one.
+
+    Only Continue on that question starts the sign-in, and only from this gateway's own page: a
+    POST from anywhere else is answered with the question again. A dashboard session it arrives in
+    must be the link's own user, and the sign-in is then bound to that session. A link made for a
+    dashboard account needs that session. Any other sign-in is bound to this browser by a cookie,
+    and the callback finishes it only where the cookie comes back.
     """
     page, offered = await _sign_in_link_page(service, ticket, opened_by)
-    if not offered or not _posted_from_this_gateway(request, config):
+    if step != CONTINUE_STEP or not offered or not _posted_from_this_gateway(request, config):
         return page
     try:
         started = await service.start_from_sign_in_link(ticket=ticket, opened_by=opened_by)

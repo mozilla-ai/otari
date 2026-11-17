@@ -134,6 +134,7 @@ function mockApi({
 function renderDialog(
   existing: WorkspaceMcpServer[] = [],
   onAddByUrl?: () => void,
+  signInUnavailable?: string,
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -147,6 +148,7 @@ function renderDialog(
         workspaceName="Alpha"
         existing={existing}
         onAddByUrl={onAddByUrl}
+        signInUnavailable={signInUnavailable}
       />
     </QueryClientProvider>,
   )
@@ -557,6 +559,52 @@ describe("McpCatalogDialog", () => {
       credential_mode: "shared",
       authorization_token: "lin_api_key",
     })
+  })
+
+  it("says up front that sign-in servers cannot be added where the deployment cannot sign anyone in", async () => {
+    const reason =
+      "Signing in to MCP servers is not set up on this Otari deployment yet."
+    const calls = mockApi({
+      probes: {
+        [LINEAR.url]: workspaceMcpServerHealth({
+          status: "failing",
+          error: "unauthorized",
+        }),
+      },
+    })
+    const user = userEvent.setup()
+    renderDialog([], undefined, reason)
+
+    // Said on the browse step, before anything is picked.
+    expect(await screen.findByText(reason)).toBeInTheDocument()
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Select Linear" }),
+    )
+    await user.click(screen.getByRole("checkbox", { name: "Select Sentry" }))
+    await user.click(screen.getByRole("button", { name: "Add 2 servers" }))
+
+    const linear = screen.getByRole("region", { name: "Linear" })
+    expect(
+      await within(linear).findByText(
+        `Linear asks each person to sign in. ${reason}`,
+      ),
+    ).toBeInTheDocument()
+    expect(
+      within(linear).getByRole("radio", { name: "Personal accounts" }),
+    ).toBeDisabled()
+    expect(
+      within(linear).getByRole("radio", { name: "Shared account" }),
+    ).toBeChecked()
+    // A server that answers without a sign-in carries no warning.
+    const sentry = screen.getByRole("region", { name: "Sentry" })
+    expect(within(sentry).queryByText(/asks each person/)).toBeNull()
+
+    await user.click(screen.getByRole("button", { name: "Confirm" }))
+    await screen.findByRole("list", { name: "What was added" })
+    expect(creates(calls).map((call) => call.body?.credential_mode)).toEqual([
+      "shared",
+      "shared",
+    ])
   })
 
   it("will not add two servers under one name", async () => {

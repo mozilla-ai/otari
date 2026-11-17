@@ -13726,7 +13726,7 @@
         "description": "Where to send the caller's browser to sign in.",
         "properties": {
           "authorization_url": {
-            "description": "The MCP server's authorization page. It carries a single-use state that expires in ten minutes",
+            "description": "The MCP server's authorization page. It carries a single-use state that expires in 30 minutes",
             "title": "Authorization Url",
             "type": "string"
           }
@@ -13984,6 +13984,39 @@
           "count"
         ],
         "title": "McpServerConnectionsPublic",
+        "type": "object"
+      },
+      "McpServerLeftOut": {
+        "description": "A server the key's access list grants and that is still not listed, and why.",
+        "properties": {
+          "detail": {
+            "description": "The reason in a sentence, for a person reading the response",
+            "title": "Detail",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "reason": {
+            "const": "key_has_no_user",
+            "description": "`key_has_no_user`: the server signs each person in with their own account, and this key belongs to no person, so there is nobody to sign in as",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "reason",
+          "detail"
+        ],
+        "title": "McpServerLeftOut",
         "type": "object"
       },
       "McpServerRequestCreate": {
@@ -14421,6 +14454,14 @@
       "McpServersResponse": {
         "description": "The enabled stored servers the authenticated key can reach.",
         "properties": {
+          "left_out": {
+            "description": "Servers the key's access list grants that are not in `servers`, each with the reason. Empty for a key that belongs to a user.",
+            "items": {
+              "$ref": "#/components/schemas/McpServerLeftOut"
+            },
+            "title": "Left Out",
+            "type": "array"
+          },
           "servers": {
             "items": {
               "$ref": "#/components/schemas/McpServerSummary"
@@ -31684,6 +31725,18 @@
             },
             "title": "Data",
             "type": "array"
+          },
+          "sign_in_unavailable": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why this deployment cannot sign anyone in to an MCP server yet, in words for a workspace admin: a server in personal-accounts mode cannot be added, and nobody can sign in for everyone. Null when sign-ins work.",
+            "title": "Sign In Unavailable"
           }
         },
         "required": [
@@ -42108,7 +42161,7 @@
     },
     "/api/v1/mcp/servers": {
       "get": {
-        "description": "List the enabled stored MCP servers this API key can reach.\n\nA server appears when its access list grants the key something: the key's own grant, else its\nowner's, else the server's `everyone_tools`. Each has the `id` to send in `mcp_server_ids`\n(or to the tool discovery and execution routes), its `name`, and its `purpose_hint`. The URL and\nthe token are never returned. A master key has no workspace and is refused with a 404.\n\nA server that sends each user's own credential is listed with `sign_in_required` true until this\nkey's user has signed in to it, with a `sign_in_url` to the page that starts their sign-in, and is\nleft out for a key that has no user. Tool discovery and execution answer such a server with a 403, the code\n`mcp_sign_in_required` and the same `sign_in_url`. Making a link stores nothing, so listing is free.",
+        "description": "List the enabled stored MCP servers this API key can reach.\n\nA server appears when its access list grants the key something: the key's own grant, else its\nowner's, else the server's `everyone_tools`. Each has the `id` to send in `mcp_server_ids`\n(or to the tool discovery and execution routes), its `name`, and its `purpose_hint`. The URL and\nthe token are never returned. A master key has no workspace and is refused with a 404.\n\nA server that sends each user's own credential is listed with `sign_in_required` true until this\nkey's user has signed in to it, with a `sign_in_url` to the page that starts their sign-in. Tool\ndiscovery and execution answer such a server with a 403, the code `mcp_sign_in_required` and the\nsame `sign_in_url`. Making a link stores nothing, so listing is free. A key that has no user cannot\nsign in, so such a server is not in `servers` for it: it is in `left_out` instead, with the reason.",
         "operationId": "mcp-list_mcp_servers",
         "responses": {
           "200": {
@@ -61035,7 +61088,7 @@
         ]
       },
       "post": {
-        "description": "Start the caller's own sign-in to a per-user MCP server.\n\nReturns the server's authorization page to send the browser to. Otari\ndiscovers the server's authorization server, registers itself as a client\nwhere the server holds no client ID, and uses the authorization code flow\nwith S256 PKCE. The sign-in is bound to the caller: it finishes only in\ntheir own dashboard session, once, within ten minutes. The connection then\nbelongs to the caller's user, so every key they own in this workspace\nreaches the server as them.\n\nAny member who can see the workspace may call this. A server in `shared`\nmode is refused with a 409, and a deployment with no `public_base_url`\nwith a 400, because the address the authorization server returns to is\nderived from it.",
+        "description": "Start the caller's own sign-in to a per-user MCP server.\n\nReturns the server's authorization page to send the browser to. Otari\ndiscovers the server's authorization server, registers itself as a client\nwhere the server holds no client ID, and uses the authorization code flow\nwith S256 PKCE. The sign-in is bound to the caller: it finishes only in\ntheir own dashboard session, once, within 30 minutes. The connection then\nbelongs to the caller's user, so every key they own in this workspace\nreaches the server as them.\n\nAny member who can see the workspace may call this. A server in `shared`\nmode is refused with a 409, and a deployment with no `public_base_url`\nwith a 400, because the address the authorization server returns to is\nderived from it.",
         "operationId": "mcp-connections-start_mcp_connection",
         "parameters": [
           {

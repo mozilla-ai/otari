@@ -2922,9 +2922,10 @@ export interface paths {
          *     the token are never returned. A master key has no workspace and is refused with a 404.
          *
          *     A server that sends each user's own credential is listed with `sign_in_required` true until this
-         *     key's user has signed in to it, with a `sign_in_url` to the page that starts their sign-in, and is
-         *     left out for a key that has no user. Tool discovery and execution answer such a server with a 403, the code
-         *     `mcp_sign_in_required` and the same `sign_in_url`. Making a link stores nothing, so listing is free.
+         *     key's user has signed in to it, with a `sign_in_url` to the page that starts their sign-in. Tool
+         *     discovery and execution answer such a server with a 403, the code `mcp_sign_in_required` and the
+         *     same `sign_in_url`. Making a link stores nothing, so listing is free. A key that has no user cannot
+         *     sign in, so such a server is not in `servers` for it: it is in `left_out` instead, with the reason.
          */
         get: operations["mcp-list_mcp_servers"];
         put?: never;
@@ -8100,7 +8101,7 @@ export interface paths {
          *     discovers the server's authorization server, registers itself as a client
          *     where the server holds no client ID, and uses the authorization code flow
          *     with S256 PKCE. The sign-in is bound to the caller: it finishes only in
-         *     their own dashboard session, once, within ten minutes. The connection then
+         *     their own dashboard session, once, within 30 minutes. The connection then
          *     belongs to the caller's user, so every key they own in this workspace
          *     reaches the server as them.
          *
@@ -15601,7 +15602,7 @@ export interface components {
         McpConnectionStarted: {
             /**
              * Authorization Url
-             * @description The MCP server's authorization page. It carries a single-use state that expires in ten minutes
+             * @description The MCP server's authorization page. It carries a single-use state that expires in 30 minutes
              */
             authorization_url: string;
         };
@@ -15747,6 +15748,30 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["McpServerConnectionPublic"][];
+        };
+        /**
+         * McpServerLeftOut
+         * @description A server the key's access list grants and that is still not listed, and why.
+         */
+        McpServerLeftOut: {
+            /**
+             * Detail
+             * @description The reason in a sentence, for a person reading the response
+             */
+            detail: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Reason
+             * @description `key_has_no_user`: the server signs each person in with their own account, and this key belongs to no person, so there is nobody to sign in as
+             * @constant
+             */
+            reason: "key_has_no_user";
         };
         /**
          * McpServerRequestCreate
@@ -15968,6 +15993,11 @@ export interface components {
          * @description The enabled stored servers the authenticated key can reach.
          */
         McpServersResponse: {
+            /**
+             * Left Out
+             * @description Servers the key's access list grants that are not in `servers`, each with the reason. Empty for a key that belongs to a user.
+             */
+            left_out?: components["schemas"]["McpServerLeftOut"][];
             /** Servers */
             servers: components["schemas"]["McpServerSummary"][];
         };
@@ -23712,6 +23742,11 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["WorkspaceMcpServerPublic"][];
+            /**
+             * Sign In Unavailable
+             * @description Why this deployment cannot sign anyone in to an MCP server yet, in words for a workspace admin: a server in personal-accounts mode cannot be added, and nobody can sign in for everyone. Null when sign-ins work.
+             */
+            sign_in_unavailable?: string | null;
         };
         /** WorkspaceMemberBudgetPoliciesPublic */
         WorkspaceMemberBudgetPoliciesPublic: {

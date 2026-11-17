@@ -890,7 +890,7 @@ class McpConnectionStarted(pydantic.BaseModel):
     """Where to send the caller's browser to sign in."""
 
     authorization_url: str = pydantic.Field(
-        description="The MCP server's authorization page. It carries a single-use state that expires in ten minutes"
+        description="The MCP server's authorization page. It carries a single-use state that expires in 30 minutes"
     )
 
 

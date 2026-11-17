@@ -90,7 +90,10 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    dashboard is a thin rendering layer**: it does not filter, search, sort, join or aggregate
    server data, and it does not assemble one view out of several responses and join them by id
    in the browser. If the endpoint the page needs does not exist, creating it is the change to
-   make, and the gateway is in this repository. **A list hook asks for the page on
+   make, and the gateway is in this repository. The one exception is a lookup by id into a list
+   the gateway caps on create and returns whole in one request, joined to the caller's own rows:
+   a workspace's MCP servers (at most 50) beside the caller's connections or requests. A list
+   with no hard cap does not qualify because it is short today. **A list hook asks for the page on
    screen**, taking `skip` and `limit` from the URL state with
    `placeholderData: (prev) => prev`; every gateway list route accepts both and rejects a
    `limit` above 1000 rather than clamping. Reading a whole collection is the finding, and a

@@ -485,6 +485,12 @@ class WorkspaceMcpServerPublic(BaseModel):
 class WorkspaceMcpServersPublic(BaseModel):
     data: list[WorkspaceMcpServerPublic]
     count: int
+    sign_in_unavailable: str | None = Field(
+        default=None,
+        description="Why this deployment cannot sign anyone in to an MCP server yet, in words for a workspace "
+        "admin: a server in personal-accounts mode cannot be added, and nobody can sign in for everyone. "
+        "Null when sign-ins work.",
+    )
 
 
 MAX_GRANTS_PER_SERVER = 1000
@@ -1198,15 +1204,9 @@ async def resolve_workspace_mcp_server(
     return resolved
 
 
-async def list_reachable_mcp_servers(
-    db: AsyncSession, *, workspace_id: uuid.UUID, access: McpAccess, tokens: McpUserTokens | None = None
-) -> list[McpServerSummary]:
-    """The enabled stored servers of a workspace the caller may reach, oldest first.
-
-    A per-user server is left out for a caller with no user, and marked ``sign_in_required`` for
-    one whose user has not signed in to it. A shared server that still needs a credential is left out.
-    """
-    rows = (
+async def _enabled_servers(db: AsyncSession, workspace_id: uuid.UUID) -> Sequence[WorkspaceMcpServer]:
+    """A workspace's enabled stored servers, oldest first."""
+    return (
         (
             await db.execute(
                 select(WorkspaceMcpServer)
@@ -1217,6 +1217,34 @@ async def list_reachable_mcp_servers(
         .scalars()
         .all()
     )
+
+
+async def list_mcp_servers_needing_a_user(
+    db: AsyncSession, *, workspace_id: uuid.UUID, access: McpAccess
+) -> list[McpServerSummary]:
+    """The enabled per-user servers the caller's access grants but :func:`list_reachable_mcp_servers` leaves out.
+
+    Empty for a caller with a user. A caller with none (a key made with no user, which bills to the
+    shared default user) cannot sign in, so it reaches none of these; this names them so it can say why.
+    """
+    if access.user_id is not None:
+        return []
+    return [
+        McpServerSummary(id=row.id, name=row.name, purpose_hint=row.purpose_hint)
+        for row in await _enabled_servers(db, workspace_id)
+        if _needs_a_user(row, access) and access.patterns_for(row.id, row.everyone_tools, _read_tools(row))
+    ]
+
+
+async def list_reachable_mcp_servers(
+    db: AsyncSession, *, workspace_id: uuid.UUID, access: McpAccess, tokens: McpUserTokens | None = None
+) -> list[McpServerSummary]:
+    """The enabled stored servers of a workspace the caller may reach, oldest first.
+
+    A per-user server is left out for a caller with no user, and marked ``sign_in_required`` for
+    one whose user has not signed in to it. A shared server that still needs a credential is left out.
+    """
+    rows = await _enabled_servers(db, workspace_id)
     reachable = [
         row
         for row in rows
@@ -1313,6 +1341,10 @@ class WorkspaceMcpServers:
     async def list_reachable(self, workspace_id: uuid.UUID, access: McpAccess) -> list[McpServerSummary]:
         """See :func:`list_reachable_mcp_servers`."""
         return await list_reachable_mcp_servers(self._db, workspace_id=workspace_id, access=access, tokens=self._tokens)
+
+    async def list_needing_a_user(self, workspace_id: uuid.UUID, access: McpAccess) -> list[McpServerSummary]:
+        """See :func:`list_mcp_servers_needing_a_user`."""
+        return await list_mcp_servers_needing_a_user(self._db, workspace_id=workspace_id, access=access)
 
     async def resolve_one(
         self, workspace_id: uuid.UUID, server_id: uuid.UUID, access: McpAccess | None = None
@@ -1557,6 +1589,7 @@ class WorkspaceMcpServerService:
                 for server in servers
             ],
             count=count,
+            sign_in_unavailable=None if self.config is None else McpConnectionService.sign_in_unavailable(self.config),
         )
 
     async def _shared_accounts(self, servers: Sequence[WorkspaceMcpServer]) -> dict[uuid.UUID, McpSharedAccountPublic]:
@@ -2539,6 +2572,7 @@ __all__ = [
     "WorkspaceMcpServerUpdate",
     "WorkspaceMcpServers",
     "WorkspaceMcpServersPublic",
+    "list_mcp_servers_needing_a_user",
     "list_reachable_mcp_servers",
     "resolve_workspace_mcp_server",
     "resolve_workspace_mcp_servers",

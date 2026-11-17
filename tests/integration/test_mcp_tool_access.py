@@ -218,7 +218,8 @@ def test_a_key_lists_the_enabled_servers_whose_everyone_rule_lets_it_in(
                 "sign_in_required": False,
                 "sign_in_url": None,
             }
-        ]
+        ],
+        "left_out": [],
     }
     for secret in ("ghp_token", "93.184.216.34"):
         assert secret not in response.text
