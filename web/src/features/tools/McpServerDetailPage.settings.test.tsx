@@ -250,7 +250,7 @@ describe("McpServerDetailPage, exposed tools and settings", () => {
 
     expect(
       screen.getByText(
-        "These are the tools the server marks read-only. Edit them to set your own.",
+        "These are the tools the server marked read-only when its tools were first listed. A tool it adds or relabels later is not read until you edit them.",
       ),
     ).toBeVisible()
     await user.click(screen.getByRole("button", { name: "Edit read tools" }))
@@ -288,7 +288,7 @@ describe("McpServerDetailPage, exposed tools and settings", () => {
 
     expect(screen.getByText("list_issues")).toBeVisible()
     expect(
-      screen.queryByText(/the server marks read-only/),
+      screen.queryByText(/the server marked read-only/),
     ).not.toBeInTheDocument()
     await userEvent
       .setup()

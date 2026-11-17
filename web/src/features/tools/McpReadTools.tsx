@@ -16,9 +16,9 @@ import { useUpdateWorkspaceMcpServer } from "@/shared/api/tools"
 /**
  * Which of a server's tools count as read, the set a "Read tools only" rule
  * allows. Until a manager edits them, the labels are the tools the server
- * itself marks read-only, so a read rule works as soon as the server's tools
- * are known. The first save makes them the manager's, and no later check
- * changes them.
+ * marked read-only the first time its tools were listed, so a read rule works
+ * as soon as they are known, and the server cannot widen it later. The first
+ * save makes them the manager's.
  *
  * The caller keys this on the labels and where they come from, so a save
  * re-seeds it and closes the editor.
@@ -46,10 +46,10 @@ export function McpReadTools({
 
   const source = isFromServer
     ? stored.length > 0
-      ? "These are the tools the server marks read-only. Edit them to set your own."
+      ? "These are the tools the server marked read-only when its tools were first listed. A tool it adds or relabels later is not read until you edit them."
       : picker.isKnown
-        ? "The server marks none of its tools read-only. Edit to pick them yourself."
-        : "Filled in from the tools the server marks read-only, once its tools are known."
+        ? "The server marked none of its tools read-only. Edit to pick them yourself."
+        : "Filled in from the tools the server marks read-only, the first time its tools are listed."
     : ""
 
   return (
