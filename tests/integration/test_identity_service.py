@@ -42,6 +42,7 @@ from gateway.models.tenancy import (
 from gateway.models.users import User as BillingUser
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.identity import IdentityRepositories, OAuthIdentityLinkRepository, OIDCConnectionRepository
+from gateway.repositories.organizations import OrganizationRepositories
 from gateway.repositories.tenancy import (
     OrganizationDomainRepository,
     OrganizationMemberRepository,
@@ -50,6 +51,7 @@ from gateway.repositories.tenancy import (
 )
 from gateway.services.identity import IdentityService
 from gateway.services.mail import Mailer
+from gateway.services.organizations import BootstrapOperatorMarker
 from gateway.services.tenancy import (
     DomainAutoJoinListener,
     OrganizationService,
@@ -83,6 +85,7 @@ def _service_with(
         identity_provider=policy,
         domain_claims=VerifiedDomainLookup(OrganizationDomainRepository(uow)),
         organizations=organizations,
+        bootstrap_operator=BootstrapOperatorMarker(OrganizationRepositories.on(uow)),
         sign_in_listener=DomainAutoJoinListener(
             OrganizationDomainRepository(uow), OrganizationMemberRepository(uow), organizations
         ),

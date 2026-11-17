@@ -69,7 +69,7 @@ from gateway.models.tenancy import (
 )
 from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository
 from gateway.services.dashboard_session_service import revoke_user_dashboard_sessions
-from gateway.services.tenancy.provisioning_service import current_bootstrap_operator_id, load_bootstrap_identity
+from gateway.services.tenancy.provisioning_service import load_bootstrap_identity
 
 if TYPE_CHECKING:
     from gateway.services.identity import SelfServiceKeyDeactivationListener
@@ -102,7 +102,8 @@ class DeploymentAdministrationAccess:
 
     async def is_bootstrap_operator(self, actor: User) -> bool:
         """Whether this caller is the identity the bootstrap marker names, read fresh from the database."""
-        return await current_bootstrap_operator_id(self.db) == actor.id
+        bootstrap = await load_bootstrap_identity(self.db)
+        return bootstrap is not None and bootstrap.id == actor.id
 
     async def administration_access_ids(self, actors: Iterable[User]) -> set[uuid.UUID]:
         """Which of ``actors`` may reach the surface, in one lookup rather than one each.

@@ -49,6 +49,7 @@ from gateway.services.identity._enforcement import (
 from gateway.services.identity._membership import VerifiedDomainClaims, organization_for_sso_identity
 from gateway.services.mail import Mailer
 from gateway.services.oauth_service import provider_label
+from gateway.services.organizations import BootstrapOperatorMarker
 from gateway.services.password_service import verify_password_async
 from gateway.services.tenancy import (
     OrganizationService,
@@ -123,6 +124,7 @@ class IdentityService:
         identity_provider: IdentityProviderPort,
         domain_claims: VerifiedDomainClaims,
         organizations: OrganizationService,
+        bootstrap_operator: BootstrapOperatorMarker,
         sign_in_listener: SignInListener,
         session_ttl_hours: int,
         terms_url: str | None,
@@ -146,6 +148,7 @@ class IdentityService:
         self._identity_provider = identity_provider
         self._domain_claims = domain_claims
         self._organizations = organizations
+        self._bootstrap_operator = bootstrap_operator
         self._sign_in_listener = sign_in_listener
         self._session_ttl_hours = session_ttl_hours
         self._terms_url = terms_url
@@ -189,6 +192,8 @@ class IdentityService:
         if external.email_verified is EmailAssertion.UNVERIFIED:
             raise OAuthEmailNotVerifiedError(label)
         async with self._uow:
+            # Before ``_account_for`` locks the account row, in the order a handover takes the two locks.
+            await self._blocked_emails.lock_shared()
             resolution = await self._account_for(external, label)
             if resolution.new_account:
                 self._record_terms(resolution.identity, terms_accepted=terms_accepted)
@@ -385,7 +390,9 @@ class IdentityService:
             CurrentPasswordIncorrectError: If the current password given does not match.
             DeploymentUserNotFoundError: If there is no such account.
         """
-        if await self._organizations.bootstrap_operator_id() != actor.id:
+        async with self._uow:
+            bootstrap_id = await self._bootstrap_operator.user_id()
+        if bootstrap_id != actor.id:
             raise BootstrapHandoverRefusedError(
                 "Only the bootstrap operator, or a request carrying the master key, can hand over the role"
             )
@@ -409,7 +416,7 @@ class IdentityService:
             if target is None:
                 raise DeploymentUserNotFoundError(user_id)
             await self._require_handover_target(target)
-            if not await self._organizations.move_bootstrap_operator(from_user_id=actor.id, to_user_id=target.id):
+            if not await self._bootstrap_operator.move(from_user_id=actor.id, to_user_id=target.id):
                 raise BootstrapHandoverRefusedError("The bootstrap operator changed while this was in progress")
             # A reset link issued before the handover would otherwise set the new bootstrap operator's password.
             target.password_reset_token_hash = None
@@ -496,7 +503,7 @@ class IdentityService:
         return PasswordLink(mail_sent=False, link=self._mailer.link(_reset_path(token)), expires_at=expires_at)
 
     async def _refuse_bootstrap_password_link(self, account_id: uuid.UUID, *, by_master_key: bool) -> None:
-        if not by_master_key and account_id == await self._organizations.bootstrap_operator_id():
+        if not by_master_key and account_id == await self._bootstrap_operator.user_id():
             raise PasswordLinkUnavailableError("Only the master key can reset the bootstrap operator's password.")
 
     async def _require_password_link_allowed(self, account: User) -> None:

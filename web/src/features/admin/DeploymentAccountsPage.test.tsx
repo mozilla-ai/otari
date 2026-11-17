@@ -32,6 +32,7 @@ function mockApi(opts: {
   granted?: boolean
   isBootstrapOperator?: boolean
   hasPassword?: boolean
+  profileFails?: boolean
   accounts?: DeploymentUser[]
   count?: number
   passwordLink?: PasswordLink
@@ -80,6 +81,9 @@ function mockApi(opts: {
       return new Response(null, { status: 204 })
     }
     if (url.endsWith(`${API_ROOT}/auth/profile`)) {
+      if (opts.profileFails) {
+        return jsonResponse({ detail: "The profile could not be read" }, 500)
+      }
       return jsonResponse({
         ...organizationContext().caller,
         has_password: opts.hasPassword ?? false,
@@ -448,6 +452,26 @@ describe("DeploymentAccountsPage", () => {
     expect(
       requests.some((request) => request.url.endsWith("/bootstrap-operator")),
     ).toBe(false)
+  })
+
+  it("reports a profile that could not be read, with a way to try again", async () => {
+    mockApi({
+      accounts: [deploymentUser({ ...ANALYST, is_superuser: true })],
+      isBootstrapOperator: true,
+      profileFails: true,
+    })
+    await renderPage(<DeploymentAccountsPage />)
+
+    await userEvent.click(
+      await screen.findByLabelText("Make Analyst the bootstrap operator"),
+    )
+
+    expect(
+      await screen.findByRole("button", { name: "Try again" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Make bootstrap operator" }),
+    ).toBeDisabled()
   })
 
   it("shows the handover disabled on the bootstrap operator's own row", async () => {

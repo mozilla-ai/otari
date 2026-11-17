@@ -8,13 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.platform import RuntimeSetting
+from gateway.models.platform import BOOTSTRAP_IDENTITY_KEY, RuntimeSetting
 from gateway.repositories.base_repository import BaseRepository
-
-# Stored in runtime_settings, and deliberately not a SETTABLE_KEY, so
-# runtime_settings_service ignores it exactly as it ignores the master-key hash
-# and the dashboard-session marker.
-BOOTSTRAP_IDENTITY_KEY = "tenancy_bootstrap_user_id"
 
 
 class BootstrapMarkerRepository(BaseRepository[RuntimeSetting, Never, Never]):
