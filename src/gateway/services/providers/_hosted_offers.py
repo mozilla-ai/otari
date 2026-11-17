@@ -176,7 +176,12 @@ class HostedOffers:
         await self.models.flush()
 
     async def custom_against_defaults(
-        self, provider: str, models: Collection[str], *, implementation: str | None = None
+        self,
+        provider: str,
+        models: Collection[str],
+        *,
+        implementation: str | None = None,
+        listed_only: bool = False,
     ) -> tuple[dict[str, tuple[ModelPricing, ModelPricing, bool]], list[str]]:
         """Each model priced by someone here, against the rate the default rung would give it.
 
@@ -184,7 +189,9 @@ class HostedOffers:
         the two charge the same, for each such model the default rung prices;
         and, sorted, the ones it does not. Left out: a rate the configuration
         stored, since the next start writes it again; one a refresh already
-        moves; and a tiered rate, which a default would flatten.
+        moves; and a tiered rate, which a default would flatten. ``listed_only``
+        takes the default from the provider's remembered listing alone, never
+        from the dataset.
         """
         keys = {_key(provider, model): model for model in models}
         versions = await self.pricing.current_versions(keys, normalize_effective_at(None))
@@ -195,7 +202,11 @@ class HostedOffers:
         }
         if not chosen:
             return {}, []
-        defaults = await self.defaults_for(provider, list(chosen), implementation=implementation)
+        if listed_only:
+            listed = self._listed.get(provider, {})
+            defaults = {model: listed[model] for model in chosen if model in listed}
+        else:
+            defaults = await self.defaults_for(provider, list(chosen), implementation=implementation)
         paired = {
             model: (version, defaults[model], self.pricing.rates_match(version, defaults[model]))
             for model, version in chosen.items()

@@ -288,8 +288,10 @@ rate and is listed in `skipped_no_default`. Two kinds of rate are never reset:
 one the `pricing:` block of `config.yml` stored, since the next start writes it
 again, and a tiered rate, which a default would flatten. For an `otari`
 provider, the reset asks the provider for its listing, so the default is the
-price it lists; its model list does not show that default beside each rate,
-only the reset's preview does. With `default_pricing` off, only an
+price it lists, never the models.dev estimate: a model the listing does not
+price, or every model while the listing cannot be read, keeps its rate. Its
+model list does not show that default beside each rate; only the reset's
+preview does. With `default_pricing` off, only an
 `otari` provider has a default to go back to.
 
 ### Workspace access

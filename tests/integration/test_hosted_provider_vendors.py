@@ -301,6 +301,37 @@ def test_serving_all_of_a_vendor_leaves_a_model_its_provider_refused_off(
     assert rows[CODER]["enabled"] is True
 
 
+@pytest.mark.usefixtures("together")
+def test_serving_all_of_a_vendor_sees_a_refusal_recorded_while_it_ran(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A model refused between the switch's two reads stays off, though the session already held its row."""
+    client.post(f"{PATH}/models/switch", json={"vendor": "Alibaba", "enabled": False}, headers=master_key_header)
+    priced = HostedOffers.current_rates
+
+    async def _refused_meanwhile(self: HostedOffers, *args: Any, **kwargs: Any) -> Any:
+        rates = await priced(self, *args, **kwargs)
+        with db_session_factory() as db:
+            db.execute(
+                update(HostedProviderModel)
+                .where(HostedProviderModel.provider == "together", HostedProviderModel.model == QWEN)
+                .values(disabled_reason="unavailable")
+            )
+            db.commit()
+        return rates
+
+    monkeypatch.setattr(HostedOffers, "current_rates", _refused_meanwhile)
+
+    served = client.post(
+        f"{PATH}/models/switch", json={"vendor": "Alibaba", "enabled": True}, headers=master_key_header
+    )
+
+    assert served.json() == {"changed": 1, "skipped_unpriced": 0, "skipped_unavailable": 1}
+
+
 @pytest.fixture
 def defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     """The default rung prices Qwen differently from the operator, the Coder the same, and DeepSeek not at all."""
@@ -493,3 +524,51 @@ def test_another_otaris_reset_goes_back_to_the_price_its_listing_names(
     assert applied.json()["applied"] is True
     [after] = client.get(f"{path}/models", headers=master_key_header).json()["data"]
     assert (after["price_source"], after["input_price_per_million"]) == ("provider", 3)
+
+
+def test_another_otaris_reset_keeps_every_price_while_its_listing_cannot_be_read(
+    client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed listing names no price, and the models.dev estimate is not what that Otari charges."""
+
+    async def _listing(impl_name: str, **_: object) -> ProviderDiscovery:
+        return ProviderDiscovery(
+            provider=impl_name,
+            models=[
+                Model.model_validate(
+                    {
+                        "id": "openai/gpt-4o",
+                        "object": "model",
+                        "created": 0,
+                        "owned_by": "otari",
+                        "pricing": {"input_price_per_million": 3, "output_price_per_million": 4},
+                    }
+                )
+            ],
+        )
+
+    async def _unreachable(impl_name: str, **_: object) -> ProviderDiscovery:
+        return ProviderDiscovery(provider=impl_name, models=[], error="unreachable")
+
+    target = "gateway.services.providers._hosted_provider_service.test_provider_credentials"
+    monkeypatch.setattr(target, _listing)
+    created = client.post(
+        f"{API_ROOT}/hosted-providers",
+        json={"provider": "otari", "name": "otari-ai", "api_key": KEY, "api_base": "https://otari.test"},
+        headers=master_key_header,
+    )
+    assert created.status_code == 201, created.text
+    path = f"{API_ROOT}/hosted-providers/otari-ai"
+    [row] = client.get(f"{path}/models", headers=master_key_header).json()["data"]
+    client.patch(
+        f"{path}/models/{row['id']}",
+        json={"input_price_per_million": 5, "output_price_per_million": 6},
+        headers=master_key_header,
+    )
+    monkeypatch.setattr(target, _unreachable)
+
+    response = client.post(f"{path}/models/reset-prices", json={}, headers=master_key_header)
+
+    assert response.json() == {"changes": [], "skipped_no_default": ["openai/gpt-4o"], "applied": False}
+    [after] = client.get(f"{path}/models", headers=master_key_header).json()["data"]
+    assert after["input_price_per_million"] == 5

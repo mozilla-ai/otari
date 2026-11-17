@@ -532,7 +532,7 @@ class HostedProviderService:
         async with self.uow:
             # Read again, so a switch flipped since the read above is not overwritten. A model
             # offered in between was not priced above, so it is left for the next press.
-            for row in await self.models.list_all_for_provider(source.name):
+            for row in await self.models.list_all_for_provider(source.name, reload=True):
                 if row.model not in known:
                     continue
                 priced = row.model in rates
@@ -558,10 +558,11 @@ class HostedProviderService:
         """Put models an operator priced back on the default rate, or say what that would change.
 
         The default rate is models.dev's, or for another Otari the one its own listing names,
-        read by dialing it here. A model the default does not price keeps its price and is
-        named as skipped. A rate the configuration stored, and a tiered rate a default would
-        flatten, are left alone. A reset writes a new version,
-        so requests already billed keep their cost, and every later refresh keeps the rate current.
+        read by dialing it here, and never an estimate. A model the default does not price, or
+        any model of an Otari whose listing cannot be read, keeps its price and is named as
+        skipped. A rate the configuration stored, and a tiered rate a default would flatten, are
+        left alone. A reset writes a new version, so requests already billed keep their cost,
+        and every later refresh keeps the rate current.
 
         Raises:
             HostedProviderNotFoundError: no such provider.
@@ -571,7 +572,8 @@ class HostedProviderService:
             rows = await self.models.list_all_for_provider(source.name)
             credential = source.credential(quiet=True)
             declared = source.declared_models
-        if source.implementation == OTARI_IMPLEMENTATION and credential is not None:
+        is_otari = source.implementation == OTARI_IMPLEMENTATION
+        if is_otari and credential is not None:
             # Another Otari's default is the price its own listing names, which only a dial reads.
             await self._dial(source.name, source.implementation, credential, declared)
         vendors = vendors_of(source.implementation, [row.model for row in rows])
@@ -582,8 +584,10 @@ class HostedProviderService:
             if (wanted is None or row.model in wanted)
             and (request.vendor is None or vendors[row.model] == request.vendor)
         ]
+        # Never the models.dev estimate for another Otari: it is not what that Otari charges,
+        # so a model its listing does not price, or a listing that could not be read, keeps its price.
         paired, skipped = await self.offers.custom_against_defaults(
-            source.name, scoped, implementation=source.implementation
+            source.name, scoped, implementation=source.implementation, listed_only=is_otari
         )
         changes = [
             HostedPriceResetChangePublic(
@@ -1099,7 +1103,8 @@ class HostedProviderService:
         if declared and discovery.discovery_unsupported:
             models = [Model(id=model, created=0, object="model", owned_by=name) for model in declared]
             return ProviderDiscovery(provider=name, models=models)
-        if implementation == OTARI_IMPLEMENTATION:
+        if implementation == OTARI_IMPLEMENTATION and discovery.error is None:
+            # A failed listing names no price, so it does not replace one that did.
             self.offers.remember_listing(name, discovery.models)
         return dataclasses.replace(discovery, provider=name)
 

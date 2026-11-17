@@ -194,13 +194,20 @@ class HostedProviderModelRepository(BaseRepository[HostedProviderModel, Never, N
         )
         return result.scalar_one_or_none()
 
-    async def list_all_for_provider(self, provider: str) -> Sequence[HostedProviderModel]:
-        """Every offered row on one provider, for the pass that reprices them."""
-        result = await self.db.execute(
+    async def list_all_for_provider(self, provider: str, *, reload: bool = False) -> Sequence[HostedProviderModel]:
+        """Every offered row on one provider, for the pass that reprices them.
+
+        ``reload`` reads each row afresh even where the session already holds it, for a
+        write that must see what another request committed since this one first read it.
+        """
+        statement = (
             select(HostedProviderModel)
             .where(HostedProviderModel.provider == provider)
             .order_by(HostedProviderModel.model)
         )
+        if reload:
+            statement = statement.execution_options(populate_existing=True)
+        result = await self.db.execute(statement)
         return result.scalars().all()
 
     async def names_for_provider(self, provider: str) -> set[str]:
