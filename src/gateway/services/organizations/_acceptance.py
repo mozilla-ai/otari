@@ -1,0 +1,101 @@
+"""Answering an invitation link: what it offers, and declining it."""
+
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime
+
+from gateway.core.tokens import hash_token
+from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.organizations_exceptions import InvitationNoLongerValidError
+from gateway.models.organizations import OrganizationInvitation
+from gateway.repositories.organizations import OrganizationRepositories
+from gateway.services.mail import Mailer
+from gateway.services.organizations._blocked_addresses import BlockedAddresses
+from gateway.services.organizations._delivery_rule import DeliveryRule
+from gateway.services.organizations._invitation_facts import InvitationFacts, InvitationFactsReader
+
+
+@dataclass(frozen=True, kw_only=True)
+class InvitationPreview:
+    """What the page behind an invitation link shows before its holder decides."""
+
+    facts: InvitationFacts
+    invited_email: str
+
+
+class InvitationAcceptance:
+    """Answers an invitation link: the facts it offers, and the invitee's decline.
+
+    NOTE: No answer and no refusal may depend on whether the invited address holds an account anywhere.
+    Add no read to this service that could answer that question.
+    """
+
+    def __init__(
+        self,
+        uow: UnitOfWork,
+        repositories: OrganizationRepositories,
+        *,
+        blocked: BlockedAddresses,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        delivery: DeliveryRule,
+        facts: InvitationFactsReader,
+        mailer: Mailer,
+    ) -> None:
+        self._uow = uow
+        self._invitations = repositories.invitations
+        self._blocked = blocked
+        self._clock = clock
+        self._delivery = delivery
+        self._facts = facts
+        self._mailer = mailer
+
+    async def preview(self, token: str) -> InvitationPreview:
+        """What this invitation offers, raising the one refusal every unusable link gets.
+
+        NOTE: Callers must not call this from inside an already-open Unit of Work block.
+        """
+        async with self._uow:
+            invitation = await self._valid_or_refused(token)
+            facts = await self._facts.read(invitation, now=self._clock())
+            if facts is None:
+                raise InvitationNoLongerValidError()
+            return InvitationPreview(facts=facts, invited_email=invitation.email)
+
+    async def decline(self, token: str) -> None:
+        """Record that the invitee declined, which ends the link.
+
+        The organization's admins see no change: the invitation stays pending until it expires.
+
+        NOTE: Callers must not call this from inside an already-open Unit of Work block.
+        """
+        async with self._uow:
+            invitation = await self._valid_or_refused(token)
+            if await self._invitations.decline_by_token_hash(invitation.token_hash, at=self._clock()) is None:
+                raise InvitationNoLongerValidError()
+
+    async def _valid_or_refused(self, token: str) -> OrganizationInvitation:
+        """The invitation this token opens, refusing every unusable case with one answer.
+
+        NOTE: Callers must call this inside an open Unit of Work block.
+        """
+        now = self._clock()
+        invitation = await self._invitations.get_by_token_hash(hash_token(token))
+        if invitation is None or invitation.expires_at <= now or invitation.declined_at is not None:
+            raise InvitationNoLongerValidError()
+        if await self._refuses_the_address(invitation, now=now):
+            raise InvitationNoLongerValidError()
+        return invitation
+
+    async def _refuses_the_address(self, invitation: OrganizationInvitation, *, now: datetime) -> bool:
+        """Whether the deployment refuses this address its invitation.
+
+        The blocklist is the deployment operator's own refusal, so it is asked wherever an invitation
+        is opened. Whether another organization has proven the address's domain is that organization's
+        data, so it is asked only where links cannot be delivered and the admin carried this one by hand.
+        """
+        if self._mailer.can_deliver_links:
+            return bool(await self._blocked.blocked_among([invitation.email]))
+        return not await self._delivery.allows(invitation.email, invitation.organization_id, now=now)
+
+
+__all__ = ["InvitationAcceptance", "InvitationPreview"]

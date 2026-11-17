@@ -26,6 +26,16 @@ class NoActiveOrganizationError(TenancyNotFoundError):
         super().__init__("You are not an active member of any organization")
 
 
+class InvitationNoLongerValidError(TenancyNotFoundError):
+    """An invitation link cannot be used: it was never one, or it expired, was declined, cancelled or blocked.
+
+    One answer for every case, so the link tells its holder nothing about which.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("This invitation is no longer valid")
+
+
 class OrganizationMemberNotFoundError(TenancyNotFoundError):
     def __init__(self, organization_member_id: object):
         super().__init__(f"Organization member {organization_member_id} not found")
@@ -546,6 +556,7 @@ __all__ = [
     "InvitationExpiredError",
     "InvitationLimitCeiling",
     "InvitationLimitError",
+    "InvitationNoLongerValidError",
     "InvitationNotFoundError",
     "InvitationPasswordNotAcceptedError",
     "InvitationRequestTooLargeError",
