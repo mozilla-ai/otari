@@ -637,6 +637,24 @@ class McpServerSummary(BaseModel):
     )
 
 
+class McpServerLeftOut(BaseModel):
+    """A server the key's access list grants and that is still not listed, and why."""
+
+    id: uuid.UUID
+    name: str
+    reason: Literal["key_has_no_user"] = Field(
+        description="`key_has_no_user`: the server signs each person in with their own account, and this key "
+        "belongs to no person, so there is nobody to sign in as"
+    )
+    detail: str = Field(description="The reason in a sentence, for a person reading the response")
+
+
+_NO_USER_DETAIL = (
+    "This server signs each person in with their own account. This API key was created without a user, "
+    "so it has nobody to sign in as. Use a key created for a user to reach this server."
+)
+
+
 def _own_client(client_id: str | None, client_secret: str | None) -> dict[str, object] | None:
     """A manager's own OAuth client in its stored shape, its secret encrypted; ``None`` when they named none."""
     if not client_id:
@@ -1221,7 +1239,7 @@ async def _enabled_servers(db: AsyncSession, workspace_id: uuid.UUID) -> Sequenc
 
 async def list_mcp_servers_needing_a_user(
     db: AsyncSession, *, workspace_id: uuid.UUID, access: McpAccess
-) -> list[McpServerSummary]:
+) -> list[McpServerLeftOut]:
     """The enabled per-user servers the caller's access grants but :func:`list_reachable_mcp_servers` leaves out.
 
     Empty for a caller with a user. A caller with none (a key made with no user, which bills to the
@@ -1230,7 +1248,7 @@ async def list_mcp_servers_needing_a_user(
     if access.user_id is not None:
         return []
     return [
-        McpServerSummary(id=row.id, name=row.name, purpose_hint=row.purpose_hint)
+        McpServerLeftOut(id=row.id, name=row.name, reason="key_has_no_user", detail=_NO_USER_DETAIL)
         for row in await _enabled_servers(db, workspace_id)
         if _needs_a_user(row, access) and access.patterns_for(row.id, row.everyone_tools, _read_tools(row))
     ]
@@ -1342,7 +1360,7 @@ class WorkspaceMcpServers:
         """See :func:`list_reachable_mcp_servers`."""
         return await list_reachable_mcp_servers(self._db, workspace_id=workspace_id, access=access, tokens=self._tokens)
 
-    async def list_needing_a_user(self, workspace_id: uuid.UUID, access: McpAccess) -> list[McpServerSummary]:
+    async def list_needing_a_user(self, workspace_id: uuid.UUID, access: McpAccess) -> list[McpServerLeftOut]:
         """See :func:`list_mcp_servers_needing_a_user`."""
         return await list_mcp_servers_needing_a_user(self._db, workspace_id=workspace_id, access=access)
 
@@ -2552,6 +2570,7 @@ __all__ = [
     "MAX_ALLOWED_TOOLS",
     "MAX_MCP_SERVERS_PER_WORKSPACE",
     "MAX_GRANTS_PER_SERVER",
+    "McpServerLeftOut",
     "McpServerSummary",
     "McpSharedAccountPublic",
     "McpSignInLinkPreview",

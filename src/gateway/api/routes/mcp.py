@@ -29,7 +29,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.exceptions import RequestValidationError
@@ -111,7 +111,11 @@ from gateway.services.model_access import (
     resolve_request_mcp_access,
 )
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
-from gateway.services.tenancy.workspace_mcp_server_service import McpServerSummary, WorkspaceMcpServers
+from gateway.services.tenancy.workspace_mcp_server_service import (
+    McpServerLeftOut,
+    McpServerSummary,
+    WorkspaceMcpServers,
+)
 from gateway.services.tools import McpConnectionService, mcp_server_contacts
 from gateway.services.traces import RequestTrace, harness_of, resolve_session
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
@@ -588,18 +592,6 @@ class McpToolsResponse(BaseModel):
     warnings: list[McpToolWarning]
 
 
-class McpServerLeftOut(BaseModel):
-    """A server the key's access list grants and that is still not listed, and why."""
-
-    id: uuid.UUID
-    name: str
-    reason: Literal["key_has_no_user"] = Field(
-        description="`key_has_no_user`: the server signs each person in with their own account, and this key "
-        "belongs to no person, so there is nobody to sign in as"
-    )
-    detail: str = Field(description="The reason in a sentence, for a person reading the response")
-
-
 class McpServersResponse(BaseModel):
     """The enabled stored servers the authenticated key can reach."""
 
@@ -609,12 +601,6 @@ class McpServersResponse(BaseModel):
         description="Servers the key's access list grants that are not in `servers`, each with the reason. "
         "Empty for a key that belongs to a user.",
     )
-
-
-_NO_USER_DETAIL = (
-    "This server signs each person in with their own account. This API key was created without a user, "
-    "so it has nobody to sign in as. Use a key created for a user to reach this server."
-)
 
 
 @router.get(
@@ -659,10 +645,7 @@ async def list_mcp_servers(
             else summary
             for summary in listed
         ],
-        left_out=[
-            McpServerLeftOut(id=summary.id, name=summary.name, reason="key_has_no_user", detail=_NO_USER_DETAIL)
-            for summary in needing_a_user
-        ],
+        left_out=needing_a_user,
     )
 
 
