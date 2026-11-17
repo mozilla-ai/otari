@@ -5,14 +5,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Literal
 
 from gateway.schemas.tools import OtariToolCallError
-from gateway.services.tools._chat_tool_calls import call_limit_error, chat_entry
+from gateway.services.tools._chat_tool_calls import chat_entry, refusal_error
 from gateway.services.tools._web_display import fetch_display_url
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from gateway.services._tool_loop import ToolBackend
-    from gateway.services.tools._native import NativeCall
+    from gateway.services.tools._native import NativeCall, Refusal
 
 # The gateway's own fetch entry ids, beside the ``otari_ws_`` ids of its searches.
 WEB_FETCH_CALL_ID_PREFIX = "otari_wf_"
@@ -49,9 +49,9 @@ class ChatWebFetchRendering:
         error = OtariToolCallError.model_validate(failure.as_dict()) if failure is not None else None
         return [_entry(call, "failed", error=error)]
 
-    def refused(self, call: NativeCall) -> list[Any]:
-        """The ended entry for a fetch the use cap refused before it ran."""
-        return [_entry(call, "failed", error=call_limit_error())]
+    def refused(self, call: NativeCall, reason: Refusal) -> list[Any]:
+        """The ended entry for a fetch refused before it ran."""
+        return [_entry(call, "failed", error=refusal_error(reason))]
 
 
 def _entry(

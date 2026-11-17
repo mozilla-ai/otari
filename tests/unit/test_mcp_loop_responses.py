@@ -37,6 +37,7 @@ from openai.types.responses.response_usage import InputTokensDetails, OutputToke
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.services import mcp_loop_responses as responses_loop_module
+from gateway.services._tool_loop import INVALID_ARGUMENTS_ERROR
 from gateway.services.mcp_loop_responses import (
     MaxToolIterationsExceeded,
     responses_tool_loop,
@@ -694,6 +695,74 @@ async def test_stream_tool_failure_keeps_the_exception_out_of_the_output_and_the
     assert output_item["output"] == "[tool error] Gateway tool execution failed"
     assert logged == [("Gateway tool execution failed: fetch_url", {"error_type": type(raised).__name__})]
     assert "sk-live-secret" not in str(captured_inputs) + str(logged) + str(events)
+
+
+@pytest.mark.asyncio
+async def test_loop_refuses_a_call_whose_arguments_are_not_a_json_object(monkeypatch: pytest.MonkeyPatch) -> None:
+    responses = iter(
+        [
+            _response(output=[_function_call("c", "fetch_url", '{"u": ')]),
+            _response(output=[], status="completed"),
+        ]
+    )
+    captured_inputs: list[Any] = []
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        captured_inputs.append(list(kwargs["input_data"]))
+        return next(responses)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+    logged = _capture_warnings(monkeypatch)
+
+    pool = _FakePool(tool_names=["fetch_url"])
+    await responses_tool_loop(
+        completion_kwargs={"model": "fake", "input_data": "go"},
+        pool=cast(Any, pool),
+        max_iterations=5,
+    )
+
+    output_item = next(
+        item for item in captured_inputs[1] if isinstance(item, dict) and item.get("type") == "function_call_output"
+    )
+    assert pool.calls == []
+    assert output_item["output"] == INVALID_ARGUMENTS_ERROR
+    assert logged == [("Tool call arguments are not a JSON object; not running fetch_url", None)]
+
+
+@pytest.mark.asyncio
+async def test_stream_refuses_a_call_whose_arguments_are_not_a_json_object(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured_inputs: list[Any] = []
+    iter_streams = iter(
+        [
+            _async_iter(
+                _output_item_added(0, _function_call("c", "fetch_url", "")),
+                _function_call_args_done(0, "fc_item_1", "fetch_url", '["x"]'),
+                _output_item_done(0, _function_call("c", "fetch_url", '["x"]')),
+                _response_completed(),
+            ),
+            _async_iter(_text_delta("msg_1", 0, "recovered"), _response_completed()),
+        ]
+    )
+
+    async def fake_aresponses(**kwargs: Any) -> AsyncIterator[ResponseStreamEvent]:
+        captured_inputs.append(list(kwargs["input_data"]))
+        return next(iter_streams)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+
+    pool = _FakePool(tool_names=["fetch_url"])
+    async for _ in responses_tool_loop_stream(
+        completion_kwargs={"model": "fake", "input_data": "go"},
+        pool=cast(Any, pool),
+        max_iterations=5,
+    ):
+        pass
+
+    output_item = next(
+        item for item in captured_inputs[1] if isinstance(item, dict) and item.get("type") == "function_call_output"
+    )
+    assert pool.calls == []
+    assert output_item["output"] == INVALID_ARGUMENTS_ERROR
 
 
 @pytest.mark.asyncio

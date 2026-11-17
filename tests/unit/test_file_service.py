@@ -299,9 +299,10 @@ async def test_a_page_token_this_gateway_did_not_issue_is_refused() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_cleanup_that_fails_does_not_replace_the_refusal_it_follows() -> None:
+@pytest.mark.parametrize("delete_error", [OSError("read-only store"), ValueError("ref escapes the store")])
+async def test_a_cleanup_that_fails_does_not_replace_the_refusal_it_follows(delete_error: Exception) -> None:
     """An orphaned blob is a smaller failure than losing why the upload was refused."""
-    store = _MemoryStore(delete_error=OSError("read-only store"))
+    store = _MemoryStore(delete_error=delete_error)
 
     with pytest.raises(EmptyUploadError):
         await _service(store, _StubFiles()).store(_upload())
@@ -324,10 +325,11 @@ async def test_a_file_whose_row_will_not_change_is_still_served() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_blob_that_will_not_delete_does_not_undo_a_completed_discard() -> None:
+@pytest.mark.parametrize("delete_error", [OSError("read-only store"), ValueError("ref escapes the store")])
+async def test_a_blob_that_will_not_delete_does_not_undo_a_completed_discard(delete_error: Exception) -> None:
     files = _StubFiles(rows=[_row()])
 
-    await _service(_MemoryStore(delete_error=OSError("read-only store")), files).discard(
+    await _service(_MemoryStore(delete_error=delete_error), files).discard(
         "file-1", FileScope(user_id="u1", workspace_id=_WORKSPACE)
     )
 
@@ -343,9 +345,10 @@ async def test_a_row_holding_no_bytes_is_not_served() -> None:
 
 
 @pytest.mark.asyncio
-async def test_bytes_that_will_not_read_back_are_a_storage_failure() -> None:
+@pytest.mark.parametrize("read_error", [OSError("blob missing"), ValueError("ref escapes the store")])
+async def test_bytes_that_will_not_read_back_are_a_storage_failure(read_error: Exception) -> None:
     files = _StubFiles(rows=[_row()])
-    store = _MemoryStore(read_error=OSError("blob missing"))
+    store = _MemoryStore(read_error=read_error)
 
     with pytest.raises(FileStorageError):
         await _service(store, files).content("file-1", FileScope(user_id="u1", workspace_id=_WORKSPACE))

@@ -27,6 +27,15 @@ class Dialect(StrEnum):
     RESPONSES = "responses"
 
 
+class Refusal(StrEnum):
+    """Why the gateway refused a call before it ran."""
+
+    # The request's use cap for the tool was spent.
+    CALL_LIMIT = "call_limit"
+    # The model's arguments were not a JSON object.
+    INVALID_INPUT = "invalid_input"
+
+
 # Marks a Messages ``server_tool_use`` ID as one this gateway minted. Anthropic issues
 # ``srvtoolu_``-prefixed IDs of its own, so a reserved prefix is what lets an echoed
 # transcript be told apart from one describing a call the provider really ran.
@@ -66,6 +75,6 @@ class NativeRendering(Protocol):
         """Wire items announcing a call the gateway ran, empty where there is nothing to report."""
         ...
 
-    def refused(self, call: NativeCall) -> list[Any]:
-        """Wire items announcing a call the request's use cap refused, empty where the dialect has none."""
+    def refused(self, call: NativeCall, reason: Refusal) -> list[Any]:
+        """Wire items announcing a call refused for ``reason`` before it ran, empty where the dialect has none."""
         ...

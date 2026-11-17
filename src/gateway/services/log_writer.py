@@ -54,6 +54,10 @@ class LogWriter(Protocol):
         """
         ...
 
+    async def after_commit(self, logs: list[UsageLog]) -> None:
+        """Report transactionally staged rows after their request transaction commits."""
+        ...
+
     async def start(self) -> None: ...
 
     async def stop(self) -> None: ...
@@ -75,6 +79,9 @@ class SingleLogWriter:
                 logger.error("SingleLogWriter failed: %s", e)
                 ROWS.labels(writer="single", result="dropped").inc()
                 return False
+
+    async def after_commit(self, logs: list[UsageLog]) -> None:
+        ROWS.labels(writer="single", result="written").inc(len(logs))
 
     async def start(self) -> None:
         pass
@@ -126,6 +133,9 @@ class BatchLogWriter:
         finally:
             QUEUE_DEPTH.set(self._queue.qsize())
         return True
+
+    async def after_commit(self, logs: list[UsageLog]) -> None:
+        ROWS.labels(writer="batch", result="written").inc(len(logs))
 
     async def start(self) -> None:
         self._stopping.clear()
@@ -277,6 +287,16 @@ class TracingLogWriter:
                 logger.warning("Usage row not traced (%s)", type(exc).__name__)
         return await self._inner.put(log)
 
+    async def after_commit(self, logs: list[UsageLog]) -> None:
+        for log in logs:
+            trace = self._traces.get(log.request_group_id)
+            if trace is not None:
+                try:
+                    trace.record_llm_call(_llm_call(log))
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Usage row not traced (%s)", type(exc).__name__)
+        await self._inner.after_commit(logs)
+
     async def start(self) -> None:
         await self._inner.start()
 
@@ -344,6 +364,19 @@ class SignalingLogWriter:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Usage row not signaled (%s)", type(exc).__name__)
         return accepted
+
+    async def after_commit(self, logs: list[UsageLog]) -> None:
+        await self._inner.after_commit(logs)
+        for log in logs:
+            try:
+                usage = recorded_usage(log)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Usage row not signaled (%s)", type(exc).__name__)
+                continue
+            try:
+                await self._signal.usage_recorded(usage)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Usage row not signaled (%s)", type(exc).__name__)
 
     async def start(self) -> None:
         await self._inner.start()

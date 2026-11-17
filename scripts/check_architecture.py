@@ -78,6 +78,13 @@ Enforces:
     library keeps its tests and scripts inside its directory rather than
     under tests/ or src/, so each directory is a root of its own, mapped to
     its rule. Entry-point discovery is banned there as under gateway/.
+25. Import cycles: no cycle runs between modules under gateway/, so a module
+    always finishes loading before another needs a name from it. A package
+    reaching its own member is the one edge a package body orders, so it is not
+    read as a dependency. Importing a.b.c runs every package above it, which is,
+    so a cycle through a package initializer is found. Only imports at module
+    scope are read, since an import inside a function or under if TYPE_CHECKING
+    does not run when the module loads.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -1974,9 +1981,136 @@ def check_service_root_exports(src_root: Path) -> list[str]:
     return violations
 
 
+IMPORT_CYCLE_SCOPE = "gateway"
+
+
+TYPE_CHECKING_NAMES = ("TYPE_CHECKING", "typing.TYPE_CHECKING")
+
+
+def _guards_type_checking(test: ast.expr) -> bool:
+    """Whether an if guards a block that only a type checker reads."""
+    return _dotted_name(test) in TYPE_CHECKING_NAMES
+
+
+def _executed_imports(tree: ast.Module) -> Iterator[ast.Import | ast.ImportFrom]:
+    """Every import that runs when the module is imported.
+
+    Descends into the blocks that run as the module body does, an if, a try, a with or a loop,
+    and not into a function or class body, which runs when it is called, nor into a
+    ``TYPE_CHECKING`` guard, which never runs. Deferring an import is how a cycle is broken,
+    so reading a deferred one as a dependency would refuse the fix.
+    """
+    pending: list[ast.stmt] = list(tree.body)
+    while pending:
+        node = pending.pop()
+        if isinstance(node, ast.Import | ast.ImportFrom):
+            yield node
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            continue
+        elif isinstance(node, ast.If) and _guards_type_checking(node.test):
+            pending.extend(node.orelse)
+        else:
+            pending.extend(getattr(node, "body", []))
+            pending.extend(getattr(node, "orelse", []))
+            pending.extend(getattr(node, "finalbody", []))
+            pending.extend(statement for handler in getattr(node, "handlers", []) for statement in handler.body)
+
+
+def _import_graph(src_root: Path) -> dict[str, set[str]]:
+    """Each module under the scope and the modules it imports when it is itself imported.
+
+    NOTE: only the imports that run when the module is imported are read, which
+    :func:`_executed_imports` decides.
+    """
+    files = [f for f in sorted((src_root / IMPORT_CYCLE_SCOPE).rglob("*.py")) if "__pycache__" not in f.parts]
+    modules = {_module_name(f.relative_to(src_root).as_posix()) for f in files}
+    graph: dict[str, set[str]] = {}
+    for file_path in files:
+        name = _module_name(file_path.relative_to(src_root).as_posix())
+        try:
+            tree = ast.parse(file_path.read_text(encoding="utf-8"), filename=str(file_path))
+        except SyntaxError:
+            continue
+        imported: set[str] = set()
+        for node in _executed_imports(tree):
+            for module in _imported_modules(node, file_path, src_root):
+                # Importing a.b.c runs a, then a.b, then a.b.c, so each package above it is an edge too.
+                parts = module.split(".")
+                for candidate in (".".join(parts[: i + 1]) for i in range(len(parts))):
+                    # A package reaching its own member is the one edge a body orders: the package binds
+                    # what the member needs before the member runs, so it is not a dependency to resolve.
+                    if candidate not in modules or candidate == name or candidate.startswith(f"{name}."):
+                        continue
+                    imported.add(candidate)
+        graph[name] = imported
+    return graph
+
+
+def _reachable(graph: dict[str, set[str]], start: str) -> set[str]:
+    """Every module reachable from ``start`` by following imports."""
+    seen: set[str] = set()
+    stack = [start]
+    while stack:
+        for module in graph.get(stack.pop(), ()):
+            if module not in seen:
+                seen.add(module)
+                stack.append(module)
+    return seen
+
+
+def _cycle_groups(graph: dict[str, set[str]]) -> list[list[str]]:
+    """The modules that import themselves back, grouped so each group is one cycle."""
+    reachable = {module: _reachable(graph, module) for module in graph}
+    on_cycle = [module for module in graph if module in reachable[module]]
+    groups: list[list[str]] = []
+    placed: set[str] = set()
+    for module in sorted(on_cycle):
+        if module in placed:
+            continue
+        group = sorted({other for other in on_cycle if other in reachable[module] and module in reachable[other]})
+        placed.update(group)
+        groups.append(group)
+    return groups
+
+
+def check_import_cycles(src_root: Path) -> list[str]:
+    """Check that no import cycle runs between modules that must each finish loading before the other.
+
+    A package reaching its own member is the one edge a package body orders, since the package binds
+    what the member needs before the member runs, so it is not read as a dependency. Every other edge
+    is, and Python refuses a cycle of them with a partially initialized module.
+    """
+    return [
+        f"{', '.join(group)} import each other; no module in the cycle finishes loading "
+        f"before another needs a name from it"
+        for group in _cycle_groups(_import_graph(src_root))
+    ]
+
+
 MODELS_SCOPE = "gateway/models"
 TABLE_ATTRIBUTES = ("__table__", "__tablename__")
 TYPE_ALIAS = ("TypeAlias", "typing.TypeAlias", "typing_extensions.TypeAlias")
+ANNOTATED = ("Annotated", "typing.Annotated", "typing_extensions.Annotated")
+
+
+def _annotated_type(node: ast.Assign, bindings: dict[str, str]) -> ast.expr | None:
+    """The type ``Annotated[T, ...]`` names in an assignment, or None where the value is not one.
+
+    NOTE: only the type is returned. The metadata beside it runs when the module loads, so it
+    stays subject to every rule a type position is exempt from.
+    """
+    if not isinstance(node.value, ast.Subscript):
+        return None
+    dotted = _dotted_name(node.value.value) or ""
+    head, _, rest = dotted.partition(".")
+    target = bindings.get(head)
+    resolved = (f"{target}.{rest}" if rest else target) if target is not None else dotted
+    if resolved not in ANNOTATED:
+        return None
+    arguments = node.value.slice
+    return arguments.elts[0] if isinstance(arguments, ast.Tuple) and arguments.elts else arguments
+
+
 TYPE_CHECKS = ("isinstance", "issubclass")
 TYPING_CASTS = ("typing.cast", "typing_extensions.cast")
 
@@ -1996,7 +2130,6 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     "gateway.models.api_keys.APIKey": {
         "repository": "gateway/repositories/api_keys/api_key_repository.py",
         "baseline": (
-            "gateway/api/deps/auth.py",
             "gateway/api/routes/batches.py",
             "gateway/api/routes/catalog.py",
             "gateway/api/routes/keys.py",
@@ -2335,7 +2468,6 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     "gateway.models.tenancy.User": {
         "repository": "gateway/repositories/tenancy/user_repository.py",
         "baseline": (
-            "gateway/api/deps/identity.py",
             "gateway/repositories/tenancy/organization_member_repository.py",
             "gateway/repositories/tenancy/workspace_repository.py",
             "gateway/services/dashboard_session_service.py",
@@ -2656,6 +2788,8 @@ def _type_position_nodes(tree: ast.Module, bindings: dict[str, str]) -> set[int]
             positions.append(node.returns)
         elif isinstance(node, ast.TypeAlias):
             positions.append(node.value)
+        elif isinstance(node, ast.Assign) and (annotated := _annotated_type(node, bindings)) is not None:
+            positions.append(annotated)
         elif isinstance(node, ast.Call):
             called = _called_name(node.func)
             dotted = _dotted_name(node.func) or ""
@@ -2855,6 +2989,7 @@ def main() -> int:
     service_package_import_violations = check_service_package_imports(SRC_ROOT, domains)
     service_root_export_violations = check_service_root_exports(SRC_ROOT)
     model_access_violations = check_model_access(SRC_ROOT)
+    import_cycle_violations = check_import_cycles(SRC_ROOT)
 
     if import_violations:
         print("❌ Architecture violations found:\n")
@@ -2929,6 +3064,12 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal service root export violations: {len(service_root_export_violations)}")
 
+    if import_cycle_violations:
+        print("\n❌ Import cycle violations:\n")
+        for violation in import_cycle_violations:
+            print(f"  {violation}")
+        print(f"\nTotal import cycle violations: {len(import_cycle_violations)}")
+
     if model_access_violations:
         print("\n❌ Model access violations:\n")
         for violation in model_access_violations:
@@ -2949,6 +3090,7 @@ def main() -> int:
         or service_package_import_violations
         or service_root_export_violations
         or model_access_violations
+        or import_cycle_violations
     ):
         print("\n💡 See ARCHITECTURE.md for the intended layering")
         return 1

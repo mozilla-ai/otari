@@ -278,26 +278,37 @@ async def test_the_bundled_catalog_serves_until_a_download_succeeds(enabled: boo
         assert mcs.cached_models_dev_catalog() is (CATALOG if enabled else EMPTY)
 
 
-def test_the_fallback_is_the_bundled_catalog() -> None:
+def test_the_fallback_is_the_bundled_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Through monkeypatch, so the catalog this reads is put back for the next test.
+    monkeypatch.setattr(mcs, "_bundled", None)
+
     catalog = _REAL_FALLBACK()
 
     assert catalog is not None
     assert catalog.model_for("openai", "gpt-4o") is not None
+    assert _REAL_FALLBACK() is catalog
 
 
-def test_the_bundled_fallback_is_read_ahead_only_when_nothing_else_serves() -> None:
+def test_the_bundled_fallback_is_read_ahead_only_when_nothing_else_serves(monkeypatch: pytest.MonkeyPatch) -> None:
+    reads = 0
+
+    def read_the_bundled_catalog() -> None:
+        nonlocal reads
+        reads += 1
+
+    monkeypatch.setattr(mcs, "_fallback", read_the_bundled_catalog)
+
     mcs.load_bundled_fallback()
-    assert mcs._bundled is not None
+    assert reads == 1
 
     mcs.serve_catalog(EMPTY, datetime.now(UTC), mcs.models_dev_base_url())
     mcs.load_bundled_fallback()
 
-    assert mcs._bundled is None
+    assert reads == 1
 
 
-def test_serving_a_catalog_releases_the_bundled_one() -> None:
-    bundled = mcs._fallback()
-    assert mcs._fallback() is bundled
+def test_serving_a_catalog_releases_the_bundled_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(mcs, "_bundled", EMPTY)
 
     mcs.serve_catalog(EMPTY, datetime.now(UTC), mcs.models_dev_base_url())
 

@@ -15,7 +15,7 @@ from anthropic.types import (
 
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, CodeExecution
 from gateway.services.tools._code_execution_declarations import native_code_execution_dialect
-from gateway.services.tools._native import SERVER_TOOL_USE_ID_PREFIX, Dialect
+from gateway.services.tools._native import SERVER_TOOL_USE_ID_PREFIX, Dialect, Refusal
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -92,9 +92,15 @@ class MessagesCodeExecutionRendering:
             return []
         return [block for execution in take_executions() for block in _execution_blocks(execution)]
 
-    def refused(self, call: NativeCall) -> list[Any]:
-        """Nothing: code execution has no use cap, so no call of it is refused."""
-        return []
+    def refused(self, call: NativeCall, reason: Refusal) -> list[Any]:
+        """The pair for a run refused before it reached the sandbox, in the vocabulary's error shape.
+
+        Code execution has no use cap, so only a call whose arguments did not parse is refused.
+        """
+        del call
+        if reason is not Refusal.INVALID_INPUT:
+            return []
+        return _execution_blocks(CodeExecution(code="", result=None, invalid_input=True))
 
 
 RENDERING = MessagesCodeExecutionRendering()

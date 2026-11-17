@@ -19,7 +19,9 @@ land and is not reproducible on demand.
 """
 
 import asyncio
+import logging
 from collections.abc import Callable, Coroutine
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +32,8 @@ from pydantic import ValidationError
 from gateway import main as gateway_main
 from gateway.container import build_container
 from gateway.core.config import GatewayConfig
+from gateway.core.database import dispose_db
+from gateway.log_config import logger as gateway_logger
 from gateway.main import (
     _LIFESPAN_WORKERS,
     _REFRESHER_STOP_TIMEOUT_SECONDS,
@@ -172,6 +176,57 @@ async def test_lifespan_shutdown_completes_despite_a_stuck_refresher(
     # indistinguishable from the fix under test.
     async with lifespan(app):
         pass
+
+
+@pytest.mark.asyncio
+async def test_a_cache_reset_that_raises_does_not_stop_the_rest_of_shutdown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The next reset still runs, the engine is still disposed, and the failure is logged."""
+    reset: list[str] = []
+    disposed: list[bool] = []
+
+    def explodes() -> None:
+        raise RuntimeError("reset blew up")
+
+    first, second, *rest = _LIFESPAN_WORKERS
+    workers = (
+        replace(first, reset=explodes),
+        replace(second, reset=lambda: reset.append(second.name)),
+        *rest,
+    )
+    monkeypatch.setattr(gateway_main, "_LIFESPAN_WORKERS", workers)
+
+    async def recording_dispose_db() -> None:
+        disposed.append(True)
+        await dispose_db()
+
+    monkeypatch.setattr(gateway_main, "dispose_db", recording_dispose_db)
+    config = GatewayConfig(
+        database_url=f"sqlite:///{tmp_path / 'lifespan.db'}",
+        master_key="sk-test-master",
+    )
+    app = FastAPI()
+    app.state.config = config
+    app.state.enabled_features = ()
+    app.state.container = build_container(config=config)
+
+    # The gateway logger does not propagate, so caplog sees it only with its handler attached.
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.WARNING, logger="gateway")
+    try:
+        async with _create_lifespan()(app):
+            pass
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+    assert reset == [second.name]
+    assert disposed == [True]
+    failures = [r for r in caplog.records if r.getMessage() == f"{first.name} cache reset failed at shutdown"]
+    assert len(failures) == 1
+    assert failures[0].exc_info is not None
 
 
 def _recording_refresher(name: str, started: list[str]) -> Callable[..., Coroutine[Any, Any, None]]:
