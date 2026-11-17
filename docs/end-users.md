@@ -28,7 +28,7 @@ cannot be deleted.
 
 1. Open **API keys** and click **Create key**.
 2. Enter a **Name**, such as `mlpa`.
-3. Click **Advanced** and tick **Service key**.
+3. Click **More options** and tick **Service key**.
 4. Pick the **Budget for each end user**: every new end user starts on its own
    copy of it. Picking **None** leaves new end users uncapped, limited only by
    the key's own ceiling.

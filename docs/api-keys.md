@@ -12,7 +12,7 @@ accepted headers are in [Base URL](api-reference.md#base-url) and
 
 1. Open the workspace's **API keys** page and click **Create key**.
 2. Enter a **Name** and, optionally, an expiry under **Expires (optional)**.
-3. Optionally, click **Advanced** to narrow the models and tools the key can
+3. Optionally, click **More options** to narrow the models and tools the key can
    use. By default a key inherits your model access, and it can never exceed
    it.
 4. Click **Create key**, then copy the key. It is shown once, so store it
@@ -48,7 +48,7 @@ anything else with `403`.
 
 Some clients fill that field with a value of their own: Claude Code and Junie
 do, and so do applications that pass their customers' ids. For those keys, set
-**Mismatched `user` field** under **Advanced** in the key form, or on the edit
+**Mismatched `user` field** under **More options** in the key form, or on the edit
 form:
 
 | Choice | A request naming another user |

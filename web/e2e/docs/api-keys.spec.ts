@@ -19,7 +19,9 @@ test("create a key", async ({ page }) => {
   await dismissComboBoxInDialog(ownerBox)
   // After the owner, so the capture is not taken with focus in the combobox.
   await dialog.getByLabel("Name").fill("Production backend")
-  await expect(dialog.getByRole("button", { name: "Advanced" })).toBeVisible()
+  await expect(
+    dialog.getByRole("button", { name: "More options" }),
+  ).toBeVisible()
   await expect(dialog.getByRole("button", { name: "Create key" })).toBeVisible()
   await docScreenshot(dialog, "api-keys-create")
 })

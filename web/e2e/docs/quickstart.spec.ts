@@ -11,7 +11,9 @@ test("the quickstart's pages", async ({ page }) => {
   await nav(page).getByRole("link", { name: "API keys" }).click()
   await page.getByRole("button", { name: "Create key" }).click()
   const dialog = page.getByRole("dialog")
-  await expect(dialog.getByRole("button", { name: "Advanced" })).toBeVisible()
+  await expect(
+    dialog.getByRole("button", { name: "More options" }),
+  ).toBeVisible()
   await dialog.getByRole("button", { name: "Cancel" }).click()
 
   // Not the Models step: this gateway reaches no provider, so its catalog is

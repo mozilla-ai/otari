@@ -5,7 +5,7 @@ Otari to put its requests under your budgets, usage tracking and traces.
 
 ## Route Claude Code through Otari
 
-1. On the dashboard's **API keys** page, create a key. Under **Advanced**, set
+1. On the dashboard's **API keys** page, create a key. Under **More options**, set
    **Mismatched `user` field** to **Always accept**. Claude Code puts its own
    telemetry value in that field, and a key left on the default refuses its
    requests with `403`. Spend still goes to the key's user; see
