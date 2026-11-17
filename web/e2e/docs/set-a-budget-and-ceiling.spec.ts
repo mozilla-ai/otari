@@ -23,7 +23,7 @@ async function signInAsAdmin(page: Page): Promise<void> {
   await expectOk(invited, "invite the admin")
   const { accept_link } = (await invited.json()) as { accept_link: string }
   const token = decodeURIComponent(
-    /[?&]token=([^&]+)/.exec(accept_link)?.[1] ?? "",
+    /[?&#]token=([^&]+)/.exec(accept_link)?.[1] ?? "",
   )
   let accepted = await page.request.post(`${API_ROOT}/invitations/accept`, {
     data: { token, password: ADMIN_PASSWORD, terms_accepted: true },
