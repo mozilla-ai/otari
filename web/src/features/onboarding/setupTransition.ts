@@ -205,6 +205,38 @@ function carry(
 }
 
 /**
+ * Settles the frame on its success face, plays the wave when there is a copy
+ * to carry, and returns what undoes both.
+ */
+function land(
+  frame: HTMLElement,
+  face: HTMLElement,
+  { height, copy, scrolled }: Landing,
+): () => void {
+  // The body is the same node in both faces, so it would keep the sheet's
+  // scroll, and the header its rule.
+  for (const element of face.querySelectorAll("*")) {
+    if (element.scrollTop) element.scrollTop = 0
+  }
+  // Held at the sheet's height so the frame does not resize, for as long as it
+  // floats: `max-height` still caps it, and the phone sheet takes the
+  // viewport's height, even when the window becomes one after the landing.
+  const floating = window.matchMedia(FLOATING_FRAME)
+  const hold = () => {
+    frame.style.height = floating.matches ? `${height}px` : ""
+  }
+  hold()
+  floating.addEventListener("change", hold)
+  // The frame did not reopen, so nothing announces the new title; focus does.
+  frame.focus({ preventScroll: true })
+  const stop = copy ? carry(frame, face, copy, scrolled) : undefined
+  return () => {
+    floating.removeEventListener("change", hold)
+    stop?.()
+  }
+}
+
+/**
  * Whether the success face should render, and the wave that carries the setup
  * face into it once it does.
  *
@@ -246,20 +278,7 @@ export function useLandingTransition(
     const frame = face?.parentElement
     if (!showsSuccess || !next || !face || !frame) return
     landing.current = null
-    // The body is the same node in both faces, so it would keep the sheet's
-    // scroll, and the header its rule.
-    for (const element of face.querySelectorAll("*")) {
-      if (element.scrollTop) element.scrollTop = 0
-    }
-    // Held at the sheet's height so the frame does not resize. `max-height`
-    // still caps it, and the phone sheet is the viewport's height already.
-    if (window.matchMedia(FLOATING_FRAME).matches) {
-      frame.style.height = `${next.height}px`
-    }
-    // The frame did not reopen, so nothing announces the new title; focus does.
-    frame.focus({ preventScroll: true })
-    if (!next.copy) return
-    return carry(frame, face, next.copy, next.scrolled)
+    return land(frame, face, next)
   }, [faceRef, showsSuccess])
 
   return showsSuccess

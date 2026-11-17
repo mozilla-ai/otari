@@ -84,17 +84,27 @@ function Sheet({ landed }: { landed: boolean }) {
 
 /** Reduced motion or not, on a floating frame or the phone sheet. */
 function media({ reduce = false, phone = false } = {}) {
-  vi.spyOn(window, "matchMedia").mockImplementation(
-    (query: string) =>
-      ({
-        matches: query.includes("prefers-reduced-motion")
-          ? reduce
-          : !phone && query.includes("639px"),
-        media: query,
-        addEventListener: () => undefined,
-        removeEventListener: () => undefined,
-      }) as unknown as MediaQueryList,
-  )
+  const size = { phone, listeners: new Set<() => void>() }
+  vi.spyOn(window, "matchMedia").mockImplementation((query: string) => {
+    const isSize = query.includes("639px")
+    return {
+      get matches() {
+        return isSize ? !size.phone : reduce
+      },
+      media: query,
+      addEventListener: (_: string, listener: () => void) => {
+        if (isSize) size.listeners.add(listener)
+      },
+      removeEventListener: (_: string, listener: () => void) => {
+        size.listeners.delete(listener)
+      },
+    } as unknown as MediaQueryList
+  })
+  /** Resizes the window across the phone sheet's threshold. */
+  return (toPhone: boolean) => {
+    size.phone = toPhone
+    for (const listener of size.listeners) listener()
+  }
 }
 
 /** Renders the sheet waiting, then lands the request, and returns the frame. */
@@ -239,6 +249,25 @@ it("keeps the frame at the sheet's height, so the payoff does not resize it", as
   )
   const { frame } = await land()
 
+  expect(frame.style.height).toBe("660px")
+})
+
+it("lets go of the held height when the window becomes the phone sheet", async () => {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+    function (this: HTMLElement) {
+      return {
+        height: this.getAttribute("role") === "dialog" ? 660 : 0,
+      } as DOMRect
+    },
+  )
+  const resize = media()
+  const { frame } = await land()
+  expect(frame.style.height).toBe("660px")
+
+  resize(true)
+  expect(frame.style.height).toBe("")
+
+  resize(false)
   expect(frame.style.height).toBe("660px")
 })
 
