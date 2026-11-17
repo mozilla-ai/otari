@@ -19,10 +19,15 @@ class AccountRelease:
     """Release an account's organizations ahead of its deletion. Runs in the caller's Unit of Work block."""
 
     def __init__(self, repositories: OrganizationRepositories) -> None:
+        self._bootstrap_marker = repositories.bootstrap_marker
         self._members = repositories.members
         self._organizations = repositories.organizations
         self._invitations = repositories.invitations
         self._workspaces = repositories.workspaces
+
+    async def is_bootstrap_operator(self, identity_id: uuid.UUID) -> bool:
+        """Whether the bootstrap operator marker names this account now, read past the session's cache."""
+        return await self._bootstrap_marker.user_id() == identity_id
 
     async def ensure_releasable(self, identity_id: uuid.UUID) -> None:
         """Refuse while this account is the last active owner of an organization other people are active in.
