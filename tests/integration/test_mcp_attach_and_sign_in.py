@@ -45,7 +45,7 @@ from gateway.models.api_keys import APIKey
 from gateway.models.mcp import ResolvedMcpServer
 from gateway.models.tenancy import DashboardSession
 from gateway.models.tenancy import User as Identity
-from gateway.models.tools import McpOAuthFlow, McpUserConnection
+from gateway.models.tools import McpOAuthFlow, McpSignInLinkUse, McpUserConnection
 from gateway.services import mcp_stateless
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.mcp_stateless import ServerCheck
@@ -424,12 +424,20 @@ def test_an_unsigned_in_user_gets_a_link_in_the_conversation_and_the_next_ask_wo
         assert "form-action 'self'" in opened.headers["content-security-policy"]
     assert test_db.execute(select(McpOAuthFlow)).first() is None, "opening a link starts nothing, however often"
 
-    assert _sent_on_to(_confirm(client, link)).startswith(f"{ISSUER}/authorize?")
-    again = _confirm(client, link)
+    authorize = _sent_on_to(_confirm(client, link))
+    assert authorize.startswith(f"{ISSUER}/authorize?")
+    state = parse_qs(urlsplit(authorize).query)["state"][0]
+    [use] = test_db.execute(select(McpSignInLinkUse)).scalars().all()
+    assert _ticket(link) not in use.ticket_hash and len(use.ticket_hash) == 64, "the link is recorded by its hash"
+
+    # The link is spent: pressing Continue again, or opening it again, starts nothing more.
+    for again in (_confirm(client, link), _open(client, link)):
+        assert again.status_code == 400, again.text
+        assert "This link was already used" in again.text
+        assert "<form" not in again.text and "http-equiv" not in again.text
     test_db.expire_all()
     [flow] = test_db.execute(select(McpOAuthFlow)).scalars().all()
     assert (flow.user_id, flow.identity_id) == ("alice", None), "confirming it twice leaves one pending sign-in"
-    state = parse_qs(urlsplit(_sent_on_to(again)).query)["state"][0]
 
     landed = client.get(f"{API_ROOT}/mcp-connections/callback", params={"state": state, "code": "c"})
     assert landed.status_code == 200
@@ -613,6 +621,11 @@ def test_a_failed_sign_in_from_a_link_ends_on_the_plain_page(
 
     assert refused.status_code == 400
     assert "The sign-in did not finish" in refused.text
+    # Continue spent the link, so a failed sign-in needs a new one, which the next listing hands out.
+    assert "This link was already used" in _open(client, listed[0]["sign_in_url"]).text
+    fresh = client.get(f"{API_ROOT}/mcp/servers", headers=_bearer(key)).json()["servers"][0]["sign_in_url"]
+    assert fresh != listed[0]["sign_in_url"]
+    assert _sent_on_to(_confirm(client, fresh)).startswith(f"{ISSUER}/authorize?")
 
 
 def test_the_streamed_chat_answer_carries_the_link_and_no_gateway_call(

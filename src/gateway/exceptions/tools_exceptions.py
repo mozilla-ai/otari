@@ -238,6 +238,13 @@ class McpConnectionFlowError(TenancyValidationError):
     """A sign-in could not be finished: its state is unknown, used, expired, or another person's."""
 
 
+class McpSignInLinkUsedError(McpConnectionFlowError):
+    """A sign-in link has already started its sign-in, and each starts one at most."""
+
+    def __init__(self) -> None:
+        super().__init__("This sign-in link was already used. Ask again for a new one.")
+
+
 class McpSignInLinkOtherUserError(TenancyForbiddenError):
     """A sign-in link was opened in the dashboard session of somebody other than the user it was made for."""
 

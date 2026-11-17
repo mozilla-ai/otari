@@ -37,13 +37,20 @@ from gateway.exceptions.tools_exceptions import (
     McpConnectionUpstreamError,
     McpOAuthIssuerChangedError,
     McpSignInLinkOtherUserError,
+    McpSignInLinkUsedError,
     McpSignInRequiredError,
     WorkspaceMcpServerNotFoundError,
     WorkspaceMcpServerUnsafeUrlError,
 )
 from gateway.models.mcp import ResolvedMcpServer
 from gateway.models.tenancy import Organization, User, Workspace, WorkspaceMember
-from gateway.models.tools import McpCredentialMode, McpOAuthFlow, McpUserConnection, WorkspaceMcpServer
+from gateway.models.tools import (
+    McpCredentialMode,
+    McpOAuthFlow,
+    McpSignInLinkUse,
+    McpUserConnection,
+    WorkspaceMcpServer,
+)
 from gateway.models.users import User as BillingUser
 from gateway.repositories.organizations import OrganizationRepositories
 from gateway.repositories.tenancy import (
@@ -55,6 +62,7 @@ from gateway.repositories.tenancy import (
 )
 from gateway.repositories.tools import (
     McpOAuthFlowRepository,
+    McpSignInLinkUseRepository,
     McpUserConnectionRepository,
     WorkspaceMcpServerGrantRepository,
     WorkspaceMcpServerRepository,
@@ -87,6 +95,7 @@ from gateway.services.tools._mcp_connections import (
     McpServerRef,
     checked_return_to,
     client_metadata,
+    read_sign_in_link,
     sign_in_link,
     stored_oauth_client,
 )
@@ -94,6 +103,7 @@ from gateway.services.tools._mcp_oauth import (
     AUTH_METHOD_BASIC,
     AUTH_METHOD_POST,
     McpOAuthClient,
+    McpOAuthDiscoveryError,
     McpOAuthMetadata,
     McpOAuthPkceUnsupportedError,
     McpOAuthRegistrationError,
@@ -245,6 +255,7 @@ def _connections(db: AsyncSession, config: GatewayConfig) -> McpConnectionServic
         WorkspaceMcpServerRepository(uow),
         McpUserConnectionRepository(uow),
         McpOAuthFlowRepository(uow),
+        McpSignInLinkUseRepository(uow),
         config,
         eligibility=WorkspaceMcpConnectionEligibility(
             uow,
@@ -2833,14 +2844,22 @@ async def test_a_named_per_user_server_is_a_sign_in_for_a_user_and_a_no_user_not
     assert [need.reason for need in stale.sign_in] == [McpSignInReason.RENEWAL_FAILED]
 
 
-async def test_a_link_opened_again_replaces_its_pending_sign_in_and_a_dashboard_one_is_kept(
+def _link_ticket(config: GatewayConfig, server_id: uuid.UUID, user_id: str = "alice") -> str:
+    return sign_in_link(config, server_id=server_id, user_id=user_id).split("ticket=", 1)[1]
+
+
+async def _link_uses(db: AsyncSession) -> list[McpSignInLinkUse]:
+    return list((await db.execute(select(McpSignInLinkUse).execution_options(populate_existing=True))).scalars().all())
+
+
+async def test_a_new_link_replaces_the_pending_sign_in_of_an_earlier_one_and_a_dashboard_one_is_kept(
     async_db: AsyncSession, config: GatewayConfig
 ) -> None:
     world = await _world(async_db, config)
     async_db.add(BillingUser(user_id="alice", alias="Alice A"))
     await async_db.commit()
     connections = _connections(async_db, config)
-    ticket = sign_in_link(config, server_id=world.server.id, user_id="alice").split("ticket=", 1)[1]
+    ticket = _link_ticket(config, world.server.id)
     await _service(async_db, config).start_connection(
         user=world.member, workspace_id=world.workspace.id, server_id=world.server.id, return_to=None
     )
@@ -2849,10 +2868,12 @@ async def test_a_link_opened_again_replaces_its_pending_sign_in_and_a_dashboard_
     assert (target.server_name, target.server_host) == ("drive", "93.184.216.34")
     assert (target.user_id, target.user_alias) == ("alice", "Alice A")
     assert len((await async_db.execute(select(McpOAuthFlow))).scalars().all()) == 1, "reading a link starts nothing"
+    assert await _link_uses(async_db) == [], "reading a link spends nothing"
     with pytest.raises(McpSignInLinkOtherUserError):
         await connections.start_from_link(ticket, opened_by=world.member.id)
+    assert await _link_uses(async_db) == [], "a refused Continue spends nothing"
     await connections.start_from_link(ticket)
-    second = await connections.start_from_link(ticket)
+    second = await connections.start_from_link(_link_ticket(config, world.server.id))
     flows = (await async_db.execute(select(McpOAuthFlow).execution_options(populate_existing=True))).scalars().all()
 
     assert sorted((flow.user_id, flow.identity_id is None) for flow in flows) == sorted(
@@ -2868,6 +2889,205 @@ async def test_a_link_opened_again_replaces_its_pending_sign_in_and_a_dashboard_
     assert outcome.query() == {"connected": str(world.server.id)}
     with pytest.raises(McpConnectionFlowError):
         await connections.start_from_link(ticket[:-3] + "AAA")
+
+
+async def test_a_link_starts_one_sign_in_and_is_then_spent_whatever_becomes_of_it(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    world = await _world(async_db, config)
+    async_db.add(BillingUser(user_id="alice"))
+    await async_db.commit()
+    connections = _connections(async_db, config)
+    ticket = _link_ticket(config, world.server.id)
+
+    started = await connections.start_from_link(ticket)
+    [use] = await _link_uses(async_db)
+    assert ticket not in use.ticket_hash and len(use.ticket_hash) == 64, "the link is recorded by its hash"
+    link = read_sign_in_link(ticket)
+    assert link is not None and use.expires_at == link.good_until, "kept for as long as the link opens"
+
+    # The sign-in it started is refused at the authorization server: the link stays spent.
+    refused = await connections.receive_callback(
+        state=started.state, code=None, error="access_denied", browser_token=started.browser_token
+    )
+    assert refused.error == "access_denied"
+    with pytest.raises(McpSignInLinkUsedError):
+        await connections.read_link(ticket)
+    with pytest.raises(McpSignInLinkUsedError):
+        await connections.start_from_link(ticket)
+    # Spelled another way that decodes to the same token, it is still the same link.
+    with pytest.raises(McpSignInLinkUsedError):
+        await connections.start_from_link(f"{ticket[:10]}....{ticket[10:]}")
+    assert (await async_db.execute(select(McpOAuthFlow))).first() is None, "nothing was started again"
+
+
+async def test_a_link_whose_sign_in_could_not_start_is_not_spent(
+    async_db: AsyncSession, config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    world = await _world(async_db, config)
+    async_db.add(BillingUser(user_id="alice"))
+    await async_db.commit()
+    connections = _connections(async_db, config)
+    ticket = _link_ticket(config, world.server.id)
+
+    async def unreachable(server_url: str) -> McpOAuthMetadata:
+        raise McpOAuthDiscoveryError("unreachable")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(_mcp_oauth, "discover", unreachable)
+        with pytest.raises(McpConnectionUpstreamError):
+            await connections.start_from_link(ticket)
+    assert await _link_uses(async_db) == []
+
+    await connections.start_from_link(ticket)
+    assert len(await _link_uses(async_db)) == 1
+
+
+async def test_a_link_is_unspent_again_when_storing_its_sign_in_fails(
+    async_db: AsyncSession, config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The claim and the pending sign-in commit together or not at all."""
+    world = await _world(async_db, config)
+    async_db.add(BillingUser(user_id="alice"))
+    await async_db.commit()
+    connections = _connections(async_db, config)
+    ticket = _link_ticket(config, world.server.id)
+
+    async def fails(*args: object, **kwargs: object) -> None:
+        raise McpConnectionFlowError("stored nothing")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(McpOAuthFlowRepository, "add", fails)
+        with pytest.raises(McpConnectionFlowError):
+            await connections.start_from_link(ticket)
+    assert await _link_uses(async_db) == []
+
+    await connections.start_from_link(ticket)
+    assert len(await _link_uses(async_db)) == 1
+
+
+async def test_two_tabs_pressing_continue_on_one_link_start_one_sign_in(
+    async_db: AsyncSession, config: GatewayConfig, postgres_url: str
+) -> None:
+    world = await _world(async_db, config)
+    async_db.add(BillingUser(user_id="alice"))
+    await async_db.commit()
+    ticket = _link_ticket(config, world.server.id)
+    engine = create_async_engine(_to_async_url(postgres_url))
+    try:
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with factory() as first, factory() as second:
+            outcomes = await asyncio.gather(
+                _connections(first, config).start_from_link(ticket),
+                _connections(second, config).start_from_link(ticket),
+                return_exceptions=True,
+            )
+    finally:
+        await engine.dispose()
+
+    assert sorted(type(outcome).__name__ for outcome in outcomes) == ["LinkSignIn", "McpSignInLinkUsedError"]
+    assert len(await _link_uses(async_db)) == 1
+    flows = (await async_db.execute(select(McpOAuthFlow).execution_options(populate_existing=True))).scalars().all()
+    assert [flow.user_id for flow in flows] == ["alice"], "the losing tab's sign-in is never stored"
+
+
+async def test_a_link_that_expires_while_its_sign_in_starts_cannot_sweep_its_own_use(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    """A second Continue read the link while it was good, and its discovery ran past the link's expiry."""
+    world = await _world(async_db, config)
+    async_db.add(BillingUser(user_id="alice"))
+    await async_db.commit()
+    connections = _connections(async_db, config)
+    ticket = _link_ticket(config, world.server.id)
+    link = read_sign_in_link(ticket)
+    assert link is not None
+
+    await connections.start_from_link(ticket)
+    expired = datetime.now(UTC) - timedelta(seconds=1)
+    await async_db.execute(update(McpSignInLinkUse).values(expires_at=expired))
+    await async_db.commit()
+
+    with pytest.raises(McpConnectionFlowError, match="expired"):
+        await connections.start(
+            server_id=world.server.id,
+            user_id="alice",
+            browser_token="late-tab",
+            link=dataclasses.replace(link, good_until=expired),
+        )
+    assert len(await _link_uses(async_db)) == 1, "the first Continue's record is still there"
+    flows = (await async_db.execute(select(McpOAuthFlow).execution_options(populate_existing=True))).scalars().all()
+    assert len(flows) == 1, "the late tab's sign-in is never stored"
+
+
+async def test_a_continue_held_up_past_expiry_cannot_claim_a_link_another_links_purge_freed(
+    async_db: AsyncSession, config: GatewayConfig, postgres_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The late tab is paused before its claim while another link's start sweeps the first use's record."""
+    world = await _world(async_db, config)
+    async_db.add(BillingUser(user_id="alice"))
+    await async_db.commit()
+    ticket = _link_ticket(config, world.server.id)
+    read = read_sign_in_link(ticket)
+    assert read is not None
+    await _connections(async_db, config).start_from_link(ticket)
+    # The service reads the wall clock, so the link is made to expire soon. The window starts only
+    # now, after the slow setup: the late tab must reach its pause before the link expires.
+    link = dataclasses.replace(read, good_until=datetime.now(UTC) + timedelta(seconds=2))
+    await async_db.execute(update(McpSignInLinkUse).values(expires_at=link.good_until))
+    await async_db.commit()
+
+    paused, resume = asyncio.Event(), asyncio.Event()
+    claim = McpSignInLinkUseRepository.claim
+
+    async def held_up(self: McpSignInLinkUseRepository, ticket_hash: str, *, expires_at: datetime) -> bool:
+        if ticket_hash == link.ticket_hash:
+            paused.set()
+            await resume.wait()
+        return await claim(self, ticket_hash, expires_at=expires_at)
+
+    monkeypatch.setattr(McpSignInLinkUseRepository, "claim", held_up)
+    engine = create_async_engine(_to_async_url(postgres_url))
+    try:
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with factory() as late, factory() as other:
+            late_tab = asyncio.create_task(
+                _connections(late, config).start(
+                    server_id=world.server.id, user_id="alice", browser_token="late-tab", link=link
+                )
+            )
+            try:
+                # Bounded, so a run too slow for the window fails rather than waits on a held row forever.
+                await asyncio.wait_for(paused.wait(), timeout=10)
+                assert datetime.now(UTC) < link.good_until, "the late tab paused only after the link expired"
+                await asyncio.sleep((link.good_until - datetime.now(UTC)).total_seconds() + 0.1)
+                another = _link_ticket(config, world.server.id)
+                await asyncio.wait_for(_connections(other, config).start_from_link(another), timeout=10)
+                resume.set()
+                with pytest.raises(McpConnectionFlowError, match="expired"):
+                    await asyncio.wait_for(late_tab, timeout=10)
+            finally:
+                late_tab.cancel()
+    finally:
+        await engine.dispose()
+
+    assert link.ticket_hash not in {use.ticket_hash for use in await _link_uses(async_db)}, "the late claim rolled back"
+
+
+async def test_a_spent_link_is_forgotten_once_it_would_have_expired_anyway(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    world = await _world(async_db, config)
+    async_db.add(BillingUser(user_id="alice"))
+    async_db.add(McpSignInLinkUse(ticket_hash="0" * 64, expires_at=datetime.now(UTC) - timedelta(seconds=1)))
+    async_db.add(McpSignInLinkUse(ticket_hash="1" * 64, expires_at=datetime.now(UTC) + timedelta(minutes=5)))
+    await async_db.commit()
+
+    await _connections(async_db, config).start_from_link(_link_ticket(config, world.server.id))
+
+    left = sorted(use.ticket_hash for use in await _link_uses(async_db))
+    assert "0" * 64 not in left, "an expired link's record is swept when another link is spent"
+    assert "1" * 64 in left and len(left) == 2
 
 
 async def test_an_attached_server_whose_token_will_not_decrypt_is_left_out_and_a_named_one_fails(

@@ -5,6 +5,7 @@ from gateway.repositories.tools.mcp_server_request_repository import (
     McpServerRequestConflict,
     McpServerRequestRepository,
 )
+from gateway.repositories.tools.mcp_sign_in_link_use_repository import McpSignInLinkUseRepository
 from gateway.repositories.tools.mcp_user_connection_repository import McpUserConnectionRepository
 from gateway.repositories.tools.sandbox_credential_repository import SandboxCredentialRepository
 from gateway.repositories.tools.search_tool_repository import SearchToolConflict, SearchToolRepository
@@ -28,6 +29,7 @@ __all__ = [
     "McpOAuthFlowRepository",
     "McpServerRequestConflict",
     "McpServerRequestRepository",
+    "McpSignInLinkUseRepository",
     "McpUserConnectionRepository",
     "OrgWebSearchKeyRepository",
     "SandboxCredentialRepository",

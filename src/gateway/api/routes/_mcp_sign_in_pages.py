@@ -20,6 +20,7 @@ class SignInPage(StrEnum):
     CONNECTED = "connected"
     FAILED = "failed"
     LINK_EXPIRED = "link_expired"
+    LINK_USED = "link_used"
     CANNOT_START = "cannot_start"
     NEEDS_SESSION = "needs_session"
 
@@ -36,6 +37,11 @@ _TEXT: dict[SignInPage, tuple[str, str]] = {
     SignInPage.LINK_EXPIRED: (
         "This link has expired",
         "Sign-in links work for a short time only. Go back to your conversation and ask again to get a new one.",
+    ),
+    SignInPage.LINK_USED: (
+        "This link was already used",
+        "Each sign-in link starts one sign-in. If you are still signing in in another tab, finish there. "
+        "Otherwise go back to your conversation and ask again to get a new link.",
     ),
     SignInPage.CANNOT_START: (
         "The sign-in could not start",
