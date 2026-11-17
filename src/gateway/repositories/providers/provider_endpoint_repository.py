@@ -4,10 +4,10 @@ Built on the Unit of Work. Flushes, never commits.
 """
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from gateway.core.unit_of_work import UnitOfWork
@@ -89,6 +89,19 @@ class ProviderEndpointRepository(
             setattr(row, field, value)
         await self._flush_or_conflict()
         return row
+
+    async def forget_secrets(
+        self, organization_ids: Collection[uuid.UUID], workspace_ids: Collection[uuid.UUID]
+    ) -> None:
+        """Stage clearing the API key of every endpoint in these workspaces."""
+        if not workspace_ids:
+            return
+        await self.db.execute(
+            update(ProviderEndpoint)
+            .where(ProviderEndpoint.workspace_id.in_(list(workspace_ids)))
+            .values(encrypted_api_key=None, last4=None)
+            .execution_options(synchronize_session=False)
+        )
 
     async def _flush_or_conflict(self) -> None:
         try:

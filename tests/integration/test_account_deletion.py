@@ -18,8 +18,13 @@ from gateway.api.deps import get_telemetry_storage_port
 from gateway.core.config import API_ROOT
 from gateway.models.api_keys import APIKey, DisabledReason
 from gateway.models.files import FileObject
-from gateway.models.identity import ErasedAccount
+from gateway.models.guardrails import OrganizationGuardrail
+from gateway.models.identity import ErasedAccount, OIDCConnection
+from gateway.models.organizations import OrganizationInvitation
+from gateway.models.provider_keys import OrgProviderKey
+from gateway.models.providers import ProviderEndpoint
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace
+from gateway.models.tools import OrgWebSearchKey, WorkspaceMcpServer
 from gateway.models.usage import UsageLog
 from gateway.models.users import User as BillingUser
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
@@ -272,6 +277,164 @@ def test_a_member_leaves_an_organization_others_use_as_it_was(
         service_key = session.get(APIKey, account.service_key_id)
         assert service_key is not None
         assert service_key.is_active is True
+    finally:
+        session.close()
+
+
+def _add_secrets(session_factory: Callable[[], Session], account: Account) -> None:
+    """A credential of every kind an organization or its workspaces store, in ``account``'s organization."""
+    session = session_factory()
+    try:
+        session.add_all(
+            [
+                OrgProviderKey(
+                    organization_id=account.organization_id,
+                    provider="openai",
+                    name="Ada's OpenAI",
+                    encrypted_api_key="encrypted",
+                    last4="abcd",
+                    client_args={"organization": "org-ada"},
+                ),
+                ProviderEndpoint(
+                    workspace_id=account.workspace_id,
+                    name="ada-vllm",
+                    provider="openai",
+                    api_base="https://vllm.example.com/v1",
+                    encrypted_api_key="encrypted",
+                    last4="abcd",
+                ),
+                OrgWebSearchKey(
+                    organization_id=account.organization_id,
+                    provider="tavily",
+                    name="Ada's Tavily",
+                    encrypted_api_key="encrypted",
+                    last4="abcd",
+                ),
+                WorkspaceMcpServer(
+                    workspace_id=account.workspace_id,
+                    name="ada-mcp",
+                    url="https://mcp.example.com",
+                    encrypted_token="encrypted",
+                ),
+                OrganizationGuardrail(
+                    organization_id=account.organization_id,
+                    profile="ada-profile",
+                    url="https://guardrails.example.com",
+                    encrypted_credential="encrypted",
+                ),
+                OIDCConnection(
+                    organization_id=account.organization_id,
+                    issuer="https://idp.example.com",
+                    resolved_issuer="https://idp.example.com",
+                    client_id="ada-client",
+                    encrypted_client_secret="encrypted",
+                    client_secret_last4="cret",
+                    display_name="Ada SSO",
+                    discovery_document={},
+                    discovered_at=datetime.now(UTC),
+                    enabled=True,
+                ),
+            ]
+        )
+        session.commit()
+    finally:
+        session.close()
+
+
+def _stored_secrets(session_factory: Callable[[], Session], account: Account) -> list[object]:
+    """Every credential still stored in ``account``'s organization and workspace."""
+    session = session_factory()
+    try:
+        return [
+            *session.query(OrgProviderKey.encrypted_api_key, OrgProviderKey.client_args)
+            .filter(col(OrgProviderKey.organization_id) == account.organization_id)
+            .all(),
+            *session.query(ProviderEndpoint.encrypted_api_key)
+            .filter(ProviderEndpoint.workspace_id == account.workspace_id)
+            .all(),
+            *session.query(OrgWebSearchKey.encrypted_api_key)
+            .filter(OrgWebSearchKey.organization_id == account.organization_id)
+            .all(),
+            *session.query(WorkspaceMcpServer.encrypted_token)
+            .filter(WorkspaceMcpServer.workspace_id == account.workspace_id)
+            .all(),
+            *session.query(OrganizationGuardrail.encrypted_credential)
+            .filter(OrganizationGuardrail.organization_id == account.organization_id)
+            .all(),
+            *session.query(OIDCConnection.encrypted_client_secret)
+            .filter(OIDCConnection.organization_id == account.organization_id)
+            .all(),
+        ]
+    finally:
+        session.close()
+
+
+def test_an_organization_left_to_nobody_loses_its_stored_credentials(
+    client: TestClient, db_session_factory: Callable[[], Session]
+) -> None:
+    account = _add_account(db_session_factory)
+    _add_secrets(db_session_factory, account)
+
+    assert _delete(client, account, current_password=PASSWORD).status_code == 204
+
+    assert all(value is None for row in _stored_secrets(db_session_factory, account) for value in row)
+    session = db_session_factory()
+    try:
+        assert (
+            session.query(OIDCConnection).filter(OIDCConnection.organization_id == account.organization_id).count() == 0
+        )
+    finally:
+        session.close()
+
+
+def test_an_organization_others_use_keeps_its_stored_credentials(
+    client: TestClient, db_session_factory: Callable[[], Session]
+) -> None:
+    owner = _add_account(db_session_factory, email="grace@example.com")
+    account = _add_account(db_session_factory, organization_id=owner.organization_id, role="member")
+    _add_secrets(db_session_factory, owner)
+
+    assert _delete(client, account, current_password=PASSWORD).status_code == 204
+
+    secrets = _stored_secrets(db_session_factory, owner)
+    assert len(secrets) == 6
+    assert all(row[0] is not None for row in secrets)
+
+
+def _invite(session_factory: Callable[[], Session], organization_id: uuid.UUID, email: str) -> uuid.UUID:
+    session = session_factory()
+    try:
+        now = datetime.now(UTC)
+        invitation = OrganizationInvitation(
+            organization_id=organization_id,
+            email=email,
+            role="member",
+            token_hash=uuid.uuid4().hex,
+            expires_at=now + timedelta(days=7),
+            send_count=1,
+            last_send_requested_at=now,
+        )
+        session.add(invitation)
+        session.commit()
+        return invitation.id
+    finally:
+        session.close()
+
+
+def test_invitations_to_the_deleted_address_are_withdrawn_everywhere(
+    client: TestClient, db_session_factory: Callable[[], Session]
+) -> None:
+    other = _add_account(db_session_factory, email="grace@example.com")
+    account = _add_account(db_session_factory)
+    to_account = _invite(db_session_factory, other.organization_id, EMAIL)
+    to_someone_else = _invite(db_session_factory, other.organization_id, "linus@example.com")
+
+    assert _delete(client, account, current_password=PASSWORD).status_code == 204
+
+    session = db_session_factory()
+    try:
+        assert session.get(OrganizationInvitation, to_account) is None
+        assert session.get(OrganizationInvitation, to_someone_else) is not None
     finally:
         session.close()
 

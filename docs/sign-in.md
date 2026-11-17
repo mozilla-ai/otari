@@ -60,9 +60,12 @@ What the deployment still has to count is kept, under a new id that nothing
 links back to you: your usage rows stay in their organizations' totals with
 their tokens and cost, and lose their request tags, session labels and end-user
 identifier. An organization nobody else is active in is renamed **Deleted
-organization** and its keys are revoked, so its usage and its configuration stay
+organization**, its keys are revoked, and the credentials it stored are removed:
+provider and web search keys, MCP server tokens, guardrail secrets and its
+single sign-on connection. Its usage and the rest of its configuration stay
 attached to it.
 In an organization other people use, you lose only your membership.
+Invitations to your address are withdrawn in every organization.
 
 Deletion is refused while you are the last active owner of an organization
 other people are active in; make one of them an owner first. The bootstrap

@@ -9,9 +9,8 @@ import { useDeleteAccount, useSessionCaller } from "@/shared/api/auth"
 /**
  * Deleting the signed-in account, for good.
  *
- * The confirmation is typed rather than clicked: the account's address, and its
- * password where it has one, so a session left open somewhere cannot delete the
- * account on its own. The server refuses the last owner of an organization other
+ * The confirmation is typed rather than clicked, so a stray click cannot delete
+ * the account: its address, and its password where it has one. The server refuses the last owner of an organization other
  * people use, and that refusal is shown as it comes back.
  */
 export function DeleteAccountCard() {
@@ -81,8 +80,8 @@ export function DeleteAccountCard() {
               This signs you out and permanently deletes your sign-in, keys,
               files, traces and Playground conversations. Usage stays in your
               organizations&rsquo; totals without your name. An organization
-              only you use is renamed and its keys revoked. This cannot be
-              undone.
+              only you use is renamed, and its keys and stored credentials are
+              removed. This cannot be undone.
             </p>
             <TextField
               value={email}

@@ -1,8 +1,8 @@
 """Deleting the signed-in account, at its owner's request.
 
 ``DELETE /api/v1/auth/account`` always acts on the caller's own identity. The
-caller types the account's address to confirm, and gives its password when it
-has one, so a session left open somewhere cannot delete the account alone.
+caller types the account's address to confirm, so a stray click cannot delete
+it, and gives its password when it has one.
 """
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response, status
@@ -51,8 +51,9 @@ async def delete_own_account(
     Erases the account's sign-in identity, sessions, passkeys, Playground
     conversations, agent traces, telemetry, files and keys. Usage rows are
     kept for the deployment's totals under a new id that does not identify
-    the person, and an organization nobody else is active in is renamed and
-    its keys revoked. Refused while the account is the last active owner of
+    the person, and an organization nobody else is active in is renamed, its
+    keys revoked and its stored credentials cleared. Invitations to the
+    account's address are withdrawn everywhere. Refused while the account is the last active owner of
     an organization other people are active in.
     """
     deleted = await accounts.delete(identity, confirm_email=body.confirm_email, current_password=body.current_password)

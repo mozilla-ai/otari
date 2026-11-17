@@ -408,8 +408,9 @@ export interface paths {
          *     Erases the account's sign-in identity, sessions, passkeys, Playground
          *     conversations, agent traces, telemetry, files and keys. Usage rows are
          *     kept for the deployment's totals under a new id that does not identify
-         *     the person, and an organization nobody else is active in is renamed and
-         *     its keys revoked. Refused while the account is the last active owner of
+         *     the person, and an organization nobody else is active in is renamed, its
+         *     keys revoked and its stored credentials cleared. Invitations to the
+         *     account's address are withdrawn everywhere. Refused while the account is the last active owner of
          *     an organization other people are active in.
          */
         delete: operations["auth-delete_own_account"];

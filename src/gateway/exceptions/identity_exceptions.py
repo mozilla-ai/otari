@@ -72,11 +72,13 @@ class AccountDeletionPasswordRequiredError(TenancyValidationError):
 class AccountErasureFailedError(TenancyError):
     """A store outside the deployment's transaction refused to erase a deleted account's records.
 
-    Raised before anything is deleted, so the deletion can be retried.
+    Some may already be erased, but the account is not deleted, so the deletion can be retried to finish.
     """
 
     def __init__(self) -> None:
-        super().__init__("Could not erase this account's telemetry or traces; the account was not deleted")
+        super().__init__(
+            "Could not erase all of this account's telemetry and traces; the account was not deleted. Try again."
+        )
 
 
 class EmptyDeploymentUserUpdateError(TenancyValidationError):

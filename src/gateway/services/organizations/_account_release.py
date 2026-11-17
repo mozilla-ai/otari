@@ -45,6 +45,10 @@ class AccountRelease:
         await self._invitations.delete_all_in_organizations(released)
         return ReleasedOrganizations(organization_ids=released, workspace_ids=workspace_ids)
 
+    async def withdraw_invitations(self, email: str) -> None:
+        """Delete every invitation to this address, in any organization, so none keeps mailing a person who left."""
+        await self._invitations.delete_addressed_to(email)
+
     async def _abandoned(self, identity_id: uuid.UUID, *, lock: bool) -> list[uuid.UUID]:
         """The organizations nobody but this account is active in, raising for one it would leave ownerless."""
         abandoned: list[uuid.UUID] = []

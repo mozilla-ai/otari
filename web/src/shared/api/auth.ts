@@ -408,9 +408,6 @@ export function useResetPassword() {
   })
 }
 
-// `enabled` lets a page that only sometimes offers a workspace control (the
-// organization-wide Usage page's filter) skip the read everywhere else.
-
 /**
  * Delete the signed-in account (`DELETE /v1/auth/account`). The server ends
  * every session it held, so the caller signs out locally once this succeeds.

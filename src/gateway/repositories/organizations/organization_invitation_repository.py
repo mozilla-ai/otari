@@ -284,6 +284,17 @@ class OrganizationInvitationRepository(BaseRepository[OrganizationInvitation, Ne
             .execution_options(synchronize_session=False)
         )
 
+    async def delete_addressed_to(self, email: str) -> None:
+        """Stage the deletion of every invitation to this address, in any organization."""
+        address = stored_address(email)
+        if address is None:
+            return
+        await self.db.execute(
+            delete(OrganizationInvitation)
+            .where(OrganizationInvitation.email == address)
+            .execution_options(synchronize_session=False)
+        )
+
     async def delete_expired_in_organization(
         self, invitation_ids: Collection[uuid.UUID], organization_id: uuid.UUID, *, expired_by: datetime
     ) -> int:
