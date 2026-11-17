@@ -90,7 +90,7 @@ async def test_deleting_an_invitation_removes_it_from_the_session_too(
         assert await repository.get(invitation.id) is None
 
 
-async def test_deleting_by_token_hash_returns_the_row_and_leaves_the_session_clean(
+async def test_deleting_by_token_hash_returns_the_row_it_removed(
     store: tuple[UnitOfWork, OrganizationInvitationRepository],
 ) -> None:
     uow, repository = store
@@ -105,6 +105,9 @@ async def test_deleting_by_token_hash_returns_the_row_and_leaves_the_session_cle
         assert (removed.id, removed.email) == (invitation.id, "ada@example.com")
         assert await repository.delete_by_token_hash("h1") is None
         assert await _declined_at(repository, invitation.id) == "gone"
+        # The row is gone from the database and a lookup on this transaction still answers,
+        # which is why the caller must read the returned row.
+        assert await repository.get(invitation.id) is not None
 
 
 async def test_an_origin_is_replaced_rather_than_duplicated_on_sqlite(
