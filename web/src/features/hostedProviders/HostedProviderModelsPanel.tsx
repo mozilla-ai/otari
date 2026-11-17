@@ -231,19 +231,21 @@ export function HostedProviderModelsPanel({
     return <PageLoading label="Loading models…" />
   }
 
+  const groups = groupByVendor(rows, vendors)
   // A failed list is not an empty one, and a filter with no models left is an
-  // empty list rather than "no models offered".
+  // empty list rather than "no models offered". Nor is a provider with a
+  // vendor still switched off: its row is the way to switch it back on.
   const isEmptyCatalog =
     !models.error &&
     !models.isPlaceholderData &&
     rows.length === 0 &&
+    groups.length === 0 &&
     kind === "" &&
     serving === "" &&
     term === ""
-  const groups = groupByVendor(rows, vendors)
   // A provider's only vendor keeps its row, with its switch and menu, and
   // starts open, since there is nothing to choose between.
-  const isSole = groups.length === 1
+  const isSole = groups.length === 1 && groups[0].rows.length > 0
   // The list is read whole up to its limit; a provider offering more is cut.
   const isCut = models.data !== undefined && models.data.count > rows.length
 

@@ -847,6 +847,25 @@ describe("HostedProviderPage", () => {
       ).toBeDisabled()
     })
 
+    it("offers the first refresh on a provider with no models and no vendor switched off", async () => {
+      mockApi({ providers: [together()], models: [] })
+      await renderProviderPage("together")
+
+      expect(
+        await screen.findByText("No models offered yet"),
+      ).toBeInTheDocument()
+    })
+
+    it("keeps a vendor switched off in view on a provider with no models left", async () => {
+      mockApi({ providers: [together()], models: [], vendorsOff: ["Old Name"] })
+      await renderProviderPage("together")
+
+      expect(
+        await screen.findByRole("switch", { name: "Serve Old Name models" }),
+      ).not.toBeChecked()
+      expect(screen.queryByText("No models offered yet")).toBeNull()
+    })
+
     it("says so when a provider offers more models than the list reads", async () => {
       mockApi({ providers: [together()], models: routed(), modelCount: 1500 })
       await renderProviderPage("together")
