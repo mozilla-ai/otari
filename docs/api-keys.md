@@ -198,10 +198,8 @@ scopes. No scope lets a key create or manage keys: that takes a dashboard
 session or the master key, so revoking a key always ends what it can do.
 
 A key created through the API or the dashboard without naming any scopes gets
-`inference:run` alone. A key the setup guide creates holds `web:search` and
-`web:fetch` too, since a coding agent declares web tools on its first calls.
-Rotating an older setup key keeps the scopes it had, so add those two by
-editing its **Access**. (A key declared in the config file has a [different default](configuration.md#budgets-and-api-keys-in-config).) Name
+`inference:run` alone. (A key declared in the config file has a
+[different default](configuration.md#budgets-and-api-keys-in-config).) Name
 them in `scopes` when you create the key, through `POST /api/v1/keys` or
 `POST /api/v1/organizations/me/keys`:
 

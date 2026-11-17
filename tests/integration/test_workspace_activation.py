@@ -316,17 +316,6 @@ async def test_issuing_the_key_twice_rotates_one_row_rather_than_collecting_two(
     assert state.first_presented_at <= state.last_presented_at
 
 
-async def test_the_setup_key_may_search_and_fetch_the_web(async_db: AsyncSession) -> None:
-    owner, workspace = await _setup(async_db, slug="acme-agent-scopes")
-    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
-
-    issued = await service.issue_api_key(user=owner, workspace_id=workspace.id)
-
-    key = await async_db.get(APIKey, issued.key_id)
-    assert key is not None
-    assert key.scopes.stored == ["inference:run", "web:search", "web:fetch"]
-
-
 async def test_rotating_the_key_moves_its_owner_to_whoever_asked_last(async_db: AsyncSession) -> None:
     """The only live plaintext belongs to the last caller, so the row's owner does too.
 
