@@ -51,7 +51,7 @@ Enforces:
     on a baseline, and the baseline only shrinks.
     A package on it holds only the modules the baseline lists, so new code goes in its domain's package.
 20. Repository imports: only a domain's own service package, its own
-    repository package and the builders in gateway/api/deps.py import a
+    repository package and the builders in gateway/api/deps/ import a
     domain's repository package, so a domain's queries stay behind its
     service. A domain is one that DOMAINS.md gives a section. Service code
     outside every domain package is not checked, because its path does not
@@ -78,6 +78,19 @@ Enforces:
     library keeps its tests and scripts inside its directory rather than
     under tests/ or src/, so each directory is a root of its own, mapped to
     its rule. Entry-point discovery is banned there as under gateway/.
+25. Import cycles: no cycle runs between modules under gateway/, so a module
+    always finishes loading before another needs a name from it. A package
+    reaching its own member is the one edge a package body orders, so it is not
+    read as a dependency. Importing a.b.c runs every package above it, which is,
+    so a cycle through a package initializer is found. Only imports at module
+    scope are read, since an import inside a function or under if TYPE_CHECKING
+    does not run when the module loads.
+26. Composition root behavior: no class under api/deps/ defines a method, so the
+    composition root builds things and threads the request's session into them
+    rather than growing an implementation of its own. A class that carries data
+    and no methods is unaffected, so the parameter objects it legitimately holds
+    stay. A class nested in a function counts, since nesting would otherwise be
+    the way around the rule.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -512,7 +525,11 @@ def _parsed_modules(src_root: Path, scope: str, exempt: tuple[str, ...] = ()) ->
     """Yield the path relative to src_root and the tree of each parseable module under scope, in path order."""
     for py_file in sorted((src_root / scope).rglob("*.py")):
         relative_path = py_file.relative_to(src_root).as_posix()
-        if relative_path in exempt or "__pycache__" in py_file.parts:
+        # An exempt entry ending in "/" names a package, so every module in it is exempt.
+        exempted = any(
+            relative_path == entry or (entry.endswith("/") and relative_path.startswith(entry)) for entry in exempt
+        )
+        if exempted or "__pycache__" in py_file.parts:
             continue
         try:
             tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
@@ -581,7 +598,7 @@ UNIT_OF_WORK = "gateway/core/unit_of_work.py"
 # so the list only shrinks.
 TRANSACTION_CONTROL_BASELINE = (
     "gateway/adapters/telemetry_storage_adapter.py",
-    "gateway/api/deps.py",
+    "gateway/api/deps/auth.py",
     "gateway/api/routes/_passthrough.py",
     "gateway/api/routes/_pipeline.py",
     "gateway/api/routes/aliases.py",
@@ -690,7 +707,7 @@ def check_transaction_control(src_root: Path) -> list[str]:
 
 UNIT_OF_WORK_TYPE = "UnitOfWork"
 UNIT_OF_WORK_MODULE = "gateway.core.unit_of_work"
-UNIT_OF_WORK_FACTORY = "gateway/api/deps.py"
+UNIT_OF_WORK_FACTORY = "gateway/api/deps/_base.py"
 UNIT_OF_WORK_FACTORY_FUNCTION = "get_unit_of_work"
 UNIT_OF_WORK_WORKER_FACTORIES = "create_unit_of_work or create_log_unit_of_work"
 
@@ -913,6 +930,85 @@ def check_listener_defaults(src_root: Path) -> list[str]:
         f"{relative_path} is on the listener default baseline for {name} of {path}, "
         "but no such listener has a default; remove it from the baseline"
         for relative_path, path, name in sorted(set(LISTENER_DEFAULT_BASELINE) - defaulted)
+    )
+    return violations
+
+
+COMPOSITION_ROOT_SCOPE = "gateway/api/deps"
+# The classes with behavior that stood in the composition root when rule 26 landed,
+# each as its path and its qualified name. A class that moves to the domain it
+# belongs to, or loses its methods, fails the check until its entry is removed, so
+# the list only shrinks. Four of them hold a raw session and cannot move until the
+# session-taking service functions take a Unit of Work instead.
+COMPOSITION_ROOT_BEHAVIOR_BASELINE: tuple[tuple[str, str], ...] = (
+    ("gateway/api/deps/__init__.py", "_BatchAccountingClaim"),
+    ("gateway/api/deps/tools.py", "_CodeExecutionEnvironmentPrices"),
+    ("gateway/api/deps/tools.py", "_DirectToolAccounts"),
+    ("gateway/api/deps/tools.py", "_DirectToolGates"),
+    ("gateway/api/deps/tools.py", "_KeySearchCatalogCaller"),
+    ("gateway/api/deps/tools.py", "_ledger_on.Ledger"),
+    ("gateway/api/deps/traces.py", "DatabaseSessionOwners"),
+    ("gateway/api/deps/traces.py", "NoSessionOwners"),
+)
+
+
+def _method_count(class_node: ast.ClassDef) -> int:
+    """The methods a class defines, wherever in its body they stand.
+
+    A method under a conditional block in the body counts, since the block is
+    still the class's own scope. A class or a function nested in the body opens a
+    scope of its own, so what it holds is not the enclosing class's.
+    """
+    methods = 0
+    pending: list[ast.AST] = list(class_node.body)
+    while pending:
+        node = pending.pop()
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            methods += 1
+        elif not isinstance(node, ast.ClassDef):
+            pending.extend(ast.iter_child_nodes(node))
+    return methods
+
+
+def _classes_with_methods(tree: ast.Module) -> Iterator[tuple[int, str, int]]:
+    """Yield the line, qualified name and method count of each class that defines a method.
+
+    Every node is descended through, not only class and function bodies, so a class
+    under a conditional block, a try or a match case is found. Only a class or a
+    function extends the qualified name, because only those name a scope.
+    """
+
+    def walk(node: ast.AST, path: tuple[str, ...]) -> Iterator[tuple[int, str, int]]:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ClassDef):
+                methods = _method_count(child)
+                if methods:
+                    yield child.lineno, ".".join((*path, child.name)), methods
+                yield from walk(child, (*path, child.name))
+            elif isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+                yield from walk(child, (*path, child.name))
+            else:
+                yield from walk(child, path)
+
+    return walk(tree, ())
+
+
+def check_composition_root_behavior(src_root: Path) -> list[str]:
+    """Check that no class off the baseline has a method under api/deps/, and that every entry still does."""
+    violations: list[str] = []
+    found: set[tuple[str, str]] = set()
+    for relative_path, tree in _parsed_modules(src_root, COMPOSITION_ROOT_SCOPE):
+        for line, name, methods in _classes_with_methods(tree):
+            found.add((relative_path, name))
+            if (relative_path, name) not in COMPOSITION_ROOT_BEHAVIOR_BASELINE:
+                violations.append(
+                    f"{relative_path}:{line} defines {name} with {methods} method(s); the composition root builds "
+                    "things and holds no implementation, so this belongs to the domain whose work it does"
+                )
+    violations.extend(
+        f"{relative_path} is on the composition root behavior baseline for {name}, "
+        "which no longer defines a method there; remove it from the baseline"
+        for relative_path, name in sorted(set(COMPOSITION_ROOT_BEHAVIOR_BASELINE) - found)
     )
     return violations
 
@@ -1223,7 +1319,7 @@ def check_domain_names(src_root: Path, domains: set[str]) -> list[str]:
 
 
 REPOSITORY_SCOPE = "gateway/repositories"
-SERVICE_BUILDERS = "gateway/api/deps.py"
+SERVICE_BUILDERS = "gateway/api/deps/"
 
 
 def _domain_packages(src_root: Path, layer: str, domains: set[str]) -> set[str]:
@@ -1970,9 +2066,136 @@ def check_service_root_exports(src_root: Path) -> list[str]:
     return violations
 
 
+IMPORT_CYCLE_SCOPE = "gateway"
+
+
+TYPE_CHECKING_NAMES = ("TYPE_CHECKING", "typing.TYPE_CHECKING")
+
+
+def _guards_type_checking(test: ast.expr) -> bool:
+    """Whether an if guards a block that only a type checker reads."""
+    return _dotted_name(test) in TYPE_CHECKING_NAMES
+
+
+def _executed_imports(tree: ast.Module) -> Iterator[ast.Import | ast.ImportFrom]:
+    """Every import that runs when the module is imported.
+
+    Descends into the blocks that run as the module body does, an if, a try, a with or a loop,
+    and not into a function or class body, which runs when it is called, nor into a
+    ``TYPE_CHECKING`` guard, which never runs. Deferring an import is how a cycle is broken,
+    so reading a deferred one as a dependency would refuse the fix.
+    """
+    pending: list[ast.stmt] = list(tree.body)
+    while pending:
+        node = pending.pop()
+        if isinstance(node, ast.Import | ast.ImportFrom):
+            yield node
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            continue
+        elif isinstance(node, ast.If) and _guards_type_checking(node.test):
+            pending.extend(node.orelse)
+        else:
+            pending.extend(getattr(node, "body", []))
+            pending.extend(getattr(node, "orelse", []))
+            pending.extend(getattr(node, "finalbody", []))
+            pending.extend(statement for handler in getattr(node, "handlers", []) for statement in handler.body)
+
+
+def _import_graph(src_root: Path) -> dict[str, set[str]]:
+    """Each module under the scope and the modules it imports when it is itself imported.
+
+    NOTE: only the imports that run when the module is imported are read, which
+    :func:`_executed_imports` decides.
+    """
+    files = [f for f in sorted((src_root / IMPORT_CYCLE_SCOPE).rglob("*.py")) if "__pycache__" not in f.parts]
+    modules = {_module_name(f.relative_to(src_root).as_posix()) for f in files}
+    graph: dict[str, set[str]] = {}
+    for file_path in files:
+        name = _module_name(file_path.relative_to(src_root).as_posix())
+        try:
+            tree = ast.parse(file_path.read_text(encoding="utf-8"), filename=str(file_path))
+        except SyntaxError:
+            continue
+        imported: set[str] = set()
+        for node in _executed_imports(tree):
+            for module in _imported_modules(node, file_path, src_root):
+                # Importing a.b.c runs a, then a.b, then a.b.c, so each package above it is an edge too.
+                parts = module.split(".")
+                for candidate in (".".join(parts[: i + 1]) for i in range(len(parts))):
+                    # A package reaching its own member is the one edge a body orders: the package binds
+                    # what the member needs before the member runs, so it is not a dependency to resolve.
+                    if candidate not in modules or candidate == name or candidate.startswith(f"{name}."):
+                        continue
+                    imported.add(candidate)
+        graph[name] = imported
+    return graph
+
+
+def _reachable(graph: dict[str, set[str]], start: str) -> set[str]:
+    """Every module reachable from ``start`` by following imports."""
+    seen: set[str] = set()
+    stack = [start]
+    while stack:
+        for module in graph.get(stack.pop(), ()):
+            if module not in seen:
+                seen.add(module)
+                stack.append(module)
+    return seen
+
+
+def _cycle_groups(graph: dict[str, set[str]]) -> list[list[str]]:
+    """The modules that import themselves back, grouped so each group is one cycle."""
+    reachable = {module: _reachable(graph, module) for module in graph}
+    on_cycle = [module for module in graph if module in reachable[module]]
+    groups: list[list[str]] = []
+    placed: set[str] = set()
+    for module in sorted(on_cycle):
+        if module in placed:
+            continue
+        group = sorted({other for other in on_cycle if other in reachable[module] and module in reachable[other]})
+        placed.update(group)
+        groups.append(group)
+    return groups
+
+
+def check_import_cycles(src_root: Path) -> list[str]:
+    """Check that no import cycle runs between modules that must each finish loading before the other.
+
+    A package reaching its own member is the one edge a package body orders, since the package binds
+    what the member needs before the member runs, so it is not read as a dependency. Every other edge
+    is, and Python refuses a cycle of them with a partially initialized module.
+    """
+    return [
+        f"{', '.join(group)} import each other; no module in the cycle finishes loading "
+        f"before another needs a name from it"
+        for group in _cycle_groups(_import_graph(src_root))
+    ]
+
+
 MODELS_SCOPE = "gateway/models"
 TABLE_ATTRIBUTES = ("__table__", "__tablename__")
 TYPE_ALIAS = ("TypeAlias", "typing.TypeAlias", "typing_extensions.TypeAlias")
+ANNOTATED = ("Annotated", "typing.Annotated", "typing_extensions.Annotated")
+
+
+def _annotated_type(node: ast.Assign, bindings: dict[str, str]) -> ast.expr | None:
+    """The type ``Annotated[T, ...]`` names in an assignment, or None where the value is not one.
+
+    NOTE: only the type is returned. The metadata beside it runs when the module loads, so it
+    stays subject to every rule a type position is exempt from.
+    """
+    if not isinstance(node.value, ast.Subscript):
+        return None
+    dotted = _dotted_name(node.value.value) or ""
+    head, _, rest = dotted.partition(".")
+    target = bindings.get(head)
+    resolved = (f"{target}.{rest}" if rest else target) if target is not None else dotted
+    if resolved not in ANNOTATED:
+        return None
+    arguments = node.value.slice
+    return arguments.elts[0] if isinstance(arguments, ast.Tuple) and arguments.elts else arguments
+
+
 TYPE_CHECKS = ("isinstance", "issubclass")
 TYPING_CASTS = ("typing.cast", "typing_extensions.cast")
 
@@ -1992,7 +2215,6 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     "gateway.models.api_keys.APIKey": {
         "repository": "gateway/repositories/api_keys/api_key_repository.py",
         "baseline": (
-            "gateway/api/deps.py",
             "gateway/api/routes/batches.py",
             "gateway/api/routes/catalog.py",
             "gateway/api/routes/keys.py",
@@ -2323,7 +2545,6 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     "gateway.models.tenancy.User": {
         "repository": "gateway/repositories/tenancy/user_repository.py",
         "baseline": (
-            "gateway/api/deps.py",
             "gateway/repositories/tenancy/organization_member_repository.py",
             "gateway/repositories/tenancy/workspace_repository.py",
             "gateway/services/dashboard_session_service.py",
@@ -2624,6 +2845,8 @@ def _type_position_nodes(tree: ast.Module, bindings: dict[str, str]) -> set[int]
             positions.append(node.returns)
         elif isinstance(node, ast.TypeAlias):
             positions.append(node.value)
+        elif isinstance(node, ast.Assign) and (annotated := _annotated_type(node, bindings)) is not None:
+            positions.append(annotated)
         elif isinstance(node, ast.Call):
             called = _called_name(node.func)
             dotted = _dotted_name(node.func) or ""
@@ -2823,6 +3046,8 @@ def main() -> int:
     service_package_import_violations = check_service_package_imports(SRC_ROOT, domains)
     service_root_export_violations = check_service_root_exports(SRC_ROOT)
     model_access_violations = check_model_access(SRC_ROOT)
+    import_cycle_violations = check_import_cycles(SRC_ROOT)
+    composition_root_violations = check_composition_root_behavior(SRC_ROOT)
 
     if import_violations:
         print("❌ Architecture violations found:\n")
@@ -2897,6 +3122,18 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal service root export violations: {len(service_root_export_violations)}")
 
+    if import_cycle_violations:
+        print("\n❌ Import cycle violations:\n")
+        for violation in import_cycle_violations:
+            print(f"  {violation}")
+        print(f"\nTotal import cycle violations: {len(import_cycle_violations)}")
+
+    if composition_root_violations:
+        print("\n❌ Composition root behavior violations:\n")
+        for violation in composition_root_violations:
+            print(f"  {violation}")
+        print(f"\nTotal composition root behavior violations: {len(composition_root_violations)}")
+
     if model_access_violations:
         print("\n❌ Model access violations:\n")
         for violation in model_access_violations:
@@ -2917,6 +3154,8 @@ def main() -> int:
         or service_package_import_violations
         or service_root_export_violations
         or model_access_violations
+        or import_cycle_violations
+        or composition_root_violations
     ):
         print("\n💡 See ARCHITECTURE.md for the intended layering")
         return 1

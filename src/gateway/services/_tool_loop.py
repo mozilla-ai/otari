@@ -20,6 +20,7 @@ tests can keep monkeypatching them there.
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, aclosing, nullcontext
 from enum import Enum, auto
@@ -57,14 +58,20 @@ class ToolBackend(Protocol):
 class RoundGate(Protocol):
     """Holds each tool-loop round after the first on the request's budgets before the round is sent.
 
-    The request's own hold covers its first round. Every later round resends the
-    whole transcript and is billed too, so it is held on its own; a round the
-    budgets cannot hold is sent as the loop's last, without the gateway's tools,
-    so the request still ends with an answer.
+    The request's own hold covers its first round and one output limit. Every
+    later round resends the whole transcript and is billed too, so it is held on
+    its own, together with what the round before it wrote, which leaves the one
+    output limit free for the round being sent. A round the budgets cannot hold
+    is sent as the loop's last, without the gateway's tools, so the request still
+    ends with an answer.
     """
 
-    async def admit(self, prompt_chars: int) -> bool:
-        """Whether a round whose request is ``prompt_chars`` long fits the request's budgets."""
+    async def admit(self, prompt_chars: int, output_tokens: int | None) -> bool:
+        """Whether a round whose request is ``prompt_chars`` long fits the request's budgets.
+
+        ``output_tokens`` is what the round before reported writing, or None where
+        it reported no usage.
+        """
         ...
 
 
@@ -84,6 +91,28 @@ def tool_failure_detail(pool: ToolBackend, name: str) -> str:
 def log_tool_failure(name: str, detail: str, exc: BaseException) -> None:
     """Log a call that raised, keeping the exception's text out of the line for the same reason."""
     logger.warning("%s: %s", detail, name, extra={"error_type": type(exc).__name__})
+
+
+INVALID_ARGUMENTS_ERROR = (
+    "[tool error] invalid_input: the arguments were not a JSON object, so the tool did not run. "
+    "Call the tool again with its arguments as a JSON object."
+)
+
+
+def parse_tool_arguments(name: str, raw: str | None) -> dict[str, Any] | None:
+    """The arguments the model sent for a call to ``name``, or ``None`` when they are not a JSON object.
+
+    Empty or blank arguments read as none. A call whose arguments are ``None`` here is refused
+    with :data:`INVALID_ARGUMENTS_ERROR` rather than run with arguments it did not send.
+    """
+    try:
+        parsed = json.loads((raw or "").strip() or "{}")
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, dict):
+        return parsed
+    logger.warning("Tool call arguments are not a JSON object; not running %s", name)
+    return None
 
 
 class MaxToolIterationsExceeded(Exception):
@@ -122,6 +151,8 @@ class ToolLoopStrategy(Protocol, Generic[ResultT, AccT]):
 
     def accumulate_usage(self, acc: AccT, result: ResultT) -> None: ...
 
+    def output_tokens(self, acc: AccT) -> int: ...
+
     def fold_usage(self, result: ResultT, acc: AccT) -> None: ...
 
     def exit_before_split(self, result: ResultT) -> bool: ...
@@ -133,6 +164,8 @@ class ToolLoopStrategy(Protocol, Generic[ResultT, AccT]):
     ) -> list[dict[str, Any]]: ...
 
     def filter_owned(self, result: ResultT, owned: list[Any], pool: ToolBackend) -> None: ...
+
+    def end_answer(self, result: ResultT) -> None: ...
 
     async def advance_transcript(
         self,
@@ -174,6 +207,8 @@ class StreamToolLoopStrategy(Protocol, Generic[ChunkT, StateT, AccT]):
 
     def accumulate_stream_usage(self, acc: AccT, state: StateT) -> None: ...
 
+    def stream_output_tokens(self, acc: AccT) -> int: ...
+
     def advance_stream_transcript(
         self,
         transcript: list[Any],
@@ -185,6 +220,8 @@ class StreamToolLoopStrategy(Protocol, Generic[ChunkT, StateT, AccT]):
     def synthetic_events(self, state: StateT, acc: AccT) -> list[ChunkT]: ...
 
     def finalize_exit(self, state: StateT, pool: ToolBackend, acc: AccT) -> AsyncIterator[ChunkT]: ...
+
+    def end_stream_answer(self, state: StateT) -> None: ...
 
 
 def _prepare(
@@ -289,9 +326,20 @@ def _request_chars(value: Any) -> int:
     return len(str(value))
 
 
-async def _round_fits(gate: RoundGate | None, iteration: int, kwargs: dict[str, Any]) -> bool:
+async def _round_fits(
+    gate: RoundGate | None, iteration: int, kwargs: dict[str, Any], output_tokens: int | None
+) -> bool:
     """Whether round ``iteration``, sent as ``kwargs``, fits the request's budgets; the first rides on its own hold."""
-    return gate is None or iteration == 1 or await gate.admit(_request_chars(kwargs))
+    return gate is None or iteration == 1 or await gate.admit(_request_chars(kwargs), output_tokens)
+
+
+def _written(before: int, after: int) -> int | None:
+    """What one round wrote, from the loop's output count before and after it.
+
+    A round the loop continues from wrote at least its tool calls, so a count that
+    did not move means the round reported no usage.
+    """
+    return after - before or None
 
 
 def _round_request(
@@ -395,9 +443,9 @@ async def run_tool_loop(
     2. Foreign tools present: mixed batches execute the owned subset for its
        side effects and filter it from the returned result, so the caller only
        sees calls it can dispatch itself.
-    3. Nothing owned, or the round stopped in step 1: return the result as the
-       final answer, without the owned calls of a round the model stopped
-       short, as the streaming loop does.
+    3. Nothing owned, the round stopped in step 1, or it is the last round the
+       loop allows: return the result as the final answer, without the owned
+       calls, as the streaming loop does.
     4. Otherwise execute the owned calls, extend the transcript, and iterate.
 
     ``on_first_response`` is invoked once, right after the first upstream call
@@ -418,16 +466,14 @@ async def run_tool_loop(
     )
     acc = strategy.new_usage_accumulator()
     first_response_signaled = False
+    written: int | None = None
 
-    final = False
     for iteration in range(1, max_iterations + 1):
-        if final:
-            break
         final = iteration == max_iterations
         kwargs = _round_request(
             strategy.transcript_key, base, merged_tools, user_tools, pool, transcript, first=iteration == 1, final=final
         )
-        if not await _round_fits(round_gate, iteration, kwargs):
+        if not await _round_fits(round_gate, iteration, kwargs, written):
             final = True
             kwargs = _round_request(
                 strategy.transcript_key,
@@ -448,7 +494,9 @@ async def run_tool_loop(
             first_response_signaled = True
             if on_first_response is not None:
                 on_first_response()
+        before = strategy.output_tokens(acc)
         strategy.accumulate_usage(acc, result)
+        written = _written(before, strategy.output_tokens(acc))
 
         stopped = strategy.exit_before_split(result)
         owned, has_foreign = strategy.split_owned(result, pool)
@@ -458,11 +506,14 @@ async def run_tool_loop(
                 strategy.filter_owned(result, owned, pool)
             strategy.fold_usage(result, acc)
             return result
-        if stopped or not owned:
+        if stopped or not owned or final:
             if owned:
-                # The model stopped before finishing these calls (a token limit, say), so
-                # the gateway does not run them, and the caller never declared the tools.
+                # The model stopped before finishing these calls (a token limit, say), or
+                # called a tool on the last round the loop allows, so the gateway does not
+                # run them, and the caller never declared the tools.
                 strategy.filter_owned(result, owned, pool)
+            if owned and not stopped:
+                strategy.end_answer(result)
             strategy.fold_usage(result, acc)
             return result
 
@@ -518,16 +569,14 @@ async def run_tool_loop_stream(
     )
     base["stream"] = True
     acc = strategy.new_stream_accumulator()
+    written: int | None = None
 
-    final = False
     for iteration in range(1, max_iterations + 1):
-        if final:
-            break
         final = iteration == max_iterations
         kwargs = _round_request(
             strategy.transcript_key, base, merged_tools, user_tools, pool, transcript, first=iteration == 1, final=final
         )
-        if not await _round_fits(round_gate, iteration, kwargs):
+        if not await _round_fits(round_gate, iteration, kwargs, written):
             final = True
             kwargs = _round_request(
                 strategy.transcript_key,
@@ -573,8 +622,19 @@ async def run_tool_loop_stream(
             for terminal in strategy.terminal_events(state, acc):
                 yield terminal
             return
+        if final:
+            # The model called the gateway's tools on the last round the loop allows,
+            # which withholds them (a provider that must declare the tools a
+            # conversation already called, such as Bedrock, offers them anyway). Their
+            # calls were hidden from the stream, so the round ends as the answer.
+            strategy.end_stream_answer(state)
+            for terminal in strategy.terminal_events(state, acc):
+                yield terminal
+            return
 
+        before = strategy.stream_output_tokens(acc)
         strategy.accumulate_stream_usage(acc, state)
+        written = _written(before, strategy.stream_output_tokens(acc))
         async for activity in strategy.advance_stream_transcript(transcript, state, pool, acc):
             yield activity
         # A format with a native vocabulary for server-side tool calls announces

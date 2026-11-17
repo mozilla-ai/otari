@@ -48,8 +48,12 @@ the old shape.
 - The service receives its own domain's repositories, the Unit of Work, config,
   ports and other domains' services through its constructor. Flag a service
   that receives the session or another domain's repository.
-- A builder in `api/deps.py` builds the service. Flag a new service builder
+- A builder in `api/deps/` builds the service. Flag a new service builder
   defined anywhere else.
+- A builder in `api/deps/` builds things and holds no implementation. Flag a
+  class with a method added under `api/deps/`, including one nested in a
+  builder, which belongs to the domain whose work it does. A class that carries
+  data and no methods is fine.
 - Flag a new module-level function under `services/` that takes an
   `AsyncSession`, including one added to a module already on
   `SERVICE_DATABASE_IMPORT_BASELINE`. The check does not catch that case.
@@ -124,7 +128,7 @@ model, except a module on the model's baseline.
   `gateway.services.<domain>`. The check refuses an import below the root
   from outside the package, for each domain `DOMAINS.md` gives a section.
   Flag such an import into a service package that is not a domain yet.
-- Only the domain's own service and repository packages and `api/deps.py`
+- Only the domain's own service and repository packages and `api/deps/`
   import `gateway.repositories.<domain>`. The check refuses any other import of
   one, for each domain `DOMAINS.md` gives a section, except from service
   code outside every domain package, whose domain its path does not give.
@@ -143,8 +147,8 @@ model, except a module on the model's baseline.
   contains `Listener`. Flag a default on a listener whose type does not name
   it, such as a bare `Callable`.
 
-The boundary check does not enforce the cycle rule yet, so review is the only
-gate for it.
+The boundary check enforces the cycle rule, so a diff that adds one fails
+before review sees it.
 
 ## Errors
 

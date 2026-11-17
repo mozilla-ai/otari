@@ -40,7 +40,7 @@ How a domain fits together:
 - **Savepoints.** A repository may open a savepoint for one purpose: to
   diagnose a refusal of its own write, by asking the database why the flush
   failed. It never opens one so that a step can continue.
-- **Builders** live in `api/deps.py`. A worker job calls the same builder with a
+- **Builders** live in `api/deps/`. A worker job calls the same builder with a
   Unit of Work over its own session. Nothing under `services/` may import
   `api/`, so the code that starts a worker passes the builder in.
 - **Imports** follow the

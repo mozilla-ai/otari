@@ -368,7 +368,7 @@ async def test_the_service_reads_the_settings_without_reporting_invalid_ones(mon
         calls.append(report_invalid)
         return {}
 
-    monkeypatch.setattr(deps, "load_overrides", load_overrides)
+    monkeypatch.setattr("gateway.api.deps.tools.load_overrides", load_overrides)
     service = deps.build_search_tool_service(object(), object(), config=GatewayConfig())  # type: ignore[arg-type]
     await service.read_settings()
     assert calls == [False]

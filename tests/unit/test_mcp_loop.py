@@ -32,7 +32,12 @@ from openai.types.chat.chat_completion_message_custom_tool_call import ChatCompl
 from gateway.core.usage import cache_write_1h_tokens_of, provider_web_searches_of, reasoning_tokens_of
 from gateway.log_config import logger
 from gateway.services import mcp_loop as mcp_loop_module
-from gateway.services._tool_loop import _released_tool_choice, _request_chars
+from gateway.services._tool_loop import (
+    INVALID_ARGUMENTS_ERROR,
+    _released_tool_choice,
+    _request_chars,
+    parse_tool_arguments,
+)
 from gateway.services.inference import EmptyCompletionError
 from gateway.services.mcp_loop import (
     MaxToolIterationsExceeded,
@@ -670,18 +675,25 @@ async def test_loop_preserves_cached_tokens_when_final_iteration_lacks_details(
 
 
 @pytest.mark.asyncio
-async def test_loop_max_iter_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_tool_call_on_the_last_round_ends_as_the_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A provider that declares the conversation's tools anyway (Bedrock) lets the model call one on the last round."""
+
     async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
-        return _completion(finish="tool_calls", tool_calls=[("c", "fetch_url", "{}")])
+        return _completion(finish="tool_calls", content="So far: 4.", tool_calls=[("c", "fetch_url", "{}")])
 
     monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    pool = _FakePool(tool_names=["fetch_url"])
 
-    with pytest.raises(MaxToolIterationsExceeded):
-        await mcp_tool_loop(
-            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
-            pool=_FakePool(tool_names=["fetch_url"]),
-            max_iterations=2,
-        )
+    out = await mcp_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+        pool=pool,
+        max_iterations=2,
+    )
+
+    assert len(pool.calls) == 1
+    assert out.choices[0].message.content == "So far: 4."
+    assert out.choices[0].message.tool_calls is None
+    assert out.choices[0].finish_reason == "stop"
 
 
 @pytest.mark.asyncio
@@ -843,6 +855,80 @@ async def test_loop_tool_execution_failure_appears_as_tool_message(monkeypatch: 
     assert "sk-live-secret" not in str(captured) + str(logged)
 
 
+@pytest.mark.parametrize(("raw", "expected"), [(None, {}), ("", {}), ("  \n", {}), ('{"u": "x"}', {"u": "x"})])
+def test_empty_or_object_arguments_parse(raw: str | None, expected: dict[str, Any]) -> None:
+    assert parse_tool_arguments("fetch_url", raw) == expected
+
+
+@pytest.mark.parametrize("raw", ['{"u": "x"', '["x"]', "null", '"x"', "1", "true"])
+def test_arguments_that_are_not_a_json_object_do_not_parse(raw: str) -> None:
+    assert parse_tool_arguments("fetch_url", raw) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("arguments", ['{"u": "x"', '["x"]', "null"])
+async def test_loop_refuses_a_call_whose_arguments_are_not_a_json_object(
+    monkeypatch: pytest.MonkeyPatch, arguments: str
+) -> None:
+    responses = iter(
+        [
+            _completion(finish="tool_calls", tool_calls=[("c", "fetch_url", arguments)]),
+            _completion(finish="stop", content="recovered"),
+        ]
+    )
+    captured: list[list[dict[str, Any]]] = []
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        captured.append(kwargs["messages"])
+        return next(responses)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    logged = _capture_warnings(monkeypatch)
+
+    pool = _FakePool(tool_names=["fetch_url"])
+    out = await mcp_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+        pool=pool,
+        max_iterations=5,
+    )
+
+    assert out.choices[0].message.content == "recovered"
+    assert pool.calls == []
+    assert captured[1][-1] == {"role": "tool", "tool_call_id": "c", "content": INVALID_ARGUMENTS_ERROR}
+    assert logged == [("Tool call arguments are not a JSON object; not running fetch_url", None)]
+
+
+@pytest.mark.asyncio
+async def test_stream_loop_refuses_a_call_whose_arguments_are_cut_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    iter_streams = iter(
+        [
+            _async_iter(
+                _chunk(tool_calls=[(0, "call_1", "fetch_url", '{"u": ')]),
+                _chunk(finish="tool_calls"),
+            ),
+            _async_iter(_chunk(content="all done", finish="stop")),
+        ]
+    )
+    captured: list[list[dict[str, Any]]] = []
+
+    async def fake_acompletion(**kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
+        captured.append(kwargs["messages"])
+        return next(iter_streams)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+    pool = _FakePool(tool_names=["fetch_url"])
+    async for _ in mcp_tool_loop_stream(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+        pool=pool,
+        max_iterations=5,
+    ):
+        pass
+
+    assert pool.calls == []
+    assert captured[1][-1] == {"role": "tool", "tool_call_id": "call_1", "content": INVALID_ARGUMENTS_ERROR}
+
+
 # ---------- streaming loop ----------
 
 
@@ -905,6 +991,32 @@ async def test_stream_loop_runs_mcp_tool_and_continues(monkeypatch: pytest.Monke
     # `tool_calls` terminal is suppressed.
     assert finishes == ["stop"]
     assert pool.calls == [("fetch_url", {})]
+
+
+@pytest.mark.asyncio
+async def test_stream_a_tool_call_on_the_last_round_ends_as_the_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_acompletion(**kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
+        return _async_iter(
+            _chunk(content="So far: 4."),
+            _chunk(tool_calls=[(0, "call_1", "fetch_url", "{}")]),
+            _chunk(finish="tool_calls"),
+        )
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
+
+    chunks = [
+        c
+        async for c in mcp_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+            pool=pool,
+            max_iterations=2,
+        )
+    ]
+
+    assert pool.calls == [("fetch_url", {})]
+    assert [c.choices[0].finish_reason for c in chunks if c.choices and c.choices[0].finish_reason] == ["stop"]
+    assert not any(c.choices and c.choices[0].delta.tool_calls for c in chunks)
 
 
 def _activity_of(chunks: list[ChatCompletionChunk]) -> list[dict[str, Any]]:
@@ -1322,9 +1434,11 @@ class _RoundGate:
     def __init__(self, *answers: bool) -> None:
         self._answers = list(answers)
         self.asked: list[int] = []
+        self.written: list[int | None] = []
 
-    async def admit(self, prompt_chars: int) -> bool:
+    async def admit(self, prompt_chars: int, output_tokens: int | None) -> bool:
         self.asked.append(prompt_chars)
+        self.written.append(output_tokens)
         return self._answers.pop(0) if self._answers else True
 
 
@@ -1371,7 +1485,43 @@ async def test_a_round_the_budget_cannot_hold_is_the_last_and_offers_no_gateway_
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stream", [False, True], ids=["non-streaming", "streaming"])
-async def test_a_round_the_budget_cannot_hold_ends_the_loop_even_if_the_model_calls_a_tool_anyway(
+async def test_a_round_is_held_with_what_the_round_before_wrote(monkeypatch: pytest.MonkeyPatch, stream: bool) -> None:
+    """Round 2 is held with round 1's reported output; round 3 with None, since round 2 reported no usage."""
+    sent: list[dict[str, Any]] = []
+
+    async def fake_acompletion(**kwargs: Any) -> Any:
+        sent.append(kwargs)
+        call_id = f"c{len(sent)}"
+        usage = CompletionUsage(prompt_tokens=10, completion_tokens=700, total_tokens=710) if len(sent) == 1 else None
+        if len(sent) == 3:
+            return _async_iter(_chunk(content="done", finish="stop")) if stream else _completion(finish="stop")
+        if stream:
+            return _async_iter(
+                _chunk(tool_calls=[(0, call_id, "fetch_url", "{}")]), _chunk(finish="tool_calls", usage=usage)
+            )
+        completion = _completion(finish="tool_calls", tool_calls=[(call_id, "fetch_url", "{}")])
+        completion.usage = usage
+        return completion
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    gate = _RoundGate()
+    completion_kwargs = {"model": "fake", "messages": [{"role": "user", "content": "go"}]}
+    pool = _FakePool(tool_names=["fetch_url"])
+
+    if stream:
+        async for _ in mcp_tool_loop_stream(
+            completion_kwargs=completion_kwargs, pool=pool, max_iterations=10, round_gate=gate
+        ):
+            pass
+    else:
+        await mcp_tool_loop(completion_kwargs=completion_kwargs, pool=pool, max_iterations=10, round_gate=gate)
+
+    assert gate.written == [700, None]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True], ids=["non-streaming", "streaming"])
+async def test_a_round_the_budget_cannot_hold_ends_as_the_answer_even_if_the_model_calls_a_tool_anyway(
     monkeypatch: pytest.MonkeyPatch, stream: bool
 ) -> None:
     """No round runs after the one the budget could not hold, whatever the model asks for in it."""
@@ -1388,18 +1538,20 @@ async def test_a_round_the_budget_cannot_hold_ends_the_loop_even_if_the_model_ca
     completion_kwargs = {"model": "fake", "messages": [{"role": "user", "content": "go"}]}
     pool = _FakePool(tool_names=["fetch_url"])
 
-    with pytest.raises(MaxToolIterationsExceeded):
-        if stream:
-            async for _ in mcp_tool_loop_stream(
-                completion_kwargs=completion_kwargs, pool=pool, max_iterations=10, round_gate=_RoundGate(False)
-            ):
-                pass
-        else:
-            await mcp_tool_loop(
-                completion_kwargs=completion_kwargs, pool=pool, max_iterations=10, round_gate=_RoundGate(False)
-            )
+    if stream:
+        async for _ in mcp_tool_loop_stream(
+            completion_kwargs=completion_kwargs, pool=pool, max_iterations=10, round_gate=_RoundGate(False)
+        ):
+            pass
+    else:
+        result = await mcp_tool_loop(
+            completion_kwargs=completion_kwargs, pool=pool, max_iterations=10, round_gate=_RoundGate(False)
+        )
+        assert result.choices[0].finish_reason == "stop"
+        assert not result.choices[0].message.tool_calls
 
     assert len(sent) == 2
+    assert pool.calls == [("fetch_url", {})], "only the first round's call runs"
 
 
 @pytest.mark.asyncio
@@ -2287,6 +2439,23 @@ async def test_a_code_execution_that_exits_non_zero_is_reported_failed(monkeypat
 
     [entry] = _reported(result)
     assert (entry["status"], entry["exit_code"]) == ("failed", 1)
+
+
+@pytest.mark.asyncio
+async def test_a_native_code_call_with_unparsable_arguments_is_refused_not_reported_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = _FakeSandboxPool()
+    result = await _answer(
+        monkeypatch,
+        pool,
+        ("c1", CODE_EXECUTION_TOOL_NAME, '{"code": "print(1'),
+        native_tools=frozenset({CODE_EXECUTION_TOOL_NAME}),
+    )
+
+    assert pool.calls == []
+    [entry] = _reported(result)
+    assert (entry["status"], entry["error"]["tag"]) == ("failed", "invalid_input")
 
 
 def test_a_code_execution_the_backend_kept_nothing_for_is_reported_failed() -> None:

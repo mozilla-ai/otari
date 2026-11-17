@@ -1,7 +1,7 @@
 """The HTTP client the web tools' providers are called through (decision 55).
 
 The lifespan builds one per app, keeps it on ``app.state`` and closes it at
-shutdown, and ``api/deps.py`` serves it, so no module holds a client of its
+shutdown, and ``api/deps/`` serves it, so no module holds a client of its
 own. It is not ``services/providers/_provider_clients.py``, which reuses the
 LLM providers' clients per event loop.
 
