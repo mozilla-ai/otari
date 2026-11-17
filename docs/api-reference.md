@@ -463,7 +463,7 @@ has a key of its own.
 | Route | Returns |
 |---|---|
 | `GET /api/v1/key/budget` | What the key may still spend, and every cap that decides it. On a service key, `end_users` also gives how many end users its cap counts and the cap (`max_end_users`, `null` for none); `null` on any other key. |
-| `GET /api/v1/key/usage/summary` | The `/api/v1/usage/summary` response over the key's own requests, with the same filters, `dimensions` and `group_by_tag`. |
+| `GET /api/v1/key/usage/summary` | The `/api/v1/usage/summary` response over the key's own requests, with the same filters, `dimensions` and `group_by_tag`. The key's own user is listed in `by_user` with `label: null`; a service key's end users keep the label the service gave them. |
 | `GET /api/v1/key/usage/series` | The `/api/v1/usage/series` response over the key's own requests. |
 
 ```json

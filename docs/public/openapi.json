@@ -38664,7 +38664,7 @@
     },
     "/api/v1/key/usage/summary": {
       "get": {
-        "description": "Spend, tokens and request volume of the calling key's own requests.\n\nThe same summary as ``GET /api/v1/usage/summary``, over the rows this key\nwrote alone: the same bounded window (default last 30 days), breakdowns, tag\nfilters and ``group_by_tag``. Tag a request with ``metadata`` and pass\n``group_by_tag`` to read what each kind of request cost.",
+        "description": "Spend, tokens and request volume of the calling key's own requests.\n\nThe same summary as ``GET /api/v1/usage/summary``, over the rows this key\nwrote alone: the same bounded window (default last 30 days), breakdowns, tag\nfilters and ``group_by_tag``. Tag a request with ``metadata`` and pass\n``group_by_tag`` to read what each kind of request cost. The key's own user\nis listed in ``by_user`` without a ``label``.",
         "operationId": "key-get_key_usage_summary",
         "parameters": [
           {
