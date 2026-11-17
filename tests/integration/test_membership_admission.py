@@ -2,13 +2,17 @@
 
 import uuid
 from collections.abc import Sequence
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from gateway.exceptions.organizations_exceptions import MembershipUpdateError
+from gateway.exceptions.organizations_exceptions import (
+    MembershipUpdateError,
+    OrganizationMemberAddressUnprovenError,
+)
 from gateway.models.budgets import ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.tenancy import (
     OrganizationMember,
@@ -234,3 +238,45 @@ async def test_a_refused_offer_leaves_no_membership_behind(async_db: AsyncSessio
 
 # The service is the collaborator acceptance holds, checked by mypy rather than by a call.
 _CONFORMS: MembershipAdmission = OrganizationService(None, membership_listener=None)  # type: ignore[arg-type]
+
+
+async def test_admitting_an_identity_only_another_organization_vouched_for_is_refused(
+    async_db: AsyncSession,
+) -> None:
+    """A vouched identity carries a password the organization that vouched could have chosen."""
+    organization = await create_organization(async_db, slug="admit-vouched")
+    elsewhere = await create_organization(async_db, slug="admit-vouched-other")
+    await create_member(async_db, organization, role="owner", full_name="Owner")
+    invitee = await _invitee(async_db, active_organization_id=elsewhere.id, email="vouched@example.com")
+    invitee.email_vouched_at = datetime.now(UTC)
+    async_db.add(invitee)
+    await async_db.flush()
+    writes = membership_writes(async_db)
+    service = OrganizationService(async_db, **writes)
+
+    with pytest.raises(OrganizationMemberAddressUnprovenError):
+        async with writes["uow"]:
+            await service.admit(organization_id=organization.id, role="member", user_id=invitee.id, workspaces=[])
+
+
+async def test_admitting_somebody_already_on_this_roster_is_not_refused_for_being_vouched(
+    async_db: AsyncSession,
+) -> None:
+    """The rule is about a second organization taking the identity, so its own roster is left alone."""
+    organization = await create_organization(async_db, slug="admit-vouched-member")
+    await create_member(async_db, organization, role="owner", full_name="Owner")
+    member = await create_member(async_db, organization, role="member", full_name="Suspended")
+    member.email_vouched_at = datetime.now(UTC)
+    async_db.add(member)
+    members = OrganizationMemberRepository(async_db)
+    membership = await members.get_by_organization_and_user(organization.id, member.id)
+    assert membership is not None
+    await members.update_membership(membership, {"status": "suspended"})
+    await async_db.flush()
+    writes = membership_writes(async_db)
+    service = OrganizationService(async_db, **writes)
+
+    async with writes["uow"]:
+        admitted = await service.admit(organization_id=organization.id, role="member", user_id=member.id, workspaces=[])
+
+    assert admitted.created is False

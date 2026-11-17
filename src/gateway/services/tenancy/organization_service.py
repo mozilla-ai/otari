@@ -2275,6 +2275,7 @@ class OrganizationService:
 
         Raises:
             MembershipUpdateError: the role offered would leave the organization with no active owner.
+            OrganizationMemberAddressUnprovenError: only another organization has vouched for the address.
             OrganizationMemberDeactivatedError: the account is deactivated, so a membership grants nothing.
             OrganizationNotFoundError: the organization no longer exists.
 
@@ -2291,6 +2292,7 @@ class OrganizationService:
             membership, created = await self.members.add_if_absent(
                 organization_id=organization_id, user_id=user_id, role=role
             )
+            _refuse_address_vouched_elsewhere(identity, None if created else membership, identity.email or str(user_id))
             if not created:
                 await self._require_an_owner_remains(
                     membership, organization_id=organization_id, new_role=role, new_status=ACTIVE_MEMBERSHIP_STATUS
