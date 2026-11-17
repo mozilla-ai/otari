@@ -94,7 +94,8 @@ When the server uses each person's own account and you have not signed in yet:
 2. Claude answers with a sign-in link. Check that it starts with your
    deployment's `public_base_url` exactly, without a trailing `/` if it has
    one, followed by `/api/v1/mcp-connections/sign-in#ticket=`, then open it
-   within 30 minutes.
+   within 30 minutes. It works once: if the sign-in does not finish, ask again
+   for a new one.
    That address can differ from the one you send requests to; ask your operator
    if you do not know it. The page names the Otari user your account will
    be attached to: check that it is you, continue, and sign in with your own
@@ -156,7 +157,7 @@ In a Claude Code session:
 The install asks for the gateway URL and an API key. The key goes to Claude
 Code's secure storage. The URL must be `https` unless the gateway runs on the
 same machine. The plugin stays active in every session after that; its
-[README](https://github.com/mozilla-ai/otari/blob/12be23b15a2bfc233d98ec5ab4718a249078e2a2/plugins/otari-router/README.md) has the options and how to update.
+[README](https://github.com/mozilla-ai/otari/blob/159c1b14f5add3d780eb819a264e79560b137a3d/plugins/otari-router/README.md) has the options and how to update.
 
 Each spawn then leaves a dim line in the transcript naming the model Otari chose
 and why. If Otari does not answer, the subagent starts on the model it would

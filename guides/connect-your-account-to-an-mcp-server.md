@@ -148,6 +148,12 @@ server's **Availability** to **Every request**, or your client names the server 
    and sign in with your own account, in the same browser.
 4. A page says you are signed in. Go back to the conversation and ask again.
 
+The link works once: clicking **This is me, continue** uses it up, whether or not
+the sign-in then finishes. If you cancel at the server's sign-in, it fails, or you
+close the tab, ask the agent again and it gives you a new link. A page that says
+**This link was already used** means the same thing; if you are still signing in
+in another tab, finish there instead.
+
 If the page says **Sign in to Otari first**, the link is for a dashboard
 account: sign in to the dashboard in that browser, then open the link again.
 The sign-in finishes only in the browser where you clicked **This is me,
@@ -164,8 +170,8 @@ An address that only starts the same way, such as
 Keep the link to yourself. It is made for you, from the key your agent uses. A
 link for a dashboard account continues only in that account's own dashboard
 session. A link for a user with no dashboard login does not need one, so
-whoever opens it within its 30 minutes and continues connects the account they
-sign in with to you.
+whoever is first to open it within its 30 minutes and continue connects the
+account they sign in with to you.
 
 Never open a sign-in link someone else sent you. It is made for their Otari
 user, so signing in through it would hand them the use of your account on that
