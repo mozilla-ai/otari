@@ -19,7 +19,14 @@ Otari never guesses from content.
 | A `session_id` request tag | `"metadata": {"session_id": "chat-42"}` | `client` |
 | Claude Code's own session id | `x-claude-code-session-id`, sent on every request | `harness` |
 | opencode's own session id | `x-opencode-session-id`, sent on every request | `harness` |
+| Amp's own thread id | `x-amp-thread-id`, sent on every request | `harness` |
+| goose's own session id | `agent-session-id`, sent on every request | `harness` |
 | Codex's own session id | `thread-id`, or `session-id` without one, when `originator` or `User-Agent` starts with `codex` | `harness` |
+| Kilo Code's own session id | `x-session-id`, when `User-Agent` starts with `Kilo-Code/` or `kilo/` | `harness` |
+| Crush's own session id | `x-session-id`, when `User-Agent` starts with `Charm-Crush/` | `harness` |
+| pi's own session id | `session-id`, else `session_id`, `x-session-affinity` or `x-session-id`, when `User-Agent` starts with `pi/` | `harness` |
+| Roo Code's own task id | `session_id`, when `originator` is `roo-code` or `User-Agent` starts with `roo-code/` | `harness` |
+| A LiteLLM session id, which OpenHands sends | `x-litellm-session-id` | `harness` |
 | A Claude Code span's session | `session.id` on an exported span | `otlp` |
 | An OTLP span's Claude session | `anthropic.session.id` on an exported span | `otlp` |
 | An OTLP span's conversation | `gen_ai.conversation.id` on an exported span | `otlp` |
@@ -42,7 +49,7 @@ the other. A request with no session reads as "(no session)".
 
 ## Grouping your own agent's requests
 
-Claude Code and Codex are recognized automatically. For your own agent:
+The harnesses in the table above are recognized automatically. For your own agent:
 
 1. **Send one `Otari-Conversation-Id` on every request of a run**, including the
    follow-ups that return tool results, and retries. A request without it starts
