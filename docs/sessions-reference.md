@@ -19,9 +19,9 @@ Otari never guesses from content.
 | A `session_id` request tag | `"metadata": {"session_id": "chat-42"}` | `client` |
 | Claude Code's own session id | `x-claude-code-session-id`, sent on every request | `harness` |
 | opencode's own session id | `x-opencode-session-id`, sent on every request | `harness` |
-| Codex's own session id | `thread-id`, or `session-id` without one, when `originator` or `User-Agent` starts with `codex` | `harness` |
 | Amp's own thread id | `x-amp-thread-id`, sent on every request | `harness` |
 | goose's own session id | `agent-session-id`, sent on every request | `harness` |
+| Codex's own session id | `thread-id`, or `session-id` without one, when `originator` or `User-Agent` starts with `codex` | `harness` |
 | Kilo Code's own session id | `x-session-id`, when `User-Agent` starts with `Kilo-Code/` or `kilo/` | `harness` |
 | Crush's own session id | `x-session-id`, when `User-Agent` starts with `Charm-Crush/` | `harness` |
 | pi's own session id | `session-id`, else `session_id`, `x-session-affinity` or `x-session-id`, when `User-Agent` starts with `pi/` | `harness` |
