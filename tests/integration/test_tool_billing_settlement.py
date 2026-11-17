@@ -39,6 +39,7 @@ from gateway.models.users import User
 from gateway.schemas.usage_and_telemetry import TOOL_METER_NAMESPACE
 from gateway.services.pricing_service import configure_default_pricing
 from gateway.services.tool_usage import ToolUsageTally
+from gateway.services.tools import OTARI_TOOL_CALLS_FIELD
 from gateway.services.web_fetch_service import WebFetchResult, WebFetchService
 from gateway.services.web_retrieval_policy import canonicalize_web_url
 
@@ -1219,7 +1220,7 @@ async def test_failed_fetch_is_counted_but_not_billed(
 
 
 @pytest.mark.asyncio
-async def test_fetch_batch_stops_at_the_shared_ten_call_limit(
+async def test_a_fetch_past_the_call_limit_is_refused_and_the_answer_still_comes(
     client: TestClient,
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
@@ -1227,8 +1228,10 @@ async def test_fetch_batch_stops_at_the_shared_ten_call_limit(
     monkeypatch: pytest.MonkeyPatch,
     test_config: GatewayConfig,
 ) -> None:
+    """A request that declares only fetch draws on ``web_search_max_calls``, and a call past it is a tool error."""
     _serve_fetch_on_fake(monkeypatch, test_config)
-    provider = AsyncMock(return_value=_fetch_batch_completion(11))
+    monkeypatch.setattr(test_config, "web_search_max_calls", 2)
+    provider = AsyncMock(side_effect=[_fetch_batch_completion(3), _completion(tool_call=False)])
     with patch("gateway.services.mcp_loop.acompletion", new=provider):
         response = client.post(
             f"{API_ROOT}/chat/completions",
@@ -1240,11 +1243,17 @@ async def test_fetch_batch_stops_at_the_shared_ten_call_limit(
             headers=api_key_header,
         )
 
-    assert response.status_code == 422, response.text
-    assert "10 calls per request" in response.json()["detail"]
+    assert response.status_code == 200, response.text
+    sent = provider.await_args_list[1].kwargs["messages"]
+    assert [message["content"] for message in sent if message["role"] == "tool"][2] == (
+        "[tool error] web fetch call limit reached for this request"
+    )
+    reported = response.json()[OTARI_TOOL_CALLS_FIELD]
+    assert [entry["status"] for entry in reported] == ["completed", "completed", "failed"]
+    assert reported[2]["error"] == {"provider": None, "status": None, "tag": "call_limit", "retryable": False}
     row = _latest_row(db_session_factory, api_key_obj["user_id"])
     fetches = (row.billing_meters or {})[TOOL_METER_NAMESPACE]["web_fetch"]
-    assert (fetches["billed"], fetches["errors"]) == (10, 0), "the eleventh call never reached the fetch instance"
+    assert (fetches["billed"], fetches["errors"]) == (2, 1), "the third call never reached the fetch instance"
 
 
 @pytest.mark.asyncio
