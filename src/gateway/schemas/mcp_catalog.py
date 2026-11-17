@@ -42,10 +42,11 @@ class McpCatalogServerPublic(BaseModel):
     logo_tone: LogoToneValue | None = Field(description=LOGO_TONE_DESCRIPTION)
     publisher_kind: Literal["vendor", "community"] = Field(
         description=(
-            "`vendor` when the server is its maker's own: the endpoint lives on a domain the publisher owns, "
-            "the server is named for that domain and nothing else, and the domain is not a hosting platform's. "
-            "A few makers' servers the rule cannot recognize are listed by hand. `community` for every other, "
-            "such as a gateway to another company's API. The rule reads names and vouches for nothing."
+            "`vendor` when the server is its maker's own: the endpoint lives on the domain the registry verified "
+            "for the publisher's namespace, the server is named for that domain and nothing else, and the domain "
+            "is not a hosting platform's. A website or title the publisher writes never earns it, and neither does "
+            "a GitHub namespace. A few makers' servers the rule cannot recognize are listed by hand. `community` "
+            "for every other, such as a gateway to another company's API."
         )
     )
     version: str | None

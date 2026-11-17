@@ -204,7 +204,7 @@ def _server_public(row: McpCatalogServer, logo: LogoRef) -> McpCatalogServerPubl
         icon_url=row.icon_url,
         logo_url=logo.url(catalog_logo_path(row.name)),
         logo_tone=logo_tone(logo.luminance),
-        publisher_kind=publisher_kind(row.name, row.title, row.url, row.website_url),
+        publisher_kind=publisher_kind(row.name, row.title, row.url),
         version=row.version,
         source=row.source,
     )
@@ -212,7 +212,7 @@ def _server_public(row: McpCatalogServer, logo: LogoRef) -> McpCatalogServerPubl
 
 def _judged(entry: McpCatalogEntry) -> McpCatalogEntry:
     """``entry`` marked as its maker's own server or not, which is what a search lists first."""
-    kind = publisher_kind(entry.name, entry.title, entry.url, entry.website_url)
+    kind = publisher_kind(entry.name, entry.title, entry.url)
     return entry.model_copy(update={"is_official": kind == "vendor"})
 
 

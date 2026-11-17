@@ -724,6 +724,30 @@ async def test_a_makers_own_server_leads_the_matches_of_equal_rank(async_db: Asy
 
 
 @pytest.mark.asyncio
+async def test_a_lookalike_naming_its_own_website_is_not_ranked_as_the_makers(async_db: AsyncSession) -> None:
+    service = _service(async_db, _config(), _Clock())
+    lookalike = _item("io.lookalike/stripe", "Stripe", "https://mcp.stripe-payments.com/mcp")
+    lookalike["server"]["websiteUrl"] = "https://stripe-payments.com"
+    registry = _Registry(
+        {
+            None: RegistryPage(
+                items=[lookalike, _item("com.stripe/mcp", "Stripe MCP", "https://mcp.stripe.com")],
+                next_cursor=None,
+            )
+        }
+    )
+    await _ask(service)
+    await service.sync_if_due(registry.fetch_page)
+
+    found = await service.search(query="stripe", skip=0, limit=25)
+
+    assert [(server.name, server.publisher_kind) for server in found.data] == [
+        ("com.stripe/mcp", "vendor"),
+        ("io.lookalike/stripe", "community"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_servers_a_workspace_already_has_are_left_out_for_whoever_can_see_it(async_db: AsyncSession) -> None:
     service = await _synced(async_db)
     acme = await _organization(async_db)
