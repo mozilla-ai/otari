@@ -505,7 +505,7 @@ test.describe("the keys page's one-time secret", () => {
 
   // The same dialog with its disclosure open, which is what makes the body
   // scroll: header and footer pinned, content moving between them.
-  test("the create dialog, with Advanced open", async ({ page }) => {
+  test("the create dialog, with More options open", async ({ page }) => {
     await login(page)
     await gotoRoute(page, "/keys")
     await expect(
@@ -513,7 +513,7 @@ test.describe("the keys page's one-time secret", () => {
     ).toBeVisible()
     await page.getByRole("button", { name: "Create key" }).first().click()
     const dialog = page.getByRole("dialog")
-    await dialog.getByRole("button", { name: "Advanced" }).click()
+    await dialog.getByRole("button", { name: "More options" }).click()
     await expect(dialog.getByText("Restrict this key's models")).toBeVisible()
     await captureScreenshot(page, "keys-create-dialog-advanced")
   })

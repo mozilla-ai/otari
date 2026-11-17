@@ -773,7 +773,7 @@ function CreateKeyDialog({
         className="self-start text-xs font-medium text-link hover:text-link-hover"
         onClick={() => setShowAdvanced((v) => !v)}
       >
-        {showAdvanced ? "Hide advanced" : "Advanced"}
+        {showAdvanced ? "Fewer options" : "More options"}
       </button>
       {showAdvanced ? (
         <div className="flex flex-col gap-4 border border-control-border p-4">

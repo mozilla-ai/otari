@@ -6,6 +6,7 @@ export type ScopeGroupKey =
   | "files"
   | "batches"
   | "tools"
+  | "mcp"
   | "agents"
   | "usage"
   | "endUsers"
@@ -51,12 +52,12 @@ export const SCOPE_INFO: Record<KeyScope, ScopeInfo> = {
   },
   "mcp:read": {
     label: "List MCP servers and their tools",
-    group: "tools",
+    group: "mcp",
     hint: "Needed to look up a server's id or sign-in link",
   },
   "mcp:execute": {
     label: "Call MCP tools",
-    group: "tools",
+    group: "mcp",
     risk: "Acts on the systems those tools reach",
     hint: "Without it, the workspace's MCP servers do nothing for this key",
   },
@@ -79,24 +80,29 @@ export const SCOPE_INFO: Record<KeyScope, ScopeInfo> = {
   },
 }
 
-/** Each group's heading, and whether only a service key is offered it. */
+/**
+ * Each group's heading, in the order the form lays them out, whether only a
+ * service key is offered it, and whether it is folded under Advanced: what most
+ * keys need (models and the built-in tools) stays in view.
+ */
 const GROUP_HEADINGS: Record<
   ScopeGroupKey,
-  { label: string; serviceKeyOnly?: boolean }
+  { label: string; serviceKeyOnly?: boolean; isAdvanced?: boolean }
 > = {
   models: { label: "Models" },
-  files: { label: "Files" },
-  batches: { label: "Batches" },
   tools: { label: "Tools" },
-  agents: { label: "Coding agents" },
-  usage: { label: "Usage" },
-  endUsers: { label: "End users", serviceKeyOnly: true },
+  files: { label: "Files", isAdvanced: true },
+  batches: { label: "Batches", isAdvanced: true },
+  mcp: { label: "MCP", isAdvanced: true },
+  agents: { label: "Coding agents", isAdvanced: true },
+  usage: { label: "Usage", isAdvanced: true },
+  endUsers: { label: "End users", serviceKeyOnly: true, isAdvanced: true },
 }
 
 export const SCOPES = Object.entries(SCOPE_INFO) as [KeyScope, ScopeInfo][]
 
 /**
- * The groups the form lays out, each with the scopes that named it, in the
+ * The groups the form lays out, each with the scopes that named it in the
  * gateway's order. Derived rather than listed, so a scope cannot be left out.
  */
 export const GROUPS = (Object.keys(GROUP_HEADINGS) as ScopeGroupKey[]).map(

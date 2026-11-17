@@ -28,7 +28,7 @@ cannot be deleted.
 
 1. Open **API keys** and click **Create key**.
 2. Enter a **Name**, such as `mlpa`.
-3. Click **Advanced** and tick **Service key**.
+3. Click **More options** and tick **Service key**.
 4. Pick the **Budget for each end user**: every new end user starts on its own
    copy of it. Picking **None** leaves new end users uncapped, limited only by
    the key's own ceiling.
@@ -37,7 +37,7 @@ cannot be deleted.
 6. Set **Max end users**, or keep 10,000; see
    [Capping a key's end users](#capping-a-keys-end-users).
 7. To manage end users with the key (step 4), check the scopes it needs in the
-   **End users** group under **Access**. With only **Call models** checked, the
+   **End users** group under **Access** → **Advanced scopes**. With only **Call models** checked, the
    key makes model calls for its end users but cannot list, change or delete
    them.
 8. Click **Create key** and copy the key.

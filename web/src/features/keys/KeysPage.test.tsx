@@ -1055,7 +1055,7 @@ describe("KeysPage", () => {
     // Focus off the picker before reaching for anything else: its popover is
     // open and react-aria aria-hides the rest of the dialog while it is.
     await usr.click(screen.getByLabelText("Name"))
-    await usr.click(screen.getByRole("button", { name: "Advanced" }))
+    await usr.click(screen.getByRole("button", { name: "More options" }))
     await usr.click(screen.getByLabelText("Exempt from budget"))
 
     // Out through the guard, which is the only way out of a dirty form.
@@ -1064,7 +1064,7 @@ describe("KeysPage", () => {
 
     await usr.click(screen.getByRole("button", { name: "Create key" }))
     expect(screen.getByPlaceholderText(/Pick a user/)).toHaveValue("")
-    await usr.click(screen.getByRole("button", { name: "Advanced" }))
+    await usr.click(screen.getByRole("button", { name: "More options" }))
     expect(screen.getByLabelText("Exempt from budget")).not.toBeChecked()
     // And nothing is unsaved on arrival, so Escape closes rather than guarding.
     await usr.keyboard("{Escape}")
@@ -1082,7 +1082,7 @@ describe("KeysPage", () => {
     await usr.click(
       screen.getByRole("button", { name: "Create your first key" }),
     )
-    await usr.click(screen.getByRole("button", { name: "Advanced" }))
+    await usr.click(screen.getByRole("button", { name: "More options" }))
     await usr.click(screen.getByLabelText("Exempt from budget"))
 
     await usr.keyboard("{Escape}")
@@ -1240,7 +1240,7 @@ describe("KeysPage", () => {
     )
     await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
     await user.keyboard("{Escape}")
-    await user.click(screen.getByRole("button", { name: "Advanced" }))
+    await user.click(screen.getByRole("button", { name: "More options" }))
     await user.click(screen.getByRole("button", { name: "Only selected" }))
     // The scope picker is a catalog combobox, not free text: type to filter, then
     // pick the discovered model.
@@ -1278,7 +1278,7 @@ describe("KeysPage", () => {
     )
     await user.type(screen.getByPlaceholderText(/Pick a user/), "mlpa")
     await user.keyboard("{Escape}")
-    await user.click(screen.getByRole("button", { name: "Advanced" }))
+    await user.click(screen.getByRole("button", { name: "More options" }))
     await user.click(screen.getByLabelText("Service key"))
     await user.click(screen.getByRole("button", { name: "Create key" }))
 
@@ -1308,7 +1308,7 @@ describe("KeysPage", () => {
     await user.click(
       screen.getByRole("button", { name: "Create your first key" }),
     )
-    await user.click(screen.getByRole("button", { name: "Advanced" }))
+    await user.click(screen.getByRole("button", { name: "More options" }))
     await user.click(screen.getByLabelText("Service key"))
     await user.click(screen.getByRole("button", { name: "Create key" }))
 
@@ -1394,7 +1394,7 @@ describe("KeysPage", () => {
     await user.click(
       screen.getByRole("button", { name: "Create your first key" }),
     )
-    await user.click(screen.getByRole("button", { name: "Advanced" }))
+    await user.click(screen.getByRole("button", { name: "More options" }))
 
     expect(screen.queryByLabelText("Service key")).not.toBeInTheDocument()
   })
@@ -1411,7 +1411,7 @@ describe("KeysPage", () => {
     await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
     await user.keyboard("{Escape}")
     // The exempt toggle lives under the Advanced disclosure.
-    await user.click(screen.getByRole("button", { name: "Advanced" }))
+    await user.click(screen.getByRole("button", { name: "More options" }))
     await user.click(screen.getByLabelText("Exempt from budget"))
     await user.click(screen.getByRole("button", { name: "Create key" }))
 
@@ -1765,7 +1765,7 @@ describe("KeysPage", () => {
       renderPage(<KeysPage />)
 
       await createWithBudget(user)
-      await user.click(screen.getByRole("button", { name: "Advanced" }))
+      await user.click(screen.getByRole("button", { name: "More options" }))
       await user.click(screen.getByLabelText("Exempt from budget"))
       await submitTheCreateDialog(user)
 
@@ -1785,7 +1785,7 @@ describe("KeysPage", () => {
     )
     await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
     await user.keyboard("{Escape}")
-    await user.click(screen.getByRole("button", { name: "Advanced" }))
+    await user.click(screen.getByRole("button", { name: "More options" }))
     await pickOption(user, "Mismatched user field", "Always accept")
     await user.click(screen.getByRole("button", { name: "Create key" }))
 
@@ -1946,7 +1946,7 @@ describe("KeysPage", () => {
     )
     await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
     await user.keyboard("{Escape}")
-    await user.click(screen.getByRole("button", { name: "Advanced" }))
+    await user.click(screen.getByRole("button", { name: "More options" }))
     await user.click(screen.getByRole("button", { name: "Block all" }))
     await user.click(screen.getByRole("button", { name: "Create key" }))
 
@@ -1969,7 +1969,7 @@ describe("KeysPage", () => {
     )
     await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
     await user.keyboard("{Escape}")
-    await user.click(screen.getByRole("button", { name: "Advanced" }))
+    await user.click(screen.getByRole("button", { name: "More options" }))
     await user.click(screen.getByRole("button", { name: "No tool" }))
     await user.click(screen.getByRole("button", { name: "Create key" }))
 
@@ -1994,11 +1994,11 @@ describe("KeysPage", () => {
     )
     await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
     await user.keyboard("{Escape}")
-    await user.click(screen.getByRole("button", { name: "Advanced" }))
+    await user.click(screen.getByRole("button", { name: "More options" }))
     await user.click(screen.getByRole("button", { name: "No tool" }))
     await user.click(screen.getByRole("button", { name: "Block all" }))
-    await user.click(screen.getByRole("button", { name: "Hide advanced" }))
-    await user.click(screen.getByRole("button", { name: "Advanced" }))
+    await user.click(screen.getByRole("button", { name: "Fewer options" }))
+    await user.click(screen.getByRole("button", { name: "More options" }))
 
     expect(
       screen.getByText(
@@ -2031,7 +2031,7 @@ describe("KeysPage", () => {
     // Give it an owner so the only reason Create stays disabled is the empty scope.
     await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
     await user.keyboard("{Escape}")
-    await user.click(screen.getByRole("button", { name: "Advanced" }))
+    await user.click(screen.getByRole("button", { name: "More options" }))
     await user.click(screen.getByRole("button", { name: "Only selected" }))
 
     expect(screen.getByRole("button", { name: "Create key" })).toBeDisabled()
@@ -2159,7 +2159,7 @@ describe("KeysPage", () => {
     )
     await user.type(screen.getByPlaceholderText(/Pick a user/), "team-checkout")
     await user.keyboard("{Escape}")
-    await user.click(screen.getByRole("button", { name: "Advanced" }))
+    await user.click(screen.getByRole("button", { name: "More options" }))
 
     // The "any" mode is labeled as inheritance, not unrestricted, and the owner's
     // access is surfaced for context (a new id starts unrestricted).
@@ -2244,6 +2244,7 @@ describe("KeysPage", () => {
     )
     await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
     await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: /Advanced scopes/ }))
     await user.click(
       screen.getByRole("checkbox", { name: "All coding agents scopes" }),
     )
@@ -2563,7 +2564,7 @@ describe("KeysPage", () => {
 
       // A member cannot write a ceiling, so there is no budget to pick.
       expect(screen.queryByText("Budget (optional)")).not.toBeInTheDocument()
-      await usr.click(screen.getByRole("button", { name: "Advanced" }))
+      await usr.click(screen.getByRole("button", { name: "More options" }))
       expect(
         screen.queryByLabelText("Exempt from budget"),
       ).not.toBeInTheDocument()

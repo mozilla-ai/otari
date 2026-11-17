@@ -317,7 +317,7 @@ test.describe("api keys", () => {
     const ownerBox = dialog.getByPlaceholder("Pick a user, or type a new id…")
     await ownerBox.fill(PARITY.users.heavy)
     await dismissComboBoxInDialog(ownerBox)
-    await dialog.getByRole("button", { name: "Advanced" }).click()
+    await dialog.getByRole("button", { name: "More options" }).click()
     await dialog.getByText("Service key", { exact: true }).click()
     await dialog.getByRole("textbox", { name: "Max end users" }).fill("3")
     await dialog.getByRole("button", { name: "Create key" }).click()
