@@ -1,7 +1,7 @@
 """What an invitation link offers an invitee, and declining it."""
 
 import uuid
-from collections.abc import AsyncIterator, Collection
+from collections.abc import AsyncIterator, Collection, Sequence
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -18,17 +18,29 @@ from gateway.exceptions.organizations_exceptions import (
     InvitationNoLongerValidError,
 )
 from gateway.models.organizations import WorkspaceAssignment
-from gateway.models.tenancy import Organization, OrganizationDomain
+from gateway.models.tenancy import (
+    Organization,
+    OrganizationDomain,
+    OrganizationMemberRole,
+    WorkspaceAssignmentRequest,
+)
 from gateway.repositories.organizations import NewInvitation, OrganizationRepositories
 from gateway.repositories.tenancy import (
     OrganizationDomainRepository,
+    OrganizationMemberRepository,
     OrganizationRepository,
     UserRepository,
     WorkspaceRepository,
 )
 from gateway.services.mail import Mailer
-from gateway.services.organizations import DeliveryRule, InvitationFactsReader, OrganizationClaimedDomains
+from gateway.services.organizations import (
+    AdmittedMember,
+    DeliveryRule,
+    InvitationFactsReader,
+    OrganizationClaimedDomains,
+)
 from gateway.services.organizations._acceptance import (
+    Acceptance,
     AcceptingPerson,
     InvitationAcceptance,
     _require_the_invited_address,
@@ -62,6 +74,25 @@ class _EverythingBlocked:
         return set(emails)
 
 
+class _RecordingAdmission:
+    """Stands in for the collaborator that admits a member, recording what it was asked to do."""
+
+    def __init__(self, member_id: uuid.UUID) -> None:
+        self._member_id = member_id
+        self.calls: list[tuple[uuid.UUID, str, uuid.UUID, tuple[uuid.UUID, ...]]] = []
+
+    async def admit(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        role: OrganizationMemberRole,
+        user_id: uuid.UUID,
+        workspaces: Sequence[WorkspaceAssignmentRequest],
+    ) -> AdmittedMember:
+        self.calls.append((organization_id, role, user_id, tuple(w.workspace_id for w in workspaces)))
+        return AdmittedMember(created=True, member_id=self._member_id)
+
+
 def _config(*, mail_transport: str = "smtp") -> GatewayConfig:
     """A deployment that can deliver links, unless given a transport that cannot."""
     return GatewayConfig(
@@ -82,6 +113,7 @@ class _Store:
     def acceptance(
         self,
         *,
+        admission: object | None = None,
         blocked: object | None = None,
         mail_transport: str = "smtp",
     ) -> InvitationAcceptance:
@@ -90,6 +122,7 @@ class _Store:
         return InvitationAcceptance(
             self.uow,
             OrganizationRepositories.on(self.uow),
+            admission=admission or _RecordingAdmission(uuid.uuid4()),  # type: ignore[arg-type]
             blocked=blocklist,  # type: ignore[arg-type]
             clock=self.clock,
             delivery=DeliveryRule(domains, blocklist),  # type: ignore[arg-type]
@@ -101,6 +134,17 @@ class _Store:
             ),
             mailer=Mailer(_config(mail_transport=mail_transport)),
         )
+
+    async def member(self, organization: Organization, *, full_name: str = "Joiner") -> tuple[uuid.UUID, uuid.UUID]:
+        """An identity and a membership of this organization, returning both ids."""
+        async with self.uow:
+            user = await UserRepository(self.uow).create_local_identity(
+                full_name=full_name, active_organization_id=organization.id
+            )
+            membership = await OrganizationMemberRepository(self.uow).create_membership(
+                organization_id=organization.id, user_id=user.id, role="member"
+            )
+            return user.id, membership.id
 
     async def proven_domain_elsewhere(self, domain: str) -> None:
         """Another organization, holding a live proof of ``domain``."""
@@ -280,3 +324,76 @@ async def test_the_invited_address_matches_in_any_spelling() -> None:
 async def test_two_values_that_are_not_addresses_never_match() -> None:
     with pytest.raises(InvitationAddressMismatchError):
         _require_the_invited_address("not an address", AcceptingPerson(email="not an address", user_id=uuid.uuid4()))
+
+
+async def test_accept_admits_the_person_on_the_terms_the_invitation_offers(store: _Store) -> None:
+    organization = await store.organization(name="Acme")
+    workspace_id = uuid.uuid4()
+    await store.invitation(organization, workspaces=[{"workspace_id": str(workspace_id), "role": "member"}])
+    user_id, member_id = await store.member(organization)
+    admission = _RecordingAdmission(member_id)
+
+    accepted = await store.acceptance(admission=admission).accept(
+        "plain-token", by=AcceptingPerson(email="ada@example.com", user_id=user_id)
+    )
+
+    assert accepted == Acceptance(organization_id=organization.id, organization_name="Acme", role="member")
+    assert admission.calls == [(organization.id, "member", user_id, (workspace_id,))]
+
+
+async def test_accept_ends_the_link(store: _Store) -> None:
+    organization = await store.organization()
+    await store.invitation(organization)
+    user_id, member_id = await store.member(organization)
+    service = store.acceptance(admission=_RecordingAdmission(member_id))
+    by = AcceptingPerson(email="ada@example.com", user_id=user_id)
+
+    await service.accept("plain-token", by=by)
+
+    with pytest.raises(InvitationNoLongerValidError):
+        await service.accept("plain-token", by=by)
+
+
+async def test_accept_refuses_a_session_on_another_address_and_keeps_the_invitation(store: _Store) -> None:
+    organization = await store.organization()
+    invitation_id = await store.invitation(organization)
+    user_id, member_id = await store.member(organization)
+    admission = _RecordingAdmission(member_id)
+
+    with pytest.raises(InvitationAddressMismatchError):
+        await store.acceptance(admission=admission).accept(
+            "plain-token", by=AcceptingPerson(email="grace@example.com", user_id=user_id)
+        )
+
+    assert admission.calls == []
+    async with store.uow:
+        assert await store.repositories.invitations.get(invitation_id) is not None
+
+
+async def test_accept_records_who_invited_and_when_they_joined(store: _Store) -> None:
+    organization = await store.organization()
+    await store.invitation(organization)
+    user_id, member_id = await store.member(organization)
+
+    await store.acceptance(admission=_RecordingAdmission(member_id)).accept(
+        "plain-token", by=AcceptingPerson(email="ada@example.com", user_id=user_id)
+    )
+
+    async with store.uow:
+        origin = await store.repositories.membership_origins.get(member_id)
+    assert origin is not None
+    assert (origin.invited_at, origin.joined_at) == (_NOW, _NOW)
+
+
+async def test_accept_refuses_a_declined_link_and_leaves_it_for_the_admin(store: _Store) -> None:
+    organization = await store.organization()
+    invitation_id = await store.invitation(organization)
+    user_id, member_id = await store.member(organization)
+    service = store.acceptance(admission=_RecordingAdmission(member_id))
+    await service.decline("plain-token")
+
+    with pytest.raises(InvitationNoLongerValidError):
+        await service.accept("plain-token", by=AcceptingPerson(email="ada@example.com", user_id=user_id))
+
+    async with store.uow:
+        assert await store.repositories.invitations.get(invitation_id) is not None

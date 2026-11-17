@@ -13,11 +13,14 @@ from gateway.exceptions.organizations_exceptions import (
     InvitationNoLongerValidError,
 )
 from gateway.models.organizations import OrganizationInvitation
+from gateway.models.tenancy import OrganizationMemberRole, WorkspaceAssignmentRequest
 from gateway.repositories.organizations import OrganizationRepositories
 from gateway.services.mail import Mailer
+from gateway.services.organizations._admission import MembershipAdmission
 from gateway.services.organizations._blocked_addresses import BlockedAddresses
 from gateway.services.organizations._delivery_rule import DeliveryRule
 from gateway.services.organizations._invitation_facts import InvitationFacts, InvitationFactsReader
+from gateway.services.organizations._workspace_assignments import workspace_id_of
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -26,6 +29,15 @@ class AcceptingPerson:
 
     email: str
     user_id: uuid.UUID
+
+
+def _offered_workspaces(invitation: OrganizationInvitation) -> list[WorkspaceAssignmentRequest]:
+    """The workspace grants an invitation offers, skipping any whose stored id is not one."""
+    return [
+        WorkspaceAssignmentRequest(workspace_id=workspace_id, role=assignment["role"])
+        for assignment in invitation.workspace_assignments
+        if (workspace_id := workspace_id_of(assignment)) is not None
+    ]
 
 
 def _require_the_invited_address(invited: str, by: AcceptingPerson) -> None:
@@ -37,6 +49,15 @@ def _require_the_invited_address(invited: str, by: AcceptingPerson) -> None:
     invited_address = normalized_address(invited)
     if invited_address is None or normalized_address(by.email) != invited_address:
         raise InvitationAddressMismatchError(invited)
+
+
+@dataclass(frozen=True, kw_only=True)
+class Acceptance:
+    """What an invitee joined, for the page that confirmed it."""
+
+    organization_id: uuid.UUID
+    organization_name: str
+    role: OrganizationMemberRole
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -59,6 +80,7 @@ class InvitationAcceptance:
         uow: UnitOfWork,
         repositories: OrganizationRepositories,
         *,
+        admission: MembershipAdmission,
         blocked: BlockedAddresses,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         delivery: DeliveryRule,
@@ -67,6 +89,9 @@ class InvitationAcceptance:
     ) -> None:
         self._uow = uow
         self._invitations = repositories.invitations
+        self._organizations = repositories.organizations
+        self._origins = repositories.membership_origins
+        self._admission = admission
         self._blocked = blocked
         self._clock = clock
         self._delivery = delivery
@@ -84,6 +109,44 @@ class InvitationAcceptance:
             if facts is None:
                 raise InvitationNoLongerValidError()
             return InvitationPreview(facts=facts, invited_email=invitation.email)
+
+    async def accept(self, token: str, *, by: AcceptingPerson) -> Acceptance:
+        """Join the organization this link invites ``by`` to, on the terms it offers.
+
+        The link works once: the invitation is removed, and whichever of two acceptances removes it
+        is the one that joins. A workspace deleted since the offer was made is dropped.
+
+        Raises:
+            InvitationAddressMismatchError: the account accepting does not hold the invited address.
+            InvitationNoLongerValidError: the link was never one, or it expired, was declined,
+                cancelled, blocked, or already used.
+
+        NOTE: Callers must not call this from inside an already-open Unit of Work block.
+        """
+        now = self._clock()
+        async with self._uow:
+            invitation = await self._valid_or_refused(token)
+            _require_the_invited_address(invitation.email, by)
+            # Removing the row is what makes the link work once, and settles two acceptances at once.
+            accepted = await self._invitations.delete_by_token_hash(invitation.token_hash)
+            if accepted is None:
+                raise InvitationNoLongerValidError()
+            organization = await self._organizations.get(accepted.organization_id)
+            if organization is None:
+                raise InvitationNoLongerValidError()
+            admitted = await self._admission.admit(
+                organization_id=accepted.organization_id,
+                role=accepted.role,
+                user_id=by.user_id,
+                workspaces=_offered_workspaces(accepted),
+            )
+            await self._origins.record(
+                organization_member_id=admitted.member_id,
+                invited_by_user_id=accepted.invited_by_user_id,
+                invited_at=accepted.created_at,
+                joined_at=now,
+            )
+            return Acceptance(organization_id=organization.id, organization_name=organization.name, role=accepted.role)
 
     async def decline(self, token: str) -> None:
         """Record that the invitee declined, which ends the link.
