@@ -3030,8 +3030,10 @@ async def test_a_continue_held_up_past_expiry_cannot_claim_a_link_another_links_
     ticket = _link_ticket(config, world.server.id)
     read = read_sign_in_link(ticket)
     assert read is not None
-    link = dataclasses.replace(read, good_until=datetime.now(UTC) + timedelta(seconds=1))
     await _connections(async_db, config).start_from_link(ticket)
+    # The service reads the wall clock, so the link is made to expire soon. The window starts only
+    # now, after the slow setup: the late tab must reach its pause before the link expires.
+    link = dataclasses.replace(read, good_until=datetime.now(UTC) + timedelta(seconds=2))
     await async_db.execute(update(McpSignInLinkUse).values(expires_at=link.good_until))
     await async_db.commit()
 
@@ -3054,12 +3056,18 @@ async def test_a_continue_held_up_past_expiry_cannot_claim_a_link_another_links_
                     server_id=world.server.id, user_id="alice", browser_token="late-tab", link=link
                 )
             )
-            await paused.wait()
-            await asyncio.sleep((link.good_until - datetime.now(UTC)).total_seconds() + 0.1)
-            await _connections(other, config).start_from_link(_link_ticket(config, world.server.id))
-            resume.set()
-            with pytest.raises(McpConnectionFlowError, match="expired"):
-                await late_tab
+            try:
+                # Bounded, so a run too slow for the window fails rather than waits on a held row forever.
+                await asyncio.wait_for(paused.wait(), timeout=10)
+                assert datetime.now(UTC) < link.good_until, "the late tab paused only after the link expired"
+                await asyncio.sleep((link.good_until - datetime.now(UTC)).total_seconds() + 0.1)
+                another = _link_ticket(config, world.server.id)
+                await asyncio.wait_for(_connections(other, config).start_from_link(another), timeout=10)
+                resume.set()
+                with pytest.raises(McpConnectionFlowError, match="expired"):
+                    await asyncio.wait_for(late_tab, timeout=10)
+            finally:
+                late_tab.cancel()
     finally:
         await engine.dispose()
 
