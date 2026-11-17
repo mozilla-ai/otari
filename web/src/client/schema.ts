@@ -27498,6 +27498,8 @@ export interface operations {
             query?: {
                 /** @description A workspace the caller can see. The servers it already has are left out. */
                 workspace_id?: string | null;
+                /** @description Catalog names to leave out, such as the servers a caller has already picked. At most 50. The count leaves them out too, so it pages the same rows the caller sees. */
+                exclude?: string[] | null;
             };
             header?: never;
             path?: never;
@@ -27536,6 +27538,8 @@ export interface operations {
                 limit?: number;
                 /** @description A workspace the caller can see. The servers it already has are left out. */
                 workspace_id?: string | null;
+                /** @description Catalog names to leave out, such as the servers a caller has already picked. At most 50. The count leaves them out too, so it pages the same rows the caller sees. */
+                exclude?: string[] | null;
             };
             header?: never;
             path?: never;

@@ -21,18 +21,29 @@ class McpCatalogServerRepository(BaseRepository[McpCatalogServer, McpCatalogEntr
         super().__init__(db, McpCatalogServer)
 
     async def search(
-        self, query: str, *, skip: int, limit: int, exclude_urls: Sequence[str] = ()
+        self,
+        query: str,
+        *,
+        skip: int,
+        limit: int,
+        exclude_urls: Sequence[str] = (),
+        exclude_names: Sequence[str] = (),
     ) -> tuple[Sequence[McpCatalogServer], int]:
         """A page of the servers whose name, title or description contains ``query``, and how many match in all.
 
         A title that starts with the query comes first, then a title that contains it, then a match in
         the name or description alone; within each, a maker's own server, then by title. An empty query
-        matches every server, by title. One listed at any of ``exclude_urls``, exactly as spelled, is left out.
+        matches every server, by title. One listed at any of ``exclude_urls``, exactly as spelled, or named in
+        ``exclude_names`` is left out of the page and the count alike.
         """
         statement = select(McpCatalogServer)
         count = select(func.count()).select_from(McpCatalogServer)
         if exclude_urls:
             kept = McpCatalogServer.url.not_in(set(exclude_urls))
+            statement = statement.where(kept)
+            count = count.where(kept)
+        if exclude_names:
+            kept = McpCatalogServer.name.not_in(set(exclude_names))
             statement = statement.where(kept)
             count = count.where(kept)
         order = [func.lower(McpCatalogServer.title), McpCatalogServer.name]

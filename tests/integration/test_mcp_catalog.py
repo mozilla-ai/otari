@@ -770,6 +770,30 @@ async def test_servers_a_workspace_already_has_are_left_out_for_whoever_can_see_
 
 
 @pytest.mark.asyncio
+async def test_servers_set_aside_by_name_leave_the_page_and_the_count(async_db: AsyncSession) -> None:
+    service = await _synced(async_db)
+    everything = await service.search(query="", skip=0, limit=25)
+    first, second = everything.data[0].name, everything.data[1].name
+
+    left = await service.search(query="", skip=0, limit=2, exclude_names=[first, second])
+
+    assert left.count == everything.count - 2
+    assert [server.name for server in left.data] == [server.name for server in everything.data[2:4]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_popular_list")
+async def test_the_popular_shelf_leaves_out_servers_set_aside_by_name(async_db: AsyncSession) -> None:
+    service = await _synced(async_db)
+    shelf = await service.popular()
+
+    left = await service.popular(exclude_names=[shelf.data[0].name])
+
+    assert [server.name for server in left.data] == [server.name for server in shelf.data[1:]]
+    assert left.count == shelf.count - 1
+
+
+@pytest.mark.asyncio
 @pytest.mark.usefixtures("_popular_list")
 async def test_the_popular_shelf_leaves_out_what_the_workspace_has(async_db: AsyncSession) -> None:
     service = await _synced(async_db)
@@ -1267,6 +1291,14 @@ def test_a_read_that_names_a_workspace_nobody_has_is_a_404(client: TestClient, p
     response = client.get(f"{_CATALOG}/{path}?workspace_id=11111111-1111-1111-1111-111111111111", headers=_MASTER)
 
     assert response.status_code == 404
+
+
+@pytest.mark.parametrize("path", ["servers", "popular"])
+def test_at_most_fifty_names_can_be_set_aside(client: TestClient, path: str) -> None:
+    fifty = "&".join(f"exclude=com.example/{index}" for index in range(50))
+
+    assert client.get(f"{_CATALOG}/{path}?{fifty}", headers=_MASTER).status_code == 200
+    assert client.get(f"{_CATALOG}/{path}?{fifty}&exclude=com.example/x", headers=_MASTER).status_code == 422
 
 
 def test_sync_now_is_accepted_and_shows_as_requested(client: TestClient) -> None:

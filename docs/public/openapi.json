@@ -40456,6 +40456,29 @@
               "description": "A workspace the caller can see. The servers it already has are left out.",
               "title": "Workspace Id"
             }
+          },
+          {
+            "description": "Catalog names to leave out, such as the servers a caller has already picked. At most 50. The count leaves them out too, so it pages the same rows the caller sees.",
+            "in": "query",
+            "name": "exclude",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "maxLength": 255,
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Catalog names to leave out, such as the servers a caller has already picked. At most 50. The count leaves them out too, so it pages the same rows the caller sees.",
+              "title": "Exclude"
+            }
           }
         ],
         "responses": {
@@ -40556,6 +40579,29 @@
               ],
               "description": "A workspace the caller can see. The servers it already has are left out.",
               "title": "Workspace Id"
+            }
+          },
+          {
+            "description": "Catalog names to leave out, such as the servers a caller has already picked. At most 50. The count leaves them out too, so it pages the same rows the caller sees.",
+            "in": "query",
+            "name": "exclude",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "maxLength": 255,
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Catalog names to leave out, such as the servers a caller has already picked. At most 50. The count leaves them out too, so it pages the same rows the caller sees.",
+              "title": "Exclude"
             }
           }
         ],
