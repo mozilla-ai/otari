@@ -38,6 +38,14 @@ MAX_ALLOWED_TOOLS = 200
 MAX_TOOL_NAME_LENGTH = 256
 
 CONTACT_WRITE_INTERVAL_S = 15 * 60
+# How long an attached server whose last contact found it unreachable is left out of every request, on every
+# worker, before one request tries it again. A failure is written again at most this often, so a server that
+# keeps failing keeps being left out, and the first answer it gives brings it back.
+ATTACHED_COOLDOWN_S = 60.0
+# The failures that cost a request time: the ones an attached server is left out for.
+_SLOW_FAILURES = frozenset(
+    {CheckFailure.TIMEOUT, CheckFailure.UNREACHABLE, CheckFailure.CONNECTION_FAILED, CheckFailure.TLS_FAILED}
+)
 """How often one server's health is rewritten from request traffic while its status stays the same."""
 
 # Past this many servers the throttle forgets what it saw, which costs one extra write each.
@@ -95,6 +103,21 @@ class WorkspaceMcpServerHealth(BaseModel):
     def _literal_names(cls, names: list[str]) -> list[str]:
         """Drop a name a rule would read as a pattern, from a fresh check and from one stored before this screen."""
         return [name for name in names if not reads_as_pattern(name)]
+
+    @staticmethod
+    def cooling_down(stored: dict[str, Any] | None, *, within_s: float = ATTACHED_COOLDOWN_S) -> bool:
+        """Whether a stored health says the server could not be reached, within the last ``within_s``.
+
+        An attached server in that state is left out of a request rather than tried, so one that is
+        down costs requests nothing until the cooldown ends.
+        """
+        if stored is None:
+            return False
+        try:
+            health = WorkspaceMcpServerHealth.model_validate(stored)
+        except ValueError:
+            return False
+        return health.status == "failing" and health.error in _SLOW_FAILURES and _is_recent(health.checked_at, within_s)
 
     @staticmethod
     def keep_first_read_hints(server: WorkspaceMcpServer) -> None:
@@ -198,7 +221,9 @@ def health_after_contact(
     if contact.failure is not None:
         if per_user and contact.failure in _ONE_USERS_REFUSAL:
             return None
-        if recent and previous is not None and previous.error == contact.failure:
+        # Written again sooner than an answer, so the cooldown an attached server is left out for follows it.
+        failed_recently = previous is not None and _is_recent(previous.checked_at, min(interval_s, ATTACHED_COOLDOWN_S))
+        if failed_recently and previous is not None and previous.error == contact.failure:
             return None
         failed = ServerCheck(tool_names=[], failure=contact.failure, http_status=contact.http_status)
         health = server_health(allowed_tools, failed)
@@ -316,7 +341,8 @@ class McpServerContacts:
             if learned is not None and now - learned < self._interval_s:
                 return
         last = self._seen.get(key)
-        if last is not None and last[1] == ok and (last[2] or not listed) and now - last[0] < self._interval_s:
+        interval = self._interval_s if ok else min(self._interval_s, ATTACHED_COOLDOWN_S)
+        if last is not None and last[1] == ok and (last[2] or not listed) and now - last[0] < interval:
             return
         pending = self._in_flight.get(key, set())
         if any(failure == contact.failure and (had_listing or not listed) for failure, had_listing in pending):

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from pydantic.json_schema import SkipJsonSchema
@@ -31,6 +33,37 @@ REVISION_LENGTH = 32
 TokenRenewer = Callable[[str], Awaitable[str]]
 
 
+class AttachedTimeBudget:
+    """The time one request's attached servers may spend between them, in every phase.
+
+    Renewing a token, checking the URL and connecting all draw on the one budget, so an attached
+    server that hangs costs a request this much at most, whichever phase it hangs in. Time spent
+    on the servers the request named is not drawn.
+    """
+
+    def __init__(self, seconds: float) -> None:
+        self._left = seconds
+
+    def left(self) -> float:
+        """Seconds still to spend; zero once spent."""
+        return self._left
+
+    def charge(self, seconds: float) -> None:
+        """Take ``seconds`` a phase spent off what is left."""
+        self._left = max(0.0, self._left - seconds)
+
+    @asynccontextmanager
+    async def spend(self) -> AsyncIterator[None]:
+        """Run the block within what is left, and charge what it took. Raises ``TimeoutError`` past it."""
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        try:
+            async with asyncio.timeout(self._left):
+                yield
+        finally:
+            self.charge(loop.time() - started)
+
+
 class McpServerConfig(BaseModel):
     """Inline MCP server configuration accepted by generation requests.
 
@@ -44,6 +77,8 @@ class McpServerConfig(BaseModel):
     awaited so it can't block the event loop, and Pydantic validators run
     synchronously during request-body parsing.
     """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     name: str = Field(min_length=1, max_length=128)
     url: str = Field(min_length=1)
@@ -63,6 +98,8 @@ class McpServerConfig(BaseModel):
     attached: SkipJsonSchema[bool] = Field(default=False, exclude=True)
     # Admission's too, on a per-user stored server: a new token for the one the server refused.
     renew_token: SkipJsonSchema[TokenRenewer | None] = Field(default=None, exclude=True)
+    # Admission's too, on an attached server: the budget all of the request's attached servers share.
+    attached_budget: SkipJsonSchema[AttachedTimeBudget | None] = Field(default=None, exclude=True)
 
 
 class ResolvedMcpServer(BaseModel):

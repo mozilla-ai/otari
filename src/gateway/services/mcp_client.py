@@ -31,6 +31,7 @@ from mcp.types import ListToolsResult
 
 from gateway.exceptions.tools_exceptions import McpSessionsInterruptedError, McpSignInRequiredError
 from gateway.log_config import logger
+from gateway.models.mcp import AttachedTimeBudget
 from gateway.services.mcp_stateless import (
     CODE_TOOL_NOT_ALLOWED,
     catalog_of,
@@ -55,7 +56,8 @@ if TYPE_CHECKING:
 
 
 # How long an attached server may take to answer its first two requests before a request goes on without it,
-# and how long all of a request's attached servers may take between them, since they connect one at a time.
+# and how long all of a request's attached servers may take between them, in every phase from renewing a token
+# to connecting (``AttachedTimeBudget``).
 ATTACHED_CONNECT_DEADLINE_S = 10.0
 ATTACHED_CONNECT_BUDGET_S = 15.0
 
@@ -259,8 +261,8 @@ class MCPClientPool:
 
     async def _hold_sessions(self, opened: asyncio.Future[None]) -> None:
         loop = asyncio.get_running_loop()
-        # The attached servers' budget starts with the first of them, so a slow named server spends none of it.
-        attached_by: float | None = None
+        # For attached servers admission handed no budget: their connections alone draw on this one.
+        fallback = AttachedTimeBudget(ATTACHED_CONNECT_BUDGET_S)
         async with self._stack:
             for cfg in self._configs:
                 if cfg.name in self._servers:
@@ -268,15 +270,21 @@ class MCPClientPool:
                 started = datetime.now(UTC)
                 # When an attached server must be up by, on the loop's clock; ``None`` for a named one.
                 expires_at: float | None = None
+                budget = cfg.attached_budget or fallback
+                # Whether the shared budget, rather than the server's own deadline, decides when it gives up.
+                cut_short = False
                 if cfg.attached:
-                    attached_by = attached_by or loop.time() + ATTACHED_CONNECT_BUDGET_S
-                    expires_at = min(loop.time() + ATTACHED_CONNECT_DEADLINE_S, attached_by)
+                    cut_short = budget.left() < ATTACHED_CONNECT_DEADLINE_S
+                    expires_at = loop.time() + min(ATTACHED_CONNECT_DEADLINE_S, budget.left())
+                connecting = loop.time()
                 try:
                     server = await self._connect(cfg, expires_at)
                 except BaseException as exc:
+                    if cfg.attached:
+                        budget.charge(loop.time() - connecting)
                     if self._trace is not None:
                         self._trace.record_mcp_connect(server=cfg.name, tool_count=None, started=started, ok=False)
-                    self._report_failure(cfg, exc)
+                    self._report_failure(cfg, exc, cut_short=cut_short)
                     if isinstance(exc, McpSignInRequiredError):
                         # The server refused the user's token and their sign-in turned out to be over:
                         # the request goes on, and the model is told to offer a new sign-in.
@@ -294,6 +302,8 @@ class MCPClientPool:
                         failure_class(exc),
                     )
                     continue
+                if cfg.attached:
+                    budget.charge(loop.time() - connecting)
                 if self._trace is not None:
                     self._trace.record_mcp_connect(
                         server=cfg.name, tool_count=len(server.tools), started=started, ok=True
@@ -352,17 +362,18 @@ class MCPClientPool:
             await session.initialize()
             return session, await session.list_tools()
 
-    def _report_failure(self, cfg: McpServerConfig, exc: BaseException) -> None:
+    def _report_failure(self, cfg: McpServerConfig, exc: BaseException, *, cut_short: bool = False) -> None:
         """Tell the observer a stored server could not be opened, unless the failure says nothing about the server.
 
         A request that was itself cancelled says nothing, and neither does an attached server
-        running out of the short budget it shares with the others.
+        that timed out on what the others left of the budget (``cut_short``). One that timed out
+        on its own deadline is recorded, so its health says so and later requests leave it out.
         """
         if self._contacts is None or cfg.stored_server_id is None:
             return
         if isinstance(exc, asyncio.CancelledError) and (self._release.is_set() or _cancelling()):
             return
-        if cfg.attached and isinstance(exc, TimeoutError):
+        if cut_short and isinstance(exc, TimeoutError):
             return
         self._contacts.failed(cfg.stored_server_id, cfg.url, exc)
 

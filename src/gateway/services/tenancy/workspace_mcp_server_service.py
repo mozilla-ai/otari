@@ -35,10 +35,10 @@ configuration rather than a narrowing of one.
 
 from __future__ import annotations
 
-import asyncio
 import dataclasses
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
+from contextlib import AbstractAsyncContextManager
 from functools import partial
 from typing import TYPE_CHECKING, Annotated, Literal
 from urllib.parse import urlsplit
@@ -74,7 +74,7 @@ from gateway.exceptions.tools_exceptions import (
     WorkspaceMcpServerUnsafeUrlError,
 )
 from gateway.log_config import logger
-from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
+from gateway.models.mcp import AttachedTimeBudget, McpServerConfig, ResolvedMcpServer
 from gateway.models.tenancy import MANAGEMENT_ROLES, User
 from gateway.models.tools import (
     McpCredentialMode,
@@ -937,7 +937,14 @@ async def _resolve_for_request(
         for row in rows
         if row.attach_by_default and row.id not in named and patterns[row.id] and not _needs_a_user(row, access)
     ]
+    cooling = [server_id for server_id in attached if WorkspaceMcpServerHealth.cooling_down(by_id[server_id].health)]
+    for server_id in cooling:
+        logger.info("Attached MCP server left out while it cools down after failing server_id=%s", server_id)
+    attached = [server_id for server_id in attached if server_id not in cooling]
 
+    # One budget for every phase of every attached server: a renewal here, then the URL check and the
+    # connection, which draw on what it leaves.
+    budget = AttachedTimeBudget(ATTACHED_CONNECT_BUDGET_S)
     # Every row is read before any token is: reading one may release the session, and a release
     # whose commit fails rolls back, which expires the rows still to come.
     planned: list[tuple[McpServerConfig, McpServerRef | None, McpSignInNeeded]] = []
@@ -970,6 +977,7 @@ async def _resolve_for_request(
             caller_access_source=f"mcp_{access.decide(row.id, row.everyone_tools)[0]}",
             stored_server_id=str(row.id),
             attached=server_id not in named,
+            attached_budget=budget if server_id not in named else None,
         )
         need = McpSignInNeeded(
             server_id=row.id,
@@ -982,15 +990,10 @@ async def _resolve_for_request(
         planned.append((config, McpServerRef.of(row) if per_user else None, need))
 
     resolved = RequestMcpServers()
-    # The attached servers' renewals share the budget their connections get, from the first of
-    # them: an expired token on several attached servers cannot hold a completion past it.
-    loop = asyncio.get_running_loop()
-    attached_by: float | None = None
     for config, ref, need in planned:
-        bound: asyncio.Timeout | None = None
+        bound: AbstractAsyncContextManager[None] | None = None
         if config.attached and (ref is not None or need.server_id in accounts):
-            attached_by = attached_by or loop.time() + ATTACHED_CONNECT_BUDGET_S
-            bound = asyncio.timeout_at(attached_by)
+            bound = budget.spend()
         if ref is not None:
             try:
                 if access.user_id is None:
@@ -1001,7 +1004,7 @@ async def _resolve_for_request(
                     async with bound:
                         config.authorization_token = await tokens.token_for(ref, access.user_id)
             except TimeoutError:
-                if bound is None or not bound.expired():
+                if bound is None:
                     raise
                 resolved.sign_in.append(dataclasses.replace(need, reason=McpSignInReason.RENEWAL_FAILED))
                 continue
@@ -1029,7 +1032,7 @@ async def _resolve_for_request(
                     async with bound:
                         account = await tokens.shared_account_for(shared_ref)
             except TimeoutError:
-                if bound is None or not bound.expired():
+                if bound is None:
                     raise
                 logger.warning(
                     "Attached MCP server left out: its token was not renewed in time server_id=%s", need.server_id
@@ -1286,7 +1289,8 @@ class WorkspaceMcpServers:
         request cannot open does not fail it: it comes back in ``sign_in``, with why. A server marked
         ``attach_by_default`` that the request did not name is added as if it had been, after the named
         ones, and is silently left out where the caller's access grants nothing on it, where the caller
-        has no user to sign in as, or where it is disabled.
+        has no user to sign in as, where it is disabled, or while it cools down after a request found it
+        unreachable. The attached servers share one ``AttachedTimeBudget`` for every phase.
 
         Raises:
             WorkspaceMcpServerNotFoundError: a named ID is unknown or grants the caller nothing.

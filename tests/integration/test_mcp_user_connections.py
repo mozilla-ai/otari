@@ -100,6 +100,7 @@ from gateway.services.tools._mcp_oauth import (
     McpOAuthTokenError,
     McpOAuthTokens,
 )
+from gateway.services.tools._mcp_server_health import ATTACHED_COOLDOWN_S
 
 from .conftest import _to_async_url
 
@@ -2759,6 +2760,35 @@ async def test_a_request_gets_the_attached_servers_after_the_named_ones_and_neve
     # A named one it may not reach still answers as unknown, as it always has.
     with pytest.raises(WorkspaceMcpServerNotFoundError):
         await servers.resolve_for_request(world.workspace.id, [uuid.uuid4()], member, attach=True)
+
+
+async def test_an_attached_server_that_keeps_failing_is_left_out_until_its_cooldown_ends(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, tokens: McpUserTokens
+) -> None:
+    """Every worker reads the same health, so a server one request found down costs the others nothing for a while."""
+    world = await _world(async_db, config, attach_by_default=True)
+    await _sign_in(async_db, config, world, world.member)
+    servers = WorkspaceMcpServers(async_db, tokens)
+    member = _access(str(world.member.id))
+
+    async def failed(seconds_ago: float) -> None:
+        checked_at = (datetime.now(UTC) - timedelta(seconds=seconds_ago)).isoformat()
+        await async_db.execute(
+            update(WorkspaceMcpServer)
+            .where(col(WorkspaceMcpServer.id) == world.server.id)
+            .values(health={"status": "failing", "checked_at": checked_at, "error": "timeout"})
+        )
+        await async_db.commit()
+
+    await failed(5)
+    cooling = await servers.resolve_for_request(world.workspace.id, [], member, attach=True)
+    named = await servers.resolve_for_request(world.workspace.id, [world.server.id], member, attach=True)
+    await failed(ATTACHED_COOLDOWN_S + 1)
+    retried = await servers.resolve_for_request(world.workspace.id, [], member, attach=True)
+
+    assert (cooling.servers, cooling.sign_in) == ([], [])
+    assert [server.name for server in named.servers] == ["drive"], "a request that names it still tries it"
+    assert [server.name for server in retried.servers] == ["drive"]
 
 
 async def test_attached_renewals_share_the_attached_budget(

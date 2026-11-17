@@ -14,7 +14,7 @@ from mcp.types import ListToolsResult, ToolAnnotations
 from mcp.types import Tool as MCPTool
 
 from gateway.exceptions.tools_exceptions import McpSignInRequiredError
-from gateway.models.mcp import McpServerConfig
+from gateway.models.mcp import AttachedTimeBudget, McpServerConfig
 from gateway.models.tools import WorkspaceMcpServer
 from gateway.services.mcp_client import MCPClientPool
 from gateway.services.mcp_stateless import CheckFailure, ServerCheck
@@ -22,6 +22,7 @@ from gateway.services.model_access import mcp_read_tools
 from gateway.services.tools import McpServerContact, McpServerContacts, WorkspaceMcpServerHealth
 from gateway.services.tools._mcp_server_health import (
     _MAX_PENDING_WRITES,
+    ATTACHED_COOLDOWN_S,
     CONTACT_WRITE_INTERVAL_S,
     MAX_ALLOWED_TOOLS,
     health_after_contact,
@@ -438,8 +439,14 @@ async def test_the_tool_loop_does_not_blame_a_server_for_one_user_s_ended_sign_i
     recorder = _Recorder()
     configs = [
         McpServerConfig(name="drive", url=URL, stored_server_id=str(SERVER)),
-        # An attached server that ran out of the short budget it shares says nothing about itself.
-        McpServerConfig(name="slow", url=URL, stored_server_id=str(uuid.uuid4()), attached=True),
+        # An attached server that ran out of what the others left of the budget says nothing about itself.
+        McpServerConfig(
+            name="slow",
+            url=URL,
+            stored_server_id=str(uuid.uuid4()),
+            attached=True,
+            attached_budget=AttachedTimeBudget(1.0),
+        ),
     ]
 
     async with MCPClientPool(configs, contacts=recorder):
@@ -447,3 +454,46 @@ async def test_the_tool_loop_does_not_blame_a_server_for_one_user_s_ended_sign_i
     await recorder.drain()
 
     assert recorder.written == []
+
+
+@pytest.mark.asyncio
+async def test_an_attached_server_that_times_out_on_its_own_deadline_is_recorded_as_failing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_open(self: MCPClientPool, stack: AsyncExitStack, cfg: McpServerConfig, *_: object) -> Any:
+        raise TimeoutError
+
+    monkeypatch.setattr(MCPClientPool, "_open", fake_open)
+    recorder = _Recorder()
+    attached = McpServerConfig(name="slow", url=URL, stored_server_id=str(SERVER), attached=True)
+
+    async with MCPClientPool([attached], contacts=recorder):
+        pass
+    await recorder.drain()
+
+    [contact] = recorder.written
+    assert (contact.server_id, contact.failure) == (SERVER, CheckFailure.TIMEOUT)
+    assert WorkspaceMcpServerHealth.cooling_down(_after(None, contact)), "later requests leave it out"
+
+
+def _failing(error: CheckFailure, seconds_ago: float) -> dict[str, Any]:
+    checked_at = (datetime.now(UTC) - timedelta(seconds=seconds_ago)).isoformat()
+    failed = server_health(None, ServerCheck(tool_names=[], failure=error))
+    return failed.model_copy(update={"checked_at": checked_at}).model_dump(mode="json")
+
+
+def test_an_unreachable_server_cools_down_for_a_while_and_a_refusal_does_not() -> None:
+    assert WorkspaceMcpServerHealth.cooling_down(_failing(CheckFailure.TIMEOUT, 5))
+    assert WorkspaceMcpServerHealth.cooling_down(_failing(CheckFailure.UNREACHABLE, 5))
+    assert not WorkspaceMcpServerHealth.cooling_down(_failing(CheckFailure.TIMEOUT, ATTACHED_COOLDOWN_S + 1))
+    assert not WorkspaceMcpServerHealth.cooling_down(_failing(CheckFailure.UNAUTHORIZED, 5))
+    assert not WorkspaceMcpServerHealth.cooling_down(server_health(None, LISTING).model_dump(mode="json"))
+    assert not WorkspaceMcpServerHealth.cooling_down(None)
+
+
+def test_a_server_that_keeps_failing_is_written_again_once_its_cooldown_is_over() -> None:
+    timed_out = McpServerContact(SERVER, URL, failure=CheckFailure.TIMEOUT)
+
+    assert _after(_failing(CheckFailure.TIMEOUT, 5), timed_out) is None
+    again = _after(_failing(CheckFailure.TIMEOUT, ATTACHED_COOLDOWN_S + 1), timed_out)
+    assert again is not None and WorkspaceMcpServerHealth.cooling_down(again)
