@@ -195,6 +195,36 @@ async def test_two_admins_changing_different_settings_keep_both_changes(
     assert (policy.in_workspace.enabled, policy.in_workspace.everyone_tools) == (False, []), "Off stays off"
 
 
+async def test_the_answer_carries_an_organization_limit_committed_after_the_write(
+    async_db: AsyncSession, config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An organization admin's limit lands between this write's commit and the read its answer is built from."""
+    world = await _world(async_db, config)
+    jira = await _shared(async_db, world.workspace.organization_id)
+    await _override(async_db, world.workspace, jira, enabled=False)
+
+    async def limit_meanwhile() -> None:
+        async with AsyncSession(async_db.bind, expire_on_commit=False) as other:
+            override = (
+                await other.execute(
+                    select(WorkspaceMcpServerOverride).where(WorkspaceMcpServerOverride.server_id == jira)
+                )
+            ).scalar_one()
+            override.organization_tools = []
+            await other.commit()
+
+    monkeypatch.setattr(AttachedMcpServerIndex, "refresh_after_write", limit_meanwhile)
+    answer = await _service(async_db, config).set_workspace_settings(
+        user=world.owner,
+        workspace_id=world.workspace.id,
+        server_id=jira,
+        request=WorkspaceMcpServerSettingsUpdate.model_validate({"attach_by_default": True}),
+    )
+
+    assert answer.in_workspace is not None
+    assert (answer.in_workspace.organization_tools, answer.in_workspace.attach_by_default) == ([], True)
+
+
 async def test_a_change_names_only_what_it_sets_and_null_restores_the_server_s_own(
     async_db: AsyncSession, config: GatewayConfig
 ) -> None:

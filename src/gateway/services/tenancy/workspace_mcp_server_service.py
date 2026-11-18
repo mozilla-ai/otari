@@ -2808,6 +2808,8 @@ class WorkspaceMcpServerService:
         await self.db.commit()
         # The workspace's own setting may attach the server here alone.
         await AttachedMcpServerIndex.refresh_after_write()
+        # Read again past what this session holds, so the answer carries an organization limit committed since.
+        await overrides.current(resolved_workspace_id, view.id)
         server = await self._reached(resolved_workspace_id, server_id, all_states=True)
         logger.info(
             "MCP organization server settings saved workspace_id=%s server_id=%s stored=%s",

@@ -10,6 +10,7 @@ import {
 } from "@/design-system/layout/SettingsGroup"
 import { McpAvailabilitySelect } from "@/features/tools/McpAvailabilitySelect"
 import { McpGrantDialog } from "@/features/tools/McpGrantDialog"
+import { McpUnconfirmedNotice } from "@/features/tools/McpUnconfirmedNotice"
 import { isLiteralToolName, ruleSummary } from "@/features/tools/mcpAccess"
 import { checkedTools } from "@/features/tools/mcpServerHealth"
 import {
@@ -50,6 +51,9 @@ export function McpWorkspaceServerSettings({
   // Bumped on each open and used as the dialog's key, so a draft never
   // survives into the next one.
   const [openCount, setOpenCount] = useState(0)
+  // The policy the editor opened on: a draft left as it was saves nothing,
+  // whatever a refetch moved the live value to meanwhile.
+  const [openedWith, setOpenedWith] = useState<readonly string[]>([])
   const own = server.in_workspace
   const ids = { workspaceId, serverId: server.id }
   const limit = organizationLimitLabel(own?.organization_tools)
@@ -64,6 +68,12 @@ export function McpWorkspaceServerSettings({
   const read = useWorkspaceMcpServer(workspaceId, server.id)
   const isUnconfirmed = read.isRefetchError
   const isHeld = isWriting || isUnconfirmed
+  const unconfirmed = isUnconfirmed ? (
+    <McpUnconfirmedNotice
+      onRefresh={() => void read.refetch()}
+      isRefreshing={read.isFetching}
+    />
+  ) : undefined
   const picker = checkedTools(server, { withinAllowList: true })
   const tools = picker.isKnown
     ? picker.tools
@@ -93,20 +103,7 @@ export function McpWorkspaceServerSettings({
             </p>
           ) : null}
           {offReason ? <InfoBanner>{offReason}</InfoBanner> : null}
-          {isUnconfirmed ? (
-            <InfoBanner>
-              <span className="flex flex-wrap items-center gap-3">
-                These settings could not be read again, so they may not be what
-                is saved.
-                <Button
-                  onPress={() => void read.refetch()}
-                  className="min-h-11 md:min-h-0"
-                >
-                  Refresh
-                </Button>
-              </span>
-            </InfoBanner>
-          ) : null}
+          {unconfirmed}
           <McpAvailabilitySelect
             value={workspaceAvailability(server)}
             onChange={(next) => write(availabilityOverride(next))}
@@ -126,6 +123,7 @@ export function McpWorkspaceServerSettings({
               onPress={() => {
                 if (isHeld) return
                 set.reset()
+                setOpenedWith(defaultTools)
                 setOpenCount((count) => count + 1)
                 setEditingDefault(true)
               }}
@@ -169,13 +167,14 @@ export function McpWorkspaceServerSettings({
           descriptions={picker.descriptions}
           isKnown={picker.isKnown}
           readTools={server.read_tools}
-          isPending={set.isPending}
+          isPending={set.isPending || isWriting}
           error={set.error}
+          held={unconfirmed}
           onSubmit={(draft) => {
-            if (set.isPending) return
+            if (isHeld) return
             // Unchanged: saving it would store the inherited policy as the
             // workspace's own, which would stop following the organization's.
-            if (isSamePolicy(draft.tools, defaultTools)) {
+            if (isSamePolicy(draft.tools, openedWith)) {
               setEditingDefault(false)
               return
             }

@@ -67,6 +67,13 @@ export function availabilityOverride(
 }
 
 /**
+ * Why nothing changes the workspace's settings after a failed write whose
+ * re-read failed too: what is shown may not be what is saved.
+ */
+export const UNCONFIRMED_SETTINGS =
+  "These settings could not be read again, so they may not be what is saved. Refresh them first."
+
+/**
  * Whether a default policy the editor returns is the one it opened on, in any
  * order. Saving it would store the inherited policy as the workspace's own,
  * which then stops following the organization's.
