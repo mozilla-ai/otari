@@ -713,15 +713,18 @@ async def collect_revocations(
     *,
     server_ids: Collection[uuid.UUID] | None = None,
     user_id: str | None = None,
+    user_ids: Collection[str] | None = None,
     shared: bool = False,
+    limit: int | None = None,
 ) -> tuple[list[McpRevocation], int]:
     """What revoking the connections a removal is about to delete sends, and how many it leaves unread.
 
     Read before the rows go, while their servers still hold the clients the tokens were issued to.
     With ``shared`` the shared accounts of ``server_ids`` are revoked too, for a removal that takes
     the servers themselves: one member leaving must not end the account everyone else uses.
+    At most ``limit`` connections are read; the rest are counted, not loaded.
     """
-    rows, total = await connections.revocable(server_ids=server_ids, user_id=user_id)
+    rows, total = await connections.revocable(server_ids=server_ids, user_id=user_id, user_ids=user_ids, limit=limit)
     accounts = (
         [
             account
@@ -745,7 +748,7 @@ async def collect_revocations(
 
 
 # Bounds on revocations sent after a bulk removal, which nothing waits on.
-_MAX_BACKGROUND_REVOCATIONS = 500
+MAX_BACKGROUND_REVOCATIONS = 500
 _BACKGROUND_REVOCATION_CONCURRENCY = 8
 _REVOCATION_DEADLINE_SECONDS = 10.0
 # Held so a running revocation task is not collected before it finishes.
@@ -756,14 +759,14 @@ def revoke_in_background(revocations: Collection[McpRevocation], *, unread: int 
     """Ask authorization servers to end these tokens, without waiting and without failing anything.
 
     For a removal that has already committed. Each call has a deadline, a few run at once, and
-    only counts are logged. Past ``_MAX_BACKGROUND_REVOCATIONS`` the rest are dropped, and they are
+    only counts are logged. Past ``MAX_BACKGROUND_REVOCATIONS`` the rest are dropped, and they are
     counted as skipped together with ``unread``, the connections the removal ended without reading.
     """
     if unread:
         logger.info("MCP connections ended without revocation count=%d reason=over_page", unread)
     if not revocations:
         return
-    batch = list(revocations)[:_MAX_BACKGROUND_REVOCATIONS]
+    batch = list(revocations)[:MAX_BACKGROUND_REVOCATIONS]
     skipped = len(revocations) - len(batch) + unread
     task = asyncio.get_running_loop().create_task(_revoke_all(batch, skipped), name="mcp-revocations")
     _revocation_tasks.add(task)
