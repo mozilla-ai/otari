@@ -24505,7 +24505,7 @@ export interface components {
             read_tools_from_server: boolean;
             /**
              * Scope
-             * @description Whose the server is: one workspace's own, or its organization's, which every workspace reaches
+             * @description Who owns the server: one workspace, or its organization
              * @enum {string}
              */
             scope: "workspace" | "organization";
@@ -32040,6 +32040,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspaceMcpServerPublic"];
+                };
+            };
+            /** @description Another server of the organization, its own or a workspace's, already has this name. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationRefusal"];
                 };
             };
             /** @description Validation Error */

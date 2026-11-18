@@ -391,7 +391,7 @@ class WorkspaceMcpServerPublic(BaseModel):
     id: uuid.UUID
     workspace_id: uuid.UUID | None = Field(description="The workspace that owns the server; null for an organization's")
     scope: Literal["workspace", "organization"] = Field(
-        description="Whose the server is: one workspace's own, or its organization's, which every workspace reaches"
+        description="Who owns the server: one workspace, or its organization"
     )
     name: str
     url: str
@@ -1476,6 +1476,28 @@ class WorkspaceMcpServerService:
         ):
             raise WorkspaceMcpServerNotFoundError(server_id)
         return server
+
+    async def _reached(
+        self, workspace_id: uuid.UUID, server_id: uuid.UUID, *, all_states: bool = False
+    ) -> McpServerInWorkspace:
+        """A server the workspace reaches, its own or its organization's, as the workspace sees it.
+
+        An organization's server turned off for the workspace is a 404 unless ``all_states``, for the workspace's
+        admins, who may turn it back on.
+        """
+        server = await self.db.get(WorkspaceMcpServer, server_id)
+        if server is not None and server.workspace_id == workspace_id:
+            return McpServerInWorkspace(server)
+        if server is not None and server.workspace_id is None:
+            organization_id = await WorkspaceRepository(self.db).get_organization_id(workspace_id)
+            if organization_id == server.organization_id:
+                override = await WorkspaceMcpServerOverrideRepository(self.db).find(
+                    workspace_id=workspace_id, server_id=server.id
+                )
+                view = McpServerInWorkspace(server, override)
+                if all_states or view.visible:
+                    return view
+        raise WorkspaceMcpServerNotFoundError(server_id)
 
     async def _get_or_404(self, workspace_id: uuid.UUID, server_id: uuid.UUID) -> WorkspaceMcpServer:
         server = await self.db.get(WorkspaceMcpServer, server_id)
@@ -2668,13 +2690,13 @@ class WorkspaceMcpServerService:
         )
 
     async def disconnect(self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID) -> None:
-        """End the caller's own connection to a server.
+        """End the caller's own connection to a server the workspace reaches, its own or its organization's.
 
         Raises:
             McpConnectionNotFoundError: the caller has no connection to it.
         """
         resolved_workspace_id = await self._visible_workspace_id(user, workspace_id)
-        server = await self._get_or_404(resolved_workspace_id, server_id)
+        server = (await self._reached(resolved_workspace_id, server_id, all_states=True)).row
         await self._connection_service().disconnect(server_id=server.id, user_id=str(user.id))
 
     async def server_connections(
