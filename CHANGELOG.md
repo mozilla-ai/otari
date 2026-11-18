@@ -4,6 +4,21 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.53.0](https://github.com/mozilla-ai/otari/releases/tag/v0.53.0) - 2026-11-18
+
+
+
+### Bug Fixes
+
+- **provider-keys:** Hold an organization key's api_base to public addresses by [@tbille](https://github.com/tbille) ([`60d3640`](https://github.com/mozilla-ai/otari/commit/60d3640af88695977c823ba727601cda30cffa91))
+
+
+### Security
+
+- Hold MCP and guardrail destinations to public addresses by [@KevinGallaccio](https://github.com/KevinGallaccio) ([`3ff5e44`](https://github.com/mozilla-ai/otari/commit/3ff5e4444d1cebaaddf63299e1815cb58c78e3b5))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.52.0...v0.53.0
 ## [0.52.0](https://github.com/mozilla-ai/otari/releases/tag/v0.52.0) - 2026-11-18
 
 
