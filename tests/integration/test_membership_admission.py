@@ -21,7 +21,12 @@ from gateway.models.tenancy import (
     WorkspaceMember,
 )
 from gateway.models.users import User as BillingUser
-from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository, WorkspaceMemberRepository
+from gateway.repositories.tenancy import (
+    OrganizationMemberRepository,
+    UserRepository,
+    WorkspaceMemberRepository,
+    WorkspaceRepository,
+)
 from gateway.services.organizations import AdmittedMember, MembershipAdmission
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.membership_listener import MembershipListener
@@ -259,6 +264,68 @@ async def test_admitting_says_nothing_about_a_workspace_role_that_did_not_change
         )
 
     assert listener.role_changed == []
+
+
+async def test_admitting_compares_a_workspace_role_read_under_its_lock(
+    async_db: AsyncSession, postgres_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A role edit committing before the lock is taken is seen, so the offered role is applied and announced."""
+    writes = membership_writes(async_db)
+    listener = _RecordingListener(writes["membership_listener"])
+    organization = await create_organization(async_db, slug="admit-workspace-role-raced")
+    owner = await create_member(async_db, organization, role="owner", full_name="Owner")
+    member = await create_member(async_db, organization, role="member", full_name="Member")
+    workspace = await create_workspace(async_db, organization, name="Engineering", owner=owner)
+    placement = await WorkspaceMemberRepository(async_db).create(
+        workspace_id=workspace.id, user_id=member.id, role="member"
+    )
+    # Committed, so the edit below is a second transaction rather than this one.
+    await async_db.commit()
+    organization_id, member_id, placement_id, workspace_id = organization.id, member.id, placement.id, workspace.id
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    real_lock = WorkspaceRepository.lock
+    edited = False
+
+    async def lock_once_an_admin_has_changed_the_role(self: WorkspaceRepository, target: uuid.UUID) -> None:
+        nonlocal edited
+        if not edited:
+            edited = True
+            async with sessions() as admin:
+                # scalar_one, so the edit is known to have reached the row this test set up.
+                changed = await admin.execute(
+                    update(WorkspaceMember)
+                    .where(col(WorkspaceMember.id) == placement_id)
+                    .values(role="admin")
+                    .returning(col(WorkspaceMember.role))
+                    .execution_options(synchronize_session=False)
+                )
+                assert changed.scalar_one() == "admin"
+                await admin.commit()
+        await real_lock(self, target)
+
+    monkeypatch.setattr(WorkspaceRepository, "lock", lock_once_an_admin_has_changed_the_role)
+    service = OrganizationService(async_db, membership_listener=listener, uow=writes["uow"])
+
+    try:
+        async with writes["uow"]:
+            await service.admit(
+                organization_id=organization_id,
+                role="member",
+                user_id=member_id,
+                workspaces=[WorkspaceAssignmentRequest(workspace_id=workspace_id, role="member")],
+            )
+        async with sessions() as check:
+            stored = await check.execute(
+                select(col(WorkspaceMember.role)).where(col(WorkspaceMember.id) == placement_id)
+            )
+            role = stored.scalar_one()
+    finally:
+        await engine.dispose()
+
+    assert edited
+    assert role == "member"
+    assert listener.role_changed == [(placement_id, "member")]
 
 
 async def test_a_refused_offer_leaves_no_membership_behind(async_db: AsyncSession) -> None:

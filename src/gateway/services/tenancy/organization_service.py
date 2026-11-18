@@ -1617,8 +1617,8 @@ class OrganizationService:
         """Grant each assigned workspace, reviving a suspended membership.
 
         Deduplicated by workspace first, keeping the first role named for one, and
-        every existing membership is resolved in one query before the loop, so a
-        body naming N workspaces costs one lookup rather than N.
+        every existing membership is resolved in one query, so a body naming N
+        workspaces costs one lookup rather than N.
         `_require_workspaces_in_organization` already resolves the same set
         rather than the list.
 
@@ -1634,11 +1634,14 @@ class OrganizationService:
         changes is announced as the ordinary role edit announces it, so what a
         member holds in the workspace follows the role they now have.
 
-        Each target workspace is locked (`WorkspaceRepository.lock`) before
-        its create-or-revive-and-announce step, same as
-        `WorkspaceService.add_member`, and in a stable order (`wanted` is
-        walked sorted by id, not in insertion order) so two requests naming
-        the same workspaces in different orders cannot deadlock each other.
+        Every target workspace is locked (`WorkspaceRepository.lock`) before any
+        membership is read, same as `WorkspaceService.add_member`, and in a
+        stable order (`wanted` is walked sorted by id, not in insertion order)
+        so two requests naming the same workspaces in different orders cannot
+        deadlock each other. Reading under those locks is what makes the role
+        comparison below sound: `WorkspaceService.update_member_role` holds the
+        workspace lock alone, so a role edit can commit while this transaction
+        holds the organization lock.
         """
         listener = self._require_membership_listener()
         members = WorkspaceMemberRepository(self.db)
@@ -1647,6 +1650,11 @@ class OrganizationService:
         for assignment in assignments:
             wanted.setdefault(assignment.workspace_id, assignment.role)
 
+        for workspace_id in sorted(wanted, key=str):
+            # Serialized against a concurrent `BudgetService.create_member_policy`
+            # on this workspace; see `WorkspaceService.add_member`'s identical lock
+            # for why.
+            await workspaces.lock(workspace_id)
         # One IN query rather than one lookup per assignment: with the ceiling at
         # MAX_WORKSPACE_ASSIGNMENTS that is the difference between one round trip
         # and fifty inside a single request.
@@ -1654,10 +1662,6 @@ class OrganizationService:
             member.workspace_id: member for member in await members.get_by_workspaces_and_user(wanted, user_id)
         }
         for workspace_id, role in sorted(wanted.items(), key=lambda item: str(item[0])):
-            # Serialized against a concurrent `BudgetService.create_member_policy`
-            # on this workspace; see `WorkspaceService.add_member`'s identical lock
-            # for why.
-            await workspaces.lock(workspace_id)
             existing = existing_by_workspace.get(workspace_id)
             if existing is not None:
                 was_inactive = existing.status != "active"

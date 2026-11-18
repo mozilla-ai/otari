@@ -337,14 +337,20 @@ class WorkspaceMemberRepository:
         One ``IN`` query so applying N workspace assignments costs one lookup
         rather than N. Any status, for the same reason
         ``get_by_workspace_and_user`` is: the caller revives a suspended row.
+
+        NOTE: ``populate_existing`` so a caller reading these rows under the
+        workspace locks sees what another transaction committed, rather than an
+        instance this session loaded earlier.
         """
         if not workspace_ids:
             return []
         result = await self.db.execute(
-            select(WorkspaceMember).where(
+            select(WorkspaceMember)
+            .where(
                 col(WorkspaceMember.workspace_id).in_(workspace_ids),
                 col(WorkspaceMember.user_id) == user_id,
             )
+            .execution_options(populate_existing=True)
         )
         return list(result.scalars().all())
 
