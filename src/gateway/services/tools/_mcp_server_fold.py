@@ -5,12 +5,14 @@ into the workspace's settings on the organization's server, keeps its id working
 
 What happens to the people signed in to it:
 
-- A personal sign-in made through the same OAuth client as the organization server's own (the same
-  ``client_id``, which the gateway's client metadata document gives every server it signs in to through it)
-  can be renewed and revoked through the organization server, so it is carried across.
+- A personal sign-in is carried across where the organization server is personal too, sits at the very URL the
+  sign-in was made for, and can renew it: the same OAuth client issued it (the same ``client_id``, which the
+  gateway's client metadata document gives every server it signs in to through it), and that client may send
+  its credentials to the token endpoint the sign-in recorded.
 - Any other sign-in is revoked once the fold commits: its client is the copy's, which goes with it. So is a
-  carried sign-in's twin, where the person already holds one on the organization server, so nobody is moved
-  to another upstream account without knowing.
+  carried sign-in's twin, where the person already holds one on the organization server: they go on through
+  that one, which may be another upstream account, and the fold step counts them apart so nobody is moved
+  without the admin seeing it.
 - A shared account or a token is never carried: the organization server's own credential serves every
   workspace, and keeping a copy's would give one workspace another account.
 
@@ -33,8 +35,8 @@ from gateway.repositories.tools import (
     WorkspaceMcpServerOverrideRepository,
     WorkspaceMcpServerRepository,
 )
-from gateway.services.model_access import expand_mcp_tool_patterns, mcp_read_tools
-from gateway.services.tools._mcp_connections import McpRevocation, revocations_for, stored_oauth_client
+from gateway.services.model_access import clip_mcp_tool_patterns, expand_mcp_tool_patterns, mcp_read_tools
+from gateway.services.tools._mcp_connections import McpRevocation, renews_through, revocations_for
 
 
 class McpServerFoldCandidate(BaseModel):
@@ -52,6 +54,11 @@ class McpServerFoldCandidate(BaseModel):
     signed_in: int = Field(description="People signed in to it with their own account")
     keep_sign_in: int = Field(description="Of those, how many keep their sign-in on the organization's server")
     sign_in_again: int = Field(description="Of those, how many must sign in again")
+    switch_account: int = Field(
+        default=0,
+        description="Of those, how many already hold a sign-in on the organization's server and go on through "
+        "it, which may be another account upstream than the one they used here",
+    )
     replaces_shared_credential: bool = Field(
         description="It holds a token or a shared account, which the organization server's credential replaces"
     )
@@ -59,10 +66,14 @@ class McpServerFoldCandidate(BaseModel):
 
 @dataclass(frozen=True, slots=True)
 class _Plan:
-    """One copy's sign-ins, split by what a fold into ``target_client_id`` does with them."""
+    """One copy's sign-ins, split by what a fold into its target does with them.
+
+    ``revoked`` is every sign-in not carried; ``switched`` is those of them whose person holds one on the target.
+    """
 
     carried: list[McpUserConnection]
     revoked: list[McpUserConnection]
+    switched: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,10 +108,20 @@ class McpServerFold:
         self._requests = requests
 
     async def copies(
-        self, organization_id: uuid.UUID, url: str, *, except_id: uuid.UUID | None = None
+        self,
+        organization_id: uuid.UUID,
+        url: str,
+        *,
+        except_id: uuid.UUID | None = None,
+        ids: Collection[uuid.UUID] | None = None,
+        lock: bool = False,
     ) -> list[WorkspaceMcpServer]:
-        """The organization's workspaces' own servers at ``url``, oldest first."""
-        return await self._servers.copies_in_organization(organization_id, url, except_id=except_id)
+        """The organization's workspaces' own servers at ``url``, oldest first, the order a fold takes them in.
+
+        ``ids`` keeps only those, and ``lock`` holds them until the caller commits, matched at ``url`` as they
+        are once locked.
+        """
+        return await self._servers.copies_in_organization(organization_id, url, except_id=except_id, ids=ids, lock=lock)
 
     async def weigh(
         self,
@@ -116,7 +137,6 @@ class McpServerFold:
         With no ``target`` yet, into a server of ``credential_mode``, holding a token of its own when ``with_token``.
         """
         signed_in_there = await self._signed_in(target)
-        client_id = _client_id(target)
         accounts = await self._connections.shared_for_servers([copy.id for copy in copies])
         # A copy with no credential of its own still changes account when the target brings one.
         if target is not None:
@@ -127,7 +147,7 @@ class McpServerFold:
         for copy in copies:
             if copy.workspace_id is None:
                 continue
-            plan = _plan(await self._connections.every_for_server(copy.id), client_id, signed_in_there)
+            plan = _plan(await self._connections.every_for_server(copy.id), target, signed_in_there)
             own_credential = copy.encrypted_token is not None or copy.id in accounts
             weighed.append(
                 McpServerFoldCandidate(
@@ -139,7 +159,8 @@ class McpServerFold:
                     same_credential=copy.credential_mode == credential_mode and not own_credential and not with_token,
                     signed_in=len(plan.carried) + len(plan.revoked),
                     keep_sign_in=len(plan.carried),
-                    sign_in_again=len(plan.revoked),
+                    sign_in_again=len(plan.revoked) - plan.switched,
+                    switch_account=plan.switched,
                     replaces_shared_credential=own_credential,
                 )
             )
@@ -153,7 +174,6 @@ class McpServerFold:
         The returned revocations are for the caller to send once the fold has committed.
         """
         signed_in_there = await self._signed_in(target)
-        client_id = _client_id(target)
         revocations: list[McpRevocation] = []
         carried = revoked = 0
         for copy in copies:
@@ -164,7 +184,7 @@ class McpServerFold:
                 or copy.organization_id != target.organization_id
             ):
                 raise ValueError(f"MCP server {copy.id} is not a workspace's copy of an organization's server")
-            plan = _plan(await self._connections.every_for_server(copy.id), client_id, signed_in_there)
+            plan = _plan(await self._connections.every_for_server(copy.id), target, signed_in_there)
             account = await self._connections.find_shared(copy.id)
             # Read while the copy still holds the client its tokens were issued to.
             revocations += revocations_for(copy, [*plan.revoked, *([account] if account is not None else [])])
@@ -187,7 +207,8 @@ class McpServerFold:
         """The copy's rules become its workspace's settings and grants on the target.
 
         ``@read`` is written out as the copy's own read tools, which the target's may not match, so no rule
-        starts reaching more or fewer tools. A person or key with a grant on the target in the workspace keeps it.
+        starts reaching more or fewer tools. The copy's allowed tools stay the most its workspace reaches, as
+        the organization's limit there. A person or key with a grant on the target in the workspace keeps it.
         """
         read_tools = mcp_read_tools(copy.read_tools, copy.read_tools_hinted)
         everyone = expand_mcp_tool_patterns(copy.everyone_tools, read_tools)
@@ -196,9 +217,10 @@ class McpServerFold:
             override,
             workspace_id=workspace_id,
             server=target,
-            organization_tools=None if override is None else override.organization_tools,
+            organization_tools=_limit(copy, target, None if override is None else override.organization_tools),
             enabled=copy.enabled,
-            everyone_tools=None if everyone == list(target.everyone_tools) else everyone,
+            # Stored even where it equals the target's default, which can change later without the workspace.
+            everyone_tools=everyone,
             attach_by_default=None if copy.attach_by_default == target.attach_by_default else copy.attach_by_default,
         )
         held = {(grant.api_key_id, grant.user_id) for grant in await self._grants.for_server(target.id, workspace_id)}
@@ -219,17 +241,40 @@ class McpServerFold:
         return {connection.user_id for connection in await self._connections.every_for_server(target.id)}
 
 
-def _client_id(target: WorkspaceMcpServer | None) -> str | None:
-    """The OAuth client a sign-in must have been made through to be carried to ``target``; ``None`` carries none."""
-    client = stored_oauth_client(target) if target is not None else None
-    return client.client_id if client is not None else None
+def _limit(copy: WorkspaceMcpServer, target: WorkspaceMcpServer, held: list[str] | None) -> list[str] | None:
+    """The organization's limit on the copy's workspace once folded: ``held``, narrowed to the copy's allowed tools.
+
+    An unrestricted copy adds nothing, nor does one that allows everything the target does.
+    """
+    allowed = copy.allowed_tools
+    if allowed is None or (target.allowed_tools is not None and set(target.allowed_tools) <= set(allowed)):
+        return held
+    if held is None:
+        return list(allowed)
+    return clip_mcp_tool_patterns(
+        allowed, expand_mcp_tool_patterns(held, mcp_read_tools(target.read_tools, target.read_tools_hinted))
+    )
 
 
-def _plan(connections: Collection[McpUserConnection], client_id: str | None, signed_in_there: set[str]) -> _Plan:
+def _carries(target: WorkspaceMcpServer | None, connection: McpUserConnection) -> bool:
+    """Whether ``target`` can take a copy's sign-in as its own, as the module docstring says."""
+    return (
+        target is not None
+        and target.credential_mode == McpCredentialMode.PER_USER
+        and connection.server_url == target.url
+        and renews_through(target, connection)
+    )
+
+
+def _plan(
+    connections: Collection[McpUserConnection], target: WorkspaceMcpServer | None, signed_in_there: set[str]
+) -> _Plan:
     carried = [
         connection
         for connection in connections
-        if client_id is not None and connection.client_id == client_id and connection.user_id not in signed_in_there
+        if _carries(target, connection) and connection.user_id not in signed_in_there
     ]
     kept = {connection.id for connection in carried}
-    return _Plan(carried=carried, revoked=[connection for connection in connections if connection.id not in kept])
+    revoked = [connection for connection in connections if connection.id not in kept]
+    switched = sum(1 for connection in revoked if connection.user_id in signed_in_there)
+    return _Plan(carried=carried, revoked=revoked, switched=switched)

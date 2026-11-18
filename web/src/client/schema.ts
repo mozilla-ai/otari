@@ -4217,17 +4217,19 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        get?: never;
+        put?: never;
         /**
          * List Organization Mcp Server Copies
          * @description The workspaces' own servers at a URL, which a new organization server can take the place of.
          *
-         *     Organization owners and admins only. For each one: how many people signed in to it keep their sign-in, how
-         *     many must sign in again, and whether a token or shared account of its own would be replaced. Fold them by
-         *     naming them in `fold_server_ids` when adding the server, or when promoting one.
+         *     Organization owners and admins only. A lookup that changes nothing, sent as a body so the URL, which can carry
+         *     credentials, stays out of the request line. For each one: how many people signed in to it keep their sign-in,
+         *     how many must sign in again, how many keep working through the sign-in they already hold on the organization's
+         *     server, and whether a token or shared account of its own would be replaced. Fold them by naming them in
+         *     `fold_server_ids` when adding the server, or when promoting one.
          */
-        get: operations["mcp-servers-list_organization_mcp_server_copies"];
-        put?: never;
-        post?: never;
+        post: operations["mcp-servers-list_organization_mcp_server_copies"];
         delete?: never;
         options?: never;
         head?: never;
@@ -16624,6 +16626,12 @@ export interface components {
              */
             signed_in: number;
             /**
+             * Switch Account
+             * @description Of those, how many already hold a sign-in on the organization's server and go on through it, which may be another account upstream than the one they used here
+             * @default 0
+             */
+            switch_account: number;
+            /**
              * Workspace Id
              * Format: uuid
              */
@@ -16638,6 +16646,33 @@ export interface components {
         McpServerFoldCandidates: {
             /** Data */
             data: components["schemas"]["McpServerFoldCandidate"][];
+        };
+        /**
+         * McpServerFoldLookup
+         * @description Which workspaces' copies to list: those of a new server at ``url``, or of the server ``server_id`` names.
+         */
+        McpServerFoldLookup: {
+            /**
+             * @description How the new server signs in, when no server_id is given
+             * @default shared
+             */
+            credential_mode: components["schemas"]["McpCredentialMode"];
+            /**
+             * Server Id
+             * @description The server about to be made the organization's, whose own URL is matched, if any
+             */
+            server_id?: string | null;
+            /**
+             * Url
+             * @description The URL of the server to add; not sent with server_id
+             */
+            url?: string | null;
+            /**
+             * With Token
+             * @description The new server is added with a token of its own, when no server_id is given
+             * @default false
+             */
+            with_token: boolean;
         };
         /**
          * McpServerLeftOut
@@ -32290,21 +32325,16 @@ export interface operations {
     };
     "mcp-servers-list_organization_mcp_server_copies": {
         parameters: {
-            query?: {
-                /** @description The URL of the server to add; not sent with server_id */
-                url?: string | null;
-                /** @description How the new server signs in, when no server_id is given */
-                credential_mode?: components["schemas"]["McpCredentialMode"];
-                /** @description The new server is added with a token of its own, when no server_id is given */
-                with_token?: boolean;
-                /** @description The server about to be made the organization's, whose own URL is matched, if any */
-                server_id?: string | null;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpServerFoldLookup"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

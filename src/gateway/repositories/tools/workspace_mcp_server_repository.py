@@ -8,24 +8,25 @@ import uuid
 from collections.abc import Collection
 from typing import Never
 
-from sqlalchemy import ColumnElement, and_, func, or_, select, update
+from sqlalchemy import ColumnElement, Select, and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tools import WorkspaceMcpServer
 from gateway.repositories.base_repository import BaseRepository
 
-# The whitespace a stored URL may carry around it: Python's ``str.strip`` drops these too.
-_WHITESPACE = " \t\n\r\f\v"
+
+def _path_end(url: str) -> int:
+    """Where a URL's path ends: at its query or fragment, or at its end."""
+    ends = [index for index in (url.find("?"), url.find("#")) if index >= 0]
+    return min(ends, default=len(url))
 
 
 def _bare(url: str) -> str:
-    return url.strip().rstrip("/")
-
-
-def _bare_url() -> ColumnElement[str]:
-    """A stored URL without the whitespace around it or a trailing slash, as :func:`_bare` reads a given one."""
-    return func.rtrim(func.ltrim(WorkspaceMcpServer.url, _WHITESPACE), _WHITESPACE + "/")
+    """A URL without the whitespace around it or the trailing slashes of its path. Its query is kept as it is."""
+    url = url.strip()
+    end = _path_end(url)
+    return url[:end].rstrip("/") + url[end:]
 
 
 class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Never]):
@@ -191,33 +192,55 @@ class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Nev
         )
         return found.first() is not None
 
-    async def has_url(self, workspace_id: uuid.UUID, url: str, organization_id: uuid.UUID | None = None) -> bool:
-        """Whether a workspace reaches a server at ``url``, a trailing slash and surrounding whitespace aside.
+    async def _at_url(self, query: Select[WorkspaceMcpServer], url: str) -> list[WorkspaceMcpServer]:
+        """The rows ``query`` finds at ``url`` as :func:`_bare` reads both, oldest first.
 
-        Its own servers, and with ``organization_id`` its organization's. SQL ``trim`` takes spaces alone, so
-        the whitespace a stored URL can carry (a tab, a line break) is named; ``ltrim`` and ``rtrim`` with a set
-        read the same on PostgreSQL and SQLite.
+        SQL narrows the rows to those whose URL holds the bare path, which every match does, and the comparison
+        itself is the one :func:`_bare` makes, so it reads alike on PostgreSQL and SQLite whatever surrounds a URL.
         """
-        rows = await self.db.execute(
-            select(WorkspaceMcpServer.id)
-            .where(self._reached_from(workspace_id, organization_id), _bare_url() == _bare(url))
-            .limit(1)
+        bare = _bare(url)
+        path = bare[: _path_end(bare)]
+        query = query.where(WorkspaceMcpServer.url.contains(path, autoescape=True)).order_by(
+            WorkspaceMcpServer.created_at, WorkspaceMcpServer.id
         )
-        return rows.first() is not None
+        rows = (await self.db.execute(query)).scalars().all()
+        return [row for row in rows if _bare(row.url) == bare]
+
+    async def at_url(
+        self, workspace_id: uuid.UUID, url: str, organization_id: uuid.UUID | None = None
+    ) -> list[WorkspaceMcpServer]:
+        """A workspace's servers at ``url``, and with ``organization_id`` its organization's, before its settings.
+
+        A URL matches with the whitespace around it and its path's trailing slashes aside, oldest first.
+        """
+        return await self._at_url(
+            select(WorkspaceMcpServer).where(self._reached_from(workspace_id, organization_id)), url
+        )
 
     async def copies_in_organization(
-        self, organization_id: uuid.UUID, url: str, *, except_id: uuid.UUID | None = None
+        self,
+        organization_id: uuid.UUID,
+        url: str,
+        *,
+        except_id: uuid.UUID | None = None,
+        ids: Collection[uuid.UUID] | None = None,
+        lock: bool = False,
     ) -> list[WorkspaceMcpServer]:
-        """The organization's workspaces' own servers at ``url``, trailing slash and whitespace aside, oldest first."""
+        """The organization's workspaces' own servers at ``url``, as :meth:`at_url` matches it, oldest first.
+
+        ``ids`` keeps only those, and ``lock`` holds them until the caller commits. Locked rows are read again
+        and matched as they are now, so one whose URL moved meanwhile is left out.
+        """
         query = select(WorkspaceMcpServer).where(
-            WorkspaceMcpServer.organization_id == organization_id,
-            WorkspaceMcpServer.workspace_id.is_not(None),
-            _bare_url() == _bare(url),
+            WorkspaceMcpServer.organization_id == organization_id, WorkspaceMcpServer.workspace_id.is_not(None)
         )
         if except_id is not None:
             query = query.where(WorkspaceMcpServer.id != except_id)
-        query = query.order_by(WorkspaceMcpServer.created_at, WorkspaceMcpServer.id)
-        return list((await self.db.execute(query)).scalars().all())
+        if ids is not None:
+            query = query.where(WorkspaceMcpServer.id.in_(list(ids)))
+        if lock:
+            query = query.with_for_update().execution_options(populate_existing=True)
+        return await self._at_url(query, url)
 
     async def url_page(self, workspace_id: uuid.UUID, *, skip: int, limit: int) -> dict[uuid.UUID, str]:
         """A page of a workspace's stored servers' URLs, by server id, oldest first as the server list pages."""
@@ -227,17 +250,6 @@ class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Nev
             .order_by(WorkspaceMcpServer.created_at, WorkspaceMcpServer.id)
             .offset(skip)
             .limit(limit)
-        )
-        return {row.id: row.url for row in rows}
-
-    async def urls_in_workspace(
-        self, workspace_id: uuid.UUID, organization_id: uuid.UUID | None = None
-    ) -> dict[uuid.UUID, str]:
-        """Each of a workspace's stored servers' URL, and with ``organization_id`` its organization's, by server id."""
-        rows = await self.db.execute(
-            select(WorkspaceMcpServer.id, WorkspaceMcpServer.url).where(
-                self._reached_from(workspace_id, organization_id)
-            )
         )
         return {row.id: row.url for row in rows}
 

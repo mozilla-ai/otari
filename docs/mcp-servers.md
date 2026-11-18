@@ -11,7 +11,7 @@ There are two ways in: add a server by its URL, or pick servers from the catalog
 1. Select the workspace in the top-left corner.
 2. Go to **Tools** → **MCP servers**.
 3. Click **Add MCP server**.
-4. If you are an owner or admin of the organization, choose under **Add to** whether the server is for **This workspace** only or the **Whole organization**, which is preselected. These steps add it to the workspace; a server for the whole organization is described in [Share an MCP server with every workspace](share-an-mcp-server-with-every-workspace.md).
+4. If you are an owner or admin of the organization, select **This workspace** under **Add to**: **Whole organization** is preselected for you. To add the server for every workspace instead, keep **Whole organization** and follow [Share an MCP server with every workspace](share-an-mcp-server-with-every-workspace.md).
 5. Enter a **Name** for the server. This must be unique within the workspace and is used to identify the server’s tools.
 6. Enter the MCP server **URL**. The endpoint must be reachable from the Otari gateway. If the server is on a private network, see [Connect an MCP server on a private network](connect-a-private-mcp-server.md).
 7. Under **Sign-in mode**, keep **Shared account** to use one account for the whole workspace, or choose **Personal accounts** to have every member connect their own account. The second is described in [Connect your account to an MCP server](connect-your-account-to-an-mcp-server.md).

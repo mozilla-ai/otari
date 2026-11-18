@@ -27,7 +27,6 @@ from gateway.api.deps import (
 from gateway.api.routes._helpers import bounded_body
 from gateway.api.routes._logo_response import LOGO_RESPONSES, logo_response
 from gateway.api.routes.organizations import Message
-from gateway.models.tools import McpCredentialMode
 from gateway.schemas.tools import (
     McpConnectionStart,
     McpConnectionStarted,
@@ -37,6 +36,7 @@ from gateway.schemas.tools import (
 )
 from gateway.services.tenancy.workspace_mcp_server_service import (
     McpServerFoldCandidates,
+    McpServerFoldLookup,
     McpServerPromote,
     WorkspaceMcpServerAccess,
     WorkspaceMcpServerAccessCheck,
@@ -612,33 +612,24 @@ async def check_organization_mcp_server_connection(
     return await service.check_connection(user=current_identity, workspace_id=None, request=body)
 
 
-@organization_router.get("/same-url")
+@organization_router.post("/same-url")
 async def list_organization_mcp_server_copies(
-    service: WorkspaceMcpServerServiceDep,
-    current_identity: CurrentIdentity,
-    url: Annotated[
-        str | None,
-        Query(min_length=1, max_length=2048, description="The URL of the server to add; not sent with server_id"),
-    ] = None,
-    credential_mode: Annotated[
-        McpCredentialMode, Query(description="How the new server signs in, when no server_id is given")
-    ] = McpCredentialMode.SHARED,
-    with_token: Annotated[
-        bool, Query(description="The new server is added with a token of its own, when no server_id is given")
-    ] = False,
-    server_id: Annotated[
-        uuid.UUID | None,
-        Query(description="The server about to be made the organization's, whose own URL is matched, if any"),
-    ] = None,
+    service: WorkspaceMcpServerServiceDep, current_identity: CurrentIdentity, body: McpServerFoldLookup
 ) -> McpServerFoldCandidates:
     """The workspaces' own servers at a URL, which a new organization server can take the place of.
 
-    Organization owners and admins only. For each one: how many people signed in to it keep their sign-in, how
-    many must sign in again, and whether a token or shared account of its own would be replaced. Fold them by
-    naming them in `fold_server_ids` when adding the server, or when promoting one.
+    Organization owners and admins only. A lookup that changes nothing, sent as a body so the URL, which can carry
+    credentials, stays out of the request line. For each one: how many people signed in to it keep their sign-in,
+    how many must sign in again, how many keep working through the sign-in they already hold on the organization's
+    server, and whether a token or shared account of its own would be replaced. Fold them by naming them in
+    `fold_server_ids` when adding the server, or when promoting one.
     """
     return await service.fold_candidates(
-        user=current_identity, url=url, credential_mode=credential_mode, with_token=with_token, server_id=server_id
+        user=current_identity,
+        url=body.url,
+        credential_mode=body.credential_mode,
+        with_token=body.with_token,
+        server_id=body.server_id,
     )
 
 

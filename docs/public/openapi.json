@@ -14777,6 +14777,12 @@
             "title": "Signed In",
             "type": "integer"
           },
+          "switch_account": {
+            "default": 0,
+            "description": "Of those, how many already hold a sign-in on the organization's server and go on through it, which may be another account upstream than the one they used here",
+            "title": "Switch Account",
+            "type": "integer"
+          },
           "workspace_id": {
             "format": "uuid",
             "title": "Workspace Id",
@@ -14817,6 +14823,51 @@
           "data"
         ],
         "title": "McpServerFoldCandidates",
+        "type": "object"
+      },
+      "McpServerFoldLookup": {
+        "description": "Which workspaces' copies to list: those of a new server at ``url``, or of the server ``server_id`` names.",
+        "properties": {
+          "credential_mode": {
+            "$ref": "#/components/schemas/McpCredentialMode",
+            "default": "shared",
+            "description": "How the new server signs in, when no server_id is given"
+          },
+          "server_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The server about to be made the organization's, whose own URL is matched, if any",
+            "title": "Server Id"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The URL of the server to add; not sent with server_id",
+            "title": "Url"
+          },
+          "with_token": {
+            "default": false,
+            "description": "The new server is added with a token of its own, when no server_id is given",
+            "title": "With Token",
+            "type": "boolean"
+          }
+        },
+        "title": "McpServerFoldLookup",
         "type": "object"
       },
       "McpServerLeftOut": {
@@ -47305,73 +47356,19 @@
       }
     },
     "/api/v1/organizations/me/mcp-servers/same-url": {
-      "get": {
-        "description": "The workspaces' own servers at a URL, which a new organization server can take the place of.\n\nOrganization owners and admins only. For each one: how many people signed in to it keep their sign-in, how\nmany must sign in again, and whether a token or shared account of its own would be replaced. Fold them by\nnaming them in `fold_server_ids` when adding the server, or when promoting one.",
+      "post": {
+        "description": "The workspaces' own servers at a URL, which a new organization server can take the place of.\n\nOrganization owners and admins only. A lookup that changes nothing, sent as a body so the URL, which can carry\ncredentials, stays out of the request line. For each one: how many people signed in to it keep their sign-in,\nhow many must sign in again, how many keep working through the sign-in they already hold on the organization's\nserver, and whether a token or shared account of its own would be replaced. Fold them by naming them in\n`fold_server_ids` when adding the server, or when promoting one.",
         "operationId": "mcp-servers-list_organization_mcp_server_copies",
-        "parameters": [
-          {
-            "description": "The URL of the server to add; not sent with server_id",
-            "in": "query",
-            "name": "url",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 2048,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "The URL of the server to add; not sent with server_id",
-              "title": "Url"
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpServerFoldLookup"
+              }
             }
           },
-          {
-            "description": "How the new server signs in, when no server_id is given",
-            "in": "query",
-            "name": "credential_mode",
-            "required": false,
-            "schema": {
-              "$ref": "#/components/schemas/McpCredentialMode",
-              "default": "shared",
-              "description": "How the new server signs in, when no server_id is given"
-            }
-          },
-          {
-            "description": "The new server is added with a token of its own, when no server_id is given",
-            "in": "query",
-            "name": "with_token",
-            "required": false,
-            "schema": {
-              "default": false,
-              "description": "The new server is added with a token of its own, when no server_id is given",
-              "title": "With Token",
-              "type": "boolean"
-            }
-          },
-          {
-            "description": "The server about to be made the organization's, whose own URL is matched, if any",
-            "in": "query",
-            "name": "server_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "The server about to be made the organization's, whose own URL is matched, if any",
-              "title": "Server Id"
-            }
-          }
-        ],
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {

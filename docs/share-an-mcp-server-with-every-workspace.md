@@ -44,21 +44,34 @@ server for the organization, or make a workspace's server the organization's,
 Otari lists the workspaces' servers at the same URL and offers to fold them in.
 A copy you fold:
 
-- gives its access rules, availability and on or off state to its workspace's
-  settings on the organization's server, so nothing changes for that workspace's
-  keys and members, apart from the credential;
+- gives its access rules, default policy, availability and on or off state to its
+  workspace's settings on the organization's server, and its allowed tools become
+  the organization's limit for that workspace;
 - keeps its id working in its workspace, so agents and links that name it still
   reach the server;
 - is then deleted.
 
+Its workspace keeps what it reached before only within the organization server's
+own allowed tools. If the copy allowed write tools and the organization's server
+allows only read tools, the workspace loses the write tools.
+
+You can fold one copy of each workspace. An organization server that is off can
+replace only copies that are off too, since no workspace can turn it back on.
+
 What happens to the people signed in to a copy is counted before you confirm,
 for each one:
 
-- A person's own sign-in made through the same OAuth client as the
-  organization's server is kept, unless they already have one on it.
-- Every other sign-in ends, and the person signs in again the next time they
-  use the server. Nothing breaks meanwhile: they are handed the usual sign-in
-  link.
+- A person's own sign-in is kept when the organization's server also uses
+  **Personal accounts**, has exactly the URL the sign-in was made for, and uses
+  the same OAuth client, which can still renew it.
+- A person who already has a sign-in on the organization's server keeps using
+  that one. It may be a different account upstream from the one they used on
+  the copy, so these people are counted separately.
+- Every other sign-in ends. On an organization server that uses
+  **Personal accounts**, the person signs in again the next time they use it;
+  nothing breaks meanwhile, as they are handed the usual sign-in link. On one
+  with a shared account or a token, that credential serves them and nobody
+  signs in.
 - A copy's own token or shared account is replaced by the organization
   server's credential, which may be a different account upstream.
 
@@ -69,7 +82,9 @@ listed but not ticked. A copy you leave unticked stays its workspace's own.
 To make a workspace's own server the organization's, open it under **Tools** →
 **MCP servers** as an organization owner or admin and choose to make it an
 organization server. It keeps its id, its settings and every sign-in to it,
-which then work in every workspace.
+which then work in every workspace. Other servers in its own workspace at the
+same URL are not offered for folding and stay that workspace's own. Members who
+asked for the server in another workspace have their request approved.
 
 ## Limit what one workspace reaches
 

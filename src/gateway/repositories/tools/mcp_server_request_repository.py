@@ -197,6 +197,24 @@ class McpServerRequestRepository(BaseRepository[McpServerRequest, Never, Never])
         )
         return list(rows.scalars().all())
 
+    async def pending_at_urls(
+        self, workspace_ids: Collection[uuid.UUID], urls: Collection[str]
+    ) -> list[McpServerRequest]:
+        """These workspaces' pending requests for a server at any of ``urls``, locked, oldest first."""
+        if not workspace_ids or not urls:
+            return []
+        rows = await self.db.execute(
+            select(McpServerRequest)
+            .where(
+                McpServerRequest.workspace_id.in_(list(workspace_ids)),
+                McpServerRequest.status == _PENDING,
+                McpServerRequest.url.in_(list(urls)),
+            )
+            .order_by(McpServerRequest.created_at, McpServerRequest.id)
+            .with_for_update()
+        )
+        return list(rows.scalars().all())
+
     async def for_requester(
         self,
         workspace_id: uuid.UUID,
@@ -298,6 +316,24 @@ class McpServerRequestRepository(BaseRepository[McpServerRequest, Never, Never])
             statement = statement.where(McpServerRequest.requester_id == requester_id)
         await self.db.execute(
             statement.values(acknowledged_at=at, updated_at=at).execution_options(synchronize_session=False)
+        )
+
+    async def acknowledge_declined_at_urls(
+        self, workspace_ids: Collection[uuid.UUID], urls: Collection[str], *, at: datetime
+    ) -> None:
+        """Stop showing these workspaces' declined requests for a server at any of ``urls``. The rows stay."""
+        if not workspace_ids or not urls:
+            return
+        await self.db.execute(
+            update(McpServerRequest)
+            .where(
+                McpServerRequest.workspace_id.in_(list(workspace_ids)),
+                McpServerRequest.status == McpServerRequestStatus.DECLINED,
+                McpServerRequest.acknowledged_at.is_(None),
+                McpServerRequest.url.in_(list(urls)),
+            )
+            .values(acknowledged_at=at, updated_at=at)
+            .execution_options(synchronize_session=False)
         )
 
     async def repoint(self, from_server_id: uuid.UUID, to_server_id: uuid.UUID) -> None:

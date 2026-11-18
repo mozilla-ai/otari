@@ -641,7 +641,7 @@ DELETE /api/v1/organizations/me/mcp-servers/{server_id}/connections/{user_id} # 
 GET /api/v1/organizations/me/mcp-servers/{server_id}/workspaces               # operator surface
 PUT /api/v1/organizations/me/mcp-servers/{server_id}/workspaces/{workspace_id}  # operator surface
 DELETE /api/v1/organizations/me/mcp-servers/{server_id}/workspaces/{workspace_id}  # operator surface
-GET /api/v1/organizations/me/mcp-servers/same-url                             # operator surface
+POST /api/v1/organizations/me/mcp-servers/same-url                            # operator surface
 POST /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/promote        # operator surface
 GET /api/v1/workspaces/{workspace_id}/mcp-server-requests                     # dashboard surface: members ask admins for a catalog server
 POST /api/v1/workspaces/{workspace_id}/mcp-server-requests                    # dashboard surface: members ask admins for a catalog server

@@ -18,6 +18,7 @@ from sqlalchemy import Engine, event, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from gateway.api.deps import build_workspace_mcp_server_urls
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.organizations_exceptions import NotAuthorizedError, WorkspaceNotFoundError
@@ -42,7 +43,7 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
-from gateway.repositories.tools import McpServerRequestRepository, WorkspaceMcpServerRepository
+from gateway.repositories.tools import McpServerRequestRepository
 from gateway.schemas.mcp_catalog import McpCatalogEntry
 from gateway.schemas.tools import McpServerRequestCreate, McpServerRequestDecline
 from gateway.services import mcp_stateless
@@ -52,11 +53,15 @@ from gateway.services.mcp_stateless import ServerCheck
 from gateway.services.secret_box import generate_secret_key
 from gateway.services.tenancy import OrganizationReach, OrganizationService
 from gateway.services.tenancy.authorization import WorkspaceAccess
-from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServerCreate, WorkspaceMcpServerService
+from gateway.services.tenancy.workspace_mcp_server_service import (
+    McpServerPromote,
+    WorkspaceMcpServerCreate,
+    WorkspaceMcpServerService,
+    WorkspaceMcpServerSettingsUpdate,
+)
 from gateway.services.tools import (
     McpGrantMembershipListener,
     McpServerRequestService,
-    WorkspaceMcpServerUrls,
     _mcp_server_requests,
 )
 from gateway.services.tools._mcp_server_requests import (
@@ -129,14 +134,12 @@ class _World:
             McpCatalogSyncStateRepository(uow),
             access,
             GatewayConfig(mcp_catalog_sync="manual"),
-            workspace_servers=WorkspaceMcpServerUrls(
-                WorkspaceMcpServerRepository(uow), WorkspaceRepository(uow).get_organization_id
-            ),
+            workspace_servers=build_workspace_mcp_server_urls(uow),
         )
         self.requests = McpServerRequestService(
             uow,
             McpServerRequestRepository(uow),
-            WorkspaceMcpServerRepository(uow),
+            build_workspace_mcp_server_urls(uow),
             access,
             catalog,
             cast(Mailer, self.mail),
@@ -500,7 +503,9 @@ async def test_a_stored_url_with_whitespace_around_it_still_counts_as_stored(
     await async_db.commit()
 
     async with UnitOfWork(async_db) as uow:
-        assert await WorkspaceMcpServerRepository(uow).has_url(team.workspace.id, SENTRY[2])
+        assert await build_workspace_mcp_server_urls(uow).has_url(
+            team.workspace.id, SENTRY[2], team.workspace.organization_id
+        )
 
 
 @pytest.mark.asyncio
@@ -675,6 +680,114 @@ async def test_adding_the_server_approves_everyone_waiting_for_it(async_db: Asyn
     await _reload(async_db, team)
     left = (await world.requests.mine(user=team.grace, workspace_id=team.workspace.id)).data
     assert [entry.status for entry in left] == ["pending"]
+
+
+async def _statuses(db: AsyncSession) -> list[tuple[uuid.UUID, McpServerRequestStatus, uuid.UUID | None]]:
+    rows = (await db.execute(select(McpServerRequest).order_by(McpServerRequest.created_at))).scalars().all()
+    return [(row.workspace_id, McpServerRequestStatus(row.status), row.server_id) for row in rows]
+
+
+@pytest.mark.asyncio
+async def test_an_organization_server_answers_every_workspace_that_reaches_it(async_db: AsyncSession) -> None:
+    team = await _team(async_db)
+    ops = await _workspace(async_db, team.organization, "Ops")
+    otto = await _person(async_db, team.organization, "Otto Ops", workspace=ops)
+    world = _World(async_db)
+    await world.requests.create(user=team.ada, workspace_id=team.workspace.id, request=_ask())
+    await world.requests.create(user=otto, workspace_id=ops.id, request=_ask())
+    await world.sent()
+    world.mail.sent.clear()
+
+    # Off, it reaches no workspace, so nobody's request is answered by it.
+    await world.servers.create_server(
+        user=team.owner,
+        workspace_id=None,
+        request=WorkspaceMcpServerCreate(name="sentry-off", url=SENTRY[2], enabled=False),
+    )
+    assert [status for _, status, _ in await _statuses(async_db)] == [McpServerRequestStatus.PENDING] * 2
+    server = await world.servers.create_server(
+        user=team.owner, workspace_id=None, request=WorkspaceMcpServerCreate(name="Sentry", url=f"{SENTRY[2]}/")
+    )
+
+    assert await _statuses(async_db) == [
+        (team.workspace.id, McpServerRequestStatus.APPROVED, server.id),
+        (ops.id, McpServerRequestStatus.APPROVED, server.id),
+    ]
+    assert sorted(await world.sent()) == [
+        ("ada.member@acme.example", "Sentry was added to Research"),
+        ("otto.ops@acme.example", "Sentry was added to Ops"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_an_organization_server_turned_off_for_a_workspace_may_still_be_asked_for_there(
+    async_db: AsyncSession,
+) -> None:
+    team = await _team(async_db)
+    world = _World(async_db)
+    server = await world.servers.create_server(
+        user=team.owner, workspace_id=None, request=WorkspaceMcpServerCreate(name="Sentry", url=SENTRY[2])
+    )
+    with pytest.raises(McpServerAlreadyAddedError):
+        await world.requests.create(user=team.ada, workspace_id=team.workspace.id, request=_ask())
+    await _reload(async_db, team)
+
+    await world.servers.set_workspace_settings(
+        user=team.admin,
+        workspace_id=team.workspace.id,
+        server_id=server.id,
+        request=WorkspaceMcpServerSettingsUpdate(enabled=False),
+    )
+
+    asked = await world.requests.create(user=team.ada, workspace_id=team.workspace.id, request=_ask())
+    assert asked.status == "pending"
+    async with UnitOfWork(async_db) as uow:
+        urls = await build_workspace_mcp_server_urls(uow).urls_in_workspace(team.workspace.id)
+    assert urls == {}, "the catalog offers it again"
+
+
+@pytest.mark.asyncio
+async def test_promoting_a_server_answers_the_workspaces_that_gain_it(async_db: AsyncSession) -> None:
+    team = await _team(async_db)
+    ops = await _workspace(async_db, team.organization, "Ops")
+    otto = await _person(async_db, team.organization, "Otto Ops", workspace=ops)
+    world = _World(async_db)
+    server = await world.servers.create_server(
+        user=team.owner, workspace_id=team.workspace.id, request=WorkspaceMcpServerCreate(name="Sentry", url=SENTRY[2])
+    )
+    await world.requests.create(user=otto, workspace_id=ops.id, request=_ask())
+    await world.sent()
+    world.mail.sent.clear()
+
+    await world.servers.promote(
+        user=team.owner, workspace_id=team.workspace.id, server_id=server.id, request=McpServerPromote()
+    )
+
+    assert await _statuses(async_db) == [(ops.id, McpServerRequestStatus.APPROVED, server.id)]
+    assert await world.sent() == [("otto.ops@acme.example", "Sentry was added to Ops")]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_approval_stores_no_server(async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The server, its fold and every approval commit together, or none of them does."""
+    team = await _team(async_db)
+    world = _World(async_db)
+    await world.requests.create(user=team.ada, workspace_id=team.workspace.id, request=_ask())
+    await world.sent()
+    world.mail.sent.clear()
+
+    async def refuse(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("approval failed")
+
+    monkeypatch.setattr(McpServerRequestRepository, "acknowledge_declined_at_urls", refuse)
+    with pytest.raises(RuntimeError):
+        await world.servers.create_server(
+            user=team.owner, workspace_id=None, request=WorkspaceMcpServerCreate(name="Sentry", url=SENTRY[2])
+        )
+
+    assert (await async_db.execute(select(WorkspaceMcpServer))).scalars().all() == []
+    assert [status for _, status, _ in await _statuses(async_db)] == [McpServerRequestStatus.PENDING]
+    assert await world.sent() == []
 
 
 @pytest.mark.asyncio

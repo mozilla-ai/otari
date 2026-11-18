@@ -193,9 +193,24 @@ def _approved(pinned: str | None, recorded: str | None, client: McpOAuthClient) 
     client with one sends nothing while the pin is unset (the client was saved again since) or
     names another endpoint.
     """
+    return _endpoint_approved(pinned, recorded, has_secret=client.client_secret is not None)
+
+
+def _endpoint_approved(pinned: str | None, recorded: str | None, *, has_secret: bool) -> bool:
+    """:func:`_approved`, for a client known only by whether it has a secret."""
     if recorded is None:
         return False
-    return client.client_secret is None or pinned == recorded
+    return not has_secret or pinned == recorded
+
+
+def renews_through(server: WorkspaceMcpServer, connection: McpUserConnection) -> bool:
+    """Whether ``server`` can renew ``connection``: its client issued it, and :func:`_approved` admits the endpoint."""
+    stored = stored_oauth_client(server)
+    if stored is None or stored.client_id != connection.client_id:
+        return False
+    return _endpoint_approved(
+        server.oauth_client_token_endpoint, connection.token_endpoint, has_secret=bool(stored.encrypted_secret)
+    )
 
 
 def _revocation(
@@ -1963,6 +1978,7 @@ __all__ = [
     "UserAliases",
     "McpRevocation",
     "McpServerRef",
+    "renews_through",
     "revocations_for",
     "collect_revocations",
     "revoke_in_background",

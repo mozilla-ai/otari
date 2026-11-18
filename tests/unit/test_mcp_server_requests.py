@@ -14,9 +14,10 @@ from gateway.core.endpoint_urls import url_spellings
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tenancy import User
 from gateway.models.tools import McpServerRequest, McpServerRequestStatus
-from gateway.repositories.tools import McpServerRequestRepository, WorkspaceMcpServerRepository
+from gateway.repositories.tools import McpServerRequestRepository
 from gateway.schemas.mcp_catalog import McpCatalogServerPublic
 from gateway.services.mail import Mailer, MailMessage
+from gateway.services.tools import WorkspaceMcpServerUrls
 from gateway.services.tools._mcp_server_requests import (
     McpServerRequestService,
     render_decision_mail,
@@ -102,13 +103,15 @@ class _Requests:
         self.rows = rows
         self.asked: list[dict[str, Any]] = []
 
-    async def pending_for_server(
-        self, workspace_id: uuid.UUID, *, catalog_name: str | None = None, urls: Collection[str] = ()
+    async def pending_at_urls(
+        self, workspace_ids: Collection[uuid.UUID], urls: Collection[str]
     ) -> list[McpServerRequest]:
-        self.asked.append({"workspace_id": workspace_id, "urls": tuple(urls)})
-        return [row for row in self.rows if row.url in urls]
+        self.asked.append({"workspace_ids": list(workspace_ids), "urls": tuple(urls)})
+        return [row for row in self.rows if row.workspace_id in workspace_ids and row.url in urls]
 
-    async def acknowledge_declined(self, workspace_id: uuid.UUID, **named: Any) -> None:
+    async def acknowledge_declined_at_urls(
+        self, workspace_ids: Collection[uuid.UUID], urls: Collection[str], **named: Any
+    ) -> None:
         pass
 
     async def save(self) -> None:
@@ -178,7 +181,7 @@ async def test_adding_a_server_approves_its_requests_and_mails_only_those_who_ca
     service = McpServerRequestService(
         UnitOfWork(cast(Any, session)),
         cast(McpServerRequestRepository, requests),
-        cast(WorkspaceMcpServerRepository, None),
+        cast(WorkspaceMcpServerUrls, None),
         cast(Any, _Workspaces([ada, gone, silent, admin])),
         _Catalog(),
         cast(Mailer, mail),
@@ -187,8 +190,7 @@ async def test_adding_a_server_approves_its_requests_and_mails_only_those_who_ca
     server_id = uuid.uuid4()
 
     approved = await service.server_added(
-        workspace_id=workspace_id,
-        workspace_name="Research",
+        workspaces={workspace_id: "Research"},
         server_id=server_id,
         url="https://mcp.sentry.dev/mcp/",
         added_by=admin.id,
@@ -227,7 +229,7 @@ async def test_a_failed_read_of_whom_to_tell_does_not_fail_the_approval_it_follo
     service = McpServerRequestService(
         UnitOfWork(cast(Any, session)),
         cast(McpServerRequestRepository, _Requests(rows)),
-        cast(WorkspaceMcpServerRepository, None),
+        cast(WorkspaceMcpServerUrls, None),
         cast(Any, _Unreadable()),
         _Catalog(),
         cast(Mailer, mail),
@@ -235,8 +237,7 @@ async def test_a_failed_read_of_whom_to_tell_does_not_fail_the_approval_it_follo
     )
 
     approved = await service.server_added(
-        workspace_id=workspace_id,
-        workspace_name="Research",
+        workspaces={workspace_id: "Research"},
         server_id=uuid.uuid4(),
         url="https://mcp.sentry.dev/mcp",
         added_by=admin.id,
@@ -255,7 +256,7 @@ async def test_adding_a_server_nobody_asked_for_sends_nothing() -> None:
     service = McpServerRequestService(
         UnitOfWork(cast(Any, _Session())),
         cast(McpServerRequestRepository, _Requests([])),
-        cast(WorkspaceMcpServerRepository, None),
+        cast(WorkspaceMcpServerUrls, None),
         cast(Any, _Workspaces([])),
         _Catalog(),
         cast(Mailer, mail),
@@ -263,8 +264,7 @@ async def test_adding_a_server_nobody_asked_for_sends_nothing() -> None:
     )
 
     approved = await service.server_added(
-        workspace_id=uuid.uuid4(),
-        workspace_name="Research",
+        workspaces={uuid.uuid4(): "Research"},
         server_id=uuid.uuid4(),
         url="https://mcp.sentry.dev/mcp",
         added_by=uuid.uuid4(),

@@ -832,6 +832,17 @@ def get_health_check_service(
 HealthCheckServiceDep = Annotated[HealthCheckService, Depends(get_health_check_service)]
 
 
+def build_workspace_mcp_server_urls(uow: UnitOfWork) -> WorkspaceMcpServerUrls:
+    """Build the read of where a workspace's MCP servers are, its organization's too, on a Unit of Work."""
+    return WorkspaceMcpServerUrls(
+        WorkspaceMcpServerRepository(uow),
+        McpWorkspaceServers(
+            WorkspaceMcpServerRepository(uow), WorkspaceMcpServerOverrideRepository(uow), McpServerAliasRepository(uow)
+        ),
+        WorkspaceRepository(uow).get_organization_id,
+    )
+
+
 def build_mcp_catalog_service(
     uow: UnitOfWork, config: GatewayConfig, workspaces: WorkspaceAccess | None = None
 ) -> McpCatalogService:
@@ -845,9 +856,7 @@ def build_mcp_catalog_service(
         McpCatalogSyncStateRepository(uow),
         workspaces,
         config,
-        workspace_servers=WorkspaceMcpServerUrls(
-            WorkspaceMcpServerRepository(uow), WorkspaceRepository(uow).get_organization_id
-        ),
+        workspace_servers=build_workspace_mcp_server_urls(uow),
     )
 
 
@@ -908,7 +917,7 @@ def get_mcp_server_request_service(
     return McpServerRequestService(
         uow,
         McpServerRequestRepository(uow),
-        WorkspaceMcpServerRepository(uow),
+        build_workspace_mcp_server_urls(uow),
         workspaces,
         catalog,
         Mailer(config),
@@ -1303,6 +1312,7 @@ __all__ = [
     "build_trace_service",
     "build_unavailable_model_reporter",
     "build_update_check_service",
+    "build_workspace_mcp_server_urls",
     "catalog_reader_operates_deployment",
     "catalog_reader_organization",
     "cookie_may_authenticate",
