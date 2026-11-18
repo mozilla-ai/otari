@@ -42,7 +42,7 @@ event takes:
 
 Only metadata and token counts are accepted; prompt, completion and tool fields
 are rejected. The exact schema is in the
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/3ff5e4444d1cebaaddf63299e1815cb58c78e3b5/docs/public/openapi.json).
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/ffa592b3e3d237ab6e7e7a855b9e735c777201d9/docs/public/openapi.json).
 
 Sending a batch again is safe: events already stored come back as duplicates.
 When the database is busy or unreachable, this endpoint and the OTLP endpoints
