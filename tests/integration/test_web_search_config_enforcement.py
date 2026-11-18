@@ -289,19 +289,21 @@ def test_a_search_with_nothing_to_search_with_is_refused_without_naming_a_settin
     assert seen.ran is False
 
 
-def test_a_disabled_workspace_is_refused_before_its_search_is_found_to_have_nothing_to_run_on(
+def test_a_disabled_workspace_with_nothing_to_search_with_is_told_what_the_deployment_lacks(
     client: TestClient,
     api_key_header: dict[str, str],
     master_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Turning the switch on would not let this search run, so the refusal names the missing search."""
     monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
     _set_config(client, master_key_header, _default_workspace_id(client, master_key_header), enabled=False)
 
-    response, _ = _post_with_search_patched(client, api_key_header, _REQUEST)
+    response, seen = _post_with_search_patched(client, api_key_header, _REQUEST)
 
-    assert response.status_code == 403
-    assert response.json()["error"]["message"] == WebSearchNotEnabledError().message
+    assert response.status_code == 400
+    assert response.json()["error"]["message"] == WEB_SEARCH_NOT_CONFIGURED_DETAIL
+    assert seen.ran is False
 
 
 def test_a_disabled_workspace_still_serves_a_request_that_asks_for_no_search(
@@ -848,6 +850,32 @@ def test_the_direct_search_endpoint_honors_the_same_veto(
     assert len(rows) == 1
     assert rows[0]["status"] == "error"
     assert rows[0]["status_code"] == 403
+
+
+def test_the_direct_search_endpoint_tells_a_disabled_workspace_there_is_nothing_to_search_with(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Turning the switch on would not let this search run, so the refusal names the missing search tool."""
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+    _set_config(client, master_key_header, _default_workspace_id(client, master_key_header), enabled=False)
+    client.post(f"{API_ROOT}/users", json={"user_id": "no-search-user"}, headers=master_key_header)
+    key = client.post(
+        f"{API_ROOT}/keys",
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "no-search-key", "user_id": "no-search-user"},
+        headers=master_key_header,
+    ).json()
+
+    response = client.post(
+        f"{API_ROOT}/search",
+        json={"query": "anything"},
+        headers={API_KEY_HEADER: f"Bearer {key['key']}"},
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"].startswith("No search tools are configured.")
+    assert response.headers.get(ERROR_CODE_HEADER) != WEB_ACCESS_DISABLED
 
 
 def test_invalid_legacy_domain_rule_returns_503_from_direct_search(

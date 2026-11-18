@@ -994,7 +994,9 @@ provider the workspace's searches run on; the purpose hint is set through the
 API. Each tool's row says whether the selected workspace's requests may
 declare it, and why not when they may not. A request that declares a web tool
 in a workspace with `enabled` off is refused with a 403 `web_access_disabled`
-whose message names this page.
+whose message names this page. A Search with nothing to run on, neither the
+deployment's own search nor an organization key, is refused with a 400 that
+says so, whatever `enabled` is.
 `max_results`, the purpose hint, and provider options apply only to Search.
 Workspace values can narrow deployment policy but cannot enable a missing
 backend, enable deployment-disabled Fetch, or relax an operator limit. Fetch
