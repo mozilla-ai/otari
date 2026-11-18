@@ -41,6 +41,7 @@ class Unreadable:
 
 _NOT_A_LITERAL = "is not written out in full"
 _WRITTEN_AGAIN = "is written at module scope more than once, so the last value decides"
+_UNDECLARED = "is written at module scope without a declaration this check can read"
 _UNSUPPORTED = "records a kind of value this check does not read"
 
 
@@ -58,7 +59,10 @@ def _module_scope_statements(body: Sequence[ast.stmt]) -> Iterator[ast.stmt]:
 
 
 def _names_written(statement: ast.stmt) -> Iterator[str]:
-    """Yield each name ending in the baseline suffix that one module-scope statement writes.
+    """Yield the name at the root of each target one module-scope statement writes.
+
+    A write through a subscript or an attribute counts against the name it starts from,
+    so assigning to one field of a constant counts as writing that constant.
 
     NOTE: This reads the targets of the statements that declare a constant. A name
     written by anything more exotic is not a form the convention produces.
@@ -66,16 +70,31 @@ def _names_written(statement: ast.stmt) -> Iterator[str]:
     targets: list[ast.expr] = []
     if isinstance(statement, ast.Assign):
         targets.extend(statement.targets)
-    elif isinstance(statement, ast.AnnAssign | ast.AugAssign):
+    elif isinstance(statement, ast.AugAssign):
         targets.append(statement.target)
+    elif isinstance(statement, ast.AnnAssign):
+        # A bare annotation declares a type and writes nothing.
+        if statement.value is not None:
+            targets.append(statement.target)
     elif isinstance(statement, ast.For | ast.AsyncFor):
         targets.append(statement.target)
     elif isinstance(statement, ast.With | ast.AsyncWith):
         targets.extend(item.optional_vars for item in statement.items if item.optional_vars is not None)
     for target in targets:
-        for node in ast.walk(target):
-            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id.endswith(BASELINE_SUFFIX):
-                yield node.id
+        yield from _roots(target)
+
+
+def _roots(target: ast.expr) -> Iterator[str]:
+    """Yield the name each part of one assignment target ultimately writes through."""
+    if isinstance(target, ast.Name):
+        yield target.id
+    elif isinstance(target, ast.Subscript | ast.Attribute):
+        yield from _roots(target.value)
+    elif isinstance(target, ast.Tuple | ast.List):
+        for element in target.elts:
+            yield from _roots(element)
+    elif isinstance(target, ast.Starred):
+        yield from _roots(target.value)
 
 
 def _declarations(body: Sequence[ast.stmt]) -> Iterator[tuple[str, ast.expr]]:
@@ -93,26 +112,43 @@ def _declarations(body: Sequence[ast.stmt]) -> Iterator[tuple[str, ast.expr]]:
             yield name, node.value
 
 
-def _nested_baselines(label: str, value: object) -> Iterator[tuple[str, object]]:
-    """Yield each baseline one constant records under a ``baseline`` key, by the path that reaches it."""
-    if not isinstance(value, dict):
+def _nested_baselines(label: str, node: ast.expr) -> Iterator[tuple[str, ast.expr]]:
+    """Yield the written-out value of each baseline a constant records under a ``baseline`` key.
+
+    This reads the mapping as it is written rather than as a whole value, so one entry
+    that is not written out in full costs only that entry.
+    """
+    if not isinstance(node, ast.Dict):
         return
-    for key, item in value.items():
-        if key == BASELINE_KEY:
-            yield f"{label}[{BASELINE_KEY!r}]", item
-        elif isinstance(item, dict):
-            yield from _nested_baselines(f"{label}[{key!r}]", item)
+    for key, value in zip(node.keys, node.values, strict=True):
+        if not isinstance(key, ast.Constant) or not isinstance(key.value, str):
+            continue
+        if key.value == BASELINE_KEY:
+            yield f"{label}[{BASELINE_KEY!r}]", value
+        else:
+            yield from _nested_baselines(f"{label}[{key.value!r}]", value)
 
 
 def _supported(value: object) -> bool:
-    """Whether one baseline records room in a form this check knows how to compare."""
-    if isinstance(value, int):
+    """Whether one baseline records room in a form this check knows how to compare.
+
+    NOTE: A count is an ``int`` exactly. A ``bool`` is one to Python, but never a count,
+    and comparing one against a count would read ``True`` as a ceiling of one.
+    """
+    if type(value) is int:
         return True
     if isinstance(value, dict):
-        return all(isinstance(key, str) and _supported(item) for key, item in value.items())
+        return all(type(key) is str and _supported(item) for key, item in value.items())
     if isinstance(value, tuple | list):
-        return all(isinstance(entry, str | tuple) for entry in value)
+        return all(_entry(entry) for entry in value)
     return False
+
+
+def _entry(entry: object) -> bool:
+    """Whether one entry of a baseline names something this check can compare."""
+    if isinstance(entry, tuple):
+        return all(type(part) is str for part in entry)
+    return type(entry) is str
 
 
 def _read_value(node: ast.expr) -> object:
@@ -137,29 +173,32 @@ def baselines(source: str) -> dict[str, object]:
         for name in _names_written(statement):
             written[name] = written.get(name, 0) + 1
 
-    found: dict[str, object] = {}
+    declared: dict[str, tuple[str, ast.expr]] = {}
     for name, node in _declarations(tree.body):
         if name.endswith(BASELINE_SUFFIX):
-            found[name] = Unreadable(_WRITTEN_AGAIN) if written.get(name, 0) > 1 else _read_value(node)
+            declared[name] = (name, node)
             continue
-        try:
-            value = ast.literal_eval(node)
-        except (TypeError, ValueError):
-            continue
-        for label, nested in _nested_baselines(name, value):
-            found[label] = nested if _supported(nested) else Unreadable(_UNSUPPORTED)
+        for label, value in _nested_baselines(name, node):
+            declared[label] = (name, value)
+
+    found: dict[str, object] = {}
+    for label, (owner, node) in declared.items():
+        found[label] = Unreadable(_WRITTEN_AGAIN) if written.get(owner, 0) > 1 else _read_value(node)
+    for name in written:
+        if name.endswith(BASELINE_SUFFIX) and name not in found:
+            found[name] = Unreadable(_UNDECLARED)
     return found
 
 
 def check_baselines(base: str, head: str) -> list[str]:
     """Return each way one revision of the check gives a baseline back room an earlier one had given up."""
+    if not base.strip():
+        return ["the earlier revision is empty, so there is nothing to measure against"]
     try:
         before = baselines(base)
         after = baselines(head)
     except SyntaxError:
         return ["the check does not parse, so no baseline can be read from it"]
-    if not before:
-        return ["the earlier revision records no baseline, so there is nothing to measure against"]
     findings: list[str] = []
     for name, recorded in sorted(before.items()):
         if name in after:

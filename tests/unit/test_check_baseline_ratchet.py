@@ -215,10 +215,20 @@ def test_a_baseline_that_arrives_written_out_in_full_is_clean() -> None:
     assert check.check_baselines("SIZE_BASELINE = 3\n", 'SIZE_BASELINE = 3\nLEAK_BASELINE = ("one.py",)\n') == []
 
 
-def test_an_earlier_revision_with_no_baseline_is_reported() -> None:
+def test_an_empty_earlier_revision_is_reported() -> None:
     assert check.check_baselines("", "SIZE_BASELINE = 3\n") == [
-        "the earlier revision records no baseline, so there is nothing to measure against"
+        "the earlier revision is empty, so there is nothing to measure against"
     ]
+
+
+def test_a_whitespace_only_earlier_revision_is_reported() -> None:
+    assert check.check_baselines("\n  \n", "SIZE_BASELINE = 3\n") == [
+        "the earlier revision is empty, so there is nothing to measure against"
+    ]
+
+
+def test_a_first_baseline_after_the_last_one_retired_is_clean() -> None:
+    assert check.check_baselines("LIMIT = 3\n", 'LIMIT = 3\nLEAK_BASELINE = ("one.py",)\n') == []
 
 
 def test_a_baseline_recorded_per_entry_is_read() -> None:
@@ -308,3 +318,52 @@ def test_the_command_reads_a_revision_from_standard_input(
     monkeypatch.setattr("sys.stdin", io.StringIO("SIZE_BASELINE = 3\n"))
     assert check.main(["--base", "-", "--head", str(head)]) == 1
     assert "SIZE_BASELINE rises from 3 to 4" in capsys.readouterr().out
+
+
+def test_a_bare_annotation_beside_a_declaration_is_not_a_second_write() -> None:
+    assert check.check_baselines("SIZE_BASELINE = 3\n", "SIZE_BASELINE: int\nSIZE_BASELINE = 2\n") == []
+
+
+def test_a_write_to_one_field_of_a_map_that_owns_baselines_is_reported() -> None:
+    before = 'SIZE_BASELINE = 3\nACCESS = {"a.B": {"baseline": ("one.py",)}}\n'
+    after = before + 'ACCESS["a.B"]["baseline"] = ("one.py", "two.py")\n'
+    assert check.check_baselines(before, after) == [
+        "ACCESS['a.B']['baseline'] is written at module scope more than once, so the last value decides; "
+        "a baseline is read without running the check"
+    ]
+
+
+def test_a_map_that_owns_baselines_assigned_again_is_reported() -> None:
+    before = 'SIZE_BASELINE = 3\nACCESS = {"a.B": {"baseline": ("one.py",)}}\n'
+    after = before + "ACCESS = {}\n"
+    assert check.check_baselines(before, after) == [
+        "ACCESS['a.B']['baseline'] is written at module scope more than once, so the last value decides; "
+        "a baseline is read without running the check"
+    ]
+
+
+def test_a_count_replaced_by_a_boolean_is_reported() -> None:
+    assert check.check_baselines("SIZE_BASELINE = 1\n", "SIZE_BASELINE = True\n") == [
+        "SIZE_BASELINE records a kind of value this check does not read; a baseline is read without running the check"
+    ]
+
+
+def test_a_boolean_under_a_key_is_reported() -> None:
+    assert check.check_baselines('MAP_BASELINE = {"one": 1}\n', 'MAP_BASELINE = {"one": True}\n') == [
+        "MAP_BASELINE records a kind of value this check does not read; a baseline is read without running the check"
+    ]
+
+
+def test_a_baseline_written_only_under_module_level_control_flow_is_reported() -> None:
+    assert check.check_baselines("SIZE_BASELINE = 0\n", "if OTHER:\n    SIZE_BASELINE = 99\n") == [
+        "SIZE_BASELINE is written at module scope without a declaration this check can read; "
+        "a baseline is read without running the check"
+    ]
+
+
+def test_one_computed_baseline_does_not_hide_the_rest_of_a_map() -> None:
+    before = 'SIZE_BASELINE = 3\nACCESS = {"a.B": {"baseline": ()}}\n'
+    after = 'SIZE_BASELINE = 3\nACCESS = {"a.B": {"baseline": ()}, "c.D": {"baseline": tuple(["new.py"])}}\n'
+    assert check.check_baselines(before, after) == [
+        "ACCESS['c.D']['baseline'] arrives and is not written out in full; a baseline is read without running the check"
+    ]

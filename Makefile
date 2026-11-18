@@ -96,10 +96,10 @@ check-architecture:
 # Check that no baseline of the architecture check records more room than it did
 # at the branch point. The check itself reads the number and the code it measures
 # from one tree, so a change that adds a builder and raises the number to match
-# passes it, and this is the half it cannot reach. The script refuses an earlier
-# revision that records no baseline, so a git show that fails here is reported
-# rather than read as an empty comparison. otari-baseline-ratchet.yml runs the
-# same comparison on a pull request.
+# passes it, and this is the half it cannot reach. The script refuses an empty
+# earlier revision, so a git show that fails here is reported rather than read
+# as an empty comparison. otari-baseline-ratchet.yml runs the same comparison on
+# a pull request.
 check-baselines:
 	@git show "$$(git merge-base origin/main HEAD):scripts/check_architecture.py" | \
 	uv run python scripts/check_baseline_ratchet.py --base - --head scripts/check_architecture.py
