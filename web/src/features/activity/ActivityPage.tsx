@@ -160,9 +160,9 @@ function ActivityPageContent({
   // Provenance: gateway traffic vs an imported agent source. Set by its own select,
   // or by a drill-down (the pricing alarm links here scoped to gateway traffic).
   const sourceFilter = url.get("source")
-  // Session, status code, endpoint and provider have no select of their own: a
-  // link carries them, shown as a chip so the scoping is visible and one click
-  // removes it.
+  // Session, status code and endpoint have no select of their own: a link
+  // carries them, shown as a chip so the scoping is visible and one click
+  // removes it. The provider's select is in the Overview's filter bar.
   const sessionFilter = url.get("source_label")
   const statusCodeFilter = url.get("status_code")
   const endpointFilter = url.get("endpoint")
@@ -591,16 +591,6 @@ function ActivityPageContent({
             label: "Endpoint",
             value: endpointFilter,
             onClear: () => url.patch({ endpoint: "" }),
-          },
-        ]
-      : []),
-    ...(providerFilter
-      ? [
-          {
-            key: "provider",
-            label: "Provider",
-            value: providerFilter,
-            onClear: () => url.patch({ provider: "" }),
           },
         ]
       : []),

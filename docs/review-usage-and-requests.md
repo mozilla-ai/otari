@@ -56,8 +56,9 @@ to ask an owner or admin.
 Open **Sessions** and pick **Requests** for the per-request log. The two views
 share one time range and the model, user, API key and status filters, which
 stay in place when you switch views and are kept in the URL. **Status** narrows
-Requests, and Sessions for errors and successes. On Requests, dragging across
-the chart narrows the range. Both views show everyone's requests in the workspace; pick
+Requests, and Sessions for errors and successes. **Provider** narrows Requests
+only, so it stays behind when you switch to Sessions. On Requests, dragging
+across the chart narrows the range. Both views show everyone's requests in the workspace; pick
 yourself under **User** to see only yours.
 
 ## Find one request

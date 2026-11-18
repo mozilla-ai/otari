@@ -11,6 +11,7 @@ import { STATUS_OPTIONS } from "@/features/activity/activityModel"
 import { useMemberAttributionLabels } from "@/features/organization/attribution"
 import { userDisplay } from "@/features/users/userDisplay"
 import { useUsageSummary } from "@/shared/api/usage"
+import { providerDisplayName } from "@/shared/helpers/providers"
 import { findPreset, localMidnightIso } from "@/shared/helpers/timeRange"
 import { useUrlState } from "@/shared/helpers/urlState"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
@@ -25,6 +26,8 @@ import { useObserveScope } from "./useObserveScope"
 // The pickers read these two summaries. by_user and by_api_key carry each
 // entity's display name, so naming an option costs nothing beyond the breakdown.
 const MODEL_BREAKDOWN: SummaryDimension[] = ["model"]
+// Requests also offers a provider, read in the same pass as the models.
+const MODEL_AND_PROVIDER_BREAKDOWN: SummaryDimension[] = ["model", "provider"]
 const ENTITY_BREAKDOWNS: SummaryDimension[] = ["user", "api_key"]
 
 const URL_DEFAULTS = {
@@ -36,6 +39,7 @@ const URL_DEFAULTS = {
   model: "",
   user_id: "",
   api_key_id: "",
+  provider: "",
   page: "0",
 } as const
 
@@ -76,6 +80,10 @@ export function ObserveFilterBar({
   const { scope, userIds: users, isResolved, clearMine } = useObserveScope()
   const isMine = scope === "mine"
   const apiKeys = url.getAll("api_key_id")
+  // Only the request log can filter on a provider, so only it offers one, and
+  // a tab switch leaves it behind (it is not a shared key).
+  const offersProvider = view === "requests"
+  const provider = offersProvider ? url.get("provider") : ""
 
   const range = url.get("range")
   const startParam = url.get("start_date")
@@ -154,7 +162,7 @@ export function ObserveFilterBar({
   const modelSummary = useUsageSummary(
     modelFilters,
     "day",
-    MODEL_BREAKDOWN,
+    offersProvider ? MODEL_AND_PROVIDER_BREAKDOWN : MODEL_BREAKDOWN,
     usageAvailable && isResolved,
   )
   const entitySummary = useUsageSummary(
@@ -168,6 +176,17 @@ export function ObserveFilterBar({
     value: group.key as string,
     label: group.key as string,
   }))
+  const providerIds = realGroups(modelSummary.data?.by_provider).map(
+    (group) => group.key as string,
+  )
+  // A provider a link names keeps its own option, by name, even when the
+  // window holds none of its requests.
+  const providerOptions = [
+    { value: "", label: "Any provider" },
+    ...(provider && !providerIds.includes(provider) ? [provider] : [])
+      .concat(providerIds)
+      .map((id) => ({ value: id, label: providerDisplayName(id) })),
+  ]
   // Name first, id in parentheses: the id is what the filter submits, and two
   // people can share a name.
   const userOptions = realGroups(entitySummary.data?.by_user).map((group) => {
@@ -229,6 +248,16 @@ export function ObserveFilterBar({
     ...valueChips("key", "API key", "api_key_id", apiKeys, (value) =>
       labelFrom(keyOptions, value),
     ),
+    ...(provider
+      ? [
+          {
+            key: "provider",
+            label: "Provider",
+            value: providerDisplayName(provider),
+            onClear: () => patch({ provider: "" }),
+          },
+        ]
+      : []),
   ]
 
   return (
@@ -243,6 +272,7 @@ export function ObserveFilterBar({
             model: [],
             user_id: [],
             api_key_id: [],
+            ...(offersProvider ? { provider: "" } : {}),
           })
         }
       >
@@ -290,6 +320,14 @@ export function ObserveFilterBar({
           placeholder="Any model"
           options={modelOptions}
         />
+        {offersProvider ? (
+          <FilterSelect
+            label="Provider"
+            value={provider}
+            onChange={(value) => patch({ provider: value })}
+            options={providerOptions}
+          />
+        ) : null}
       </FilterChips>
     </div>
   )
