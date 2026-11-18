@@ -27,7 +27,7 @@ export function keepAttachableMcpIds(
 function attachableMcpIds(tools: PlaygroundTools): Set<string> {
   return new Set(
     tools.mcp_servers
-      // One the caller is no longer signed in to would refuse the message.
+      // One the caller is not signed in to would refuse the message.
       .filter((server) => server.enabled && !server.sign_in_required)
       .map((server) => server.id),
   )

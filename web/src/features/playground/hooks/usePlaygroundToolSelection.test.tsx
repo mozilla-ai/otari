@@ -214,7 +214,7 @@ describe("usePlaygroundToolSelection", () => {
     expect(result.current.selectedMcpIds).toEqual([])
   })
 
-  it("never sends an MCP server the latest read no longer offers, even before it reconciles", () => {
+  it("never sends an MCP server the latest read leaves out, even before it reconciles", () => {
     // Send can run on the render a refreshed read arrives in, before the
     // reconciliation effect commits, so every render's selection is checked.
     const sent: string[][] = []
