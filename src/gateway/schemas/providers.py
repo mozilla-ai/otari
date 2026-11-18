@@ -20,7 +20,7 @@ from pydantic import ValidationInfo, field_validator, model_validator
 from sqlmodel import Field, SQLModel
 
 from gateway.core.link_urls import normalize_link_url
-from gateway.core.settings.inference import country_codes
+from gateway.core.settings.inference import country_codes, data_location, data_locations
 from gateway.models.money import as_float
 from gateway.models.pricing import HostedPriceSource, ModelPricing, PriceSource
 from gateway.models.provider_keys import OrgProviderKey
@@ -412,6 +412,9 @@ class HostedProviderCreateRequest(SQLModel):
     whether or not something prices it. ``supported_countries`` keeps the
     provider to requests from those ISO country codes, checked as well as
     ``provider_supported_countries``; null serves every country.
+    ``data_location`` declares where the upstream keeps request data: an ISO
+    3166-1 alpha-2 country code, ``EU`` or ``GLOBAL``; null leaves it undeclared.
+    A workspace that lists the locations it accepts is served only from one of them.
     ``zero_data_retention`` declares that the upstream keeps no prompt or
     completion data; the catalog shows it and nothing enforces it.
     ``terms_url`` and ``privacy_url`` link the upstream's own terms of service
@@ -430,6 +433,7 @@ class HostedProviderCreateRequest(SQLModel):
     restricted_to_organization_id: uuid.UUID | None = None
     serves_unlisted_models: bool = False
     supported_countries: list[str] | None = Field(default=None, max_length=300)
+    data_location: str | None = Field(default=None, max_length=16)
     zero_data_retention: bool = False
     terms_url: str | None = Field(default=None, max_length=1024)
     privacy_url: str | None = Field(default=None, max_length=1024)
@@ -438,6 +442,11 @@ class HostedProviderCreateRequest(SQLModel):
     @classmethod
     def _country_codes(cls, value: list[str] | None) -> list[str] | None:
         return country_codes(value) if value is not None else None
+
+    @field_validator("data_location")
+    @classmethod
+    def _data_location(cls, value: str | None) -> str | None:
+        return data_location(value) if value is not None else None
 
     @field_validator("terms_url", "privacy_url")
     @classmethod
@@ -457,7 +466,7 @@ class HostedProviderUpdateRequest(SQLModel):
     null clears it, and an entry echoed back as the mask keeps the stored value.
     ``restricted_to_organization_id`` reads the same way: omitted keeps the
     restriction, null lifts it, and so does ``supported_countries``, where an
-    empty list closes the provider to every country. ``terms_url`` and
+    empty list closes the provider to every country, and ``data_location``. ``terms_url`` and
     ``privacy_url`` omitted are left alone; null or an empty string removes the link.
     """
 
@@ -471,6 +480,7 @@ class HostedProviderUpdateRequest(SQLModel):
     restricted_to_organization_id: uuid.UUID | None = None
     serves_unlisted_models: bool | None = None
     supported_countries: list[str] | None = Field(default=None, max_length=300)
+    data_location: str | None = Field(default=None, max_length=16)
     zero_data_retention: bool | None = None
     terms_url: str | None = Field(default=None, max_length=1024)
     privacy_url: str | None = Field(default=None, max_length=1024)
@@ -479,6 +489,11 @@ class HostedProviderUpdateRequest(SQLModel):
     @classmethod
     def _country_codes(cls, value: list[str] | None) -> list[str] | None:
         return country_codes(value) if value is not None else None
+
+    @field_validator("data_location")
+    @classmethod
+    def _data_location(cls, value: str | None) -> str | None:
+        return data_location(value) if value is not None else None
 
     @field_validator("terms_url", "privacy_url")
     @classmethod
@@ -498,6 +513,129 @@ class HostedProviderModelSummary(SQLModel):
     serving: int
     unpriced: int
     vendors_off: int
+
+
+class HostedProviderRegionCreateRequest(SQLModel):
+    """Add a region a hosted provider serves from.
+
+    Only what differs from the provider is given; every field left out is the
+    provider's. ``slug`` pins the region in a selector
+    (``<provider>@<slug>:<model>``) and names it in every route. ``api_key``
+    left out uses the provider's key, which a region on another origin than
+    the provider's endpoint may not: it needs a key of its own there.
+    ``client_args`` are merged over the provider's on the provider's origin, so
+    a Bedrock region gives its ``region_name`` alone; a region on another
+    origin takes its own alone. An ``api_base`` that carries a key must be https.
+    ``data_location`` declares where the region keeps request data. Left out, it
+    copies the provider's declaration as it stands; null declares nothing. It is
+    the region's own from then on: a later change to the provider's does not
+    move it.
+
+    A request is served by the first enabled region whose countries admit it
+    and whose data location the workspace accepts; a pinned region is held to
+    the same filters. A provider with no regions yet serves from its own connection. Adding its
+    first region keeps that connection as a region of its own, ahead of the new
+    one, under ``primary_slug`` and ``primary_label``: by default the
+    provider's data location, or ``primary``.
+    """
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "slug": "sg",
+                "label": "Southeast Asia",
+                "api_base": "https://tokenhub-intl.example.com/v1",
+                "api_key": "<the region's key>",
+                "data_location": "SG",
+            }
+        }
+    }
+
+    slug: str = Field(min_length=1, max_length=32)
+    label: str = Field(min_length=1, max_length=64)
+    api_key: str | None = Field(default=None, min_length=1, max_length=1024)
+    api_base: str | None = Field(default=None, max_length=1024)
+    client_args: dict[str, Any] | None = None
+    data_location: str | None = Field(default=None, max_length=16)
+    supported_countries: list[str] | None = Field(default=None, max_length=300)
+    enabled: bool = True
+    primary_slug: str | None = Field(default=None, min_length=1, max_length=32)
+    primary_label: str | None = Field(default=None, min_length=1, max_length=64)
+
+    @field_validator("supported_countries")
+    @classmethod
+    def _country_codes(cls, value: list[str] | None) -> list[str] | None:
+        return country_codes(value) if value is not None else None
+
+    @field_validator("data_location")
+    @classmethod
+    def _data_location(cls, value: str | None) -> str | None:
+        return data_location(value) if value is not None else None
+
+
+class HostedProviderRegionUpdateRequest(SQLModel):
+    """Change one region. A field left out is left alone.
+
+    Null puts a field the region inherits back on the provider's value:
+    ``api_key`` null returns the region to the provider's key, an empty
+    ``api_base`` or null to the provider's endpoint, and so on for
+    ``client_args`` and ``supported_countries``. ``data_location`` is the
+    region's own, so null declares nothing. Null on ``label``, ``enabled`` or
+    ``position`` changes nothing. ``client_args`` echoed
+    back with masked entries keeps the stored values. ``position`` moves the
+    region to that place in the order regions are tried, counted from 0.
+    """
+
+    model_config = {"json_schema_extra": {"example": {"enabled": False}}}
+
+    label: str | None = Field(default=None, min_length=1, max_length=64)
+    api_key: str | None = Field(default=None, min_length=1, max_length=1024)
+    api_base: str | None = Field(default=None, max_length=1024)
+    client_args: dict[str, Any] | None = None
+    data_location: str | None = Field(default=None, max_length=16)
+    supported_countries: list[str] | None = Field(default=None, max_length=300)
+    enabled: bool | None = None
+    position: int | None = Field(default=None, ge=0, le=1000)
+
+    @field_validator("supported_countries")
+    @classmethod
+    def _country_codes(cls, value: list[str] | None) -> list[str] | None:
+        return country_codes(value) if value is not None else None
+
+    @field_validator("data_location")
+    @classmethod
+    def _data_location(cls, value: str | None) -> str | None:
+        return data_location(value) if value is not None else None
+
+
+class HostedProviderRegionPublic(SQLModel):
+    """One region of a hosted provider, as stored: null wherever it uses the provider's value.
+
+    ``data_location`` is the exception: it is the region's own, and null there
+    means nothing is declared.
+
+    ``selector`` is what pins it in a request (``tokenhub@sg``). ``has_api_key``
+    is true for a region with a key of its own, known by its last four
+    characters; ``client_args`` holds only the region's own extras, masked as
+    the provider's are. ``decryptable`` is false for a region whose own key or
+    extras no configured ``OTARI_SECRET_KEY`` reads, which serves nothing until
+    re-entered.
+    """
+
+    slug: str
+    selector: str
+    label: str
+    position: int
+    enabled: bool
+    data_location: str | None = None
+    has_api_key: bool = False
+    api_key_last4: str | None = None
+    api_base: str | None = None
+    client_args: dict[str, Any] | None = None
+    supported_countries: list[str] | None = None
+    decryptable: bool = True
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class HostedProviderPublic(SQLModel):
@@ -523,7 +661,10 @@ class HostedProviderPublic(SQLModel):
     country. ``zero_data_retention`` is the operator's declaration that the
     upstream keeps no prompt or completion data. ``terms_url`` and
     ``privacy_url`` are the upstream's policies, null where none is linked.
-    ``models`` counts its offered models, on the list only.
+    ``data_location`` is where the upstream keeps request data, null where
+    nobody declared it. ``regions`` lists the regions it serves from, in the
+    order they are tried, and is empty for a provider that serves from its own
+    connection alone. ``models`` counts its offered models, on the list only.
     """
 
     id: uuid.UUID | None = None
@@ -539,10 +680,12 @@ class HostedProviderPublic(SQLModel):
     restricted_to_organization_id: uuid.UUID | None = None
     serves_unlisted_models: bool = False
     supported_countries: list[str] | None = None
+    data_location: str | None = None
     zero_data_retention: bool = False
     terms_url: str | None = None
     privacy_url: str | None = None
     shadows_config: bool = False
+    regions: list[HostedProviderRegionPublic] = Field(default_factory=list)
     models: HostedProviderModelSummary | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -578,6 +721,7 @@ class HostedProviderPublic(SQLModel):
             restricted_to_organization_id=row.restricted_to_organization_id,
             serves_unlisted_models=row.serves_unlisted_models,
             supported_countries=row.supported_countries,
+            data_location=row.data_location,
             zero_data_retention=row.zero_data_retention,
             terms_url=row.terms_url,
             privacy_url=row.privacy_url,
@@ -599,6 +743,7 @@ class HostedProviderPublic(SQLModel):
         enabled: bool,
         restricted_to_organization_id: uuid.UUID | None,
         supported_countries: list[str] | None = None,
+        data_location: str | None = None,
         zero_data_retention: bool = False,
         terms_url: str | None = None,
         privacy_url: str | None = None,
@@ -618,6 +763,7 @@ class HostedProviderPublic(SQLModel):
             enabled=enabled,
             restricted_to_organization_id=restricted_to_organization_id,
             supported_countries=supported_countries,
+            data_location=data_location,
             zero_data_retention=zero_data_retention,
             terms_url=terms_url,
             privacy_url=privacy_url,
@@ -851,7 +997,10 @@ class HostedModelPublic(SQLModel):
     ``vendor`` is who makes the model, ``Other`` when nothing names one.
     ``default_rates`` is what the default rung (models.dev, or the provider's
     own listing) would price a model an operator priced, where it prices it
-    and the two differ; None otherwise.
+    and the two differ; None otherwise. ``region_rates`` holds, by region slug,
+    the rates a region of the provider sets of its own (stored under
+    ``<provider>@<slug>:<model>`` through the pricing endpoint); a region
+    absent from it settles at the provider's rate.
     """
 
     id: uuid.UUID
@@ -865,6 +1014,7 @@ class HostedModelPublic(SQLModel):
     unit: str | None = None
     price_source: HostedPriceSource | None = None
     default_rates: HostedModelRates | None = None
+    region_rates: dict[str, HostedModelRates] = Field(default_factory=dict)
     vendor: str | None = None
     enabled: bool
     disabled_reason: HostedModelDisabledReason | None = None
@@ -880,6 +1030,7 @@ class HostedModelPublic(SQLModel):
         model_type: ModelType | None = None,
         vendor: str | None = None,
         default_rates: HostedModelRates | None = None,
+        region_rates: dict[str, HostedModelRates] | None = None,
     ) -> HostedModelPublic:
         """Read one offered row for the API, with whatever currently prices it."""
         return cls(
@@ -889,6 +1040,7 @@ class HostedModelPublic(SQLModel):
             type=model_type,
             vendor=vendor,
             default_rates=default_rates,
+            region_rates=region_rates or {},
             input_price_per_million=rates.input_price_per_million if rates else None,
             output_price_per_million=rates.output_price_per_million if rates else None,
             cache_read_price_per_million=rates.cache_read_price_per_million if rates else None,
@@ -1196,6 +1348,14 @@ class WorkspaceHostedProviderPublic(SQLModel):
     zero_data_retention: bool = Field(
         default=False, description="Whether the deployment declares this provider keeps no prompt or completion data."
     )
+    data_locations: list[str | None] = Field(
+        default_factory=list,
+        description=(
+            "Where each region the provider serves from declares it keeps request data (one entry for a provider "
+            "with no regions), null where nothing is declared. A workspace listing allowed data locations is "
+            "refused the provider when none of these is on its list."
+        ),
+    )
 
 
 class WorkspaceHostedProvidersPublic(SQLModel):
@@ -1205,16 +1365,34 @@ class WorkspaceHostedProvidersPublic(SQLModel):
 class WorkspaceProviderPolicyRequest(SQLModel):
     """What one workspace requires of every provider serving it."""
 
-    require_zero_data_retention: bool = Field(
+    require_zero_data_retention: bool | None = Field(
+        default=None,
         description=(
             "Refuse every provider not declared zero data retention: an organization key or a hosted provider "
-            "nobody declared, and every provider configured in config.yml or endpoint the workspace owns."
-        )
+            "nobody declared, and every provider configured in config.yml or endpoint the workspace owns. "
+            "Omitted keeps the stored setting."
+        ),
     )
+
+    allowed_data_locations: list[str] | None = Field(
+        default=None,
+        description=(
+            "The data locations a hosted provider region must declare to serve the workspace: ISO 3166-1 alpha-2 "
+            "country codes, EU (which also admits each member state) or GLOBAL. Null accepts any location, and "
+            "omitting the field keeps the stored list. A region whose location nobody declared never matches a list."
+        ),
+        max_length=300,
+    )
+
+    @field_validator("allowed_data_locations")
+    @classmethod
+    def _data_locations(cls, value: list[str] | None) -> list[str] | None:
+        return data_locations(value) if value is not None else None
 
 
 class WorkspaceProviderPolicyPublic(SQLModel):
     require_zero_data_retention: bool
+    allowed_data_locations: list[str] | None = None
 
 
 __all__ = [
@@ -1235,6 +1413,9 @@ __all__ = [
     "HostedModelsRefreshPublic",
     "HostedProviderCreateRequest",
     "HostedProviderPublic",
+    "HostedProviderRegionCreateRequest",
+    "HostedProviderRegionPublic",
+    "HostedProviderRegionUpdateRequest",
     "HostedProviderTestPublic",
     "HostedProviderTestRequest",
     "HostedProviderUpdateRequest",

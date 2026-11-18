@@ -48,6 +48,11 @@ import { useDeployment } from "@/shared/hooks/useDeployment"
 import { AddHostedProviderForm } from "./AddHostedProviderForm"
 import { DeploymentProviderMigration } from "./DeploymentProviderMigration"
 import {
+  dataLocationLabel,
+  providerDataLocations,
+  servingRegions,
+} from "./dataLocations"
+import {
   catalogPreviewOutcome,
   catalogRefreshFailures,
   catalogRefreshOutcome,
@@ -253,6 +258,31 @@ function ModelsSummaryCell({
   )
 }
 
+/**
+ * How many regions a provider serves from, where it has several, and every
+ * place they keep data, each region's own. A switched-off region serves
+ * nothing, so it counts toward neither. Nothing declared says so, since a
+ * workspace limited to certain locations refuses such a provider.
+ */
+function DataLocationBadges({ provider }: { provider: HostedProvider }) {
+  const regionCount = servingRegions(provider).length
+  const locations = providerDataLocations(provider)
+  const names = [
+    ...locations.filter((location) => location !== null).map(dataLocationLabel),
+    ...(locations.includes(null) ? ["not declared"] : []),
+  ]
+  return (
+    <>
+      {regionCount >= 2 ? (
+        <Badge tone="muted">{`${regionCount} regions`}</Badge>
+      ) : null}
+      {names.length > 0 ? (
+        <Badge tone="muted">{`Data: ${names.join(", ")}`}</Badge>
+      ) : null}
+    </>
+  )
+}
+
 export function HostedProvidersPage() {
   const access = useDeploymentAdminAccess()
   // Withheld until the gate answers, so a non-operator load does not put a 404
@@ -390,6 +420,7 @@ export function HostedProvidersPage() {
           {row.zero_data_retention ? (
             <Badge tone="muted">Zero data retention</Badge>
           ) : null}
+          <DataLocationBadges provider={row} />
           {row.decryptable ? null : <Badge tone="warn">Key unreadable</Badge>}
         </span>
       ),

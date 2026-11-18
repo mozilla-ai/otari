@@ -1,5 +1,6 @@
 """The hosted name index keeps a write this worker made while a refresh was reading."""
 
+import uuid
 from collections.abc import Iterator
 from typing import Any
 
@@ -11,9 +12,11 @@ from gateway.services.providers import _hosted_name_index as index
 
 class _Row:
     def __init__(self, name: str, provider: str) -> None:
+        self.id = uuid.uuid4()
         self.name = name
         self.provider = provider
         self.zero_data_retention = False
+        self.data_location = None
 
 
 class _Uow:
@@ -24,8 +27,17 @@ class _Uow:
         return None
 
 
+class _NoRegions:
+    def __init__(self, _uow: object) -> None:
+        pass
+
+    async def list_for_providers(self, _ids: object) -> dict[uuid.UUID, list[object]]:
+        return {}
+
+
 @pytest.fixture(autouse=True)
-def _clean_index() -> Iterator[None]:
+def _clean_index(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    monkeypatch.setattr(index, "HostedProviderRegionRepository", _NoRegions)
     index.reset_hosted_name_index()
     yield
     index.reset_hosted_name_index()

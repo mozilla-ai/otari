@@ -343,6 +343,7 @@ from gateway.services.provider_kwargs import (
 from gateway.services.providers import (
     CountryGate,
     CountryNotServedError,
+    HostedRegionIndex,
     UnknownHostedUpstreamError,
     dispatch_on_hosted_credential,
     ensure_hosted_country,
@@ -1748,7 +1749,7 @@ async def _serve_from_hosted_credential(
     if credential is None or not lookup.accepts(credential.response_provider, resolved.instance):
         raise await _provider_not_configured(ctx, resolved, missing, adapter=adapter)
     try:
-        ensure_hosted_country(ctx.country_gate, credential.supported_countries)
+        credential = ensure_hosted_country(ctx.country_gate, credential)
     except CountryNotServedError as exc:
         detail = exc.gate.refusal_detail(resolved.alias or f"{resolved.instance}:{resolved.model}")
         await release_reservation(ctx)
@@ -1945,6 +1946,8 @@ async def move_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) ->
             price_of=_request_price_of(
                 ctx.db, ctx.prices if ctx.prices is not None else get_request_prices(ctx.db, ctx.organization_id)
             ),
+            # A region is held to its provider's ceilings, as the reservation was.
+            ceiling_instance=HostedRegionIndex.parent_of(attempt.instance),
         )
     except ProviderSpendCeilingExceededError as exc:
         raise CandidateCannotServe(spend_ceiling_refusal(exc)) from exc
@@ -2935,7 +2938,12 @@ async def resolve_request_context(
                     strategy=config.budget_strategy,
                     counts_toward_budget=not budget_exempt,
                     scope=BudgetScopeRequest(
-                        api_key=api_key, provider_instance=gate_instance, workspace_id=workspace_id
+                        api_key=api_key,
+                        # A pinned region is held to its provider's ceilings.
+                        provider_instance=HostedRegionIndex.parent_of(gate_instance) or gate_instance
+                        if gate_instance is not None
+                        else None,
+                        workspace_id=workspace_id,
                     ),
                     organization_id=organization_id,
                     # A free row whose rules price this request is held to the dollar budget.
@@ -3103,10 +3111,12 @@ async def resolve_request_context(
                 provider=gate_instance,
                 model=gate_model,
             )
-            if hosted is None or hosted.api_key is None:
+            if hosted is None:
                 return None
             # Before an attachment is uploaded on it, as dispatch would refuse it after.
-            ensure_hosted_country(country_gate, hosted.supported_countries)
+            hosted = ensure_hosted_country(country_gate, hosted)
+            if hosted.api_key is None:
+                return None
             return ResolvedCredential(
                 api_key=hosted.api_key, api_base=hosted.api_base, client_args=dict(hosted.client_args or {})
             )

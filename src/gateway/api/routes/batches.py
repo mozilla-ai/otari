@@ -82,11 +82,13 @@ from gateway.services.pricing import PriceFacts, apply_rules
 from gateway.services.pricing_service import find_model_pricing
 from gateway.services.provider_kwargs import (
     MissingCredential,
+    ResolvedProvider,
     require_declared_credential,
     resolve_provider_selector,
 )
 from gateway.services.providers import (
     CountryNotServedError,
+    HostedRegionIndex,
     ensure_provider_country,
     serve_on_hosted_provider,
 )
@@ -143,6 +145,11 @@ class CreateBatchRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def _served_location(resolved: ResolvedProvider) -> str | None:
+    """Where the hosted credential serving ``resolved`` declared it keeps data, or None off the deployment's own."""
+    return HostedRegionIndex.data_location_of(resolved.instance) if resolved.deployment_paid else None
+
+
 async def log_batch_usage(
     db: AsyncSession,
     api_key_id: str | None,
@@ -162,8 +169,12 @@ async def log_batch_usage(
     counts_toward_budget: bool = True,
     workspace_id: uuid.UUID | None = None,
     deployment_paid: bool = False,
+    data_location: str | None = None,
 ) -> UsageLog:
     """Log batch API usage, including token counts and cost when derivable.
+
+    ``data_location`` is what the batch recorded at submission, never a later
+    declaration: a batch without one records none.
 
     ``workspace_id`` overrides the workspace derived from ``api_key_id``. A batch
     is retrieved by a key that need not be the one that created it, and the
@@ -195,6 +206,7 @@ async def log_batch_usage(
         status_code=status_code,
         counts_toward_budget=counts_toward_budget,
         deployment_paid=deployment_paid,
+        data_location=data_location,
     )
     return usage_log
 
@@ -543,6 +555,8 @@ async def create_batch(
                 error=str(e),
                 status_code=UpstreamFailure(e).logged_status,
                 counts_toward_budget=not budget_exempt,
+                deployment_paid=resolved.deployment_paid,
+                data_location=_served_location(resolved),
             )
         )
         await refund_reservation(db, reservation)
@@ -554,6 +568,9 @@ async def create_batch(
         except OSError:
             logger.warning("Failed to remove temp file %s", tmp_path)
 
+    # Read once, as the credential that took the batch declared it, for the
+    # submission's row now and the result rows the record keeps it for.
+    served_location = _served_location(resolved)
     await log_writer.put(
         await log_batch_usage(
             db=db,
@@ -566,6 +583,8 @@ async def create_batch(
             completion_tokens=0,
             total_tokens=0,
             counts_toward_budget=not budget_exempt,
+            deployment_paid=resolved.deployment_paid,
+            data_location=served_location,
         )
     )
     await reconcile_reservation(db, reservation, 0.0)
@@ -582,6 +601,7 @@ async def create_batch(
         api_key_id=api_key_id,
         model=model,
         workspace_id=workspace_id,
+        data_location=served_location,
     )
 
     if rate_limit_info:
@@ -946,6 +966,7 @@ async def retrieve_batch_results(
                         counts_toward_budget=not batch_exempt,
                         workspace_id=origin_workspace_id,
                         deployment_paid=deployment_paid,
+                        data_location=record.data_location if record is not None else None,
                     )
                 )
         else:
@@ -967,6 +988,7 @@ async def retrieve_batch_results(
                     counts_toward_budget=not batch_exempt,
                     workspace_id=origin_workspace_id,
                     deployment_paid=deployment_paid,
+                    data_location=record.data_location if record is not None else None,
                 )
             )
         charge = None

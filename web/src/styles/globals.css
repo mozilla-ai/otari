@@ -3137,6 +3137,18 @@ body {
   width: 6.25rem;
   min-width: 6.25rem;
 }
+/* A column per region beside the provider's price. Narrow, with its header
+   free to wrap (a region is named "Southeast Asia"), and a narrower model
+   column, so three regions still fit a desktop row without scrolling. */
+.otari-offered-models-table--regions .table__column[data-key="model"] {
+  min-width: 12rem;
+}
+.otari-offered-models-table .table__column[data-key^="region:"] {
+  width: 6.5rem;
+  min-width: 6.5rem;
+  white-space: normal;
+  text-align: end;
+}
 .otari-members-table .table__row .table__cell {
   height: 3.625rem;
   padding-block: 0;
