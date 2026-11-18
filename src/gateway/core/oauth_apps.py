@@ -35,6 +35,18 @@ def parse_oauth_redirect(value: str) -> SplitResult | None:
     return parsed
 
 
+def open_app_site(client_id: str, redirect_uri: str) -> str | None:
+    """The site an unregistered app is, when its client ID is its callback's origin.
+
+    The origin is compared as a browser writes ``location.origin``, so a client ID that
+    differs from it in case or in a spelled-out default port is refused, not normalized.
+    """
+    parsed = parse_oauth_redirect(redirect_uri)
+    if parsed is None or client_id != f"{parsed.scheme}://{parsed.netloc}":
+        return None
+    return parsed.netloc
+
+
 def redirect_matches(registered: str, requested: str) -> bool:
     """RFC 8252 loopback callbacks may choose a free port; every other component is exact."""
     expected, actual = parse_oauth_redirect(registered), parse_oauth_redirect(requested)

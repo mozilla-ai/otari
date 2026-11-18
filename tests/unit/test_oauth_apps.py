@@ -6,7 +6,7 @@ import pytest
 from apron_auth.pkce import generate_code_challenge as pkce_challenge
 from pydantic import ValidationError
 
-from gateway.core.oauth_apps import redirect_matches
+from gateway.core.oauth_apps import open_app_site, redirect_matches
 from gateway.core.settings.identity import IdentitySettings, OAuthAppConfig
 from gateway.schemas.identity import AppAuthorizationRequest
 from gateway.schemas.identity.oauth_apps import AppAuthorizationParameters, AppTokenRequest
@@ -157,3 +157,33 @@ def test_an_app_key_gets_the_default_scopes_unless_its_registration_names_its_ow
 def test_an_app_registration_refuses_scopes_an_app_key_cannot_hold(scopes: list[str]) -> None:
     with pytest.raises(ValidationError):
         OAuthAppConfig.model_validate({"name": "App", "redirect_uris": ["https://app.example/cb"], "scopes": scopes})
+
+
+@pytest.mark.parametrize(
+    "client_id,redirect_uri,site",
+    [
+        ("https://someone.github.io", "https://someone.github.io/pizza/", "someone.github.io"),
+        ("https://shop.example:8443", "https://shop.example:8443/", "shop.example:8443"),
+        ("http://localhost:8080", "http://localhost:8080/", "localhost:8080"),
+        ("http://127.0.0.1:8080", "http://127.0.0.1:8080/index.html", "127.0.0.1:8080"),
+    ],
+)
+def test_an_open_app_is_the_site_its_callback_is_on(client_id: str, redirect_uri: str, site: str) -> None:
+    assert open_app_site(client_id, redirect_uri) == site
+
+
+@pytest.mark.parametrize(
+    "client_id,redirect_uri",
+    [
+        ("https://someone.github.io", "https://other.github.io/"),
+        ("https://someone.github.io/", "https://someone.github.io/"),
+        ("https://SOMEONE.github.io", "https://someone.github.io/"),
+        ("https://someone.github.io:443", "https://someone.github.io/"),
+        ("http://someone.example", "http://someone.example/"),
+        ("http://localhost:8080", "http://localhost:9090/"),
+        ("https://someone.github.io", "https://someone.github.io/?next=/"),
+        ("thunderbolt", "https://app.thunderbolt.io/oauth/callback"),
+    ],
+)
+def test_an_open_app_client_id_must_be_its_callbacks_origin(client_id: str, redirect_uri: str) -> None:
+    assert open_app_site(client_id, redirect_uri) is None

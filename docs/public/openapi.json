@@ -2182,13 +2182,19 @@
             },
             "title": "Scopes",
             "type": "array"
+          },
+          "verified": {
+            "description": "Whether the operator registered this app. An unregistered app is named after its site, which nothing has checked beyond its callback being on it.",
+            "title": "Verified",
+            "type": "boolean"
           }
         },
         "required": [
           "name",
           "redirect_uri",
           "issuer",
-          "scopes"
+          "scopes",
+          "verified"
         ],
         "title": "AppDetails",
         "type": "object"

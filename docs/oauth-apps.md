@@ -25,11 +25,32 @@ names none, so an app calls models and tools and nothing else unless you say so.
 service key, so it cannot hold the `end-users` scopes.
 
 Restart the gateway after changing registration. Empty `oauth_apps` disables
-these endpoints. Removing a registration prevents new approvals and exchanges;
+these endpoints unless `oauth_open_apps` is on. Removing a registration prevents new approvals and exchanges;
 revoke already-issued keys on the API keys page. HTTPS redirects match exactly. HTTP is allowed only for
 loopback hosts; a native app may choose a different port on the registered
 loopback host and path, as RFC 8252 requires. Wildcards, query strings, fragments
 and embedded credentials are not accepted in registrations.
+
+## Let unregistered apps connect
+
+Set `oauth_open_apps: true` to let any site connect without a registration, so
+a static site or a local prototype can offer a sign-in button without asking
+you first. An unregistered app sends its callback's origin as `client_id`,
+written as a browser writes `location.origin`: `https://someone.github.io`, or
+`http://localhost:8080` for loopback. Any path on that origin is accepted as
+`redirect_uri`, and nothing off it. HTTP is again allowed only for loopback
+hosts, and an origin longer than 128 characters cannot be a client ID.
+
+The consent screen names the site and says Otari has not verified it. The key
+holds the [default scopes](api-keys.md#scopes) and appears on the API keys page
+as `<site> (OAuth)`, for example `someone.github.io (OAuth)`. A registered
+client ID keeps its own registration, so turning this on changes nothing for
+registered apps. The rest of the flow is the same as for a registered app.
+
+Any site can then ask your users for a key, and a careless approval hands one to
+a site they should not trust. The key is still bound by the person's budgets and
+workspace access, and they can revoke it on the API keys page. Leave this off
+unless your users are expected to connect apps you have not reviewed.
 
 ## Authorize
 

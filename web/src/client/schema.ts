@@ -10378,6 +10378,11 @@ export interface components {
              * @description The scopes each key this app is issued will hold, from its registration.
              */
             scopes: components["schemas"]["KeyScope"][];
+            /**
+             * Verified
+             * @description Whether the operator registered this app. An unregistered app is named after its site, which nothing has checked beyond its callback being on it.
+             */
+            verified: boolean;
         };
         /** AppRevocationRequest */
         AppRevocationRequest: {

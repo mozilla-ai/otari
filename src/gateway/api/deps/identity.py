@@ -220,6 +220,7 @@ def get_oauth_app_service(
         organizations,
         workspaces,
         apps=config.oauth_apps,
+        open_apps=config.oauth_open_apps,
         ui_link=config.ui_link,
         issuer=_oauth_app_issuer(request, config),
     )

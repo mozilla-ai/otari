@@ -28,6 +28,10 @@ const request = new URLSearchParams({
 function renderPage(
   workspaces = [{ id: "workspace-one", name: "Personal" }],
   appError?: Error,
+  app: { name: string; verified: boolean } = {
+    name: "Thunderbolt",
+    verified: true,
+  },
 ) {
   vi.mocked(apiFetch).mockImplementation(async (path) => {
     if (appError) throw appError
@@ -39,7 +43,7 @@ function renderPage(
           "http://localhost:5199/oauth/otari?code=grant&state=state-nonce",
       }
     return {
-      name: "Thunderbolt",
+      ...app,
       issuer: "https://auth.otari.example",
       scopes: ["inference:run"],
       redirect_uri: "http://localhost:5199/oauth/otari",
@@ -105,6 +109,27 @@ it("shows the app, permission boundaries and the sole workspace before explicit 
     workspace_id: "workspace-one",
     scopes: ["inference:run"],
   })
+})
+
+it("warns that a site connecting without registration is unverified", async () => {
+  renderPage(undefined, undefined, {
+    name: "someone.github.io",
+    verified: false,
+  })
+  expect(
+    await screen.findByRole("heading", {
+      name: "Connect to someone.github.io",
+    }),
+  ).toBeVisible()
+  expect(
+    await screen.findByText(/Otari has not verified this site/),
+  ).toBeVisible()
+})
+
+it("does not warn about a registered app", async () => {
+  renderPage()
+  await screen.findByText("Personal")
+  expect(screen.queryByText(/Otari has not verified/)).toBeNull()
 })
 
 it("requires a workspace choice when more than one is available", async () => {

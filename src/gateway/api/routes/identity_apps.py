@@ -166,6 +166,6 @@ async def revoke(body: Annotated[AppRevocationRequest, Form()], service: OAuthAp
 FEATURE = CoreFeature(
     name="oauth_apps",
     surface=None,
-    enabled=lambda config: bool(config.oauth_apps),
+    enabled=lambda config: bool(config.oauth_apps) or config.oauth_open_apps,
     routers=lambda config: (router, public_router),
 )

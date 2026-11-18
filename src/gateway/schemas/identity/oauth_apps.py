@@ -45,6 +45,10 @@ class AppDetails(BaseModel):
     scopes: list[KeyScope] = Field(
         description="The scopes each key this app is issued will hold, from its registration."
     )
+    verified: bool = Field(
+        description="Whether the operator registered this app. An unregistered app is named after "
+        "its site, which nothing has checked beyond its callback being on it."
+    )
 
 
 class AppAuthorizationResponse(BaseModel):

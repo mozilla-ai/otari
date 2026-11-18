@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 
 from apron_auth.pkce import generate_code_challenge
 
-from gateway.core.oauth_apps import redirect_matches
+from gateway.core.oauth_apps import open_app_site, redirect_matches
 from gateway.core.settings.identity import OAuthAppConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.api_keys_exceptions import AppKeyOwnerInactiveError
@@ -41,6 +41,7 @@ class OAuthAppService:
         workspaces: WorkspaceService,
         *,
         apps: Mapping[str, OAuthAppConfig],
+        open_apps: bool = False,
         ui_link: Callable[[str], str],
         issuer: str,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
@@ -48,31 +49,37 @@ class OAuthAppService:
         self.uow, self.grants, self.keys = uow, grants, keys
         self.key_format = key_format
         self.organizations, self.workspaces = organizations, workspaces
-        self.apps, self.ui_link, self.issuer, self.clock = apps, ui_link, issuer, clock
+        self.apps, self.open_apps = apps, open_apps
+        self.ui_link, self.issuer, self.clock = ui_link, issuer, clock
 
-    def require_registered_redirect(self, client_id: str, redirect_uri: str) -> None:
-        """Only an explicitly registered callback may receive an authorization code."""
+    def require_app(self, client_id: str, redirect_uri: str) -> OAuthAppConfig:
+        """The app an authorization code may be delivered to at this callback.
+
+        A registered client ID admits only its registered callbacks. With open apps on, any
+        other client ID is admitted when it is its callback's origin, and the app is that site.
+        """
         app = self.apps.get(client_id)
-        if app is None or not any(redirect_matches(uri, redirect_uri) for uri in app.redirect_uris):
-            raise OAuthAppGrantError("invalid_request", "Unknown app or redirect URI")
-
-    def _app_name(self, client_id: str) -> str:
-        """The operator's display name for a client ``require_registered_redirect`` has admitted."""
-        return self.apps[client_id].name
+        if app is not None:
+            if any(redirect_matches(uri, redirect_uri) for uri in app.redirect_uris):
+                return app
+        elif self.open_apps and (site := open_app_site(client_id, redirect_uri)) is not None:
+            return OAuthAppConfig(name=site, redirect_uris=[redirect_uri])
+        raise OAuthAppGrantError("invalid_request", "Unknown app or redirect URI")
 
     def details(self, client_id: str, redirect_uri: str) -> AppDetails:
         """What the consent screen shows: the app, where it returns, and what its keys will hold."""
-        self.require_registered_redirect(client_id, redirect_uri)
+        app = self.require_app(client_id, redirect_uri)
         return AppDetails(
-            name=self._app_name(client_id),
+            name=app.name,
             redirect_uri=redirect_uri,
             issuer=self.issuer,
-            scopes=self.apps[client_id].scopes,
+            scopes=app.scopes,
+            verified=client_id in self.apps,
         )
 
     def authorization_url(self, request: AppAuthorizationParameters) -> str:
         """Continue through the dashboard's existing sign-in and consent gate."""
-        self.require_registered_redirect(request.client_id, request.redirect_uri)
+        self.require_app(request.client_id, request.redirect_uri)
         return self.ui_link("/oauth/authorize?" + urlencode(request.model_dump()))
 
     async def authorize(self, user: User, request: AppAuthorizationRequest) -> str:
@@ -81,8 +88,8 @@ class OAuthAppService:
         Raises:
             OAuthAppGrantError: the registration and the screen share no scope.
         """
-        self.require_registered_redirect(request.client_id, request.redirect_uri)
-        registered = KeyScopeSet.checked(self.apps[request.client_id].scopes, is_service_key=False)
+        app = self.require_app(request.client_id, request.redirect_uri)
+        registered = KeyScopeSet.checked(app.scopes, is_service_key=False)
         approved = registered & request.scopes
         if not approved:
             raise OAuthAppGrantError("invalid_scope", "The app's access changed while you were approving it")
@@ -123,20 +130,22 @@ class OAuthAppService:
             The key and the scopes it holds, which the token response names because they can be
             fewer than the app's registration.
         """
-        if request.client_id not in self.apps:
-            # An unregistered client_id is whatever an unauthenticated caller sent, line breaks and
-            # Rich markup included, so it never reaches the log.
+        if request.client_id not in self.apps and not (
+            self.open_apps and open_app_site(request.client_id, request.redirect_uri)
+        ):
+            # Any other client_id is whatever an unauthenticated caller sent, line breaks and Rich
+            # markup included, so it never reaches the log. An open app's is a validated origin.
             logger.warning("OAuth app exchange refused: reason=unknown_client")
             raise OAuthAppGrantError("invalid_client", "Unknown app")
         try:
-            self.require_registered_redirect(request.client_id, request.redirect_uri)
-            return await self._exchange(request)
+            app = self.require_app(request.client_id, request.redirect_uri)
+            return await self._exchange(request, app.name)
         except (OAuthAppGrantError, NotAuthorizedError, WorkspaceNotFoundError, AppKeyOwnerInactiveError) as exc:
             # Refusals contain no request credentials. Unexpected failures must remain server errors.
             logger.warning("OAuth app exchange refused: client_id=%s reason=%s", request.client_id, str(exc))
             raise OAuthAppGrantError("invalid_grant", "Invalid or expired authorization grant") from None
 
-    async def _exchange(self, request: AppTokenRequest) -> tuple[str, KeyScopeSet]:
+    async def _exchange(self, request: AppTokenRequest, app_name: str) -> tuple[str, KeyScopeSet]:
         now = self.clock()
         async with self.uow:
             grant = await self.grants.find_bound(
@@ -162,7 +171,7 @@ class OAuthAppService:
                 user=user,
                 workspace_id=grant.workspace_id,
                 client_id=request.client_id,
-                app_name=self._app_name(request.client_id),
+                app_name=app_name,
                 scopes=held,
                 key_format=self.key_format,
             )

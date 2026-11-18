@@ -3,6 +3,7 @@ import { FiArrowRight, FiCheck, FiCpu, FiGrid, FiShield } from "react-icons/fi"
 import type { Workspace } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { ComboBoxField } from "@/design-system/forms/ComboBoxField"
 import { ProductMark } from "@/design-system/ProductMark"
@@ -94,6 +95,12 @@ export function AppAuthorizationPage() {
       {loading && <PageLoading label="Loading connection details…" />}
       {app.data && !app.error && !loading && (
         <>
+          {!app.data.verified && (
+            <InfoBanner tone="warning">
+              Otari has not verified this site. Allow access only if you trust{" "}
+              <span className="text-mono-caption">{app.data.name}</span>.
+            </InfoBanner>
+          )}
           <div className="flex flex-col gap-4 border-y border-border py-5">
             <h2 className="text-overline">What you’re allowing</h2>
             <div className="flex items-start gap-3">
