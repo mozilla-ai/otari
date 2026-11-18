@@ -3,6 +3,7 @@ import { screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type {
+  ApiKey,
   OrganizationMember,
   UsageEntry,
   UsageSummary,
@@ -70,13 +71,13 @@ const WEEKLY = workspaceBudgetDefault({
   reset_alignment: "calendar_week",
 })
 
-function summary(start: string, cost: number): UsageSummary {
+function summary(start: string, cost: number, requestCount = 1): UsageSummary {
   return {
     // As the server writes it back, not as it was asked.
     start_date: new Date(start).toISOString().replace(".000Z", "+00:00"),
     end_date: new Date().toISOString(),
     bucket: "day",
-    totals: usageTotals({ cost, request_count: 1 }),
+    totals: usageTotals({ cost, request_count: requestCount }),
     series: [],
     by_api_key: [],
     by_endpoint: [],
@@ -110,6 +111,9 @@ async function renderMemberHome({
   defaults = [WEEKLY],
   refusalMessage = "Member has $0.01 of budget remaining, less than this request's estimated cost",
   hasTraces = false,
+  keys = [LAPTOP],
+  requestCount = 1,
+  sessionCount = 3,
 }: {
   windowCost: number
   periodCost: number
@@ -118,6 +122,10 @@ async function renderMemberHome({
   refusalMessage?: string
   /** Whether the deployment captures sessions, as its bootstrap says. */
   hasTraces?: boolean
+  keys?: ApiKey[]
+  /** The member's requests in every summary read. */
+  requestCount?: number
+  sessionCount?: number
 }) {
   const refusal: Partial<UsageEntry> = {
     id: "r-1",
@@ -136,18 +144,18 @@ async function renderMemberHome({
       case `/workspaces/${PLATFORM}/member-budget-policies`:
         return Response.json({ data: defaults, count: defaults.length })
       case "/organizations/me/keys":
-        return Response.json([LAPTOP])
+        return Response.json(keys)
       case "/organizations/me/usage":
         return Response.json([refusal])
       case "/organizations/me/traces/count":
-        return Response.json({ count: 3 })
+        return Response.json({ count: sessionCount })
       case "/organizations/me/usage/summary": {
         const start = query.get("start_date") ?? ""
         const isWindow =
           query.has("end_date") ||
           query.getAll("dimensions").some((one) => one !== "none")
         return Response.json({
-          ...summary(start, isWindow ? windowCost : periodCost),
+          ...summary(start, isWindow ? windowCost : periodCost, requestCount),
           by_api_key: [
             {
               key: LAPTOP.id,
@@ -294,5 +302,44 @@ describe("MemberHome, sessions", () => {
       await findRowMenuItem(user, /See its sessions/, table),
     ).not.toBeNull()
     expect(screen.queryByText("Failures")).toBeNull()
+  })
+})
+
+describe("MemberHome, a first run", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  // The band in either form: a first key for who may make one, what a viewer
+  // may do instead. This harness's caller has no workspace selected, so the second.
+  const FIRST_RUN = /through Platform/
+
+  it("opens on it with no key and no requests where the deployment records no sessions", async () => {
+    await renderMemberHome({
+      windowCost: 0,
+      periodCost: 0,
+      keys: [],
+      requestCount: 0,
+    })
+    expect(await screen.findByText(FIRST_RUN)).toBeVisible()
+  })
+
+  it("does not open on it once a request has run, sessions or not", async () => {
+    await renderMemberHome({ windowCost: 2, periodCost: 2, keys: [] })
+    expect(await screen.findByText("1 requests")).toBeVisible()
+    expect(screen.queryByText(FIRST_RUN)).toBeNull()
+  })
+
+  it("opens on it with no key and no sessions where the deployment records them", async () => {
+    await renderMemberHome({
+      windowCost: 0,
+      periodCost: 0,
+      keys: [],
+      requestCount: 0,
+      sessionCount: 0,
+      hasTraces: true,
+    })
+    expect(await screen.findByText(FIRST_RUN)).toBeVisible()
   })
 })
