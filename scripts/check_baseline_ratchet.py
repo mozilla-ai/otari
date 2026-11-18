@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Check that a change gives no baseline of the architecture check back room it had given up.
 
-Every ``*_BASELINE`` in the architecture check records debt the repository has
-already taken on, and each one only shrinks. The check itself proves the code
-agrees with the number in front of it, so a change that moves a builder and the
-number together passes. This reads the two revisions instead, and fails when the
-later one records more room than the earlier one.
+Every baseline in the architecture check records debt the repository has already
+taken on, and each one only shrinks. The check itself proves the code agrees with
+the number in front of it, so a change that adds a builder and raises the number
+together passes. This reads the two revisions instead, and fails when the later
+one records more room than the earlier one.
 
 A baseline that is new passes, because that is how a rule arrives with the debt
-it found. A baseline that is gone passes only once it is empty, because a rule
-is retired after its debt is paid rather than before.
+it found. A baseline that is gone passes only once it is empty, because a rule is
+retired after its debt is paid rather than before. A baseline whose room cannot
+be read fails either way, because a comparison that proves nothing is not a pass.
 
 NOTE: This takes two files and reads neither repository. The caller decides which
 revision is which, so the same command serves a pull request and a local branch.
@@ -21,29 +22,65 @@ from __future__ import annotations
 import argparse
 import ast
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 
 BASELINE_SUFFIX = "_BASELINE"
+BASELINE_KEY = "baseline"
 
 _ONLY_FALLS = "a baseline records room already given up, so it may only fall"
 _ONLY_LOSES = "a baseline records room already given up, so it may only lose entries"
 
 
-class _NotWrittenOut:
-    """A baseline whose value is not written out, so it cannot be read without running the check."""
+class Unreadable:
+    """A baseline whose recorded room cannot be read from the source alone."""
+
+    def __init__(self, why: str) -> None:
+        self.why = why
 
 
-NOT_WRITTEN_OUT = _NotWrittenOut()
+_NOT_A_LITERAL = "is not written out in full"
+_WRITTEN_AGAIN = "is written at module scope more than once, so the last value decides"
+_UNSUPPORTED = "records a kind of value this check does not read"
 
 
-def baselines(source: str) -> dict[str, object]:
-    """Return the value each baseline of one revision of the check is written out as, by name.
+def _module_scope_statements(body: Sequence[ast.stmt]) -> Iterator[ast.stmt]:
+    """Yield each statement that runs at module scope, descending through control flow but not into a new scope."""
+    for node in body:
+        yield node
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            continue
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ExceptHandler | ast.match_case):
+                yield from _module_scope_statements(child.body)
+            elif isinstance(child, ast.stmt):
+                yield from _module_scope_statements([child])
 
-    A baseline that is not written out in full maps to ``NOT_WRITTEN_OUT``.
+
+def _names_written(statement: ast.stmt) -> Iterator[str]:
+    """Yield each name ending in the baseline suffix that one module-scope statement writes.
+
+    NOTE: This reads the targets of the statements that declare a constant. A name
+    written by anything more exotic is not a form the convention produces.
     """
-    found: dict[str, object] = {}
-    for node in ast.parse(source).body:
+    targets: list[ast.expr] = []
+    if isinstance(statement, ast.Assign):
+        targets.extend(statement.targets)
+    elif isinstance(statement, ast.AnnAssign | ast.AugAssign):
+        targets.append(statement.target)
+    elif isinstance(statement, ast.For | ast.AsyncFor):
+        targets.append(statement.target)
+    elif isinstance(statement, ast.With | ast.AsyncWith):
+        targets.extend(item.optional_vars for item in statement.items if item.optional_vars is not None)
+    for target in targets:
+        for node in ast.walk(target):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id.endswith(BASELINE_SUFFIX):
+                yield node.id
+
+
+def _declarations(body: Sequence[ast.stmt]) -> Iterator[tuple[str, ast.expr]]:
+    """Yield the name and the written-out value of each constant one module declares at its top level."""
+    for node in body:
         if isinstance(node, ast.AnnAssign):
             names = [node.target.id] if isinstance(node.target, ast.Name) else []
         elif isinstance(node, ast.Assign):
@@ -53,12 +90,64 @@ def baselines(source: str) -> dict[str, object]:
         if node.value is None:
             continue
         for name in names:
-            if not name.endswith(BASELINE_SUFFIX):
-                continue
-            try:
-                found[name] = ast.literal_eval(node.value)
-            except (TypeError, ValueError):
-                found[name] = NOT_WRITTEN_OUT
+            yield name, node.value
+
+
+def _nested_baselines(label: str, value: object) -> Iterator[tuple[str, object]]:
+    """Yield each baseline one constant records under a ``baseline`` key, by the path that reaches it."""
+    if not isinstance(value, dict):
+        return
+    for key, item in value.items():
+        if key == BASELINE_KEY:
+            yield f"{label}[{BASELINE_KEY!r}]", item
+        elif isinstance(item, dict):
+            yield from _nested_baselines(f"{label}[{key!r}]", item)
+
+
+def _supported(value: object) -> bool:
+    """Whether one baseline records room in a form this check knows how to compare."""
+    if isinstance(value, int):
+        return True
+    if isinstance(value, dict):
+        return all(isinstance(key, str) and _supported(item) for key, item in value.items())
+    if isinstance(value, tuple | list):
+        return all(isinstance(entry, str | tuple) for entry in value)
+    return False
+
+
+def _read_value(node: ast.expr) -> object:
+    """Return the room one declaration records, or an ``Unreadable`` saying why it cannot be read."""
+    try:
+        value = ast.literal_eval(node)
+    except (TypeError, ValueError):
+        return Unreadable(_NOT_A_LITERAL)
+    return value if _supported(value) else Unreadable(_UNSUPPORTED)
+
+
+def baselines(source: str) -> dict[str, object]:
+    """Return the room each baseline of one revision of the check records, by the name that reaches it.
+
+    A baseline is a constant whose name ends in the baseline suffix, or a ``baseline``
+    key inside a constant that records one per entry. One whose room cannot be read maps
+    to an ``Unreadable``.
+    """
+    tree = ast.parse(source)
+    written: dict[str, int] = {}
+    for statement in _module_scope_statements(tree.body):
+        for name in _names_written(statement):
+            written[name] = written.get(name, 0) + 1
+
+    found: dict[str, object] = {}
+    for name, node in _declarations(tree.body):
+        if name.endswith(BASELINE_SUFFIX):
+            found[name] = Unreadable(_WRITTEN_AGAIN) if written.get(name, 0) > 1 else _read_value(node)
+            continue
+        try:
+            value = ast.literal_eval(node)
+        except (TypeError, ValueError):
+            continue
+        for label, nested in _nested_baselines(name, value):
+            found[label] = nested if _supported(nested) else Unreadable(_UNSUPPORTED)
     return found
 
 
@@ -69,21 +158,31 @@ def check_baselines(base: str, head: str) -> list[str]:
         after = baselines(head)
     except SyntaxError:
         return ["the check does not parse, so no baseline can be read from it"]
+    if not before:
+        return ["the earlier revision records no baseline, so there is nothing to measure against"]
     findings: list[str] = []
     for name, recorded in sorted(before.items()):
         if name in after:
             findings.extend(_compared(name, recorded, after[name]))
         else:
             findings.extend(_retired(name, recorded))
-    return findings
+    findings.extend(_arrived(name, after[name]) for name in sorted(after) if name not in before)
+    return [finding for finding in findings if finding]
+
+
+def _arrived(name: str, recorded: object) -> str:
+    """Return a finding when a baseline arrives recording room that cannot be read."""
+    if isinstance(recorded, Unreadable):
+        return f"{name} arrives and {recorded.why}; a baseline is read without running the check"
+    return ""
 
 
 def _compared(label: str, before: object, after: object) -> list[str]:
     """Return each way one baseline records more room than it did, naming the part that moved."""
-    if isinstance(after, _NotWrittenOut):
-        return [f"{label} is no longer written out in full; a baseline is read without running the check"]
-    if isinstance(before, _NotWrittenOut):
-        return []
+    if isinstance(after, Unreadable):
+        return [f"{label} {after.why}; a baseline is read without running the check"]
+    if isinstance(before, Unreadable):
+        return [f"{label} cannot be measured, because at the branch point it {before.why}"]
     if isinstance(before, int) and isinstance(after, int):
         return [f"{label} rises from {before} to {after}; {_ONLY_FALLS}"] if after > before else []
     if isinstance(before, dict) and isinstance(after, dict):
@@ -99,8 +198,8 @@ def _compared(label: str, before: object, after: object) -> list[str]:
 
 def _retired(name: str, recorded: object) -> list[str]:
     """Return a finding when a baseline is gone before the room it records was given back."""
-    if isinstance(recorded, _NotWrittenOut):
-        return []
+    if isinstance(recorded, Unreadable):
+        return [f"{name} is gone, and whether it was empty cannot be read, because it {recorded.why}"]
     if isinstance(recorded, int):
         if recorded == 0:
             return []

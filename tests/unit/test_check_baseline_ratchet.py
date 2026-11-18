@@ -25,19 +25,23 @@ def _load() -> ModuleType:
 check = _load()
 
 
+def _architecture_check() -> str:
+    return (Path(__file__).resolve().parents[2] / "scripts" / "check_architecture.py").read_text(encoding="utf-8")
+
+
 def test_a_tree_that_changed_nothing_is_clean() -> None:
     source = "SIZE_BASELINE = 3\n"
     assert check.check_baselines(source, source) == []
 
 
 def test_the_real_check_measured_against_itself_is_clean() -> None:
-    source = (Path(__file__).resolve().parents[2] / "scripts" / "check_architecture.py").read_text(encoding="utf-8")
+    source = _architecture_check()
     assert check.check_baselines(source, source) == []
 
 
-def test_every_baseline_the_real_check_records_is_read() -> None:
-    source = (Path(__file__).resolve().parents[2] / "scripts" / "check_architecture.py").read_text(encoding="utf-8")
-    assert sorted(check.baselines(source)) == [
+def test_every_baseline_the_real_check_names_is_read() -> None:
+    found = check.baselines(_architecture_check())
+    assert sorted(name for name in found if name.endswith(check.BASELINE_SUFFIX)) == [
         "COMPOSITION_ROOT_BEHAVIOR_BASELINE",
         "COMPOSITION_ROOT_SIZE_BASELINE",
         "DOMAIN_NAME_BASELINE",
@@ -50,6 +54,18 @@ def test_every_baseline_the_real_check_records_is_read() -> None:
         "SERVICE_ROOT_EXPORT_BASELINE",
         "TRANSACTION_CONTROL_BASELINE",
     ]
+
+
+def test_every_per_entry_baseline_the_real_check_records_is_read() -> None:
+    found = check.baselines(_architecture_check())
+    nested = [name for name in found if not name.endswith(check.BASELINE_SUFFIX)]
+    assert nested, "the model access map records a baseline per model"
+    assert all(name.startswith("MODEL_ACCESS[") and name.endswith("['baseline']") for name in nested)
+
+
+def test_no_baseline_the_real_check_records_is_unreadable() -> None:
+    found = check.baselines(_architecture_check())
+    assert [name for name, room in found.items() if isinstance(room, check.Unreadable)] == []
 
 
 def test_a_count_that_rises_is_flagged() -> None:
@@ -141,7 +157,7 @@ def test_a_baseline_that_changes_shape_is_flagged() -> None:
 
 
 def test_a_constant_that_is_not_a_baseline_is_not_read() -> None:
-    assert check.check_baselines("LIMIT = 3\n", "LIMIT = 4\n") == []
+    assert check.check_baselines("SIZE_BASELINE = 3\nLIMIT = 3\n", "SIZE_BASELINE = 3\nLIMIT = 4\n") == []
 
 
 def test_an_annotated_baseline_is_read() -> None:
@@ -154,8 +170,70 @@ def test_an_annotated_baseline_is_read() -> None:
 
 def test_a_baseline_that_is_not_a_literal_is_reported() -> None:
     assert check.check_baselines("SIZE_BASELINE = 3\n", "SIZE_BASELINE = len(OTHER)\n") == [
-        "SIZE_BASELINE is no longer written out in full; a baseline is read without running the check"
+        "SIZE_BASELINE is not written out in full; a baseline is read without running the check"
     ]
+
+
+def test_a_baseline_written_again_at_module_scope_is_reported() -> None:
+    after = "SIZE_BASELINE = 3\nSIZE_BASELINE += 3\n"
+    assert check.check_baselines("SIZE_BASELINE = 3\n", after) == [
+        "SIZE_BASELINE is written at module scope more than once, so the last value decides; "
+        "a baseline is read without running the check"
+    ]
+
+
+def test_a_baseline_written_again_under_module_level_control_flow_is_reported() -> None:
+    after = "SIZE_BASELINE = 3\nif OTHER:\n    SIZE_BASELINE = 90\n"
+    assert check.check_baselines("SIZE_BASELINE = 3\n", after) == [
+        "SIZE_BASELINE is written at module scope more than once, so the last value decides; "
+        "a baseline is read without running the check"
+    ]
+
+
+def test_a_baseline_recording_a_kind_this_check_does_not_read_is_reported() -> None:
+    assert check.check_baselines("SIZE_BASELINE = 3\n", "SIZE_BASELINE = None\n") == [
+        "SIZE_BASELINE records a kind of value this check does not read; a baseline is read without running the check"
+    ]
+
+
+def test_a_baseline_recording_a_kind_this_check_does_not_read_is_reported_when_gone() -> None:
+    before = "SIZE_BASELINE = None\nLEAK_BASELINE = ()\n"
+    assert check.check_baselines(before, "LEAK_BASELINE = ()\n") == [
+        "SIZE_BASELINE is gone, and whether it was empty cannot be read, because it records a kind of value "
+        "this check does not read"
+    ]
+
+
+def test_a_baseline_that_arrives_unreadable_is_reported() -> None:
+    after = "SIZE_BASELINE = 3\nLEAK_BASELINE = len(OTHER)\n"
+    assert check.check_baselines("SIZE_BASELINE = 3\n", after) == [
+        "LEAK_BASELINE arrives and is not written out in full; a baseline is read without running the check"
+    ]
+
+
+def test_a_baseline_that_arrives_written_out_in_full_is_clean() -> None:
+    assert check.check_baselines("SIZE_BASELINE = 3\n", 'SIZE_BASELINE = 3\nLEAK_BASELINE = ("one.py",)\n') == []
+
+
+def test_an_earlier_revision_with_no_baseline_is_reported() -> None:
+    assert check.check_baselines("", "SIZE_BASELINE = 3\n") == [
+        "the earlier revision records no baseline, so there is nothing to measure against"
+    ]
+
+
+def test_a_baseline_recorded_per_entry_is_read() -> None:
+    before = 'SIZE_BASELINE = 3\nACCESS = {"a.B": {"repository": "r.py", "baseline": ("one.py",)}}\n'
+    after = 'SIZE_BASELINE = 3\nACCESS = {"a.B": {"repository": "r.py", "baseline": ("one.py", "two.py")}}\n'
+    assert check.check_baselines(before, after) == [
+        "ACCESS['a.B']['baseline'] gains 'two.py'; a baseline records room already given up, "
+        "so it may only lose entries"
+    ]
+
+
+def test_a_repository_beside_a_baseline_recorded_per_entry_is_not_read() -> None:
+    before = 'SIZE_BASELINE = 3\nACCESS = {"a.B": {"repository": "one.py", "baseline": ()}}\n'
+    after = 'SIZE_BASELINE = 3\nACCESS = {"a.B": {"repository": "two.py", "baseline": ()}}\n'
+    assert check.check_baselines(before, after) == []
 
 
 def test_every_way_one_change_gives_back_room_is_reported() -> None:
@@ -209,12 +287,17 @@ def test_a_count_that_is_gone_while_it_still_stands_above_zero_is_flagged() -> N
     ]
 
 
-def test_a_baseline_that_was_never_written_out_is_read_once_it_is() -> None:
-    assert check.check_baselines("SIZE_BASELINE = len(OTHER)\n", "SIZE_BASELINE = 99\n") == []
+def test_a_baseline_written_out_for_the_first_time_cannot_be_measured() -> None:
+    assert check.check_baselines("SIZE_BASELINE = len(OTHER)\n", "SIZE_BASELINE = 99\n") == [
+        "SIZE_BASELINE cannot be measured, because at the branch point it is not written out in full"
+    ]
 
 
-def test_a_baseline_that_was_never_written_out_and_is_gone_is_clean() -> None:
-    assert check.check_baselines("SIZE_BASELINE = len(OTHER)\nLEAK_BASELINE = ()\n", "LEAK_BASELINE = ()\n") == []
+def test_a_baseline_that_was_never_written_out_and_is_gone_cannot_be_measured() -> None:
+    before = "SIZE_BASELINE = len(OTHER)\nLEAK_BASELINE = ()\n"
+    assert check.check_baselines(before, "LEAK_BASELINE = ()\n") == [
+        "SIZE_BASELINE is gone, and whether it was empty cannot be read, because it is not written out in full"
+    ]
 
 
 def test_the_command_reads_a_revision_from_standard_input(
