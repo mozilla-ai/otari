@@ -4,6 +4,36 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.50.0](https://github.com/mozilla-ai/otari/releases/tag/v0.50.0) - 2026-11-18
+
+
+
+### Bug Fixes
+
+- **mcp:** Make sign-in links single-use in [#3356](https://github.com/mozilla-ai/otari/pull/3356) by [@KevinGallaccio](https://github.com/KevinGallaccio) ([`159c1b1`](https://github.com/mozilla-ai/otari/commit/159c1b14f5add3d780eb819a264e79560b137a3d))
+- **oauth-apps:** Name public_base_url's origin as the issuer behind a proxy by [@daavoo](https://github.com/daavoo) ([`f464620`](https://github.com/mozilla-ai/otari/commit/f46462070c9f122e51264b6e5f86c64887cb2bbb))
+
+
+### Features
+
+- **web:** Fold the less common key scopes under Advanced scopes in [#3358](https://github.com/mozilla-ai/otari/pull/3358) by [@hasangzl](https://github.com/hasangzl) ([`12be23b`](https://github.com/mozilla-ai/otari/commit/12be23b15a2bfc233d98ec5ab4718a249078e2a2))
+- **architecture:** Cap the imports that reach below a non-domain service package by [@peteski22](https://github.com/peteski22) ([`1cac7cd`](https://github.com/mozilla-ai/otari/commit/1cac7cdde5101ee78db46ef107a81db94611d32c))
+- **traces:** Group opencode requests into sessions by its own header in [#3345](https://github.com/mozilla-ai/otari/pull/3345) by [@omelhus](https://github.com/omelhus) ([`df6676c`](https://github.com/mozilla-ai/otari/commit/df6676c34d1969379155a7ea5cc5dd8150a1d24d))
+- **onboarding:** Carry the first-run sheet into its payoff with a wave in [#3368](https://github.com/mozilla-ai/otari/pull/3368) by [@jigjigjig](https://github.com/jigjigjig) ([`535e7fe`](https://github.com/mozilla-ai/otari/commit/535e7feba4afcfe0682f3d682f1fcb2c5d5d209e))
+- **traces:** Group more agent harnesses' requests into sessions by their own headers in [#3370](https://github.com/mozilla-ai/otari/pull/3370) by [@tbille](https://github.com/tbille) ([`62271af`](https://github.com/mozilla-ai/otari/commit/62271af696017c0a4171e32d3d0e6a275c99f85f))
+- **web:** Show each recognized harness's logo on its session in [#3371](https://github.com/mozilla-ai/otari/pull/3371) by [@tbille](https://github.com/tbille) ([`5747c52`](https://github.com/mozilla-ai/otari/commit/5747c524bcbabfac2a33f8a1e939633b0673b391))
+- **hosted-providers:** A page per provider, with models grouped by vendor, a vendor switch and a price resync in [#3367](https://github.com/mozilla-ai/otari/pull/3367) by [@tbille](https://github.com/tbille) ([`16bc561`](https://github.com/mozilla-ai/otari/commit/16bc56141c935b1867980c37c6ee1f5855990d4c))
+- **onboarding:** Offer the setup key already issued when the guide is reopened in [#3373](https://github.com/mozilla-ai/otari/pull/3373) by [@tbille](https://github.com/tbille) ([`34f60d6`](https://github.com/mozilla-ai/otari/commit/34f60d66bbf9701693d931e1fbf5d297ada52221))
+- **web:** Give every dashboard page its own path instead of a /#/ address in [#3372](https://github.com/mozilla-ai/otari/pull/3372) by [@tbille](https://github.com/tbille) ([`3289c5a`](https://github.com/mozilla-ai/otari/commit/3289c5ab6192061f420be258c7f1779a3e1e6f10))
+- **traces:** Recognize more agent harnesses and draw their logos in [#3380](https://github.com/mozilla-ai/otari/pull/3380) by [@tbille](https://github.com/tbille) ([`31765e3`](https://github.com/mozilla-ai/otari/commit/31765e3bf4aa3e672df88a9f6b8840d5e3b9cb6b))
+
+
+
+### New Contributors
+
+- [@omelhus](https://github.com/omelhus) made their first contribution in [#3345](https://github.com/mozilla-ai/otari/pull/3345)
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.49.0...v0.50.0
 ## [0.49.0](https://github.com/mozilla-ai/otari/releases/tag/v0.49.0) - 2026-11-17
 
 
