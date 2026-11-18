@@ -237,6 +237,76 @@ async def test_an_accept_racing_a_cancel_finds_the_link_gone(
     assert isinstance(outcome, InvitationNoLongerValidError)
 
 
+async def test_an_accept_racing_a_decline_is_refused(postgres_url: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A decline that commits while an acceptance is in flight ends the link, so the acceptance finds none."""
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    address = "pia@example.com"
+    arrived = asyncio.Event()
+    released = asyncio.Event()
+    real_delete = OrganizationInvitationRepository.delete_by_token_hash
+
+    async def delete_that_waits(
+        self: OrganizationInvitationRepository, token_hash: str
+    ) -> OrganizationInvitation | None:
+        arrived.set()
+        await released.wait()
+        return await real_delete(self, token_hash)
+
+    monkeypatch.setattr(OrganizationInvitationRepository, "delete_by_token_hash", delete_that_waits)
+
+    try:
+        async with sessions() as setup:
+            organization = await create_organization(setup, slug="accept-vs-decline")
+            await create_member(setup, organization, role="owner", full_name="Owner")
+            invitee = await _invitee(setup, organization, email=address)
+            await setup.commit()
+            await _invite(setup, organization, email=address)
+            await setup.commit()
+            by = AcceptingPerson(email=address, user_id=invitee.id)
+
+        async with sessions() as accepting, sessions() as declining:
+
+            async def accept() -> InvitationNoLongerValidError | object:
+                try:
+                    return await _acceptance(accepting).accept(_TOKEN, by=by)
+                except InvitationNoLongerValidError as refusal:
+                    return refusal
+
+            async def decline_once_the_accept_is_waiting() -> None:
+                await arrived.wait()
+                uow = UnitOfWork(declining)
+                async with uow:
+                    declined = await OrganizationRepositories.on(uow).invitations.decline_by_token_hash(
+                        hash_token(_TOKEN), at=_NOW
+                    )
+                    assert declined is not None
+                released.set()
+
+            async with asyncio.TaskGroup() as actors:
+                accept_task = actors.create_task(asyncio.wait_for(accept(), timeout=10.0))
+                actors.create_task(decline_once_the_accept_is_waiting())
+            outcome = accept_task.result()
+
+        async with sessions() as check:
+            memberships = (
+                (
+                    await check.execute(
+                        select(col(OrganizationMemberRepository(check).model_class.id)).where(
+                            col(OrganizationMemberRepository(check).model_class.user_id) == invitee.id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+    finally:
+        await engine.dispose()
+
+    assert isinstance(outcome, InvitationNoLongerValidError)
+    assert memberships == []
+
+
 async def test_an_accept_racing_a_workspace_deletion_joins_without_it(
     postgres_url: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:

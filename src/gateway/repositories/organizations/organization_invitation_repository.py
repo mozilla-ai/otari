@@ -296,15 +296,19 @@ class OrganizationInvitationRepository(BaseRepository[OrganizationInvitation, Ne
         )
 
     async def delete_by_token_hash(self, token_hash: str) -> OrganizationInvitation | None:
-        """Delete the invitation holding this token hash, and return the row it removed.
+        """Delete the undeclined invitation holding this token hash, and return the row it removed.
 
-        None when no row holds it, which is how a second acceptance of one link learns it lost. The
-        returned row carries every column and belongs to no session, so a later lookup of the same
-        invitation answers that it is gone.
+        None when no row holds it and none when the invitation was declined, which is how a second
+        acceptance of one link, and one racing a decline, each learn they lost. The returned row
+        carries every column and belongs to no session, so a later lookup of the same invitation
+        answers that it is gone.
         """
         result = await self.db.execute(
             delete(OrganizationInvitation)
-            .where(OrganizationInvitation.token_hash == token_hash)
+            .where(
+                OrganizationInvitation.token_hash == token_hash,
+                OrganizationInvitation.declined_at.is_(None),
+            )
             .returning(OrganizationInvitation)
             .execution_options(synchronize_session="fetch")
         )
