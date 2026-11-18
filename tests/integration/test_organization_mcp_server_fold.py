@@ -18,6 +18,7 @@ from gateway.exceptions.tools_exceptions import (
 )
 from gateway.models.tenancy import User, Workspace
 from gateway.models.tools import (
+    McpCredentialMode,
     McpServerAlias,
     McpUserConnection,
     WorkspaceMcpServer,
@@ -56,7 +57,9 @@ async def _sales(db: AsyncSession, config: GatewayConfig, world: _World, *member
     copy = await _service(db, config).create_server(
         user=world.owner,
         workspace_id=workspace.id,
-        request=WorkspaceMcpServerCreate(name="drive-sales", url=f"{PUBLIC_URL}/", credential_mode="per_user"),
+        request=WorkspaceMcpServerCreate(
+            name="drive-sales", url=f"{PUBLIC_URL}/", credential_mode=McpCredentialMode.PER_USER
+        ),
     )
     return workspace, copy.id
 
@@ -73,7 +76,7 @@ async def test_a_fold_step_counts_who_must_sign_in_again(async_db: AsyncSession,
     await _sign_in(async_db, config, world, world.member)
     _, sales_copy = await _sales(async_db, config, world)
 
-    weighed = await _candidates(async_db, config, world, credential_mode="per_user")
+    weighed = await _candidates(async_db, config, world, credential_mode=McpCredentialMode.PER_USER)
 
     home = weighed[world.server.id]
     assert (home.signed_in, home.keep_sign_in, home.sign_in_again, home.same_credential) == (1, 0, 1, True)
@@ -102,7 +105,7 @@ async def test_folding_a_copy_moves_its_rules_keeps_its_id_and_ends_its_sign_ins
         user=world.owner,
         workspace_id=None,
         request=WorkspaceMcpServerCreate(
-            name="drive", url=PUBLIC_URL, credential_mode="per_user", fold_server_ids=[copy]
+            name="drive", url=PUBLIC_URL, credential_mode=McpCredentialMode.PER_USER, fold_server_ids=[copy]
         ),
     )
 
