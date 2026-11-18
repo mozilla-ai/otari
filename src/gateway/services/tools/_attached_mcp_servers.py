@@ -4,18 +4,21 @@ Every request made with a key holding ``mcp:execute`` asks this, and nearly
 every workspace has no such server, so the answer is held in a process-wide
 set rather than read per request. It is refreshed on a TTL and right after a
 server is written, the arrangement ``services/providers/_provider_endpoint_cache``
-uses: a write reaches its own worker at once and every other worker within
+uses: a write reaches its own worker at once and every other worker on that
+worker's next successful refresh, which runs every
 ``ATTACHED_MCP_SERVERS_CACHE_TTL_SECONDS``.
 
-A stale entry is harmless for a server that was detached: the request goes on
-to read the workspace's attached servers and finds none. One newly attached on
-another worker is left out of that worker's requests until its next refresh.
+A stale entry never keeps a detached, disabled or deleted server in a request:
+the request goes on to read the workspace's attached servers and finds none.
+One newly attached on another worker is left out of that worker's requests
+until its next refresh.
 """
 
 import asyncio
 import uuid
 from typing import ClassVar
 
+from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.unit_of_work import create_unit_of_work
 from gateway.log_config import logger
 from gateway.repositories.tools import WorkspaceMcpServerRepository
@@ -52,6 +55,20 @@ class AttachedMcpServerIndex:
         cls._workspaces, cls._applied_refresh = workspaces, number
 
     @classmethod
+    async def refresh_after_write(cls) -> None:
+        """Refresh on a session of its own once a write has committed, best effort.
+
+        A failure is logged and left to the periodic refresher: the write is
+        already durable, so its caller must not be told it failed.
+        """
+        try:
+            await cls._refresh_on_a_session_of_its_own()
+        except DATABASE_ERRORS as exc:
+            logger.warning("Attached MCP server refresh after a write failed: %s", describe_database_error(exc))
+        except Exception as exc:  # noqa: BLE001 - the periodic refresher catches up
+            logger.warning("Attached MCP server refresh after a write failed: %s", type(exc).__name__)
+
+    @classmethod
     def reset(cls) -> None:
         """Drop the set so the next load starts clean (startup and tests)."""
         cls._workspaces, cls._applied_refresh = frozenset(), 0
@@ -67,8 +84,16 @@ class AttachedMcpServerIndex:
         cls.reset()
         try:
             await cls._refresh_on_a_session_of_its_own()
-        except Exception:
-            logger.exception("Failed to load the workspaces with attached MCP servers; continuing with none cached")
+        except DATABASE_ERRORS as exc:
+            logger.error(
+                "Failed to load the workspaces with attached MCP servers; continuing with none cached: %s",
+                describe_database_error(exc),
+            )
+        except Exception as exc:  # noqa: BLE001 - the periodic refresher retries
+            logger.error(
+                "Failed to load the workspaces with attached MCP servers; continuing with none cached: %s",
+                type(exc).__name__,
+            )
 
     @classmethod
     async def run_refresher(cls, interval: float = ATTACHED_MCP_SERVERS_CACHE_TTL_SECONDS) -> None:
@@ -79,5 +104,9 @@ class AttachedMcpServerIndex:
                 await cls._refresh_on_a_session_of_its_own()
             except asyncio.CancelledError:
                 raise
-            except Exception:
-                logger.warning("Attached MCP server refresh failed; retrying in %ss", interval, exc_info=True)
+            except DATABASE_ERRORS as exc:
+                logger.warning(
+                    "Attached MCP server refresh failed; retrying in %ss: %s", interval, describe_database_error(exc)
+                )
+            except Exception as exc:  # noqa: BLE001 - retried next tick
+                logger.warning("Attached MCP server refresh failed; retrying in %ss: %s", interval, type(exc).__name__)

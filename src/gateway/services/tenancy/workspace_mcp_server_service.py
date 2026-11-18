@@ -1694,7 +1694,7 @@ class WorkspaceMcpServerService:
                 added_by=user.id,
             )
         await self.db.commit()
-        await AttachedMcpServerIndex.refresh(WorkspaceMcpServerRepository(self.db))
+        await AttachedMcpServerIndex.refresh_after_write()
         # After the commit, so a server that fails its check is still stored:
         # it may be registered before it is up, and `health` says what failed.
         await self._record_check(server)
@@ -1822,8 +1822,8 @@ class WorkspaceMcpServerService:
             await self._end_connections(server)
 
         await self.db.commit()
-        await AttachedMcpServerIndex.refresh(WorkspaceMcpServerRepository(self.db))
         McpConnectionService.revoke_in_background(revocations, unread=unread)
+        await AttachedMcpServerIndex.refresh_after_write()
         if connection_changed:
             await self._record_check(server)
         else:
@@ -2159,8 +2159,8 @@ class WorkspaceMcpServerService:
         await McpOAuthFlowRepository(self.db).remove_for_server(server.id)
         await self.db.delete(server)
         await self.db.commit()
-        await AttachedMcpServerIndex.refresh(WorkspaceMcpServerRepository(self.db))
         McpConnectionService.revoke_in_background(revocations, unread=unread)
+        await AttachedMcpServerIndex.refresh_after_write()
 
     async def my_tools(self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID) -> WorkspaceMcpServerMyTools:
         """The tools the caller may use on a server, for any member who can see the workspace.
