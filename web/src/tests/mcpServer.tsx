@@ -7,6 +7,7 @@ import type {
   ApiKey,
   McpServerConnection,
   McpServerFoldCandidate,
+  McpServerWorkspaceSettings,
   OrganizationContext,
   OrganizationMember,
   WorkspaceMcpServer,
@@ -149,20 +150,29 @@ export function mockMcpServerApi({
           { status: 404 },
         )
       }
-      // A workspace's own settings on its organization's server: set from
-      // the body, or cleared back to the server's.
+      // A workspace's own settings on its organization's server, as the
+      // gateway keeps them: a PATCH changes only the fields it sends, and a
+      // DELETE takes them all away. The organization's limit is never touched.
       if (url.endsWith("/override") && saved.in_workspace) {
+        const own: McpServerWorkspaceSettings =
+          method === "PATCH"
+            ? ({ ...saved.in_workspace, ...body } as McpServerWorkspaceSettings)
+            : {
+                ...saved.in_workspace,
+                enabled: true,
+                everyone_tools: null,
+                attach_by_default: null,
+              }
+        const limit = own.organization_tools
         saved = {
           ...saved,
-          in_workspace:
-            method === "PUT"
-              ? { ...saved.in_workspace, ...body }
-              : {
-                  ...saved.in_workspace,
-                  enabled: true,
-                  everyone_tools: null,
-                  attach_by_default: null,
-                },
+          in_workspace: {
+            ...own,
+            reached:
+              saved.enabled &&
+              own.enabled &&
+              (limit === null || limit.length > 0),
+          },
         }
         return Response.json(saved)
       }

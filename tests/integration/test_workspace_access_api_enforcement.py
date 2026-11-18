@@ -242,7 +242,7 @@ def _require_zero_data_retention(client: TestClient, master: dict[str, str], wor
             headers=master,
         )
     )
-    assert policy == {"require_zero_data_retention": True}
+    assert policy == {"require_zero_data_retention": True, "allowed_data_locations": None}
 
 
 def test_requiring_zero_data_retention_refuses_a_hosted_provider_until_it_is_declared(
@@ -263,6 +263,55 @@ def test_requiring_zero_data_retention_refuses_a_hosted_provider_until_it_is_dec
     assert refused_status == 403
     assert not refused, "a provider not declared zero data retention must never be called"
     assert served.get("api_key") == HOSTED_KEY
+
+
+def test_allowed_data_locations_serve_from_the_region_that_keeps_data_there(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """The workspace's locations pick the region; none left refuses without calling anything."""
+    _hosted_openai(client, master_key_header)
+    _ok(client.patch(f"{API_ROOT}/hosted-providers/openai", json={"data_location": "US"}, headers=master_key_header))
+    _ok(
+        client.post(
+            f"{API_ROOT}/hosted-providers/openai/regions",
+            json={"slug": "eu", "label": "Europe", "api_key": "sk-hosted-eu", "data_location": "DE"},
+            headers=master_key_header,
+        )
+    )
+    workspace_id, headers = _workspace_and_key(client, master_key_header)
+    url = f"{API_ROOT}/workspaces/{workspace_id}/provider-policy"
+
+    policy = _ok(
+        client.put(
+            url,
+            json={"require_zero_data_retention": False, "allowed_data_locations": ["eu"]},
+            headers=master_key_header,
+        )
+    )
+    _, served = _chat(client, headers, "openai:gpt-4o")
+    listed = _ok(client.get(f"{API_ROOT}/workspaces/{workspace_id}/hosted-providers", headers=master_key_header))
+    _ok(
+        client.put(
+            url,
+            json={"require_zero_data_retention": False, "allowed_data_locations": ["JP"]},
+            headers=master_key_header,
+        )
+    )
+    refused_status, refused = _chat(client, headers, "openai:gpt-4o")
+    kept = _ok(client.put(url, json={"require_zero_data_retention": True}, headers=master_key_header))
+    cleared = _ok(client.put(url, json={"allowed_data_locations": None}, headers=master_key_header))
+
+    assert policy == {"require_zero_data_retention": False, "allowed_data_locations": ["EU"]}
+    assert [row["data_locations"] for row in listed["data"]] == [["US", "DE"]]
+    assert served.get("api_key") == "sk-hosted-eu", (
+        "EU admits the region kept in Germany, not the US one first in order"
+    )
+    assert refused_status == 403
+    assert not refused, "a region keeping data elsewhere must never be called"
+    assert kept["allowed_data_locations"] == ["JP"], "omitting the list keeps the stored one"
+    assert cleared == {"require_zero_data_retention": True, "allowed_data_locations": None}, (
+        "omitting zero data retention keeps it"
+    )
 
 
 def test_requiring_zero_data_retention_refuses_an_organization_key_until_it_is_declared(
@@ -361,7 +410,7 @@ def test_the_policy_reads_back_and_starts_off(client: TestClient, master_key_hea
 
     policy = _ok(client.get(f"{API_ROOT}/workspaces/{workspace_id}/provider-policy", headers=master_key_header))
 
-    assert policy == {"require_zero_data_retention": False}
+    assert policy == {"require_zero_data_retention": False, "allowed_data_locations": None}
 
 
 def test_an_alias_to_a_hosted_model_the_workspace_refuses_is_not_listed(

@@ -61,7 +61,7 @@ const BO_LAPTOP = apiKey({
 })
 
 /**
- * Holds the first PUT of the workspace's own settings until the returned
+ * Holds the first write of the workspace's own settings until the returned
  * function is called with how it answers: the stub's answer, or a refusal.
  */
 function holdFirstOverrideWrite(): (outcome: "save" | "refuse") => void {
@@ -72,7 +72,7 @@ function holdFirstOverrideWrite(): (outcome: "save" | "refuse") => void {
   })
   let isHeld = false
   vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
-    if (String(input).endsWith("/override") && init?.method === "PUT") {
+    if (String(input).endsWith("/override") && init?.method === "PATCH") {
       if (!isHeld) {
         isHeld = true
         if ((await held) === "refuse") {
@@ -163,17 +163,16 @@ describe("McpServerDetailPage, an organization's server", () => {
     await waitFor(() =>
       expect(
         mcpWrites(calls).find((call) => call.url.endsWith("/override")),
-      ).toMatchObject({
-        method: "PUT",
-        body: {
-          enabled: true,
-          everyone_tools: ["@read"],
-          attach_by_default: true,
-        },
-      }),
+      ).toMatchObject({ method: "PATCH" }),
     )
+    // Only what Availability sets: the default policy is left as stored.
+    expect(
+      mcpWrites(calls).find((call) => call.url.endsWith("/override"))?.body,
+    ).toEqual({ enabled: true, attach_by_default: true })
     // Nothing that changes the organization's definition.
-    expect(mcpWrites(calls).some((call) => call.method === "PATCH")).toBe(false)
+    expect(
+      mcpWrites(calls).some((call) => !call.url.endsWith("/override")),
+    ).toBe(false)
   })
 
   it("sets the workspace's default policy from the access rules", async () => {
@@ -192,17 +191,44 @@ describe("McpServerDetailPage, an organization's server", () => {
     await waitFor(() =>
       expect(
         mcpWrites(calls).find((call) => call.url.endsWith("/override")),
-      ).toMatchObject({
-        method: "PUT",
-        // The workspace's switch is sent as stored.
-        body: { enabled: false, everyone_tools: [], attach_by_default: null },
+      ).toEqual(
+        expect.objectContaining({
+          method: "PATCH",
+          // Only the policy: the workspace's switch is left as stored.
+          body: { everyone_tools: [] },
+        }),
+      ),
+    )
+  })
+
+  it("saves nothing when the default policy is saved unchanged", async () => {
+    const server = organizationServer()
+    const calls = mockMcpServerApi({ server, row: asRead(server) })
+    const user = userEvent.setup()
+    await openPage(server.id)
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "Edit the default policy for this workspace",
       }),
     )
+    const dialog = await screen.findByRole("dialog", {
+      name: "Edit the default policy",
+    })
+    await user.click(within(dialog).getByRole("button", { name: "Save rule" }))
+
+    // Saving the inherited policy would stop it following the organization's.
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Edit the default policy" }),
+      ).toBeNull(),
+    )
+    expect(mcpWrites(calls)).toEqual([])
   })
 
   it("holds the default policy's Edit while an Availability write is in flight, and keeps its refusal", async () => {
     const server = organizationServer()
-    mockMcpServerApi({ server, row: asRead(server) })
+    const calls = mockMcpServerApi({ server, row: asRead(server) })
     const release = holdFirstOverrideWrite()
     const user = userEvent.setup()
     await openPage(server.id)
@@ -215,7 +241,21 @@ describe("McpServerDetailPage, an organization's server", () => {
 
     release("refuse")
     expect(await screen.findByText("Write refused")).toBeVisible()
+    // The write may have landed all the same, so the server is read again first.
+    const written = calls.findIndex((call) => call.method === "PATCH")
+    await waitFor(() =>
+      expect(
+        calls
+          .slice(written + 1)
+          .some(
+            (call) =>
+              call.method === "GET" &&
+              call.url.endsWith(`/mcp-servers/${server.id}`),
+          ),
+      ).toBe(true),
+    )
     await waitFor(() => expect(edit).toBeEnabled())
+    expect(screen.getByText("Write refused")).toBeVisible()
 
     // Opening the editor clears the settled refusal.
     await user.click(edit)
@@ -232,8 +272,9 @@ describe("McpServerDetailPage, an organization's server", () => {
 
     await pickOption(user, "Availability", "Off")
     // The access rules write the same settings, so their Edit waits too.
-    const held = await getRowMenuItem(user, /Saving another change first/)
+    const held = await getRowMenuItem(user, /^Edit…/)
     expect(held).toHaveAttribute("aria-disabled", "true")
+    expect(held).toHaveTextContent("Saving another change first")
     await user.keyboard("{Escape}")
 
     release("save")
@@ -259,8 +300,14 @@ describe("McpServerDetailPage, an organization's server", () => {
     const [off, policy] = mcpWrites(calls).filter((call) =>
       call.url.endsWith("/override"),
     )
-    expect(off?.body).toMatchObject({ enabled: false })
-    expect(policy?.body).toMatchObject({ enabled: false, everyone_tools: [] })
+    expect(off?.body).toEqual({ enabled: false })
+    // The policy alone, so it cannot undo Off even from a view that missed it.
+    expect(policy?.body).toEqual({ everyone_tools: [] })
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /Availability/ }),
+      ).toHaveTextContent("Off"),
+    )
   })
 
   it("clears the workspace's own settings back to the organization's", async () => {

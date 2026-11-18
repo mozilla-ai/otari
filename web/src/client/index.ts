@@ -418,6 +418,15 @@ export type CreateHostedProviderRequest = Defaulted<
   "enabled"
 >
 export type UpdateHostedProviderRequest = Schemas["HostedProviderUpdateRequest"]
+// A region a hosted provider serves from: its own key, endpoint and data
+// location where it has them, null wherever it uses the provider's.
+export type HostedProviderRegion = Schemas["HostedProviderRegionPublic"]
+export type CreateHostedProviderRegionRequest = Defaulted<
+  Schemas["HostedProviderRegionCreateRequest"],
+  "enabled"
+>
+export type UpdateHostedProviderRegionRequest =
+  Schemas["HostedProviderRegionUpdateRequest"]
 export type HostedModel = Schemas["HostedModelPublic"]
 
 // The decision models that pick a subagent's model when a coding agent asks,
@@ -697,6 +706,8 @@ export type SetWorkspaceHostedProviderRequest =
   Schemas["WorkspaceHostedProviderAccessRequest"]
 // What one workspace requires of every provider serving it.
 export type WorkspaceProviderPolicy = Schemas["WorkspaceProviderPolicyPublic"]
+export type SetWorkspaceProviderPolicyRequest =
+  Schemas["WorkspaceProviderPolicyRequest"]
 
 // The first-request setup guide's state, and the API key it issues. The wire
 // names carry the platform's "activation" vocabulary (see
@@ -793,7 +804,7 @@ export type UpdateWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerUpdate"]
 // On an organization's server read through a workspace: that workspace's own
 // settings on it and the organization's limit there, and the body that sets
-// them (`PUT .../override`). Each field of the body replaces the one stored.
+// them (`PATCH .../override`). A field left out of the body keeps the one stored.
 export type McpServerWorkspaceSettings = Schemas["McpServerWorkspaceSettings"]
 export type SetWorkspaceMcpServerOverrideRequest =
   Schemas["WorkspaceMcpServerSettingsUpdate"]

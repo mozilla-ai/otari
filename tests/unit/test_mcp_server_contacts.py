@@ -380,10 +380,19 @@ class _Heard:
         self.reached_with: list[tuple[uuid.UUID | str | None, ServerCheck | None]] = []
         self.failures: list[uuid.UUID | str | None] = []
 
-    def reached(self, server_id: uuid.UUID | str | None, url: str, listing: ServerCheck | None = None) -> None:
+    def reached(
+        self,
+        server_id: uuid.UUID | str | None,
+        url: str,
+        listing: ServerCheck | None = None,
+        *,
+        credential_mode: str | None = None,
+    ) -> None:
         self.reached_with.append((server_id, listing))
 
-    def failed(self, server_id: uuid.UUID | str | None, url: str, failure: BaseException) -> None:
+    def failed(
+        self, server_id: uuid.UUID | str | None, url: str, failure: BaseException, *, credential_mode: str | None = None
+    ) -> None:
         self.failures.append(server_id)
 
 

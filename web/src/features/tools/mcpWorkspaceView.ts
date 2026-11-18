@@ -55,33 +55,30 @@ export function workspaceAvailability(
 }
 
 /**
- * The whole body for `PUT .../override`, from what is stored and one change.
- * The request replaces every field, so the ones the change leaves alone are
- * sent as stored.
+ * The body that sets one Availability choice, and nothing else: `PATCH
+ * .../override` keeps every field left out, so a default policy another admin
+ * saved meanwhile stays. Off keeps the stored attach setting.
  */
-export function overrideBody(
-  server: WorkspaceMcpServer,
-  change: Partial<SetWorkspaceMcpServerOverrideRequest>,
-): SetWorkspaceMcpServerOverrideRequest {
-  const own = server.in_workspace
-  return {
-    enabled: own?.enabled ?? true,
-    everyone_tools: own?.everyone_tools ?? null,
-    attach_by_default: own?.attach_by_default ?? null,
-    ...change,
-  }
-}
-
-/** The body that sets one Availability choice. Off keeps the stored attach setting. */
 export function availabilityOverride(
-  server: WorkspaceMcpServer,
   availability: McpAvailability,
 ): SetWorkspaceMcpServerOverrideRequest {
-  if (availability === "off") return overrideBody(server, { enabled: false })
-  return overrideBody(server, {
-    enabled: true,
-    attach_by_default: availability === "every_request",
-  })
+  if (availability === "off") return { enabled: false }
+  return { enabled: true, attach_by_default: availability === "every_request" }
+}
+
+/**
+ * Whether a default policy the editor returns is the one it opened on, in any
+ * order. Saving it would store the inherited policy as the workspace's own,
+ * which then stops following the organization's.
+ */
+export function isSamePolicy(
+  draft: readonly string[],
+  shown: readonly string[],
+): boolean {
+  return (
+    draft.length === shown.length &&
+    draft.every((pattern) => shown.includes(pattern))
+  )
 }
 
 /** Whether the workspace set anything of its own, which "Use organization defaults" clears. */
