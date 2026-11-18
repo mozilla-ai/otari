@@ -2002,3 +2002,45 @@ describe("the catalog shows every prop", () => {
     ).toEqual([])
   })
 })
+
+// The operator's API keys table, every lane shown, at a 1440px screen. The
+// shell leaves the table 1128px there (measured in Chromium), and a classic
+// scrollbar can take 16px of that. Key takes what the other lanes leave, so
+// when their floors and its own outgrow that the table scrolls sideways and
+// Key sits at its floor, cutting a name like "lena-research-agent".
+describe("the API keys table at 1440px", () => {
+  const ROOM = 1128 - 16
+  const floors = new Map<string, number>()
+  for (const [, selectors, body] of CSS.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const width = /(?:^|;|\s)min-width:\s*([\d.]+)rem/.exec(body)
+    if (!width) continue
+    for (const [, lane] of selectors.matchAll(
+      /\.otari-keys-table \.table__column\[data-key="([a-z]+)"\]/g,
+    )) {
+      floors.set(lane, Number(width[1]) * 16)
+    }
+  }
+
+  it("fits every lane's floor beside the shell", () => {
+    expect([...floors.keys()].sort()).toEqual([
+      "actions",
+      "budget",
+      "expires",
+      "name",
+      "owner",
+      "spend",
+      "state",
+      "tokens",
+      "used",
+    ])
+    const total = [...floors.values()].reduce((sum, one) => sum + one, 0)
+    expect(total).toBeLessThanOrEqual(ROOM)
+  })
+
+  // A lane narrower than its content grows, and Key pays for it. "12/31/2026",
+  // the widest date `toLocaleDateString` writes in en-US, is 79px in the mono
+  // caption (measured in Chromium), inside the cell's 32px of padding.
+  it("holds a whole expiry date in Expires", () => {
+    expect(floors.get("expires")).toBeGreaterThanOrEqual(79 + 32)
+  })
+})
