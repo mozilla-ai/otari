@@ -2548,6 +2548,8 @@ def test_a_type_alias_statement_counts_as_a_definition(tmp_path: Path, monkeypat
         pytest.param("match object():\n    case GATE:\n        pass\n", id="match_capture"),
         pytest.param("match ():\n    case [*GATE]:\n        pass\n", id="match_star"),
         pytest.param("match {}:\n    case {**GATE}:\n        pass\n", id="match_rest"),
+        pytest.param("GATES[(GATE := 'one')]: int\n", id="annotation_subscript_target"),
+        pytest.param("GATES[(GATE := 'one')]: int = 1\n", id="annotation_subscript_target_with_value"),
     ],
 )
 def test_every_statement_that_binds_a_name_counts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str) -> None:

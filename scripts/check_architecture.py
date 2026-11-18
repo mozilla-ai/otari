@@ -1493,9 +1493,11 @@ def _statement_bindings(node: ast.stmt) -> Iterator[str]:
         yield node.name
         pending.extend(_header_expressions(node))
     elif isinstance(node, ast.AnnAssign) and node.value is None:
-        # An annotation with no value leaves its target unbound, while an assignment
-        # expression in the annotation still binds here.
+        # An annotation with no value leaves a plain target unbound, while a subscript or
+        # attribute target is still evaluated, as the annotation itself may be.
         pending.append(node.annotation)
+        if not isinstance(node.target, ast.Name):
+            pending.append(node.target)
     else:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, ast.stmt):
