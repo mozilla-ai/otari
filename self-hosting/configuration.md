@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/34f60d66bbf9701693d931e1fbf5d297ada52221/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/3289c5ab6192061f420be258c7f1779a3e1e6f10/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -865,7 +865,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/34f60d66bbf9701693d931e1fbf5d297ada52221/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/3289c5ab6192061f420be258c7f1779a3e1e6f10/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -1889,9 +1889,9 @@ Unset, `public_base_url` is used.
 - Supply an absolute http(s) URL with no trailing slash.
 - Credentials and fragments are refused, since the value goes into redirects
   and mail.
-- A query string is kept and placed ahead of the hash route in every link
-  (`https://app.example.com/dashboard/?edge=a#/verify-email?token=…`), for an
-  edge that serves one interface for several deployments.
+- A query string is kept and joined to every link's own query, ahead of its
+  fragment (`https://app.example.com/dashboard/verify-email?edge=a#token=…`),
+  for an edge that serves one interface for several deployments.
 
 A dashboard served from a sibling host of this process may hold a session here
 only when that host is listed in `cors_allow_origins`: the session cookie is
@@ -1910,7 +1910,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/34f60d66bbf9701693d931e1fbf5d297ada52221/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/3289c5ab6192061f420be258c7f1779a3e1e6f10/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Contacting the Otari team

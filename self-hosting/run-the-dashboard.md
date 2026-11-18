@@ -4,6 +4,14 @@ A self-hosted gateway serves its dashboard at the gateway root. This page covers
 what the operator sets up there: the sign-in and encryption keys, the first run,
 the deployment view, and deployment-wide settings.
 
+Each dashboard page has its own path, such as
+`http://localhost:8000/organization/provider-keys`, so a page can be reloaded,
+bookmarked and shared. The gateway answers a browser opening any path that is not
+one of its own routes with the dashboard, so a reverse proxy in front of it has
+to forward every path, not only `/`. A link from an older release, written as
+`http://localhost:8000/#/organization/provider-keys`, still works: the dashboard
+moves it to the path it names.
+
 ## Sign-in and secrets
 
 | Credential | Purpose |
@@ -19,7 +27,7 @@ Otari 1.0.0 is running at http://localhost:8000
 
 Open this link to choose your password and finish setup:
 
-http://localhost:8000/#/setup?key=otari-mk-...
+http://localhost:8000/setup#key=otari-mk-...
 
 It is shown only once and carries your master key, so treat it like one.
 ```
@@ -252,4 +260,4 @@ service and privacy notice. The account menu links each one set; see
 The dashboard source is under `web/`, and the Docker image includes the
 bundle. From a source checkout, run `make dashboard` for the gateway to serve
 it, or `pnpm --dir web dev` for frontend development. See
-[web/README.md](https://github.com/mozilla-ai/otari/blob/34f60d66bbf9701693d931e1fbf5d297ada52221/web/README.md).
+[web/README.md](https://github.com/mozilla-ai/otari/blob/3289c5ab6192061f420be258c7f1779a3e1e6f10/web/README.md).
