@@ -99,6 +99,7 @@ async def test_an_override_is_saved_read_and_removed(async_db: AsyncSession) -> 
 
     found = await overrides.find(workspace_id=marcomms.id, server_id=drive.id)
     assert found is not None
+    await async_db.refresh(found)  # read back from the row, not the values just assigned
     assert (found.organization_tools, found.enabled, found.everyone_tools, found.attach_by_default) == (
         ["@read"],
         False,
