@@ -65,16 +65,24 @@ class WorkspaceMcpServerOverrideRepository(BaseRepository[WorkspaceMcpServerOver
         enabled: bool,
         everyone_tools: list[str] | None,
         attach_by_default: bool | None,
-    ) -> WorkspaceMcpServerOverride:
-        """Stage a new override of an organization's ``server``, or new values on the one passed in.
+    ) -> WorkspaceMcpServerOverride | None:
+        """Stage a workspace's settings on an organization's ``server``: a new override, or ``override`` changed.
 
+        Settings that are all the defaults are no override: the one passed in is removed, and ``None`` returned.
         The keys refuse a workspace of another organization than the server's.
 
         Raises:
-            ValueError: ``server`` is one workspace's own, which no other workspace reaches.
+            ValueError: ``server`` is one workspace's own, which no other workspace reaches, or ``override`` is
+                another workspace's or another server's.
         """
         if server.workspace_id is not None:
             raise ValueError(f"MCP server {server.id} is a workspace's own; only an organization's takes overrides")
+        if override is not None and (override.workspace_id != workspace_id or override.server_id != server.id):
+            raise ValueError("The override passed in is another workspace's or another server's")
+        if organization_tools is None and enabled and everyone_tools is None and attach_by_default is None:
+            if override is not None:
+                await self.remove(override)
+            return None
         if override is None:
             override = WorkspaceMcpServerOverride(
                 workspace_id=workspace_id, organization_id=server.organization_id, server_id=server.id
