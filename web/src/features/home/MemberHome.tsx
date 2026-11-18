@@ -183,10 +183,12 @@ export function MemberHome({
   const hasGraphicRow = spend.series.length > 1 || Boolean(sessionCount)
   const slot = (graphic: ReactNode) =>
     graphic ?? (hasGraphicRow ? <span aria-hidden /> : undefined)
+  // The figures keep the last window's counts while the next loads; the band
+  // waits for this window's.
   const isFirstRun = isMemberFirstRun({
     keys: keys.data,
     hasSessions,
-    sessionCount,
+    sessionCount: sessions.isPlaceholderData ? undefined : sessionCount,
     requestCount:
       usage === "ready" && !spend.isPlaceholder ? requestCount : undefined,
     now,

@@ -1,5 +1,5 @@
 import { Outlet } from "@tanstack/react-router"
-import { screen, within } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type {
@@ -116,6 +116,7 @@ async function renderMemberHome({
   requestCount = 1,
   sessionCount = 3,
   holdSummary,
+  holdSessions,
 }: {
   windowCost: number
   periodCost: number
@@ -129,8 +130,10 @@ async function renderMemberHome({
   /** The member's requests in every summary read. */
   requestCount?: number
   sessionCount?: number
-  /** Holds a summary read from this start until the promise settles. */
+  /** Holds a summary read from any other start until the promise settles. */
   holdSummary?: { unless: string; until: Promise<void> }
+  /** Holds a session count from any other start until the promise settles. */
+  holdSessions?: { unless: string; until: Promise<void> }
 }) {
   const refusal: Partial<UsageEntry> = {
     id: "r-1",
@@ -156,6 +159,9 @@ async function renderMemberHome({
       case "/organizations/me/usage":
         return Response.json([refusal])
       case "/organizations/me/traces/count":
+        if (holdSessions && query.get("start") !== holdSessions.unless) {
+          await holdSessions.until
+        }
         return Response.json({ count: sessionCount })
       case "/organizations/me/usage/summary": {
         const start = query.get("start_date") ?? ""
@@ -356,8 +362,20 @@ describe("MemberHome, a first run", () => {
       keys: "failed",
       requestCount: 0,
     })
-    expect(await screen.findAllByText("No requests yet")).not.toHaveLength(0)
-    expect(screen.queryByText(FIRST_RUN)).toBeNull()
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(globalThis.fetch)
+          .mock.calls.some(([input]) =>
+            String(input).includes("/organizations/me/keys?"),
+          ),
+      ).toBe(true),
+    )
+    // Long enough for the refusal to settle and the band to show if it took
+    // a failed read for no keys.
+    await expect(
+      screen.findByText(FIRST_RUN, {}, { timeout: 1000 }),
+    ).rejects.toThrow()
   })
 
   it("does not decide on the last window's count while the next one loads", async () => {
@@ -376,6 +394,30 @@ describe("MemberHome, a first run", () => {
     expect(await screen.findByText(FIRST_RUN)).toBeVisible()
     await user.click(screen.getByRole("radio", { name: "90 days" }))
     expect(screen.queryByText(FIRST_RUN)).toBeNull()
+    release()
+  })
+
+  it("does not decide on the last window's session count while the next one loads", async () => {
+    const user = userEvent.setup()
+    let release = () => {}
+    const until = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await renderMemberHome({
+      windowCost: 0,
+      periodCost: 0,
+      keys: [],
+      requestCount: 0,
+      sessionCount: 0,
+      hasTraces: true,
+      holdSessions: { unless: windowOf("month", Date.now()).start, until },
+    })
+    expect(await screen.findByText(FIRST_RUN)).toBeVisible()
+    await user.click(screen.getByRole("radio", { name: "90 days" }))
+    // The 90 days' requests arrive; their sessions do not.
+    await expect(
+      screen.findByText(FIRST_RUN, {}, { timeout: 1000 }),
+    ).rejects.toThrow()
     release()
   })
 
