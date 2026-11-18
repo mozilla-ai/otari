@@ -16,10 +16,9 @@
  * is the source for most of it and is MIT licensed (Copyright (c) 2023
  * LobeHub), but depending on it would drag in `antd-style` and peer-require
  * `antd` and `@lobehub/ui`, a second design system this dashboard has no use
- * for. Three marks come from Simple Icons through `react-icons`, which is already
- * a dependency, because LobeHub ships no Databricks, OVH or Zed mark, and curl's
- * terminal comes from Bootstrap Icons the same way. Two come from the vendor's
- * own repository. `source` records which, per mark.
+ * for. A mark LobeHub does not ship comes from `react-icons`, which is already a
+ * dependency, or from the vendor's own repository. `source` records which, per
+ * mark.
  *
  * Marks are monochrome and inherit the page's text ink, never a per-vendor
  * brand color: of the brand colors the sources carry, five of eleven measured

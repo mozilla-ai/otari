@@ -17,7 +17,7 @@ Otari never guesses from content.
 | The `Otari-Conversation-Id` header | `Otari-Conversation-Id: chat-42` | `client` |
 | The `session_label` request field | `"session_label": "chat-42"` | `client` |
 | A `session_id` request tag | `"metadata": {"session_id": "chat-42"}` | `client` |
-| Claude Code's own session id | `x-claude-code-session-id`, sent on every request (oh-my-pi sends it too, on the Anthropic API) | `harness` |
+| Claude Code's own session id | `x-claude-code-session-id`, sent on every request (oh-my-pi 18.1.6 and later send it too, on the Anthropic API; earlier versions only when signed in with Claude Code) | `harness` |
 | opencode's own session id | `x-opencode-session-id`, sent on every request | `harness` |
 | Amp's own thread id | `x-amp-thread-id`, sent on every request | `harness` |
 | goose's own session id | `agent-session-id`, sent on every request | `harness` |

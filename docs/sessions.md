@@ -29,12 +29,13 @@ Otari records sessions for the completions it serves, which is on by default. On
 a deployment you run, [Store agent traces](trace-storage.md) says how to turn it
 off or change how long sessions are kept.
 
-- **Claude Code, Codex, opencode, Amp, goose, Kilo Code, Crush, pi, oh-my-pi,
-  Roo Code, Mistral Vibe and OpenHands** are recognized automatically when they
-  route through Otari, by the session id each one sends
-  ([the full list](sessions-reference.md#what-makes-a-session)). Hermes Agent and
-  OpenClaw send one once it is turned on
-  ([how](sessions-reference.md#agents-that-send-a-session-id-when-asked)).
+- **Claude Code, Codex, opencode, Amp, goose, Kilo Code, Crush, pi, Roo Code,
+  Mistral Vibe and OpenHands** are recognized automatically when they route
+  through Otari, by the session id each one sends
+  ([the full list](sessions-reference.md#what-makes-a-session)). oh-my-pi sends
+  one only on the Anthropic API, from version 18.1.6; on other APIs each of its
+  requests is a session of its own. Hermes Agent and OpenClaw send one once it is
+  turned on ([how](sessions-reference.md#agents-that-send-a-session-id-when-asked)).
   Claude Code can also send its sessions without routing its model
   traffic; see [Send Claude Code sessions to Otari](claude-code.md#send-claude-code-sessions-to-otari).
 - **Your own agent** sends the same `Otari-Conversation-Id` header on every
