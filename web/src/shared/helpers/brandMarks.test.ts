@@ -208,9 +208,9 @@ describe("makerMark", () => {
 
   it("tiles the two makers that have no usable mark", () => {
     // Amazon's only mark in the set is the aws wordmark, unreadable at these
-    // steps, so it tiles like the SageMaker row. OpenBMB has none.
+    // steps, so it tiles like the SageMaker row. Writer has no vector mark.
     expect(makerMark("amazon")).toBeUndefined()
-    expect(makerMark("openbmb")).toBeUndefined()
+    expect(makerMark("writer")).toBeUndefined()
   })
 
   it("marks the makers this list names, and tiles the two it does not", () => {
@@ -222,7 +222,7 @@ describe("makerMark", () => {
     //
     // What this pins is the outcome a reader of this module expects today: the
     // two exemptions, and that everything else resolves.
-    const TILED = ["amazon", "openbmb"]
+    const TILED = ["amazon", "writer"]
     const SAMPLE = [
       "ai21",
       "alibaba",
