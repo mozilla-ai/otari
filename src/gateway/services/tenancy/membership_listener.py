@@ -99,22 +99,23 @@ class OrganizationReach:
         """The dashboard accounts these workspace memberships join."""
         return await self._members.user_ids_for_members(member_ids)
 
-    async def still_reaches(
-        self, organization_id: uuid.UUID, user_id: uuid.UUID, *, losing: Collection[uuid.UUID]
-    ) -> bool:
-        """Whether a dashboard account reaches the organization once it loses these workspaces.
+    async def still_reaching(
+        self, organization_id: uuid.UUID, user_ids: Collection[uuid.UUID], *, losing: Collection[uuid.UUID]
+    ) -> set[uuid.UUID]:
+        """Which of these dashboard accounts reach the organization once they lose these workspaces.
 
-        The person's membership of the organization is locked first, so two removals of one person from
-        two workspaces at once decide one after the other, and the second sees the first's.
+        Their memberships of the organization are locked first, so two removals of one person from two
+        workspaces at once decide one after the other, and the second sees the first's.
         """
-        await self._organization_members.lock_for_user(organization_id, user_id)
+        if not user_ids:
+            return set()
+        await self._organization_members.lock_for_users(organization_id, user_ids)
         kept = [
             workspace_id
             for workspace_id in await self._workspaces.get_ids_by_organization(organization_id)
             if workspace_id not in losing
         ]
-        if await self._members.get_active_pairs(kept, [user_id]):
-            return True
-        return user_id in await self._organization_members.active_with_roles(
-            organization_id, {user_id}, MANAGEMENT_ROLES
+        reaching = {user_id for _, user_id in await self._members.get_active_pairs(kept, user_ids)}
+        return reaching | await self._organization_members.active_with_roles(
+            organization_id, set(user_ids) - reaching, MANAGEMENT_ROLES
         )

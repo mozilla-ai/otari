@@ -67,17 +67,21 @@ class OrganizationMemberRepository(
         )
         return result.scalars().first()
 
-    async def lock_for_user(self, organization_id: uuid.UUID, user_id: uuid.UUID) -> None:
-        """Lock the person's membership of the organization, whatever its status, until the transaction ends.
+    async def lock_for_users(self, organization_id: uuid.UUID, user_ids: Collection[uuid.UUID]) -> None:
+        """Lock these people's memberships of the organization, whatever their status, until the transaction ends.
 
-        Serializes two decisions about what the person keeps in the organization (PostgreSQL only).
+        Serializes two decisions about what a person keeps in the organization (PostgreSQL only). The rows are
+        taken in one order, so two callers locking overlapping sets cannot deadlock.
         """
+        if not user_ids:
+            return
         await self.db.execute(
             select(col(OrganizationMember.id))
             .where(
                 col(OrganizationMember.organization_id) == organization_id,
-                col(OrganizationMember.user_id) == user_id,
+                col(OrganizationMember.user_id).in_(list(user_ids)),
             )
+            .order_by(col(OrganizationMember.id))
             .with_for_update()
         )
 
