@@ -2560,12 +2560,40 @@ def test_every_statement_that_binds_a_name_counts(tmp_path: Path, monkeypatch: p
 
 
 @pytest.mark.parametrize(
+    ("body", "counted"),
+    [
+        pytest.param("def get_two(gate=(GATE := object())) -> None: ...\n", 3, id="parameter_default"),
+        pytest.param("def get_two(*, gate=(GATE := object())) -> None: ...\n", 3, id="keyword_only_default"),
+        pytest.param("async def get_two(gate=(GATE := object())) -> None: ...\n", 3, id="async_parameter_default"),
+        pytest.param("@(GATE := staticmethod)\ndef get_two() -> None: ...\n", 3, id="function_decorator"),
+        pytest.param("@(GATE := staticmethod)\nclass Gate:\n    pass\n", 3, id="class_decorator"),
+        pytest.param("class Gate((GATE := object)):\n    pass\n", 3, id="class_base"),
+        pytest.param("class Gate(metaclass=(GATE := type)):\n    pass\n", 3, id="class_keyword"),
+        pytest.param("GATES = lambda gate=(GATE := object()): gate\n", 3, id="lambda_default"),
+        pytest.param("try:\n    pass\nexcept (GATE := ValueError):\n    pass\n", 2, id="exception_type"),
+    ],
+)
+def test_a_definition_header_binds_in_the_scope_around_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str, counted: int
+) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 1)
+    _root_with(tmp_path, f"def get_one() -> None: ...\n\n\n{body}")
+    assert check.check_composition_root_size(tmp_path) == [
+        f"{check.COMPOSITION_ROOT_MODULE} holds {counted} definitions, above its baseline of 1; put the new "
+        "one in the module of the domain whose work it does, which the root re-exports"
+    ]
+
+
+@pytest.mark.parametrize(
     "body",
     [
         pytest.param(
             "try:\n    GATES = object()\nexcept Exception as gate:\n    pass\n",
             id="except_target_is_unbound",
         ),
+        pytest.param("class Gate[T]((gate := object)):\n    pass\n", id="a_generic_class_base_is_its_own_scope"),
+        pytest.param("def get_two() -> None:\n    gate = object()\n", id="a_function_body_is_its_own_scope"),
+        pytest.param("class Gate:\n    gate = object()\n", id="a_class_body_is_its_own_scope"),
         pytest.param("GATES = [gate for gate in ()]\n", id="comprehension_has_its_own_scope"),
         pytest.param("GATES = lambda: (gate := object())\n", id="a_lambda_body_binds_in_its_own_scope"),
         pytest.param("GATES = {}\nGATES['one'] = object()\n", id="a_subscript_write_binds_nothing"),

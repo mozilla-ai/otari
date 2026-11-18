@@ -1448,6 +1448,32 @@ def _module_scope_statements(body: Iterable[ast.stmt]) -> Iterator[ast.stmt]:
                 yield from _module_scope_statements([child])
 
 
+def _header_expressions(node: ast.AST) -> Iterator[ast.expr]:
+    """Yield each expression of a definition that is evaluated where the definition sits, not inside it.
+
+    A decorator, a parameter default and a class base run at the point the definition
+    runs, so an assignment expression in one binds in the surrounding scope. The base
+    list of a generic class runs in the scope its type parameters open instead, so it is
+    left out.
+
+    NOTE: An annotation is left out whatever it holds. Which scope evaluates one, and
+    whether it is evaluated at all, depends on the Python version and on whether the
+    module defers annotations.
+    """
+    if isinstance(node, ast.ClassDef):
+        yield from node.decorator_list
+        if not node.type_params:
+            yield from node.bases
+            yield from (keyword.value for keyword in node.keywords)
+        return
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+        yield from node.decorator_list
+    elif not isinstance(node, ast.Lambda):
+        return
+    yield from node.args.defaults
+    yield from (default for default in node.args.kw_defaults if default is not None)
+
+
 def _statement_bindings(node: ast.stmt) -> Iterator[str]:
     """Yield each name one statement binds in the scope it sits in, not counting what its own body binds.
 
@@ -1458,19 +1484,20 @@ def _statement_bindings(node: ast.stmt) -> Iterator[str]:
     NOTE: An import binds a name, but is excluded, because the root re-exports what its
     modules define and a re-export is not a definition.
     """
-    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-        yield node.name
-        return
     if isinstance(node, ast.Import | ast.ImportFrom):
         return
     pending: list[ast.AST] = []
-    for child in ast.iter_child_nodes(node):
-        if isinstance(child, ast.stmt):
-            continue
-        if isinstance(child, ast.match_case):
-            pending.extend(part for part in (child.pattern, child.guard) if part is not None)
-        else:
-            pending.append(child)
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+        yield node.name
+        pending.extend(_header_expressions(node))
+    else:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.stmt):
+                continue
+            if isinstance(child, ast.match_case):
+                pending.extend(part for part in (child.pattern, child.guard) if part is not None)
+            else:
+                pending.append(child)
     while pending:
         current = pending.pop()
         if isinstance(current, ast.Name) and isinstance(current.ctx, ast.Store):
@@ -1480,6 +1507,7 @@ def _statement_bindings(node: ast.stmt) -> Iterator[str]:
         elif isinstance(current, ast.MatchMapping) and current.rest is not None:
             yield current.rest
         if isinstance(current, ast.Lambda):
+            pending.extend(_header_expressions(current))
             continue
         if isinstance(current, ast.comprehension):
             # The iteration variable belongs to the comprehension's own scope, while an
