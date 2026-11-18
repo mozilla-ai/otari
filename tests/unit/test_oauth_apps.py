@@ -1,15 +1,16 @@
 """Protocol boundaries independent of the dashboard."""
 
 import uuid
+from typing import get_args
 
 import pytest
 from apron_auth.pkce import generate_code_challenge as pkce_challenge
 from pydantic import ValidationError
 
-from gateway.core.oauth_apps import open_app_site, redirect_matches
+from gateway.core.oauth_apps import APP_KEY_LIFETIMES, open_app_site, redirect_matches
 from gateway.core.settings.identity import IdentitySettings, OAuthAppConfig
 from gateway.schemas.identity import AppAuthorizationRequest
-from gateway.schemas.identity.oauth_apps import AppAuthorizationParameters, AppTokenRequest
+from gateway.schemas.identity.oauth_apps import AppAuthorizationParameters, AppKeyExpiration, AppTokenRequest
 from gateway.types.key_scope import DEFAULT_KEY_SCOPES, KeyScope
 
 
@@ -136,7 +137,7 @@ def test_authorization_boundaries(
 def test_dashboard_consent_has_its_own_workspace_and_extra_field_contract() -> None:
     payload = _authorization()
     wire = AppAuthorizationParameters.model_validate({**payload, "scope": "models"})
-    assert wire.model_dump() == {**payload, "response_type": "code"}
+    assert wire.model_dump(exclude_none=True) == {**payload, "response_type": "code"}
     with pytest.raises(ValidationError, match="workspace_id"):
         AppAuthorizationRequest.model_validate(payload)
     consent = {**payload, "workspace_id": str(uuid.uuid4()), "scopes": ["inference:run"]}
@@ -187,3 +188,25 @@ def test_an_open_app_is_the_site_its_callback_is_on(client_id: str, redirect_uri
 )
 def test_an_open_app_client_id_must_be_its_callbacks_origin(client_id: str, redirect_uri: str) -> None:
     assert open_app_site(client_id, redirect_uri) is None
+
+
+@pytest.mark.parametrize("limit", ["0", "-1", "1000000", "12.345", "lots"])
+def test_consent_refuses_a_spending_limit_the_screen_cannot_offer(limit: str) -> None:
+    consent = {**_authorization(), "workspace_id": str(uuid.uuid4()), "scopes": ["inference:run"], "limit": limit}
+    with pytest.raises(ValidationError):
+        AppAuthorizationRequest.model_validate(consent)
+
+
+def test_consent_defaults_to_no_limit_and_no_expiry_and_refuses_an_unknown_expiry() -> None:
+    consent = {**_authorization(), "workspace_id": str(uuid.uuid4()), "scopes": ["inference:run"]}
+    approved = AppAuthorizationRequest.model_validate(consent)
+    assert approved.limit is None
+    assert approved.expiration == "never"
+    assert set(APP_KEY_LIFETIMES) == set(get_args(AppKeyExpiration))
+    with pytest.raises(ValidationError):
+        AppAuthorizationRequest.model_validate({**consent, "expiration": "2-days"})
+
+
+def test_an_app_may_suggest_a_limit_and_expiry_the_screen_validates_later() -> None:
+    wire = AppAuthorizationParameters.model_validate({**_authorization(), "limit": "lots", "expiration": "2-days"})
+    assert (wire.limit, wire.expiration) == ("lots", "2-days")

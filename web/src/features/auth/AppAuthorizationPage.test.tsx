@@ -108,7 +108,48 @@ it("shows the app, permission boundaries and the sole workspace before explicit 
     ...Object.fromEntries(request),
     workspace_id: "workspace-one",
     scopes: ["inference:run"],
+    expiration: "never",
   })
+})
+
+it("starts from the limit and expiry the app suggests and sends what the person approves", async () => {
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: {
+      ...realLocation,
+      ...routeLocation(
+        `/oauth/authorize?${request}&limit=12.50&expiration=7-days`,
+      ),
+      assign,
+    },
+  })
+  renderPage()
+  const limit = await screen.findByRole("textbox", {
+    name: "Spending limit (USD)",
+  })
+  expect(limit).toHaveValue("12.50")
+  await userEvent.clear(limit)
+  await userEvent.type(limit, "5")
+  await userEvent.click(screen.getByRole("button", { name: "Allow access" }))
+  await waitFor(() => expect(assign).toHaveBeenCalled())
+  const call = vi
+    .mocked(apiFetch)
+    .mock.calls.find(([path]) => path === "/oauth/apps/authorize")
+  expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
+    limit: "5",
+    expiration: "7-days",
+  })
+})
+
+it("does not approve a spending limit the server would refuse", async () => {
+  renderPage()
+  const limit = await screen.findByRole("textbox", {
+    name: "Spending limit (USD)",
+  })
+  await userEvent.type(limit, "12.345")
+  expect(screen.getByRole("button", { name: "Allow access" })).toBeDisabled()
+  await userEvent.clear(limit)
+  expect(screen.getByRole("button", { name: "Allow access" })).toBeEnabled()
 })
 
 it("warns that a site connecting without registration is unverified", async () => {

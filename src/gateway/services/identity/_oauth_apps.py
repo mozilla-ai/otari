@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 
 from apron_auth.pkce import generate_code_challenge
 
-from gateway.core.oauth_apps import open_app_site, redirect_matches
+from gateway.core.oauth_apps import APP_KEY_LIFETIMES, open_app_site, redirect_matches
 from gateway.core.settings.identity import OAuthAppConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.api_keys_exceptions import AppKeyOwnerInactiveError
@@ -21,6 +21,7 @@ from gateway.repositories.identity.oauth_app_grant_repository import OAuthAppGra
 from gateway.schemas.identity import AppAuthorizationRequest
 from gateway.schemas.identity.oauth_apps import AppAuthorizationParameters, AppDetails, AppTokenRequest
 from gateway.services.api_keys import ApiKeyService
+from gateway.services.budgets import BudgetService
 from gateway.services.tenancy import OrganizationService, WorkspaceService
 from gateway.types.key_scope import KeyScopeSet
 
@@ -39,6 +40,7 @@ class OAuthAppService:
         key_format: ApiKeyFormatPort,
         organizations: OrganizationService,
         workspaces: WorkspaceService,
+        budgets: BudgetService,
         *,
         apps: Mapping[str, OAuthAppConfig],
         open_apps: bool = False,
@@ -48,7 +50,7 @@ class OAuthAppService:
     ) -> None:
         self.uow, self.grants, self.keys = uow, grants, keys
         self.key_format = key_format
-        self.organizations, self.workspaces = organizations, workspaces
+        self.organizations, self.workspaces, self.budgets = organizations, workspaces, budgets
         self.apps, self.open_apps = apps, open_apps
         self.ui_link, self.issuer, self.clock = ui_link, issuer, clock
 
@@ -80,7 +82,11 @@ class OAuthAppService:
     def authorization_url(self, request: AppAuthorizationParameters) -> str:
         """Continue through the dashboard's existing sign-in and consent gate."""
         self.require_app(request.client_id, request.redirect_uri)
-        return self.ui_link("/oauth/authorize?" + urlencode(request.model_dump()))
+        return self.ui_link("/oauth/authorize?" + urlencode(request.model_dump(exclude_none=True)))
+
+    def manage_url(self) -> str:
+        """The dashboard page where a person sees and revokes the keys apps were issued."""
+        return self.ui_link("/keys")
 
     async def authorize(self, user: User, request: AppAuthorizationRequest) -> str:
         """Record explicit consent, for the scopes the screen showed that the registration still names.
@@ -100,6 +106,7 @@ class OAuthAppService:
                 ",".join(scope.value for scope in registered if scope not in approved),
             )
         now = self.clock()
+        lifetime = APP_KEY_LIFETIMES[request.expiration]
         code = secrets.token_urlsafe(32)
         async with self.uow:
             # Identity before workspace, matching redemption and organization deletion.
@@ -119,6 +126,8 @@ class OAuthAppService:
                 workspace_id=workspace.id,
                 scopes=approved,
                 expires_at=now + timedelta(minutes=2),
+                spend_limit=request.limit,
+                key_lifetime_sec=None if lifetime is None else int(lifetime.total_seconds()),
             )
             await self.grants.prune_expired(now)
         return request.redirect_uri + "?" + urlencode({"code": code, "state": request.state, "iss": self.issuer})
@@ -167,14 +176,22 @@ class OAuthAppService:
             )
             if not await self.grants.consume(grant.code_hash, now):
                 raise OAuthAppGrantError("invalid_grant", "Authorization grant was already consumed")
-            key = await self.keys.issue_app_key(
+            key, key_id = await self.keys.issue_app_key(
                 user=user,
                 workspace_id=grant.workspace_id,
                 client_id=request.client_id,
                 app_name=app_name,
                 scopes=held,
                 key_format=self.key_format,
+                expires_at=None if grant.key_lifetime_sec is None else now + timedelta(seconds=grant.key_lifetime_sec),
             )
+            if grant.spend_limit is not None:
+                await self.budgets.cap_app_key(
+                    key_id=key_id,
+                    workspace_id=grant.workspace_id,
+                    name=f"{app_name} (OAuth)",
+                    max_budget=grant.spend_limit,
+                )
             return key, held
 
     async def revoke(self, token: str) -> None:

@@ -17,6 +17,7 @@ from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.repositories.identity.oauth_app_grant_repository import OAuthAppGrantRepository
 from gateway.schemas.identity.oauth_apps import AppTokenRequest
 from gateway.services.api_keys import ApiKeyService
+from gateway.services.budgets import BudgetService
 from gateway.services.identity import OAuthAppService
 from gateway.services.tenancy import OrganizationService, WorkspaceService
 from gateway.types.key_scope import DEFAULT_KEY_SCOPES, KeyScopeSet
@@ -30,6 +31,7 @@ def _service(grants: OAuthAppGrantRepository, *, open_apps: bool = False) -> OAu
         cast(ApiKeyFormatPort, Mock()),
         AsyncMock(spec=OrganizationService),
         cast(WorkspaceService, Mock()),
+        AsyncMock(spec=BudgetService),
         apps={"app": OAuthAppConfig(name="App", redirect_uris=["https://app.example/callback"])},
         open_apps=open_apps,
         ui_link=lambda path: path,
@@ -103,7 +105,7 @@ async def test_redemption_uses_the_same_instant_for_lookup_and_atomic_consumptio
     )
     grants.consume.return_value = True
     keys = AsyncMock(spec=ApiKeyService)
-    keys.issue_app_key.return_value = "issued-token"
+    keys.issue_app_key.return_value = ("issued-token", "key-id")
     organizations = AsyncMock(spec=OrganizationService)
     organizations.hold_delegated_workspace_access.return_value = User(id=uuid.uuid4())
     service = OAuthAppService(
@@ -113,6 +115,7 @@ async def test_redemption_uses_the_same_instant_for_lookup_and_atomic_consumptio
         cast(ApiKeyFormatPort, Mock()),
         organizations,
         cast(WorkspaceService, Mock()),
+        AsyncMock(spec=BudgetService),
         apps={"app": OAuthAppConfig(name="App", redirect_uris=["https://app.example/callback"])},
         ui_link=lambda path: path,
         issuer="https://otari.example",

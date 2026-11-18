@@ -71,6 +71,17 @@ them in its own `scope` member. An operator who narrows a registration while
 somebody is reading the screen narrows their key; one who widens it does not
 widen theirs.
 
+Two optional parameters suggest limits for the key, with the names OpenRouter's
+sign-in uses. `limit` is a spending limit in USD, a positive amount under
+1,000,000 with at most two decimals, such as `25` or `12.50`. `expiration` is one
+of `1-hour`, `1-day`, `7-days`, `30-days`, `90-days`, `180-days`, `1-year` or
+`never`. The consent screen starts from them and the person can change either,
+so treat them as suggestions. A value the screen cannot use starts it at no limit
+or `never`, which are also the defaults. An approved limit caps the key over its
+whole life through a budget of its own, named like the key and listed with the
+organization's budgets, and an approved expiry counts from the moment the key is
+issued.
+
 The authorization endpoint uses the deployment's `ui_base_url` (falling back to
 `public_base_url`), so a separately hosted dashboard works too. The dashboard
 signs in the user if necessary, displays the registered app name
@@ -90,7 +101,9 @@ rewrites the host or terminates TLS. POST `application/x-www-form-urlencoded` to
 grant_type=authorization_code&client_id=thunderbolt&redirect_uri=https%3A%2F%2Fyour-thunderbolt.example%2Foauth%2Fotari&code=the-returned-code&code_verifier=the-original-verifier
 ```
 
-The JSON response contains `access_token` and `token_type: Bearer`. Refusals use
+The JSON response contains `access_token`, `token_type: Bearer`, `scope`, and
+`manage_url`, the dashboard page where the person sees the key and revokes it, so
+an app can link there. Refusals use
 OAuth `error` and `error_description` fields; token responses must not be cached.
 Use the token against Otari's OpenAI-compatible API. The code expires after two minutes, is bound to
 the exact redirect and client, and can be exchanged only once. No client secret

@@ -1,8 +1,21 @@
 """Strict redirect validation for registered public OAuth clients."""
 
+from datetime import timedelta
 from urllib.parse import SplitResult, urlsplit
 
 from pydantic import HttpUrl
+
+# How long an app key lives, by the names OpenRouter's PKCE sign-in uses for its ``expiration``.
+APP_KEY_LIFETIMES: dict[str, timedelta | None] = {
+    "1-hour": timedelta(hours=1),
+    "1-day": timedelta(days=1),
+    "7-days": timedelta(days=7),
+    "30-days": timedelta(days=30),
+    "90-days": timedelta(days=90),
+    "180-days": timedelta(days=180),
+    "1-year": timedelta(days=365),
+    "never": None,
+}
 
 # The only hosts plain HTTP is admitted for, and where RFC 8252 lets the port vary.
 _LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")

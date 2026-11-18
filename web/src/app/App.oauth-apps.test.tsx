@@ -117,6 +117,7 @@ async function approveOriginalRequest() {
     ...Object.fromEntries(params),
     workspace_id: "workspace",
     scopes: ["inference:run"],
+    expiration: "never",
   })
 }
 

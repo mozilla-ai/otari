@@ -1,5 +1,6 @@
 """RFC 6749 public-client authorization, token and revocation contracts."""
 
+from decimal import Decimal
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
@@ -10,6 +11,8 @@ OAuthClientId = Annotated[str, Field(min_length=1, max_length=128)]
 OAuthRedirectUri = Annotated[str, Field(max_length=2048)]
 OAuthState = Annotated[str, Field(min_length=16, max_length=256, pattern=r"^[A-Za-z0-9._~+/=-]+$")]
 PKCECodeChallenge = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{43}$")]
+AppKeyExpiration = Literal["1-hour", "1-day", "7-days", "30-days", "90-days", "180-days", "1-year", "never"]
+AppKeyLimit = Annotated[Decimal, Field(gt=0, lt=1_000_000, decimal_places=2)]
 
 
 class AppAuthorizationParameters(BaseModel):
@@ -24,6 +27,18 @@ class AppAuthorizationParameters(BaseModel):
     code_challenge: PKCECodeChallenge
     code_challenge_method: Literal["S256"]
     response_type: Literal["code"] = "code"
+    limit: str | None = Field(
+        default=None,
+        max_length=32,
+        description="A spending limit in USD to suggest for the key. The person can change it on the consent "
+        "screen, and one the screen cannot use is left blank.",
+    )
+    expiration: str | None = Field(
+        default=None,
+        max_length=16,
+        description="An expiry to suggest for the key: 1-hour, 1-day, 7-days, 30-days, 90-days, 180-days, "
+        "1-year or never. The person can change it, and any other value leaves it at never.",
+    )
 
 
 class AppTokenRequest(BaseModel):
@@ -64,6 +79,7 @@ class AppTokenResponse(BaseModel):
         description="The scopes the key holds, space delimited. Fewer than the registration names "
         "where the person approved it before an operator narrowed it."
     )
+    manage_url: str = Field(description="The page where the person sees this key, and revokes it.")
 
 
 class AppRevocationRequest(BaseModel):
