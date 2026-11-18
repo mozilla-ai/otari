@@ -204,6 +204,11 @@ no rate, because a request that would run it is refused. See
 
 ## The setup guide
 
+The guide creates its API key only when you ask for one. Reopened after that,
+it offers the key it already issued, named by its last characters, instead of
+a new one: **Use it** keeps that key, and **Replace it** issues a new one and
+the old key stops working.
+
 Set `activation_guide: false` to turn off the Overview's
 setup guide for the deployment.
 
@@ -247,4 +252,4 @@ service and privacy notice. The account menu links each one set; see
 The dashboard source is under `web/`, and the Docker image includes the
 bundle. From a source checkout, run `make dashboard` for the gateway to serve
 it, or `pnpm --dir web dev` for frontend development. See
-[web/README.md](https://github.com/mozilla-ai/otari/blob/16bc56141c935b1867980c37c6ee1f5855990d4c/web/README.md).
+[web/README.md](https://github.com/mozilla-ai/otari/blob/34f60d66bbf9701693d931e1fbf5d297ada52221/web/README.md).
