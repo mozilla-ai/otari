@@ -226,7 +226,9 @@ describe("usePlaygroundToolSelection", () => {
       },
       { initialProps: { available: tools() } },
     )
+    act(() => result.current.toggleMcpServer("srv-1", true))
     act(() => result.current.toggleMcpServer("srv-2", true))
+    expect(result.current.selection.mcpServerIds).toEqual(["srv-1", "srv-2"])
     sent.length = 0
 
     rerender({
@@ -243,7 +245,9 @@ describe("usePlaygroundToolSelection", () => {
       }),
     })
     expect(sent.length).toBeGreaterThan(0)
-    expect(sent.every((ids) => ids.length === 0)).toBe(true)
+    expect(sent.every((ids) => ids.length === 1 && ids[0] === "srv-1")).toBe(
+      true,
+    )
   })
 
   it("drops an MCP server the caller is disconnected from while the page is open", () => {
