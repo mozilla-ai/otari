@@ -253,7 +253,13 @@ function breakdownRows(
   return usage
     .filter((row) => row.cost > 0 || row.requests > 0)
     .map((row) => ({
-      id: row.is_other ? `${kind}:other` : `${kind}:${row.key ?? "none"}`,
+      // The fold and the requests that recorded none take ids no value can:
+      // an instance an operator names "other" or "none" is still its own row.
+      id: row.is_other
+        ? `${kind}::other`
+        : row.key === null
+          ? `${kind}::none`
+          : `${kind}:${row.key}`,
       filterKey: row.is_other ? null : row.key,
       ...(row.is_other ? { name: OTHER } : named(row.key)),
       cost: row.cost,

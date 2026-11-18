@@ -42,8 +42,8 @@ describe("the server's fold row", () => {
   it("is Other, with a key of its own, on every cut", () => {
     const models = modelRows([FOLD, NOBODY])
     expect(models.map((row) => [row.id, row.name])).toEqual([
-      ["model:other", "Other"],
-      ["model:none", "Unknown model"],
+      ["model::other", "Other"],
+      ["model::none", "Unknown model"],
     ])
     const keys = keyRows(
       [FOLD, NOBODY],
@@ -92,8 +92,8 @@ describe("providerRows", () => {
       ["provider:openai", "OpenAI", "openai"],
       ["provider:anthropic", "Anthropic", "anthropic"],
       // The server's fold, at $3 like Anthropic: a tie goes by name.
-      ["provider:other", "Other", null],
-      ["provider:none", "Unknown provider", null],
+      ["provider::other", "Other", null],
+      ["provider::none", "Unknown provider", null],
       // An instance an operator named keeps the name they gave it.
       ["provider:acme-proxy", "acme-proxy", "acme-proxy"],
     ])
@@ -101,7 +101,7 @@ describe("providerRows", () => {
 
   it("keeps the requests that recorded no provider as one row, so the rows add up to the total", () => {
     const rows = providerRows(usage)
-    const unknown = rows.find((row) => row.id === "provider:none")
+    const unknown = rows.find((row) => row.id === "provider::none")
     expect(unknown?.detail).toBe("Not recorded")
     expect(unknown?.cost).toBe(0.5)
     expect(rows.reduce((sum, row) => sum + row.cost, 0)).toBe(12.75)
@@ -114,6 +114,20 @@ describe("providerRows", () => {
       expect(row.limits).toBe(NO_LIMITS)
       expect(row.target).toBeNull()
     }
+  })
+
+  it("keeps an instance named like the aggregate rows apart from them", () => {
+    const rows = providerRows([
+      group({ key: "other", cost: 2 }),
+      group({ key: "none", cost: 1 }),
+      group({ key: null, cost: 0.5 }),
+      FOLD,
+    ])
+    const ids = rows.map((row) => row.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(rows.find((row) => row.id === "provider:other")?.filterKey).toBe(
+      "other",
+    )
   })
 
   it("leaves out a provider with no requests and no spend", () => {
