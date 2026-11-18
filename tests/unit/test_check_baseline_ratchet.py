@@ -40,7 +40,7 @@ def test_the_real_check_measured_against_itself_is_clean() -> None:
 
 
 def test_every_baseline_the_real_check_names_is_read() -> None:
-    found = check.baselines(_architecture_check())
+    found = check.baselines(_architecture_check()).rooms
     assert sorted(name for name in found if name.endswith(check.BASELINE_SUFFIX)) == [
         "COMPOSITION_ROOT_BEHAVIOR_BASELINE",
         "COMPOSITION_ROOT_SIZE_BASELINE",
@@ -57,14 +57,14 @@ def test_every_baseline_the_real_check_names_is_read() -> None:
 
 
 def test_every_per_entry_baseline_the_real_check_records_is_read() -> None:
-    found = check.baselines(_architecture_check())
+    found = check.baselines(_architecture_check()).rooms
     nested = [name for name in found if not name.endswith(check.BASELINE_SUFFIX)]
     assert nested, "the model access map records a baseline per model"
     assert all(name.startswith("MODEL_ACCESS[") and name.endswith("['baseline']") for name in nested)
 
 
 def test_no_baseline_the_real_check_records_is_unreadable() -> None:
-    found = check.baselines(_architecture_check())
+    found = check.baselines(_architecture_check()).rooms
     assert [name for name, room in found.items() if isinstance(room, check.Unreadable)] == []
 
 
@@ -367,3 +367,41 @@ def test_one_computed_baseline_does_not_hide_the_rest_of_a_map() -> None:
     assert check.check_baselines(before, after) == [
         "ACCESS['c.D']['baseline'] arrives and is not written out in full; a baseline is read without running the check"
     ]
+
+
+def test_a_baseline_an_unpacking_can_replace_is_reported() -> None:
+    before = 'ACCESS = {"a.B": {"baseline": ("one.py",)}}\n'
+    after = 'ACCESS = {"a.B": {"baseline": ("one.py",), **EXTRA}}\n'
+    assert check.check_baselines(before, after) == [
+        "ACCESS['a.B']['baseline'] sits in a mapping that unpacks another into itself, "
+        "so the value written here may be replaced; a baseline is read without running the check"
+    ]
+
+
+def test_an_unpacking_in_the_map_itself_is_reported() -> None:
+    before = 'ACCESS = {"a.B": {"baseline": ("one.py",)}}\n'
+    after = 'ACCESS = {"a.B": {"baseline": ("one.py",)}, **EXTRA}\n'
+    assert check.check_baselines(before, after) == [
+        "ACCESS['a.B']['baseline'] sits in a mapping that unpacks another into itself, "
+        "so the value written here may be replaced; a baseline is read without running the check"
+    ]
+
+
+def test_an_empty_baseline_gone_into_a_map_that_cannot_be_read_is_reported() -> None:
+    before = 'ACCESS = {"a.B": {"baseline": ()}}\n'
+    after = 'ACCESS = dict({"a.B": {"baseline": ("new.py",)}})\n'
+    assert check.check_baselines(before, after) == [
+        "ACCESS['a.B']['baseline'] is gone from ACCESS, which is not written out in full, so its removal cannot be read"
+    ]
+
+
+def test_an_empty_baseline_gone_from_a_map_that_can_be_read_is_clean() -> None:
+    before = 'ACCESS = {"a.B": {"baseline": ()}, "c.D": {"baseline": ()}}\n'
+    after = 'ACCESS = {"c.D": {"baseline": ()}}\n'
+    assert check.check_baselines(before, after) == []
+
+
+def test_a_baseline_gone_with_its_whole_map_is_clean_once_empty() -> None:
+    before = 'SIZE_BASELINE = 0\nACCESS = {"a.B": {"baseline": ()}}\n'
+    after = "SIZE_BASELINE = 0\n"
+    assert check.check_baselines(before, after) == []

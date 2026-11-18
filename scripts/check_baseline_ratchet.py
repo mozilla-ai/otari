@@ -8,9 +8,10 @@ together passes. This reads the two revisions instead, and fails when the later
 one records more room than the earlier one.
 
 A baseline that is new passes, because that is how a rule arrives with the debt
-it found. A baseline that is gone passes only once it is empty, because a rule is
-retired after its debt is paid rather than before. A baseline whose room cannot
-be read fails either way, because a comparison that proves nothing is not a pass.
+it found. A baseline that is gone passes only once it is empty, and only once the
+constant it was read from still reads in full, because a rule is retired after its
+debt is paid rather than before. A baseline whose room cannot be read fails either
+way, because a comparison that proves nothing is not a pass.
 
 NOTE: This takes two files and reads neither repository. The caller decides which
 revision is which, so the same command serves a pull request and a local branch.
@@ -24,6 +25,7 @@ import ast
 import sys
 from collections.abc import Iterator, Sequence
 from pathlib import Path
+from typing import NamedTuple
 
 BASELINE_SUFFIX = "_BASELINE"
 BASELINE_KEY = "baseline"
@@ -43,6 +45,21 @@ _NOT_A_LITERAL = "is not written out in full"
 _WRITTEN_AGAIN = "is written at module scope more than once, so the last value decides"
 _UNDECLARED = "is written at module scope without a declaration this check can read"
 _UNSUPPORTED = "records a kind of value this check does not read"
+_UNPACKED = "sits in a mapping that unpacks another into itself, so the value written here may be replaced"
+
+
+class Revision(NamedTuple):
+    """What one revision of the check records about its baselines.
+
+    ``rooms`` gives the room each baseline records, by the name that reaches it, and
+    ``owners`` gives the constant each of those names was read from. ``unread`` names
+    the constants whose baselines could not be read in full, so a name missing from
+    ``rooms`` under one of them was not shown to be gone.
+    """
+
+    rooms: dict[str, object]
+    owners: dict[str, str]
+    unread: frozenset[str]
 
 
 def _module_scope_statements(body: Sequence[ast.stmt]) -> Iterator[ast.stmt]:
@@ -112,21 +129,42 @@ def _declarations(body: Sequence[ast.stmt]) -> Iterator[tuple[str, ast.expr]]:
             yield name, node.value
 
 
-def _nested_baselines(label: str, node: ast.expr) -> Iterator[tuple[str, ast.expr]]:
-    """Yield the written-out value of each baseline a constant records under a ``baseline`` key.
+def _written_out_in_full(node: ast.expr) -> bool:
+    """Whether one value stands written where it is, so no baseline can hide inside it."""
+    try:
+        ast.literal_eval(node)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _nested_baselines(label: str, node: ast.expr) -> tuple[list[tuple[str, ast.expr | Unreadable]], bool]:
+    """Return each baseline a constant records under a ``baseline`` key, and whether it was read in full.
 
     This reads the mapping as it is written rather than as a whole value, so one entry
     that is not written out in full costs only that entry.
+
+    NOTE: A mapping that unpacks another into itself is not read in full, because the
+    unpacked keys decide and are not written out. Every baseline written in such a
+    mapping is returned as unreadable, since unpacking may replace any of them.
     """
     if not isinstance(node, ast.Dict):
-        return
+        return [], _written_out_in_full(node)
+    unpacks = any(key is None for key in node.keys)
+    found: list[tuple[str, ast.expr | Unreadable]] = []
+    read_in_full = not unpacks
     for key, value in zip(node.keys, node.values, strict=True):
         if not isinstance(key, ast.Constant) or not isinstance(key.value, str):
             continue
         if key.value == BASELINE_KEY:
-            yield f"{label}[{BASELINE_KEY!r}]", value
-        else:
-            yield from _nested_baselines(f"{label}[{key.value!r}]", value)
+            found.append((f"{label}[{BASELINE_KEY!r}]", value))
+            continue
+        nested, whole = _nested_baselines(f"{label}[{key.value!r}]", value)
+        found.extend(nested)
+        read_in_full = read_in_full and whole
+    if unpacks:
+        return [(nested_label, Unreadable(_UNPACKED)) for nested_label, _ in found], False
+    return found, read_in_full
 
 
 def _supported(value: object) -> bool:
@@ -160,8 +198,8 @@ def _read_value(node: ast.expr) -> object:
     return value if _supported(value) else Unreadable(_UNSUPPORTED)
 
 
-def baselines(source: str) -> dict[str, object]:
-    """Return the room each baseline of one revision of the check records, by the name that reaches it.
+def baselines(source: str) -> Revision:
+    """Return what one revision of the check records about its baselines.
 
     A baseline is a constant whose name ends in the baseline suffix, or a ``baseline``
     key inside a constant that records one per entry. One whose room cannot be read maps
@@ -173,21 +211,31 @@ def baselines(source: str) -> dict[str, object]:
         for name in _names_written(statement):
             written[name] = written.get(name, 0) + 1
 
-    declared: dict[str, tuple[str, ast.expr]] = {}
+    declared: dict[str, tuple[str, ast.expr | Unreadable]] = {}
+    unread: set[str] = set()
     for name, node in _declarations(tree.body):
         if name.endswith(BASELINE_SUFFIX):
             declared[name] = (name, node)
             continue
-        for label, value in _nested_baselines(name, node):
+        nested, read_in_full = _nested_baselines(name, node)
+        if not read_in_full:
+            unread.add(name)
+        for label, value in nested:
             declared[label] = (name, value)
 
-    found: dict[str, object] = {}
-    for label, (owner, node) in declared.items():
-        found[label] = Unreadable(_WRITTEN_AGAIN) if written.get(owner, 0) > 1 else _read_value(node)
+    rooms: dict[str, object] = {}
+    owners: dict[str, str] = {}
+    for label, (owner, written_out) in declared.items():
+        owners[label] = owner
+        if written.get(owner, 0) > 1:
+            rooms[label] = Unreadable(_WRITTEN_AGAIN)
+        else:
+            rooms[label] = written_out if isinstance(written_out, Unreadable) else _read_value(written_out)
     for name in written:
-        if name.endswith(BASELINE_SUFFIX) and name not in found:
-            found[name] = Unreadable(_UNDECLARED)
-    return found
+        if name.endswith(BASELINE_SUFFIX) and name not in rooms:
+            rooms[name] = Unreadable(_UNDECLARED)
+            owners[name] = name
+    return Revision(rooms, owners, frozenset(unread))
 
 
 def check_baselines(base: str, head: str) -> list[str]:
@@ -200,12 +248,14 @@ def check_baselines(base: str, head: str) -> list[str]:
     except SyntaxError:
         return ["the check does not parse, so no baseline can be read from it"]
     findings: list[str] = []
-    for name, recorded in sorted(before.items()):
-        if name in after:
-            findings.extend(_compared(name, recorded, after[name]))
+    for label, recorded in sorted(before.rooms.items()):
+        if label in after.rooms:
+            findings.extend(_compared(label, recorded, after.rooms[label]))
+        elif (owner := before.owners[label]) in after.unread:
+            findings.append(f"{label} is gone from {owner}, which {_NOT_A_LITERAL}, so its removal cannot be read")
         else:
-            findings.extend(_retired(name, recorded))
-    findings.extend(_arrived(name, after[name]) for name in sorted(after) if name not in before)
+            findings.extend(_retired(label, recorded))
+    findings.extend(_arrived(label, after.rooms[label]) for label in sorted(after.rooms) if label not in before.rooms)
     return [finding for finding in findings if finding]
 
 
