@@ -10,6 +10,7 @@ from typing import Any, cast
 import pytest
 from sqlalchemy.exc import OperationalError
 
+from gateway.core.endpoint_urls import url_spellings
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tenancy import User
 from gateway.models.tools import McpServerRequest, McpServerRequestStatus
@@ -18,7 +19,6 @@ from gateway.schemas.mcp_catalog import McpCatalogServerPublic
 from gateway.services.mail import Mailer, MailMessage
 from gateway.services.tools._mcp_server_requests import (
     McpServerRequestService,
-    _spellings,
     render_decision_mail,
     render_request_mail,
 )
@@ -77,8 +77,11 @@ def test_the_decision_mail_says_what_was_decided(approved: bool, reason: str | N
 
 
 def test_a_url_is_matched_with_and_without_its_trailing_slash() -> None:
-    assert _spellings("https://mcp.example.com/mcp/") == ("https://mcp.example.com/mcp", "https://mcp.example.com/mcp/")
-    assert _spellings(" https://mcp.example.com ") == ("https://mcp.example.com", "https://mcp.example.com/")
+    assert url_spellings("https://mcp.example.com/mcp/") == (
+        "https://mcp.example.com/mcp",
+        "https://mcp.example.com/mcp/",
+    )
+    assert url_spellings(" https://mcp.example.com ") == ("https://mcp.example.com", "https://mcp.example.com/")
 
 
 class _Session:

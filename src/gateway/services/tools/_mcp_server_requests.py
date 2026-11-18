@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 from typing import ClassVar, Protocol
 
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
+from gateway.core.endpoint_urls import url_spellings
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.tools_exceptions import (
     McpCatalogServerNotListedError,
@@ -85,12 +86,6 @@ class CatalogEntries(Protocol):
     """What this service needs of the mcp-catalog domain: the entry a request names."""
 
     async def servers_by_names(self, names: Sequence[str]) -> dict[str, McpCatalogServerPublic]: ...
-
-
-def _spellings(url: str) -> tuple[str, str]:
-    """``url`` without and with a trailing slash, the two spellings of one endpoint."""
-    bare = url.strip().rstrip("/")
-    return bare, f"{bare}/"
 
 
 def _person(user: User | None) -> str:
@@ -397,12 +392,12 @@ class McpServerRequestService:
         Returns how many requests it approved.
         """
         async with self._uow:
-            rows = await self._requests.pending_for_server(workspace_id, urls=_spellings(url))
+            rows = await self._requests.pending_for_server(workspace_id, urls=url_spellings(url))
             answered = self._answer(rows, McpServerRequestStatus.APPROVED, decided_by=added_by, server_id=server_id)
             if rows:
                 await self._requests.save()
             # The server is here now, so an earlier decline of it no longer says anything true.
-            await self._requests.acknowledge_declined(workspace_id, at=self._clock(), urls=_spellings(url))
+            await self._requests.acknowledge_declined(workspace_id, at=self._clock(), urls=url_spellings(url))
         if answered:
             logger.info("MCP server requests approved workspace_id=%s count=%d", workspace_id, len(answered))
             await self._mail_requesters(workspace_name, answered, approved=True, reason=None, decided_by=added_by)

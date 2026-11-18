@@ -12,6 +12,11 @@ import type {
 export const ALL_TOOLS = "*"
 export const READ_TOOLS = "@read"
 
+/** "tool" or "tools", to follow a count. */
+export function toolNoun(count: number): string {
+  return count === 1 ? "tool" : "tools"
+}
+
 /**
  * Whether a server's tool name means only itself once picked, the gateway's
  * own rule (`reads_as_pattern`): not empty, no wildcard, comma or leading `@`,
