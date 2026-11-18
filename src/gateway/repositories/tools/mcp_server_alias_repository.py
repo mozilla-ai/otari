@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.tools import McpServerAlias
+from gateway.models.tools import McpServerAlias, WorkspaceMcpServer
 from gateway.repositories.base_repository import BaseRepository
 
 
@@ -22,9 +22,21 @@ class McpServerAliasRepository(BaseRepository[McpServerAlias, Never, Never]):
     def __init__(self, db: AsyncSession | UnitOfWork) -> None:
         super().__init__(db, McpServerAlias)
 
-    async def add(self, old_id: uuid.UUID, *, workspace_id: uuid.UUID, server_id: uuid.UUID) -> None:
-        """Stage ``old_id`` naming ``server_id`` for callers in ``workspace_id``."""
-        self.db.add(McpServerAlias(old_id=old_id, workspace_id=workspace_id, server_id=server_id))
+    async def add(self, old_id: uuid.UUID, *, workspace_id: uuid.UUID, server: WorkspaceMcpServer) -> None:
+        """Stage ``old_id`` naming an organization's ``server`` for callers in ``workspace_id``.
+
+        The keys refuse a workspace of another organization than the server's.
+
+        Raises:
+            ValueError: ``server`` is one workspace's own, which no other id can stand for.
+        """
+        if server.workspace_id is not None:
+            raise ValueError(f"MCP server {server.id} is a workspace's own; an alias names an organization's")
+        self.db.add(
+            McpServerAlias(
+                old_id=old_id, organization_id=server.organization_id, workspace_id=workspace_id, server_id=server.id
+            )
+        )
         await self.db.flush()
 
     async def targets(self, workspace_id: uuid.UUID, ids: Collection[uuid.UUID]) -> dict[uuid.UUID, uuid.UUID]:

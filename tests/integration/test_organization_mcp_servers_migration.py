@@ -107,7 +107,14 @@ def test_the_revision_fills_in_existing_rows_and_its_downgrade_keeps_workspace_s
                 organization_id=organization_id,
                 server_id=shared,
             )
-            _insert(connection, "mcp_server_aliases", old_id=uuid.uuid4(), workspace_id=workspace_id, server_id=shared)
+            _insert(
+                connection,
+                "mcp_server_aliases",
+                old_id=uuid.uuid4(),
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+                server_id=shared,
+            )
 
         command.downgrade(config, _BEFORE)
 

@@ -91,14 +91,23 @@ class OrganizationReach:
         self._members = members
         self._organization_members = organization_members
 
-    async def organization_of(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
-        """The organization a workspace belongs to, or ``None`` for one that does not exist."""
-        return await self._workspaces.get_organization_id(workspace_id)
+    async def organizations_of(self, workspace_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
+        """The organizations these workspaces belong to."""
+        return await self._workspaces.get_organization_ids(workspace_ids)
+
+    async def people_of(self, member_ids: Collection[uuid.UUID]) -> list[uuid.UUID]:
+        """The dashboard accounts these workspace memberships join."""
+        return await self._members.user_ids_for_members(member_ids)
 
     async def still_reaches(
         self, organization_id: uuid.UUID, user_id: uuid.UUID, *, losing: Collection[uuid.UUID]
     ) -> bool:
-        """Whether a dashboard account reaches the organization once it loses these workspaces."""
+        """Whether a dashboard account reaches the organization once it loses these workspaces.
+
+        The person's membership of the organization is locked first, so two removals of one person from
+        two workspaces at once decide one after the other, and the second sees the first's.
+        """
+        await self._organization_members.lock_for_user(organization_id, user_id)
         kept = [
             workspace_id
             for workspace_id in await self._workspaces.get_ids_by_organization(organization_id)

@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.tools import WorkspaceMcpServerOverride
+from gateway.models.tools import WorkspaceMcpServer, WorkspaceMcpServerOverride
 from gateway.repositories.base_repository import BaseRepository
 
 
@@ -60,17 +60,24 @@ class WorkspaceMcpServerOverrideRepository(BaseRepository[WorkspaceMcpServerOver
         override: WorkspaceMcpServerOverride | None,
         *,
         workspace_id: uuid.UUID,
-        organization_id: uuid.UUID,
-        server_id: uuid.UUID,
+        server: WorkspaceMcpServer,
         organization_tools: list[str] | None,
         enabled: bool,
         everyone_tools: list[str] | None,
         attach_by_default: bool | None,
     ) -> WorkspaceMcpServerOverride:
-        """Stage a new override, or new values on the one passed in."""
+        """Stage a new override of an organization's ``server``, or new values on the one passed in.
+
+        The keys refuse a workspace of another organization than the server's.
+
+        Raises:
+            ValueError: ``server`` is one workspace's own, which no other workspace reaches.
+        """
+        if server.workspace_id is not None:
+            raise ValueError(f"MCP server {server.id} is a workspace's own; only an organization's takes overrides")
         if override is None:
             override = WorkspaceMcpServerOverride(
-                workspace_id=workspace_id, organization_id=organization_id, server_id=server_id
+                workspace_id=workspace_id, organization_id=server.organization_id, server_id=server.id
             )
             self.db.add(override)
         override.organization_tools = organization_tools

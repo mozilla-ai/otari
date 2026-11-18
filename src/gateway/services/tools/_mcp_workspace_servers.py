@@ -75,6 +75,12 @@ class McpServerInWorkspace:
             return None
         return expand_mcp_tool_patterns(self.override.organization_tools, self.read_tools)
 
+    def refused_by(self, access: McpAccess) -> str:
+        """What decided that a caller holds no tool here: the organization's limit, or the caller's own rule."""
+        if self.tool_limit is not None and access.patterns_for(self.id, self.everyone_tools, self.read_tools):
+            return "organization"
+        return access.decide(self.id, self.everyone_tools)[0]
+
     def patterns_for(self, access: McpAccess) -> list[str]:
         """The tool patterns a caller holds on the server here, ``@read`` expanded; empty means it cannot reach it."""
         granted = access.patterns_for(self.id, self.everyone_tools, self.read_tools)
@@ -115,22 +121,24 @@ class McpWorkspaceServers:
         server_ids: Collection[uuid.UUID],
         *,
         attached: bool,
-    ) -> list[McpServerInWorkspace]:
+    ) -> tuple[list[McpServerInWorkspace], dict[uuid.UUID, uuid.UUID]]:
         """The servers these ids name in the workspace, and with ``attached`` every one it might attach, oldest first.
 
-        An id a folded workspace copy had names the organization's server it was folded into.
-        Callers check :attr:`McpServerInWorkspace.attach_by_default` themselves.
+        Also returns the id each given id names: itself, or for an old id of a folded workspace copy the
+        organization's server it was folded into. Callers check :attr:`McpServerInWorkspace.attach_by_default`.
         """
         named = list(dict.fromkeys(server_ids))
         rows = await self._servers.for_request(workspace_id, organization_id, named, attached=attached)
-        missing = [server_id for server_id in named if server_id not in {row.id for row in rows}]
-        if missing:
-            # Only an id naming nothing is looked up, so a request that names live ids reads no alias.
-            swapped = await self.swap_aliases(workspace_id, missing)
-            if swapped != missing:
-                named = await self.swap_aliases(workspace_id, named)
-                rows = await self._servers.for_request(workspace_id, organization_id, named, attached=attached)
-        return await self.seen_from(workspace_id, rows)
+        found = {row.id for row in rows}
+        missing = [server_id for server_id in named if server_id not in found]
+        # Only an id naming nothing is looked up, so a request that names live ids reads no alias.
+        targets = await self._aliases.targets(workspace_id, missing) if missing else {}
+        if targets:
+            swapped = list(dict.fromkeys(targets.get(server_id, server_id) for server_id in named))
+            rows = await self._servers.for_request(workspace_id, organization_id, swapped, attached=attached)
+        return await self.seen_from(workspace_id, rows), {
+            server_id: targets.get(server_id, server_id) for server_id in named
+        }
 
     async def swap_aliases(self, workspace_id: uuid.UUID, server_ids: Collection[uuid.UUID]) -> list[uuid.UUID]:
         """These ids in their order, each old id of a folded copy swapped for the server it names in the workspace."""
@@ -147,9 +155,7 @@ class McpWorkspaceServers:
         rows = await self._servers.enabled_in_workspace(workspace_id, organization_id)
         return [view for view in await self.seen_from(workspace_id, rows) if view.enabled]
 
-    async def any_attached(self, workspace_id: uuid.UUID, organization_id: uuid.UUID) -> bool:
-        """Whether the workspace attaches an enabled server, its own or its organization's, to every request."""
-        if await self._servers.any_attached(workspace_id):
-            return True
+    async def any_organization_server_attached(self, workspace_id: uuid.UUID, organization_id: uuid.UUID) -> bool:
+        """Whether the workspace attaches one of its organization's enabled servers to every request."""
         shared = await self._servers.enabled_of_organization(organization_id)
         return any(view.attach_by_default for view in await self.seen_from(workspace_id, shared))

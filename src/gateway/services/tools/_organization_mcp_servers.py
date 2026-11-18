@@ -143,8 +143,7 @@ class OrganizationMcpServerWorkspaceService:
                 override = await self.overrides.save(
                     override,
                     workspace_id=workspace_id,
-                    organization_id=server.organization_id,
-                    server_id=server.id,
+                    server=server,
                     organization_tools=tools,
                     enabled=enabled,
                     everyone_tools=everyone,

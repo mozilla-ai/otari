@@ -51,8 +51,11 @@ def _ticket(link: str) -> str:
     return link.split("ticket=", 1)[1]
 
 
-def test_a_link_names_its_server_and_user_and_points_at_this_gateway() -> None:
-    link = sign_in_link(_config(), server_id=SERVER, user_id="alice", workspace_id=None)
+@pytest.mark.parametrize("workspace_id", [None, uuid.UUID("44444444-4444-4444-4444-444444444444")])
+def test_a_link_names_its_server_user_and_workspace_and_points_at_this_gateway(
+    workspace_id: uuid.UUID | None,
+) -> None:
+    link = sign_in_link(_config(), server_id=SERVER, user_id="alice", workspace_id=workspace_id)
 
     assert link.startswith(f"{ORIGIN}{API_ROOT}/mcp-connections/sign-in#ticket=")
     assert "?" not in link, "the ticket stays out of the part of the address a browser sends"
@@ -60,7 +63,7 @@ def test_a_link_names_its_server_and_user_and_points_at_this_gateway() -> None:
     assert "=" not in _ticket(link), "no padding for a chat to mangle"
     assert "alice" not in link
     read = read_sign_in_link(_ticket(link))
-    assert read is not None and (read.server_id, read.user_id) == (SERVER, "alice")
+    assert read is not None and (read.server_id, read.user_id, read.workspace_id) == (SERVER, "alice", workspace_id)
 
 
 def test_a_link_is_known_by_its_token_however_its_text_is_spelled() -> None:

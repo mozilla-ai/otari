@@ -903,6 +903,7 @@ class McpConnectionService:
         async with self._uow:
             server = await self._server_in_mode(server_id, mode)
             started_in = await self._started_in(server, workspace_id, managing=for_check or for_shared)
+            of_organization = server.workspace_id is None
             url, stored, pinned = server.url, stored_oauth_client(server), _Pin.of(server)
         try:
             metadata = await _mcp_oauth.discover(url)
@@ -938,7 +939,13 @@ class McpConnectionService:
                     raise McpConnectionFlowError(_LINK_INVALID)
             # Discovery took seconds. The row is locked and read again, so a sign-in found for the
             # server as it was cannot be stored against the server as a manager has since made it.
+            # An organization's server is checked again against the workspace the sign-in starts from,
+            # locked first, in the order completion takes the two.
+            if of_organization and started_in is not None:
+                await self._eligibility.hold(started_in)
             server = await self._server_in_mode(server_id, mode, lock=True)
+            if of_organization:
+                await self._started_in(server, started_in, managing=for_check or for_shared)
             current = stored_oauth_client(server)
             if server.url != url or current is None or current.client_id != client.client_id:
                 raise McpConnectionFlowError("The server changed while the sign-in was starting. Start it again.")
@@ -947,7 +954,7 @@ class McpConnectionService:
             if identity_id is None:
                 # A new link for the same user and server replaces the sign-in an earlier one started,
                 # so asking again holds one pending sign-in rather than one per link.
-                await self._flows.remove_unbound(server_id, user_id)
+                await self._flows.remove_unbound(server_id, user_id, started_in)
             await self._flows.add(
                 state_hash=_state_hash(state),
                 server_id=server_id,
@@ -989,6 +996,8 @@ class McpConnectionService:
             if await self._link_uses.used(link.ticket_hash):
                 raise McpSignInLinkUsedError
             server = await self._server_in_mode(await self._linked_server(link), McpCredentialMode.PER_USER)
+            # An organization's server the link's workspace no longer reaches is not shown, as starting it refuses.
+            await self._started_in(server, link.workspace_id, managing=False)
             alias = (await self._users.aliases([link.user_id])).get(link.user_id)
             return SignInLinkTarget(
                 server_id=server.id,
