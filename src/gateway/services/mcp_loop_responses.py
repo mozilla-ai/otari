@@ -183,7 +183,14 @@ def _coerce_input_to_list(input_data: Any) -> list[Any]:
     return [input_data]
 
 
-_USAGE_COUNTS = ("input_tokens", "cached_tokens", "output_tokens", "reasoning_tokens", "total_tokens")
+_USAGE_COUNTS = (
+    "input_tokens",
+    "cached_tokens",
+    "cache_write_tokens",
+    "output_tokens",
+    "reasoning_tokens",
+    "total_tokens",
+)
 
 
 def _round_usage(usage: Any) -> dict[str, int]:
@@ -193,6 +200,7 @@ def _round_usage(usage: Any) -> dict[str, int]:
     return {
         "input_tokens": getattr(usage, "input_tokens", 0) or 0,
         "cached_tokens": getattr(input_details, "cached_tokens", 0) or 0,
+        "cache_write_tokens": getattr(input_details, "cache_write_tokens", 0) or 0,
         "output_tokens": getattr(usage, "output_tokens", 0) or 0,
         "reasoning_tokens": getattr(output_details, "reasoning_tokens", 0) or 0,
         "total_tokens": getattr(usage, "total_tokens", 0) or 0,
@@ -207,12 +215,19 @@ def _add_round_usage(acc: dict[str, Any], usage: Any) -> None:
 
 def _with_usage(usage: Any, counts: dict[str, Any]) -> Any:
     """A copy of ``usage`` that reports ``counts``, its token details included."""
-    input_details = usage.input_tokens_details or InputTokensDetails(cached_tokens=0)
+    input_details = usage.input_tokens_details or InputTokensDetails(cached_tokens=0, cache_write_tokens=0)
     output_details = usage.output_tokens_details or OutputTokensDetails(reasoning_tokens=0)
     return usage.model_copy(
         update={
             "input_tokens": counts["input_tokens"],
-            "input_tokens_details": input_details.model_copy(update={"cached_tokens": counts["cached_tokens"]}),
+            "input_tokens_details": input_details.model_copy(
+                update={
+                    "cached_tokens": counts["cached_tokens"],
+                    "cache_write_tokens": counts["cache_write_tokens"],
+                    # One round's retention breakdown would not add up to the summed writes.
+                    "cache_write_tokens_details": None,
+                }
+            ),
             "output_tokens": counts["output_tokens"],
             "output_tokens_details": output_details.model_copy(update={"reasoning_tokens": counts["reasoning_tokens"]}),
             "total_tokens": counts["total_tokens"],

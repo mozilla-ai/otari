@@ -241,6 +241,18 @@ def _is_otari_provider(provider: Any) -> bool:
 _STREAM_EVENT_ADAPTER: TypeAdapter[ResponseStreamEvent] = TypeAdapter(ResponseStreamEvent)
 
 
+def _typed_event(event: dict[str, Any]) -> ResponseStreamEvent:
+    """Validate one raw event, reading a usage without ``cache_write_tokens`` as no cache writes.
+
+    The openai SDK requires the count, and an Otari on an older SDK sends usage without it.
+    """
+    usage = (event.get("response") or {}).get("usage") or {}
+    details = usage.get("input_tokens_details")
+    if isinstance(details, dict):
+        details.setdefault("cache_write_tokens", 0)
+    return _STREAM_EVENT_ADAPTER.validate_python(event)
+
+
 async def _typed_stream_events(stream: AsyncIterator[Any]) -> AsyncIterator[ResponseStreamEvent]:
     """``stream`` with each raw event dict validated into its typed event.
 
@@ -250,7 +262,7 @@ async def _typed_stream_events(stream: AsyncIterator[Any]) -> AsyncIterator[Resp
     """
     try:
         async for event in stream:
-            yield _STREAM_EVENT_ADAPTER.validate_python(event) if isinstance(event, dict) else event
+            yield _typed_event(event) if isinstance(event, dict) else event
     finally:
         close = getattr(stream, "aclose", None)
         if close is not None:
@@ -573,7 +585,10 @@ def _responses_usage(usage: Any) -> dict[str, Any] | None:
     completion_details = getattr(usage, "completion_tokens_details", None)
     return {
         "input_tokens": usage.prompt_tokens or 0,
-        "input_tokens_details": {"cached_tokens": getattr(prompt_details, "cached_tokens", None) or 0},
+        "input_tokens_details": {
+            "cached_tokens": getattr(prompt_details, "cached_tokens", None) or 0,
+            "cache_write_tokens": getattr(prompt_details, "cache_write_tokens", None) or 0,
+        },
         "output_tokens": usage.completion_tokens or 0,
         "output_tokens_details": {"reasoning_tokens": getattr(completion_details, "reasoning_tokens", None) or 0},
         "total_tokens": usage.total_tokens or 0,

@@ -68,7 +68,7 @@ def _responses_usage(**extra: Any) -> ResponseUsage:
     return ResponseUsage.model_validate(
         {
             "input_tokens": 100,
-            "input_tokens_details": {"cached_tokens": 0},
+            "input_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
             "output_tokens": 50,
             "output_tokens_details": {"reasoning_tokens": 0},
             "total_tokens": 150,
