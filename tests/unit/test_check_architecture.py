@@ -2530,6 +2530,56 @@ def test_an_unpacking_assignment_counts_every_name_it_binds(tmp_path: Path, monk
     ]
 
 
+def test_a_type_alias_statement_counts_as_a_definition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 1)
+    _root_with(tmp_path, "def get_one() -> None: ...\n\n\ntype Result = tuple[int, str]\n")
+    assert check.check_composition_root_size(tmp_path) == [
+        f"{check.COMPOSITION_ROOT_MODULE} holds 2 definitions, above its baseline of 1; put the new one "
+        "in the module of the domain whose work it does, which the root re-exports"
+    ]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param("for GATE in ():\n    pass\n", id="for_target"),
+        pytest.param("with open('x') as GATE:\n    pass\n", id="with_target"),
+        pytest.param("if (GATE := object()):\n    pass\n", id="assignment_expression"),
+        pytest.param("match object():\n    case GATE:\n        pass\n", id="match_capture"),
+        pytest.param("match ():\n    case [*GATE]:\n        pass\n", id="match_star"),
+        pytest.param("match {}:\n    case {**GATE}:\n        pass\n", id="match_rest"),
+    ],
+)
+def test_every_statement_that_binds_a_name_counts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 1)
+    _root_with(tmp_path, f"def get_one() -> None: ...\n\n\n{body}")
+    assert check.check_composition_root_size(tmp_path) == [
+        f"{check.COMPOSITION_ROOT_MODULE} holds 2 definitions, above its baseline of 1; put the new one "
+        "in the module of the domain whose work it does, which the root re-exports"
+    ]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(
+            "try:\n    GATES = object()\nexcept Exception as gate:\n    pass\n",
+            id="except_target_is_unbound",
+        ),
+        pytest.param("GATES = [gate for gate in ()]\n", id="comprehension_has_its_own_scope"),
+        pytest.param("GATES = lambda: (gate := object())\n", id="a_lambda_body_binds_in_its_own_scope"),
+        pytest.param("GATES = {}\nGATES['one'] = object()\n", id="a_subscript_write_binds_nothing"),
+        pytest.param("GATES = object()\nGATES = object()\n", id="one_name_bound_twice_is_one_name"),
+    ],
+)
+def test_a_statement_that_binds_no_new_module_name_is_not_counted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str
+) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 2)
+    _root_with(tmp_path, f"def get_one() -> None: ...\n\n\n{body}")
+    assert check.check_composition_root_size(tmp_path) == []
+
+
 def test_a_definition_under_module_level_control_flow_counts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 1)
     _root_with(tmp_path, "def get_one() -> None: ...\n\n\nif True:\n    def get_two() -> None: ...\n")

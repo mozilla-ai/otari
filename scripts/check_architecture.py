@@ -104,9 +104,12 @@ Enforces:
     builder lands when nothing says otherwise, so it refills as fast as it is
     emptied. The count rising fails, and the count falling fails until the
     baseline is lowered, so the room a split makes cannot be spent again. A
-    definition under a module-level if or try counts, and an unpacking
-    assignment counts each name it binds; one nested in a function or a class
-    body does not, because it binds no name the root exports. This says nothing
+    definition under a module-level if or try counts, a type alias statement
+    counts, and an unpacking assignment counts each name it binds; one nested in
+    a function or a class body does not, because it binds no name the root
+    exports. Raising the baseline itself is caught in review rather than here:
+    every baseline in this file is read from the tree being checked, so a change
+    that moves the number and the code together passes. This says nothing
     about which module a builder belongs in, which is a judgement no check can
     make; it says only that the root is full, so the next builder goes where a
     reader of that domain will look.
@@ -1432,17 +1435,6 @@ COMPOSITION_ROOT_MODULE = "gateway/api/deps/__init__.py"
 COMPOSITION_ROOT_SIZE_BASELINE = 89
 
 
-def _target_names(target: ast.expr) -> Iterator[str]:
-    """Yield each name an assignment target binds, descending through tuple, list and starred targets."""
-    if isinstance(target, ast.Name):
-        yield target.id
-    elif isinstance(target, ast.Tuple | ast.List):
-        for element in target.elts:
-            yield from _target_names(element)
-    elif isinstance(target, ast.Starred):
-        yield from _target_names(target.value)
-
-
 def _module_scope_statements(body: Iterable[ast.stmt]) -> Iterator[ast.stmt]:
     """Yield each statement that runs at module scope, descending through control flow but not into a new scope."""
     for node in body:
@@ -1456,17 +1448,54 @@ def _module_scope_statements(body: Iterable[ast.stmt]) -> Iterator[ast.stmt]:
                 yield from _module_scope_statements([child])
 
 
+def _statement_bindings(node: ast.stmt) -> Iterator[str]:
+    """Yield each name one statement binds in the scope it sits in, not counting what its own body binds.
+
+    A name reaches this through a store-context ``ast.Name`` or a capture pattern, so a
+    write to an attribute or a subscript binds nothing and the target of an ``except``
+    clause does not either, which matches the clause unbinding it on the way out.
+
+    NOTE: An import binds a name, but is excluded, because the root re-exports what its
+    modules define and a re-export is not a definition.
+    """
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+        yield node.name
+        return
+    if isinstance(node, ast.Import | ast.ImportFrom):
+        return
+    pending: list[ast.AST] = []
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.stmt):
+            continue
+        if isinstance(child, ast.match_case):
+            pending.extend(part for part in (child.pattern, child.guard) if part is not None)
+        else:
+            pending.append(child)
+    while pending:
+        current = pending.pop()
+        if isinstance(current, ast.Name) and isinstance(current.ctx, ast.Store):
+            yield current.id
+        elif isinstance(current, ast.MatchAs | ast.MatchStar) and current.name is not None:
+            yield current.name
+        elif isinstance(current, ast.MatchMapping) and current.rest is not None:
+            yield current.rest
+        if isinstance(current, ast.Lambda):
+            continue
+        if isinstance(current, ast.comprehension):
+            # The iteration variable belongs to the comprehension's own scope, while an
+            # assignment expression anywhere in the clause binds in this one.
+            pending.append(current.iter)
+            pending.extend(current.ifs)
+            continue
+        pending.extend(child for child in ast.iter_child_nodes(current) if not isinstance(child, ast.stmt))
+
+
 def _module_definitions(tree: ast.Module) -> int:
-    """How many names a module binds at its own scope, not counting its public surface list."""
-    definitions = 0
-    for node in _module_scope_statements(tree.body):
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-            definitions += 1
-        elif isinstance(node, ast.Assign):
-            definitions += sum(1 for target in node.targets for name in _target_names(target) if name != "__all__")
-        elif isinstance(node, ast.AnnAssign):
-            definitions += sum(1 for name in _target_names(node.target) if name != "__all__")
-    return definitions
+    """How many distinct names a module binds at its own scope, not counting its public surface list."""
+    bound = {
+        name for node in _module_scope_statements(tree.body) for name in _statement_bindings(node) if name != "__all__"
+    }
+    return len(bound)
 
 
 def check_composition_root_size(src_root: Path) -> list[str]:
