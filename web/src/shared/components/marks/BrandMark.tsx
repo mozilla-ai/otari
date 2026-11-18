@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react"
 
 import { ProductMark } from "@/design-system/ProductMark"
 import {
+  hasHarnessMark,
   hasMakerMark,
   hasProviderMark,
   isProductMarkProvider,
@@ -51,7 +52,7 @@ function Glyph({
   box,
 }: {
   markKey: string
-  kind: "provider" | "maker"
+  kind: "provider" | "maker" | "harness"
   box: string
 }) {
   return (
@@ -183,4 +184,35 @@ export function anyProviderMark(providerIds: readonly string[]): boolean {
 /** The same question for a list of makers. */
 export function anyMakerMark(vendorSlugs: readonly string[]): boolean {
   return vendorSlugs.some(hasMakerMark)
+}
+
+/**
+ * An agent harness's mark, keyed on the name a session shows it under, or a
+ * lettermark tile when it has none.
+ */
+export function HarnessMark({
+  harness,
+  step = 16,
+}: {
+  harness: string
+  step?: BrandMarkStep
+}) {
+  const box = BOX[step]
+  return hasHarnessMark(harness) ? (
+    <Glyph markKey={harness} kind="harness" box={box} />
+  ) : (
+    <Lettermark label={harness} box={box} />
+  )
+}
+
+/** Whether any of these harnesses has a mark, which decides if a list reserves the slot. */
+export function anyHarnessMark(harnesses: readonly (string | null)[]): boolean {
+  return harnesses.some(
+    (harness) => harness !== null && hasHarnessMark(harness),
+  )
+}
+
+/** The empty slot a row without a harness keeps, so names stay aligned. */
+export function NoHarnessMark({ step = 16 }: { step?: BrandMarkStep }) {
+  return <Reserved box={BOX[step]} />
 }

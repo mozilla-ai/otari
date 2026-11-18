@@ -29,6 +29,11 @@ import {
   useTraces,
 } from "@/shared/api/traces"
 import { useWorkspaces } from "@/shared/api/workspaces"
+import {
+  anyHarnessMark,
+  HarnessMark,
+  NoHarnessMark,
+} from "@/shared/components/marks/BrandMark"
 import { formatCost, formatNumber } from "@/shared/helpers/format"
 import {
   ACTIVITY_DEFAULT_KEY,
@@ -110,7 +115,10 @@ const HAS_ERROR: Record<string, "true" | "false"> = {
 
 const EMPTY = <span className="text-subtle">—</span>
 
-function columns(peekId: string): DataTableColumn<TraceSummary>[] {
+function columns(
+  peekId: string,
+  withMarks: boolean,
+): DataTableColumn<TraceSummary>[] {
   return [
     {
       id: "last_activity",
@@ -127,7 +135,14 @@ function columns(peekId: string): DataTableColumn<TraceSummary>[] {
       header: "Name",
       isRowHeader: true,
       cell: (session) => (
-        <span className="flex min-w-0 items-baseline gap-2">
+        <span className="flex min-w-0 items-center gap-2">
+          {withMarks ? (
+            session.harness ? (
+              <HarnessMark harness={session.harness} />
+            ) : (
+              <NoHarnessMark />
+            )
+          ) : null}
           <span className="truncate text-body">{sessionName(session)}</span>
           <span className="shrink-0 text-mono-caption whitespace-nowrap text-subtle">
             {shortId(session.trace_id)}
@@ -413,9 +428,12 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
     return out
   }, [points, chartStart, bucket, now])
   const win = custom ?? { start: chartStart, end: now }
-  const tableColumns = useMemo(() => columns(peekId), [peekId])
-
   const rows = traces.data?.items ?? []
+  const withMarks = anyHarnessMark(rows.map((session) => session.harness))
+  const tableColumns = useMemo(
+    () => columns(peekId, withMarks),
+    [peekId, withMarks],
+  )
   const openIndex = rows.findIndex((session) => session.trace_id === peekId)
   // The read's own summary once it lands: the list is a snapshot, and a
   // session still running has moved on since. Until then, the row on screen.

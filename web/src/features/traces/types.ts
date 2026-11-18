@@ -96,6 +96,8 @@ export interface JudgeCalls {
 export interface Trace {
   id: string
   name: string
+  /** The agent that ran it, where the gateway recognized one. */
+  harness?: string | null
   timestamp: string
   observations: Observation[]
   /** Absent until the session's spans have loaded. */
