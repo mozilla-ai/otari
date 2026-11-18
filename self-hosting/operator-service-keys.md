@@ -31,7 +31,7 @@ Create `end-user-budget-memories` the same way.
 
 ## Create the service key
 
-Signed in as the deployment operator, open **API keys**, click **Create key**,
+Signed in as the deployment operator, open **API keys**, click **Create API key**,
 click **More options** and tick **Service key**. Pick `end-user-budget-ai` as the
 **Budget for each end user** and tick the other budget under **Other budgets a
 request may choose**. With **None** as the budget for each end user, end users a

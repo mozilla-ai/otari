@@ -50,9 +50,16 @@ deployment.
   key's spend against its limit. Where the deployment enables it, a key's actions
   menu offers **Workload identity…**; see
   [Rules on a member's own key](https://docs.otari.ai/self-hosting/operations/workload-identity#rules-on-a-members-own-key).
-- **Overview and Routing** show an operator their active organization only. What
-  the Overview flags for each role is in
-  [What needs attention](review-usage-and-requests.md#what-needs-attention).
+- **Home, Sessions and Routing** show an operator their active organization
+  only. What Home shows each role is in
+  [Home](review-usage-and-requests.md#home).
+- **Pages someone may not use** are left out of their menus, and opening one
+  by its address goes to Home: the organization's pages for anyone but an
+  owner or admin (**Spend & budgets** also opens to the deployment's
+  operator), the deployment's pages for anyone but its operator, the
+  workspace's guardrails for anyone but an organization owner or admin, and the
+  Playground for a viewer. A workspace's own page under **Workspaces** also
+  opens to that workspace's owner or admin.
 
 ## How a request is attributed
 

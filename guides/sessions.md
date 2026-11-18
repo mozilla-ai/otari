@@ -6,9 +6,9 @@ it serves, so you can see what an agent did, not only what one call did.
 
 ## Look at a session
 
-1. Open **Overview** and pick the **Sessions** tab.
+1. Open **Sessions**.
 
-   ![The Sessions tab, listing a support-agent session with its last activity, user and latency.](assets/screenshots/sessions-list.png)
+   ![Sessions, listing a support-agent session with its last activity, user and latency.](assets/screenshots/sessions-list.png)
 
 2. Click a session to open it.
 
@@ -17,11 +17,11 @@ it serves, so you can see what an agent did, not only what one call did.
 Where Otari has a logo for the agent that ran a session, it shows it beside the
 session's name, in the list and at the top of its panel.
 
-The tab shares the Overview's time range and its user, API key, model and status
-filters. A session opens on **At a glance**, which splits its time and cost, and
-shows what filled the model's context window. Pick a span to see its details, or
-switch to the timeline or the flat log. From the **Requests** tab, **View trace**
-on a request opens its session on that call.
+The **Sessions** and **Requests** views share one time range and the user, API
+key, model and status filters. A session opens on **At a glance**, which splits
+its time and cost, and shows what filled the model's context window. Pick a span
+to see its details, or switch to the timeline or the flat log. From the
+**Requests** view, **View trace** on a request opens its session on that call.
 
 ## Collect sessions
 
@@ -29,9 +29,13 @@ Otari records sessions for the completions it serves, which is on by default. On
 a deployment you run, [Store agent traces](https://docs.otari.ai/self-hosting/operations/trace-storage) says how to turn it
 off or change how long sessions are kept.
 
-- **Claude Code, Codex, opencode, Amp, goose, Kilo Code, Crush, pi, Roo Code and
-  OpenHands** are recognized automatically when they route through Otari, by the
-  session id each one sends ([the full list](https://docs.otari.ai/reference/gateway/sessions-reference#what-makes-a-session)).
+- **Claude Code, Codex, opencode, Amp, goose, Kilo Code, Crush, pi, Roo Code,
+  Mistral Vibe and OpenHands** are recognized automatically when they route
+  through Otari, by the session id each one sends
+  ([the full list](https://docs.otari.ai/reference/gateway/sessions-reference#what-makes-a-session)). oh-my-pi sends
+  one only on the Anthropic API, from version 18.1.6; on other APIs each of its
+  requests is a session of its own. Hermes Agent and OpenClaw send one once it is
+  turned on ([how](https://docs.otari.ai/reference/gateway/sessions-reference#agents-that-send-a-session-id-when-asked)).
   Claude Code can also send its sessions without routing its model
   traffic; see [Send Claude Code sessions to Otari](claude-code.md#send-claude-code-sessions-to-otari).
 - **Your own agent** sends the same `Otari-Conversation-Id` header on every

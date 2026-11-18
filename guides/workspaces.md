@@ -4,7 +4,7 @@ A workspace is the boundary for one app, environment, team, or customer. It keep
 
 If two workloads need different keys, budgets, access, or reporting, they should usually live in different workspaces.
 
-Most dashboard tools are scoped to the active workspace, including Overview, Models, Routing, Tools, API keys, and Members.
+Most dashboard tools are scoped to the active workspace, including Sessions, Models, Routing, Tools, API keys, and Members.
 
 ## What's inside a workspace?
 

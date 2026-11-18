@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/3289c5ab6192061f420be258c7f1779a3e1e6f10/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/a4455abdfb3448a5c9914c07238a5a152c1950a4/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -683,8 +683,10 @@ How the request is translated:
 - `stop_sequences` is refused with a 400 (no Responses equivalent); `top_k`,
   `cache_control` and `metadata` are dropped.
 - With no `prompt_cache_key`, the request's session (`Otari-Conversation-Id`,
-  or the session id Claude Code sends) keys the provider's prompt cache, scoped
-  to the caller, so the session id itself never reaches the provider.
+  or the session id a recognized harness sends, as
+  [What makes a session](https://docs.otari.ai/reference/gateway/sessions-reference#what-makes-a-session) lists) keys
+  the provider's prompt cache, scoped to the caller, so the session id itself
+  never reaches the provider.
 - Anthropic's server tools are not forwarded: Otari's own web search, web fetch
   and code execution serve them where configured (see [Built-in tools](https://docs.otari.ai/reference/gateway/tools)),
   and one Otari does not serve is dropped.
@@ -865,7 +867,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/3289c5ab6192061f420be258c7f1779a3e1e6f10/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/a4455abdfb3448a5c9914c07238a5a152c1950a4/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -1030,7 +1032,7 @@ priced (see [Who is shown which models](https://docs.otari.ai/reference/gateway/
 The gateway logs a warning per unpriced model at most once an hour per
 process. Operators see a dashboard banner naming the models that served
 unpriced traffic in the selected workspace in the last 24 hours, linked to
-those requests on the Overview, where each can be priced.
+those requests in the Requests view of Sessions, where each can be priced.
 
 ### Keeping the defaults current
 
@@ -1910,7 +1912,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/3289c5ab6192061f420be258c7f1779a3e1e6f10/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/a4455abdfb3448a5c9914c07238a5a152c1950a4/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Contacting the Otari team

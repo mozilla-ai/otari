@@ -53,13 +53,13 @@ Before applying a guardrail, you can test how it evaluates specific content. Ent
 
 ## Edit or delete a guardrail
 
-In **Guardrails**, click **Edit** on the guardrail you want to update to modify its credentials or configuration parameters.
+In **Guardrails**, choose **Edit** from the menu at the end of the guardrail you want to update to modify its credentials or configuration parameters.
 
-To delete a guardrail, make sure it is no longer mandated. If the guardrail is still in use, click **Remove** on each of its mandates first. Once all mandates have been removed, click **Remove** on the guardrail itself.
+To delete a guardrail, make sure it is no longer mandated. If the guardrail is still in use, choose **Remove** from the menu of each of its mandates first. Once all mandates have been removed, choose **Remove** from the guardrail's own menu.
 
 Deleting a guardrail is permanent and cannot be undone. Make sure you no longer need the guardrail before confirming the deletion.
 
-To stop a mandate without removing it, click **Pause** on its row. Other mandates on the same guardrail keep running.
+To stop a mandate without removing it, choose **Pause** from its row's menu. Other mandates on the same guardrail keep running.
 
 ## Ask for a guardrail in a request
 

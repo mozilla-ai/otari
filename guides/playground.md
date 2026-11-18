@@ -39,8 +39,8 @@ Your saved Playground history is private and visible only to you.
 ## What a Playground request is
 
 Requests run through the same path as any completion, so routing policies,
-guardrails, budgets and tools all apply, and every request appears on the
-Overview.
+guardrails, budgets and tools all apply, and every request appears in
+the Requests view of Sessions.
 
 **Billing.** A Playground request uses no API key. It is billed to you, in the
 workspace selected in the switcher, against your own budget and rate limit, and

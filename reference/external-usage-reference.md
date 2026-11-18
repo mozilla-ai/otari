@@ -42,7 +42,7 @@ event takes:
 
 Only metadata and token counts are accepted; prompt, completion and tool fields
 are rejected. The exact schema is in the
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/3289c5ab6192061f420be258c7f1779a3e1e6f10/docs/public/openapi.json).
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/a4455abdfb3448a5c9914c07238a5a152c1950a4/docs/public/openapi.json).
 
 Sending a batch again is safe: events already stored come back as duplicates.
 When the database is busy or unreachable, this endpoint and the OTLP endpoints
@@ -128,8 +128,7 @@ charge, and cache pricing is only as accurate as the source's token counts.
 
 ## Reading imported usage
 
-Imported rows show on the **Overview**: **Requests** marks them, and **Usage**
-separates priced from unpriced totals. The usage APIs filter on `source`,
-`api_key_id`, user, model and session label.
+Imported rows show in **Sessions**, where the **Requests** view marks them. The
+usage APIs filter on `source`, `api_key_id`, user, model and session label.
 
 Budget gauges do not include imported usage.
