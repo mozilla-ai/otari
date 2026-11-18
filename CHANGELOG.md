@@ -4,6 +4,49 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.52.0](https://github.com/mozilla-ai/otari/releases/tag/v0.52.0) - 2026-11-18
+
+
+
+### Bug Fixes
+
+- **demo:** Call the API under /api/v1 in [#3383](https://github.com/mozilla-ai/otari/pull/3383) by [@daavoo](https://github.com/daavoo) ([`9da9479`](https://github.com/mozilla-ai/otari/commit/9da94790e388650848fc7d617a3bcceb546be16e))
+- **budgets:** Hold an output limit for each of a chat request's n choices in [#3385](https://github.com/mozilla-ai/otari/pull/3385) by [@daavoo](https://github.com/daavoo) ([`eaa926d`](https://github.com/mozilla-ai/otari/commit/eaa926d2f0fcbcf4b9bccad794b8d467f090c317))
+- **routing:** Leave reasoning off a non-reasoning fallback on Responses and Messages in [#3065](https://github.com/mozilla-ai/otari/pull/3065) by [@Vidhaankhare16](https://github.com/Vidhaankhare16) ([`ab9e935`](https://github.com/mozilla-ai/otari/commit/ab9e935bf504bf3c57c4c8d22f138384577e503c))
+- **marks:** Stop gating any-llm providers on a mark in [#3413](https://github.com/mozilla-ai/otari/pull/3413) by [@jigjigjig](https://github.com/jigjigjig) ([`9990e9e`](https://github.com/mozilla-ai/otari/commit/9990e9eec2edff5b816bc878f0b26ce9f77358f5))
+
+
+### Features
+
+- **tools:** Say whether direct search and fetch would run for the caller in [#3366](https://github.com/mozilla-ai/otari/pull/3366) by [@daavoo](https://github.com/daavoo) ([`1a9510e`](https://github.com/mozilla-ai/otari/commit/1a9510e1511a136c1fee0988e118341125b30774))
+- **traces:** Show a session client's language and its SDK version in [#3389](https://github.com/mozilla-ai/otari/pull/3389) by [@tbille](https://github.com/tbille) ([`8450eb0`](https://github.com/mozilla-ai/otari/commit/8450eb0896b7463579d2c0438f379559d034bad1))
+- **keys:** Give new keys the tool and MCP scopes by default in [#3397](https://github.com/mozilla-ai/otari/pull/3397) by [@daavoo](https://github.com/daavoo) ([`5a30d2f`](https://github.com/mozilla-ai/otari/commit/5a30d2fd1c6307f3aafcc5842f3575a8941f4e8d))
+- **playground:** Offer web fetch in the Playground's tools menu in [#3392](https://github.com/mozilla-ai/otari/pull/3392) by [@aittalam](https://github.com/aittalam) ([`d6e2b0f`](https://github.com/mozilla-ai/otari/commit/d6e2b0f34e8e724e75bd0d3035fcbc34d20a4974))
+- **architecture:** Cap how many definitions the composition root holds in [#3386](https://github.com/mozilla-ai/otari/pull/3386) by [@peteski22](https://github.com/peteski22) ([`3599c97`](https://github.com/mozilla-ai/otari/commit/3599c9713c641441b5c7f25458454de9716ef0b9))
+- Add You.com to any-search and any-fetch in [#3064](https://github.com/mozilla-ai/otari/pull/3064) by [@itsakhilyou](https://github.com/itsakhilyou) ([`f198519`](https://github.com/mozilla-ai/otari/commit/f1985190950220bb4d222c4ca30b444b73d709f4))
+- **marks:** Draw the model makers the hosted catalog lists in [#3406](https://github.com/mozilla-ai/otari/pull/3406) by [@jigjigjig](https://github.com/jigjigjig) ([`c803957`](https://github.com/mozilla-ai/otari/commit/c803957bfec0c3fe09ad7334af24a9388e987dae))
+- **hosted-providers:** Serve one provider from several regions in [#3403](https://github.com/mozilla-ai/otari/pull/3403) by [@tbille](https://github.com/tbille) ([`b5e6b18`](https://github.com/mozilla-ai/otari/commit/b5e6b18545613bb70c5f35e3e57d3f6f8026f79f))
+- **home:** Break spend down by provider in [#3415](https://github.com/mozilla-ai/otari/pull/3415) by [@jigjigjig](https://github.com/jigjigjig) ([`26c0ee3`](https://github.com/mozilla-ai/otari/commit/26c0ee39eb19c7d2f36870d473cbc226d69784d7))
+- **home:** Pick spend windows Today, Yesterday, 7D, 30D, 3M and 6M in [#3417](https://github.com/mozilla-ai/otari/pull/3417) by [@jigjigjig](https://github.com/jigjigjig) ([`9a1aba6`](https://github.com/mozilla-ai/otari/commit/9a1aba65bec6e468fe4cf45e5a8d5b947927666f))
+
+
+### Other
+
+- Update zdr.md by [@ssaantunes](https://github.com/ssaantunes) ([`8b6d8e3`](https://github.com/mozilla-ai/otari/commit/8b6d8e3f1d7bd9ee0921f6da7d24ee27b71eae8f))
+
+
+### Performance
+
+- **tools:** Cache which workspaces attach an MCP server to every request in [#3398](https://github.com/mozilla-ai/otari/pull/3398) by [@daavoo](https://github.com/daavoo) ([`ed83319`](https://github.com/mozilla-ai/otari/commit/ed833191942e50c0029ebfdcde5ab710217fcb96))
+
+
+
+### New Contributors
+
+- [@itsakhilyou](https://github.com/itsakhilyou) made their first contribution in [#3064](https://github.com/mozilla-ai/otari/pull/3064)
+- [@thbabs](https://github.com/thbabs) made their first contribution in [#2525](https://github.com/mozilla-ai/otari/pull/2525)
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.51.0...v0.52.0
 ## [0.51.0](https://github.com/mozilla-ai/otari/releases/tag/v0.51.0) - 2026-11-18
 
 
