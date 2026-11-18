@@ -16,9 +16,11 @@ path puts the key in an any-llm client in this process and dials the upstream.
 """
 
 import uuid
+from dataclasses import replace
 
+from gateway.core.config import region_instance
 from gateway.ports.model_provider_port import HostedCredential, HostedModels, ModelProviderPort
-from gateway.services.providers import HostedProviderService
+from gateway.services.providers import HostedProviderService, ResolvedHostedProvider
 
 
 class HostedProviderModelProviderAdapter(ModelProviderPort):
@@ -38,8 +40,7 @@ class HostedProviderModelProviderAdapter(ModelProviderPort):
     ) -> HostedCredential | None:
         """Resolve the deployment's own credential for ``provider``.
 
-        ``model`` selects nothing (a hosted provider is one credential) but it
-        can refuse: only a model the operator switched on in this provider's
+        ``model`` selects no region but it can refuse: only a model the operator switched on in this provider's
         roster is served, so one switched off is refused, and so is one never
         offered unless the provider serves unlisted models.
 
@@ -53,24 +54,19 @@ class HostedProviderModelProviderAdapter(ModelProviderPort):
         name is credentialed upstream of this port and never reaches it. An
         accepted alias (``openai-compatible``) is served by the provider it
         folds to, and is answered under that provider's name.
+
+        A provider with regions answers its first enabled region, carrying the
+        rest as ``alternates`` in order; a name that pins one
+        (``tokenhub@sg``) answers that region alone.
         """
         del workspace_id
         if self._service is None:
             return None
-        resolved = await self._service.resolve(provider, model, organization_id=organization_id)
-        if resolved is None:
+        regions = await self._service.resolve_regions(provider, model, organization_id=organization_id)
+        if not regions:
             return None
-        return HostedCredential(
-            api_key=resolved.api_key,
-            api_base=resolved.api_base,
-            # The stored name, so an alias settles under the key the provider is
-            # priced and switched under rather than under the alias, which
-            # nothing prices. Equal to ``provider`` for anything but an alias.
-            response_provider=resolved.name or provider,
-            client_args=resolved.client_args,
-            implementation=resolved.implementation,
-            supported_countries=resolved.supported_countries,
-        )
+        credentials = [_credential(resolved, provider) for resolved in regions]
+        return replace(credentials[0], alternates=tuple(credentials[1:]))
 
     async def get_hosted_models(self, *, organization_id: uuid.UUID | None) -> HostedModels:
         """The providers this deployment serves ``organization_id`` hosted inference on, with their advertised models.
@@ -83,3 +79,23 @@ class HostedProviderModelProviderAdapter(ModelProviderPort):
         if self._service is None:
             return {}
         return await self._service.serveable_models(organization_id=organization_id)
+
+
+def _credential(resolved: ResolvedHostedProvider, provider: str) -> HostedCredential:
+    """One region's connection as the port hands it out.
+
+    Named by the stored name, so an alias settles under the key the provider is
+    priced and switched under rather than under the alias, which nothing
+    prices; a region's name pins it (``tokenhub@sg``), so its usage and its
+    own price are kept apart from the provider's other regions.
+    """
+    name = resolved.name or provider
+    return HostedCredential(
+        api_key=resolved.api_key,
+        api_base=resolved.api_base,
+        response_provider=region_instance(name, resolved.region),
+        client_args=resolved.client_args,
+        implementation=resolved.implementation,
+        supported_countries=resolved.supported_countries,
+        data_location=resolved.data_location,
+    )

@@ -270,6 +270,19 @@ vendor read by `_hosted_vendors.vendor_of`) is refused in both
 `HostedProviderRuntime.resolve` and `serveable_models`, so dispatch and the
 catalog agree; change one and change the other.
 
+A hosted provider with regions (`hosted_provider_regions`, `_hosted_regions.py`)
+answers the port with its first enabled region and the rest as the
+credential's `alternates`. The gateway side narrows them, in order, to the
+workspace's data locations (`narrow_to_workspace_locations` in
+`hosted_credential_for`) and then to the request's country
+(`ensure_hosted_country`). An overlay adapter that returns no alternates keeps
+its behavior while the workspace lists no data locations; for a workspace that
+does, its credential must declare a `data_location` on the list or it is
+refused. A region is addressed as `<name>@<slug>`, resolved from the region
+rows and never by splitting a name (`get_serving`, `HostedRegionIndex`), since
+a provider named before regions may hold `@`: it is the instance a request
+settles under, and a pricing key that falls back to its provider's.
+
 A provider's own SDK variable (`OPENAI_API_KEY`) is never a credential: a key
 reaches a call only from the kwargs `get_provider_kwargs` builds (an entry's
 `api_key`, `${VAR}` included, a stored key, an organization key, or the keyless

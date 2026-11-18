@@ -99,6 +99,19 @@ def default_pricing_enabled() -> bool:
 _provider_type_resolver: Callable[[str], str | None] | None = None
 
 
+# The hosted provider an instance name is a region of (``tokenhub@sg`` ->
+# ``tokenhub``), whose price a region with none of its own settles at.
+# Registered at startup, as above.
+_region_parent: Callable[[str], str | None] | None = None
+
+
+def configure_region_parents(resolver: Callable[[str], str | None] | None) -> None:
+    """Register the lookup from a hosted provider region's name to its provider's."""
+
+    global _region_parent
+    _region_parent = resolver
+
+
 def configure_provider_types(resolver: Callable[[str], str | None] | None) -> None:
     """Register the instance to any-llm implementation lookup used for pricing."""
 
@@ -442,9 +455,19 @@ def pricing_key_forms(model_key: str) -> list[str]:
     ``provider/model``. Settlement, an organization override and the catalog all
     offer the same forms in the same order, so a rate one of them finds cannot be
     a rate another misses.
+
+    A key naming one region of a hosted provider (``tokenhub@sg:model``) also
+    offers its provider's forms after its own, so a region with no rate of its
+    own settles at the provider's.
     """
     instance, separator, model = model_key.partition(":")
-    return [model_key, f"{instance}/{model}"] if separator else [model_key]
+    if not separator:
+        return [model_key]
+    forms = [model_key, f"{instance}/{model}"]
+    parent = _region_parent(instance) if _region_parent is not None else None
+    if parent is not None:
+        forms += [f"{parent}:{model}", f"{parent}/{model}"]
+    return forms
 
 
 def legacy_tool_price_keys(config: GatewayConfig) -> set[str]:

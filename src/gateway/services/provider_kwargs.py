@@ -318,8 +318,12 @@ class HostedLookup:
     own_name_only: bool
 
     def accepts(self, response_provider: str, instance: str) -> bool:
-        """Whether a hosted answer for ``response_provider`` may serve the ``instance`` candidate."""
-        return not self.own_name_only or response_provider == instance
+        """Whether a hosted answer for ``response_provider`` may serve the ``instance`` candidate.
+
+        A region of the provider (``ollama@eu``) answers for the provider's own
+        name; a candidate that already names a region takes that region alone.
+        """
+        return not self.own_name_only or response_provider == instance or _region_parent(response_provider) == instance
 
 
 def hosted_lookup(provider: LLMProvider) -> HostedLookup:
@@ -346,6 +350,21 @@ def _no_hosted_names(_name: str) -> str | None:
 # composition root (``configure_hosted_names``) as pricing's provider types
 # are: the names live in ``services/providers``, which imports this module.
 _hosted_names: Callable[[str], str | None] = _no_hosted_names
+
+
+def _no_region_parent(_name: str) -> str | None:
+    return None
+
+
+# The hosted provider a name is a region of, registered by the composition root
+# as the hosted names are.
+_region_parent: Callable[[str], str | None] = _no_region_parent
+
+
+def configure_region_parents(resolver: Callable[[str], str | None] | None) -> None:
+    """Register the lookup from a hosted provider region's name to its provider's; None unregisters it."""
+    global _region_parent  # noqa: PLW0603
+    _region_parent = resolver or _no_region_parent
 
 
 def configure_hosted_names(resolver: Callable[[str], str | None] | None) -> None:

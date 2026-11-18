@@ -31,6 +31,7 @@ from gateway.models.providers import HostedProvider, HostedProviderModel
 from gateway.repositories.pricing import ModelPricingRepository, OrganizationModelPricingRepository
 from gateway.repositories.providers import (
     HostedProviderModelRepository,
+    HostedProviderRegionRepository,
     HostedProviderRepository,
     HostedProviderVendorRepository,
     ProviderEndpointRepository,
@@ -96,7 +97,8 @@ def _service(db: AsyncSession, config: GatewayConfig) -> HostedProviderService:
         uow,
         config=config,
         providers=providers,
-        sources=HostedSources(config, providers),
+        regions=HostedProviderRegionRepository(uow),
+        sources=HostedSources(config, providers, HostedProviderRegionRepository(uow)),
         models=HostedProviderModelRepository(uow),
         vendors=HostedProviderVendorRepository(uow),
         endpoints=ProviderEndpointRepository(uow),

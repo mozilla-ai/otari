@@ -8,6 +8,7 @@ import {
   countriesFileInput,
   EMPTY_SWEEP,
   hostedProvider,
+  hostedRegion,
   hostedRequests,
   jsonResponse,
   mockApi,
@@ -55,6 +56,47 @@ describe("HostedProvidersPage", () => {
     expect(within(row("mistral")).getByText("None yet")).toBeInTheDocument()
     // The key, endpoint and scope are the provider page's.
     expect(within(table).queryByText("••••abcd")).toBeNull()
+  })
+
+  it("says where each provider keeps data, and how many regions it serves from", async () => {
+    mockApi({
+      providers: [
+        hostedProvider({
+          data_location: "CN",
+          regions: [
+            hostedRegion({ slug: "cn", position: 0, data_location: "CN" }),
+            hostedRegion({ slug: "sg", position: 1, data_location: "SG" }),
+            hostedRegion({ slug: "us", position: 2, data_location: "US" }),
+          ],
+        }),
+        hostedProvider({
+          id: "22222222-2222-4222-8222-222222222222",
+          provider: "mistral",
+          data_location: "EU",
+        }),
+        hostedProvider({
+          id: "33333333-3333-4333-8333-333333333333",
+          provider: "anthropic",
+        }),
+      ],
+    })
+    await renderPage()
+
+    const table = await screen.findByRole("grid", { name: "Hosted providers" })
+    const row = (name: string) =>
+      within(table).getByRole("rowheader", { name: new RegExp(`^${name}`) })
+    await within(table).findByText("3 regions")
+    expect(within(row("openai")).getByText("3 regions")).toBeInTheDocument()
+    expect(
+      within(row("openai")).getByText("Data: China, Singapore, United States"),
+    ).toBeInTheDocument()
+    expect(
+      within(row("mistral")).getByText("Data: European Union"),
+    ).toBeInTheDocument()
+    expect(within(row("mistral")).queryByText(/regions$/)).toBeNull()
+    expect(
+      within(row("anthropic")).getByText("Data: not declared"),
+    ).toBeInTheDocument()
   })
 
   it("refuses a caller who does not operate the deployment without asking for the list", async () => {
@@ -277,7 +319,9 @@ describe("HostedProvidersPage", () => {
     await user.click(await screen.findByRole("option", { name: "Anthropic" }))
     await user.type(within(dialog).getByLabelText("API key"), "sk-ant-secret")
     await user.type(
-      within(dialog).getByRole("textbox", { name: "Supported countries" }),
+      within(dialog).getByRole("textbox", {
+        name: "Available to requests from",
+      }),
       "us, de",
     )
     await user.click(
@@ -313,7 +357,9 @@ describe("HostedProvidersPage", () => {
 
     await waitFor(() =>
       expect(
-        within(dialog).getByRole("textbox", { name: "Supported countries" }),
+        within(dialog).getByRole("textbox", {
+          name: "Available to requests from",
+        }),
       ).toHaveValue("US, DE, GB"),
     )
     await user.click(
@@ -347,8 +393,44 @@ describe("HostedProvidersPage", () => {
       ),
     ).toBeInTheDocument()
     expect(
-      within(dialog).getByRole("textbox", { name: "Supported countries" }),
+      within(dialog).getByRole("textbox", {
+        name: "Available to requests from",
+      }),
     ).toHaveValue("")
+  })
+
+  it("refuses a countries file whose entries are not all codes, keeping the draft", async () => {
+    mockApi({ providers: [] })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      (await screen.findAllByRole("button", { name: "Add provider" }))[0],
+    )
+    const dialog = await screen.findByRole("dialog")
+    const field = within(dialog).getByRole("textbox", {
+      name: "Available to requests from",
+    })
+    await user.type(field, "GB")
+    // An empty entry would vanish from the text and read as every country.
+    await user.upload(
+      countriesFileInput(),
+      new File(['[""]'], "countries.json", { type: "application/json" }),
+    )
+    expect(
+      await within(dialog).findByText(
+        'The file holds entries that are not two-letter country codes: ""',
+      ),
+    ).toBeInTheDocument()
+    expect(field).toHaveValue("GB")
+
+    await user.upload(
+      countriesFileInput(),
+      new File(['["US","DE"]'], "countries.json", {
+        type: "application/json",
+      }),
+    )
+    await waitFor(() => expect(field).toHaveValue("US, DE"))
   })
 
   it("holds back a country that is not a two-letter code", async () => {
@@ -364,7 +446,9 @@ describe("HostedProvidersPage", () => {
     await user.click(await screen.findByRole("option", { name: "Anthropic" }))
     await user.type(within(dialog).getByLabelText("API key"), "sk-ant-secret")
     await user.type(
-      within(dialog).getByRole("textbox", { name: "Supported countries" }),
+      within(dialog).getByRole("textbox", {
+        name: "Available to requests from",
+      }),
       "US, USA",
     )
 

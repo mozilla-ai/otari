@@ -68,6 +68,17 @@ class HostedCredential:
     # The countries whose requests the credential serves, or None for every
     # country. Checked as well as ``provider_supported_countries``.
     supported_countries: tuple[str, ...] | None = None
+    # Where the upstream keeps request data: an ISO country code, ``EU`` or
+    # ``GLOBAL``, or None when nobody declared it.
+    data_location: str | None = None
+    # The same provider's other regions, in the order they are tried when this
+    # one does not admit the request (its country, or its workspace's data
+    # locations). Each is a whole credential of its own; none carries alternates.
+    alternates: tuple["HostedCredential", ...] = ()
+
+    def candidates(self) -> tuple["HostedCredential", ...]:
+        """This credential, then its alternates, in the order a request tries them."""
+        return (self, *self.alternates)
 
     @property
     def upstream(self) -> str:

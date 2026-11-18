@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import type {
   CreateHostedModelRequest,
+  CreateHostedProviderRegionRequest,
   CreateHostedProviderRequest,
   DeploymentProviderMigration,
   DeploymentProviderMigrationReviewedRow,
@@ -24,6 +25,7 @@ import type {
   SwitchHostedVendorModelsRequest,
   TestHostedProviderRequest,
   UpdateHostedModelRequest,
+  UpdateHostedProviderRegionRequest,
   UpdateHostedProviderRequest,
   UpdateHostedVendorRequest,
 } from "@/client"
@@ -148,6 +150,86 @@ export function useDeleteHostedProvider() {
       // Removing the connected provider is how a deployment disconnects.
       void queryClient.invalidateQueries({ queryKey: [PLATFORM_CONNECT] })
     },
+  })
+}
+
+// A provider's regions (`/hosted-providers/{provider}/regions`). Each write
+// answers the whole provider, whose list row is what every page reads, so the
+// hosted reads are invalidated rather than patched.
+
+const regionPath = (provider: string, slug: string) =>
+  `${providerPath(provider)}/regions/${encodeURIComponent(slug)}`
+
+/**
+ * Every region write answers the whole provider, which is put into the cached
+ * list at once (keeping its list-only model counts) before the list is read
+ * again: a second move pressed before the reread lands must see the new order.
+ */
+function useApplyRegionWrite() {
+  const queryClient = useQueryClient()
+  const invalidate = useInvalidateHosted()
+  return (provider: HostedProvider) => {
+    queryClient.setQueryData<HostedProviders>(
+      [HOSTED_PROVIDERS, "list"],
+      (list) =>
+        list && {
+          ...list,
+          data: list.data.map((row) =>
+            row.name === provider.name
+              ? { ...provider, models: row.models }
+              : row,
+          ),
+        },
+    )
+    invalidate()
+  }
+}
+
+/**
+ * Add a region after the provider's others. The first one also turns the
+ * provider's own connection into a region ahead of it, named by
+ * `primary_slug` and `primary_label`.
+ */
+export function useAddHostedProviderRegion(provider: string) {
+  const applyRegionWrite = useApplyRegionWrite()
+  return useMutation({
+    mutationFn: (body: CreateHostedProviderRegionRequest) =>
+      apiFetch<HostedProvider>(`${providerPath(provider)}/regions`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: applyRegionWrite,
+  })
+}
+
+/** Change, switch or move one region; `position` is its new place, from 0. */
+export function useUpdateHostedProviderRegion(provider: string) {
+  const applyRegionWrite = useApplyRegionWrite()
+  return useMutation({
+    mutationFn: ({
+      slug,
+      body,
+    }: {
+      slug: string
+      body: UpdateHostedProviderRegionRequest
+    }) =>
+      apiFetch<HostedProvider>(regionPath(provider, slug), {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: applyRegionWrite,
+  })
+}
+
+/** Remove one region. Removing the last leaves the provider on its own connection. */
+export function useRemoveHostedProviderRegion(provider: string) {
+  const applyRegionWrite = useApplyRegionWrite()
+  return useMutation({
+    mutationFn: (slug: string) =>
+      apiFetch<HostedProvider>(regionPath(provider, slug), {
+        method: "DELETE",
+      }),
+    onSuccess: applyRegionWrite,
   })
 }
 
