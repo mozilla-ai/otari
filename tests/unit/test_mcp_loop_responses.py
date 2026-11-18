@@ -399,6 +399,17 @@ async def test_loop_accumulates_usage_across_iterations(monkeypatch: pytest.Monk
             _response(output=[], input_tokens=12, output_tokens=3, cached_tokens=9, reasoning_tokens=2),
         ]
     )
+    rounds = list(responses)
+    for writes, response in zip((4, 2), rounds, strict=True):
+        assert response.usage is not None
+        response.usage.input_tokens_details = InputTokensDetails.model_validate(
+            {
+                "cached_tokens": response.usage.input_tokens_details.cached_tokens,
+                "cache_write_tokens": writes,
+                "cache_write_tokens_details": {"ttl_12h_tokens": 0, "ttl_30m_tokens": writes},
+            }
+        )
+    responses = iter(rounds)
 
     async def fake_aresponses(**kwargs: Any) -> Response:
         return next(responses)
@@ -413,6 +424,9 @@ async def test_loop_accumulates_usage_across_iterations(monkeypatch: pytest.Monk
     assert out.usage is not None
     assert out.usage.input_tokens == 22
     assert out.usage.input_tokens_details.cached_tokens == 15
+    assert out.usage.input_tokens_details.cache_write_tokens == 6
+    # The final round's breakdown alone would not add up to the summed writes.
+    assert out.usage.input_tokens_details.cache_write_tokens_details is None
     assert out.usage.output_tokens == 5
     assert out.usage.output_tokens_details.reasoning_tokens == 3
     assert out.usage.total_tokens == 27

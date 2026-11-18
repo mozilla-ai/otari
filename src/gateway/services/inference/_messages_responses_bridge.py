@@ -591,19 +591,21 @@ def usage_unreported(usage: Any) -> bool:
 
 
 def _usage(usage: Any) -> dict[str, Any] | None:
-    """Responses usage in Messages terms: cached input is reported apart, as Anthropic does.
+    """Responses usage in Messages terms: cache reads and writes are reported apart, as Anthropic does.
 
     ``None`` when the provider reported none, which is not the same as zero tokens.
     """
     if not isinstance(usage, dict):
         return None
     input_tokens = int(usage.get("input_tokens") or 0)
-    cached = int((usage.get("input_tokens_details") or {}).get("cached_tokens") or 0)
+    input_details = usage.get("input_tokens_details") or {}
+    cached = int(input_details.get("cached_tokens") or 0)
+    written = int(input_details.get("cache_write_tokens") or 0)
     reasoning = int((usage.get("output_tokens_details") or {}).get("reasoning_tokens") or 0)
     out: dict[str, Any] = {
-        "input_tokens": max(input_tokens - cached, 0),
+        "input_tokens": max(input_tokens - cached - written, 0),
         "cache_read_input_tokens": cached,
-        "cache_creation_input_tokens": 0,
+        "cache_creation_input_tokens": written,
         "output_tokens": int(usage.get("output_tokens") or 0),
     }
     if reasoning:

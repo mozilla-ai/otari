@@ -221,7 +221,12 @@ def _with_usage(usage: Any, counts: dict[str, Any]) -> Any:
         update={
             "input_tokens": counts["input_tokens"],
             "input_tokens_details": input_details.model_copy(
-                update={"cached_tokens": counts["cached_tokens"], "cache_write_tokens": counts["cache_write_tokens"]}
+                update={
+                    "cached_tokens": counts["cached_tokens"],
+                    "cache_write_tokens": counts["cache_write_tokens"],
+                    # One round's retention breakdown would not add up to the summed writes.
+                    "cache_write_tokens_details": None,
+                }
             ),
             "output_tokens": counts["output_tokens"],
             "output_tokens_details": output_details.model_copy(update={"reasoning_tokens": counts["reasoning_tokens"]}),
