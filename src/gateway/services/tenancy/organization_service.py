@@ -1630,7 +1630,9 @@ class OrganizationService:
         is back. Gated on the row actually having been inactive: re-applying
         the same assignment to an already-active membership (a repeat
         invitation accept, say) is not a join, and announcing it would
-        resurrect state an admin deliberately deleted.
+        resurrect state an admin deliberately deleted. A role this grant
+        changes is announced as the ordinary role edit announces it, so what a
+        member holds in the workspace follows the role they now have.
 
         Each target workspace is locked (`WorkspaceRepository.lock`) before
         its create-or-revive-and-announce step, same as
@@ -1659,9 +1661,12 @@ class OrganizationService:
             existing = existing_by_workspace.get(workspace_id)
             if existing is not None:
                 was_inactive = existing.status != "active"
+                takes_a_new_role = existing.role != role
                 revived = await members.update(existing, WorkspaceMemberUpdate(role=role, status="active"))
                 if was_inactive:
                     await listener.member_joined(revived)
+                if takes_a_new_role:
+                    await listener.member_role_changed(revived)
                 continue
             member = await members.create(workspace_id=workspace_id, user_id=user_id, role=role)
             await listener.member_joined(member)

@@ -44,6 +44,7 @@ class _RecordingListener:
     def __init__(self, inner: MembershipListener) -> None:
         self._inner = inner
         self.changed: list[tuple[uuid.UUID, int]] = []
+        self.role_changed: list[tuple[uuid.UUID, str]] = []
 
     async def member_joined(self, member: WorkspaceMember) -> None:
         await self._inner.member_joined(member)
@@ -52,6 +53,7 @@ class _RecordingListener:
         await self._inner.member_removed(member)
 
     async def member_role_changed(self, member: WorkspaceMember) -> None:
+        self.role_changed.append((member.id, member.role))
         await self._inner.member_role_changed(member)
 
     async def organization_member_changed(
@@ -210,6 +212,54 @@ async def test_admitting_an_active_member_announces_the_role_it_applied(async_db
     assert admitted.created is False
     assert [member_id for member_id, _ in listener.changed] == [admitted.member_id]
     assert listener.changed[0][1] >= 1
+
+
+async def test_admitting_announces_a_workspace_role_the_invitation_changes(async_db: AsyncSession) -> None:
+    """A workspace demotion through an invitation is announced, so the member's keys follow the role they hold."""
+    writes = membership_writes(async_db)
+    listener = _RecordingListener(writes["membership_listener"])
+    organization = await create_organization(async_db, slug="admit-workspace-role")
+    owner = await create_member(async_db, organization, role="owner", full_name="Owner")
+    member = await create_member(async_db, organization, role="member", full_name="Member")
+    workspace = await create_workspace(async_db, organization, name="Engineering", owner=owner)
+    placement = await WorkspaceMemberRepository(async_db).create(
+        workspace_id=workspace.id, user_id=member.id, role="admin"
+    )
+    await async_db.flush()
+    service = OrganizationService(async_db, membership_listener=listener, uow=writes["uow"])
+
+    async with writes["uow"]:
+        await service.admit(
+            organization_id=organization.id,
+            role="member",
+            user_id=member.id,
+            workspaces=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role="viewer")],
+        )
+
+    assert listener.role_changed == [(placement.id, "viewer")]
+
+
+async def test_admitting_says_nothing_about_a_workspace_role_that_did_not_change(async_db: AsyncSession) -> None:
+    """A second acceptance of the same offer changes nothing, so it announces nothing."""
+    writes = membership_writes(async_db)
+    listener = _RecordingListener(writes["membership_listener"])
+    organization = await create_organization(async_db, slug="admit-workspace-role-same")
+    owner = await create_member(async_db, organization, role="owner", full_name="Owner")
+    member = await create_member(async_db, organization, role="member", full_name="Member")
+    workspace = await create_workspace(async_db, organization, name="Engineering", owner=owner)
+    await WorkspaceMemberRepository(async_db).create(workspace_id=workspace.id, user_id=member.id, role="member")
+    await async_db.flush()
+    service = OrganizationService(async_db, membership_listener=listener, uow=writes["uow"])
+
+    async with writes["uow"]:
+        await service.admit(
+            organization_id=organization.id,
+            role="member",
+            user_id=member.id,
+            workspaces=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role="member")],
+        )
+
+    assert listener.role_changed == []
 
 
 async def test_a_refused_offer_leaves_no_membership_behind(async_db: AsyncSession) -> None:
