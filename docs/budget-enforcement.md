@@ -44,7 +44,8 @@ released.
 
 The hold is the request's worst case: its prompt at roughly four characters per
 token, plus its whole output token limit (`max_tokens`, or `max_output_tokens` on
-Responses; a deployment default of 1024 tokens when the request sets none). A
+Responses; a deployment default of 1024 tokens when the request sets none),
+once for each choice a Chat Completions request asks for with `n`. A
 request with `max_tokens: 8192` holds the price of 8192 output tokens however few
 the model writes, so a user near the cap is refused once that hold no longer
 fits. A client that sends a realistic output limit keeps more of its allowance
