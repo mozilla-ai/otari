@@ -27,7 +27,7 @@ from any_llm import LLMProvider
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator
 
 from gateway.core.link_urls import normalize_link_url
-from gateway.core.settings.inference import country_codes
+from gateway.core.settings.inference import country_codes, data_location
 from gateway.core.settings_view import OMITTED, SettingsGroup, Shown
 
 DEFAULT_PLATFORM_URL = "https://api.otari.ai"
@@ -73,6 +73,7 @@ class _HostedProviderEntryShape(BaseModel):
     restricted_to_organization_id: uuid.UUID | None = None
     models: list[str] | None = None
     supported_countries: list[str] | None = None
+    data_location: str | None = None
     zero_data_retention: bool = False
     terms_url: str | None = None
     privacy_url: str | None = None
@@ -81,6 +82,11 @@ class _HostedProviderEntryShape(BaseModel):
     @classmethod
     def _country_codes(cls, value: list[str] | None) -> list[str] | None:
         return country_codes(value) if value is not None else None
+
+    @field_validator("data_location")
+    @classmethod
+    def _data_location(cls, value: str | None) -> str | None:
+        return data_location(value) if value is not None else None
 
     @field_validator("terms_url", "privacy_url")
     @classmethod
@@ -103,6 +109,8 @@ class HostedProviderEntry:
     models: tuple[str, ...]
     # The countries whose requests it serves, or None for every country.
     supported_countries: tuple[str, ...] | None = None
+    # Where the upstream keeps request data (a country code, ``EU`` or ``GLOBAL``), or None when undeclared.
+    data_location: str | None = None
     # The operator's declaration that the upstream keeps no prompt or completion data.
     zero_data_retention: bool = False
     # The upstream's own policies, linked from the public Providers pages.
@@ -160,6 +168,7 @@ def parse_hosted_providers(raw: Mapping[str, Any]) -> dict[str, HostedProviderEn
             restricted_to_organization_id=shape.restricted_to_organization_id,
             models=tuple(shape.models or ()),
             supported_countries=tuple(shape.supported_countries) if shape.supported_countries is not None else None,
+            data_location=shape.data_location,
             zero_data_retention=shape.zero_data_retention,
             terms_url=shape.terms_url,
             privacy_url=shape.privacy_url,
@@ -180,7 +189,7 @@ class ProviderSettings(BaseModel):
         description=(
             "Hosted providers declared in configuration, keyed by name, each with the fields the hosted-providers "
             "API takes: 'provider' (the any-llm implementation, defaulting to the name), 'api_key', 'api_base', "
-            "'client_args', 'enabled', "
+            "'client_args', 'enabled', 'data_location', "
             "'restricted_to_organization_id', and an optional 'models' list offered when the provider cannot list "
             "its own. Served after every other credential, as a stored hosted provider is, and never written to "
             "the database; a stored hosted provider of the same name wins. Settable as JSON through "

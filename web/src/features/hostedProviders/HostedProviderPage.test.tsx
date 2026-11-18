@@ -125,7 +125,7 @@ describe("HostedProviderPage", () => {
     await user.click(await screen.findByRole("button", { name: "Edit openai" }))
     let dialog = await screen.findByRole("dialog")
     let countries = within(dialog).getByRole("textbox", {
-      name: "Supported countries",
+      name: "Available to requests from",
     })
     expect(countries).toHaveValue("US")
     await user.clear(countries)
@@ -142,7 +142,7 @@ describe("HostedProviderPage", () => {
     await user.click(await screen.findByRole("button", { name: "Edit openai" }))
     dialog = await screen.findByRole("dialog")
     countries = within(dialog).getByRole("textbox", {
-      name: "Supported countries",
+      name: "Available to requests from",
     })
     await user.clear(countries)
     await user.click(within(dialog).getByRole("button", { name: "Save" }))

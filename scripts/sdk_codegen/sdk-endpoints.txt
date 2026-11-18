@@ -167,6 +167,9 @@ PATCH /api/v1/hosted-providers/{provider}/vendors                        # dashb
 GET /api/v1/hosted-providers/{provider}/available-models                 # dashboard-only
 PATCH /api/v1/hosted-providers/{provider}/models/{model_id}              # dashboard-only
 DELETE /api/v1/hosted-providers/{provider}/models/{model_id}             # dashboard-only
+POST /api/v1/hosted-providers/{provider}/regions                         # dashboard-only
+PATCH /api/v1/hosted-providers/{provider}/regions/{slug}                 # dashboard-only
+DELETE /api/v1/hosted-providers/{provider}/regions/{slug}                # dashboard-only
 # Subagent routers (the decision models that pick a subagent's model, operator-only)
 GET /api/v1/routing/recommenders                    # dashboard-only
 POST /api/v1/routing/recommenders                   # dashboard-only

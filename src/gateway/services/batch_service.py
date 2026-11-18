@@ -33,8 +33,12 @@ async def record_batch(
     api_key_id: str | None,
     model: str,
     workspace_id: uuid.UUID | None = None,
+    data_location: str | None = None,
 ) -> None:
     """Persist an ownership record for a newly created batch.
+
+    ``data_location`` is where the hosted credential that took the batch
+    declared it keeps data, kept for the usage rows its results write.
 
     Best-effort: the provider has already accepted the batch, so a failure to
     persist the record must not fail the request. Ownership then degrades to the
@@ -52,6 +56,7 @@ async def record_batch(
             api_key_id=api_key_id,
             model=model,
             workspace_id=workspace_id,
+            data_location=data_location,
         )
     )
     try:

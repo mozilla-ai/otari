@@ -52,6 +52,8 @@ from gateway.schemas.providers import (
     HostedPriceResetRequest,
     HostedProviderCreateRequest,
     HostedProviderPublic,
+    HostedProviderRegionCreateRequest,
+    HostedProviderRegionUpdateRequest,
     HostedProvidersPublic,
     HostedProvidersReencryptPublic,
     HostedProviderTestPublic,
@@ -215,6 +217,40 @@ async def delete_hosted_provider(service: HostedProviderServiceDep, provider: st
     """
     await service.delete_provider(provider)
     return Message(message="Hosted provider deleted")
+
+
+@router.post("/{provider}/regions", status_code=status.HTTP_201_CREATED)
+async def add_hosted_provider_region(
+    service: HostedProviderServiceDep, provider: str, body: HostedProviderRegionCreateRequest
+) -> HostedProviderPublic:
+    """Add a region the provider serves from, after its others, and answer the provider.
+
+    The first region added keeps the provider's own connection as a region
+    ahead of it, so what was served keeps being served. A request to the
+    provider is served by the first enabled region whose countries admit it,
+    and ``<provider>@<slug>:<model>`` pins one. A provider defined in
+    configuration answers 409.
+    """
+    return await service.add_region(provider, body)
+
+
+@router.patch("/{provider}/regions/{slug}")
+async def update_hosted_provider_region(
+    service: HostedProviderServiceDep, provider: str, slug: str, body: HostedProviderRegionUpdateRequest
+) -> HostedProviderPublic:
+    """Change, switch off or move one region, and answer the provider."""
+    return await service.update_region(provider, slug, body)
+
+
+@router.delete("/{provider}/regions/{slug}")
+async def remove_hosted_provider_region(
+    service: HostedProviderServiceDep, provider: str, slug: str
+) -> HostedProviderPublic:
+    """Remove one region, and answer the provider.
+
+    Removing the last region leaves the provider serving from its own connection.
+    """
+    return await service.remove_region(provider, slug)
 
 
 @router.get("/{provider}/models")

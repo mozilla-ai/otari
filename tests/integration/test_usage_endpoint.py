@@ -343,6 +343,7 @@ def test_list_usage_response_shape(
         "timestamp": timestamp.isoformat(),
         "model": "gpt-4o",
         "provider": "openai",
+        "data_location": None,
         "endpoint": "/custom",
         "prompt_tokens": 42,
         "completion_tokens": 7,

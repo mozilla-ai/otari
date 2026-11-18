@@ -4,6 +4,7 @@ from collections.abc import Collection
 from dataclasses import dataclass
 
 from gateway.core.config import PROVIDER_TYPE_ALIASES, GatewayConfig
+from gateway.ports.model_provider_port import HostedCredential
 from gateway.services.providers._hosted_name_index import hosted_implementation
 
 
@@ -53,14 +54,21 @@ class CountryNotServedError(Exception):
         self.gate = gate
 
 
-def ensure_hosted_country(gate: CountryGate | None, countries: Collection[str] | None) -> None:
-    """Refuse a request a hosted provider's own ``countries`` leave out.
+def ensure_hosted_country(gate: CountryGate | None, credential: HostedCredential) -> HostedCredential:
+    """The first of ``credential`` and its alternates whose own ``supported_countries`` admit the request.
+
+    A provider with no regions has no alternates, so this refuses the request
+    when the provider's own countries leave it out; None serves every country.
 
     Raises:
-        CountryNotServedError: ``countries`` does not hold the request's country.
+        CountryNotServedError: no region of the provider serves the request's country.
     """
-    if gate is not None and gate.excludes(countries):
-        raise CountryNotServedError(gate)
+    if gate is None:
+        return credential
+    for candidate in credential.candidates():
+        if not gate.excludes(candidate.supported_countries):
+            return candidate
+    raise CountryNotServedError(gate)
 
 
 def ensure_provider_country(config: GatewayConfig, gate: CountryGate | None, instance: str) -> None:

@@ -5,6 +5,7 @@ import type {
   WorkspaceHostedProvider,
   WorkspaceProviderKeyOverride,
 } from "@/client"
+import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { SearchField } from "@/design-system/forms/SearchField"
 import { Toggle } from "@/design-system/forms/Toggle"
@@ -13,9 +14,17 @@ import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { DisclosureRow } from "@/design-system/navigation/DisclosureRow"
 import { Segmented } from "@/design-system/navigation/Segmented"
 import {
+  dataLocationLabel,
+  refusesProvider,
+} from "@/features/hostedProviders/dataLocations"
+import {
   AccessRow,
   modelsScopeLabel,
 } from "@/features/workspaces/access/AccessRow"
+import {
+  AllowedDataLocationsDialog,
+  describeAllowedDataLocations,
+} from "@/features/workspaces/access/AllowedDataLocationsDialog"
 import { HostedModelsDialog } from "@/features/workspaces/access/HostedModelsDialog"
 import { KeyModelsDialog } from "@/features/workspaces/access/KeyModelsDialog"
 import {
@@ -114,6 +123,16 @@ export function InferenceAccessSection({
   const setPolicy = useSetWorkspaceProviderPolicy()
   const requiresZeroRetention =
     policy.data?.require_zero_data_retention ?? false
+  // Its own mutation, so a failed retention write is not shown in the
+  // locations dialog, nor a failed locations save beside the switch.
+  const setLocations = useSetWorkspaceProviderPolicy()
+  const isPolicyWriting = setPolicy.isPending || setLocations.isPending
+  const allowedLocations = policy.data?.allowed_data_locations ?? null
+  const [locationsOpening, setLocationsOpening] = useState(0)
+  // The workspace the locations dialog was opened in, so it never reopens
+  // over another workspace after a switch.
+  const [locationsOpenFor, setLocationsOpenFor] = useState("")
+  const isEditingLocations = locationsOpenFor === workspaceId
   const [open, setOpen] = useState<OpenScope>()
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   const [query, setQuery] = useState("")
@@ -168,10 +187,17 @@ export function InferenceAccessSection({
   const openKeyRecord = openKey
     ? byId.get(openKey.org_provider_key_id)
     : undefined
+  // A hosted provider none of whose locations the workspace allows is refused
+  // as one not declared zero data retention is.
+  const isLocationRefused = (row: WorkspaceHostedProvider) =>
+    refusesProvider(allowedLocations, row.data_locations ?? [])
   const openHosted =
     open?.kind === "hosted" && isOpenHere
       ? hostedRows.find(
-          (row) => row.provider === open.provider && isUsable(row),
+          (row) =>
+            row.provider === open.provider &&
+            isUsable(row) &&
+            !isLocationRefused(row),
         )
       : undefined
 
@@ -208,7 +234,9 @@ export function InferenceAccessSection({
         name: row.provider,
         isCustomized: row.customized,
         isOff:
-          !row.enabled || (requiresZeroRetention && !row.zero_data_retention),
+          !row.enabled ||
+          (requiresZeroRetention && !row.zero_data_retention) ||
+          isLocationRefused(row),
       }),
     ),
   ]
@@ -252,6 +280,7 @@ export function InferenceAccessSection({
       <HostedRow
         key={entry.id}
         row={entry.row}
+        allowedLocations={allowedLocations}
         isNested={isNested}
         hasChevronGutter={hasGroups}
         requiresZeroRetention={requiresZeroRetention}
@@ -302,7 +331,7 @@ export function InferenceAccessSection({
             <Toggle
               label="Require zero data retention"
               isSelected={requiresZeroRetention}
-              isDisabled={!canManage || !policy.data || setPolicy.isPending}
+              isDisabled={!canManage || !policy.data || isPolicyWriting}
               onChange={(next) =>
                 setPolicy.mutate({
                   workspaceId,
@@ -312,7 +341,56 @@ export function InferenceAccessSection({
             />
           }
         />
+        <SettingRow
+          label="Allowed data locations"
+          help={
+            policy.data
+              ? `${describeAllowedDataLocations(allowedLocations)}. Hosted providers serve this workspace only where they declare one of these locations.`
+              : policy.isPending
+                ? "Loading…"
+                : "Unknown until this workspace's provider policy can be read."
+          }
+          control={
+            <Button
+              size="sm"
+              className="min-h-11 md:min-h-9"
+              aria-label="Change allowed data locations"
+              isDisabled={!canManage || !policy.data || isPolicyWriting}
+              onPress={() => {
+                setLocations.reset()
+                setLocationsOpening((n) => n + 1)
+                setLocationsOpenFor(workspaceId)
+              }}
+            >
+              Change
+            </Button>
+          }
+        />
       </SettingsGroup>
+      {policy.data ? (
+        <AllowedDataLocationsDialog
+          key={`${workspaceId}:${locationsOpening}`}
+          allowed={allowedLocations}
+          providers={hostedRows}
+          providersState={
+            hosted.isError
+              ? "error"
+              : hosted.data && !hosted.isFetching
+                ? "ready"
+                : "loading"
+          }
+          isOpen={isEditingLocations}
+          onClose={() => setLocationsOpenFor("")}
+          isPending={setLocations.isPending}
+          error={setLocations.error}
+          onSave={(allowed) =>
+            setLocations.mutate(
+              { workspaceId, allowedDataLocations: allowed },
+              { onSuccess: () => setLocationsOpenFor("") },
+            )
+          }
+        />
+      ) : null}
       {isLoading ? (
         <span className="text-caption">Loading…</span>
       ) : !policy.data ? (
@@ -532,10 +610,23 @@ function KeyRow({
   )
 }
 
+/** Why the workspace's location list refuses a provider, or empty where it does not. */
+function locationRefusalNote(
+  allowed: readonly string[] | null,
+  locations: readonly (string | null)[],
+): string {
+  if (!refusesProvider(allowed, locations)) return ""
+  const declared = locations.filter((location) => location !== null)
+  return declared.length === 0
+    ? "Refused: location not declared"
+    : `Refused: data kept in ${declared.map(dataLocationLabel).join(", ")}`
+}
+
 function HostedRow({
   row,
   isNested,
   hasChevronGutter,
+  allowedLocations,
   requiresZeroRetention,
   isDisabled,
   onToggle,
@@ -545,13 +636,20 @@ function HostedRow({
   row: WorkspaceHostedProvider
   isNested: boolean
   hasChevronGutter: boolean
+  /** The data locations the workspace accepts; null for any. */
+  allowedLocations: readonly string[] | null
   requiresZeroRetention: boolean
   isDisabled: boolean
   onToggle: (next: boolean) => void
   onOpenScope: () => void
   onReset: () => void
 }) {
-  const isBlocked = requiresZeroRetention && !row.zero_data_retention
+  const locationNote = locationRefusalNote(
+    allowedLocations,
+    row.data_locations ?? [],
+  )
+  const isBlocked =
+    (requiresZeroRetention && !row.zero_data_retention) || locationNote !== ""
   return (
     <AccessRow
       name={row.provider}
@@ -569,7 +667,11 @@ function HostedRow({
       // could serve, so this row decides nothing until that key goes.
       note={[
         row.served_by_own_key ? "Not used, your key serves this provider" : "",
-        retentionNote(row.zero_data_retention, isBlocked),
+        retentionNote(
+          row.zero_data_retention,
+          requiresZeroRetention && !row.zero_data_retention,
+        ),
+        locationNote,
       ]
         .filter(Boolean)
         .join(" · ")}

@@ -9,6 +9,7 @@ import type {
   CreateWorkspaceRequest,
   SetWorkspaceHostedProviderRequest,
   SetWorkspaceProviderKeyOverrideRequest,
+  SetWorkspaceProviderPolicyRequest,
   UpdateWorkspaceBudgetDefaultRequest,
   UpdateWorkspaceRequest,
   Workspace,
@@ -530,27 +531,45 @@ export function useWorkspaceProviderPolicy(workspaceId: string | null) {
   })
 }
 
-/** Require zero data retention of every provider serving the workspace, or stop requiring it. */
+/**
+ * Set what the workspace requires of every provider serving it: zero data
+ * retention, and the data locations a hosted provider must declare. Either
+ * left out keeps what is stored, so one control never writes the other's
+ * value back. For the list, null accepts any location and an empty list none.
+ */
 export function useSetWorkspaceProviderPolicy() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({
       workspaceId,
       requireZeroDataRetention,
+      allowedDataLocations,
     }: {
       workspaceId: string
-      requireZeroDataRetention: boolean
+      requireZeroDataRetention?: boolean
+      allowedDataLocations?: string[] | null
     }) =>
       apiFetch<WorkspaceProviderPolicy>(
         `/workspaces/${encodeURIComponent(workspaceId)}/provider-policy`,
         {
           method: "PUT",
           body: JSON.stringify({
-            require_zero_data_retention: requireZeroDataRetention,
-          }),
+            ...(requireZeroDataRetention === undefined
+              ? {}
+              : { require_zero_data_retention: requireZeroDataRetention }),
+            ...(allowedDataLocations === undefined
+              ? {}
+              : { allowed_data_locations: allowedDataLocations }),
+          } satisfies SetWorkspaceProviderPolicyRequest),
         },
       ),
-    onSuccess: (_data, { workspaceId }) => {
+    onSuccess: (policy, { workspaceId }) => {
+      // The answer is the stored policy, so the page shows it at once rather
+      // than offering an edit built on the one before it.
+      queryClient.setQueryData(
+        [WORKSPACES, workspaceId, "provider-policy"],
+        policy,
+      )
       void queryClient.invalidateQueries({
         queryKey: [WORKSPACES, workspaceId, "provider-policy"],
       })

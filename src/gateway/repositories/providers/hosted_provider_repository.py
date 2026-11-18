@@ -131,6 +131,38 @@ class HostedProviderRepository(BaseRepository[HostedProvider, Never, Never]):
         await self.db.refresh(row)
         return row
 
+    async def lock(self, row_id: uuid.UUID) -> bool:
+        """Lock one provider's row until the transaction ends, so changes to it and its regions run one at a time.
+
+        False when the row is gone. On SQLite, which has no row locks and
+        ignores FOR UPDATE, a no-op write takes the database's write lock now,
+        before the caller reads anything, so a second change waits for this one
+        to commit rather than reading past it.
+        """
+        if dialect_name(self.db) == "sqlite":
+            touched = cast(
+                CursorResult[Any],
+                await self.db.execute(
+                    update(HostedProvider)
+                    .where(HostedProvider.id == row_id)
+                    .values(id=HostedProvider.id)
+                    .execution_options(synchronize_session=False)
+                ),
+            )
+            return touched.rowcount == 1
+        locked = await self.db.execute(select(HostedProvider.id).where(HostedProvider.id == row_id).with_for_update())
+        return locked.scalar_one_or_none() is not None
+
+    async def lock_and_reload(self, row: HostedProvider) -> bool:
+        """Lock ``row`` until the transaction ends and read it again, so what it says is what committed before.
+
+        False when the row was deleted before the lock was taken.
+        """
+        if not await self.lock(row.id):
+            return False
+        await self.db.refresh(row)
+        return True
+
     async def save(self, row: HostedProvider) -> HostedProvider:
         """Flush a changed row and read back what the database filled in."""
         self.db.add(row)

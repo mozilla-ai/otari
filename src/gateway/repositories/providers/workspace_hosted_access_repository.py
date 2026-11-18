@@ -89,16 +89,36 @@ class WorkspaceProviderPolicyRepository(BaseRepository[WorkspaceProviderPolicy, 
     async def get_for(self, workspace_id: uuid.UUID) -> WorkspaceProviderPolicy | None:
         return await self.db.get(WorkspaceProviderPolicy, workspace_id)
 
-    async def zero_data_retention_workspaces(self) -> frozenset[uuid.UUID]:
-        """Every workspace that requires zero data retention, for the dispatch-path cache."""
+    async def requirements(self) -> tuple[frozenset[uuid.UUID], dict[uuid.UUID, frozenset[str]]]:
+        """For the dispatch-path cache, in one read: the workspaces requiring zero data retention, and the
+        workspaces accepting only some data locations, with those locations."""
         result = await self.db.execute(
-            select(WorkspaceProviderPolicy.workspace_id).where(
+            select(
+                WorkspaceProviderPolicy.workspace_id,
+                WorkspaceProviderPolicy.require_zero_data_retention,
+                WorkspaceProviderPolicy.allowed_data_locations,
+            ).where(
                 WorkspaceProviderPolicy.require_zero_data_retention.is_(True)
+                | WorkspaceProviderPolicy.allowed_data_locations.is_not(None)
             )
         )
-        return frozenset(result.scalars().all())
+        zero_retention: set[uuid.UUID] = set()
+        locations: dict[uuid.UUID, frozenset[str]] = {}
+        for workspace_id, requires_zero_retention, allowed in result.all():
+            if requires_zero_retention:
+                zero_retention.add(workspace_id)
+            if allowed is not None:
+                locations[workspace_id] = frozenset(allowed)
+        return frozenset(zero_retention), locations
 
-    async def put(self, workspace_id: uuid.UUID, *, require_zero_data_retention: bool) -> WorkspaceProviderPolicy:
+    async def put(
+        self,
+        workspace_id: uuid.UUID,
+        *,
+        require_zero_data_retention: bool | None,
+        allowed_data_locations: list[str] | None = None,
+        set_locations: bool = False,
+    ) -> WorkspaceProviderPolicy:
         """Stage the workspace's policy, creating its row when it has none.
 
         Two writers may both find no row; the primary key refuses the second,
@@ -114,7 +134,13 @@ class WorkspaceProviderPolicyRepository(BaseRepository[WorkspaceProviderPolicy, 
                 policy = await self.get_for(workspace_id)
                 if policy is None:
                     raise  # not the race: nothing is there to have collided with
-        policy.require_zero_data_retention = require_zero_data_retention
+        # Each requirement is written only when the caller sent it, also on the
+        # row a concurrent writer inserted, so one never undoes the other's.
+        if require_zero_data_retention is not None:
+            policy.require_zero_data_retention = require_zero_data_retention
+        if set_locations:
+            # Left alone otherwise, also on the row a concurrent writer inserted.
+            policy.allowed_data_locations = allowed_data_locations
         await self.db.flush()
         await self.db.refresh(policy)
         return policy

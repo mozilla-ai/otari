@@ -208,6 +208,14 @@ class UsageEntry(BaseModel):
     timestamp: str
     model: str
     provider: str | None
+    data_location: str | None = Field(
+        default=None,
+        description=(
+            "Where the hosted provider or region that served the request declared it keeps request data when the "
+            "row was written: an ISO 3166-1 alpha-2 code, EU or GLOBAL. Null where the deployment did not serve it "
+            "or nothing was declared."
+        ),
+    )
     endpoint: str
     prompt_tokens: int | None
     completion_tokens: int | None
@@ -268,6 +276,7 @@ class UsageEntry(BaseModel):
             timestamp=utc_iso(log.timestamp),
             model=log.model,
             provider=log.provider,
+            data_location=log.data_location,
             endpoint=log.endpoint,
             source=log.source,
             source_label=log.source_label,

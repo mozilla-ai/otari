@@ -49,7 +49,13 @@ DISCOVERED = "listed-model"
 # Every table a route on this surface writes: the providers, their rosters,
 # the deployment price list the offers seed, and the organization overrides
 # the catalog sweep deletes.
-WRITTEN_TABLES = ("hosted_providers", "hosted_provider_models", "model_pricing", "organization_model_pricing")
+WRITTEN_TABLES = (
+    "hosted_providers",
+    "hosted_provider_regions",
+    "hosted_provider_models",
+    "model_pricing",
+    "organization_model_pricing",
+)
 # What the operator gate answers a signed-in non-operator, word for word, and
 # what ``/api/v1/admin`` answers the same caller: it says nothing about the
 # surface, not even that this one holds credentials.
@@ -285,7 +291,13 @@ def _seed_leftover(session_factory: Callable[[], Session]) -> None:
 
 
 def _concrete(template: str, model_id: uuid.UUID) -> str:
-    return template.replace("{provider}", PROVIDER).replace("{model_id}", str(model_id)).replace("{instance}", LEFTOVER)
+    return (
+        template.replace("{provider}", PROVIDER)
+        .replace("{model_id}", str(model_id))
+        .replace("{instance}", LEFTOVER)
+        # The slug the region create example adds, which the walk posts before it edits or removes it.
+        .replace("{slug}", "sg")
+    )
 
 
 def _request(client: TestClient, world: _World, principal: str, method: str, path: str, body: Any) -> Any:
