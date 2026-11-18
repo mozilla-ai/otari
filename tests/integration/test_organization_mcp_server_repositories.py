@@ -4,6 +4,7 @@ Nothing creates an organization server through a route yet, so the rows are writ
 """
 
 import uuid
+from typing import Any
 
 import pytest
 from sqlalchemy import select
@@ -84,6 +85,7 @@ async def test_an_override_is_saved_read_and_removed(async_db: AsyncSession) -> 
         everyone_tools=None,
         attach_by_default=None,
     )
+    assert saved is not None
     await overrides.save(
         saved,
         workspace_id=marcomms.id,
@@ -114,6 +116,48 @@ async def test_an_override_is_saved_read_and_removed(async_db: AsyncSession) -> 
     await overrides.remove(found)
     await async_db.commit()
     assert await overrides.find(workspace_id=marcomms.id, server_id=drive.id) is None
+
+
+async def test_settings_left_at_their_defaults_are_no_override(async_db: AsyncSession) -> None:
+    acme = await _organization(async_db)
+    marcomms = await _workspace(async_db, acme, "Marcomms")
+    drive = await _server(async_db, acme)
+    overrides = WorkspaceMcpServerOverrideRepository(async_db)
+    defaults: dict[str, Any] = {
+        "organization_tools": None,
+        "enabled": True,
+        "everyone_tools": None,
+        "attach_by_default": None,
+    }
+
+    assert await overrides.save(None, workspace_id=marcomms.id, server=drive, **defaults) is None
+    limited = await overrides.save(
+        None, workspace_id=marcomms.id, server=drive, **{**defaults, "organization_tools": ["@read"]}
+    )
+    assert limited is not None
+    assert await overrides.save(limited, workspace_id=marcomms.id, server=drive, **defaults) is None
+    await async_db.commit()
+
+    assert await overrides.find(workspace_id=marcomms.id, server_id=drive.id) is None
+
+
+async def test_an_override_is_changed_only_for_its_own_workspace_and_server(async_db: AsyncSession) -> None:
+    acme = await _organization(async_db)
+    marcomms = await _workspace(async_db, acme, "Marcomms")
+    sales = await _workspace(async_db, acme, "Sales")
+    drive = await _server(async_db, acme)
+    overrides = WorkspaceMcpServerOverrideRepository(async_db)
+    settings: dict[str, Any] = {
+        "organization_tools": ["@read"],
+        "enabled": True,
+        "everyone_tools": None,
+        "attach_by_default": None,
+    }
+    sales_override = await overrides.save(None, workspace_id=sales.id, server=drive, **settings)
+
+    with pytest.raises(ValueError, match="another workspace"):
+        await overrides.save(sales_override, workspace_id=marcomms.id, server=drive, **{**settings, "enabled": False})
+    assert sales_override is not None and sales_override.enabled is True
 
 
 async def test_a_workspace_has_one_override_per_server(async_db: AsyncSession) -> None:
