@@ -57,12 +57,15 @@ describe("KeyScopeFields", () => {
     expect(seen.at(-1)).toEqual(["inference:run", "code:execute"])
   })
 
-  it("keeps models and the built-in tools in view and folds the rest under Advanced", async () => {
+  it("keeps models, the built-in tools and MCP in view and folds the rest under Advanced", async () => {
     const user = userEvent.setup()
     renderFields(["inference:run"])
 
     expect(
       screen.getByRole("checkbox", { name: /Search the web/ }),
+    ).toBeVisible()
+    expect(
+      screen.getByRole("checkbox", { name: /Call MCP tools/ }),
     ).toBeVisible()
     expect(
       screen.queryByRole("checkbox", { name: "All files scopes" }),
@@ -95,10 +98,8 @@ describe("KeyScopeFields", () => {
     expect(seen.at(-1)).toEqual(["inference:run"])
   })
 
-  it("says under the MCP scopes what leaving them off turns off", async () => {
-    const user = userEvent.setup()
+  it("says under the MCP scopes what leaving them off turns off", () => {
     renderFields(["inference:run"])
-    await openAdvanced(user)
 
     expect(
       screen.getByText(

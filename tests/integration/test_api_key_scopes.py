@@ -38,17 +38,14 @@ def _refusal(response: Any) -> str:
     return message
 
 
-def test_a_key_created_without_scopes_calls_models_and_nothing_else(
+def test_a_key_created_without_scopes_calls_models_and_tools_and_nothing_else(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     key = _create(client, master_key_header)
     headers = _header(key)
 
-    assert key["scopes"] == ["inference:run"]
+    assert key["scopes"] == ["inference:run", "web:search", "web:fetch", "code:execute", "mcp:read", "mcp:execute"]
     assert "'usage:read'" in _refusal(client.get(f"{API_ROOT}/key/budget", headers=headers))
-    # The MCP routes answer every refusal with one fixed message per code, so this one names no scope.
-    mcp = client.get(f"{API_ROOT}/mcp/servers", headers=headers)
-    assert (mcp.status_code, mcp.json()["code"]) == (status.HTTP_403_FORBIDDEN, "forbidden"), mcp.text
     assert "'telemetry:write'" in _refusal(client.post("/otlp/v1/logs", json={}, headers=headers))
     assert "'usage:write'" in _refusal(
         client.post(f"{API_ROOT}/usage/external-events", json={"events": []}, headers=headers)

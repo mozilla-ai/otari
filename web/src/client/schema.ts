@@ -12399,7 +12399,7 @@ export interface components {
             reject_user_mismatch?: boolean | null;
             /**
              * Scopes
-             * @description The endpoint groups the key may reach. Omitted, the key gets 'inference:run' alone, which calls models and nothing else. The end-users scopes are a service key's alone.
+             * @description The endpoint groups the key may reach. Omitted, the key gets 'inference:run', 'web:search', 'web:fetch', 'code:execute', 'mcp:read' and 'mcp:execute': it calls models and tools and lists MCP servers, and nothing else. The end-users scopes are a service key's alone.
              */
             scopes?: components["schemas"]["KeyScope"][];
             /**
@@ -12536,7 +12536,7 @@ export interface components {
             reject_user_mismatch?: boolean | null;
             /**
              * Scopes
-             * @description The endpoint groups the key may reach. Omitted, the key gets 'inference:run' alone, which calls models and nothing else. The end-users scopes are a service key's alone.
+             * @description The endpoint groups the key may reach. Omitted, the key gets 'inference:run', 'web:search', 'web:fetch', 'code:execute', 'mcp:read' and 'mcp:execute': it calls models and tools and lists MCP servers, and nothing else. The end-users scopes are a service key's alone.
              */
             scopes?: components["schemas"]["KeyScope"][];
             /**
