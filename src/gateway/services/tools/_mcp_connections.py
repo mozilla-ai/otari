@@ -717,7 +717,8 @@ async def collect_revocations(
     Read before the rows go, while their servers still hold the clients the tokens were issued to.
     With ``shared`` the shared accounts of ``server_ids`` are revoked too, for a removal that takes
     the servers themselves: one member leaving must not end the account everyone else uses.
-    At most ``limit`` connections are read; the rest are counted, not loaded.
+    At most ``limit`` tokens are decrypted, the people's first and then the shared accounts'; the rest are
+    counted. A ``limit`` of 0 only counts.
     """
     rows, total = await connections.revocable(server_ids=server_ids, user_id=user_id, user_ids=user_ids, limit=limit)
     accounts = (
@@ -729,6 +730,9 @@ async def collect_revocations(
         if shared and server_ids
         else []
     )
+    total += len(accounts)
+    if limit is not None:
+        accounts = accounts[: max(limit - len(rows), 0)]
     held = await servers.find_many({row.server_id for row in rows} | {account.server_id for account in accounts})
     revocations = [
         revocation
@@ -739,7 +743,7 @@ async def collect_revocations(
             + [account for account in accounts if account.server_id == server.id],
         )
     ]
-    return revocations, total - len(rows)
+    return revocations, total - len(rows) - len(accounts)
 
 
 # Bounds on revocations sent after a bulk removal, which nothing waits on.
