@@ -9378,8 +9378,8 @@ export interface components {
          * ActivationApiKeyPublic
          * @description The API key the guide hands out, with its plaintext.
          *
-         *     Returned once, on the press that asked for it, and never stored in
-         *     plaintext, like every other key this gateway mints.
+         *     Returned once, when the guide opens or is asked for a replacement, and
+         *     never stored in plaintext, like every other key this gateway mints.
          */
         ActivationApiKeyPublic: {
             /** Key */

@@ -214,8 +214,8 @@ class WorkspaceActivationPublic(BaseModel):
 class ActivationApiKeyPublic(BaseModel):
     """The API key the guide hands out, with its plaintext.
 
-    Returned once, on the press that asked for it, and never stored in
-    plaintext, like every other key this gateway mints.
+    Returned once, when the guide opens or is asked for a replacement, and
+    never stored in plaintext, like every other key this gateway mints.
     """
 
     key: str
@@ -382,10 +382,10 @@ class WorkspaceActivationService:
     async def dismiss(self, *, user: User, workspace_id: uuid.UUID) -> None:
         """Retire the guide for this workspace. Permanent, and idempotent.
 
-        The key the guide issued is left as it is. It is minted only on a press,
-        so an unused one means "not used *yet*": revoking it would break the
-        likeliest sequence in the flow, which is copy the key, Skip, and have the
-        first request answer 401. A key's lifecycle belongs to the Keys page.
+        The key the guide issued is left as it is. An unused one may mean "not
+        used *yet*": revoking it would break the likeliest sequence in the flow,
+        which is copy the key, Skip, and have the first request answer 401. A
+        key's lifecycle belongs to the Keys page.
         """
         workspace = await self._resolve_manageable(user=user, workspace_id=workspace_id)
         state = await self._state_for_update(workspace.id)

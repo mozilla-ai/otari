@@ -1,7 +1,11 @@
 import { useNavigate } from "@tanstack/react-router"
 import { useCallback, useEffect, useRef, useState } from "react"
 
-import type { ActivationIssuedKey, WorkspaceActivation } from "@/client"
+import type {
+  ActivationApiKey,
+  ActivationIssuedKey,
+  WorkspaceActivation,
+} from "@/client"
 import { SetupSheet } from "@/features/onboarding/SetupSheet"
 import { setupFailureCopy } from "@/features/onboarding/setupFailureCopy"
 import {
@@ -119,6 +123,16 @@ function SetupFlow({
   // Held as the fingerprint chosen, because a rotation elsewhere keeps the row
   // and changes the key: the choice no longer stands once it stops matching.
   const [keptKey, setKeptKey] = useState<string | null>(null)
+  // The minted key and a failed mint, held here rather than read off the
+  // mutation: React's development remount detaches the mutation's observer from
+  // the mint the sheet starts on open, so its result only arrives through the
+  // promise.
+  const [issued, setIssued] = useState<ActivationApiKey>()
+  const [mintError, setMintError] = useState<unknown>()
+  const mintKey = useCallback(() => {
+    setMintError(undefined)
+    createKey.mutateAsync(workspaceId).then(setIssued, setMintError)
+  }, [createKey.mutateAsync, workspaceId])
   // The flow only celebrates a first request it was present for. Without this
   // latch, somebody who never opened the guide would be congratulated on the
   // traffic they already had, on the next page load after it arrived.
@@ -155,6 +169,19 @@ function SetupFlow({
     },
     [workspaceId, recordEvent],
   )
+  // The key is minted as the sheet opens, because the sheet exists to hand one
+  // over and a press before showing it is a step with nothing behind it. Not
+  // when the workspace already holds a setup key: minting rotates it, and
+  // whoever took it may have pasted it already, so that one is offered instead.
+  // A ref, so neither a re-render nor StrictMode's doubled effect mints twice;
+  // the flow is keyed on the workspace, so a switch starts a fresh one.
+  const hasRequestedKey = useRef(false)
+  const needsKey = isOffered && data.issued_key == null
+  useEffect(() => {
+    if (!needsKey || hasRequestedKey.current) return
+    hasRequestedKey.current = true
+    mintKey()
+  }, [needsKey, mintKey])
   // A first request landing while the sheet was up retires it too.
   useEffect(() => {
     if (isActivated && wasOffered.current) recordRetired("activated")
@@ -197,12 +224,12 @@ function SetupFlow({
   return (
     <SetupSheet
       workspaceName={workspaceName}
-      apiKey={createKey.data?.key}
-      keyPrefix={createKey.data?.key_prefix ?? undefined}
-      keySuffix={createKey.data?.key_suffix ?? undefined}
+      apiKey={issued?.key}
+      keyPrefix={issued?.key_prefix ?? undefined}
+      keySuffix={issued?.key_suffix ?? undefined}
       // The mint refreshes this state, so a key minted here is described by
       // both; the plaintext in hand is the one to show.
-      issuedKey={createKey.data ? undefined : (data.issued_key ?? undefined)}
+      issuedKey={issued ? undefined : (data.issued_key ?? undefined)}
       isUsingIssuedKey={
         data.issued_key != null && keptKey === keyFingerprint(data.issued_key)
       }
@@ -223,11 +250,11 @@ function SetupFlow({
       }
       isChecking={isChecking}
       checkFailed={checkFailed}
-      keyError={createKey.error}
+      keyError={mintError}
       isCreatingKey={createKey.isPending}
       skipError={dismiss.error}
       isSkipping={dismiss.isPending}
-      onCreateKey={() => createKey.mutate(workspaceId)}
+      onCreateKey={mintKey}
       onCheckNow={() => void checkNow()}
       onSkip={skip}
       onLeave={leave}

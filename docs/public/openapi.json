@@ -127,7 +127,7 @@
         "type": "object"
       },
       "ActivationApiKeyPublic": {
-        "description": "The API key the guide hands out, with its plaintext.\n\nReturned once, on the press that asked for it, and never stored in\nplaintext, like every other key this gateway mints.",
+        "description": "The API key the guide hands out, with its plaintext.\n\nReturned once, when the guide opens or is asked for a replacement, and\nnever stored in plaintext, like every other key this gateway mints.",
         "properties": {
           "key": {
             "title": "Key",
