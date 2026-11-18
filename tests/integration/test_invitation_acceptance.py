@@ -300,11 +300,20 @@ async def test_an_accept_racing_a_decline_is_refused(postgres_url: str, monkeypa
                 .scalars()
                 .all()
             )
+            # scalar_one, so a deleted row fails here: the DELETE must not have matched.
+            declined_at = (
+                await check.execute(
+                    select(col(OrganizationInvitation.declined_at)).where(
+                        col(OrganizationInvitation.token_hash) == hash_token(_TOKEN)
+                    )
+                )
+            ).scalar_one()
     finally:
         await engine.dispose()
 
     assert isinstance(outcome, InvitationNoLongerValidError)
     assert memberships == []
+    assert declined_at == _NOW
 
 
 async def test_an_accept_racing_a_workspace_deletion_joins_without_it(
