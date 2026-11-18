@@ -254,7 +254,7 @@ ${BOLD}what's running${RST} (all via \`docker compose up\` in the gateway repo)
                 │  your app, an SDK)       │
                 └─────────────┬────────────┘
                               │
-                  POST /v1/chat/completions
+                  POST /api/v1/chat/completions
                               │
                               ▼
             ┌──────────────────────────────────┐         ┌─────────────┐

@@ -253,7 +253,7 @@ ${BOLD}what's running${RST} (all via \`docker compose up\` in the gateway repo)
                 │  your app, an SDK)       │
                 └─────────────┬────────────┘
                               │
-                  POST /v1/chat/completions
+                  POST /api/v1/chat/completions
                               │
                               ▼
             ┌──────────────────────────────────┐         ┌─────────────┐
@@ -480,8 +480,8 @@ present "2) Native provider web search — via the gateway" \
         "web_search_<date>). The gateway passes it through untouched instead of" \
         "running its own search — the 'searxng saw' lines stay quiet." \
         "Whether the provider then runs a server-side search depends on the" \
-        "provider and endpoint (e.g. Anthropic's web_search expects /v1/messages," \
-        "so on /v1/chat/completions the model may just answer from memory)."
+        "provider and endpoint (e.g. Anthropic's web_search expects /api/v1/messages," \
+        "so on /api/v1/chat/completions the model may just answer from memory)."
 if [[ ${#NATIVE[@]} -eq 0 ]]; then
   echo "${YEL}  no providers with native search are enabled (need --openai or --anthropic).${RST}"
 else
