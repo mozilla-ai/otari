@@ -5,7 +5,7 @@ from collections.abc import Generator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
+import httpx2
 import openai
 import pytest
 from any_llm.exceptions import BatchNotCompleteError
@@ -204,7 +204,7 @@ def test_create_batch_provider_error(
 def _credential_rejected() -> Exception:
     upstream = openai.AuthenticationError(
         "Error code: 401 - Incorrect API key provided: sk-proj-AAAAAAAAAAAAAAAA",
-        response=httpx.Response(401, request=httpx.Request("POST", "https://api.openai.com/v1/batches")),
+        response=httpx2.Response(401, request=httpx2.Request("POST", "https://api.openai.com/v1/batches")),
         body=None,
     )
     return convert_exception(upstream, "openai")
@@ -249,8 +249,8 @@ def test_list_batches_answers_a_request_fault_403_with_the_providers_400(
     error = {"message": "This operation is not allowed for this request", "type": "invalid_request_error"}
     upstream = openai.PermissionDeniedError(
         f"Error code: 403 - {{'error': {error}}}",
-        response=httpx.Response(
-            403, request=httpx.Request("GET", "https://api.openai.com/v1/batches"), json={"error": error}
+        response=httpx2.Response(
+            403, request=httpx2.Request("GET", "https://api.openai.com/v1/batches"), json={"error": error}
         ),
         body=error,
     )

@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-import httpx
+import httpx2
 import openai
 import pytest
 from any_llm.types.video import VideoError, VideoJob, VideoOutput
@@ -605,15 +605,15 @@ def test_a_rate_limited_retrieval_is_a_429_and_a_rejected_credential_a_424(
     _per_second(client, master_key_header)
     headers = _user_key(client, master_key_header)
     assert _start(client, headers).status_code == 200
-    request = httpx.Request("GET", "https://api.openai.com/v1/videos/video_abc")
+    request = httpx2.Request("GET", "https://api.openai.com/v1/videos/video_abc")
     limited = convert_exception(
-        openai.RateLimitError("Error code: 429 - slow down", response=httpx.Response(429, request=request), body=None),
+        openai.RateLimitError("Error code: 429 - slow down", response=httpx2.Response(429, request=request), body=None),
         "openai",
     )
     rejected = convert_exception(
         openai.AuthenticationError(
             "Error code: 401 - Incorrect API key provided: sk-proj-AAAA",
-            response=httpx.Response(401, request=request),
+            response=httpx2.Response(401, request=request),
             body=None,
         ),
         "openai",

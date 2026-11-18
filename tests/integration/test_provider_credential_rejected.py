@@ -11,7 +11,7 @@ from collections.abc import Generator
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-import httpx
+import httpx2
 import openai
 import pytest
 from any_llm.exceptions import MissingApiKeyError
@@ -33,11 +33,11 @@ _LEAKED_KEY = "sk-proj-AAAAAAAAAAAAAAAAAAAA"
 
 def _rejected(status_code: int = 401) -> Exception:
     """The provider's refusal of the gateway's key, as any-llm hands it back."""
-    request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+    request = httpx2.Request("POST", "https://api.openai.com/v1/chat/completions")
     error_type = openai.AuthenticationError if status_code == 401 else openai.PermissionDeniedError
     upstream = error_type(
         f"Error code: {status_code} - Incorrect API key provided: {_LEAKED_KEY}",
-        response=httpx.Response(status_code, request=request),
+        response=httpx2.Response(status_code, request=request),
         body=None,
     )
     return convert_exception(upstream, "openai")
@@ -242,11 +242,11 @@ _LOGPROBS_MSG = "You are not allowed to request logprobs from this model"
 
 def _request_fault_403() -> Exception:
     """OpenAI's 403 for logprobs on a model without them, sent with a valid key."""
-    request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+    request = httpx2.Request("POST", "https://api.openai.com/v1/chat/completions")
     error = {"message": _LOGPROBS_MSG, "type": "invalid_request_error", "param": None, "code": None}
     upstream = openai.PermissionDeniedError(
         f"Error code: 403 - {{'error': {error}}}",
-        response=httpx.Response(403, request=request, json={"error": error}),
+        response=httpx2.Response(403, request=request, json={"error": error}),
         body=error,
     )
     return convert_exception(upstream, "openai")
