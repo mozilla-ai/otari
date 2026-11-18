@@ -46,6 +46,7 @@ class McpOAuthFlowRepository(BaseRepository[McpOAuthFlow, Never, Never]):
         expires_at: datetime,
         for_check: bool = False,
         for_shared: bool = False,
+        shared_account_generation: int | None = None,
     ) -> None:
         """Stage a sign-in that is about to be sent to its authorization server."""
         self.db.add(
@@ -69,6 +70,7 @@ class McpOAuthFlowRepository(BaseRepository[McpOAuthFlow, Never, Never]):
                 return_to=return_to,
                 for_check=for_check,
                 for_shared=for_shared,
+                shared_account_generation=shared_account_generation,
                 expires_at=expires_at,
             )
         )

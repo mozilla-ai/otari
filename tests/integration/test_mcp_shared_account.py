@@ -26,7 +26,7 @@ from gateway.exceptions.tools_exceptions import (
     WorkspaceMcpServerUnsafeUrlError,
 )
 from gateway.models.mcp import ResolvedMcpServer
-from gateway.models.tenancy import OrganizationMember, WorkspaceMember
+from gateway.models.tenancy import OrganizationMember, User, WorkspaceMember
 from gateway.models.tools import McpCredentialMode, McpOAuthFlow, McpSharedConnection, McpUserConnection
 from gateway.repositories.tools import McpUserConnectionRepository, WorkspaceMcpServerRepository
 from gateway.services import mcp_stateless
@@ -39,7 +39,7 @@ from gateway.services.tenancy.workspace_mcp_server_service import (
     WorkspaceMcpServers,
     WorkspaceMcpServerUpdate,
 )
-from gateway.services.tools import McpGrantMembershipListener, McpUserTokens, _mcp_connections
+from gateway.services.tools import McpGrantMembershipListener, McpUserTokens, _mcp_connections, _mcp_oauth
 from gateway.services.tools._mcp_connections import McpServerRef, collect_revocations
 from gateway.services.tools._mcp_oauth import McpOAuthTokenError, McpOAuthTokens
 
@@ -575,3 +575,43 @@ async def test_a_shared_account_counts_against_a_removal_s_revocation_limit(
     assert (found, unread, read, decrypted) == ([], 1, 0, []), "a zero limit counts the account and reads nothing"
     found, unread, read = await collect_revocations(*repositories, server_ids=[world.server.id], shared=True, limit=1)
     assert (len(found), unread, read) == (1, 0, 1)
+
+
+async def test_a_shared_sign_in_finishing_after_its_account_was_ended_stores_nothing(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    world = await _shared_world(async_db, config)
+    await _sign_in_for_everyone(async_db, config, world)
+    ids = {"workspace_id": world.workspace.id, "server_id": world.server.id}
+    started = await _service(async_db, config).start_shared_sign_in(user=world.owner, return_to=None, **ids)
+    owner_id = world.owner.id
+    exchange = wire.exchange_code
+
+    async def ended_during_the_exchange(*args: object, **kwargs: object) -> McpOAuthTokens:
+        # Another manager's request, on a session of its own, while this sign-in waits on its code.
+        async with AsyncSession(async_db.bind, expire_on_commit=False) as other:
+            owner = await other.get(User, owner_id)
+            assert owner is not None
+            await _service(other, config).disconnect_shared(user=owner, **ids)
+
+        wire.issue = McpOAuthTokens(access_token="late-access", refresh_token="late-refresh", expires_in=3600)
+        return await exchange(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(_mcp_oauth, "exchange_code", ended_during_the_exchange)
+    with pytest.raises(McpConnectionFlowError, match="shared account was ended"):
+        await _service(async_db, config).complete_connection(
+            user=world.owner, state=_state(started.authorization_url), code="code"
+        )
+
+    assert await _account(async_db, world) is None, "the account the manager ended is not stored again"
+    await base._drain_revocations()
+    assert "late-refresh" in wire.revoked, "and the token issued for it is ended upstream"
+
+
+async def test_a_shared_sign_in_with_no_disconnect_meanwhile_still_stores_its_account(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    world = await _shared_world(async_db, config)
+    await _sign_in_for_everyone(async_db, config, world)
+    await _sign_in_for_everyone(async_db, config, world)
+    assert await _account(async_db, world) is not None

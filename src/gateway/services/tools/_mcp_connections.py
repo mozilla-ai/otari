@@ -636,6 +636,7 @@ class _Pending:
     return_to: str | None
     for_check: bool
     for_shared: bool
+    shared_account_generation: int | None
     expires_at: datetime
 
 
@@ -998,6 +999,7 @@ class McpConnectionService:
                 return_to=return_to,
                 for_check=for_check,
                 for_shared=for_shared,
+                shared_account_generation=server.shared_account_generation if for_shared else None,
                 expires_at=now + FLOW_LIFETIME,
             )
         logger.info("MCP sign-in started server_id=%s user_id=%s", server_id, user_id)
@@ -1312,6 +1314,7 @@ class McpConnectionService:
                     return_to=flow.return_to,
                     for_check=flow.for_check,
                     for_shared=flow.for_shared,
+                    shared_account_generation=flow.shared_account_generation,
                     expires_at=flow.expires_at,
                 )
             )
@@ -1408,7 +1411,11 @@ class McpConnectionService:
                 # A check stores nothing here: its token is handed back below, used once, and dropped.
                 pass
             elif pending.for_shared:
-                if pending.identity_id is None or not (
+                if pending.shared_account_generation != current.shared_account_generation:
+                    # A manager ended the shared account while this sign-in was exchanging its code.
+                    logger.info("MCP shared sign-in refused reason=account_ended server_id=%s", pending.server_id)
+                    refusal = "The server's shared account was ended while you were signing in. Start it again."
+                elif pending.identity_id is None or not (
                     await self._eligibility.may_manage(workspace_id, pending.identity_id)
                     if workspace_id is not None
                     else await self._eligibility.may_manage_organization(current.organization_id, pending.identity_id)
@@ -1572,6 +1579,8 @@ class McpConnectionService:
             client_id, auth_method = connection.client_id, connection.client_auth_method
             await self._connections.remove(connection)
             await self._flows.remove_for_server(server_id)
+            # A shared sign-in already exchanging its code has left no flow to remove; this is what it finds.
+            server.shared_account_generation += 1
             server.health = None
         logger.info("MCP shared connection ended server_id=%s", server_id)
         await self._revoke_now(server, revocation_endpoint, encrypted_token, client_id, auth_method)
