@@ -315,8 +315,15 @@ def _add_secrets(session_factory: Callable[[], Session], account: Account) -> No
                     last4="abcd",
                 ),
                 WorkspaceMcpServer(
+                    organization_id=account.organization_id,
                     workspace_id=account.workspace_id,
                     name="ada-mcp",
+                    url="https://mcp.example.com",
+                    encrypted_token="encrypted",
+                ),
+                WorkspaceMcpServer(
+                    organization_id=account.organization_id,
+                    name="ada-org-mcp",
                     url="https://mcp.example.com",
                     encrypted_token="encrypted",
                 ),
@@ -366,7 +373,7 @@ def _stored_secrets(session_factory: Callable[[], Session], account: Account) ->
             .filter(OrgWebSearchKey.organization_id == account.organization_id)
             .all(),
             *session.query(WorkspaceMcpServer.encrypted_token)
-            .filter(WorkspaceMcpServer.workspace_id == account.workspace_id)
+            .filter(WorkspaceMcpServer.organization_id == account.organization_id)
             .all(),
             *session.query(OrganizationGuardrailDefinition.encrypted_create_secrets)
             .filter(OrganizationGuardrailDefinition.organization_id == account.organization_id)
@@ -394,7 +401,7 @@ def test_an_organization_left_to_nobody_loses_its_stored_credentials(
 
     assert all(value is None for row in _stored_secrets(db_session_factory, account) for value in row)
     unrelated_secrets = _stored_secrets(db_session_factory, unrelated)
-    assert len(unrelated_secrets) == 7
+    assert len(unrelated_secrets) == 8
     assert all(row[0] is not None for row in unrelated_secrets)
     session = db_session_factory()
     try:
@@ -415,7 +422,7 @@ def test_an_organization_others_use_keeps_its_stored_credentials(
     assert _delete(client, account, current_password=PASSWORD).status_code == 204
 
     secrets = _stored_secrets(db_session_factory, owner)
-    assert len(secrets) == 7
+    assert len(secrets) == 8
     assert all(row[0] is not None for row in secrets)
 
 

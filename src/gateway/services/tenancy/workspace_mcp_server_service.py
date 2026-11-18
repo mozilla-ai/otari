@@ -54,6 +54,7 @@ from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions import TenancyError
+from gateway.exceptions.organizations_exceptions import WorkspaceNotFoundError
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.exceptions.tools_exceptions import (
     McpCheckSignInRequiredError,
@@ -455,6 +456,9 @@ class WorkspaceMcpServerPublic(BaseModel):
         those components masked. A manager sees the URL as stored, because the
         edit form restates it and would otherwise save the mask back.
         """
+        if server.workspace_id is None:
+            # This shape describes a workspace's own server; nothing lists an organization server yet.
+            raise ValueError(f"MCP server {server.id} belongs to no workspace")
         client = McpConnectionService.stored_oauth_client(server)
         own_client = client if client is not None and not client.dynamic else None
         return cls(
@@ -1646,6 +1650,8 @@ class WorkspaceMcpServerService:
         workspaces = WorkspaceRepository(self.db)
         await workspaces.lock(resolved_workspace_id)
         organization_id = await workspaces.get_organization_id(resolved_workspace_id)
+        if organization_id is None:
+            raise WorkspaceNotFoundError(workspace_id)
 
         count = (
             await self.db.execute(
@@ -1658,6 +1664,7 @@ class WorkspaceMcpServerService:
             raise WorkspaceMcpServerLimitReachedError(workspace_id, MAX_MCP_SERVERS_PER_WORKSPACE)
 
         server = WorkspaceMcpServer(
+            organization_id=organization_id,
             workspace_id=resolved_workspace_id,
             name=request.name,
             url=request.url,
@@ -1696,7 +1703,7 @@ class WorkspaceMcpServerService:
         # After the commit, so a server that fails its check is still stored:
         # it may be registered before it is up, and `health` says what failed.
         await self._record_check(server)
-        if growth is not None and background_tasks is not None and organization_id is not None:
+        if growth is not None and background_tasks is not None:
             await growth.record_action(
                 background_tasks=background_tasks,
                 action=GrowthAction.MCP_SERVER_CREATED,
@@ -1958,7 +1965,13 @@ class WorkspaceMcpServerService:
             raise WorkspaceMcpServerGrantSubjectError(
                 f"A server holds at most {MAX_GRANTS_PER_SERVER} grants; grant a user instead of each of their keys"
             )
-        await repository.put(server.id, api_key_ids=request.api_key_ids, user_ids=request.user_ids, tools=request.tools)
+        await repository.put(
+            server.id,
+            workspace_id=resolved_workspace_id,
+            api_key_ids=request.api_key_ids,
+            user_ids=request.user_ids,
+            tools=request.tools,
+        )
         await self.db.commit()
         logger.info(
             "MCP server grants added server_id=%s keys=%d users=%d",

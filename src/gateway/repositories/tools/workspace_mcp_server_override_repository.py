@@ -1,0 +1,86 @@
+"""Data access for ``workspace_mcp_server_overrides``: each workspace's settings on an organization's MCP servers.
+
+The only module that constructs or queries the table. Writes flush and leave
+the commit to the caller.
+"""
+
+import uuid
+from collections.abc import Collection
+from typing import Never
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from gateway.core.unit_of_work import UnitOfWork
+from gateway.models.tools import WorkspaceMcpServerOverride
+from gateway.repositories.base_repository import BaseRepository
+
+
+class WorkspaceMcpServerOverrideRepository(BaseRepository[WorkspaceMcpServerOverride, Never, Never]):
+    """Read and stage override rows, always addressed by workspace and server."""
+
+    def __init__(self, db: AsyncSession | UnitOfWork) -> None:
+        super().__init__(db, WorkspaceMcpServerOverride)
+
+    async def find(self, *, workspace_id: uuid.UUID, server_id: uuid.UUID) -> WorkspaceMcpServerOverride | None:
+        """A workspace's override of one server, or ``None`` where it inherits."""
+        found = await self.db.execute(
+            select(WorkspaceMcpServerOverride).where(
+                WorkspaceMcpServerOverride.workspace_id == workspace_id,
+                WorkspaceMcpServerOverride.server_id == server_id,
+            )
+        )
+        return found.scalar_one_or_none()
+
+    async def for_workspace(
+        self, workspace_id: uuid.UUID, server_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, WorkspaceMcpServerOverride]:
+        """A workspace's overrides of these servers, by server id; a server it inherits has none."""
+        if not server_ids:
+            return {}
+        rows = await self.db.execute(
+            select(WorkspaceMcpServerOverride).where(
+                WorkspaceMcpServerOverride.workspace_id == workspace_id,
+                WorkspaceMcpServerOverride.server_id.in_(list(server_ids)),
+            )
+        )
+        return {override.server_id: override for override in rows.scalars().all()}
+
+    async def for_server(self, server_id: uuid.UUID) -> list[WorkspaceMcpServerOverride]:
+        """Every workspace's override of one server, oldest first."""
+        rows = await self.db.execute(
+            select(WorkspaceMcpServerOverride)
+            .where(WorkspaceMcpServerOverride.server_id == server_id)
+            .order_by(WorkspaceMcpServerOverride.created_at, WorkspaceMcpServerOverride.id)
+        )
+        return list(rows.scalars().all())
+
+    async def save(
+        self,
+        override: WorkspaceMcpServerOverride | None,
+        *,
+        workspace_id: uuid.UUID,
+        organization_id: uuid.UUID,
+        server_id: uuid.UUID,
+        organization_tools: list[str] | None,
+        enabled: bool,
+        everyone_tools: list[str] | None,
+        attach_by_default: bool | None,
+    ) -> WorkspaceMcpServerOverride:
+        """Stage a new override, or new values on the one passed in."""
+        if override is None:
+            override = WorkspaceMcpServerOverride(
+                workspace_id=workspace_id, organization_id=organization_id, server_id=server_id
+            )
+            self.db.add(override)
+        override.organization_tools = organization_tools
+        override.enabled = enabled
+        override.everyone_tools = everyone_tools
+        override.attach_by_default = attach_by_default
+        await self.db.flush()
+        return override
+
+    async def remove(self, override: WorkspaceMcpServerOverride) -> None:
+        """Stage an override's removal."""
+        await self.db.delete(override)
+        await self.db.flush()

@@ -1520,9 +1520,15 @@ async def _key(db: AsyncSession, workspace_id: uuid.UUID, *, user_id: str | None
 async def _grant(
     db: AsyncSession, server_id: uuid.UUID, tools: list[str], *, key: APIKey | None = None, user_id: str | None = None
 ) -> None:
+    server = await db.get(WorkspaceMcpServer, server_id)
+    assert server is not None and server.workspace_id is not None
     db.add(
         WorkspaceMcpServerGrant(
-            server_id=server_id, api_key_id=key.id if key is not None else None, user_id=user_id, tools=tools
+            server_id=server_id,
+            workspace_id=server.workspace_id,
+            api_key_id=key.id if key is not None else None,
+            user_id=user_id,
+            tools=tools,
         )
     )
     await db.flush()

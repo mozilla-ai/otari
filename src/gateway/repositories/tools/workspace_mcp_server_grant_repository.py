@@ -66,11 +66,12 @@ class WorkspaceMcpServerGrantRepository(BaseRepository[WorkspaceMcpServerGrant, 
         self,
         server_id: uuid.UUID,
         *,
+        workspace_id: uuid.UUID,
         api_key_ids: Collection[str],
         user_ids: Collection[str],
         tools: list[str],
     ) -> None:
-        """Stage one grant per key and per user with ``tools``, replacing the tools of any they already hold.
+        """Stage one grant in ``workspace_id`` per key and per user with ``tools``, replacing any they hold there.
 
         A concurrent put can insert a grant for the same key or user between this one's read and its insert,
         where nothing locks the server (SQLite), and the unique constraint refuses the second. The write runs
@@ -79,35 +80,46 @@ class WorkspaceMcpServerGrantRepository(BaseRepository[WorkspaceMcpServerGrant, 
         """
         try:
             async with self.db.begin_nested():
-                await self._put(server_id, api_key_ids=api_key_ids, user_ids=user_ids, tools=tools)
+                await self._put(
+                    server_id, workspace_id=workspace_id, api_key_ids=api_key_ids, user_ids=user_ids, tools=tools
+                )
         except IntegrityError:
-            await self._put(server_id, api_key_ids=api_key_ids, user_ids=user_ids, tools=tools)
+            await self._put(
+                server_id, workspace_id=workspace_id, api_key_ids=api_key_ids, user_ids=user_ids, tools=tools
+            )
 
     async def _existing(
-        self, server_id: uuid.UUID, api_key_ids: Collection[str], user_ids: Collection[str]
+        self, server_id: uuid.UUID, workspace_id: uuid.UUID, api_key_ids: Collection[str], user_ids: Collection[str]
     ) -> dict[tuple[str | None, str | None], WorkspaceMcpServerGrant]:
-        """The grants these keys and users already hold on a server, by ``(api_key_id, user_id)``."""
+        """The grants these keys and users already hold on a server in a workspace, by ``(api_key_id, user_id)``."""
         return {
             (grant.api_key_id, grant.user_id): grant
             for grant in await self.for_server(server_id)
-            if grant.api_key_id in api_key_ids or grant.user_id in user_ids
+            if grant.workspace_id == workspace_id and (grant.api_key_id in api_key_ids or grant.user_id in user_ids)
         }
 
     async def _put(
         self,
         server_id: uuid.UUID,
         *,
+        workspace_id: uuid.UUID,
         api_key_ids: Collection[str],
         user_ids: Collection[str],
         tools: list[str],
     ) -> None:
-        existing = await self._existing(server_id, api_key_ids, user_ids)
+        existing = await self._existing(server_id, workspace_id, api_key_ids, user_ids)
         subjects = [(key_id, None) for key_id in api_key_ids] + [(None, user_id) for user_id in user_ids]
         for subject in subjects:
             grant = existing.get(subject)
             if grant is None:
                 self.db.add(
-                    WorkspaceMcpServerGrant(server_id=server_id, api_key_id=subject[0], user_id=subject[1], tools=tools)
+                    WorkspaceMcpServerGrant(
+                        server_id=server_id,
+                        workspace_id=workspace_id,
+                        api_key_id=subject[0],
+                        user_id=subject[1],
+                        tools=tools,
+                    )
                 )
             else:
                 grant.tools = tools

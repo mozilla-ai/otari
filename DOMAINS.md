@@ -223,6 +223,11 @@ the request path and the Playground read it through the same service.
 
 It also owns an organization's web search keys and each workspace's choice
 among them (`org_web_search_keys`, `workspace_web_search_key_overrides`).
+An organization's own MCP servers share `workspace_mcp_servers` with the
+workspaces' servers, with no workspace, so every sign-in and grant names one
+kind of server id. Each workspace's settings on one
+(`workspace_mcp_server_overrides`) belong here, and so do the old ids of the
+workspace copies folded into one (`mcp_server_aliases`).
 So does a member's request for a catalog server and a manager's answer to it
 (`mcp_server_requests`): `McpServerRequestService` asks mcp-catalog for the
 entry a request names and the tenancy checks for who manages the workspace,

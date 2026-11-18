@@ -95,7 +95,7 @@ class McpCredentialMode(StrEnum):
 
 
 class WorkspaceMcpServer(Base):
-    """One MCP server a workspace has configured, referenced by id from a request.
+    """One stored MCP server, a workspace's own or its organization's, referenced by id from a request.
 
     Ported from otari-ai's ``mcp_server`` table (otari#658). A request names
     stored servers with ``mcp_server_ids``, resolved here against the
@@ -119,8 +119,14 @@ class WorkspaceMcpServer(Base):
     request, so a caller whose stored id list outlives one server's
     decommissioning still gets the rest.
 
-    CASCADE: a workspace-owned configuration row means nothing without its
-    workspace.
+    ``workspace_id`` is null on an organization server, which every workspace of
+    ``organization_id`` reaches, each through its own
+    :class:`WorkspaceMcpServerOverride`. On such a server ``allowed_tools``,
+    ``everyone_tools``, ``attach_by_default`` and ``enabled`` are the
+    organization's ceiling, default access, default attach and master switch.
+
+    CASCADE on both: a server means nothing without its workspace or its
+    organization.
     """
 
     __tablename__ = "workspace_mcp_servers"
@@ -132,11 +138,27 @@ class WorkspaceMcpServer(Base):
         # tools with, so collapsing two onto one name would silently hide a
         # server.
         UniqueConstraint("workspace_id", "name", name="uq_workspace_mcp_servers_workspace_name"),
+        # The same rule among an organization's own servers, which the constraint above
+        # cannot see: a null workspace_id never collides.
+        Index(
+            "uq_workspace_mcp_servers_organization_name",
+            "organization_id",
+            "name",
+            unique=True,
+            postgresql_where=text("workspace_id IS NULL"),
+            sqlite_where=text("workspace_id IS NULL"),
+        ),
+        # The target of the override table's composite FK, which pins an override to a
+        # server of its own organization. It also serves as the organization_id index.
+        UniqueConstraint("organization_id", "id", name="uq_workspace_mcp_servers_organization_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    workspace_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), nullable=False, index=True
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organization.id", ondelete="CASCADE"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), nullable=True, index=True
     )
     name: Mapped[str] = mapped_column(nullable=False)
     url: Mapped[str] = mapped_column(nullable=False)
@@ -218,19 +240,30 @@ class WorkspaceMcpServerGrant(Base):
     ``tools`` holds patterns in the same grammar, and ``[]`` denies. The server's
     ``allowed_tools`` stays a ceiling over all of them.
 
-    CASCADE on all three: a grant means nothing without its server, its key or its user.
+    ``workspace_id`` is the workspace the grant applies in: a workspace server's own,
+    or one of the workspaces an organization server reaches, so one user may hold a
+    grant per workspace on an organization server.
+
+    CASCADE on all four: a grant means nothing without its server, its workspace, its key or its user.
     """
 
     __tablename__ = "workspace_mcp_server_grants"
     __table_args__ = (
         CheckConstraint("(api_key_id IS NULL) <> (user_id IS NULL)", name="ck_workspace_mcp_server_grants_one_subject"),
-        UniqueConstraint("server_id", "api_key_id", name="uq_workspace_mcp_server_grants_server_key"),
-        UniqueConstraint("server_id", "user_id", name="uq_workspace_mcp_server_grants_server_user"),
+        UniqueConstraint(
+            "server_id", "workspace_id", "api_key_id", name="uq_workspace_mcp_server_grants_server_workspace_key"
+        ),
+        UniqueConstraint(
+            "server_id", "workspace_id", "user_id", name="uq_workspace_mcp_server_grants_server_workspace_user"
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     server_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("workspace_mcp_servers.id", ondelete="CASCADE"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), nullable=False, index=True
     )
     api_key_id: Mapped[str | None] = mapped_column(ForeignKey("api_keys.id", ondelete="CASCADE"), index=True)
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
@@ -240,6 +273,75 @@ class WorkspaceMcpServerGrant(Base):
         UtcDateTime(),
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class WorkspaceMcpServerOverride(Base):
+    """One workspace's settings on one organization server.
+
+    No row means the workspace inherits everything from the server. ``organization_tools``
+    is the organization's limit for this workspace, in the tool pattern grammar: null sets
+    no extra limit, and ``[]`` turns the server off for the workspace where its own admin
+    cannot turn it back on. The other three are the workspace admin's: ``enabled`` is
+    their off switch, and a null ``everyone_tools`` or ``attach_by_default`` takes the
+    server's own. A row left with only these defaults is deleted rather than stored.
+
+    CASCADE on the workspace and, through the composite key, the server, which also holds
+    an override to a server of its own organization.
+    """
+
+    __tablename__ = "workspace_mcp_server_overrides"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "server_id", name="uq_workspace_mcp_server_overrides_workspace_server"),
+        ForeignKeyConstraint(
+            ["organization_id", "server_id"],
+            ["workspace_mcp_servers.organization_id", "workspace_mcp_servers.id"],
+            ondelete="CASCADE",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    # The unique constraint above leads with it, so it needs no index of its own.
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), nullable=False
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    server_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    organization_tools: Mapped[list[str] | None] = mapped_column(JSON(none_as_null=True), default=None)
+    enabled: Mapped[bool] = mapped_column(default=True, server_default=true(), nullable=False)
+    everyone_tools: Mapped[list[str] | None] = mapped_column(JSON(none_as_null=True), default=None)
+    attach_by_default: Mapped[bool | None] = mapped_column(default=None)
+    created_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        server_default=func.now(),
+    )
+
+
+class McpServerAlias(Base):
+    """The id a workspace's own copy of a server had before it was folded into an organization server.
+
+    A caller in ``workspace_id`` naming ``old_id`` reaches ``server_id`` instead, so ids stored
+    in agents and sign-in links handed out before the fold keep working there.
+
+    CASCADE on both: an alias means nothing without its workspace or the server it names.
+    """
+
+    __tablename__ = "mcp_server_aliases"
+
+    old_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    server_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace_mcp_servers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
     )
 
 
