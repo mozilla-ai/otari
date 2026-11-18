@@ -1,5 +1,8 @@
 """Let an organization own an MCP server, for every one of its workspaces.
 
+``workspace`` gains a unique index on ``(organization_id, id)``, which composite
+keys below reference to hold a row's organization to its workspace's.
+
 ``workspace_mcp_servers`` gains ``organization_id``, filled from each server's
 workspace, and ``workspace_id`` becomes nullable: a server with no workspace
 belongs to its organization. Organization servers' names are unique per
@@ -47,6 +50,8 @@ _SERVERS_ORGANIZATION_NAME_RULE = "uq_workspace_mcp_servers_organization_name"
 _SERVERS_ORGANIZATION_ID_RULE = "uq_workspace_mcp_servers_organization_id"
 # PostgreSQL's own name for the key, which is what it would have been had the table been created with it.
 _SERVERS_ORGANIZATION_KEY = "workspace_mcp_servers_organization_id_fkey"
+_SERVERS_WORKSPACE_ORGANIZATION_KEY = "fk_workspace_mcp_servers_workspace_organization"
+_WORKSPACE_ORGANIZATION_INDEX = "uq_workspace_organization_id"
 _ORGANIZATION_SERVER = "workspace_id IS NULL"
 
 _GRANTS_KEY_INDEX = "ix_workspace_mcp_server_grants_api_key_id"
@@ -121,6 +126,12 @@ def _servers_table(*, upgraded: bool) -> sa.Table:
                 sa.ForeignKeyConstraint(
                     ["organization_id"], ["organization.id"], ondelete="CASCADE", name=_SERVERS_ORGANIZATION_KEY
                 ),
+                sa.ForeignKeyConstraint(
+                    ["organization_id", "workspace_id"],
+                    ["workspace.organization_id", "workspace.id"],
+                    ondelete="CASCADE",
+                    name=_SERVERS_WORKSPACE_ORGANIZATION_KEY,
+                ),
                 sa.UniqueConstraint("organization_id", "id", name=_SERVERS_ORGANIZATION_ID_RULE),
             ]
             if upgraded
@@ -188,12 +199,20 @@ def _upgrade_servers(bind: sa.Connection) -> None:
     )
     _delete_servers(bind, _servers.c.organization_id.is_(None))
 
+    op.create_index(_WORKSPACE_ORGANIZATION_INDEX, "workspace", ["organization_id", "id"], unique=True)
     op.drop_index(_SERVERS_WORKSPACE_INDEX, table_name=_SERVERS)
     with op.batch_alter_table(_SERVERS, copy_from=_servers_table(upgraded=False)) as batch:
         batch.alter_column("organization_id", existing_type=sa.Uuid(), nullable=False)
         batch.alter_column("workspace_id", existing_type=sa.Uuid(), nullable=True)
         batch.create_foreign_key(
             _SERVERS_ORGANIZATION_KEY, "organization", ["organization_id"], ["id"], ondelete="CASCADE"
+        )
+        batch.create_foreign_key(
+            _SERVERS_WORKSPACE_ORGANIZATION_KEY,
+            "workspace",
+            ["organization_id", "workspace_id"],
+            ["organization_id", "id"],
+            ondelete="CASCADE",
         )
         batch.create_unique_constraint(_SERVERS_ORGANIZATION_ID_RULE, ["organization_id", "id"])
     op.create_index(_SERVERS_WORKSPACE_INDEX, _SERVERS, ["workspace_id"])
@@ -252,7 +271,9 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
-        sa.ForeignKeyConstraint(["workspace_id"], ["workspace.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["organization_id", "workspace_id"], ["workspace.organization_id", "workspace.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(
             ["organization_id", "server_id"], [f"{_SERVERS}.organization_id", f"{_SERVERS}.id"], ondelete="CASCADE"
         ),
@@ -263,12 +284,17 @@ def upgrade() -> None:
     op.create_table(
         _ALIASES,
         sa.Column("old_id", sa.Uuid(), nullable=False),
+        sa.Column("organization_id", sa.Uuid(), nullable=False),
         sa.Column("workspace_id", sa.Uuid(), nullable=False),
         sa.Column("server_id", sa.Uuid(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.PrimaryKeyConstraint("old_id"),
-        sa.ForeignKeyConstraint(["workspace_id"], ["workspace.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["server_id"], [f"{_SERVERS}.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["organization_id", "workspace_id"], ["workspace.organization_id", "workspace.id"], ondelete="CASCADE"
+        ),
+        sa.ForeignKeyConstraint(
+            ["organization_id", "server_id"], [f"{_SERVERS}.organization_id", f"{_SERVERS}.id"], ondelete="CASCADE"
+        ),
     )
     op.create_index("ix_mcp_server_aliases_workspace_id", _ALIASES, ["workspace_id"])
     op.create_index("ix_mcp_server_aliases_server_id", _ALIASES, ["server_id"])
@@ -306,8 +332,10 @@ def downgrade() -> None:
     op.drop_index(_SERVERS_ORGANIZATION_NAME_RULE, table_name=_SERVERS)
     op.drop_index(_SERVERS_WORKSPACE_INDEX, table_name=_SERVERS)
     with op.batch_alter_table(_SERVERS, copy_from=_servers_table(upgraded=True)) as batch:
+        batch.drop_constraint(_SERVERS_WORKSPACE_ORGANIZATION_KEY, type_="foreignkey")
         batch.drop_constraint(_SERVERS_ORGANIZATION_ID_RULE, type_="unique")
         batch.drop_constraint(_SERVERS_ORGANIZATION_KEY, type_="foreignkey")
         batch.alter_column("workspace_id", existing_type=sa.Uuid(), nullable=False)
         batch.drop_column("organization_id")
     op.create_index(_SERVERS_WORKSPACE_INDEX, _SERVERS, ["workspace_id"])
+    op.drop_index(_WORKSPACE_ORGANIZATION_INDEX, table_name="workspace")

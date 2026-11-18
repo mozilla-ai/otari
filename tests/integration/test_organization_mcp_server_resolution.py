@@ -177,7 +177,14 @@ async def test_an_old_id_names_the_server_it_was_folded_into_in_its_own_workspac
     sales = await _another_workspace(async_db, world)
     jira = await _shared(async_db, world.workspace.organization_id)
     old_id = uuid.uuid4()
-    async_db.add(McpServerAlias(old_id=old_id, workspace_id=world.workspace.id, server_id=jira))
+    async_db.add(
+        McpServerAlias(
+            old_id=old_id,
+            organization_id=world.workspace.organization_id,
+            workspace_id=world.workspace.id,
+            server_id=jira,
+        )
+    )
     await async_db.commit()
 
     resolved = await resolve_workspace_mcp_servers(

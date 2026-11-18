@@ -408,6 +408,13 @@ def test_an_organization_left_to_nobody_loses_its_stored_credentials(
         assert (
             session.query(OIDCConnection).filter(OIDCConnection.organization_id == account.organization_id).count() == 0
         )
+        # Kept, with no token: the workspace's own server and the organization's.
+        servers = (
+            session.query(WorkspaceMcpServer.encrypted_token)
+            .filter(WorkspaceMcpServer.organization_id == account.organization_id)
+            .all()
+        )
+        assert [token for (token,) in servers] == [None, None]
     finally:
         session.close()
 

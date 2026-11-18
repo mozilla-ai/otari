@@ -1682,10 +1682,15 @@ class WorkspaceMcpServerService:
         await _validate_url(request.url, has_token=per_user or bool(request.authorization_token))
 
         # The workspace lock stops a concurrent create from invalidating the count below before this insert.
+        # The organization's is taken first, in the order a workspace's deletion takes the two: the insert
+        # checks the server's organization key, which waits on a deletion holding the organization.
         workspaces = WorkspaceRepository(self.db)
-        await workspaces.lock(resolved_workspace_id)
         organization_id = await workspaces.get_organization_id(resolved_workspace_id)
         if organization_id is None:
+            raise WorkspaceNotFoundError(workspace_id)
+        await OrganizationRepository(self.db).lock_settings(organization_id)
+        await workspaces.lock(resolved_workspace_id)
+        if await workspaces.get_organization_id(resolved_workspace_id) is None:
             raise WorkspaceNotFoundError(workspace_id)
         await self._refuse_organization_name(organization_id, request.name, except_id=None)
 
@@ -2001,8 +2006,13 @@ class WorkspaceMcpServerService:
                     f"'{strangers[0]}' is not a member of this workspace and owns no key in it"
                 )
         repository = WorkspaceMcpServerGrantRepository(self.db)
-        # The key reads above end in commits; the server is read again here, locked, so two
-        # concurrent adds cannot both pass the cap.
+        # The key reads above end in commits. The workspace is locked before the server, in the order its
+        # deletion takes them, since a grant's insert checks its workspace key. The server is read again
+        # here, locked, so two concurrent adds cannot both pass the cap.
+        workspaces = WorkspaceRepository(self.db)
+        await workspaces.lock(resolved_workspace_id)
+        if await workspaces.get_organization_id(resolved_workspace_id) is None:
+            raise WorkspaceNotFoundError(workspace_id)
         server = await self.db.get(WorkspaceMcpServer, server_id, with_for_update=True)
         if server is None:
             raise WorkspaceMcpServerNotFoundError(server_id)
@@ -2021,7 +2031,7 @@ class WorkspaceMcpServerService:
                 f"A server holds at most {MAX_GRANTS_PER_SERVER} grants; grant a user instead of each of their keys"
             )
         await repository.put(
-            server.id,
+            server,
             workspace_id=resolved_workspace_id,
             api_key_ids=request.api_key_ids,
             user_ids=request.user_ids,
