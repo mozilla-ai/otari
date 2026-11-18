@@ -14,7 +14,7 @@ from gateway.repositories.tools import (
     WorkspaceMcpServerGrantRepository,
     WorkspaceMcpServerRepository,
 )
-from gateway.services.tools._mcp_connections import collect_revocations, revoke_in_background
+from gateway.services.tools._mcp_connections import McpRevocation, collect_revocations, revoke_in_background
 
 
 class McpOrganizationReach(Protocol):
@@ -88,11 +88,22 @@ class McpGrantMembershipListener:
         The change is the caller's, which may still roll back, so nothing is sent before it commits.
         ``shared`` adds the servers' shared accounts, for a change that deletes the servers.
         """
-        if not server_ids:
-            return
-        revocations, unread = await collect_revocations(
-            self._connections, self._servers, server_ids=server_ids, user_id=user_id, shared=shared
-        )
+        await self._revoke_all_after_commit([(server_ids, user_id)], shared=shared)
+
+    async def _revoke_all_after_commit(
+        self, removals: Sequence[tuple[Sequence[uuid.UUID], str | None]], *, shared: bool = False
+    ) -> None:
+        """As :meth:`_revoke_after_commit`, for several people's removals sent as one batch, under one limit."""
+        revocations: list[McpRevocation] = []
+        unread = 0
+        for server_ids, user_id in removals:
+            if not server_ids:
+                continue
+            found, missed = await collect_revocations(
+                self._connections, self._servers, server_ids=server_ids, user_id=user_id, shared=shared
+            )
+            revocations += found
+            unread += missed
         if revocations or unread:
             self._connections.after_commit(lambda: revoke_in_background(revocations, unread=unread))
 
@@ -115,14 +126,27 @@ class McpGrantMembershipListener:
         """The workspace's servers go with it, and every token they hold is revoked once it commits.
 
         A member it was the last way into the organization for loses their sign-ins to the organization's own
-        servers too.
+        servers too. Every token is revoked in one batch, after the commit.
         """
         await self._revoke_after_commit(server_ids=await self._servers.ids_in_workspaces([workspace_id]), shared=True)
+        shared_by_organization = {
+            organization_id: await self._servers.ids_of_organization(organization_id)
+            for organization_id in await self._reach.organizations_of([workspace_id])
+        }
+        removals: list[tuple[list[uuid.UUID], str]] = []
         for user_id in await self._reach.people_of(member_ids):
-            lost = await self._organization_servers_lost(user_id, [workspace_id])
-            await self._revoke_after_commit(server_ids=lost, user_id=str(user_id))
-            await self._connections.remove_for_user_on_servers(str(user_id), lost)
-            await self._flows.remove_for_user(str(user_id), lost)
+            lost = [
+                server_id
+                for organization_id, shared in shared_by_organization.items()
+                if shared and not await self._reach.still_reaches(organization_id, user_id, losing=[workspace_id])
+                for server_id in shared
+            ]
+            if lost:
+                removals.append((lost, str(user_id)))
+        await self._revoke_all_after_commit(removals)
+        for lost, person in removals:
+            await self._connections.remove_for_user_on_servers(person, lost)
+            await self._flows.remove_for_user(person, lost)
 
     async def member_lost_workspaces(self, user_id: uuid.UUID, workspace_ids: Sequence[uuid.UUID]) -> None:
         """Remove the person's grants on, and connections to, these workspaces' servers."""

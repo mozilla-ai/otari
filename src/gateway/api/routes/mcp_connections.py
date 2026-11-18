@@ -264,7 +264,7 @@ async def start_mcp_sign_in_from_link(
     service: WorkspaceMcpServerServiceDep,
     config: Annotated[GatewayConfig, Depends(get_config)],
     opened_by: Annotated[TenancyUser | None, Depends(get_session_identity)],
-    ticket: Annotated[str, Form(max_length=1024)] = "",
+    ticket: Annotated[str, Form(max_length=McpConnectionService.sign_in_ticket_max)] = "",
     step: Annotated[str, Form(max_length=32)] = "",
 ) -> Response:
     """Ask before a link's sign-in starts, then start it once the person pressed Continue.
