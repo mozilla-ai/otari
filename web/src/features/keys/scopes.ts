@@ -82,8 +82,8 @@ export const SCOPE_INFO: Record<KeyScope, ScopeInfo> = {
 
 /**
  * Each group's heading, in the order the form lays them out, whether only a
- * service key is offered it, and whether it is folded under Advanced: what most
- * keys need (models and the built-in tools) stays in view.
+ * service key is offered it, and whether it is folded under Advanced: what a
+ * new key holds (models, the built-in tools and MCP) stays in view.
  */
 const GROUP_HEADINGS: Record<
   ScopeGroupKey,
@@ -91,9 +91,9 @@ const GROUP_HEADINGS: Record<
 > = {
   models: { label: "Models" },
   tools: { label: "Tools" },
+  mcp: { label: "MCP" },
   files: { label: "Files", isAdvanced: true },
   batches: { label: "Batches", isAdvanced: true },
-  mcp: { label: "MCP", isAdvanced: true },
   agents: { label: "Coding agents", isAdvanced: true },
   usage: { label: "Usage", isAdvanced: true },
   endUsers: { label: "End users", serviceKeyOnly: true, isAdvanced: true },

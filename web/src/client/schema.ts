@@ -12709,7 +12709,7 @@ export interface components {
             reject_user_mismatch?: boolean | null;
             /**
              * Scopes
-             * @description The endpoint groups the key may reach. Omitted, the key gets 'inference:run' alone, which calls models and nothing else. The end-users scopes are a service key's alone.
+             * @description The endpoint groups the key may reach. Omitted, the key gets 'inference:run', 'web:search', 'web:fetch', 'code:execute', 'mcp:read' and 'mcp:execute': it calls models and tools and lists MCP servers, and nothing else. The end-users scopes are a service key's alone.
              */
             scopes?: components["schemas"]["KeyScope"][];
             /**
@@ -12846,7 +12846,7 @@ export interface components {
             reject_user_mismatch?: boolean | null;
             /**
              * Scopes
-             * @description The endpoint groups the key may reach. Omitted, the key gets 'inference:run' alone, which calls models and nothing else. The end-users scopes are a service key's alone.
+             * @description The endpoint groups the key may reach. Omitted, the key gets 'inference:run', 'web:search', 'web:fetch', 'code:execute', 'mcp:read' and 'mcp:execute': it calls models and tools and lists MCP servers, and nothing else. The end-users scopes are a service key's alone.
              */
             scopes?: components["schemas"]["KeyScope"][];
             /**
@@ -19949,7 +19949,7 @@ export interface components {
         PlaygroundToolStatus: {
             /**
              * Configured
-             * @description Whether this deployment has a backend for the tool at all.
+             * @description Whether the menu lists the tool: the deployment, or for web search the workspace's organization search key, provides it. Whether it can be attached, and why not, are enabled and reason.
              */
             configured: boolean;
             /**
@@ -19973,6 +19973,8 @@ export interface components {
             files: components["schemas"]["PlaygroundToolStatus"];
             /** Mcp Servers */
             mcp_servers: components["schemas"]["PlaygroundMcpServer"][];
+            /** @description Whether a message may declare otari_web_fetch. */
+            web_fetch: components["schemas"]["PlaygroundToolStatus"];
             web_search: components["schemas"]["PlaygroundToolStatus"];
         };
         /**
@@ -22681,6 +22683,16 @@ export interface components {
         TraceSummaryPublic: {
             /** Api Key Id */
             api_key_id: string | null;
+            /**
+             * Client Language
+             * @description The language the client was written in, from its SDK's headers or its HTTP library's User-Agent. `javascript` covers TypeScript.
+             */
+            client_language?: ("python" | "javascript" | "go" | "java" | "rust" | "ruby") | null;
+            /**
+             * Client Version
+             * @description The client's version, from its own User-Agent.
+             */
+            client_version?: string | null;
             /**
              * Cost
              * @description USD, a snapshot of the usage rows' cost. Usage stays the billing record.

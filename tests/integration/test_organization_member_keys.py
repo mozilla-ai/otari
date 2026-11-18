@@ -1369,7 +1369,7 @@ def test_an_owner_lists_its_end_users_and_nobody_else_reaches_them(
 # =============================================================================
 
 
-def test_a_member_key_calls_models_alone_unless_it_names_more(client: TestClient, world: _World) -> None:
+def test_a_member_key_gets_the_default_scopes_unless_it_names_its_own(client: TestClient, world: _World) -> None:
     code, plain = _create(client, world, "alpha_member", {"key_name": "plain"})
     assert code == status.HTTP_200_OK, plain
     code, wider = _create(
@@ -1377,7 +1377,7 @@ def test_a_member_key_calls_models_alone_unless_it_names_more(client: TestClient
     )
     assert code == status.HTTP_200_OK, wider
 
-    assert plain["scopes"] == ["inference:run"]
+    assert plain["scopes"] == ["inference:run", "web:search", "web:fetch", "code:execute", "mcp:read", "mcp:execute"]
     assert wider["scopes"] == ["inference:run", "usage:read"]
 
 

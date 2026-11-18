@@ -1976,7 +1976,6 @@ SERVICE_ROOT_EXPORT_BASELINE: dict[str, tuple[str, ...]] = {
         "cache_in_input",
         "context_of",
         "gate_usage_event_id",
-        "harness_of",
         "identifier_or_none",
         "is_subagent",
         "otlp_sessions",

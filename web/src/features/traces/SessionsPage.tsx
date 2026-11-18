@@ -321,7 +321,7 @@ function SessionsPageContent({ embedded }: { embedded: boolean }) {
   const win = custom ?? { start: chartStart, end: now }
 
   const rows = traces.data?.items ?? []
-  const withMarks = anyHarnessMark(rows.map((session) => session.harness))
+  const withMarks = anyHarnessMark(rows)
   const tableColumns = useMemo(
     () => columns(peekId, withMarks),
     [peekId, withMarks],

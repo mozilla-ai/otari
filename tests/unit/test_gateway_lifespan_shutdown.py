@@ -42,6 +42,7 @@ from gateway.main import (
     _stop_refreshers,
 )
 from gateway.services.organizations import ExpiredInvitationCleanup, InvitationDelivery
+from gateway.services.tools import AttachedMcpServerIndex
 
 
 async def _absorbs_cancellation() -> None:
@@ -258,6 +259,9 @@ async def _started_worker_names(config: GatewayConfig, monkeypatch: pytest.Monke
             monkeypatch.setattr(gateway_main, attribute, _recording_refresher(attribute, called))
     monkeypatch.setattr(InvitationDelivery, "poll", _recording_refresher("InvitationDelivery.poll", called))
     monkeypatch.setattr(ExpiredInvitationCleanup, "poll", _recording_refresher("ExpiredInvitationCleanup.poll", called))
+    monkeypatch.setattr(
+        AttachedMcpServerIndex, "run_refresher", _recording_refresher("AttachedMcpServerIndex.run_refresher", called)
+    )
 
     workers = _start_lifespan_workers(config, build_container(config=config))
     for task, _worker in workers:

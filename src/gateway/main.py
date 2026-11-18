@@ -204,6 +204,7 @@ from gateway.services.tenancy.organization_guardrail_runner import (
 from gateway.services.tool_settings_service import apply_overrides_from_db as apply_tool_overrides_from_db
 from gateway.services.tools import (
     SANDBOX_KEY_ENV,
+    AttachedMcpServerIndex,
     LegacySearchValues,
     build_web_provider_client,
     load_sandbox_credentials_at_startup,
@@ -605,6 +606,11 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
         "sandbox credential",
         lambda _config, _container: run_sandbox_credential_refresher(),
         reset_sandbox_credential_cache,
+    ),
+    _LifespanWorker(
+        "attached MCP server",
+        lambda _config, _container: AttachedMcpServerIndex.run_refresher(),
+        AttachedMcpServerIndex.reset,
     ),
     # No reset: the stored rules live on the config, which the startup load rebuilds.
     _LifespanWorker("rate limit rule", lambda config, _container: run_rate_limit_refresher(config)),
@@ -1283,6 +1289,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         await load_provider_endpoints_at_startup()
         await load_served_models_at_startup()
         await load_workspace_hosted_access_at_startup()
+        await AttachedMcpServerIndex.load_at_startup()
         await load_stored_country_database_at_startup(config)
         if config.effective_sandbox_provider() in SANDBOX_KEY_ENV:
             await load_sandbox_credentials_at_startup(config.effective_sandbox_provider())

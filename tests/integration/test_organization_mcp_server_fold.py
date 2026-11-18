@@ -34,10 +34,11 @@ from gateway.services.tenancy.workspace_mcp_server_service import (
     MAX_MCP_SERVERS_PER_WORKSPACE,
     McpServerPromote,
     WorkspaceMcpServerCreate,
+    WorkspaceMcpServers,
     WorkspaceMcpServerUpdate,
     resolve_workspace_mcp_servers,
 )
-from gateway.services.tools import McpServerFoldCandidate, McpUserTokens
+from gateway.services.tools import AttachedMcpServerIndex, McpServerFoldCandidate, McpUserTokens
 
 from . import test_mcp_user_connections as base
 from .test_mcp_user_connections import PUBLIC_URL, _expire, _service, _sign_in, _World, _world
@@ -48,6 +49,7 @@ config = base.config
 checks = base.checks
 tokens = base.tokens
 _secret_key = base._secret_key
+attached_index_on_async_db = base.attached_index_on_async_db
 
 pytestmark = pytest.mark.asyncio
 
@@ -443,3 +445,58 @@ async def test_a_workspace_cannot_fold_anything_into_its_own_server(
             workspace_id=world.workspace.id,
             request=WorkspaceMcpServerCreate(name="other", url=PUBLIC_URL, fold_server_ids=[world.server.id]),
         )
+
+
+@pytest.mark.usefixtures("attached_index_on_async_db")
+async def test_promoting_an_attached_server_attaches_it_in_every_workspace_at_once(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    AttachedMcpServerIndex.reset()
+    world = await _world(async_db, config)
+    sales, sales_copy = await _sales(async_db, config, world, url="https://93.184.216.99/other")
+    service = _service(async_db, config)
+    await service.update_server(
+        user=world.owner,
+        workspace_id=sales.id,
+        server_id=sales_copy,
+        request=WorkspaceMcpServerUpdate(attach_by_default=True),
+    )
+    servers = WorkspaceMcpServers(async_db)
+    organization_id = world.workspace.organization_id
+    assert not await servers.any_attached(world.workspace.id, organization_id)
+
+    await service.promote(user=world.owner, workspace_id=sales.id, server_id=sales_copy, request=McpServerPromote())
+
+    assert await servers.any_attached(world.workspace.id, organization_id), "the organization's now"
+
+
+@pytest.mark.usefixtures("attached_index_on_async_db")
+async def test_a_folded_copy_attached_to_every_request_stays_attached_in_its_workspace(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    AttachedMcpServerIndex.reset()
+    world = await _world(async_db, config)
+    service = _service(async_db, config)
+    await service.update_server(
+        user=world.owner,
+        workspace_id=world.workspace.id,
+        server_id=world.server.id,
+        request=WorkspaceMcpServerUpdate(attach_by_default=True),
+    )
+    servers = WorkspaceMcpServers(async_db)
+    organization_id = world.workspace.organization_id
+
+    await service.create_server(
+        user=world.owner,
+        workspace_id=None,
+        request=WorkspaceMcpServerCreate(
+            name="drive",
+            url=PUBLIC_URL,
+            credential_mode=McpCredentialMode.PER_USER,
+            fold_server_ids=[world.server.id],
+        ),
+    )
+
+    assert await servers.any_attached(world.workspace.id, organization_id), "its workspace's own setting, now"
+    stored = (await async_db.execute(select(WorkspaceMcpServerOverride.attach_by_default))).scalars().all()
+    assert stored == [True], "the copy's attach, kept as its workspace's setting"

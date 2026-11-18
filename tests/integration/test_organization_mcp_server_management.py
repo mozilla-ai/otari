@@ -25,8 +25,16 @@ from gateway.models.tools import McpSharedConnection, WorkspaceMcpServerOverride
 from gateway.repositories.tenancy import OrganizationRepository, WorkspaceMemberRepository, WorkspaceRepository
 from gateway.repositories.tools import WorkspaceMcpServerOverrideRepository, WorkspaceMcpServerRepository
 from gateway.services.tenancy import OrganizationService
-from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServerCreate, WorkspaceMcpServerUpdate
-from gateway.services.tools import OrganizationMcpServerLimit, OrganizationMcpServerWorkspaceService
+from gateway.services.tenancy.workspace_mcp_server_service import (
+    WorkspaceMcpServerCreate,
+    WorkspaceMcpServers,
+    WorkspaceMcpServerUpdate,
+)
+from gateway.services.tools import (
+    AttachedMcpServerIndex,
+    OrganizationMcpServerLimit,
+    OrganizationMcpServerWorkspaceService,
+)
 
 from . import test_mcp_user_connections as base
 from .test_mcp_user_connections import PUBLIC_URL, _member, _service, _state, _World, _world
@@ -36,6 +44,7 @@ wire = base.wire
 config = base.config
 checks = base.checks
 _secret_key = base._secret_key
+attached_index_on_async_db = base.attached_index_on_async_db
 
 pytestmark = pytest.mark.asyncio
 
@@ -228,3 +237,38 @@ async def test_an_owner_signs_in_for_everyone_on_an_organization_server(
     assert (done.server_id, done.workspace_id, done.shared) == (jira, None, True)
     accounts = (await async_db.execute(select(McpSharedConnection.server_id))).scalars().all()
     assert accounts == [jira]
+
+
+@pytest.mark.usefixtures("attached_index_on_async_db")
+async def test_every_organization_server_write_reaches_the_attached_server_index(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    AttachedMcpServerIndex.reset()
+    world = await _world(async_db, config)
+    service = _service(async_db, config)
+    servers = WorkspaceMcpServers(async_db)
+    organization_id = world.workspace.organization_id
+    # The scaffolding's own workspace server attaches nothing.
+    await service.update_server(
+        user=world.owner,
+        workspace_id=world.workspace.id,
+        server_id=world.server.id,
+        request=WorkspaceMcpServerUpdate(attach_by_default=False),
+    )
+
+    async def attached() -> bool:
+        return await servers.any_attached(world.workspace.id, organization_id)
+
+    jira = await _add(async_db, config, world.owner, attach_by_default=True)
+    assert await attached(), "added attached to every request"
+    ids = {"user": world.owner, "workspace_id": None, "server_id": jira}
+    await service.update_server(**ids, request=WorkspaceMcpServerUpdate(enabled=False))  # type: ignore[arg-type]
+    assert not await attached(), "turned off"
+    await service.update_server(**ids, request=WorkspaceMcpServerUpdate(enabled=True))  # type: ignore[arg-type]
+    assert await attached(), "turned back on"
+    await service.update_server(**ids, request=WorkspaceMcpServerUpdate(attach_by_default=False))  # type: ignore[arg-type]
+    assert not await attached(), "no longer attached"
+    await service.update_server(**ids, request=WorkspaceMcpServerUpdate(attach_by_default=True))  # type: ignore[arg-type]
+    assert await attached()
+    await service.delete_server(user=world.owner, workspace_id=None, server_id=jira)
+    assert not await attached(), "deleted"

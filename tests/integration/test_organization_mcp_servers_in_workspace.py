@@ -18,11 +18,13 @@ from gateway.services.api_keys import ApiKeyService
 from gateway.services.model_access import McpAccess
 from gateway.services.tenancy.workspace_mcp_server_service import (
     WorkspaceMcpServerGrantsCreate,
+    WorkspaceMcpServers,
     WorkspaceMcpServerService,
     WorkspaceMcpServerSettingsUpdate,
     WorkspaceMcpServerUpdate,
     resolve_workspace_mcp_servers,
 )
+from gateway.services.tools import AttachedMcpServerIndex
 
 from . import test_mcp_user_connections as base
 from .test_mcp_user_connections import _connections, _state, _World, _world
@@ -34,6 +36,7 @@ wire = base.wire
 config = base.config
 checks = base.checks
 _secret_key = base._secret_key
+attached_index_on_async_db = base.attached_index_on_async_db
 
 pytestmark = pytest.mark.asyncio
 
@@ -209,3 +212,30 @@ async def test_a_workspace_s_own_page_reads_an_organization_server_it_turned_off
     assert read.scope == "organization"
     with pytest.raises(WorkspaceMcpServerNotFoundError):
         await service.get_server(user=world.member, workspace_id=world.workspace.id, server_id=jira)
+
+
+@pytest.mark.usefixtures("attached_index_on_async_db")
+async def test_a_workspace_attaching_an_organization_server_reaches_the_attached_server_index(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    AttachedMcpServerIndex.reset()
+    world = await _world(async_db, config)
+    jira = await _shared(async_db, world.workspace.organization_id)
+    sales = await _another_workspace(async_db, world)
+    service = _service(async_db, config)
+    servers = WorkspaceMcpServers(async_db)
+    organization_id = world.workspace.organization_id
+    await AttachedMcpServerIndex.refresh_after_write()
+    assert not await servers.any_attached(sales.id, organization_id)
+
+    await service.set_workspace_settings(
+        user=world.owner,
+        workspace_id=sales.id,
+        server_id=jira,
+        request=WorkspaceMcpServerSettingsUpdate(attach_by_default=True),
+    )
+    assert await servers.any_attached(sales.id, organization_id), "attached there by its own setting"
+    assert not await servers.any_attached(world.workspace.id, organization_id), "and nowhere else"
+
+    await service.clear_workspace_settings(user=world.owner, workspace_id=sales.id, server_id=jira)
+    assert not await servers.any_attached(sales.id, organization_id), "back to the organization's"

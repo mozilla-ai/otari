@@ -10,7 +10,7 @@ from gateway.core.oauth_apps import redirect_matches
 from gateway.core.settings.identity import IdentitySettings, OAuthAppConfig
 from gateway.schemas.identity import AppAuthorizationRequest
 from gateway.schemas.identity.oauth_apps import AppAuthorizationParameters, AppTokenRequest
-from gateway.types.key_scope import KeyScope
+from gateway.types.key_scope import DEFAULT_KEY_SCOPES, KeyScope
 
 
 def test_rfc7636_s256_vector() -> None:
@@ -145,8 +145,8 @@ def test_dashboard_consent_has_its_own_workspace_and_extra_field_contract() -> N
         AppAuthorizationRequest.model_validate({**consent, "scope": "models"})
 
 
-def test_an_app_key_calls_models_alone_unless_its_registration_says_more() -> None:
-    assert OAuthAppConfig(name="App", redirect_uris=["https://app.example/cb"]).scopes == [KeyScope.INFERENCE_RUN]
+def test_an_app_key_gets_the_default_scopes_unless_its_registration_names_its_own() -> None:
+    assert OAuthAppConfig(name="App", redirect_uris=["https://app.example/cb"]).scopes == list(DEFAULT_KEY_SCOPES)
     widened = OAuthAppConfig.model_validate(
         {"name": "App", "redirect_uris": ["https://app.example/cb"], "scopes": ["usage:read", "inference:run"]}
     )

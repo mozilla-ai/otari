@@ -413,6 +413,7 @@ export interface StreamUsage {
 /** What the gateway can attach to one Playground message. */
 export interface ToolSelection {
   isWebSearchOn: boolean
+  isWebFetchOn: boolean
   isCodeExecutionOn: boolean
   mcpServerIds: string[]
 }
@@ -430,9 +431,10 @@ interface StreamChunk {
 // The canonical tool types this gateway runs itself, which a request declares in
 // `tools[]` the same way an SDK caller would (`GET /api/v1/tools` publishes
 // them). Spelled here rather than read from that endpoint because they are the
-// contract: the Playground attaches exactly these two, and the availability read
+// contract: the Playground attaches exactly these three, and the availability read
 // is what decides whether it may.
 const WEB_SEARCH_TOOL = "otari_web_search"
+const WEB_FETCH_TOOL = "otari_web_fetch"
 const CODE_EXECUTION_TOOL = "otari_code_execution"
 
 /** One part of a message that carries more than text, in the OpenAI format. */
@@ -491,6 +493,7 @@ export async function streamPlaygroundChat({
 }: StreamChatParams): Promise<void> {
   const declaredTools = [
     ...(tools.isWebSearchOn ? [{ type: WEB_SEARCH_TOOL }] : []),
+    ...(tools.isWebFetchOn ? [{ type: WEB_FETCH_TOOL }] : []),
     ...(tools.isCodeExecutionOn ? [{ type: CODE_EXECUTION_TOOL }] : []),
   ]
   const body: Record<string, unknown> = {

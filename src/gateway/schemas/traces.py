@@ -43,6 +43,12 @@ class TraceSummaryPublic(BaseModel):
         "an OTLP conversation id, or nothing (a single request)."
     )
     harness: str | None = Field(description="The agent or client that sent the requests, from its User-Agent.")
+    client_language: Literal["python", "javascript", "go", "java", "rust", "ruby"] | None = Field(
+        default=None,
+        description="The language the client was written in, from its SDK's headers or its HTTP library's "
+        "User-Agent. `javascript` covers TypeScript.",
+    )
+    client_version: str | None = Field(default=None, description="The client's version, from its own User-Agent.")
     name: str | None
     started_at: datetime
     last_activity_at: datetime
@@ -357,6 +363,8 @@ def summary_public(summary: TraceSummary) -> TraceSummaryPublic:
         api_key_id=summary.api_key_id,
         session_source=summary.session_source,  # type: ignore[arg-type]
         harness=summary.harness,
+        client_language=summary.client_language,  # type: ignore[arg-type]
+        client_version=summary.client_version,
         name=summary.name,
         started_at=summary.started_at,
         last_activity_at=summary.last_activity_at,
