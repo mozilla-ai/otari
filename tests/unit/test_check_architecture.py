@@ -2482,3 +2482,181 @@ def test_one_statement_counts_once_however_many_names_it_binds(tmp_path: Path, m
     _sidecar(tmp_path, outside_imports=0)
     _write(tmp_path, _OUTSIDE, "from gateway.services.sidecar._impl import VALUE, OTHER, THIRD\n")
     assert check.check_non_domain_service_imports(tmp_path, {"things"}) == []
+
+
+def _root_with(tmp_path: Path, body: str) -> None:
+    _write(tmp_path, check.COMPOSITION_ROOT_MODULE, body)
+
+
+def test_a_composition_root_at_its_baseline_is_clean(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 2)
+    _root_with(tmp_path, "def get_one() -> None: ...\n\n\ndef get_two() -> None: ...\n")
+    assert check.check_composition_root_size(tmp_path) == []
+
+
+def test_a_definition_added_to_the_composition_root_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 1)
+    _root_with(tmp_path, "def get_one() -> None: ...\n\n\ndef get_two() -> None: ...\n")
+    assert check.check_composition_root_size(tmp_path) == [
+        f"{check.COMPOSITION_ROOT_MODULE} holds 2 definitions, above its baseline of 1; put the new one "
+        "in the module of the domain whose work it does, which the root re-exports"
+    ]
+
+
+def test_a_definition_removed_must_be_recorded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 5)
+    _root_with(tmp_path, "def get_one() -> None: ...\n")
+    assert check.check_composition_root_size(tmp_path) == [
+        f"{check.COMPOSITION_ROOT_MODULE} holds 1 definitions, under its baseline of 5; lower the "
+        "baseline to that, so the room made cannot be spent again"
+    ]
+
+
+def test_an_annotated_alias_counts_as_a_definition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 1)
+    _root_with(tmp_path, "def get_one() -> None: ...\n\n\nOneDep = Annotated[object, Depends(get_one)]\n")
+    assert check.check_composition_root_size(tmp_path) == [
+        f"{check.COMPOSITION_ROOT_MODULE} holds 2 definitions, above its baseline of 1; put the new one "
+        "in the module of the domain whose work it does, which the root re-exports"
+    ]
+
+
+def test_an_unpacking_assignment_counts_every_name_it_binds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 1)
+    _root_with(tmp_path, "def get_one() -> None: ...\n\n\nFIRST, SECOND = (1, 2)\n")
+    assert check.check_composition_root_size(tmp_path) == [
+        f"{check.COMPOSITION_ROOT_MODULE} holds 3 definitions, above its baseline of 1; put the new one "
+        "in the module of the domain whose work it does, which the root re-exports"
+    ]
+
+
+def test_a_type_alias_statement_counts_as_a_definition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 1)
+    _root_with(tmp_path, "def get_one() -> None: ...\n\n\ntype Result = tuple[int, str]\n")
+    assert check.check_composition_root_size(tmp_path) == [
+        f"{check.COMPOSITION_ROOT_MODULE} holds 2 definitions, above its baseline of 1; put the new one "
+        "in the module of the domain whose work it does, which the root re-exports"
+    ]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param("for GATE in ():\n    pass\n", id="for_target"),
+        pytest.param("with open('x') as GATE:\n    pass\n", id="with_target"),
+        pytest.param("if (GATE := object()):\n    pass\n", id="assignment_expression"),
+        pytest.param("match object():\n    case GATE:\n        pass\n", id="match_capture"),
+        pytest.param("match ():\n    case [*GATE]:\n        pass\n", id="match_star"),
+        pytest.param("match {}:\n    case {**GATE}:\n        pass\n", id="match_rest"),
+        pytest.param("GATES[(GATE := 'one')]: int\n", id="annotation_subscript_target"),
+        pytest.param("GATES[(GATE := 'one')]: int = 1\n", id="annotation_subscript_target_with_value"),
+    ],
+)
+def test_every_statement_that_binds_a_name_counts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 1)
+    _root_with(tmp_path, f"def get_one() -> None: ...\n\n\n{body}")
+    assert check.check_composition_root_size(tmp_path) == [
+        f"{check.COMPOSITION_ROOT_MODULE} holds 2 definitions, above its baseline of 1; put the new one "
+        "in the module of the domain whose work it does, which the root re-exports"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("body", "counted"),
+    [
+        pytest.param("def get_two(gate=(GATE := object())) -> None: ...\n", 3, id="parameter_default"),
+        pytest.param("def get_two(*, gate=(GATE := object())) -> None: ...\n", 3, id="keyword_only_default"),
+        pytest.param("async def get_two(gate=(GATE := object())) -> None: ...\n", 3, id="async_parameter_default"),
+        pytest.param("@(GATE := staticmethod)\ndef get_two() -> None: ...\n", 3, id="function_decorator"),
+        pytest.param("@(GATE := staticmethod)\nclass Gate:\n    pass\n", 3, id="class_decorator"),
+        pytest.param("class Gate((GATE := object)):\n    pass\n", 3, id="class_base"),
+        pytest.param("class Gate(metaclass=(GATE := type)):\n    pass\n", 3, id="class_keyword"),
+        pytest.param("GATES = lambda gate=(GATE := object()): gate\n", 3, id="lambda_default"),
+        pytest.param("try:\n    pass\nexcept (GATE := ValueError):\n    pass\n", 2, id="exception_type"),
+        pytest.param("def get_two[T](gate=(GATE := object())) -> None: ...\n", 3, id="generic_parameter_default"),
+        pytest.param("@(GATE := staticmethod)\nclass Gate[T]:\n    pass\n", 3, id="generic_class_decorator"),
+        # An assignment expression in an annotation binds on a Python that evaluates
+        # annotations eagerly. Every Python parses these, so the cases run anywhere.
+        pytest.param("def get_two(gate: (GATE := object)) -> None: ...\n", 3, id="parameter_annotation"),
+        pytest.param("def get_two(gate: (GATE := object), /) -> None: ...\n", 3, id="positional_only_annotation"),
+        pytest.param("def get_two(*, gate: (GATE := object)) -> None: ...\n", 3, id="keyword_only_annotation"),
+        pytest.param("def get_two(*gates: (GATE := object)) -> None: ...\n", 3, id="variadic_annotation"),
+        pytest.param("def get_two(**gates: (GATE := object)) -> None: ...\n", 3, id="keyword_variadic_annotation"),
+        pytest.param("def get_two() -> (GATE := object): ...\n", 3, id="return_annotation"),
+    ],
+)
+def test_a_definition_header_binds_in_the_scope_around_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str, counted: int
+) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 1)
+    _root_with(tmp_path, f"def get_one() -> None: ...\n\n\n{body}")
+    assert check.check_composition_root_size(tmp_path) == [
+        f"{check.COMPOSITION_ROOT_MODULE} holds {counted} definitions, above its baseline of 1; put the new "
+        "one in the module of the domain whose work it does, which the root re-exports"
+    ]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(
+            "try:\n    GATES = object()\nexcept Exception as gate:\n    pass\n",
+            id="except_target_is_unbound",
+        ),
+        pytest.param("GATES = object()\ngate: object\n", id="an_annotation_with_no_value_binds_nothing"),
+        pytest.param("def get_two() -> None:\n    gate = object()\n", id="a_function_body_is_its_own_scope"),
+        pytest.param("class Gate:\n    gate = object()\n", id="a_class_body_is_its_own_scope"),
+        pytest.param("GATES = [gate for gate in ()]\n", id="comprehension_has_its_own_scope"),
+        pytest.param("GATES = lambda: (gate := object())\n", id="a_lambda_body_binds_in_its_own_scope"),
+        pytest.param("GATES = {}\nGATES['one'] = object()\n", id="a_subscript_write_binds_nothing"),
+        pytest.param("GATES = object()\nGATES = object()\n", id="one_name_bound_twice_is_one_name"),
+    ],
+)
+def test_a_statement_that_binds_no_new_module_name_is_not_counted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str
+) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 2)
+    _root_with(tmp_path, f"def get_one() -> None: ...\n\n\n{body}")
+    assert check.check_composition_root_size(tmp_path) == []
+
+
+def test_a_definition_under_module_level_control_flow_counts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 1)
+    _root_with(tmp_path, "def get_one() -> None: ...\n\n\nif True:\n    def get_two() -> None: ...\n")
+    assert check.check_composition_root_size(tmp_path) == [
+        f"{check.COMPOSITION_ROOT_MODULE} holds 2 definitions, above its baseline of 1; put the new one "
+        "in the module of the domain whose work it does, which the root re-exports"
+    ]
+
+
+def test_a_composition_root_that_is_gone_must_lower_the_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 5)
+    assert check.check_composition_root_size(tmp_path) == [
+        f"{check.COMPOSITION_ROOT_MODULE} holds 0 definitions, under its baseline of 5; lower the "
+        "baseline to that, so the room made cannot be spent again"
+    ]
+
+
+def test_the_public_surface_list_is_not_a_definition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 1)
+    _root_with(tmp_path, 'def get_one() -> None: ...\n\n\n__all__ = ["get_one"]\n')
+    assert check.check_composition_root_size(tmp_path) == []
+
+
+def test_a_re_export_imported_into_the_root_is_not_a_definition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 1)
+    _root_with(
+        tmp_path,
+        "from gateway.api.deps.things import ThingDep, get_thing\n\n\ndef get_one() -> None: ...\n",
+    )
+    assert check.check_composition_root_size(tmp_path) == []
+
+
+def test_a_nested_definition_does_not_count(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 1)
+    _root_with(tmp_path, "def get_one() -> None:\n    def inner() -> None: ...\n\n    return inner()\n")
+    assert check.check_composition_root_size(tmp_path) == []

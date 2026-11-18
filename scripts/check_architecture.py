@@ -85,6 +85,12 @@ Enforces:
     so a cycle through a package initializer is found. Only imports at module
     scope are read, since an import inside a function or under if TYPE_CHECKING
     does not run when the module loads.
+26. Composition root behavior: no class under api/deps/ defines a method, so the
+    composition root builds things and threads the request's session into them
+    rather than growing an implementation of its own. A class that carries data
+    and no methods is unaffected, so the parameter objects it legitimately holds
+    stay. A class nested in a function counts, since nesting would otherwise be
+    the way around the rule.
 27. Non-domain service imports: each service package whose name is not a domain
     DOMAINS.md gives a section carries a ceiling on how many times code outside
     it reaches below its root, and the count must equal that ceiling. Rule 21
@@ -93,12 +99,20 @@ Enforces:
     debt is counted instead so it cannot grow. The count rising fails, and the
     count falling fails until the ceiling is lowered, so every removal is
     recorded and a package's dissolution is proved by its ceiling reaching zero.
-26. Composition root behavior: no class under api/deps/ defines a method, so the
-    composition root builds things and threads the request's session into them
-    rather than growing an implementation of its own. A class that carries data
-    and no methods is unaffected, so the parameter objects it legitimately holds
-    stay. A class nested in a function counts, since nesting would otherwise be
-    the way around the rule.
+28. Composition root size: the package root of api/deps/ carries a count of the
+    definitions it holds, and that count may only fall. The root is where a
+    builder lands when nothing says otherwise, so it refills as fast as it is
+    emptied. The count rising fails, and the count falling fails until the
+    baseline is lowered, so the room a split makes cannot be spent again. A
+    definition under a module-level if or try counts, a type alias statement
+    counts, and an unpacking assignment counts each name it binds; one nested in
+    a function or a class body does not, because it binds no name the root
+    exports. Raising the baseline itself is caught in review rather than here:
+    every baseline in this file is read from the tree being checked, so a change
+    that moves the number and the code together passes. This says nothing
+    about which module a builder belongs in, which is a judgment no check can
+    make; it says only that the root is full, so the next builder goes where a
+    reader of that domain will look.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -111,7 +125,7 @@ Exit codes:
 import ast
 import re
 import sys
-from collections.abc import Callable, Container, Iterator
+from collections.abc import Callable, Container, Iterable, Iterator
 from pathlib import Path
 from typing import TypedDict
 
@@ -1410,6 +1424,139 @@ def check_non_domain_service_imports(src_root: Path, domains: set[str]) -> list[
         for package in sorted(set(NON_DOMAIN_SERVICE_IMPORT_BASELINE) - set(packages))
     )
     return violations
+
+
+COMPOSITION_ROOT_MODULE = "gateway/api/deps/__init__.py"
+# How many definitions the composition root holds. It may only fall: the root is
+# where a builder lands when nothing says otherwise, and over two days it took
+# back three hundred lines of what a split had moved out. A fall must be recorded
+# here, so the room made cannot be spent again. The count says nothing about where
+# a builder belongs, which is a judgment no check can make.
+COMPOSITION_ROOT_SIZE_BASELINE = 89
+
+
+def _module_scope_statements(body: Iterable[ast.stmt]) -> Iterator[ast.stmt]:
+    """Yield each statement that runs at module scope, descending through control flow but not into a new scope."""
+    for node in body:
+        yield node
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            continue
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ExceptHandler | ast.match_case):
+                yield from _module_scope_statements(child.body)
+            elif isinstance(child, ast.stmt):
+                yield from _module_scope_statements([child])
+
+
+def _header_expressions(node: ast.AST) -> Iterator[ast.expr]:
+    """Yield each expression of a definition that can bind a name in the scope the definition sits in.
+
+    A decorator, a parameter default and a class base are evaluated where the definition
+    runs, so an assignment expression in one binds in the surrounding scope. An annotation
+    does the same on a Python that evaluates annotations eagerly.
+
+    NOTE: A generic definition evaluates its bases and its annotations in the scope its type
+    parameters open rather than the surrounding one. That needs no case of its own here,
+    because Python rejects an assignment expression anywhere inside a type-parameter scope.
+    """
+    if isinstance(node, ast.ClassDef):
+        yield from node.decorator_list
+        yield from node.bases
+        yield from (keyword.value for keyword in node.keywords)
+        return
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+        yield from node.decorator_list
+        if node.returns is not None:
+            yield node.returns
+    elif not isinstance(node, ast.Lambda):
+        return
+    yield from node.args.defaults
+    yield from (default for default in node.args.kw_defaults if default is not None)
+    parameters = (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs, node.args.vararg, node.args.kwarg)
+    yield from (one.annotation for one in parameters if one is not None and one.annotation is not None)
+
+
+def _statement_bindings(node: ast.stmt) -> Iterator[str]:
+    """Yield each name one statement binds in the scope it sits in, not counting what its own body binds.
+
+    A name reaches this through a store-context ``ast.Name`` or a capture pattern, so a
+    write to an attribute or a subscript binds nothing and the target of an ``except``
+    clause does not either, which matches the clause unbinding it on the way out.
+
+    NOTE: An import binds a name, but is excluded, because the root re-exports what its
+    modules define and a re-export is not a definition.
+    """
+    if isinstance(node, ast.Import | ast.ImportFrom):
+        return
+    pending: list[ast.AST] = []
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+        yield node.name
+        pending.extend(_header_expressions(node))
+    elif isinstance(node, ast.AnnAssign) and node.value is None:
+        # An annotation with no value leaves a plain target unbound, while a subscript or
+        # attribute target is still evaluated, as the annotation itself may be.
+        pending.append(node.annotation)
+        if not isinstance(node.target, ast.Name):
+            pending.append(node.target)
+    else:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.stmt):
+                continue
+            if isinstance(child, ast.match_case):
+                pending.extend(part for part in (child.pattern, child.guard) if part is not None)
+            else:
+                pending.append(child)
+    while pending:
+        current = pending.pop()
+        if isinstance(current, ast.Name) and isinstance(current.ctx, ast.Store):
+            yield current.id
+        elif isinstance(current, ast.MatchAs | ast.MatchStar) and current.name is not None:
+            yield current.name
+        elif isinstance(current, ast.MatchMapping) and current.rest is not None:
+            yield current.rest
+        if isinstance(current, ast.Lambda):
+            pending.extend(_header_expressions(current))
+            continue
+        if isinstance(current, ast.comprehension):
+            # The iteration variable belongs to the comprehension's own scope, while an
+            # assignment expression anywhere in the clause binds in this one.
+            pending.append(current.iter)
+            pending.extend(current.ifs)
+            continue
+        pending.extend(child for child in ast.iter_child_nodes(current) if not isinstance(child, ast.stmt))
+
+
+def _module_definitions(tree: ast.Module) -> int:
+    """How many distinct names a module binds at its own scope, not counting its public surface list."""
+    bound = {
+        name for node in _module_scope_statements(tree.body) for name in _statement_bindings(node) if name != "__all__"
+    }
+    return len(bound)
+
+
+def check_composition_root_size(src_root: Path) -> list[str]:
+    """Check the composition root's definition count against its baseline."""
+    module = src_root / COMPOSITION_ROOT_MODULE
+    counted = 0
+    if module.is_file():
+        try:
+            tree = ast.parse(module.read_text(encoding="utf-8"))
+        except SyntaxError:
+            return []
+        counted = _module_definitions(tree)
+    if counted > COMPOSITION_ROOT_SIZE_BASELINE:
+        return [
+            f"{COMPOSITION_ROOT_MODULE} holds {counted} definitions, above its baseline of "
+            f"{COMPOSITION_ROOT_SIZE_BASELINE}; put the new one in the module of the domain whose "
+            "work it does, which the root re-exports"
+        ]
+    if counted < COMPOSITION_ROOT_SIZE_BASELINE:
+        return [
+            f"{COMPOSITION_ROOT_MODULE} holds {counted} definitions, under its baseline of "
+            f"{COMPOSITION_ROOT_SIZE_BASELINE}; lower the baseline to that, so the room made "
+            "cannot be spent again"
+        ]
+    return []
 
 
 REPOSITORY_SCOPE = "gateway/repositories"
@@ -3190,6 +3337,7 @@ def main() -> int:
     model_access_violations = check_model_access(SRC_ROOT)
     import_cycle_violations = check_import_cycles(SRC_ROOT)
     composition_root_violations = check_composition_root_behavior(SRC_ROOT)
+    composition_root_size_violations = check_composition_root_size(SRC_ROOT)
 
     if import_violations:
         print("❌ Architecture violations found:\n")
@@ -3276,6 +3424,12 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal non-domain service import violations: {len(non_domain_import_violations)}")
 
+    if composition_root_size_violations:
+        print("\n❌ Composition root size violations:\n")
+        for violation in composition_root_size_violations:
+            print(f"  {violation}")
+        print(f"\nTotal composition root size violations: {len(composition_root_size_violations)}")
+
     if composition_root_violations:
         print("\n❌ Composition root behavior violations:\n")
         for violation in composition_root_violations:
@@ -3304,6 +3458,7 @@ def main() -> int:
         or model_access_violations
         or import_cycle_violations
         or composition_root_violations
+        or composition_root_size_violations
         or non_domain_import_violations
     ):
         print("\n💡 See ARCHITECTURE.md for the intended layering")
