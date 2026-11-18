@@ -130,7 +130,7 @@ def _response_events(*texts: str) -> Callable[[], AsyncIterator[ResponseStreamEv
             "input_tokens": 11,
             "output_tokens": 7,
             "total_tokens": 18,
-            "input_tokens_details": {"cached_tokens": 0},
+            "input_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
             "output_tokens_details": {"reasoning_tokens": 0},
         },
     }

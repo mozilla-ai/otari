@@ -15,7 +15,7 @@ import { providerDisplayName } from "@/shared/helpers/providers"
 /**
  * The geometry, fetched after paint.
  *
- * The path data for every mark is 70 kB, against ~3 kB for the list of which
+ * The path data for every mark is about 130 kB, against ~3 kB for the list of which
  * companies have one. Statically imported, every visitor to a page with a mark
  * on it downloaded all of the art before the page painted, for the handful of
  * providers a deployment actually has. So the question "is there a mark" stays
@@ -73,7 +73,7 @@ function Glyph({
  * anyone would recognize.
  *
  * Stays in this module rather than the deferred one: a deployment with no
- * marked providers should not fetch 70 kB of geometry to draw a letter.
+ * marked providers should not fetch 130 kB of geometry to draw a letter.
  */
 function Lettermark({ label, box }: { label: string; box: string }) {
   return (

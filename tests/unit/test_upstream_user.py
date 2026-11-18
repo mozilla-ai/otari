@@ -86,6 +86,7 @@ _FIELD_BY_PROVIDER: dict[LLMProvider, str | None] = {
     LLMProvider.REQUESTY: None,
     LLMProvider.SAMBANOVA: None,
     LLMProvider.TELNYX: None,
+    LLMProvider.TINFOIL: None,
     LLMProvider.WATSONX: None,
     LLMProvider.ZAI: None,
     # Another Otari reads ``user`` as the billed user, and a strict key refuses one that is not its own.

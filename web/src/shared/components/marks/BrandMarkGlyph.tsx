@@ -11,7 +11,7 @@ export type MarkKind = "provider" | "maker" | "harness" | "language"
 /**
  * One mark, drawn from the geometry table.
  *
- * Its own module, and the only thing that imports `brandMarks`, so the 70 kB of
+ * Its own module, and the only thing that imports `brandMarks`, so the 130 kB of
  * path data lands in a chunk of its own that `BrandMark` fetches after paint.
  * A default export because `React.lazy` takes one, which is the sanctioned
  * exception to this codebase's named-exports rule.

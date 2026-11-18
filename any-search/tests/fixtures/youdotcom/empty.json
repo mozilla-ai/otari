@@ -1,0 +1,11 @@
+{
+  "status": 200,
+  "body": {
+    "results": {},
+    "metadata": {
+      "query": "latest stable python release",
+      "search_uuid": "8f514a3f-7385-4373-bd66-74a4de79ef53",
+      "latency": 0.2599659659899771
+    }
+  }
+}
