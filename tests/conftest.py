@@ -187,6 +187,11 @@ def _no_background_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
     from every app boot, and it races a test that patches the dial *after*
     startup, so the read then serves whatever the unpatched prime cached.
 
+    The selector index refresher is suppressed too. It opens a session the moment
+    the lifespan starts, and left running in tests it is where most of the
+    aiosqlite connections that garbage collection reports under a later test
+    came from (#1221).
+
     Suppressing the refreshers leaves the cache empty, so a read takes the
     cold-provider path and dials once, under whatever the test has patched.
     A test that wants the warm-cache read path seeds the cache itself.
@@ -206,6 +211,7 @@ def _no_background_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("gateway.main.run_discovery_refresher", _noop)
     monkeypatch.setattr("gateway.main.run_catalog_refresher", _noop)
+    monkeypatch.setattr("gateway.main.run_selector_index_refresher", _noop)
     monkeypatch.setattr("gateway.api.routes.health_checks.run_health_check_worker", _noop)
     monkeypatch.setattr("gateway.services.mcp_catalog.McpCatalogService.poll", _noop)
     monkeypatch.setattr("gateway.services.update_check.UpdateCheckService.poll", _noop)
