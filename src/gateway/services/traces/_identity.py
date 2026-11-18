@@ -63,17 +63,36 @@ class _MarkedHarness:
 # as ``session-id``; the thread is the session, so a subagent gets one of its own. Kilo
 # Code and Crush give a subagent a session of its own too. pi sends ``session-id`` on the
 # Responses API and the other names on the APIs where its session affinity is turned on.
-# Roo Code sends ``session_id`` only from its OpenAI provider.
+# Roo Code sends ``session_id`` only from its OpenAI provider. Mistral Vibe sends its root
+# session's id as ``x-affinity``, so a subagent shares it. OpenClaw sends ``session_id`` and
+# ``x-session-affinity`` once its session affinity is turned on, and its own User-Agent only
+# where it is configured. oh-my-pi sends ``x-claude-code-session-id`` on the Anthropic API,
+# which names the session; its mark names the harness.
 _MARKED_HARNESSES = (
     _MarkedHarness("codex", (("originator", "codex"), ("user-agent", "codex")), ("thread-id", "session-id")),
     _MarkedHarness("kilo-code", (("user-agent", "kilo-code/"), ("user-agent", "kilo/")), ("x-session-id",)),
     _MarkedHarness("crush", (("user-agent", "charm-crush/"),), ("x-session-id",)),
     _MarkedHarness("pi", (("user-agent", "pi/"),), ("session-id", "session_id", "x-session-affinity", "x-session-id")),
     _MarkedHarness("roo-code", (("originator", "roo-code"), ("user-agent", "roo-code/")), ("session_id",)),
+    _MarkedHarness(
+        "mistral-vibe",
+        (("user-agent", "mistral-vibe/"), ("user-agent", "mistral-client-python/mistral-vibe/")),
+        ("x-affinity",),
+    ),
+    _MarkedHarness(
+        "openclaw", (("originator", "openclaw"), ("user-agent", "openclaw/")), ("session_id", "x-session-affinity")
+    ),
+    _MarkedHarness("oh-my-pi", (("user-agent", "omp/"),), ()),
 )
 
 # ``User-Agent`` product names a harness is known by, where it differs from the name shown.
-_HARNESS_PRODUCTS: Mapping[str, str] = {"claude-cli": "claude-code"}
+_HARNESS_PRODUCTS: Mapping[str, str] = {
+    "claude-cli": "claude-code",
+    "githubcopilotchat": "github-copilot",
+    "hermesagent": "hermes-agent",
+    "kimi-code-cli": "kimi-code",
+    "qwencode": "qwen-code",
+}
 
 _MAX_KEY_LENGTH = 512
 
@@ -162,14 +181,16 @@ def harness_of(headers: Mapping[str, str]) -> str | None:
     """The agent or client that sent the request, from its ``User-Agent`` product name.
 
     Only the product name is kept, mapped to the name the harness is known by, and
-    only when it is identifier-shaped. A request a harness marked with its own
-    session header is that harness whatever its ``User-Agent`` says.
+    only when it is identifier-shaped. A harness's own mark comes first, since one
+    harness can send another's session header (oh-my-pi sends Claude Code's); then a
+    request carrying a harness's own session header is that harness whatever its
+    ``User-Agent`` says.
     """
+    if (marked := _marked_harness(headers)) is not None:
+        return marked.harness
     for header, harness in HARNESS_SESSION_HEADERS.items():
         if headers.get(header):
             return harness
-    if (marked := _marked_harness(headers)) is not None:
-        return marked.harness
     agent = (headers.get("user-agent") or "").strip()
     if not agent:
         return None

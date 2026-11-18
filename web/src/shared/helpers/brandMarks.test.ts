@@ -256,6 +256,23 @@ describe("harnessMark", () => {
     expect(hasHarnessMark("roo-code")).toBe(true)
   })
 
+  it("draws the harnesses known only by their User-Agent, and curl as a terminal", () => {
+    for (const harness of [
+      "hermes-agent",
+      "openclaw",
+      "oh-my-pi",
+      "mistral-vibe",
+      "kimi-code",
+      "qwen-code",
+      "github-copilot",
+      "zed",
+      "curl",
+    ]) {
+      expect(harnessMark(harness)?.shapes.length).toBeGreaterThan(0)
+    }
+    expect(harnessMark("curl")?.source).toBe("BsTerminalFill")
+  })
+
   it("has no mark for a harness LobeHub does not draw, or one a client named itself", () => {
     // The caller tiles these: Crush has no mark in the source set, and any
     // other `User-Agent` product can reach a session as its harness.

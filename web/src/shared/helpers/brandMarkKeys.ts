@@ -95,6 +95,15 @@ const HARNESS_MARK_IDS: ReadonlySet<string> = new Set([
   "pi",
   "roo-code",
   "openhands",
+  "hermes-agent",
+  "openclaw",
+  "oh-my-pi",
+  "mistral-vibe",
+  "kimi-code",
+  "qwen-code",
+  "github-copilot",
+  "zed",
+  "curl",
 ])
 
 /**
