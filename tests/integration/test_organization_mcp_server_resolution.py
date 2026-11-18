@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.tools_exceptions import (
+    McpConnectionFlowError,
     McpServerNameTakenError,
     WorkspaceMcpServerAccessDeniedError,
     WorkspaceMcpServerNotFoundError,
@@ -409,3 +410,20 @@ async def test_deleting_a_member_s_last_workspace_ends_their_organization_server
 
     connections = (await async_db.execute(select(McpUserConnection.user_id))).scalars().all()
     assert connections == [], "the member reached the organization only through that workspace"
+
+
+async def test_a_sign_in_finishing_after_its_workspace_turned_the_server_off_stores_nothing(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    world = await _world(async_db, config)
+    jira = await _per_user_shared(async_db, world)
+    member_id = world.member.id
+    url = await _start(async_db, config, jira, member_id, world.workspace.id)
+    await _override(async_db, world.workspace, jira, enabled=False)
+    member = await async_db.get(User, member_id)
+    assert member is not None
+
+    with pytest.raises(McpConnectionFlowError, match="no longer available"):
+        await _service(async_db, config).complete_connection(user=member, state=_state(url), code="code")
+
+    assert (await async_db.execute(select(McpUserConnection.id))).scalars().all() == []
