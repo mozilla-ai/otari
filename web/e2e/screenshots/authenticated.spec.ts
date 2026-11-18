@@ -34,6 +34,48 @@ async function ensureOrgProviderKey(page: Page): Promise<void> {
   }
 }
 
+// The models the hosted provider's page draws: three vendors, so the vendor
+// rows show, and one model with no price, so the unpriced badge does too.
+const HOSTED_MODELS: ReadonlyArray<{ model: string; price?: number }> = [
+  { model: "Qwen/Qwen3.5-9B", price: 0.1 },
+  { model: "Qwen/Qwen3-Coder-480B", price: 2 },
+  { model: "deepseek-ai/DeepSeek-V3.2", price: 0.6 },
+  { model: "black-forest-labs/FLUX.1-schnell" },
+]
+
+// A hosted provider for its page to draw. Pointed at the discard port, so the
+// create's model listing fails at once and its models are added by hand.
+async function ensureHostedProvider(page: Page): Promise<void> {
+  const created = await page.request.post(`${API_ROOT}/hosted-providers`, {
+    headers: authHeaders,
+    data: {
+      provider: "openai",
+      name: "screenshot-hosted",
+      api_key: "sk-not-a-real-credential",
+      api_base: "http://127.0.0.1:9/v1",
+    },
+  })
+  if (created.status() === 409) return
+  await expectOk(created, "create hosted provider")
+  for (const { model, price } of HOSTED_MODELS) {
+    const added = await page.request.post(
+      `${API_ROOT}/hosted-providers/screenshot-hosted/models`,
+      {
+        headers: authHeaders,
+        data:
+          price === undefined
+            ? { model }
+            : {
+                model,
+                input_price_per_million: price,
+                output_price_per_million: price,
+              },
+      },
+    )
+    await expectOk(added, `offer ${model}`)
+  }
+}
+
 // One entry per destination the nav registry can reach. The matrix in
 // playwright.config.ts multiplies each of these by three viewports and both
 // themes, so adding a page here is the whole cost of covering it.
@@ -138,6 +180,13 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     route: "/admin/hosted-providers",
     name: "admin-hosted-providers",
     heading: /hosted providers/i,
+  },
+  {
+    route: "/admin/hosted-providers/screenshot-hosted",
+    name: "admin-hosted-provider-detail",
+    // The provider's own title, so "No hosted provider named" does not pass.
+    heading: /^screenshot-hosted$/i,
+    prepare: ensureHostedProvider,
   },
   {
     route: "/admin/recommender",

@@ -265,6 +265,10 @@ only after local and tenant BYO sources fail. The core adapter answers from the
 deployment's hosted providers (`services/providers`, the `hosted_providers`
 tables, `/api/v1/hosted-providers`), built on the request's Unit of Work. A
 hosted credential must never move ahead of BYO or leave its trusted gateway.
+A vendor switched off on a hosted provider (`hosted_provider_disabled_vendors`,
+vendor read by `_hosted_vendors.vendor_of`) is refused in both
+`HostedProviderRuntime.resolve` and `serveable_models`, so dispatch and the
+catalog agree; change one and change the other.
 
 A provider's own SDK variable (`OPENAI_API_KEY`) is never a credential: a key
 reaches a call only from the kwargs `get_provider_kwargs` builds (an entry's

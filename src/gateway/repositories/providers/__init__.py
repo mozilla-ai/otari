@@ -3,6 +3,7 @@ from gateway.repositories.providers.hosted_provider_repository import (
     HostedProviderConflict,
     HostedProviderModelRepository,
     HostedProviderRepository,
+    HostedProviderVendorRepository,
 )
 from gateway.repositories.providers.org_provider_key_model_repository import (
     OfferedModelConflict,
@@ -24,6 +25,7 @@ __all__ = [
     "HostedProviderConflict",
     "HostedProviderModelRepository",
     "HostedProviderRepository",
+    "HostedProviderVendorRepository",
     "OfferedModelConflict",
     "OrgProviderKeyModelRepository",
     "PlatformConnectRepository",

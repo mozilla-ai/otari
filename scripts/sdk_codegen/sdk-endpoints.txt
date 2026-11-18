@@ -161,6 +161,9 @@ DELETE /api/v1/hosted-providers/{provider}          # dashboard-only
 GET /api/v1/hosted-providers/{provider}/models      # dashboard-only
 POST /api/v1/hosted-providers/{provider}/models     # dashboard-only
 POST /api/v1/hosted-providers/{provider}/models/refresh                  # dashboard-only
+POST /api/v1/hosted-providers/{provider}/models/switch                   # dashboard-only
+POST /api/v1/hosted-providers/{provider}/models/reset-prices             # dashboard-only
+PATCH /api/v1/hosted-providers/{provider}/vendors                        # dashboard-only
 GET /api/v1/hosted-providers/{provider}/available-models                 # dashboard-only
 PATCH /api/v1/hosted-providers/{provider}/models/{model_id}              # dashboard-only
 DELETE /api/v1/hosted-providers/{provider}/models/{model_id}             # dashboard-only

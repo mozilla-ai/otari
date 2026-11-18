@@ -216,6 +216,7 @@ from gateway.repositories.pricing import ModelPricingRepository, OrganizationMod
 from gateway.repositories.providers import (
     HostedProviderModelRepository,
     HostedProviderRepository,
+    HostedProviderVendorRepository,
     OrgProviderKeyModelRepository,
     PlatformConnectRepository,
     ProviderEndpointRepository,
@@ -685,6 +686,7 @@ def build_hosted_provider_service(uow: UnitOfWork, *, config: GatewayConfig) -> 
         providers=providers,
         sources=HostedSources(config, providers),
         models=HostedProviderModelRepository(uow),
+        vendors=HostedProviderVendorRepository(uow),
         endpoints=ProviderEndpointRepository(uow),
         pricing=build_deployment_pricing_service(uow),
         live_byo_pairs=OrgProviderKeyRepository(uow).live_provider_pairs,

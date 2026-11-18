@@ -114,6 +114,9 @@ export const PLATFORM_CONNECT = "platform-connect"
 export const HOSTED_PROVIDER_AVAILABLE_MODELS =
   "hosted-provider-available-models"
 export const HOSTED_CATALOG_UPDATE_PREVIEW = "hosted-catalog-update-preview"
+// A price sync's dry run, apart for a like reason: the apply invalidates
+// HOSTED_PROVIDERS, which would ask for the preview again under the open dialog.
+export const HOSTED_PRICE_RESET_PREVIEW = "hosted-price-reset-preview"
 // The decision models that pick a subagent's model. One root: switching one on
 // switches the others off on the server, so every write refetches the list.
 export const AGENT_RECOMMENDERS = "agent-recommenders"

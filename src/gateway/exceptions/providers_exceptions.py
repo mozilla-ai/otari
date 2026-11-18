@@ -287,6 +287,13 @@ class HostedModelNotFoundError(TenancyNotFoundError):
         super().__init__(f"Hosted model {model_id} not found")
 
 
+class HostedVendorNotFoundError(TenancyNotFoundError):
+    """A vendor none of a hosted provider's offered models is made by."""
+
+    def __init__(self, provider: str, vendor: str) -> None:
+        super().__init__(f"Hosted provider '{provider}' offers no model by '{vendor}'")
+
+
 class HostedProviderAlreadyExistsError(TenancyConflictError):
     def __init__(self, name: str) -> None:
         super().__init__(f"A hosted provider named '{name}' is already configured")
@@ -435,6 +442,7 @@ __all__ = [
     "HostedProviderUnknownOrganizationError",
     "HostedProviderUnknownProviderError",
     "HostedProviderUnsafeApiBaseError",
+    "HostedVendorNotFoundError",
     "OrgDefaultProviderKeyConflictError",
     "OrgProviderKeyAlreadyExistsError",
     "OrgProviderKeyArchivedError",

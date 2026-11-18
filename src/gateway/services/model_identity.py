@@ -200,6 +200,15 @@ def own_providers_for_vendor_slug(slug: str) -> frozenset[str]:
     return _OWN_PROVIDERS_BY_SLUG.get(slug.lower(), frozenset())
 
 
+def vendor_publishing_on(provider_id: str) -> str | None:
+    """The vendor that publishes its own models under the provider id ``provider_id``, or None.
+
+    ``openai`` answers ``OpenAI``; a provider that resells others' models answers None.
+    """
+    wanted = provider_id.lower()
+    return next((vendor for vendor, ids in _VENDOR_PROVIDERS.items() if wanted in ids), None)
+
+
 # Hand rulings for what the two rungs get wrong, keyed ``provider_type/model_id``
 # and valued with the grouping key to use. Empty until a report says otherwise;
 # the point of having it is that a fix is one line here rather than a rule.

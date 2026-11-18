@@ -2354,6 +2354,9 @@ export interface paths {
         /**
          * List Hosted Models
          * @description List the models offered on one provider, with the price each currently serves at.
+         *
+         *     ``search`` matches a model's name or its vendor. ``vendors`` counts each vendor's models
+         *     across the whole provider, whatever the list was narrowed to, with the vendor's own switch.
          */
         get: operations["hosted-providers-list_hosted_models"];
         put?: never;
@@ -2395,6 +2398,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/hosted-providers/{provider}/models/reset-prices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset Hosted Model Prices
+         * @description Put models priced by an operator back on the default price, or preview it with ``dry_run``.
+         *
+         *     The default is models.dev's price, or the one the provider's own listing names. A model the
+         *     default does not price keeps its price. Requests already billed keep the cost they were billed at.
+         */
+        post: operations["hosted-providers-reset_hosted_model_prices"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hosted-providers/{provider}/models/switch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Switch Hosted Vendor Models
+         * @description Switch every model of one vendor on or off at once.
+         *
+         *     Switching on serves only the models that have a price; the rest stay off and are counted
+         *     as skipped. ``only_unpriced`` with switching off withholds only the models served without a price.
+         */
+        post: operations["hosted-providers-switch_hosted_vendor_models"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/hosted-providers/{provider}/models/{model_id}": {
         parameters: {
             query?: never;
@@ -2417,6 +2466,29 @@ export interface paths {
          * @description Reprice one offered model, toggle whether it is served, or both.
          */
         patch: operations["hosted-providers-update_hosted_model"];
+        trace?: never;
+    };
+    "/api/v1/hosted-providers/{provider}/vendors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Hosted Vendor
+         * @description Switch one vendor on or off on a provider.
+         *
+         *     Off withholds every model of the vendor, including models a later refresh offers, and keeps
+         *     each model's own switch, which applies again once the vendor is switched back on.
+         */
+        patch: operations["hosted-providers-update_hosted_vendor"];
         trace?: never;
     };
     "/api/v1/images/edits": {
@@ -14565,6 +14637,10 @@ export interface components {
          *     while it waits for a rate, ``operator`` when an operator switched it off,
          *     ``unavailable`` when its provider refused to serve it. ``type`` is the
          *     kind of model, from models.dev, and None when it does not know.
+         *     ``vendor`` is who makes the model, ``Other`` when nothing names one.
+         *     ``default_rates`` is what the default rung (models.dev, or the provider's
+         *     own listing) would price a model an operator priced, where it prices it
+         *     and the two differ; None otherwise.
          */
         HostedModelPublic: {
             /** Cache Read Price Per Million */
@@ -14576,6 +14652,7 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            default_rates?: components["schemas"]["HostedModelRates"] | null;
             /** Disabled Reason */
             disabled_reason?: ("unpriced" | "operator" | "unavailable") | null;
             /** Enabled */
@@ -14601,6 +14678,32 @@ export interface components {
             unit?: string | null;
             /** Updated At */
             updated_at?: string | null;
+            /** Vendor */
+            vendor?: string | null;
+        };
+        /**
+         * HostedModelRates
+         * @description The rates a hosted model is currently served at, and which rung of the deployment's ladder said so.
+         */
+        HostedModelRates: {
+            /** Cache Read Price Per Million */
+            cache_read_price_per_million?: number | null;
+            /** Cache Write Price Per Million */
+            cache_write_price_per_million?: number | null;
+            /** Input Price Per Million */
+            input_price_per_million: number;
+            /** Output Price Per Million */
+            output_price_per_million: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "organization" | "deployment" | "defaults" | "provider";
+            /**
+             * Unit
+             * @default token
+             */
+            unit: string;
         };
         /**
          * HostedModelUpdateRequest
@@ -14646,6 +14749,8 @@ export interface components {
             type_counts?: {
                 [key: string]: number;
             };
+            /** Vendors */
+            vendors?: components["schemas"]["HostedVendorPublic"][];
         };
         /**
          * HostedModelsRefreshPublic
@@ -14669,6 +14774,61 @@ export interface components {
             error?: string | null;
             /** Repriced */
             repriced: string[];
+        };
+        /**
+         * HostedPriceResetChangePublic
+         * @description One model a reset covers: the rate an operator set, and the default rate it moves to.
+         */
+        HostedPriceResetChangePublic: {
+            current: components["schemas"]["HostedModelRates"];
+            default: components["schemas"]["HostedModelRates"];
+            /** Matches */
+            matches: boolean;
+            /** Model */
+            model: string;
+            /** Vendor */
+            vendor: string;
+        };
+        /**
+         * HostedPriceResetPublic
+         * @description What a price reset changed, or would change on a dry run.
+         *
+         *     ``changes`` lists every operator-priced model the default rung prices,
+         *     ``matches`` marking one whose price is already the default; a price the
+         *     configuration stored is never listed. ``skipped_no_default`` names the
+         *     operator-priced models the default rung does not price, which keep their
+         *     price. ``applied`` is true only when a reset wrote something.
+         */
+        HostedPriceResetPublic: {
+            /** Applied */
+            applied: boolean;
+            /** Changes */
+            changes: components["schemas"]["HostedPriceResetChangePublic"][];
+            /** Skipped No Default */
+            skipped_no_default: string[];
+        };
+        /**
+         * HostedPriceResetRequest
+         * @description Put models an operator priced back on the default rate.
+         *
+         *     ``models`` names them; null means every model, narrowed to ``vendor``
+         *     when one is given. ``dry_run`` answers what a reset would change and
+         *     writes nothing.
+         * @example {
+         *       "dry_run": true,
+         *       "vendor": "Anthropic"
+         *     }
+         */
+        HostedPriceResetRequest: {
+            /**
+             * Dry Run
+             * @default false
+             */
+            dry_run: boolean;
+            /** Models */
+            models?: string[] | null;
+            /** Vendor */
+            vendor?: string | null;
         };
         /**
          * HostedProviderCreateRequest
@@ -14738,6 +14898,24 @@ export interface components {
             zero_data_retention: boolean;
         };
         /**
+         * HostedProviderModelSummary
+         * @description How many models a hosted provider offers, how many it serves, and what holds the rest back.
+         *
+         *     ``serving`` counts a model switched on whose vendor is switched on too.
+         *     ``unpriced`` counts a model held off for want of a rate, and
+         *     ``vendors_off`` the vendors the provider does not serve.
+         */
+        HostedProviderModelSummary: {
+            /** Serving */
+            serving: number;
+            /** Total */
+            total: number;
+            /** Unpriced */
+            unpriced: number;
+            /** Vendors Off */
+            vendors_off: number;
+        };
+        /**
          * HostedProviderPublic
          * @description One hosted provider, known by its name, its implementation and the tail of its key.
          *
@@ -14761,6 +14939,7 @@ export interface components {
          *     country. ``zero_data_retention`` is the operator's declaration that the
          *     upstream keeps no prompt or completion data. ``terms_url`` and
          *     ``privacy_url`` are the upstream's policies, null where none is linked.
+         *     ``models`` counts its offered models, on the list only.
          */
         HostedProviderPublic: {
             /** Api Base */
@@ -14787,6 +14966,7 @@ export interface components {
             has_api_key: boolean;
             /** Id */
             id?: string | null;
+            models?: components["schemas"]["HostedProviderModelSummary"] | null;
             /** Name */
             name: string;
             /** Privacy Url */
@@ -14941,6 +15121,89 @@ export interface components {
             skipped: number;
             /** Unreadable */
             unreadable: number;
+        };
+        /**
+         * HostedVendorModelsSwitchPublic
+         * @description What a vendor-wide switch did: how many models it changed, and how many it left off.
+         *
+         *     ``skipped_unpriced`` counts those left off for want of a rate, ``skipped_unavailable``
+         *     those the provider refused to serve, which an operator switches on one at a time.
+         */
+        HostedVendorModelsSwitchPublic: {
+            /** Changed */
+            changed: number;
+            /**
+             * Skipped Unavailable
+             * @default 0
+             */
+            skipped_unavailable: number;
+            /** Skipped Unpriced */
+            skipped_unpriced: number;
+        };
+        /**
+         * HostedVendorModelsSwitchRequest
+         * @description Set the switch of every model of one vendor at once.
+         *
+         *     ``enabled`` true serves each model that has a rate, and leaves one with
+         *     none off. ``only_unpriced`` with ``enabled`` false withholds only the
+         *     models served without a rate.
+         * @example {
+         *       "enabled": false,
+         *       "vendor": "Anthropic"
+         *     }
+         */
+        HostedVendorModelsSwitchRequest: {
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Only Unpriced
+             * @default false
+             */
+            only_unpriced: boolean;
+            /** Vendor */
+            vendor: string;
+        };
+        /**
+         * HostedVendorPublic
+         * @description One vendor whose models a hosted provider offers, and what it serves of them.
+         *
+         *     ``enabled`` is the vendor's switch: off withholds every model of the
+         *     vendor, including ones offered later, and keeps each model's own switch.
+         *     The counts cover the whole provider, whatever the list was narrowed to:
+         *     ``serving`` the models served, ``unpriced`` those held off for want of a
+         *     rate, ``unavailable`` those the provider refused to serve, and
+         *     ``custom_differs`` those an operator priced where the default rate now
+         *     says something else.
+         */
+        HostedVendorPublic: {
+            /** Custom Differs */
+            custom_differs: number;
+            /** Enabled */
+            enabled: boolean;
+            /** Serving */
+            serving: number;
+            /** Total */
+            total: number;
+            /** Unavailable */
+            unavailable: number;
+            /** Unpriced */
+            unpriced: number;
+            /** Vendor */
+            vendor: string;
+        };
+        /**
+         * HostedVendorUpdateRequest
+         * @description Switch a vendor on or off on one hosted provider.
+         * @example {
+         *       "enabled": false,
+         *       "vendor": "Anthropic"
+         *     }
+         */
+        HostedVendorUpdateRequest: {
+            /** Enabled */
+            enabled: boolean;
+            /** Vendor */
+            vendor: string;
         };
         /**
          * Icon
@@ -27945,8 +28208,10 @@ export interface operations {
                 type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | "unknown" | null;
                 /** @description Only models whose name contains this text, case-insensitively */
                 search?: string | null;
-                /** @description Only models served (`true`) or only models withheld (`false`) */
+                /** @description Only models served (`true`) or only models withheld (`false`), a model of a vendor switched off counting as withheld */
                 enabled?: boolean | null;
+                /** @description Only models made by this vendor, `Other` for those nothing names one for */
+                vendor?: string | null;
             };
             header?: never;
             path: {
@@ -28042,6 +28307,76 @@ export interface operations {
             };
         };
     };
+    "hosted-providers-reset_hosted_model_prices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostedPriceResetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedPriceResetPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-switch_hosted_vendor_models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostedVendorModelsSwitchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedVendorModelsSwitchPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "hosted-providers-remove_hosted_model": {
         parameters: {
             query?: never;
@@ -28097,6 +28432,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HostedModelPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-update_hosted_vendor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostedVendorUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedVendorPublic"];
                 };
             };
             /** @description Validation Error */

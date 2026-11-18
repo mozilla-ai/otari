@@ -7,16 +7,21 @@ lands in a column, so the service hands these repositories encrypted payloads.
 
 import uuid
 from collections.abc import Collection, Mapping, Sequence
+from datetime import UTC, datetime
 from typing import Any, Never, cast
 
 from sqlalchemy import CursorResult, delete, select, update
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 
+from gateway.core.sql import dialect_name
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.providers import (
     ConfiguredProviderImport,
     HostedModelDisabledReason,
     HostedProvider,
+    HostedProviderDisabledVendor,
     HostedProviderModel,
     ProviderCredential,
 )
@@ -189,13 +194,20 @@ class HostedProviderModelRepository(BaseRepository[HostedProviderModel, Never, N
         )
         return result.scalar_one_or_none()
 
-    async def list_all_for_provider(self, provider: str) -> Sequence[HostedProviderModel]:
-        """Every offered row on one provider, for the pass that reprices them."""
-        result = await self.db.execute(
+    async def list_all_for_provider(self, provider: str, *, reload: bool = False) -> Sequence[HostedProviderModel]:
+        """Every offered row on one provider, for the pass that reprices them.
+
+        ``reload`` reads each row afresh even where the session already holds it, for a
+        write that must see what another request committed since this one first read it.
+        """
+        statement = (
             select(HostedProviderModel)
             .where(HostedProviderModel.provider == provider)
             .order_by(HostedProviderModel.model)
         )
+        if reload:
+            statement = statement.execution_options(populate_existing=True)
+        result = await self.db.execute(statement)
         return result.scalars().all()
 
     async def names_for_provider(self, provider: str) -> set[str]:
@@ -235,6 +247,23 @@ class HostedProviderModelRepository(BaseRepository[HostedProviderModel, Never, N
         for provider, model in result.all():
             served.setdefault(provider, set()).add(model)
         return served
+
+    async def states_for_providers(
+        self, providers: Collection[str]
+    ) -> list[tuple[str, str, bool, HostedModelDisabledReason | None]]:
+        """Each offered model of the named providers as ``(provider, model, enabled, disabled_reason)``."""
+        wanted = set(providers)
+        if not wanted:
+            return []
+        result = await self.db.execute(
+            select(
+                HostedProviderModel.provider,
+                HostedProviderModel.model,
+                HostedProviderModel.enabled,
+                HostedProviderModel.disabled_reason,
+            ).where(HostedProviderModel.provider.in_(wanted))
+        )
+        return [(provider, model, enabled, reason) for provider, model, enabled, reason in result.all()]
 
     async def switch_off(self, provider: str, models: Collection[str], *, reason: HostedModelDisabledReason) -> int:
         """Stop serving these models under ``provider``, off for ``reason``. Returns how many were still switched on."""
@@ -318,3 +347,76 @@ class HostedProviderModelRepository(BaseRepository[HostedProviderModel, Never, N
         )
         await self.db.flush()
         return result.rowcount
+
+
+class HostedProviderVendorRepository(BaseRepository[HostedProviderDisabledVendor, Never, Never]):
+    """Repository for `hosted_provider_disabled_vendors` rows: the vendors a hosted provider does not serve."""
+
+    def __init__(self, uow: UnitOfWork):
+        super().__init__(uow, HostedProviderDisabledVendor)
+
+    async def disabled_for(self, provider: str) -> set[str]:
+        """The vendors switched off on one provider."""
+        result = await self.db.execute(
+            select(HostedProviderDisabledVendor.vendor).where(HostedProviderDisabledVendor.provider == provider)
+        )
+        return set(result.scalars().all())
+
+    async def disabled_for_providers(self, providers: Collection[str]) -> dict[str, set[str]]:
+        """The vendors switched off on each named provider. A provider absent from the result has none."""
+        wanted = set(providers)
+        if not wanted:
+            return {}
+        result = await self.db.execute(
+            select(HostedProviderDisabledVendor.provider, HostedProviderDisabledVendor.vendor).where(
+                HostedProviderDisabledVendor.provider.in_(wanted)
+            )
+        )
+        disabled: dict[str, set[str]] = {}
+        for provider, vendor in result.all():
+            disabled.setdefault(provider, set()).add(vendor)
+        return disabled
+
+    async def switch_off(self, provider: str, vendor: str) -> bool:
+        """Stop serving ``vendor`` on ``provider``. Returns whether it was on.
+
+        An insert that skips a row already there, so two requests switching the
+        same vendor off at once both succeed.
+        """
+        insert = postgresql_insert if dialect_name(self.db) == "postgresql" else sqlite_insert
+        result = cast(
+            CursorResult[Any],
+            await self.db.execute(
+                insert(HostedProviderDisabledVendor)
+                .values(id=uuid.uuid4(), provider=provider, vendor=vendor, created_at=datetime.now(UTC))
+                .on_conflict_do_nothing(
+                    index_elements=[HostedProviderDisabledVendor.provider, HostedProviderDisabledVendor.vendor]
+                )
+            ),
+        )
+        await self.db.flush()
+        return bool(result.rowcount)
+
+    async def switch_on(self, provider: str, vendor: str) -> bool:
+        """Serve ``vendor`` on ``provider`` again. Returns whether it was off."""
+        result = cast(
+            CursorResult[Any],
+            await self.db.execute(
+                delete(HostedProviderDisabledVendor).where(
+                    HostedProviderDisabledVendor.provider == provider, HostedProviderDisabledVendor.vendor == vendor
+                )
+            ),
+        )
+        await self.db.flush()
+        return bool(result.rowcount)
+
+    async def delete_for_provider(self, provider: str) -> int:
+        """Remove every vendor switch of one provider, returning how many went."""
+        result = cast(
+            CursorResult[Any],
+            await self.db.execute(
+                delete(HostedProviderDisabledVendor).where(HostedProviderDisabledVendor.provider == provider)
+            ),
+        )
+        await self.db.flush()
+        return int(result.rowcount or 0)

@@ -42,15 +42,17 @@ from gateway.exceptions.providers_exceptions import (
     HostedProviderReadOnlyError,
     HostedProviderUnknownOrganizationError,
     HostedProviderUnsafeApiBaseError,
+    HostedVendorNotFoundError,
 )
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
-from gateway.models.providers import HostedProvider, HostedProviderModel
+from gateway.models.providers import DISABLED_UNAVAILABLE, DISABLED_UNPRICED, HostedProvider, HostedProviderModel
 from gateway.models.secret_fields import carries_redaction, restore_redacted_values
 from gateway.repositories.providers import (
     HostedModelConflict,
     HostedProviderConflict,
     HostedProviderModelRepository,
     HostedProviderRepository,
+    HostedProviderVendorRepository,
     ProviderEndpointRepository,
 )
 from gateway.schemas.providers import (
@@ -59,16 +61,25 @@ from gateway.schemas.providers import (
     HostedCatalogRefreshPublic,
     HostedModelCreateRequest,
     HostedModelPublic,
+    HostedModelRates,
     HostedModelsPublic,
     HostedModelsRefreshPublic,
     HostedModelUpdateRequest,
+    HostedPriceResetChangePublic,
+    HostedPriceResetPublic,
+    HostedPriceResetRequest,
     HostedProviderCreateRequest,
+    HostedProviderModelSummary,
     HostedProviderPublic,
     HostedProvidersPublic,
     HostedProvidersReencryptPublic,
     HostedProviderTestPublic,
     HostedProviderTestRequest,
     HostedProviderUpdateRequest,
+    HostedVendorModelsSwitchPublic,
+    HostedVendorModelsSwitchRequest,
+    HostedVendorPublic,
+    HostedVendorUpdateRequest,
 )
 from gateway.services.catalog import ModelMetadataOverrideService, offered_model_types
 from gateway.services.model_catalog_service import cached_models_dev_catalog
@@ -106,6 +117,7 @@ from gateway.services.providers._hosted_name_index import (
 from gateway.services.providers._hosted_offers import OTARI_IMPLEMENTATION, HostedOffers
 from gateway.services.providers._hosted_runtime import HostedProviderRuntime
 from gateway.services.providers._hosted_sources import HostedProviderProfile, HostedSource, HostedSources
+from gateway.services.providers._hosted_vendors import OTHER_VENDOR, vendor_of, vendors_of
 from gateway.services.providers._model_kinds import page_by_kind
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
 from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
@@ -152,6 +164,7 @@ class HostedProviderService:
         providers: HostedProviderRepository,
         sources: HostedSources,
         models: HostedProviderModelRepository,
+        vendors: HostedProviderVendorRepository,
         endpoints: ProviderEndpointRepository,
         pricing: DeploymentPricingService,
         live_byo_pairs: LiveByoPairs,
@@ -174,10 +187,11 @@ class HostedProviderService:
         self.config = config
         self.providers = providers
         self.models = models
+        self.vendors = vendors
         self.organization_exists = organization_exists
         self.sources = sources
         self.offers = HostedOffers(models, pricing)
-        self.runtime = HostedProviderRuntime(uow, sources=self.sources, models=models)
+        self.runtime = HostedProviderRuntime(uow, sources=self.sources, models=models, vendors=vendors)
         self.sweep = HostedCatalogSweep(
             uow,
             config=config,
@@ -197,9 +211,15 @@ class HostedProviderService:
         """
         async with self.uow:
             sources = await self.sources.all()
-            return HostedProvidersPublic(
-                data=[self._public(source) for source in sources[skip : skip + limit]], count=len(sources)
-            )
+            shown = sources[skip : skip + limit]
+            names = [source.name for source in shown]
+            states = await self.models.states_for_providers(names)
+            disabled = await self.vendors.disabled_for_providers(names)
+        summaries = _model_summaries(shown, states, disabled)
+        return HostedProvidersPublic(
+            data=[self._public(source).model_copy(update={"models": summaries[source.name]}) for source in shown],
+            count=len(sources),
+        )
 
     async def create_provider(
         self, request: HostedProviderCreateRequest, *, switch_on_listed: bool = False
@@ -367,6 +387,7 @@ class HostedProviderService:
             name = row.name
             if not source.shadows_config:
                 await self.models.delete_for_provider(name)
+                await self.vendors.delete_for_provider(name)
                 await self.metadata_overrides.clear_provider(name)
             await self.providers.delete_row(row)
         if not source.shadows_config:
@@ -389,13 +410,16 @@ class HostedProviderService:
         model_type: OfferedModelType | None = None,
         search: str | None = None,
         enabled: bool | None = None,
+        vendor: str | None = None,
     ) -> HostedModelsPublic:
         """One page of a provider's offered models, of one kind or of every kind, each priced as it currently serves.
 
-        ``search`` keeps the models whose name contains it, case-insensitively, and ``enabled`` the models
-        served (true) or withheld (false); both narrow the counts too.
+        ``search`` keeps the models whose name or vendor contains it, case-insensitively, ``enabled`` the models
+        served (true) or withheld (false), a model of a vendor switched off counting as withheld, and ``vendor``
+        the models of one vendor. All three narrow the kind counts too; the vendor counts cover the whole provider.
 
-        Every row is read, because the kind is not stored and each kind's count covers the whole provider.
+        Every row is read, because neither the kind nor the vendor is stored and each count covers the whole
+        provider.
 
         Raises:
             HostedProviderNotFoundError: no such provider.
@@ -403,19 +427,208 @@ class HostedProviderService:
         async with self.uow:
             source = await self._provider_or_raise(provider)
             rows = await self.models.list_all_for_provider(source.name)
-        kinds = _kinds(source, [row.model for row in rows])
-        page = page_by_kind(
-            rows, kinds, "model", model_type=model_type, skip=skip, limit=limit, search=search, enabled=enabled
-        )
-        rates = await self.offers.current_rates(source.name, page.rows, implementation=source.implementation)
+            disabled = await self.vendors.disabled_for(source.name)
+        names = [row.model for row in rows]
+        kinds = _kinds(source, names)
+        vendors = vendors_of(source.implementation, names)
+        rates = await self.offers.current_rates(source.name, rows, implementation=source.implementation)
+        defaults = await self._differing_defaults(source, rows)
+
+        def served(row: HostedProviderModel) -> bool:
+            return row.enabled and vendors[row.model] not in disabled
+
+        narrowed: list[HostedProviderModel] = list(rows)
+        if vendor is not None:
+            narrowed = [row for row in narrowed if vendors[row.model] == vendor]
+        needle = (search or "").strip().casefold()
+        if needle:
+            narrowed = [
+                row for row in narrowed if needle in row.model.casefold() or needle in vendors[row.model].casefold()
+            ]
+        if enabled is not None:
+            narrowed = [row for row in narrowed if served(row) is enabled]
+        page = page_by_kind(narrowed, kinds, "model", model_type=model_type, skip=skip, limit=limit)
         return HostedModelsPublic(
             data=[
-                HostedModelPublic.from_row(model, rates=rates.get(model.model), model_type=kinds.get(model.model))
+                HostedModelPublic.from_row(
+                    model,
+                    rates=rates.get(model.model),
+                    model_type=kinds.get(model.model),
+                    vendor=vendors[model.model],
+                    default_rates=defaults.get(model.model),
+                )
                 for model in page.rows
             ],
             count=page.count,
             type_counts=page.type_counts,
+            vendors=_vendor_facets(rows, vendors, disabled, served, defaults),
         )
+
+    async def set_vendor(self, provider: str, request: HostedVendorUpdateRequest) -> HostedVendorPublic:
+        """Switch a vendor on or off on one provider, leaving each of its models' own switch as it is.
+
+        Switching on needs no offered model by the vendor, so a switch stored under a vendor name
+        no model goes by any more (models.dev renamed it, or its models were removed) can still be
+        cleared.
+
+        Raises:
+            HostedProviderNotFoundError: no such provider.
+            HostedVendorNotFoundError: switching off a vendor the provider offers no model by.
+        """
+        async with self.uow:
+            source = await self._provider_or_raise(provider)
+            rows = await self.models.list_all_for_provider(source.name)
+            vendors = vendors_of(source.implementation, [row.model for row in rows])
+            if request.enabled:
+                await self.vendors.switch_on(source.name, request.vendor)
+            elif request.vendor not in vendors.values():
+                raise HostedVendorNotFoundError(source.name, request.vendor)
+            else:
+                await self.vendors.switch_off(source.name, request.vendor)
+            disabled = await self.vendors.disabled_for(source.name)
+        get_model_cache().clear(source.name)
+        defaults = await self._differing_defaults(source, rows)
+        facets = _vendor_facets(
+            rows, vendors, disabled, lambda row: row.enabled and vendors[row.model] not in disabled, defaults
+        )
+        return next(
+            (facet for facet in facets if facet.vendor == request.vendor),
+            HostedVendorPublic(
+                vendor=request.vendor,
+                enabled=request.enabled,
+                total=0,
+                serving=0,
+                unpriced=0,
+                unavailable=0,
+                custom_differs=0,
+            ),
+        )
+
+    async def switch_vendor_models(
+        self, provider: str, request: HostedVendorModelsSwitchRequest
+    ) -> HostedVendorModelsSwitchPublic:
+        """Set the switch of every model of one vendor, as an operator's choice, in one transaction.
+
+        Switching on serves only a model that has a rate and that its provider has not refused;
+        the rest stay off and are counted as skipped. ``only_unpriced`` with switching off
+        withholds only the models served without a rate. The vendor's own switch is left as it is.
+
+        Raises:
+            HostedProviderNotFoundError: no such provider.
+            HostedVendorNotFoundError: the provider offers no model by that vendor.
+        """
+        async with self.uow:
+            source = await self._provider_or_raise(provider)
+            rows = await self.models.list_all_for_provider(source.name)
+        vendors = vendors_of(source.implementation, [row.model for row in rows])
+        members = [row for row in rows if vendors[row.model] == request.vendor]
+        if not members:
+            raise HostedVendorNotFoundError(source.name, request.vendor)
+        known = {row.model for row in members}
+        # The default rung does not move with a deleted price, so it is read here, outside the
+        # block; the stored prices are read inside it, with the rows.
+        fallback = await self.offers.fallback_priced(source.name, known, implementation=source.implementation)
+        targets: list[HostedProviderModel] = []
+        skipped_unpriced = 0
+        skipped_unavailable = 0
+        async with self.uow:
+            # Read again, so a switch flipped since the read above is not overwritten. A model
+            # offered in between was not priced above, so it is left for the next press.
+            stored = await self.offers.stored_priced(source.name, known)
+            for row in await self.models.list_all_for_provider(source.name, reload=True):
+                if row.model not in known:
+                    continue
+                priced = row.model in stored or row.model in fallback
+                if request.enabled:
+                    if row.enabled:
+                        continue
+                    if row.disabled_reason == DISABLED_UNAVAILABLE:
+                        skipped_unavailable += 1
+                        continue
+                    if not priced:
+                        skipped_unpriced += 1
+                        continue
+                elif not row.enabled or (request.only_unpriced and priced):
+                    continue
+                targets.append(row)
+            await self.offers.switch_many_priced_by_operator(targets, request.enabled)
+        get_model_cache().clear(source.name)
+        return HostedVendorModelsSwitchPublic(
+            changed=len(targets), skipped_unpriced=skipped_unpriced, skipped_unavailable=skipped_unavailable
+        )
+
+    async def reset_prices(self, provider: str, request: HostedPriceResetRequest) -> HostedPriceResetPublic:
+        """Put models an operator priced back on the default rate, or say what that would change.
+
+        The default rate is models.dev's, or for another Otari the one its own listing names,
+        read by dialing it here, and never an estimate. A model the default does not price, or
+        any model of an Otari whose listing cannot be read, keeps its price and is named as
+        skipped. A rate the configuration stored, and a tiered rate a default would flatten, are
+        left alone. A reset writes a new version, so requests already billed keep their cost,
+        and every later refresh keeps the rate current.
+
+        Raises:
+            HostedProviderNotFoundError: no such provider.
+        """
+        async with self.uow:
+            source = await self._provider_or_raise(provider)
+            rows = await self.models.list_all_for_provider(source.name)
+            credential = source.credential(quiet=True)
+            declared = source.declared_models
+        is_otari = source.implementation == OTARI_IMPLEMENTATION
+        if is_otari and credential is not None:
+            # Another Otari's default is the price its own listing names, which only a dial reads.
+            await self._dial(source.name, source.implementation, credential, declared)
+        vendors = vendors_of(source.implementation, [row.model for row in rows])
+        wanted = None if request.models is None else set(request.models)
+        scoped = [
+            row.model
+            for row in rows
+            if (wanted is None or row.model in wanted)
+            and (request.vendor is None or vendors[row.model] == request.vendor)
+        ]
+        # Never the models.dev estimate for another Otari: it is not what that Otari charges,
+        # so a model its listing does not price, or a listing that could not be read, keeps its price.
+        paired, skipped = await self.offers.custom_against_defaults(
+            source.name, scoped, implementation=source.implementation, listed_only=is_otari
+        )
+        changes = [
+            HostedPriceResetChangePublic(
+                model=model,
+                vendor=vendors[model],
+                current=HostedModelRates.from_version(version, "deployment"),
+                default=HostedModelRates.from_version(default, "defaults"),
+                matches=matches,
+            )
+            for model, (version, default, matches) in sorted(paired.items())
+        ]
+        applied = not request.dry_run and bool(changes)
+        if applied:
+            async with self.uow:
+                await self._provider_or_raise(provider)
+                await self.offers.reset_to_defaults(
+                    source.name, {model: default for model, (_, default, _) in paired.items()}
+                )
+        return HostedPriceResetPublic(changes=changes, skipped_no_default=skipped, applied=applied)
+
+    async def _differing_defaults(
+        self, source: HostedSource, rows: Sequence[HostedProviderModel]
+    ) -> dict[str, HostedModelRates]:
+        """The default rate of each operator-priced model the default rung prices differently, keyed by model.
+
+        None for another Otari: its default is the price its listing names, which only a dial
+        reads, and a list is no place to dial. Its price sync dials, and answers there.
+        """
+        if source.implementation == OTARI_IMPLEMENTATION:
+            return {}
+        paired, _ = await self.offers.custom_against_defaults(
+            source.name, [row.model for row in rows], implementation=source.implementation
+        )
+        return {
+            model: HostedModelRates.from_version(default, "defaults")
+            for model, (_, default, matches) in paired.items()
+            if not matches
+        }
 
     async def add_model(self, provider: str, request: HostedModelCreateRequest) -> HostedModelPublic:
         """Offer a model on a provider, at the rate given or at the seeded default.
@@ -893,7 +1106,8 @@ class HostedProviderService:
         if declared and discovery.discovery_unsupported:
             models = [Model(id=model, created=0, object="model", owned_by=name) for model in declared]
             return ProviderDiscovery(provider=name, models=models)
-        if implementation == OTARI_IMPLEMENTATION:
+        if implementation == OTARI_IMPLEMENTATION and discovery.error is None:
+            # A failed listing names no price, so it does not replace one that did.
             self.offers.remember_listing(name, discovery.models)
         return dataclasses.replace(discovery, provider=name)
 
@@ -957,6 +1171,63 @@ class HostedProviderService:
         if model is None:
             raise HostedModelNotFoundError(model_id)
         return model
+
+
+def _vendor_facets(
+    rows: Sequence[HostedProviderModel],
+    vendors: Mapping[str, str],
+    disabled: Collection[str],
+    served: Callable[[HostedProviderModel], bool],
+    defaults: Mapping[str, HostedModelRates],
+) -> list[HostedVendorPublic]:
+    """Each vendor among ``rows`` with its switch and counts, by name, ``Other`` last.
+
+    A vendor switched off that no model goes by any more is listed with no models, so its
+    switch can still be seen and cleared.
+    """
+    grouped: dict[str, list[HostedProviderModel]] = {vendor: [] for vendor in disabled}
+    for row in rows:
+        grouped.setdefault(vendors[row.model], []).append(row)
+    return [
+        HostedVendorPublic(
+            vendor=vendor,
+            enabled=vendor not in disabled,
+            total=len(members),
+            serving=sum(1 for row in members if served(row)),
+            unpriced=sum(1 for row in members if row.disabled_reason == DISABLED_UNPRICED),
+            unavailable=sum(1 for row in members if row.disabled_reason == DISABLED_UNAVAILABLE),
+            custom_differs=sum(1 for row in members if row.model in defaults),
+        )
+        for vendor, members in sorted(grouped.items(), key=lambda item: (item[0] == OTHER_VENDOR, item[0].casefold()))
+    ]
+
+
+def _model_summaries(
+    sources: Sequence[HostedSource],
+    states: Sequence[tuple[str, str, bool, str | None]],
+    disabled: Mapping[str, set[str]],
+) -> dict[str, HostedProviderModelSummary]:
+    """How many models each provider offers and serves, for the provider list."""
+    implementations = {source.name: source.implementation for source in sources}
+    totals = dict.fromkeys(implementations, 0)
+    serving = dict.fromkeys(implementations, 0)
+    unpriced = dict.fromkeys(implementations, 0)
+    for provider, model, enabled, reason in states:
+        totals[provider] += 1
+        off = disabled.get(provider)
+        if enabled and not (off and vendor_of(implementations[provider], model) in off):
+            serving[provider] += 1
+        if reason == DISABLED_UNPRICED:
+            unpriced[provider] += 1
+    return {
+        name: HostedProviderModelSummary(
+            total=totals[name],
+            serving=serving[name],
+            unpriced=unpriced[name],
+            vendors_off=len(disabled.get(name, ())),
+        )
+        for name in implementations
+    }
 
 
 async def _undecryptable(provider: str) -> ProviderDiscovery:

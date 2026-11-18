@@ -432,6 +432,21 @@ export type HostedModels = Schemas["HostedModelsPublic"]
 export type CreateHostedModelRequest = Schemas["HostedModelCreateRequest"]
 export type UpdateHostedModelRequest = Schemas["HostedModelUpdateRequest"]
 export type HostedModelsRefresh = Schemas["HostedModelsRefreshPublic"]
+export type HostedModelRates = Schemas["HostedModelRates"]
+export type HostedProviderModelSummary = Schemas["HostedProviderModelSummary"]
+export type HostedVendor = Schemas["HostedVendorPublic"]
+export type UpdateHostedVendorRequest = Schemas["HostedVendorUpdateRequest"]
+export type SwitchHostedVendorModelsRequest = Defaulted<
+  Schemas["HostedVendorModelsSwitchRequest"],
+  "only_unpriced"
+>
+export type HostedVendorModelsSwitch = Schemas["HostedVendorModelsSwitchPublic"]
+export type HostedPriceResetRequest = Defaulted<
+  Schemas["HostedPriceResetRequest"],
+  "dry_run"
+>
+export type HostedPriceReset = Schemas["HostedPriceResetPublic"]
+export type HostedPriceResetChange = Schemas["HostedPriceResetChangePublic"]
 export type HostedAvailableModels = Schemas["HostedAvailableModelsPublic"]
 export type HostedCatalogRefresh = Schemas["HostedCatalogRefreshPublic"]
 export type HostedCatalogProviderRefresh =

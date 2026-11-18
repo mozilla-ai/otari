@@ -102,6 +102,9 @@ def _walk(client: TestClient, headers: dict[str, str]) -> list[tuple[str, int, s
         json={"model": "o3", "input_price_per_million": 1, "output_price_per_million": 2},
     )
     record("PATCH", f"{PATH}/openai/models/{model['id']}", json={"enabled": False})
+    record("PATCH", f"{PATH}/openai/vendors", json={"vendor": "OpenAI", "enabled": False})
+    record("POST", f"{PATH}/openai/models/switch", json={"vendor": "OpenAI", "enabled": True})
+    record("POST", f"{PATH}/openai/models/reset-prices", json={"dry_run": True})
     record("POST", f"{PATH}/openai/models/refresh")
     record("POST", f"{PATH}/catalog-update", json={})
     record("PATCH", f"{PATH}/openai", json={"api_key": "sk-live-rotated-9876", "enabled": False})

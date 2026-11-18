@@ -1,6 +1,6 @@
 import { useState } from "react"
 
-import type { TestHostedProviderRequest } from "@/client"
+import type { HostedProvider, TestHostedProviderRequest } from "@/client"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Field } from "@/design-system/forms/Field"
@@ -81,10 +81,13 @@ const EMPTY_DRAFT: ProviderDraft = {
 export function AddHostedProviderForm({
   isOpen,
   onClose,
+  onCreated,
   configuredProviders = [],
 }: {
   isOpen: boolean
   onClose: () => void
+  /** Told the stored provider once the create lands, after the dialog closes. */
+  onCreated?: (provider: HostedProvider) => void
   /** The names config.yml defines, which a stored one would override. */
   configuredProviders?: string[]
 }) {
@@ -159,7 +162,12 @@ export function AddHostedProviderForm({
           ? {}
           : { privacy_url: policyUrlValue(draft.privacyUrl) }),
       },
-      { onSuccess: onClose },
+      {
+        onSuccess: (created) => {
+          onClose()
+          onCreated?.(created)
+        },
+      },
     )
   }
 
