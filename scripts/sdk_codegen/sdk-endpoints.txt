@@ -622,6 +622,8 @@ DELETE /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/connections/{us
 GET /api/v1/workspaces/{workspace_id}/mcp-servers/logos                       # dashboard-only
 PUT /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/logo            # dashboard-only
 DELETE /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/logo         # dashboard-only
+PUT /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/override        # operator surface
+DELETE /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/override     # operator surface
 # An organization's own MCP servers (otari#3342), which every workspace reaches: the
 # same operator surface as a workspace's, held by the organization's owners and admins.
 GET /api/v1/organizations/me/mcp-servers                                      # operator surface

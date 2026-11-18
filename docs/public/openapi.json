@@ -15192,6 +15192,72 @@
         "title": "McpServerSummary",
         "type": "object"
       },
+      "McpServerWorkspaceSettings": {
+        "description": "One workspace's settings on its organization's server, and whether the workspace reaches it.",
+        "properties": {
+          "attach_by_default": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the workspace attaches it; null takes the server's own",
+            "title": "Attach By Default"
+          },
+          "enabled": {
+            "description": "The workspace's own switch",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "everyone_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What every key of the workspace may call; null takes the server's own",
+            "title": "Everyone Tools"
+          },
+          "organization_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization's limit for the workspace, which caps every rule set here; null sets none",
+            "title": "Organization Tools"
+          },
+          "reached": {
+            "description": "The workspace's requests reach the server: neither the organization nor the workspace turned it off here, and the server itself is on",
+            "title": "Reached",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "reached",
+          "enabled",
+          "everyone_tools",
+          "attach_by_default",
+          "organization_tools"
+        ],
+        "title": "McpServerWorkspaceSettings",
+        "type": "object"
+      },
       "McpServersResponse": {
         "description": "The enabled stored servers the authenticated key can reach.",
         "properties": {
@@ -31551,12 +31617,13 @@
             "type": "boolean"
           },
           "decided_by": {
-            "description": "The key's own grant, its owner's, the server's everyone_tools, or the server itself (disabled, or its allowed_tools leaves the tool out)",
+            "description": "The key's own grant, its owner's, the server's everyone_tools, the server itself (disabled, or its allowed_tools leaves the tool out), or on an organization's server the organization's limit for the workspace",
             "enum": [
               "key",
               "user",
               "everyone",
-              "server"
+              "server",
+              "organization"
             ],
             "title": "Decided By",
             "type": "string"
@@ -32073,6 +32140,21 @@
             "title": "Name",
             "type": "string"
           },
+          "organization_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "On an organization's server, its limit for this workspace, which caps every rule; null sets none",
+            "title": "Organization Tools"
+          },
           "read_tools": {
             "description": "The server's tools labeled read, which '@read' in tools stands for",
             "items": {
@@ -32348,6 +32430,17 @@
             "title": "Id",
             "type": "string"
           },
+          "in_workspace": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/McpServerWorkspaceSettings"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "On an organization's server read through a workspace: that workspace's own settings on it, and the organization's limit there. The fields above are the organization's definition"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -32458,6 +32551,46 @@
           "updated_at"
         ],
         "title": "WorkspaceMcpServerPublic",
+        "type": "object"
+      },
+      "WorkspaceMcpServerSettingsUpdate": {
+        "description": "A workspace's own settings on its organization's server. Each replaces the one stored.",
+        "properties": {
+          "attach_by_default": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether every request of the workspace gets the server; null takes the server's",
+            "title": "Attach By Default"
+          },
+          "enabled": {
+            "default": true,
+            "description": "Off turns the server off for this workspace",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "everyone_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tool patterns every key of the workspace may call; [] denies everyone; null takes the server's",
+            "title": "Everyone Tools"
+          }
+        },
+        "title": "WorkspaceMcpServerSettingsUpdate",
         "type": "object"
       },
       "WorkspaceMcpServerUpdate": {
@@ -65255,6 +65388,138 @@
           }
         ],
         "summary": "Get My Workspace Mcp Server Tools",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/override": {
+      "delete": {
+        "description": "Take this workspace's own settings off its organization's server, so it inherits the server's. Idempotent.\n\nWorkspace owners and admins only. The organization's limit for the workspace stays.",
+        "operationId": "mcp-servers-clear_workspace_mcp_server_override",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Clear Workspace Mcp Server Override",
+        "tags": [
+          "mcp-servers"
+        ]
+      },
+      "put": {
+        "description": "Set this workspace's own settings on its organization's server. Workspace owners and admins only.\n\nIts switch, its default access and whether it is attached, each replacing the one stored; null takes the\nserver's own. The organization's limit for the workspace stays, and caps what is set here. A 404 for a\nworkspace's own server, which is changed with `PATCH` instead.",
+        "operationId": "mcp-servers-set_workspace_mcp_server_override",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceMcpServerSettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Workspace Mcp Server Override",
         "tags": [
           "mcp-servers"
         ]

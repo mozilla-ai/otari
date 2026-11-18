@@ -79,6 +79,16 @@ class McpServerNameTakenError(TenancyConflictError):
         super().__init__(f"An MCP server named '{name}' is already available to this organization's workspaces")
 
 
+class McpServerIsOrganizationsError(TenancyConflictError):
+    """A workspace route was asked to change its organization's server, which the organization defines."""
+
+    def __init__(self, name: object):
+        super().__init__(
+            f"MCP server '{name}' is your organization's: its owners and admins change it, and this workspace "
+            "changes only its own settings on it"
+        )
+
+
 class WorkspaceMcpServerUnsafeUrlError(TenancyValidationError):
     """The URL failed the same SSRF and TLS checks a request-body MCP server faces.
 
@@ -717,6 +727,7 @@ __all__ = [
     "McpConnectionUpstreamError",
     "McpSignInRequiredError",
     "McpServerNameTakenError",
+    "McpServerIsOrganizationsError",
     "DirectFetchDomainRefusedError",
     "DirectFetchFailedError",
     "DirectFetchNotEnabledError",

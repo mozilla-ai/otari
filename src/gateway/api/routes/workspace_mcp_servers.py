@@ -45,6 +45,7 @@ from gateway.services.tenancy.workspace_mcp_server_service import (
     WorkspaceMcpServerKeyAccess,
     WorkspaceMcpServerMyTools,
     WorkspaceMcpServerPublic,
+    WorkspaceMcpServerSettingsUpdate,
     WorkspaceMcpServersPublic,
     WorkspaceMcpServerUpdate,
 )
@@ -408,6 +409,39 @@ async def check_workspace_mcp_server_connection(
     a create gets.
     """
     return await service.check_connection(user=current_identity, workspace_id=workspace_id, request=body)
+
+
+@router.put("/{server_id}/override")
+async def set_workspace_mcp_server_override(
+    service: WorkspaceMcpServerServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+    server_id: uuid.UUID,
+    body: WorkspaceMcpServerSettingsUpdate,
+) -> WorkspaceMcpServerPublic:
+    """Set this workspace's own settings on its organization's server. Workspace owners and admins only.
+
+    Its switch, its default access and whether it is attached, each replacing the one stored; null takes the
+    server's own. The organization's limit for the workspace stays, and caps what is set here. A 404 for a
+    workspace's own server, which is changed with `PATCH` instead.
+    """
+    return await service.set_workspace_settings(
+        user=current_identity, workspace_id=workspace_id, server_id=server_id, request=body
+    )
+
+
+@router.delete("/{server_id}/override")
+async def clear_workspace_mcp_server_override(
+    service: WorkspaceMcpServerServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+    server_id: uuid.UUID,
+) -> WorkspaceMcpServerPublic:
+    """Take this workspace's own settings off its organization's server, so it inherits the server's. Idempotent.
+
+    Workspace owners and admins only. The organization's limit for the workspace stays.
+    """
+    return await service.clear_workspace_settings(user=current_identity, workspace_id=workspace_id, server_id=server_id)
 
 
 @router.delete("/{server_id}")
