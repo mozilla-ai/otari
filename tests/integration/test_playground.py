@@ -883,9 +883,11 @@ def test_a_stored_policy_that_cannot_be_read_refuses_both_web_tools(
 def test_a_search_tool_admission_finds_misconfigured_is_reported_as_nothing_to_search_with(
     client: TestClient,
     world: _World,
+    test_config: GatewayConfig,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The tools read still answers, so fetch, code execution and the MCP servers stay listed."""
+    monkeypatch.setattr(test_config, "web_fetch_enabled", True)
 
     def misconfigured(*_args: object, **_kwargs: object) -> bool:
         raise SearchToolMisconfiguredError("searxng")
@@ -896,6 +898,7 @@ def test_a_search_tool_admission_finds_misconfigured_is_reported_as_nothing_to_s
 
     assert code == status.HTTP_200_OK
     assert body["web_search"]["configured"] is False
+    assert body["web_fetch"] == {"configured": True, "enabled": True, "reason": None}
 
 
 def test_an_organization_fetch_key_that_cannot_be_used_shows_web_fetch_disabled_with_why(

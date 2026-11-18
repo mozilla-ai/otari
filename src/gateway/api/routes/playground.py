@@ -145,8 +145,8 @@ class PlaygroundToolStatus(BaseModel):
     """
 
     configured: bool = Field(
-        description="Whether the tool has something to run on for the caller's workspace: the deployment's "
-        "backend, or for web search, the workspace's own organization search key."
+        description="Whether the menu lists the tool: the deployment, or for web search the workspace's "
+        "organization search key, provides it. Whether it can be attached, and why not, are enabled and reason."
     )
     enabled: bool = Field(description="Whether the caller's workspace may attach it.")
     reason: str | None = Field(

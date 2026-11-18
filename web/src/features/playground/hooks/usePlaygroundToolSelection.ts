@@ -91,24 +91,39 @@ export function usePlaygroundToolSelection(
     setSelectedMcpIds((prev) => keepAttachableMcpIds(prev, attachable))
   }, [tools, isWebSearchOn, isWebFetchOn, isCodeExecutionOn])
 
-  // What a message declares is what the current workspace's read allows, so a
-  // choice made in another workspace is not sent while this one's read loads.
+  // What is attached is what the current workspace's read allows: the chips, the
+  // menu and the request all show it, so a choice made in another workspace is
+  // neither sent nor shown while this one's read loads. The choice itself is
+  // kept, and shows again once the read allows it.
+  const effectiveWebSearch =
+    isWebSearchOn && (tools?.web_search.enabled ?? false)
+  const effectiveWebFetch = isWebFetchOn && (tools?.web_fetch.enabled ?? false)
+  const effectiveCodeExecution =
+    isCodeExecutionOn && (tools?.code_execution.enabled ?? false)
+  const effectiveMcpIds = useMemo(
+    () => (tools ? selectedMcpIds : []),
+    [tools, selectedMcpIds],
+  )
   const selection = useMemo<ToolSelection>(
     () => ({
-      isWebSearchOn: isWebSearchOn && (tools?.web_search.enabled ?? false),
-      isWebFetchOn: isWebFetchOn && (tools?.web_fetch.enabled ?? false),
-      isCodeExecutionOn:
-        isCodeExecutionOn && (tools?.code_execution.enabled ?? false),
-      mcpServerIds: tools ? selectedMcpIds : [],
+      isWebSearchOn: effectiveWebSearch,
+      isWebFetchOn: effectiveWebFetch,
+      isCodeExecutionOn: effectiveCodeExecution,
+      mcpServerIds: effectiveMcpIds,
     }),
-    [tools, isWebSearchOn, isWebFetchOn, isCodeExecutionOn, selectedMcpIds],
+    [
+      effectiveWebSearch,
+      effectiveWebFetch,
+      effectiveCodeExecution,
+      effectiveMcpIds,
+    ],
   )
 
   return {
-    isWebSearchOn,
-    isWebFetchOn,
-    isCodeExecutionOn,
-    selectedMcpIds,
+    isWebSearchOn: effectiveWebSearch,
+    isWebFetchOn: effectiveWebFetch,
+    isCodeExecutionOn: effectiveCodeExecution,
+    selectedMcpIds: effectiveMcpIds,
     toggleWebSearch,
     toggleWebFetch,
     toggleCodeExecution,

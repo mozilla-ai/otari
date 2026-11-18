@@ -161,8 +161,16 @@ describe("usePlaygroundToolSelection", () => {
         usePlaygroundToolSelection(available),
       { initialProps: { available: tools() as PlaygroundTools | undefined } },
     )
+    act(() => result.current.toggleWebSearch(true))
     act(() => result.current.toggleWebFetch(true))
+    act(() => result.current.toggleCodeExecution(true))
     act(() => result.current.toggleMcpServer("srv-1", true))
+    expect(result.current.selection).toEqual({
+      isWebSearchOn: true,
+      isWebFetchOn: true,
+      isCodeExecutionOn: true,
+      mcpServerIds: ["srv-1"],
+    })
 
     rerender({ available: undefined })
     expect(result.current.selection).toEqual({
@@ -171,6 +179,14 @@ describe("usePlaygroundToolSelection", () => {
       isCodeExecutionOn: false,
       mcpServerIds: [],
     })
+    // The chips read the same state, so they show nothing either.
+    expect(result.current.isWebFetchOn).toBe(false)
+    expect(result.current.selectedMcpIds).toEqual([])
+
+    // The choice comes back once the workspace's read allows it.
+    rerender({ available: tools() })
+    expect(result.current.isWebFetchOn).toBe(true)
+    expect(result.current.selectedMcpIds).toEqual(["srv-1"])
   })
 
   it("drops an MCP server that is deleted while the page is open", () => {
@@ -231,9 +247,17 @@ describe("usePlaygroundToolSelection", () => {
   })
 
   it("keeps a selection while the availability read has not answered", () => {
-    // An undefined read is "not known yet", not "nothing is attachable".
-    const { result } = renderHook(() => usePlaygroundToolSelection(undefined))
+    // An undefined read means the tools are unknown, not that nothing is
+    // attachable: the choice is not sent meanwhile, and is not dropped either.
+    const { result, rerender } = renderHook(
+      ({ available }: { available: PlaygroundTools | undefined }) =>
+        usePlaygroundToolSelection(available),
+      { initialProps: { available: undefined as PlaygroundTools | undefined } },
+    )
     act(() => result.current.toggleWebSearch(true))
+    expect(result.current.selection.isWebSearchOn).toBe(false)
+
+    rerender({ available: tools() })
     expect(result.current.isWebSearchOn).toBe(true)
   })
 })
