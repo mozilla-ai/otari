@@ -716,8 +716,9 @@ export function TeamHome({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
             <h2 className="text-title">Where it went</h2>
-            {/* A segmented track holds four choices at most. */}
-            {cuts.length > 4 ? (
+            {/* A segmented track holds four choices at most, and a phone
+              fits three at a larger text size. */}
+            {cuts.length > (isMobile ? 3 : 4) ? (
               <FilterSelect
                 ariaLabel="Break down by"
                 value={shownCut ?? ""}

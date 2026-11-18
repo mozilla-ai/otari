@@ -393,6 +393,32 @@ describe("Home, by provider", () => {
     ).not.toBeNull()
   })
 
+  it("picks the cut from a list on a phone once there are more than three", async () => {
+    const original = window.matchMedia
+    window.matchMedia = ((query: string) => ({
+      matches: query === "(max-width: 767px)",
+      media: query,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    })) as typeof window.matchMedia
+    try {
+      mockApi()
+      await renderHome()
+      await waitFor(() =>
+        expect(selectTrigger("Break down by")).toBeInTheDocument(),
+      )
+      expect(
+        screen.queryByRole("radiogroup", { name: "Break down by" }),
+      ).toBeNull()
+    } finally {
+      window.matchMedia = original
+    }
+  })
+
   it("picks the cut from a list once there are more than four", async () => {
     mockApi({ workspaces: 2 })
     await renderHome()
