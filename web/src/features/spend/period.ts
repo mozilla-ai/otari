@@ -35,21 +35,19 @@ export const PERIODS: { value: PeriodKey; label: string }[] = [
 ]
 
 /** Home's window when its URL names none, or names one it no longer offers. */
-export const DEFAULT_PERIOD: WindowKind = "30d"
+export const DEFAULT_PERIOD: PeriodKey = "30d"
 
 const ROLLING_DAYS: Partial<Record<WindowKind, number>> = { "7d": 7, "30d": 30 }
 const MONTHS_BACK: Partial<Record<WindowKind, number>> = { "3m": 3, "6m": 6 }
-
-/** Links from before the picker was renamed: `90d` was the quarter. */
-const RENAMED = new Map<string, PeriodKey>([["90d", "3m"]])
 
 export function isPeriodKey(value: string): value is PeriodKey {
   return PERIODS.some((period) => period.value === value)
 }
 
 /** The window a URL's `period` names, or the default for one it does not. */
-export function periodFromUrl(value: string): WindowKind {
-  const key = RENAMED.get(value) ?? value
+export function periodFromUrl(value: string): PeriodKey {
+  // A link from before the rename: `90d` was the quarter.
+  const key = value === "90d" ? "3m" : value
   return isPeriodKey(key) ? key : DEFAULT_PERIOD
 }
 

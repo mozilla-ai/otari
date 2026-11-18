@@ -40,6 +40,7 @@ import {
   windowWords,
 } from "@/features/spend/period"
 import { SpendPeriodPicker } from "@/features/spend/SpendPeriodPicker"
+import { usePageClock } from "@/features/spend/usePageClock"
 import {
   type ReadState,
   readState,
@@ -104,7 +105,7 @@ export function MemberHome({
   workspace: string
 }) {
   // One clock for the page's life, so its windows and query keys hold still.
-  const [now] = useState(() => Date.now())
+  const [now, refreshClock] = usePageClock()
   const navigate = useNavigate()
   const { get, patch } = useUrlState(URL_DEFAULTS)
   const isMobile = useIsMobile()
@@ -426,7 +427,7 @@ export function MemberHome({
 
   // Only a window still under way can be spent in "yet".
   const nothingYet = `Nothing spent ${words}${
-    period === "today" || period === "month" ? " yet" : ""
+    period === "today" ? " yet" : ""
   }.`
 
   return (
@@ -436,7 +437,10 @@ export function MemberHome({
         action={
           <SpendPeriodPicker
             value={period}
-            onChange={(next) => patch({ period: next })}
+            onChange={(next) => {
+              refreshClock()
+              patch({ period: next })
+            }}
           />
         }
       />

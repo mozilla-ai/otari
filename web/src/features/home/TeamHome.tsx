@@ -45,6 +45,7 @@ import {
 } from "@/features/spend/period"
 import { SetLimitDialog } from "@/features/spend/SetLimitDialog"
 import { SpendPeriodPicker } from "@/features/spend/SpendPeriodPicker"
+import { usePageClock } from "@/features/spend/usePageClock"
 import {
   type SpendRow,
   useSpend,
@@ -207,7 +208,7 @@ export function TeamHome({
   notice?: ReactNode
 }) {
   // One clock for the page's life, so its windows and query keys hold still.
-  const [now] = useState(() => Date.now())
+  const [now, refreshClock] = usePageClock()
   const navigate = useNavigate()
   const { get, patch } = useUrlState(URL_DEFAULTS)
   const { select } = useSelectedWorkspace()
@@ -540,7 +541,10 @@ export function TeamHome({
           <div className="flex flex-wrap items-center justify-end gap-2">
             <SpendPeriodPicker
               value={period}
-              onChange={(next) => patch({ period: next })}
+              onChange={(next) => {
+                refreshClock()
+                patch({ period: next })
+              }}
             />
             {hasWorkspaces ? (
               <FilterSelect
@@ -747,7 +751,9 @@ export function TeamHome({
                 <EmptyMessage>
                   {isTableFailed
                     ? "Could not load"
-                    : "Nothing was spent in this window. Pick a longer one above."}
+                    : period === "6m"
+                      ? "Nothing was spent in this window."
+                      : "Nothing was spent in this window. Pick a longer one above."}
                 </EmptyMessage>
               }
               onRowAction={

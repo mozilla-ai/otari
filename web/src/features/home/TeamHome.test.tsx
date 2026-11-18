@@ -180,6 +180,25 @@ describe("Home, People active", () => {
     })
   }
 
+  it("points an empty window at a longer one, but not from the longest", async () => {
+    mockApi()
+    await renderHome("/?period=7d&by=models")
+    expect(
+      await screen.findByText(
+        "Nothing was spent in this window. Pick a longer one above.",
+      ),
+    ).toBeVisible()
+  })
+
+  it("offers no longer window from 6M", async () => {
+    mockApi()
+    await renderHome("/?period=6m&by=models")
+    expect(
+      await screen.findByText("Nothing was spent in this window."),
+    ).toBeVisible()
+    expect(screen.queryByText(/Pick a longer one/)).toBeNull()
+  })
+
   it("counts the people of the workspace the page shows, not the organization", async () => {
     mockApi()
     await renderHome("/?workspace=ws-a")

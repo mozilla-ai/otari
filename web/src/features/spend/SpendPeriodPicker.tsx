@@ -1,7 +1,7 @@
 import { useIsMobile } from "@/design-system/hooks/useIsMobile"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { Segmented } from "@/design-system/navigation/Segmented"
-import { PERIODS, type WindowKind } from "@/features/spend/period"
+import { PERIODS, type PeriodKey } from "@/features/spend/period"
 
 /**
  * Home's window. Six segments is past the four a `Segmented` is meant to
@@ -14,7 +14,7 @@ export function SpendPeriodPicker({
   value,
   onChange,
 }: {
-  value: WindowKind
+  value: PeriodKey
   onChange: (next: string) => void
 }) {
   const isMobile = useIsMobile()
