@@ -25,6 +25,7 @@ X_LITERAL = re.compile(r"""["']([Xx]-[A-Za-z0-9-]+)["']""")
 # Header names Otari sends or reads but did not define, so it cannot rename them
 # alone. Each reason says what owns the name.
 INHERITED_HEADERS = {
+    "x-affinity": "Mistral Vibe's session header, read only beside its own mark.",
     "x-amp-thread-id": "Amp's own thread header, which traces read to group its requests.",
     "x-api-key": "Anthropic's credential header, which its SDKs send.",
     "x-claude-code-agent-id": "Claude Code's own subagent header, which traces read so a subagent opens no turn.",
@@ -38,7 +39,7 @@ INHERITED_HEADERS = {
     "X-Subscription-Token": "The Brave Search API's own header.",
     "x-opencode-session-id": "opencode's own session header, which traces read to group its requests.",
     "x-litellm-session-id": "LiteLLM's session header, which OpenHands sends and traces read to group its requests.",
-    "x-session-affinity": "A session header pi sends, read only beside pi's own mark.",
+    "x-session-affinity": "A session header pi and OpenClaw send, read only beside the harness's own mark.",
     "x-session-id": "The session header Kilo Code, Crush and pi send, read only beside the harness's own mark.",
     "x-goog-api-key": "The Gemini API's own credential header, which its Decisions API takes.",
     "x-should-retry": "The OpenAI and Anthropic SDKs' retry override, read under this name only.",

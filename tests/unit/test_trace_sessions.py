@@ -49,11 +49,15 @@ _ROO_CODE = {
     "user-agent": "roo-code/3.36.0 (darwin 25.1.0; arm64) node/22",
     "session_id": "t-1",
 }
+_MISTRAL_VIBE = {"user-agent": "Mistral-Vibe/2.14.0", "x-affinity": "a8f3c2d1-5e6b-4c7d"}
+_OPENCLAW = {"user-agent": "openclaw/2026.11.3", "session_id": "7d2e9b10", "x-session-affinity": "7d2e9b10"}
 _MARKED = {
     "kilo-code": (_KILO_CODE, "x-session-id"),
     "crush": (_CRUSH, "x-session-id"),
     "pi": (_PI, "session-id"),
     "roo-code": (_ROO_CODE, "session_id"),
+    "mistral-vibe": (_MISTRAL_VIBE, "x-affinity"),
+    "openclaw": (_OPENCLAW, "session_id"),
 }
 
 
@@ -138,6 +142,8 @@ def test_a_generic_session_header_without_its_harnesss_mark_names_no_session(har
         {"user-agent": "pi/0.112.0", "session_id": "ses_4f1a"},
         {"user-agent": "pi/0.112.0", "x-session-affinity": "ses_4f1a"},
         {"user-agent": "roo-code/3.36.0", "session_id": "ses_4f1a"},
+        {"user-agent": "mistral-client-python/Mistral-Vibe/2.14.0", "x-affinity": "ses_4f1a"},
+        {"user-agent": "openclaw/2026.11.3", "x-session-affinity": "ses_4f1a"},
     ],
 )
 def test_each_header_and_mark_a_harness_sends_its_session_with_is_enough(headers: dict[str, str]) -> None:
@@ -156,6 +162,13 @@ def test_litellms_session_header_names_the_session_and_leaves_the_harness_to_the
 
     assert resolve(headers, session_label=None, tags=None) == SessionRef(source="harness", key="conv-81d2")
     assert harness_of(headers) == "litellm"
+
+
+def test_oh_my_pi_is_named_by_its_mark_while_claude_codes_header_names_its_session() -> None:
+    headers = {"user-agent": "omp/17.2.12", "x-claude-code-session-id": "019a7c1e-3b2d"}
+
+    assert resolve(headers, session_label=None, tags=None) == SessionRef(source="harness", key="019a7c1e-3b2d")
+    assert harness_of(headers) == "oh-my-pi"
 
 
 def test_a_harnesss_own_session_header_wins_over_a_generic_one() -> None:
@@ -226,6 +239,14 @@ def test_only_an_identifier_shaped_key_the_client_chose_names_the_session(ref: S
         ({"user-agent": "Charm-Crush/0.31.0 (https://charm.land/crush)"}, "crush"),
         ({"user-agent": "kilo/stable/7.2.4/cli"}, "kilo-code"),
         ({"user-agent": "opencode/0.15 ai-sdk"}, "opencode"),
+        ({"user-agent": "omp/17.2.12"}, "oh-my-pi"),
+        ({"user-agent": "mistral-client-python/Mistral-Vibe/2.14.0"}, "mistral-vibe"),
+        ({"user-agent": "HermesAgent/1.0"}, "hermes-agent"),
+        ({"user-agent": "kimi-code-cli/1.4.0"}, "kimi-code"),
+        ({"user-agent": "QwenCode/0.9.1 (darwin; arm64)"}, "qwen-code"),
+        ({"user-agent": "GitHubCopilotChat/0.40.0"}, "github-copilot"),
+        ({"user-agent": "Zed/0.215.3 (macos; aarch64)"}, "zed"),
+        ({"user-agent": "curl/8.7.1"}, "curl"),
         ({"user-agent": "OpenAI/Python 1.99"}, "openai"),
         ({}, None),
     ],
