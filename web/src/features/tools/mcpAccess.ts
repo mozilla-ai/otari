@@ -160,6 +160,9 @@ export function verdictLabel(
       ? `${verdict}, the server does not expose this tool`
       : `${verdict}, the server is disabled`
   }
+  if (check.decided_by === "organization") {
+    return `${verdict}, the organization's limit for this workspace decided it`
+  }
   if (check.decided_by === "everyone") {
     return `${verdict}, matched the default policy (${ruleSummary(check.tools)})`
   }

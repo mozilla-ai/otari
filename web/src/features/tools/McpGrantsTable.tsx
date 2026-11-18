@@ -21,6 +21,7 @@ export type AclRow =
 export function McpGrantsTable({
   grants,
   defaultTools,
+  defaultDetail = "any other key",
   labels,
   canManage,
   showRules = true,
@@ -31,6 +32,8 @@ export function McpGrantsTable({
   grants: readonly WorkspaceMcpServerGrant[]
   /** The server's `everyone_tools`. */
   defaultTools: readonly string[]
+  /** The caption beside "Default policy", which says where it comes from. */
+  defaultDetail?: string
   /** User labels by user id, from the organization roster. */
   labels: ReadonlyMap<string, string>
   canManage: boolean
@@ -63,7 +66,7 @@ export function McpGrantsTable({
           return (
             <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
               <span className="font-medium">Default policy</span>
-              <span className="text-caption">any other key</span>
+              <span className="text-caption">{defaultDetail}</span>
             </span>
           )
         }

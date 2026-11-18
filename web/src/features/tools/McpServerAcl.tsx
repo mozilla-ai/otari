@@ -24,6 +24,10 @@ import {
   userLabel,
 } from "@/features/tools/mcpGrantSubjects"
 import { checkedTools } from "@/features/tools/mcpServerHealth"
+import {
+  isOrganizationServer,
+  overrideBody,
+} from "@/features/tools/mcpWorkspaceView"
 import { useMcpServerCheck } from "@/features/tools/useMcpServerCheck"
 import { useKeys } from "@/shared/api/apiKeys"
 import { ApiError } from "@/shared/api/client"
@@ -32,6 +36,7 @@ import { useOrganizationMembers } from "@/shared/api/organizations"
 import {
   useAddWorkspaceMcpServerGrants,
   useDeleteWorkspaceMcpServerGrant,
+  useSetWorkspaceMcpServerOverride,
   useUpdateMcpServer,
   useUpdateWorkspaceMcpServerGrant,
   useWorkspaceMcpServerAccess,
@@ -56,6 +61,11 @@ export interface UserRuleRequest {
 /**
  * A server's access rules: its rules for keys and users, its default policy,
  * and a trace of one key's call to one tool through them.
+ *
+ * On an organization's server, `server` is as the workspace uses it
+ * (`asWorkspaceUses`): its default policy is the workspace's own where it set
+ * one, and changing it sets the workspace's own, since the server's is the
+ * organization's.
  */
 export function McpServerAcl({
   workspaceId,
@@ -76,6 +86,9 @@ export function McpServerAcl({
   const linkedCall =
     linkedKey && linkedTool ? { keyId: linkedKey, tool: linkedTool } : undefined
   const updateServer = useUpdateMcpServer()
+  const setOverride = useSetWorkspaceMcpServerOverride()
+  const isOrganizations = isOrganizationServer(server)
+  const defaultWrite = isOrganizations ? setOverride : updateServer
   const addGrants = useAddWorkspaceMcpServerGrants()
   const updateGrant = useUpdateWorkspaceMcpServerGrant()
   const removeGrant = useDeleteWorkspaceMcpServerGrant()
@@ -113,7 +126,8 @@ export function McpServerAcl({
     tools,
     descriptions: picker.descriptions,
     isKnown: picker.isKnown,
-    onCheck: () => check.run(server),
+    // Only the organization checks its own server.
+    onCheck: isOrganizations ? undefined : () => check.run(server),
     isChecking: check.isRunning(server.id),
     checkError: check.error,
     onDismissCheckError: check.dismissError,
@@ -171,7 +185,7 @@ export function McpServerAcl({
     setEditing(grant)
   }
   const openEditDefault = () => {
-    updateServer.reset()
+    defaultWrite.reset()
     setOpenCount((count) => count + 1)
     setEditingDefault(true)
   }
@@ -226,6 +240,11 @@ export function McpServerAcl({
           <McpGrantsTable
             grants={grants}
             defaultTools={server.everyone_tools}
+            defaultDetail={
+              server.in_workspace && server.in_workspace.everyone_tools === null
+                ? "any other key, as your organization set it"
+                : undefined
+            }
             labels={labels}
             canManage={canManage}
             showRules={!isRefused}
@@ -317,18 +336,29 @@ export function McpServerAcl({
           editing={{ name: "the default policy", tools: server.everyone_tools }}
           {...pickerProps}
           readTools={server.read_tools}
-          isPending={updateServer.isPending}
-          error={updateServer.error}
-          onSubmit={(draft) =>
+          isPending={defaultWrite.isPending}
+          error={defaultWrite.error}
+          onSubmit={(draft) => {
+            const onSuccess = () => setEditingDefault(false)
+            if (isOrganizations) {
+              setOverride.mutate(
+                {
+                  ...ids,
+                  body: overrideBody(server, { everyone_tools: draft.tools }),
+                },
+                { onSuccess },
+              )
+              return
+            }
             updateServer.mutate(
               {
                 scope: workspaceMcpScope(workspaceId),
                 serverId: server.id,
                 body: { everyone_tools: draft.tools },
               },
-              { onSuccess: () => setEditingDefault(false) },
+              { onSuccess },
             )
-          }
+          }}
         />
       ) : null}
       <ConfirmDialog
