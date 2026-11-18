@@ -159,8 +159,9 @@ async def insert_replacing_duplicates(
     same key that another transaction has not committed is waited for and then
     replaced, where a read would have missed it and collided. Does not commit.
 
-    NOTE: This does not refresh an instance the session already holds, so a caller
-    holding a row it replaced must read it again to see the new values.
+    NOTE: This does not refresh an instance the session already holds, and reading
+    the row again returns that same instance. A caller holding a row it replaced
+    must refresh it (``AsyncSession.refresh``) to see the new values.
     """
     if not rows:
         return
