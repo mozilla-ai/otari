@@ -61,8 +61,9 @@ def downgrade() -> None:
     regions = op.get_bind().execute(sa.text("SELECT COUNT(*) FROM hosted_provider_regions")).scalar()
     if regions:
         msg = (
-            f"{regions} hosted provider region(s) exist, which the previous release cannot serve. Remove the regions "
-            "(or the providers that have them) before downgrading."
+            f"{regions} hosted provider region(s) exist, which the previous release cannot serve. Switch off each "
+            "provider that has regions, then remove its regions, and keep it off until its own connection carries "
+            "equivalent country and location limits: removing the last region serves from that connection at once."
         )
         raise RuntimeError(msg)
     # The release before this one cannot enforce a workspace's data locations,

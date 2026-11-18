@@ -138,6 +138,11 @@ class HostedProviderRepository(BaseRepository[HostedProvider, Never, Never]):
         """
         await self.db.execute(select(HostedProvider.id).where(HostedProvider.id == row_id).with_for_update())
 
+    async def lock_and_reload(self, row: HostedProvider) -> None:
+        """Lock ``row`` until the transaction ends and read it again, so what it says is what committed before."""
+        await self.lock(row.id)
+        await self.db.refresh(row)
+
     async def save(self, row: HostedProvider) -> HostedProvider:
         """Flush a changed row and read back what the database filled in."""
         self.db.add(row)

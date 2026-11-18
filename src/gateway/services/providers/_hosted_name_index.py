@@ -16,6 +16,7 @@ refresh.
 """
 
 import asyncio
+from contextvars import ContextVar
 
 from gateway.core.config import REGION_SEPARATOR, GatewayConfig, region_instance
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
@@ -69,10 +70,33 @@ def hosted_region_parent(name: str) -> str | None:
     return base if separator and slug and base in _providers else None
 
 
+# The data location of each hosted credential this request was dispatched on,
+# by the name it settles under, as the credential declared it when chosen.
+_served_locations: ContextVar[dict[str, str | None] | None] = ContextVar("hosted_served_locations", default=None)
+
+
+def remember_served_location(name: str, location: str | None) -> None:
+    """Record where the credential this request is dispatched on keeps data, for the usage row it writes."""
+    _served_locations.set({**(_served_locations.get() or {}), name: location})
+
+
 def hosted_data_location(name: str) -> str | None:
-    """Where the hosted provider or region ``name`` serves a request from, when that is one declared place."""
+    """Where the hosted provider or region ``name`` served this request from.
+
+    The location the serving credential declared when the request chose it;
+    for a row written outside such a request (a job settled later), the one
+    declared now, when that is one place.
+    """
+    served = _served_locations.get()
+    if served is not None and name in served:
+        return served[name]
     locations = _locations.get(name, ())
     return locations[0] if len(locations) == 1 else None
+
+
+def hosted_provider_named(name: str) -> bool:
+    """Whether a hosted provider goes by exactly ``name``, rather than a region of one."""
+    return name in _providers
 
 
 class HostedRegionIndex:

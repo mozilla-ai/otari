@@ -301,8 +301,10 @@ describe("HostedProviderPage: regions", () => {
     )
     const confirmOff = await screen.findByRole("alertdialog")
     expect(
-      within(confirmOff).getByText(/Its requests go to China next/),
-    ).toBeInTheDocument()
+      within(confirmOff).getByText(/first other serving region that admits/),
+    ).toHaveTextContent(
+      "China, the next serving region in order, is the likely one. A request that pins openai@sg is refused while it is off.",
+    )
     expect(hostedRequests(requests, "PATCH")).toHaveLength(1)
     await user.click(
       within(confirmOff).getByRole("button", { name: "Switch off" }),

@@ -6,7 +6,6 @@ a region never changes what a request already served is served on. Every field
 a region leaves unset is the provider's (``HostedProviderRegion``).
 """
 
-import uuid
 from collections.abc import Awaitable, Callable, Sequence
 
 from gateway.core.config import GatewayConfig, hosted_key_optional, region_instance, region_slug_problem
@@ -129,8 +128,9 @@ def ensure_regions_follow(row: HostedProvider, regions: Sequence[HostedProviderR
     ``moved`` is whether the change points the provider at another origin. A
     region with a key of its own on the provider's endpoint must not have that
     key carried there, a region using the provider's key on an endpoint of its
-    own must not be sent a key meant for another origin, and a region using the
-    provider's key must still have one where its endpoint needs it.
+    own must be on the provider's origin (checked whatever changed, a key added
+    included), and a region using the provider's key must still have one where
+    its endpoint needs it.
 
     Raises:
         HostedProviderRegionKeyRequiredError: a region's key would reach an endpoint it was not entered for.
@@ -141,7 +141,11 @@ def ensure_regions_follow(row: HostedProvider, regions: Sequence[HostedProviderR
             if moved and region.api_base is None:
                 raise HostedProviderRegionKeyRequiredError(region.slug)
             continue
-        if moved and region.api_base is not None and row.encrypted_api_key is not None:
+        if (
+            row.encrypted_api_key is not None
+            and region.api_base is not None
+            and _safe_origin(region.api_base) != _safe_origin(row.api_base)
+        ):
             raise HostedProviderRegionKeyRequiredError(region.slug)
         api_base = region.api_base if region.api_base is not None else row.api_base
         if row.encrypted_api_key is None and not hosted_key_optional(row.provider, api_base):
@@ -175,7 +179,7 @@ class HostedProviderRegions:
         config: GatewayConfig,
         regions: HostedProviderRegionRepository,
         stored: Callable[[str], Awaitable[tuple[HostedProvider, HostedSource]]],
-        lock: Callable[[uuid.UUID], Awaitable[None]],
+        lock: Callable[[HostedProvider], Awaitable[None]],
         taken: Callable[[str], Awaitable[bool]],
         validate_api_base: Callable[[str | None], Awaitable[None]],
     ) -> None:
@@ -183,7 +187,7 @@ class HostedProviderRegions:
 
         ``stored`` answers a provider's row and its merged view, refusing one
         defined in configuration; ``lock`` locks a provider's row for the rest
-        of the transaction; ``taken`` answers whether a hosted provider is
+        of the transaction and reads it again under the lock; ``taken`` answers whether a hosted provider is
         configured under a whole name, which a region's selector must not
         shadow; ``validate_api_base`` is the SSRF gate an endpoint passes
         before it is stored.
@@ -348,7 +352,7 @@ class HostedProviderRegions:
     async def _locked(self, provider: str) -> tuple[HostedProvider, list[HostedProviderRegion]]:
         """The provider's row, locked, and its regions as they stand once it is."""
         row, _ = await self.stored(provider)
-        await self.lock(row.id)
+        await self.lock(row)
         return row, await self.regions.list_for_provider(row.id, fresh=True)
 
     async def _insert(self, row: HostedProvider, **fields: object) -> None:

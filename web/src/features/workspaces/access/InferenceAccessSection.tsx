@@ -372,6 +372,9 @@ export function InferenceAccessSection({
           key={`${workspaceId}:${locationsOpening}`}
           allowed={allowedLocations}
           providers={hostedRows}
+          providersState={
+            hosted.data ? "ready" : hosted.isError ? "error" : "loading"
+          }
           isOpen={isEditingLocations}
           onClose={() => setLocationsOpenFor("")}
           isPending={setLocations.isPending}

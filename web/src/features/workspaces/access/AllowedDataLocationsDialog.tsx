@@ -49,6 +49,7 @@ export function describeAllowedDataLocations(
 export function AllowedDataLocationsDialog({
   allowed,
   providers,
+  providersState,
   isOpen,
   onClose,
   onSave,
@@ -62,6 +63,11 @@ export function AllowedDataLocationsDialog({
     WorkspaceHostedProvider,
     "provider" | "data_locations"
   >[]
+  /**
+   * Whether `providers` can be read: an empty list while it loads or after it
+   * failed is not "nothing would be refused".
+   */
+  providersState: "ready" | "loading" | "error"
   isOpen: boolean
   onClose: () => void
   onSave: (allowed: string[] | null) => void
@@ -73,9 +79,14 @@ export function AllowedDataLocationsDialog({
     locations: [...(allowed ?? [])],
   }))
   const { isDirty } = useDirtySnapshot(draft)
-  const canSubmit = draft.scope !== "only" || draft.locations.length > 0
   const chosen =
     draft.scope === "any" ? null : draft.scope === "none" ? [] : draft.locations
+  // A restrictive choice is saved knowing what it refuses: held while the
+  // roster loads, and allowed with a warning when it could not be read.
+  const isRestrictive = chosen !== null
+  const isCheckingImpact = isRestrictive && providersState === "loading"
+  const canSubmit =
+    (draft.scope !== "only" || draft.locations.length > 0) && !isCheckingImpact
   // What the choice would refuse, said before it is saved.
   const refused = providers.filter((row) =>
     refusesProvider(chosen, row.data_locations ?? []),
@@ -133,7 +144,19 @@ export function AllowedDataLocationsDialog({
           }
         />
       ) : null}
-      {canSubmit && refused.length > 0 ? (
+      {isCheckingImpact ? (
+        <p className="text-caption" role="status">
+          Checking which providers this affects…
+        </p>
+      ) : isRestrictive && providersState === "error" ? (
+        <InfoBanner tone="warning">
+          <p role="status">
+            Which providers this refuses could not be checked, because the
+            workspace's hosted providers could not be read. Saving still applies
+            the list.
+          </p>
+        </InfoBanner>
+      ) : canSubmit && providersState === "ready" && refused.length > 0 ? (
         <InfoBanner tone="warning">
           <p role="status">
             {`These providers will be refused: ${refused

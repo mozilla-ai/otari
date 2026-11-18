@@ -51,6 +51,8 @@ function mockApi(
     requireZeroRetention?: boolean
     /** The data locations the workspace accepts; null for any. */
     allowedDataLocations?: string[] | null
+    /** The workspace's hosted providers never answer, or answer with this refusal. */
+    hostedRead?: "pending" | { status: number; detail: string }
     /** How many policy writes are refused before one is stored. */
     policyWriteRefusals?: number
     /** A change another manager stores right after the page first reads the policy. */
@@ -130,6 +132,13 @@ function mockApi(
     }
     if (url.includes("/hosted-providers")) {
       if (method !== "GET") return jsonResponse(hosted[0] ?? {})
+      if (opts.hostedRead === "pending") return new Promise<Response>(() => {})
+      if (opts.hostedRead) {
+        return jsonResponse(
+          { detail: opts.hostedRead.detail },
+          opts.hostedRead.status,
+        )
+      }
       return jsonResponse({ data: hosted })
     }
     if (url.includes(`${API_ROOT}/workspaces/`)) {
@@ -998,6 +1007,55 @@ describe("InferenceAccessSection: allowed data locations", () => {
     // The EU admits France, so mistral stays.
     expect(within(dialog).getByText(/will be refused/)).toHaveTextContent(
       "These providers will be refused: anthropic (not declared), tokenhub (US, SG, CN).",
+    )
+  })
+
+  it("holds a restrictive save until it knows which providers it refuses", async () => {
+    mockApi({ hostedRead: "pending" })
+    const user = userEvent.setup()
+    renderSection()
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Change allowed data locations",
+      }),
+    )
+    const dialog = await screen.findByRole("dialog")
+    // Any location refuses nothing, so it needs no check.
+    expect(
+      within(dialog).queryByText("Checking which providers this affects…"),
+    ).toBeNull()
+    await user.click(within(dialog).getByRole("radio", { name: "No location" }))
+    expect(
+      within(dialog).getByText("Checking which providers this affects…"),
+    ).toBeInTheDocument()
+    expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled()
+  })
+
+  it("lets a restrictive save through with a warning when the providers cannot be read", async () => {
+    const requests = mockApi({
+      hostedRead: { status: 500, detail: "Hosted providers unavailable" },
+    })
+    const user = userEvent.setup()
+    renderSection()
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Change allowed data locations",
+      }),
+    )
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("radio", { name: "No location" }))
+    expect(
+      await within(dialog).findByText(/could not be checked/),
+    ).toBeInTheDocument()
+    expect(within(dialog).queryByText(/will be refused/)).toBeNull()
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+    await waitFor(() =>
+      expect(
+        requests.find((request) => request.method === "PUT")?.body,
+      ).toEqual({ allowed_data_locations: [] }),
     )
   })
 

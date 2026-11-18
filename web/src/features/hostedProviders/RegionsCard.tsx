@@ -25,8 +25,11 @@ function countriesText(countries: readonly string[] | null | undefined) {
 }
 
 /**
- * Where a switched-off region's requests go: the next serving region in
- * order, since a request reaches the first one that admits it.
+ * Where a switched-off region's requests go. An unpinned request goes to the
+ * first remaining serving region that admits it (its country, and the
+ * workspace's allowed locations), and is refused when none does, so the next
+ * region in order is only the likely one. A request pinned to this region is
+ * refused while it is off.
  */
 export function switchOffConsequence(
   regions: readonly HostedProviderRegion[],
@@ -39,13 +42,14 @@ export function switchOffConsequence(
   const next = regions
     .slice(regions.indexOf(region) + 1)
     .find((other) => other.enabled)
-  const pinned = `A request that pins ${region.selector} is refused.`
+  const pinned = `A request that pins ${region.selector} is refused while it is off.`
   if (others.length === 0) {
     return `No region serves ${providerName} then, so every request to it is refused.`
   }
-  return next
-    ? `Its requests go to ${next.label} next, the next serving region in order. ${pinned}`
-    : `Requests the other regions do not admit will be refused. ${pinned}`
+  const likely = next
+    ? ` ${next.label}, the next serving region in order, is the likely one.`
+    : ""
+  return `Its requests go to the first other serving region that admits them, by the caller's country and the workspace's allowed data locations, and are refused where none does.${likely} ${pinned}`
 }
 
 /**

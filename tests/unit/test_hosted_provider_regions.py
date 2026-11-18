@@ -2,18 +2,21 @@
 
 import uuid
 from collections.abc import Iterator
+from contextvars import ContextVar
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
 from gateway.core.config import hosted_provider_name_problem, region_instance, region_slug_problem
 from gateway.core.settings.inference import data_location, data_location_admitted, data_locations
-from gateway.exceptions.providers_exceptions import HostedProviderInvalidNameError
+from gateway.exceptions.providers_exceptions import HostedProviderInvalidNameError, HostedProviderRegionKeyRequiredError
 from gateway.ports.model_provider_port import HostedCredential
 from gateway.services.pricing_service import configure_region_parents, pricing_key_forms
 from gateway.services.providers import CountryGate, CountryNotServedError, ensure_hosted_country
 from gateway.services.providers import _hosted_name_index as index
 from gateway.services.providers._hosted_credentials import normalize_name
+from gateway.services.providers._hosted_regions import ensure_regions_follow
 from gateway.services.providers._workspace_hosted_access import (
     WorkspaceHostedAccessDeniedError,
     narrow_to_workspace_locations,
@@ -171,3 +174,36 @@ def test_a_region_name_is_known_by_its_provider_and_a_provider_name_never_is(mon
     assert index.hosted_region_parent("tokenhub@jp") == "tokenhub", "a region another worker just added"
     assert index.hosted_region_parent("team@eu") is None
     assert index.hosted_region_parent("nobody@eu") is None
+
+
+def test_a_usage_row_takes_the_location_the_serving_credential_declared(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A declaration changed after the request chose its credential does not reach the row."""
+    monkeypatch.setattr(index, "_locations", {"tokenhub@sg": ("DE",)})
+    monkeypatch.setattr(index, "_served_locations", ContextVar("served", default=None))
+
+    before = index.hosted_data_location("tokenhub@sg")
+    index.remember_served_location("tokenhub@sg", "SG")
+    index.remember_served_location("tokenhub@us", None)
+
+    assert before == "DE", "outside a served request, the declaration as it stands"
+    assert index.hosted_data_location("tokenhub@sg") == "SG"
+    assert index.hosted_data_location("tokenhub@us") is None, "an undeclared serving credential records nothing"
+
+
+def _row(**fields: object) -> SimpleNamespace:
+    base: dict[str, object] = {"provider": "openai", "encrypted_api_key": "k", "api_base": "https://a.example/v1"}
+    return SimpleNamespace(**{**base, **fields})
+
+
+def test_a_region_on_its_own_origin_may_not_use_a_key_the_provider_gains() -> None:
+    """A keyless provider given a key, endpoint unchanged, would send it to the region's other origin."""
+    region = SimpleNamespace(slug="sg", encrypted_api_key=None, api_base="https://b.example/v1")
+
+    with pytest.raises(HostedProviderRegionKeyRequiredError):
+        ensure_regions_follow(_row(), [region], moved=False)  # type: ignore[arg-type, list-item]
+
+
+def test_a_region_on_the_provider_origin_may_use_its_key() -> None:
+    region = SimpleNamespace(slug="sg", encrypted_api_key=None, api_base="https://a.example/v2")
+
+    ensure_regions_follow(_row(), [region], moved=False)  # type: ignore[arg-type, list-item]

@@ -203,7 +203,7 @@ class HostedProviderService:
             config=config,
             regions=regions,
             stored=self._stored_or_raise,
-            lock=providers.lock,
+            lock=providers.lock_and_reload,
             taken=self._taken,
             validate_api_base=self._validate_api_base,
         )

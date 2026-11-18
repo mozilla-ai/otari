@@ -339,12 +339,14 @@ def configure_usage_data_location(resolver: Callable[[str], str | None] | None) 
     _data_location_of = resolver
 
 
-@event.listens_for(UsageLog, "before_insert")
-def _stamp_data_location(_mapper: object, _connection: object, row: UsageLog) -> None:
-    """Record, as the row is written, where the hosted provider that served it keeps data.
+@event.listens_for(UsageLog, "init")
+def _stamp_data_location(_row: UsageLog, _args: object, kwargs: dict[str, Any]) -> None:
+    """Fill in where a deployment-served row was served from, as the row is built.
 
-    At write time rather than read time, so a later change to a declaration
-    never rewrites where a past request went.
+    Built in the request that served it, so the registered lookup answers what
+    the serving credential declared then, and a later change to a declaration
+    never reaches the row. A row that names its location keeps it.
     """
-    if row.deployment_paid and row.data_location is None and row.provider and _data_location_of is not None:
-        row.data_location = _data_location_of(row.provider)
+    if kwargs.get("deployment_paid") and kwargs.get("provider") and "data_location" not in kwargs:
+        if _data_location_of is not None:
+            kwargs["data_location"] = _data_location_of(kwargs["provider"])

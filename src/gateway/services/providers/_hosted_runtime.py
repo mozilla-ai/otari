@@ -5,8 +5,9 @@ from typing import Any
 
 from any_llm import LLMProvider
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import GatewayConfig, region_instance
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.log_config import logger
 from gateway.ports.model_provider_port import NO_ORGANIZATION, HostedCredential, HostedModels, ModelProviderPort
 from gateway.repositories.providers import HostedProviderModelRepository, HostedProviderVendorRepository
 from gateway.services.provider_kwargs import (
@@ -17,6 +18,7 @@ from gateway.services.provider_kwargs import (
 )
 from gateway.services.providers._country_gate import CountryGate, ensure_hosted_country
 from gateway.services.providers._hosted_credentials import ResolvedHostedProvider
+from gateway.services.providers._hosted_name_index import hosted_provider_named, remember_served_location
 from gateway.services.providers._hosted_sources import HostedSources
 from gateway.services.providers._hosted_vendors import vendor_of
 from gateway.services.providers._workspace_hosted_access import (
@@ -82,6 +84,7 @@ def dispatch_on_hosted_credential(
     Raises:
         UnknownHostedUpstreamError: the credential names an upstream any-llm does not implement.
     """
+    remember_served_location(credential.response_provider, credential.data_location)
     try:
         upstream = LLMProvider(credential.upstream)
     except ValueError as exc:
@@ -222,4 +225,19 @@ class HostedProviderRuntime:
                 disabled = await self.vendors.disabled_for(source.name)
                 if disabled and vendor_of(source.implementation, model) in disabled:
                     return []
-            return source.region_credentials(slug=pinned)
+            credentials = source.region_credentials(slug=pinned)
+        # A provider of a region's whole name answers that selector, so the
+        # region would settle under, and be priced as, a provider it is not.
+        shadowed = [
+            each
+            for each in credentials
+            if each.region and hosted_provider_named(region_instance(source.name, each.region))
+        ]
+        for each in shadowed:
+            logger.warning(
+                "Region %r of hosted provider %r is not served: a provider is named %r",
+                each.region,
+                source.name,
+                region_instance(source.name, each.region),
+            )
+        return [each for each in credentials if each not in shadowed]
