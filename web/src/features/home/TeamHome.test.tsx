@@ -474,7 +474,7 @@ describe("Home, the window", () => {
   })
 
   /** Every read answered with some spend; returns every URL the page asked. */
-  function mockApi() {
+  function mockApi({ errors = 0 }: { errors?: number } = {}) {
     const asked: URL[] = []
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = new URL(String(input), "http://test")
@@ -493,7 +493,11 @@ describe("Home, the window", () => {
       }
       if (path === "/organizations/me/usage/summary") {
         return Response.json({
-          totals: usageTotals({ cost: 4, request_count: 6 }),
+          totals: usageTotals({
+            cost: 4,
+            request_count: 6,
+            error_count: errors,
+          }),
           series: [],
           by_user: [spent("u-ada", "Ada"), spent("u-wei", "Wei")],
           by_api_key: [spent("k-1", "laptop")],
@@ -544,6 +548,11 @@ describe("Home, the window", () => {
         url.searchParams.has("start_date") || url.searchParams.has("start"),
     )
 
+  it("counts one failed request in the singular", async () => {
+    mockApi({ errors: 1 })
+    await renderHome("/?period=today")
+    expect(await screen.findByText("1 failed request")).toBeVisible()
+  })
   it("ends every read of yesterday at midnight, so none counts today", async () => {
     const asked = mockApi()
     await renderHome("/?period=yesterday")

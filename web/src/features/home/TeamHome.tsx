@@ -652,7 +652,7 @@ export function TeamHome({
             value={spend.totals ? formatPct(errorRate) : "—"}
             subline={
               spend.totals
-                ? `${formatNumber(spend.totals.error_count)} failed requests`
+                ? `${formatNumber(spend.totals.error_count)} failed ${spend.totals.error_count === 1 ? "request" : "requests"}`
                 : unreadLine
             }
           />
