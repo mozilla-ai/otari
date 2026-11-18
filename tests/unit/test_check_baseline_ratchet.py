@@ -1,0 +1,227 @@
+"""Tests for the baseline ratchet check."""
+
+from __future__ import annotations
+
+import importlib.util
+import io
+import sys
+from pathlib import Path
+from types import ModuleType
+
+import pytest
+
+_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "check_baseline_ratchet.py"
+
+
+def _load() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("check_baseline_ratchet", _SCRIPT)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+check = _load()
+
+
+def test_a_tree_that_changed_nothing_is_clean() -> None:
+    source = "SIZE_BASELINE = 3\n"
+    assert check.check_baselines(source, source) == []
+
+
+def test_the_real_check_measured_against_itself_is_clean() -> None:
+    source = (Path(__file__).resolve().parents[2] / "scripts" / "check_architecture.py").read_text(encoding="utf-8")
+    assert check.check_baselines(source, source) == []
+
+
+def test_every_baseline_the_real_check_records_is_read() -> None:
+    source = (Path(__file__).resolve().parents[2] / "scripts" / "check_architecture.py").read_text(encoding="utf-8")
+    assert sorted(check.baselines(source)) == [
+        "COMPOSITION_ROOT_BEHAVIOR_BASELINE",
+        "COMPOSITION_ROOT_SIZE_BASELINE",
+        "DOMAIN_NAME_BASELINE",
+        "FLAT_MODULE_BASELINE",
+        "LISTENER_DEFAULT_BASELINE",
+        "NON_DOMAIN_SERVICE_IMPORT_BASELINE",
+        "ROUTE_DATABASE_IMPORT_BASELINE",
+        "SAVEPOINT_BASELINE",
+        "SERVICE_DATABASE_IMPORT_BASELINE",
+        "SERVICE_ROOT_EXPORT_BASELINE",
+        "TRANSACTION_CONTROL_BASELINE",
+    ]
+
+
+def test_a_count_that_rises_is_flagged() -> None:
+    assert check.check_baselines("SIZE_BASELINE = 3\n", "SIZE_BASELINE = 4\n") == [
+        "SIZE_BASELINE rises from 3 to 4; a baseline records room already given up, so it may only fall"
+    ]
+
+
+def test_a_count_that_falls_is_clean() -> None:
+    assert check.check_baselines("SIZE_BASELINE = 3\n", "SIZE_BASELINE = 2\n") == []
+
+
+def test_an_entry_added_to_a_baseline_is_flagged() -> None:
+    before = 'LEAK_BASELINE = ("one.py",)\n'
+    after = 'LEAK_BASELINE = ("one.py", "two.py")\n'
+    assert check.check_baselines(before, after) == [
+        "LEAK_BASELINE gains 'two.py'; a baseline records room already given up, so it may only lose entries"
+    ]
+
+
+def test_an_entry_removed_from_a_baseline_is_clean() -> None:
+    before = 'LEAK_BASELINE = ("one.py", "two.py")\n'
+    after = 'LEAK_BASELINE = ("one.py",)\n'
+    assert check.check_baselines(before, after) == []
+
+
+def test_a_nested_entry_added_to_a_baseline_is_flagged() -> None:
+    before = 'PAIR_BASELINE = (("one.py", "A"),)\n'
+    after = 'PAIR_BASELINE = (("one.py", "A"), ("two.py", "B"))\n'
+    assert check.check_baselines(before, after) == [
+        "PAIR_BASELINE gains ('two.py', 'B'); a baseline records room already given up, so it may only lose entries"
+    ]
+
+
+def test_a_key_added_to_a_baseline_is_flagged() -> None:
+    before = 'MAP_BASELINE = {"one": 1}\n'
+    after = 'MAP_BASELINE = {"one": 1, "two": 2}\n'
+    assert check.check_baselines(before, after) == [
+        "MAP_BASELINE gains the entry 'two'; a baseline records room already given up, so it may only lose entries"
+    ]
+
+
+def test_a_key_removed_from_a_baseline_is_clean() -> None:
+    before = 'MAP_BASELINE = {"one": 1, "two": 2}\n'
+    after = 'MAP_BASELINE = {"one": 1}\n'
+    assert check.check_baselines(before, after) == []
+
+
+def test_a_count_under_a_key_that_rises_is_flagged() -> None:
+    before = 'MAP_BASELINE = {"one": 1}\n'
+    after = 'MAP_BASELINE = {"one": 2}\n'
+    assert check.check_baselines(before, after) == [
+        "MAP_BASELINE['one'] rises from 1 to 2; a baseline records room already given up, so it may only fall"
+    ]
+
+
+def test_an_entry_under_a_key_that_is_added_is_flagged() -> None:
+    before = 'MAP_BASELINE = {"one": ("A",)}\n'
+    after = 'MAP_BASELINE = {"one": ("A", "B")}\n'
+    assert check.check_baselines(before, after) == [
+        "MAP_BASELINE['one'] gains 'B'; a baseline records room already given up, so it may only lose entries"
+    ]
+
+
+def test_a_baseline_that_is_new_is_clean() -> None:
+    assert check.check_baselines("SIZE_BASELINE = 3\n", "SIZE_BASELINE = 3\nLEAK_BASELINE = ()\n") == []
+
+
+def test_a_baseline_that_is_gone_while_it_still_holds_room_is_flagged() -> None:
+    before = 'LEAK_BASELINE = ("one.py",)\nSIZE_BASELINE = 3\n'
+    after = "SIZE_BASELINE = 3\n"
+    assert check.check_baselines(before, after) == [
+        "LEAK_BASELINE is gone while it still held 1 entry; empty it before the rule that reads it goes"
+    ]
+
+
+def test_a_baseline_that_is_gone_having_been_emptied_is_clean() -> None:
+    assert check.check_baselines("LEAK_BASELINE = ()\nSIZE_BASELINE = 3\n", "SIZE_BASELINE = 3\n") == []
+
+
+def test_a_count_that_is_gone_having_reached_zero_is_clean() -> None:
+    assert check.check_baselines("SIZE_BASELINE = 0\nLEAK_BASELINE = ()\n", "LEAK_BASELINE = ()\n") == []
+
+
+def test_a_baseline_that_changes_shape_is_flagged() -> None:
+    assert check.check_baselines("SIZE_BASELINE = 3\n", 'SIZE_BASELINE = ("one.py",)\n') == [
+        "SIZE_BASELINE changes from a count to a list of entries; a reader cannot tell what room it gives back"
+    ]
+
+
+def test_a_constant_that_is_not_a_baseline_is_not_read() -> None:
+    assert check.check_baselines("LIMIT = 3\n", "LIMIT = 4\n") == []
+
+
+def test_an_annotated_baseline_is_read() -> None:
+    before = 'MAP_BASELINE: dict[str, int] = {"one": 1}\n'
+    after = 'MAP_BASELINE: dict[str, int] = {"one": 2}\n'
+    assert check.check_baselines(before, after) == [
+        "MAP_BASELINE['one'] rises from 1 to 2; a baseline records room already given up, so it may only fall"
+    ]
+
+
+def test_a_baseline_that_is_not_a_literal_is_reported() -> None:
+    assert check.check_baselines("SIZE_BASELINE = 3\n", "SIZE_BASELINE = len(OTHER)\n") == [
+        "SIZE_BASELINE is no longer written out in full; a baseline is read without running the check"
+    ]
+
+
+def test_every_way_one_change_gives_back_room_is_reported() -> None:
+    before = 'SIZE_BASELINE = 3\nLEAK_BASELINE = ("one.py",)\n'
+    after = 'SIZE_BASELINE = 4\nLEAK_BASELINE = ("one.py", "two.py")\n'
+    assert check.check_baselines(before, after) == [
+        "LEAK_BASELINE gains 'two.py'; a baseline records room already given up, so it may only lose entries",
+        "SIZE_BASELINE rises from 3 to 4; a baseline records room already given up, so it may only fall",
+    ]
+
+
+def test_a_tree_whose_check_does_not_parse_is_reported() -> None:
+    assert check.check_baselines("SIZE_BASELINE = 3\n", "SIZE_BASELINE = (\n") == [
+        "the check does not parse, so no baseline can be read from it"
+    ]
+
+
+def _write_pair(tmp_path: Path, before: str, after: str) -> tuple[Path, Path]:
+    base = tmp_path / "base.py"
+    head = tmp_path / "head.py"
+    base.write_text(before, encoding="utf-8")
+    head.write_text(after, encoding="utf-8")
+    return base, head
+
+
+def test_the_command_passes_a_change_that_gives_back_no_room(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    base, head = _write_pair(tmp_path, "SIZE_BASELINE = 3\n", "SIZE_BASELINE = 2\n")
+    assert check.main(["--base", str(base), "--head", str(head)]) == 0
+    assert "No baseline gives back room" in capsys.readouterr().out
+
+
+def test_the_command_fails_a_change_that_gives_back_room(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    base, head = _write_pair(tmp_path, "SIZE_BASELINE = 3\n", "SIZE_BASELINE = 4\n")
+    assert check.main(["--base", str(base), "--head", str(head)]) == 1
+    assert "SIZE_BASELINE rises from 3 to 4" in capsys.readouterr().out
+
+
+def test_the_command_reports_a_missing_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    base, head = _write_pair(tmp_path, "SIZE_BASELINE = 3\n", "SIZE_BASELINE = 3\n")
+    base.unlink()
+    assert check.main(["--base", str(base), "--head", str(head)]) == 1
+    assert str(base) in capsys.readouterr().out
+
+
+def test_a_count_that_is_gone_while_it_still_stands_above_zero_is_flagged() -> None:
+    before = "SIZE_BASELINE = 3\nLEAK_BASELINE = ()\n"
+    assert check.check_baselines(before, "LEAK_BASELINE = ()\n") == [
+        "SIZE_BASELINE is gone while it still stood at 3; take it to zero before the rule that reads it"
+    ]
+
+
+def test_a_baseline_that_was_never_written_out_is_read_once_it_is() -> None:
+    assert check.check_baselines("SIZE_BASELINE = len(OTHER)\n", "SIZE_BASELINE = 99\n") == []
+
+
+def test_a_baseline_that_was_never_written_out_and_is_gone_is_clean() -> None:
+    assert check.check_baselines("SIZE_BASELINE = len(OTHER)\nLEAK_BASELINE = ()\n", "LEAK_BASELINE = ()\n") == []
+
+
+def test_the_command_reads_a_revision_from_standard_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    head = tmp_path / "head.py"
+    head.write_text("SIZE_BASELINE = 4\n", encoding="utf-8")
+    monkeypatch.setattr("sys.stdin", io.StringIO("SIZE_BASELINE = 3\n"))
+    assert check.main(["--base", "-", "--head", str(head)]) == 1
+    assert "SIZE_BASELINE rises from 3 to 4" in capsys.readouterr().out
