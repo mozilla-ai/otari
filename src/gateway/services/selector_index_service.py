@@ -355,10 +355,10 @@ async def run_selector_index_refresher(
 ) -> None:
     """Keep the selector index current with discovery, pricing and providers.
 
-    Rebuilt on a short fixed interval rather than hooked into every writer that
-    could change it (a price set, a provider added, a discovery tick): the
-    build is one catalog read, and a spelling that lags a minute behind a
-    change is a far smaller hazard than one hook missed.
+    Rebuilt on a short fixed interval, so a writer nothing hooks (a price set,
+    a discovery tick) lags at most a minute. The hosted-provider routes also
+    rebuild once their write commits, since an operator who switches a model on
+    sends a request by its catalog id next.
 
     ``resolve_model_provider`` hands each tick the hosted port for its session
     and Unit of Work, the way a request resolves it; the composition root is
