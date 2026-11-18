@@ -6,13 +6,17 @@ where the spend went. The per-request log is the **Requests** view of
 
 ## Home
 
-Pick the window at the top: **This month**, **7 days**, **30 days** or
-**90 days**. What Home shows depends on your role.
+Pick the window at the top: **Today**, **Yesterday**, **7D**, **30D**, **3M** or
+**6M**; Home opens on **30D**. Days are your browser's calendar days. **Today**
+runs from midnight to now and **Yesterday** is the whole day before it, both
+read by the hour; the others are whole days ending with today. On a phone the
+same windows are in a select. What Home shows depends on your role.
 
 An organization owner or admin sees the whole organization, or one workspace
 picked beside the window when there is more than one:
 
-- What the window cost, against the same span before it, with spend per day.
+- What the window cost, against the same span before it (**Today** against
+  yesterday up to the same time of day), with spend per hour or per day.
 - How much of the organization's spend limit is used, and what the period is on
   pace to cost. With no limit set, **Set a team budget** sets one.
 - **Failures**: the share of requests that failed.
