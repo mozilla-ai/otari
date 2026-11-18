@@ -430,6 +430,46 @@ describe("McpServerDetailPage, an organization's server", () => {
     expect(held).toHaveTextContent("Refresh the settings first")
   })
 
+  it("holds the access rules' default-policy dialog after a failed write whose re-read fails too", async () => {
+    const server = organizationServer()
+    const calls = mockMcpServerApi({ server, row: asRead(server) })
+    const release = holdFirstOverrideWrite()
+    const user = userEvent.setup()
+    await openPage(server.id)
+
+    // The write fails from the access rules' dialog, still open, and the read
+    // after it fails too.
+    await pressRowAction(user, "Edit the default policy")
+    const dialog = await screen.findByRole("dialog", {
+      name: "Edit the default policy",
+    })
+    await user.click(within(dialog).getByRole("radio", { name: "Deny" }))
+    await user.click(within(dialog).getByRole("button", { name: "Save rule" }))
+    failServerReads(server.id)
+    release("refuse")
+    expect(await within(dialog).findByText("Write refused")).toBeVisible()
+    expect(
+      await within(dialog).findByText(/could not be read again/),
+    ).toBeVisible()
+
+    // It offers the refresh itself, cannot save again, and the refused write
+    // is the only one sent.
+    expect(
+      within(dialog).getByRole("button", { name: "Refresh" }),
+    ).toBeVisible()
+    expect(
+      within(dialog).getByRole("button", { name: "Save rule" }),
+    ).toBeDisabled()
+    const sent = vi
+      .mocked(globalThis.fetch)
+      .mock.calls.filter(
+        ([input, init]) =>
+          String(input).endsWith("/override") && init?.method === "PATCH",
+      )
+    expect(sent).toHaveLength(1)
+    expect(mcpWrites(calls)).toEqual([])
+  })
+
   it("clears the workspace's own settings back to the organization's", async () => {
     const server = organizationServer({ attach_by_default: true })
     const calls = mockMcpServerApi({ server, row: asRead(server) })
