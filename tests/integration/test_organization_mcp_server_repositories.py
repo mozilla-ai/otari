@@ -273,11 +273,14 @@ async def test_a_user_holds_one_grant_per_workspace_on_an_organization_server(as
 
     await grants.put(drive, workspace_id=marcomms.id, api_key_ids=[], user_ids=["ada"], tools=["*"])
     await grants.put(drive, workspace_id=sales.id, api_key_ids=[], user_ids=["ada"], tools=["@read"])
+    await async_db.commit()
+    [sales_grant] = [grant.id for grant in await grants.for_server(drive.id) if grant.workspace_id == sales.id]
     await grants.put(drive, workspace_id=sales.id, api_key_ids=[], user_ids=["ada"], tools=[])
     await async_db.commit()
 
-    held = {grant.workspace_id: grant.tools for grant in await grants.for_server(drive.id)}
-    assert held == {marcomms.id: ["*"], sales.id: []}
+    held = {grant.workspace_id: (grant.id, grant.tools) for grant in await grants.for_server(drive.id)}
+    assert held[sales.id] == (sales_grant, []), "replaced in place"
+    assert held[marcomms.id][1] == ["*"]
 
 
 async def test_an_alias_names_its_server_in_its_workspace_only(async_db: AsyncSession) -> None:

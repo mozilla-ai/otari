@@ -189,6 +189,9 @@ def _delete_servers(bind: sa.Connection, which: sa.ColumnElement[bool]) -> None:
 
 
 def _upgrade_servers(bind: sa.Connection) -> None:
+    # ``workspace`` is locked before ``workspace_mcp_servers``, the order a workspace's deletion takes them
+    # in through its cascade, so the two cannot wait on each other.
+    op.create_index(_WORKSPACE_ORGANIZATION_INDEX, "workspace", ["organization_id", "id"], unique=True)
     op.add_column(_SERVERS, sa.Column("organization_id", sa.Uuid(), nullable=True))
     bind.execute(
         sa.update(_servers).values(
@@ -199,7 +202,6 @@ def _upgrade_servers(bind: sa.Connection) -> None:
     )
     _delete_servers(bind, _servers.c.organization_id.is_(None))
 
-    op.create_index(_WORKSPACE_ORGANIZATION_INDEX, "workspace", ["organization_id", "id"], unique=True)
     op.drop_index(_SERVERS_WORKSPACE_INDEX, table_name=_SERVERS)
     with op.batch_alter_table(_SERVERS, copy_from=_servers_table(upgraded=False)) as batch:
         batch.alter_column("organization_id", existing_type=sa.Uuid(), nullable=False)
