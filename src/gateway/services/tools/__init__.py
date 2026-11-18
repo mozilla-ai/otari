@@ -74,6 +74,7 @@ environment, ``store_sandbox_api_key`` and ``clear_sandbox_api_key`` change the 
 and ``retargeted_tool_choice`` points a forced ``tool_choice`` at the search tool a declaration was renamed to.
 """
 
+from gateway.services.tools._attached_mcp_servers import AttachedMcpServerIndex
 from gateway.services.tools._builtin_tool import BuiltinTool
 from gateway.services.tools._candidate_tools import CandidateTools, ProviderToolDeclaration, decide_candidate_tools
 from gateway.services.tools._chat_tool_calls import OTARI_TOOL_CALLS_FIELD, mcp_entry, without_otari_tool_calls
@@ -288,6 +289,7 @@ from gateway.services.tools._web_tool_failure import WebToolFailure
 from gateway.services.tools._workspace_mcp_server_urls import WorkspaceMcpServerUrls
 
 __all__ = [
+    "AttachedMcpServerIndex",
     "DirectCaller",
     "DirectToolAccounts",
     "DirectToolCall",

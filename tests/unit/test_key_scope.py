@@ -25,8 +25,15 @@ def _migration() -> ModuleType:
     return module
 
 
-def test_new_keys_call_models_and_nothing_else() -> None:
-    assert DEFAULT_KEY_SCOPES == (KeyScope.INFERENCE_RUN,)
+def test_new_keys_call_models_and_the_built_in_tools() -> None:
+    assert DEFAULT_KEY_SCOPES == (
+        KeyScope.INFERENCE_RUN,
+        KeyScope.WEB_SEARCH,
+        KeyScope.WEB_FETCH,
+        KeyScope.CODE_EXECUTE,
+        KeyScope.MCP_READ,
+        KeyScope.MCP_EXECUTE,
+    )
 
 
 def test_scopes_are_stored_once_each_in_one_order() -> None:

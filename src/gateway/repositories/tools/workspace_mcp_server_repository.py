@@ -169,18 +169,31 @@ class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Nev
             query = query.where(WorkspaceMcpServer.id != except_id)
         return (await self.db.execute(query.limit(1))).first() is not None
 
-    async def any_attached(self, workspace_id: uuid.UUID) -> bool:
-        """Whether a workspace has an enabled server attached by default."""
+    async def attached_workspace_ids(self) -> frozenset[uuid.UUID]:
+        """Every workspace that has an enabled server of its own attached by default."""
         found = await self.db.execute(
-            select(WorkspaceMcpServer.id)
+            select(WorkspaceMcpServer.workspace_id)
             .where(
-                WorkspaceMcpServer.workspace_id == workspace_id,
                 WorkspaceMcpServer.attach_by_default.is_(True),
                 WorkspaceMcpServer.enabled.is_(True),
+                WorkspaceMcpServer.workspace_id.is_not(None),
             )
-            .limit(1)
+            .distinct()
         )
-        return found.first() is not None
+        return frozenset(workspace_id for workspace_id in found.scalars() if workspace_id is not None)
+
+    async def attached_organization_ids(self) -> frozenset[uuid.UUID]:
+        """Every organization with an enabled server of its own attached by default."""
+        found = await self.db.execute(
+            select(WorkspaceMcpServer.organization_id)
+            .where(
+                WorkspaceMcpServer.attach_by_default.is_(True),
+                WorkspaceMcpServer.enabled.is_(True),
+                WorkspaceMcpServer.workspace_id.is_(None),
+            )
+            .distinct()
+        )
+        return frozenset(found.scalars())
 
     async def has_url(self, workspace_id: uuid.UUID, url: str) -> bool:
         """Whether a workspace stores a server at ``url``, a trailing slash and surrounding whitespace aside.

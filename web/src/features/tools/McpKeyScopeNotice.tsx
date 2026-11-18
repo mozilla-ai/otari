@@ -33,7 +33,7 @@ export function holdersSentence(
 /**
  * Which keys can use the workspace's MCP servers, for the page that lists them.
  *
- * A new key holds `inference:run` alone, and a server reaches a request only
+ * A key may be created without `mcp:execute`, and a server reaches a request only
  * when the key holds `mcp:execute`, so a server added for a fresh key silently
  * does nothing. This says so where that is noticed, and links to the keys page
  * rather than offering to widen every key from here.

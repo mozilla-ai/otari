@@ -70,6 +70,19 @@ SPAN_OUTCOMES: tuple[SpanOutcome, ...] = ("ok", "error", "unknown", "blocked")
 SessionSource = Literal["client", "harness", "otlp", "none"]
 SESSION_SOURCES: tuple[SessionSource, ...] = ("client", "harness", "otlp", "none")
 
+# The language the client that sent a session was written in, from its SDK's headers or
+# its HTTP library's ``User-Agent``. JavaScript covers TypeScript, which no header tells apart.
+ClientLanguage = Literal["python", "javascript", "go", "java", "rust", "ruby"]
+CLIENT_LANGUAGES: tuple[ClientLanguage, ...] = ("python", "javascript", "go", "java", "rust", "ruby")
+# A client's version as its User-Agent spells it: digits and dots, then a PEP 440 pre, post or
+# dev release (``rc1``, ``.dev3``) or a SemVer prerelease (``-rc.1``), and SemVer build metadata.
+CLIENT_VERSION_PATTERN = re.compile(
+    r"\d+(?:\.\d+){0,3}"
+    r"(?:[-.]?(?:a|b|c|rc|alpha|beta|pre|preview|post|dev)\.?\d*|-[0-9A-Za-z.-]{1,24})?"
+    r"(?:\+[0-9A-Za-z.-]{1,24})?"
+)
+CLIENT_VERSION_MAX_LENGTH = 32
+
 # The shape every name a client could have chosen must have before it is stored:
 # an identifier, never prose. 128 characters is room for any tool, model or
 # provider name and for a namespaced identifier, and too little for a sentence to
@@ -179,6 +192,11 @@ class InvalidSpanError(ValueError):
 def is_identifier(value: str) -> bool:
     """Whether a client-supplied name is safe to store as it is."""
     return IDENTIFIER_PATTERN.fullmatch(value) is not None and not any(pattern.search(value) for pattern in _NOT_A_NAME)
+
+
+def is_client_version(value: str) -> bool:
+    """Whether a value is shaped like a client's version number."""
+    return len(value) <= CLIENT_VERSION_MAX_LENGTH and CLIENT_VERSION_PATTERN.fullmatch(value) is not None
 
 
 def is_gate_id(value: object) -> bool:
@@ -322,6 +340,8 @@ class TraceWrite:
     session_source: str
     spans: tuple[SpanRecord, ...]
     harness: str | None = None
+    client_language: str | None = None
+    client_version: str | None = None
     name: str | None = None
     captured_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     """When the gateway took these spans in, which an erasure of their user since then outranks."""
@@ -337,6 +357,10 @@ class TraceWrite:
         _check_id("trace_id", self.trace_id)
         _check_choice("session_source", self.session_source, SESSION_SOURCES)
         _check_identifier("harness", self.harness)
+        if self.client_language is not None:
+            _check_choice("client_language", self.client_language, CLIENT_LANGUAGES)
+        if self.client_version is not None and not is_client_version(self.client_version):
+            raise InvalidSpanError("client_version must be a version number")
         _check_identifier("name", self.name)
 
 
@@ -503,6 +527,8 @@ class TraceSummary:
     api_key_id: str | None
     session_source: str
     harness: str | None
+    client_language: str | None
+    client_version: str | None
     name: str | None
     started_at: datetime
     last_activity_at: datetime

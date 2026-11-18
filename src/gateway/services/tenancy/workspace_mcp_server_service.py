@@ -135,6 +135,7 @@ from gateway.services.secret_box import (
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.tools import (
+    AttachedMcpServerIndex,
     CompletedConnection,
     LinkSignIn,
     McpConnectionService,
@@ -1417,17 +1418,15 @@ class WorkspaceMcpServers:
             defer=True,
         )
 
-    async def any_attached(self, workspace_id: uuid.UUID) -> bool:
+    async def any_attached(self, workspace_id: uuid.UUID, organization_id: uuid.UUID | None = None) -> bool:
         """Whether the workspace attaches an enabled server to every request, its own or its organization's.
 
-        One indexed read when the workspace attaches one of its own.
+        As this worker last read it, so nothing is read per request. ``organization_id`` is the workspace's,
+        read here when the caller does not have it.
         """
-        if await WorkspaceMcpServerRepository(self._db).any_attached(workspace_id):
-            return True
-        organization_id = await WorkspaceRepository(self._db).get_organization_id(workspace_id)
-        return organization_id is not None and await _mcp_views(self._db).any_organization_server_attached(
-            workspace_id, organization_id
-        )
+        if organization_id is None:
+            organization_id = await WorkspaceRepository(self._db).get_organization_id(workspace_id)
+        return AttachedMcpServerIndex.has_attached(workspace_id, organization_id)
 
     async def list_reachable(self, workspace_id: uuid.UUID, access: McpAccess) -> list[McpServerSummary]:
         """See :func:`list_reachable_mcp_servers`."""
@@ -1926,6 +1925,7 @@ class WorkspaceMcpServerService:
                 added_by=user.id,
             )
         await self.db.commit()
+        await AttachedMcpServerIndex.refresh_after_write()
         # After the commit, so a server that fails its check is still stored:
         # it may be registered before it is up, and `health` says what failed.
         await self._record_check(server)
@@ -2062,6 +2062,7 @@ class WorkspaceMcpServerService:
 
         await self.db.commit()
         McpConnectionService.revoke_in_background(revocations, unread=unread)
+        await AttachedMcpServerIndex.refresh_after_write()
         if connection_changed:
             await self._record_check(server)
         else:
@@ -2440,6 +2441,7 @@ class WorkspaceMcpServerService:
         await self.db.delete(server)
         await self.db.commit()
         McpConnectionService.revoke_in_background(revocations, unread=unread)
+        await AttachedMcpServerIndex.refresh_after_write()
 
     async def set_workspace_settings(
         self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID, request: WorkspaceMcpServerSettingsUpdate

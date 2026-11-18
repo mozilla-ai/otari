@@ -366,6 +366,29 @@ def test_requests_of_one_harness_session_share_one_trace(
     assert (trace.session_source, trace.harness, trace.step_count) == ("harness", "claude-code", 2)
 
 
+def test_a_session_records_the_language_and_version_of_the_client_that_sent_it(
+    client: TestClient, api_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    headers = api_key_header | {
+        "user-agent": "AsyncOpenAI/Python 2.30.0",
+        "x-stainless-lang": "python",
+        "x-stainless-package-version": "2.30.0",
+    }
+    with patch("gateway.api.routes.chat.acompletion", return_value=_completion()):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": MODEL_NAME, "messages": [{"role": "user", "content": "x"}]},
+            headers=headers,
+        )
+    assert response.status_code == 200
+
+    trace_id = _only_trace_id(db_session_factory)
+    _wait_for_spans(db_session_factory, trace_id, 2)
+    with db_session_factory() as session:
+        trace = session.scalars(select(Trace).where(Trace.trace_id == trace_id)).one()
+    assert (trace.harness, trace.client_language, trace.client_version) == ("openai", "python", "2.30.0")
+
+
 def test_requests_of_one_harness_session_on_messages_share_one_trace(
     client: TestClient, api_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
