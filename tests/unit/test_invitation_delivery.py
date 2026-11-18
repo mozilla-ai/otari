@@ -95,7 +95,7 @@ class _RecordingMailer(Mailer):
 
     def tokens(self) -> list[str]:
         """The token in the accept link of each sent email."""
-        found = [re.search(r"accept-invitation\?token=([\w-]+)", message.text) for _, message in self.sent]
+        found = [re.search(r"accept-invitation#token=([\w-]+)", message.text) for _, message in self.sent]
         return [match.group(1) for match in found if match is not None]
 
 
@@ -293,7 +293,7 @@ async def test_a_delivered_email_finishes_the_send_and_carries_the_link_whose_ha
     [(to, message)] = store.mailer.sent
     assert to == _ADDRESS
     [token] = store.mailer.tokens()
-    assert f"https://otari.example.com/#/accept-invitation?token={token}" in message.text
+    assert f"https://otari.example.com/accept-invitation#token={token}" in message.text
     assert hash_token(token) == row.token_hash
     assert _warnings(logs) == []
     _assert_logs_hold_no_send_values(logs, row, store)

@@ -23,7 +23,7 @@ from gateway.services.tools._mcp_server_requests import (
     render_request_mail,
 )
 
-LINK = "https://otari.example/#/tools/mcp-servers"
+LINK = "https://otari.example/tools/mcp-servers"
 
 
 def test_the_request_mail_names_who_asked_for_what_and_carries_the_note() -> None:

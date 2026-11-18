@@ -1564,11 +1564,10 @@ class GatewayConfig(
     def ui_link(self, path: str) -> str:
         """An absolute link into the interface, or ``path`` itself when the address is unknown.
 
-        A query on ``ui_base_url`` travels with every link, placed before the hash
-        route: ``https://app.example.com/ui/?edge=a`` and ``/#/verify-email?token=t``
-        give ``https://app.example.com/ui/?edge=a#/verify-email?token=t``, which is
-        the one order a browser keeps the query in the page's own location rather
-        than in the route's.
+        A query on ``ui_base_url`` travels with every link, joined to the page's
+        own query and placed before its fragment: ``https://app.example.com/ui/?edge=a``
+        and ``/verify-email#token=t`` give
+        ``https://app.example.com/ui/verify-email?edge=a#token=t``.
         """
         base = self.effective_ui_base_url
         if not base:
@@ -2324,7 +2323,7 @@ class GatewayConfig(
         in the second. A path-prefixed interface writes the whole URL, the way
         ``public_base_url`` already does. A query string is kept, since an edge
         that serves one interface for several deployments may need each link to
-        say which one built it; ``ui_link`` places it ahead of the hash route.
+        say which one built it; ``ui_link`` joins it to each link's own query.
         """
         stripped = (value or "").strip()
         if not stripped:

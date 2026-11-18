@@ -7,7 +7,7 @@ message's own values and the wording it produces.
 
 from gateway.services.tenancy.invitation_email import render_invitation_email
 
-ACCEPT_LINK = "https://gw.example.com/#/accept-invitation?token=abc"
+ACCEPT_LINK = "https://gw.example.com/accept-invitation#token=abc"
 
 
 def _render(**overrides: object) -> tuple[str, str, str]:

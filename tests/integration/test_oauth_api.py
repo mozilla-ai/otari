@@ -2320,7 +2320,7 @@ def test_the_provider_redirect_path_bounces_into_the_dashboard_hash_route(client
     response = client.get(f"/auth/{provider}/callback?code=the-code&state=the-state", follow_redirects=False)
 
     assert response.status_code == 303
-    assert response.headers["location"] == (f"/#/auth/{provider}/callback?code=the-code&state=the-state")
+    assert response.headers["location"] == (f"/sign-in/{provider}/callback?code=the-code&state=the-state")
 
 
 def test_the_provider_redirect_path_carries_an_error_query_through_too(
@@ -2329,14 +2329,14 @@ def test_the_provider_redirect_path_carries_an_error_query_through_too(
     response = client.get("/auth/google/callback?error=access_denied&state=s", follow_redirects=False)
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/#/auth/google/callback?error=access_denied&state=s"
+    assert response.headers["location"] == "/sign-in/google/callback?error=access_denied&state=s"
 
 
 def test_the_provider_redirect_path_works_with_no_query_at_all(client: TestClient) -> None:
     response = client.get("/auth/google/callback", follow_redirects=False)
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/#/auth/google/callback"
+    assert response.headers["location"] == "/sign-in/google/callback"
 
 
 def test_the_provider_redirect_path_needs_no_credential(client: TestClient) -> None:

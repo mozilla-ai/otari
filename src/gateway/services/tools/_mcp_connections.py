@@ -104,7 +104,7 @@ CLIENT_METADATA_PATH = "/mcp-connections/client-metadata"
 # Where a manager supplies a client, said wherever a sign-in cannot start without one.
 _WHERE_TO_ADD_A_CLIENT = "Add an OAuth client ID: on the server's page, open Settings."
 # The dashboard route that finishes a sign-in a dashboard session started.
-DASHBOARD_CALLBACK_ROUTE = "/#/mcp-connections/callback"
+DASHBOARD_CALLBACK_ROUTE = "/mcp-connections/callback"
 _MAX_RETURN_TO_LENGTH = 2048
 # An OAuth ``error`` code as RFC 6749 section 4.1.2.1 spells one, and short.
 _SAFE_ERROR = re.compile(r"[a-z0-9_.-]{1,64}")

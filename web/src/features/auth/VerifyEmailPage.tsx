@@ -3,7 +3,7 @@ import { useState } from "react"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { useMailedLinkStatus, useVerifyEmail } from "@/shared/api/auth"
 import { ApiError } from "@/shared/api/client"
-import { tokenFromHash } from "@/shared/helpers/hashParams"
+import { tokenFromRoute } from "@/shared/helpers/routeParams"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
@@ -13,7 +13,7 @@ import { rememberSignInAddress } from "./signInAddress"
 import { CheckingLinkPanel, UnusableLinkPanel } from "./UnusableLinkPanel"
 
 /**
- * `#/verify-email?token=…`: the page the mailed verification link lands on.
+ * `/verify-email#token=…`: the page the mailed verification link lands on.
  *
  * It asks for the password chosen at signup before verifying. Anyone can sign
  * up with an address they do not hold, and the link then reaches the
@@ -26,8 +26,8 @@ import { CheckingLinkPanel, UnusableLinkPanel } from "./UnusableLinkPanel"
  * told to use the one they chose first. Whoever forgot it, or never signed up,
  * is pointed at a password reset, which is how they take the address back.
  */
-export function VerifyEmailPage({ hash }: { hash: string }) {
-  const token = tokenFromHash(hash)
+export function VerifyEmailPage({ route }: { route: string }) {
+  const token = tokenFromRoute(route)
   const verify = useVerifyEmail()
   const linkStatus = useMailedLinkStatus("verify", token ?? "")
   const { recordEvent } = useTelemetry()
@@ -69,7 +69,7 @@ export function VerifyEmailPage({ hash }: { hash: string }) {
     return (
       <PublicAuthLayout
         title="Verify your email"
-        footer={<PublicAuthLink to="#/">Back to sign in</PublicAuthLink>}
+        footer={<PublicAuthLink to="/">Back to sign in</PublicAuthLink>}
       >
         <ErrorBanner
           error={
@@ -87,7 +87,7 @@ export function VerifyEmailPage({ hash }: { hash: string }) {
       <PublicAuthLayout
         title="Email verified"
         description={`${verify.data.email} is confirmed. You can sign in now.`}
-        footer={<PublicAuthLink to="#/">Go to sign in</PublicAuthLink>}
+        footer={<PublicAuthLink to="/">Go to sign in</PublicAuthLink>}
       >
         <p role="status" className="text-center text-sm text-success">
           Verification complete.
@@ -107,7 +107,7 @@ export function VerifyEmailPage({ hash }: { hash: string }) {
       <UnusableLinkPanel
         status={linkStatus.data}
         renew={{
-          to: "#/resend-verification",
+          to: "/resend-verification",
           label: "Send a new verification link",
         }}
       />
@@ -121,13 +121,13 @@ export function VerifyEmailPage({ hash }: { hash: string }) {
       description="Enter the password you chose when you signed up to confirm this address. If you signed up more than once, use the password you chose first."
       footer={
         <>
-          <PublicAuthLink to="#/recover-password">
+          <PublicAuthLink to="/recover-password">
             Forgot that password, or didn't sign up? Set a new one
           </PublicAuthLink>
-          <PublicAuthLink to="#/resend-verification">
+          <PublicAuthLink to="/resend-verification">
             Send a new verification link
           </PublicAuthLink>
-          <PublicAuthLink to="#/">Back to sign in</PublicAuthLink>
+          <PublicAuthLink to="/">Back to sign in</PublicAuthLink>
         </>
       }
     >

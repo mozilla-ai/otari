@@ -24,13 +24,13 @@ import { leaveForOAuthProvider } from "./oauthRoundTrip"
 export function OAuthContinueRows({
   providers,
   termsAccepted,
-  returnHash,
+  returnRoute,
   isDisabled = false,
 }: {
   providers: readonly OAuthProvider[]
   termsAccepted: boolean
   /** Where a successful sign-in lands; home when not given. */
-  returnHash?: string
+  returnRoute?: string
   isDisabled?: boolean
 }) {
   const { recordEvent } = useTelemetry()
@@ -47,7 +47,7 @@ export function OAuthContinueRows({
     try {
       const started = await leaveForOAuthProvider(provider, {
         termsAccepted,
-        returnHash,
+        returnRoute,
       })
       if (!started.isOk) {
         recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {

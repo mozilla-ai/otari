@@ -30,7 +30,7 @@ HEALTH_TIMEOUT_SECONDS = 120
 DOCKER_TIMEOUT_SECONDS = 60
 
 _FENCE = re.compile(r"^```bash\n(.*?)^```", re.DOTALL | re.MULTILINE)
-_SETUP_LINK = re.compile(r"^http\S+/#/setup\?key=(otari-mk-\S+)\s*$", re.MULTILINE)
+_SETUP_LINK = re.compile(r"^http\S+/setup#key=(otari-mk-\S+)\s*$", re.MULTILINE)
 _PRINTED_SECRET = re.compile(r"\b(?:otari-mk-|tk-)\S+")
 # Everything a zero-config first start may print besides the setup link itself
 # and uvicorn's access log, which only starts once a request arrives.

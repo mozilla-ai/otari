@@ -251,7 +251,7 @@ async def test_a_member_asks_and_the_managers_are_mailed_once_each(async_db: Asy
     ]
     text = world.mail.sent[0][1].text
     assert "Triage production errors" in text
-    assert "https://otari.example/#/tools/mcp-servers" in text
+    assert "https://otari.example/tools/mcp-servers" in text
 
 
 @pytest.mark.asyncio

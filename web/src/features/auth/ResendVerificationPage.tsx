@@ -15,14 +15,14 @@ import {
 import { readSignInAddress, rememberSignInAddress } from "./signInAddress"
 
 /**
- * `#/resend-verification`: mail a fresh verification link.
+ * `/resend-verification`: mail a fresh verification link.
  *
  * Reached from the check-email page, from a verification link that had already
  * expired, and from the sign-in screen, because the gateway's own refusal for
  * an unverified identity tells the caller to request a new one and would
  * otherwise be a dead end.
  *
- * Enumeration-safe like signup, so success goes to `#/check-email?type=resend`
+ * Enumeration-safe like signup, so success goes to `/check-email?type=resend`
  * without reading the response: the server sends the same sentence whether the
  * address is unknown, already verified, or genuinely just re-sent. The address
  * typed on the page before is filled in, and goes on to the check-email page.
@@ -54,7 +54,7 @@ export function ResendVerificationPage() {
         // like signup, so there is nothing in the response to read.
         recordEvent(TELEMETRY_EVENTS.RESEND_VERIFICATION_CLICKED)
         rememberSignInAddress(email.trim())
-        goToPublicAuthPage("#/check-email?type=resend")
+        goToPublicAuthPage("/check-email?type=resend")
       },
     })
   }
@@ -64,7 +64,7 @@ export function ResendVerificationPage() {
       isBusy={resend.isPending}
       title="Send a new verification link"
       description="Enter the address you signed up with and we will mail a fresh link."
-      footer={<PublicAuthLink to="#/">Back to sign in</PublicAuthLink>}
+      footer={<PublicAuthLink to="/">Back to sign in</PublicAuthLink>}
     >
       <form
         className="flex flex-col gap-4"

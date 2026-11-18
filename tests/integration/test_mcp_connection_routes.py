@@ -136,7 +136,7 @@ def _landing(response: Any) -> dict[str, str]:
     """The dashboard route a callback redirected to, and its query."""
     assert response.status_code == 303, response.text
     location = response.headers["location"]
-    assert location.startswith(f"{ORIGIN}/#/mcp-connections/callback?"), location
+    assert location.startswith(f"{ORIGIN}/mcp-connections/callback?"), location
     return {key: value[0] for key, value in parse_qs(location.partition("?")[2]).items()}
 
 

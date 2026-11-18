@@ -471,7 +471,7 @@ def test_standard_authorization_url_preserves_request_for_consent(client: TestCl
     response = client.get(f"{API_ROOT}/oauth/apps/authorize", params=params, follow_redirects=False)
     assert response.status_code == 302
     assert "no-store" in response.headers["cache-control"]
-    assert response.headers["location"].startswith("/#/oauth/authorize?")
+    assert response.headers["location"].startswith("/oauth/authorize?")
     assert (
         dict((key, values[0]) for key, values in parse_qs(response.headers["location"].split("?", 1)[1]).items())
         == params
@@ -592,4 +592,5 @@ def test_authorization_uses_the_deployments_configured_dashboard(
     )
     response = client.get(f"{API_ROOT}/oauth/apps/authorize", params=params, follow_redirects=False)
     assert response.status_code == 302
-    assert response.headers["location"].startswith("https://example.com/dashboard/?edge=one#/oauth/authorize?")
+    assert response.headers["location"].startswith("https://example.com/dashboard/oauth/authorize?")
+    assert response.headers["location"].endswith("&edge=one")

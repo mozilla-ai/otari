@@ -746,7 +746,7 @@ test("OAuth app consent", async ({ page }) => {
   // An external app's authorization redirect starts a fresh dashboard document.
   await page.goto("about:blank")
   await page.goto(
-    "/#/oauth/authorize?client_id=thunderbolt&redirect_uri=http%3A%2F%2Flocalhost%3A5199%2Foauth%2Fotari",
+    "/oauth/authorize?client_id=thunderbolt&redirect_uri=http%3A%2F%2Flocalhost%3A5199%2Foauth%2Fotari",
   )
   await expect(
     page.getByRole("heading", { name: "Connect to Thunderbolt" }),

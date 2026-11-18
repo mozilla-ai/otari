@@ -1889,9 +1889,9 @@ Unset, `public_base_url` is used.
 - Supply an absolute http(s) URL with no trailing slash.
 - Credentials and fragments are refused, since the value goes into redirects
   and mail.
-- A query string is kept and placed ahead of the hash route in every link
-  (`https://app.example.com/dashboard/?edge=a#/verify-email?token=…`), for an
-  edge that serves one interface for several deployments.
+- A query string is kept and joined to every link's own query, ahead of its
+  fragment (`https://app.example.com/dashboard/verify-email?edge=a#token=…`),
+  for an edge that serves one interface for several deployments.
 
 A dashboard served from a sibling host of this process may hold a session here
 only when that host is listed in `cors_allow_origins`: the session cookie is

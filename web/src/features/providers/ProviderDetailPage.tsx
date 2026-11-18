@@ -25,6 +25,7 @@ import { publicProvidersHref } from "@/features/providers/publicProviders"
 import { ApiError } from "@/shared/api/client"
 import { useCatalogProvider } from "@/shared/api/models"
 import { ProviderMark } from "@/shared/components/marks/BrandMark"
+import { followInAppLink } from "@/shared/helpers/appLocation"
 import { formatContext } from "@/shared/helpers/format"
 import { useUrlState } from "@/shared/helpers/urlState"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
@@ -55,6 +56,7 @@ function modelColumns(
           {publicView ? (
             <a
               href={publicCatalogHref(row.id)}
+              onClick={followInAppLink}
               className="text-body break-words text-link hover:text-link-hover"
             >
               {row.name}
@@ -119,7 +121,11 @@ function BackLink({ publicView }: { publicView: boolean }) {
   return (
     <nav aria-label="Breadcrumb" className="text-caption">
       {publicView ? (
-        <a href={publicProvidersHref()} className={className}>
+        <a
+          href={publicProvidersHref()}
+          onClick={followInAppLink}
+          className={className}
+        >
           ← Providers
         </a>
       ) : (
@@ -141,7 +147,7 @@ export function ProviderDetailView({
   /** The page of the provider's models on screen. */
   list: ProvidersListState
   onListChange: (next: ProvidersListState) => void
-  /** Ahead of a session: links are hash paths, as there is no router. */
+  /** Ahead of a session: links are plain anchors, as there is no router. */
   publicView?: boolean
 }) {
   // The models the selected workspace may call, as the Models page shows them.

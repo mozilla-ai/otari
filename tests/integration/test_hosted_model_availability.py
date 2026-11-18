@@ -155,7 +155,7 @@ def test_a_model_its_provider_refuses_is_switched_off_and_the_operators_are_told
     message = outbox.sent[0][1]
     assert message.subject == "Otari on otari.example.com: openai:gpt-4o switched off"
     assert "non-serverless model gpt-4o" in message.text
-    assert "https://otari.example.com/#/admin/hosted-providers" in message.text
+    assert "https://otari.example.com/admin/hosted-providers" in message.text
     listed = [model["id"] for model in client.get(f"{API_ROOT}/models", headers=hosted).json()["data"]]
     assert "openai/gpt-4o" not in listed
     assert "embedder" in listed

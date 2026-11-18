@@ -25,7 +25,7 @@ interface Props {
   /**
    * Clears the caught state when it changes, the way the router's own boundary
    * takes `getResetKey`. Without one the panel latches: `App` picks the branch
-   * to render from the hash, so following a second emailed link after one of
+   * to render from the URL, so following a second emailed link after one of
    * them threw would keep showing the first link's failure.
    */
   resetKey?: string

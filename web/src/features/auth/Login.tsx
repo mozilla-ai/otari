@@ -22,6 +22,7 @@ import {
   signInWithPasskey,
   startOAuthSignIn,
 } from "@/shared/api/client"
+import { currentRoute } from "@/shared/helpers/appLocation"
 import {
   PasskeyCancelledError,
   supportsPasskeys,
@@ -624,8 +625,8 @@ export function Login() {
         return
       }
       // The sign-in screen renders in place of whatever page was asked for,
-      // so this hash is the link the person followed.
-      rememberOAuthState(started.state, { returnHash: window.location.hash })
+      // so this route is the link the person followed.
+      rememberOAuthState(started.state, { returnRoute: currentRoute() })
       window.location.assign(started.authorizationUrl)
     } catch (caught) {
       recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {
@@ -841,7 +842,7 @@ export function Login() {
                       <div className="col-start-2 row-start-1 flex self-start">
                         <PublicAuthLink
                           isInline
-                          to="#/recover-password"
+                          to="/recover-password"
                           onPress={handOverAddress}
                         >
                           Forgot your password?
@@ -855,7 +856,7 @@ export function Login() {
                   </TextField>
                   {offersResendVerification ? (
                     <PublicAuthLink
-                      to="#/resend-verification"
+                      to="/resend-verification"
                       onPress={handOverAddress}
                     >
                       Send a new verification link
@@ -1008,7 +1009,7 @@ export function Login() {
         </div>
         <div className="otari-auth-actions flex flex-wrap items-center justify-between gap-x-4 border-t border-border pt-2">
           {offersSignup ? (
-            <PublicAuthLink to="#/signup">
+            <PublicAuthLink to="/signup">
               {open_signup ? "Create an account" : "Set your password"}
             </PublicAuthLink>
           ) : null}

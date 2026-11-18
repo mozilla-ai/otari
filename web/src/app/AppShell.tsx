@@ -782,10 +782,10 @@ function AppShellChrome() {
   }, [collapsed])
 
   // Move focus (and scroll) to the page's main region, past the header and the
-  // whole nav. A plain anchor to `#main-content` can't do this: the router runs
-  // on hash history, so that href would register as a route change. Focusing
-  // the ref directly keeps the route intact; `main` carries tabIndex={-1} so it
-  // can accept programmatic focus without joining the tab order.
+  // whole nav. A plain anchor to `#main-content` would leave a fragment in the
+  // address and a history entry under it. Focusing the ref directly keeps the
+  // address intact; `main` carries tabIndex={-1} so it can accept programmatic
+  // focus without joining the tab order.
   const skipToMain = useCallback(
     (event: ReactMouseEvent<HTMLButtonElement>) => {
       event.preventDefault()

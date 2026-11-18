@@ -90,7 +90,7 @@ def test_invite_emails_the_accept_link_when_a_transport_is_configured(
     assert result["accept_link"] is None
     assert "You're invited to join" in caplog.text
     # Absolute, because it has to mean something outside a browser.
-    assert "https://otari.example.com/#/accept-invitation?token=" in caplog.text
+    assert "https://otari.example.com/accept-invitation#token=" in caplog.text
     # The recipient is redacted in the log line even on the success path.
     assert "mailed@example.com" not in caplog.text
 
@@ -108,7 +108,7 @@ def test_invite_is_not_emailed_without_a_public_base_url(
     result = _invite(client, master_key_header, email="relative@example.com")
 
     assert result["mail_sent"] is False
-    assert result["accept_link"].startswith("/#/accept-invitation?token=")
+    assert result["accept_link"].startswith("/accept-invitation#token=")
 
 
 def test_invite_lands_invited_with_no_mail_transport_configured(
@@ -1209,7 +1209,7 @@ def test_an_organization_over_its_invitation_mail_limit_gets_the_links_instead(
     assert len(held) == 1
     # Still invited, with the link to share by hand, and said why.
     assert held[0]["mail_limited"] is True
-    assert held[0]["accept_link"].startswith("https://otari.example.com/#/accept-invitation?token=")
+    assert held[0]["accept_link"].startswith("https://otari.example.com/accept-invitation#token=")
     assert all(row["mail_limited"] is False for row in sent)
     single = _invite(client, master_key_header, email="d@example.com")
     assert single["mail_sent"] is False

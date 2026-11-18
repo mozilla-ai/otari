@@ -43,6 +43,7 @@ import {
   useOrganizationContext,
 } from "@/shared/api/organizations"
 import { ProviderMark } from "@/shared/components/marks/BrandMark"
+import { followInAppLink, routeHref } from "@/shared/helpers/appLocation"
 import {
   formatContext,
   formatRate,
@@ -513,6 +514,7 @@ export function ModelDetailView({
         {publicView ? (
           <a
             href={publicCatalogHref()}
+            onClick={followInAppLink}
             className="text-link hover:text-link-hover"
           >
             ← Models
@@ -551,10 +553,11 @@ export function ModelDetailView({
               // Signup where the deployment offers it, sign-in otherwise; the
               // model is reopened once the new session starts.
               <a
-                href={open_signup ? "#/signup" : "#/"}
-                onClick={() => {
+                href={routeHref(open_signup ? "/signup" : "/")}
+                onClick={(event) => {
                   recordUseModel(model.id)
                   rememberModel(model.id)
+                  followInAppLink(event)
                 }}
                 className={buttonVariants({ variant: "primary" })}
               >

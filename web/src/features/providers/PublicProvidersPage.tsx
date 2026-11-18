@@ -13,13 +13,13 @@ import { readUrlState } from "@/shared/helpers/urlState"
 // The providers pages ahead of a session, where the deployment has opened its
 // catalog (`public_catalog`). Rendered by `DeploymentRoot` before the auth gate,
 // beside `PublicCatalogPage` and under the same bar, so there is no router and
-// no organization: links are hash paths. The page on screen is read off the
-// hash once and then kept in memory, as `PublicCatalogPage` keeps its list.
+// no organization: links are plain anchors. The list on screen is read off the
+// URL once and then kept in memory, as `PublicCatalogPage` keeps its list.
 export function PublicProvidersPage({ name }: { name?: string }) {
   const [list, setList] = useState(() =>
     providersListFromUrl(
       readUrlState(
-        parseSearch(window.location.hash.split("?")[1] ?? ""),
+        parseSearch(window.location.search.replace(/^\?/, "")),
         PROVIDERS_URL_DEFAULTS,
       ),
     ),

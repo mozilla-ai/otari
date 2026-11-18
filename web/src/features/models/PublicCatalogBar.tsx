@@ -8,6 +8,7 @@ import {
   siteHomeHref,
 } from "@/features/models/publicCatalog"
 import { publicProvidersHref } from "@/features/providers/publicProviders"
+import { followInAppLink, routeHref } from "@/shared/helpers/appLocation"
 import { OTARI_COMMUNITY_URL } from "@/shared/helpers/community"
 import { documentationHref } from "@/shared/helpers/docs"
 import { useDeployment } from "@/shared/hooks/useDeployment"
@@ -43,6 +44,7 @@ export function PublicCatalogBar({
     <header className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4 md:px-6">
       <a
         href={siteHomeHref(deployment) || publicCatalogHref()}
+        onClick={followInAppLink}
         aria-label="Otari home"
         className="inline-flex min-h-11 items-center"
       >
@@ -51,6 +53,7 @@ export function PublicCatalogBar({
       <nav aria-label="Site" className="flex items-center gap-1 md:gap-2">
         <a
           href={publicCatalogHref()}
+          onClick={followInAppLink}
           aria-current={current === "models" ? "page" : undefined}
           className={LINK}
         >
@@ -58,6 +61,7 @@ export function PublicCatalogBar({
         </a>
         <a
           href={publicProvidersHref()}
+          onClick={followInAppLink}
           aria-current={current === "providers" ? "page" : undefined}
           className={LINK}
         >
@@ -71,12 +75,13 @@ export function PublicCatalogBar({
         >
           Documentation
         </a>
-        <a href="#/" className={LINK}>
+        <a href={routeHref("/")} onClick={followInAppLink} className={LINK}>
           Log in
         </a>
         {open_signup ? (
           <a
-            href="#/signup"
+            href={routeHref("/signup")}
+            onClick={followInAppLink}
             // An anchor dressed as a button: the phone's 44px floor is keyed
             // on HeroUI's own button slot, so it says so itself.
             className={`${buttonVariants({ size: "sm", variant: "primary" })} max-md:min-h-11`}
@@ -134,7 +139,10 @@ export function PublicCatalogBar({
                   <a
                     href={publicCatalogHref()}
                     aria-current={current === "models" ? "page" : undefined}
-                    onClick={() => setMenuOpen(false)}
+                    onClick={(event) => {
+                      setMenuOpen(false)
+                      followInAppLink(event)
+                    }}
                     className={DRAWER_LINK}
                   >
                     Models
@@ -142,7 +150,10 @@ export function PublicCatalogBar({
                   <a
                     href={publicProvidersHref()}
                     aria-current={current === "providers" ? "page" : undefined}
-                    onClick={() => setMenuOpen(false)}
+                    onClick={(event) => {
+                      setMenuOpen(false)
+                      followInAppLink(event)
+                    }}
                     className={DRAWER_LINK}
                   >
                     Providers
@@ -174,7 +185,11 @@ export function PublicCatalogBar({
                     Discord
                   </a>
                   <hr className="my-2 border-border" />
-                  <a href="#/" className={DRAWER_LINK}>
+                  <a
+                    href={routeHref("/")}
+                    onClick={followInAppLink}
+                    className={DRAWER_LINK}
+                  >
                     Log in
                   </a>
                 </Drawer.Body>

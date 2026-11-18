@@ -59,7 +59,7 @@ Otari 1.0.0 is running at http://localhost:8000
 
 Open this link to choose your password and finish setup:
 
-http://localhost:8000/#/setup?key=otari-mk-...
+http://localhost:8000/setup#key=otari-mk-...
 
 It is shown only once and carries your master key, so treat it like one.
 ```

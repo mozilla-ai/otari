@@ -66,7 +66,7 @@ _FIRST_START = (
     "\n"
     "Open this link to choose your password and finish setup:\n"
     "\n"
-    "http://localhost:8000/#/setup?key=otari-mk-abc_DEF-123\n"
+    "http://localhost:8000/setup#key=otari-mk-abc_DEF-123\n"
     "\n"
     "It is shown only once and carries your master key, so treat it like one.\n"
     "\n"

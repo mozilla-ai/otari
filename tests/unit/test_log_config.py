@@ -118,10 +118,10 @@ def test_log_secret_still_prints_the_one_time_key(configured_logger: io.StringIO
 def test_a_record_marked_as_carrying_a_credential_is_left_alone(configured_logger: io.StringIO) -> None:
     """The console mail transport's links are the point of that transport."""
     log_config.logger.warning(
-        "Accept: https://otari.example.com/#/accept-invitation?token=abc123", extra=log_config.CARRIES_CREDENTIAL
+        "Accept: https://otari.example.com/accept-invitation#token=abc123", extra=log_config.CARRIES_CREDENTIAL
     )
 
-    assert "accept-invitation?token=abc123" in configured_logger.getvalue()
+    assert "accept-invitation#token=abc123" in configured_logger.getvalue()
 
 
 def test_a_reference_to_where_a_credential_comes_from_is_kept(configured_logger: io.StringIO) -> None:
@@ -259,7 +259,7 @@ def test_uvicorn_lifecycle_lines_print_only_when_debugging() -> None:
 
 
 def test_log_plain_prints_lines_without_columns_or_wrapping(captured_logger: io.StringIO) -> None:
-    link = "http://localhost:8000/#/setup?key=" + LONG_SECRET
+    link = "http://localhost:8000/setup#key=" + LONG_SECRET
 
     log_config.log_plain("Open this link:", link, level=logging.WARNING)
 

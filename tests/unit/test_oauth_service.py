@@ -239,14 +239,14 @@ class TestRedirectUri:
 
         assert oauth_service.redirect_uri(config, "google") == "https://example.com/otari/auth/google/callback"
         assert oauth_service.callback_landing_target(config, "google", "code=x") == (
-            "https://example.com/otari/#/auth/google/callback?code=x"
+            "https://example.com/otari/sign-in/google/callback?code=x"
         )
 
     def test_the_landing_target_carries_the_query_or_nothing(self) -> None:
         config = configured()
 
         assert oauth_service.callback_landing_target(config, "github", "") == (
-            "https://otari.example.com/#/auth/github/callback"
+            "https://otari.example.com/sign-in/github/callback"
         )
 
     def test_a_trailing_slash_on_the_base_url_does_not_double_up(self) -> None:
@@ -266,7 +266,7 @@ class TestWhereTheBrowserLands:
 
         assert oauth_service.redirect_uri(config, "google") == "https://api.example.com/auth/google/callback"
         assert oauth_service.callback_landing_target(config, "google", "code=x") == (
-            "https://app.example.com/ui/#/auth/google/callback?code=x"
+            "https://app.example.com/ui/sign-in/google/callback?code=x"
         )
 
     def test_an_unset_ui_base_url_lands_back_on_this_process(self) -> None:
@@ -274,7 +274,7 @@ class TestWhereTheBrowserLands:
         config = configured(public_base_url="https://otari.example.com")
 
         assert oauth_service.callback_landing_target(config, "google", "") == (
-            "https://otari.example.com/#/auth/google/callback"
+            "https://otari.example.com/sign-in/google/callback"
         )
 
     def test_the_fallback_belongs_to_the_config_not_to_one_caller(self) -> None:
@@ -294,24 +294,24 @@ class TestWhereTheBrowserLands:
 
         assert config.effective_ui_base_url == "https://otari.example.com"
 
-    def test_a_query_on_the_ui_base_url_lands_ahead_of_the_hash_route(self) -> None:
-        # The same composition ``Mailer.link`` uses: the interface's own query
-        # stays in the page's location, and the provider's query stays on the
-        # route, so the state check reads the one it stored.
+    def test_a_query_on_the_ui_base_url_joins_the_providers_query(self) -> None:
+        # The same composition ``Mailer.link`` uses: the interface's own query is
+        # appended to the provider's, which keeps its parameters as sent, so the
+        # state check reads the one it stored.
         config = configured(ui_base_url="https://app.example.com/ui/?edge=eu")
 
         assert oauth_service.callback_landing_target(config, "google", "code=x&state=s") == (
-            "https://app.example.com/ui/?edge=eu#/auth/google/callback?code=x&state=s"
+            "https://app.example.com/ui/sign-in/google/callback?code=x&state=s&edge=eu"
         )
         assert oauth_service.callback_landing_target(config, "google", "") == (
-            "https://app.example.com/ui/?edge=eu#/auth/google/callback"
+            "https://app.example.com/ui/sign-in/google/callback?edge=eu"
         )
 
     def test_a_trailing_slash_on_the_ui_base_url_does_not_double_up(self) -> None:
         config = configured(ui_base_url="https://app.example.com/")
 
         assert oauth_service.callback_landing_target(config, "google", "") == (
-            "https://app.example.com/#/auth/google/callback"
+            "https://app.example.com/sign-in/google/callback"
         )
 
 
@@ -334,8 +334,8 @@ class TestRejectingAUiBaseUrlABrowserCouldNotFollow:
 
     @pytest.mark.parametrize("value", ["https://app.example.com/#", "https://app.example.com/#/x"])
     def test_a_fragment_is_refused(self, value: str) -> None:
-        # The hash route is appended to this value, so a second '#' can match no
-        # route and the authorization code is dropped without a word.
+        # Every link's path is appended to this value, so a fragment here would
+        # swallow it and the authorization code would be dropped without a word.
         with pytest.raises(ValidationError, match="fragment"):
             GatewayConfig(ui_base_url=value)
 
@@ -349,7 +349,7 @@ class TestRejectingAUiBaseUrlABrowserCouldNotFollow:
         assert config.ui_base_url == "https://app.example.com/ui?edge=team/"
         assert config.effective_ui_base_url == "https://app.example.com/ui?edge=team/"
         assert oauth_service.callback_landing_target(config, "google", "code=x") == (
-            "https://app.example.com/ui/?edge=team/#/auth/google/callback?code=x"
+            "https://app.example.com/ui/sign-in/google/callback?code=x&edge=team/"
         )
         assert GatewayConfig(public_base_url="https://otari.example.com/?edge=team/").effective_ui_base_url == (
             "https://otari.example.com?edge=team/"

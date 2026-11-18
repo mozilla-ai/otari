@@ -1,7 +1,8 @@
 import { type SsoStartResult, startSsoSignIn } from "@/shared/api/client"
+import { routeWithoutFragment } from "@/shared/helpers/appLocation"
 
 import { goToPublicAuthPage } from "./PublicAuthLayout"
-import { resolveSignInReturnHash } from "./publicAuthPaths"
+import { resolveSignInReturnRoute } from "./publicAuthPaths"
 
 /**
  * Where the CSRF `state`, the organization's slug and the terms acceptance
@@ -15,14 +16,14 @@ const STATE_KEY = "otari.sso.state"
 const SLUG_KEY = "otari.sso.slug"
 const NAME_KEY = "otari.sso.name"
 const TERMS_KEY = "otari.sso.terms-accepted"
-const RETURN_KEY = "otari.sso.return-hash"
+const RETURN_KEY = "otari.sso.return-route"
 
 interface RoundTripOptions {
   termsAccepted?: boolean
   /** The organization's own name, to show on returning rather than its slug. */
   organizationName?: string
   /** Home unless the page starting the round trip stands in for another. */
-  returnHash?: string
+  returnRoute?: string
 }
 
 /** Remember the slug, the state, the terms acceptance and the page to return to, for the round trip about to start. */
@@ -31,7 +32,7 @@ export function rememberSsoState(
   state: string,
   {
     termsAccepted = false,
-    returnHash = "#/",
+    returnRoute = "/",
     organizationName,
   }: RoundTripOptions = {},
 ): void {
@@ -49,7 +50,10 @@ export function rememberSsoState(
   }
   window.sessionStorage.removeItem(RETURN_KEY)
   try {
-    window.sessionStorage.setItem(RETURN_KEY, returnHash)
+    // A page's path and query, never its fragment, which is where a link's
+    // secret rides: what is kept here names a page and authorizes nothing.
+    // codeql[js/clear-text-storage-of-sensitive-data]
+    window.sessionStorage.setItem(RETURN_KEY, routeWithoutFragment(returnRoute))
   } catch {
     // Storage full: the sign-in still starts, and lands on the home page.
   }
@@ -77,10 +81,10 @@ export function takeSsoState(): {
  * Take the page to return to, cleared with the state whatever the outcome, and
  * checked on the way out: storage is not a source to navigate on unchecked.
  */
-export function takeSsoReturnHash(): string {
+export function takeSsoReturnRoute(): string {
   const stored = window.sessionStorage.getItem(RETURN_KEY) ?? ""
   window.sessionStorage.removeItem(RETURN_KEY)
-  return resolveSignInReturnHash(stored)
+  return resolveSignInReturnRoute(stored)
 }
 
 /**
@@ -97,7 +101,7 @@ export async function leaveForSsoConnection(
   const started = await startSsoSignIn(slug)
   if (started.isOk) {
     rememberSsoState(slug, started.state, options)
-    goToPublicAuthPage(`#/sso/${encodeURIComponent(slug)}`)
+    goToPublicAuthPage(`/sso/${encodeURIComponent(slug)}`)
     window.location.assign(started.authorizationUrl)
   }
   return started

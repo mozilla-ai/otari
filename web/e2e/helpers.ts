@@ -163,10 +163,10 @@ export async function dismissSetupGuide(page: Page): Promise<void> {
   }
 }
 
-// Open a client route directly. The router runs on hash history, so a
-// filtered view is a hash URL and its query string is what `useUrlState` reads.
+// Open a client route directly: a reload of that address, so its query string
+// is what `useUrlState` reads.
 export async function gotoRoute(page: Page, route: string): Promise<void> {
-  await page.goto(`/#${route}`)
+  await page.goto(route)
 }
 
 // Fail with the server's own body rather than a bare status code: a 422 from the

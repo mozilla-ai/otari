@@ -1,17 +1,18 @@
 import type { DeploymentBootstrap } from "@/client"
+import { routeHref, routePath } from "@/shared/helpers/appLocation"
 
 /**
- * Which catalog page a hash names, for the render ahead of a session.
+ * Which catalog page a route names, for the render ahead of a session.
  *
- * `#/models` is the list, `#/models/<id>` a selected model; anything else is
+ * `/models` is the list, `/models/<id>` a selected model; anything else is
  * not the public catalog's to answer. Matched on the path alone, so a query
  * string (`?provider=…`) cannot make a known path unrecognizable, the way
  * `publicAuthPath` reads its own table.
  */
 export function publicCatalogPath(
-  hash: string,
+  route: string,
 ): { modelId: string | undefined } | null {
-  const path = hash.replace(/^#/, "").split("?")[0] ?? ""
+  const path = routePath(route)
   if (path === "/models" || path === "/models/") {
     return { modelId: undefined }
   }
@@ -22,15 +23,20 @@ export function publicCatalogPath(
   try {
     return { modelId: decodeURIComponent(match[1] ?? "") }
   } catch {
-    // A malformed escape (`#/models/%`) is not a model id; it is not the
-    // public catalog's hash at all.
+    // A malformed escape (`/models/%`) is not a model id; it is not the
+    // public catalog's route at all.
     return null
   }
 }
 
-/** The hash a public catalog link points at. */
+/** The route a public catalog link points at. */
+export function publicCatalogRoute(modelId?: string): string {
+  return modelId ? `/models/${modelId}` : "/models"
+}
+
+/** The href a public catalog link points at. */
 export function publicCatalogHref(modelId?: string): string {
-  return modelId ? `#/models/${modelId}` : "#/models"
+  return routeHref(publicCatalogRoute(modelId))
 }
 
 /**

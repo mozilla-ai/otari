@@ -27,7 +27,7 @@ const KEY_REFUSED =
   "The gateway did not accept that setup link. Use the link from its most recent first start, or sign in."
 
 /**
- * `#/setup?key=…`: where the first-run link in the gateway's log lands.
+ * `/setup#key=…`: where the first-run link in the gateway's log lands.
  *
  * The key in the link is the generated master key, so this is the existing
  * claim with nothing typed twice: the key signs in (`POST /v1/auth/session`),
@@ -36,12 +36,12 @@ const KEY_REFUSED =
  * cannot do that (the gateway is already claimed, or the key is missing or
  * refused) hands the sign-in screen one line saying so.
  */
-export function SetupPage({ hash }: { hash: string }) {
+export function SetupPage({ route }: { route: string }) {
   const { sign_in_methods } = useDeployment()
   const { isAuthenticated, login } = useAuth()
   const retireMasterKeySignIn = useRetireMasterKeySignIn()
   const setPassword = useSetPassword()
-  const [key] = useState(() => captureSetupKey(hash))
+  const [key] = useState(() => captureSetupKey(route))
   // Decided once, on arrival: claiming flips `sign_in_methods` under this page.
   const [refusal] = useState(() =>
     !sign_in_methods.includes("master_key")
@@ -66,7 +66,7 @@ export function SetupPage({ hash }: { hash: string }) {
     if (!isAuthenticated) {
       rememberSignInNotice(refusal)
     }
-    replacePublicAuthPage("#/")
+    replacePublicAuthPage("/")
   }, [refusal, isAuthenticated])
 
   if (refusal !== null || key === null) {
@@ -88,7 +88,7 @@ export function SetupPage({ hash }: { hash: string }) {
         if (!session.isOk) {
           forgetSetupKey()
           rememberSignInNotice(KEY_REFUSED)
-          replacePublicAuthPage("#/")
+          replacePublicAuthPage("/")
           return
         }
         hasSession.current = true
@@ -102,7 +102,7 @@ export function SetupPage({ hash }: { hash: string }) {
         retireMasterKeySignIn()
       }
       login()
-      replacePublicAuthPage("#/")
+      replacePublicAuthPage("/")
     } catch (caught) {
       setError(caught)
     } finally {

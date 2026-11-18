@@ -11,7 +11,7 @@ from gateway.services.mail import MailMessage
 from gateway.services.organizations._invitation_email import render_invitation_email
 from gateway.services.organizations._invitation_facts import InvitationFacts
 
-_ACCEPT_LINK = "https://otari.example.com/#/accept-invitation?token=abc"
+_ACCEPT_LINK = "https://otari.example.com/accept-invitation#token=abc"
 _EXPIRES_AT = datetime(2026, 11, 20, 14, 5, tzinfo=UTC)
 _EXPIRY = "The invitation expires on 20 November 2026 at 14:05 UTC."
 _JOINING = (

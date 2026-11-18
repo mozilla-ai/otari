@@ -16,7 +16,7 @@ import { LoginPageShell } from "./LoginPageShell"
 
 /** Consent stays behind the dashboard's normal session gate. */
 export function AppAuthorizationPage() {
-  const params = new URLSearchParams(window.location.hash.split("?")[1] ?? "")
+  const params = new URLSearchParams(window.location.search)
   const [workspace, setWorkspace] = useState<Workspace>()
   const [search, setSearch] = useState("")
   const app = useOAuthApp(
