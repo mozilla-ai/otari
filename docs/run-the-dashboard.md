@@ -204,6 +204,11 @@ no rate, because a request that would run it is refused. See
 
 ## The setup guide
 
+The guide creates its API key only when you ask for one. Reopened after that,
+it offers the key it already issued, named by its last characters, instead of
+a new one: **Use it** keeps that key, and **Replace it** issues a new one and
+the old key stops working.
+
 Set `activation_guide: false` to turn off the Overview's
 setup guide for the deployment.
 

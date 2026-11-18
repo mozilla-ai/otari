@@ -150,10 +150,18 @@ function renderGuide(
   canServeRequests = true,
   deployment: DeploymentBootstrap = bootstrap(),
 ) {
+  return renderGuideWithClient(canServeRequests, deployment)
+}
+
+/** The guide, with the query client a test can refetch through. */
+async function renderGuideWithClient(
+  canServeRequests = true,
+  deployment: DeploymentBootstrap = bootstrap(),
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return renderWithRouter(
+  const rendered = await renderWithRouter(
     <QueryClientProvider client={client}>
       <DeploymentProvider value={deployment}>
         <SelectedWorkspaceProvider>
@@ -163,6 +171,7 @@ function renderGuide(
       </DeploymentProvider>
     </QueryClientProvider>,
   )
+  return Object.assign(rendered, { queryClient: client })
 }
 
 /** The snippet on screen, which is a code block rather than a form field. */
@@ -622,6 +631,83 @@ describe("SetupGuide", () => {
     )
     expect(await screen.findByDisplayValue(OTHER_KEY)).toBeInTheDocument()
     expect(screen.queryByDisplayValue(KEY)).not.toBeInTheDocument()
+  })
+
+  describe("return after step 2", () => {
+    const issued = {
+      key_id: "88888888-8888-8888-8888-888888888888",
+      key_prefix: "gw-setup-g",
+      key_suffix: "JYnT",
+    }
+
+    it("offers the key already issued and keeps it without minting", async () => {
+      const fetchMock = mockApi({
+        activation: workspaceActivation({ issued_key: issued }),
+      })
+      const user = userEvent.setup()
+      await renderGuide()
+
+      expect(
+        await screen.findByText(/You already have a setup key/),
+      ).toHaveTextContent("You already have a setup key ending ••JYnT.")
+      expect(
+        screen.queryByRole("button", { name: "Create API key" }),
+      ).not.toBeInTheDocument()
+      expect(screen.getByText("The old key stops working.")).toBeVisible()
+      expect(screen.queryByText(/The examples read it from/)).toBeNull()
+
+      await user.click(screen.getByRole("button", { name: "Use it" }))
+
+      expect(await screen.findByText(/Using your setup key/)).toHaveTextContent(
+        "Using your setup key ending ••JYnT.",
+      )
+      expect(screen.getByText("Listening for your first request")).toBeVisible()
+      await user.click(screen.getByRole("button", { name: "cURL" }))
+      expect(snippet("curl")).toHaveTextContent("Bearer $OTARI_API_KEY")
+      expect(snippet("curl")).not.toHaveTextContent("export OTARI_API_KEY")
+      expect(mintCalls(fetchMock)).toHaveLength(0)
+    })
+
+    it("withdraws the choice once the key is rotated elsewhere", async () => {
+      const api = mockApi({
+        activation: workspaceActivation({ issued_key: issued }),
+      })
+      const user = userEvent.setup()
+      const { queryClient } = await renderGuideWithClient()
+
+      await user.click(await screen.findByRole("button", { name: "Use it" }))
+      await screen.findByText(/Using your setup key/)
+
+      api.setActivation(
+        workspaceActivation({ issued_key: { ...issued, key_suffix: "Q9zX" } }),
+      )
+      await act(() => queryClient.refetchQueries())
+
+      expect(
+        await screen.findByText(/You already have a setup key/),
+      ).toHaveTextContent("You already have a setup key ending ••Q9zX.")
+      expect(screen.getByRole("button", { name: "Use it" })).toBeVisible()
+    })
+
+    it("replaces the key only when asked, and shows the new one", async () => {
+      const fetchMock = mockApi({
+        activation: workspaceActivation({ issued_key: issued }),
+      })
+      const user = userEvent.setup()
+      await renderGuide()
+
+      await user.click(
+        await screen.findByRole("button", { name: "Replace it" }),
+      )
+
+      expect(await screen.findByLabelText("Your API key")).toHaveValue(
+        CONCEALED_KEY,
+      )
+      expect(mintCalls(fetchMock)).toHaveLength(1)
+      expect(
+        screen.queryByText(/You already have a setup key/),
+      ).not.toBeInTheDocument()
+    })
   })
 
   it("skipping retires the guide for the workspace and takes the sheet away", async () => {

@@ -639,6 +639,7 @@ export function workspaceActivation(
     latest_attempt: null,
     experience_eligible: true,
     dismissed: false,
+    issued_key: null,
     ...overrides,
   }
 }

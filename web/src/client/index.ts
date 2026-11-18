@@ -705,6 +705,7 @@ export type WorkspaceProviderPolicy = Schemas["WorkspaceProviderPolicyPublic"]
 export type WorkspaceActivation = Schemas["WorkspaceActivationPublic"]
 export type ActivationAttempt = Schemas["ActivationAttemptPublic"]
 export type ActivationApiKey = Schemas["ActivationApiKeyPublic"]
+export type ActivationIssuedKey = Schemas["ActivationIssuedKeyPublic"]
 /** The failure classes the guide's copy is written for. */
 export type ActivationErrorCategory = NonNullable<
   ActivationAttempt["error_category"]

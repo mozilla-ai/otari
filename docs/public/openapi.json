@@ -277,6 +277,44 @@
         "title": "ActivationAttemptPublic",
         "type": "object"
       },
+      "ActivationIssuedKeyPublic": {
+        "description": "The setup key the guide already issued, identified as the Keys page lists it. Never its plaintext.",
+        "properties": {
+          "key_id": {
+            "title": "Key Id",
+            "type": "string"
+          },
+          "key_prefix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Prefix"
+          },
+          "key_suffix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Suffix"
+          }
+        },
+        "required": [
+          "key_id",
+          "key_prefix",
+          "key_suffix"
+        ],
+        "title": "ActivationIssuedKeyPublic",
+        "type": "object"
+      },
       "ActiveOrganizationMemberCreateRequest": {
         "description": "Add someone to the caller's organization, optionally into workspaces at once.",
         "properties": {
@@ -30911,6 +30949,17 @@
             "description": "Whether the dashboard should offer the guide to this caller right now: the deployment has it enabled, the workspace is classified for it, nobody dismissed it, no request has succeeded yet, and the caller may manage the workspace.",
             "title": "Experience Eligible",
             "type": "boolean"
+          },
+          "issued_key": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivationIssuedKeyPublic"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The setup key the guide already issued, so a reopened guide can offer it instead of rotating it. Null until one is issued, once it is revoked, deleted or expired, when the caller is not the one it was issued to, and whenever the guide is not offered to this caller."
           },
           "latest_attempt": {
             "anyOf": [
