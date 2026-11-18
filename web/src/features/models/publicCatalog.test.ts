@@ -9,21 +9,21 @@ import {
 
 describe("publicCatalogPath", () => {
   it("names the list and a selected model", () => {
-    expect(publicCatalogPath("#/models")).toEqual({ modelId: undefined })
-    expect(publicCatalogPath("#/models/")).toEqual({ modelId: undefined })
-    expect(publicCatalogPath("#/models/z-ai/glm-5.3")).toEqual({
+    expect(publicCatalogPath("/models")).toEqual({ modelId: undefined })
+    expect(publicCatalogPath("/models/")).toEqual({ modelId: undefined })
+    expect(publicCatalogPath("/models/z-ai/glm-5.3")).toEqual({
       modelId: "z-ai/glm-5.3",
     })
   })
 
   it("ignores a query string and refuses everything else", () => {
-    expect(publicCatalogPath("#/models?provider=nebius")).toEqual({
+    expect(publicCatalogPath("/models?provider=nebius")).toEqual({
       modelId: undefined,
     })
-    expect(publicCatalogPath("#/")).toBeNull()
-    expect(publicCatalogPath("#/keys")).toBeNull()
+    expect(publicCatalogPath("/")).toBeNull()
+    expect(publicCatalogPath("/keys")).toBeNull()
     // A malformed percent escape is not a model id, and decoding one throws.
-    expect(publicCatalogPath("#/models/%")).toBeNull()
+    expect(publicCatalogPath("/models/%")).toBeNull()
   })
 
   it("round-trips through the href", () => {
@@ -32,7 +32,7 @@ describe("publicCatalogPath", () => {
     ).toEqual({
       modelId: "moonshotai/kimi-k2.6",
     })
-    expect(publicCatalogHref()).toBe("#/models")
+    expect(publicCatalogHref()).toBe("/models")
   })
 })
 

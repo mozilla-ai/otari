@@ -253,13 +253,14 @@ def apply_override(config: GatewayConfig, key: str, value: SettingValue) -> None
     setattr(config, key, value)
 
 
-async def apply_overrides_from_db(config: GatewayConfig, session: AsyncSession) -> None:
-    """Load persisted tool overrides and apply them to ``config`` at startup."""
+async def apply_overrides_from_db(config: GatewayConfig, session: AsyncSession) -> dict[str, SettingValue]:
+    """Load persisted tool overrides, apply them to ``config`` at startup, and return them."""
     overrides = await load_overrides(session)
     for key, value in overrides.items():
         apply_override(config, key, value)
         # Key only: a *_url override value may embed credentials; keep it out of logs.
         logger.info("Applied tool setting override %s", key)
+    return overrides
 
 
 async def stage_override(session: AsyncSession, key: str, value: SettingValue) -> SettingValue:

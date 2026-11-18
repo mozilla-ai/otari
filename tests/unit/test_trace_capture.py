@@ -177,17 +177,54 @@ def test_a_span_that_cannot_be_built_is_dropped_never_raised() -> None:
 def test_a_tool_name_that_is_not_an_identifier_is_kept_out_of_the_span() -> None:
     trace = _trace()
 
-    trace.record_tool_call(tool_name="delete all the files", tool_type="mcp", started=_T0, ok=True)
+    trace.record_tool_call(tool_name="delete all the files", tool_type="mcp", started=_T0, ok=True, arguments=None)
 
     [span] = trace.spans
     assert (span.name, span.tool_name) == ("execute_tool", None)
+
+
+def test_an_mcp_tool_call_names_the_server_that_owns_the_tool() -> None:
+    trace = _trace()
+
+    trace.record_tool_call(
+        tool_name="search_issues", tool_type="mcp", started=_T0, ok=True, arguments=None, mcp_server="github"
+    )
+    trace.record_tool_call(
+        tool_name="search_issues", tool_type="mcp", started=_T0, ok=True, arguments=None, mcp_server="not safe!"
+    )
+    trace.record_tool_call(tool_name="web_search", tool_type="web_search", started=_T0, ok=True, arguments=None)
+
+    assert [span.attributes.get("otari.mcp.server") for span in trace.spans] == ["github", None, None]
+
+
+def test_a_guardrail_span_keeps_where_it_ran_and_what_it_withheld() -> None:
+    trace = _trace()
+    trace.record_guardrail(
+        profile="pii",
+        mode="block",
+        valid=False,
+        started=_T0,
+        ended=_T0,
+        event="after_tool",
+        tool="web_search",
+        withheld=True,
+    )
+
+    [span] = trace.spans
+    assert span.attributes == {
+        "otari.guardrail.profile": "pii",
+        "otari.guardrail.mode": "block",
+        "otari.guardrail.event": "after_tool",
+        "otari.guardrail.tool": "web_search",
+        "otari.guardrail.action": "withheld",
+    }
 
 
 def test_spans_past_the_cap_are_counted_not_kept() -> None:
     trace = _trace(max_spans=2)
 
     for _ in range(5):
-        trace.record_tool_call(tool_name="Bash", tool_type="mcp", started=_T0, ok=True)
+        trace.record_tool_call(tool_name="Bash", tool_type="mcp", started=_T0, ok=True, arguments=None)
 
     assert (len(trace.spans), trace.dropped) == (2, 3)
 
@@ -456,6 +493,41 @@ async def test_an_unreachable_database_drops_the_batch_without_retrying_each_tra
 
     assert store.write.await_count == 1
     assert _dropped("store_error") - before == 6
+
+
+class _Deadlock(Exception):
+    sqlstate = "40P01"
+
+
+@pytest.mark.asyncio
+async def test_a_batch_chosen_as_a_deadlocks_victim_is_written_again_once() -> None:
+    """A workspace deleted as its content is stored can deadlock; losing must not drop every tenant's spans."""
+    deadlock = OperationalError("INSERT", {}, _Deadlock("deadlock detected"))
+    store = AsyncMock()
+    store.write.side_effect = [deadlock, WriteResult(accepted=4)]
+    writer = _writer(store, interval_s=60.0, batch_spans=100)
+    before = _dropped("store_error")
+    writer.submit(_write(2, "a"))
+    writer.submit(_write(2, "b"))
+    await writer.start()
+    await writer.stop()
+
+    assert store.write.await_count == 2
+    assert _dropped("store_error") - before == 0
+
+
+@pytest.mark.asyncio
+async def test_a_batch_that_deadlocks_twice_is_dropped() -> None:
+    store = AsyncMock()
+    store.write.side_effect = OperationalError("INSERT", {}, _Deadlock("deadlock detected"))
+    writer = _writer(store, interval_s=60.0, batch_spans=100)
+    before = _dropped("store_error")
+    writer.submit(_write(2, "a"))
+    await writer.start()
+    await writer.stop()
+
+    assert store.write.await_count == 2
+    assert _dropped("store_error") - before == 2
 
 
 @pytest.mark.asyncio

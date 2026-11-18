@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.adapters.model_provider_adapter import HostedProviderModelProviderAdapter
+from gateway.api.deps import build_model_metadata_override_service
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.providers_exceptions import (
@@ -42,6 +43,7 @@ from gateway.repositories.pricing import ModelPricingRepository, OrganizationMod
 from gateway.repositories.providers import (
     HostedProviderModelRepository,
     HostedProviderRepository,
+    HostedProviderVendorRepository,
     ProviderEndpointRepository,
 )
 from gateway.repositories.tenancy import OrganizationRepository, OrgProviderKeyRepository, WorkspaceRepository
@@ -57,6 +59,7 @@ from gateway.services.pricing_service import configure_default_pricing
 from gateway.services.providers import HostedProviderService, HostedSources
 from gateway.services.providers._hosted_catalog import KEEP_FETCH_TOOL, KEEP_OWNED_ENDPOINT
 from gateway.services.secret_box import generate_secret_key
+from gateway.types.models_dev import parse_catalog_v2
 
 pytestmark = pytest.mark.asyncio
 
@@ -84,12 +87,14 @@ def _service(db: AsyncSession, config: GatewayConfig | None = None) -> HostedPro
         providers=providers,
         sources=HostedSources(config, providers),
         models=HostedProviderModelRepository(uow),
+        vendors=HostedProviderVendorRepository(uow),
         endpoints=ProviderEndpointRepository(uow),
         pricing=DeploymentPricingService(
             uow, pricing=ModelPricingRepository(uow), overrides=OrganizationModelPricingRepository(uow)
         ),
         live_byo_pairs=OrgProviderKeyRepository(uow).live_provider_pairs,
         organization_exists=OrganizationRepository(uow).exists,
+        metadata_overrides=build_model_metadata_override_service(uow),
     )
 
 
@@ -128,7 +133,7 @@ def _defaults(monkeypatch: pytest.MonkeyPatch, rates: dict[str, tuple[str, str]]
             input_price_per_million=Decimal(input_rate),
             output_price_per_million=Decimal(output_rate),
             pricing_tiers=[],
-            unit="tokens",
+            unit="token",
         )
 
     monkeypatch.setattr(DATASET, _stub)
@@ -162,7 +167,7 @@ async def _price(
             input_price_per_million=Decimal(input_rate),
             output_price_per_million=Decimal(output_rate),
             pricing_tiers=[],
-            unit="tokens",
+            unit="token",
             origin=origin,
         )
     )
@@ -185,7 +190,7 @@ async def _override(db: AsyncSession, organization: Organization, model_key: str
             input_price_per_million=Decimal("1"),
             output_price_per_million=Decimal("2"),
             pricing_tiers=[],
-            unit="tokens",
+            unit="token",
             origin=API_ORIGIN,
             effective_from=datetime(2026, 1, 1, tzinfo=UTC),
         )
@@ -492,6 +497,39 @@ async def test_the_model_list_carries_each_models_current_price(
     assert by_model["unpriced"].enabled is False
 
 
+async def test_each_offered_model_names_its_kind_and_the_list_shows_one_kind(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    models_dev = parse_catalog_v2({"openai": {"models": {"gpt-4o": {"type": "chat"}, "dall-e-3": {"type": "image"}}}})
+    monkeypatch.setattr(
+        "gateway.services.providers._hosted_provider_service.cached_models_dev_catalog", lambda: models_dev
+    )
+    service = _service(async_db)
+    await _provider(service, monkeypatch, "gpt-4o", "dall-e-3", "mystery")
+
+    listed = await service.list_models("openai")
+    assert {model.model: model.type for model in listed.data} == {
+        "dall-e-3": "image",
+        "gpt-4o": "chat",
+        "mystery": None,
+    }
+    assert listed.type_counts == {"image": 1, "chat": 1, "unknown": 1}
+
+    chat = await service.list_models("openai", model_type="chat")
+    assert ([model.model for model in chat.data], chat.count) == (["gpt-4o"], 1)
+    assert chat.type_counts == listed.type_counts
+
+    searched = await service.list_models("openai", search="DALL")
+    assert ([model.model for model in searched.data], searched.count) == (["dall-e-3"], 1)
+    assert searched.type_counts == {"image": 1}
+
+    served = await service.list_models("openai", enabled=True)
+    withheld = await service.list_models("openai", enabled=False)
+    assert [model.model for model in served.data] == [model.model for model in listed.data if model.enabled]
+    assert [model.model for model in withheld.data] == [model.model for model in listed.data if not model.enabled]
+    assert withheld.count == len(withheld.data) > 0
+
+
 async def test_adding_a_model_prices_it_at_what_was_asked(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -524,16 +562,16 @@ async def test_a_model_can_be_priced_per_request(async_db: AsyncSession, monkeyp
     added = await service.add_model(
         "openai",
         HostedModelCreateRequest(
-            model="rerank", input_price_per_million=2000, output_price_per_million=0, unit="requests"
+            model="rerank", input_price_per_million=2000, output_price_per_million=0, unit="request"
         ),
     )
     repriced = await service.update_model(
         "openai", added.id, HostedModelUpdateRequest(input_price_per_million=3000, output_price_per_million=0)
     )
 
-    assert (added.unit, added.input_price_per_million) == ("requests", 2000.0)
-    assert (repriced.unit, repriced.input_price_per_million) == ("requests", 3000.0)
-    assert {version.unit for version in await _versions(async_db, "openai:rerank")} == {"requests"}
+    assert (added.unit, added.input_price_per_million) == ("request", 2000.0)
+    assert (repriced.unit, repriced.input_price_per_million) == ("request", 3000.0)
+    assert {version.unit for version in await _versions(async_db, "openai:rerank")} == {"request"}
 
 
 async def test_an_offer_without_a_price_seeds_the_default(
@@ -638,7 +676,7 @@ async def test_new_base_rates_drop_a_seeds_tiers_and_carry_an_operators(
             input_price_per_million=Decimal("2.5"),
             output_price_per_million=Decimal("10"),
             pricing_tiers=[tier],
-            unit="tokens",
+            unit="token",
         )
 
     monkeypatch.setattr(DATASET, _tiered)

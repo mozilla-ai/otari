@@ -41,7 +41,7 @@ type Story = StoryObj<typeof meta>
 
 const POLICIES = [
   { name: "fast", serves: "openai:gpt-5-mini  +1 on failure" },
-  { name: "cheap", serves: "Learned · 2 candidates, openai:gpt-5 by default" },
+  { name: "cheap", serves: "Priority · 2 candidates, openai:gpt-5 by default" },
   { name: "balanced", serves: "Weighted · 70% / 30% across 2 models" },
   { name: "strict", serves: "anthropic:claude-sonnet-4-5" },
 ]
@@ -237,7 +237,7 @@ export const DetailShown: Story = {
       detail={
         <div className="flex flex-col gap-4 px-4 py-5">
           <h2 className="text-title">cheap</h2>
-          <Facts serves="Learned · 2 candidates, openai:gpt-5 by default" />
+          <Facts serves="Priority · 2 candidates, openai:gpt-5 by default" />
         </div>
       }
     />
@@ -264,7 +264,7 @@ export const Dark: Story = {
       detail={
         <div className="flex flex-col gap-4 px-4 py-5">
           <h2 className="text-title">cheap</h2>
-          <Facts serves="Learned · 2 candidates, openai:gpt-5 by default" />
+          <Facts serves="Priority · 2 candidates, openai:gpt-5 by default" />
         </div>
       }
     />

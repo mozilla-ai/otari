@@ -11,8 +11,9 @@ token exchange that names it.
 Verification is apron-auth's (``apron_auth.workload``): the signature against
 the issuer's published keys, public-key algorithms only, and the claims. What
 is Otari's is which issuers are trusted, where their keys may be fetched from,
-and the rules. Every refusal carries a reason for the authentication-failure
-metric and nothing from the token itself.
+which audiences this deployment answers to, and the rules. Every refusal
+carries a reason for the authentication-failure metric and nothing from the
+token itself.
 """
 
 import base64
@@ -25,17 +26,22 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
-from apron_auth.errors import ConfigurationError, IdentityFetchError, TokenExpiredError, TokenVerificationError
+from apron_auth.errors import (
+    ConfigurationError,
+    IdentityFetchError,
+    TokenExpiredError,
+    TokenValidationError,
+    TokenValidationReason,
+)
+from apron_auth.models import WorkloadIssuer
 from apron_auth.workload import WorkloadTokenVerifier
 
 from gateway.core.settings.api_keys import FederationIssuer
 from gateway.models.api_keys import APIKeyFederationRule
-from gateway.services.url_safety import UnsafeURLError, validate_federation_url
 from gateway.services.web_retrieval_network import (
-    PINNED_TARGET_EXTENSION,
-    PinnedAsyncHTTPTransport,
-    RetrievalTargetError,
-    validate_retrieval_target,
+    MAX_FEDERATION_FETCH_BYTES,
+    BoundedFederationTransport,
+    CheckedFederationTransport,
 )
 
 MAX_TOKEN_BYTES = 16 * 1024
@@ -106,46 +112,12 @@ def unverified_issuer(token: str) -> str | None:
     return issuer if isinstance(issuer, str) else None
 
 
-class _CheckedTransport(httpx.AsyncBaseTransport):
-    """Send a discovery or key set request only to a URL that passes the outbound checks.
-
-    With private hosts refused, the connection goes to the address the check admitted rather than to a second
-    resolution of the hostname, so a name that answers with a public address and then a private one cannot pass.
-    """
-
-    def __init__(self, *, allow_private_hosts: bool) -> None:
-        self._allow_private_hosts = allow_private_hosts
-        self._transport: httpx.AsyncBaseTransport = (
-            httpx.AsyncHTTPTransport(trust_env=False) if allow_private_hosts else PinnedAsyncHTTPTransport()
-        )
-
-    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        try:
-            if self._allow_private_hosts:
-                await validate_federation_url(str(request.url), allow_private_hosts=True)
-                return await self._transport.handle_async_request(request)
-            if request.url.scheme != "https":
-                raise UnsafeURLError("federation URL must use https")
-            target = await validate_retrieval_target(str(request.url))
-        except (UnsafeURLError, RetrievalTargetError) as exc:
-            # A request error is what apron-auth reports as a failed fetch.
-            raise httpx.ConnectError("refused by the outbound URL checks", request=request) from exc
-        headers = request.headers.copy()
-        headers["host"] = target.origin.authority
-        pinned = httpx.Request(
-            request.method,
-            target.url,
-            headers=headers,
-            stream=request.stream,
-            extensions={**request.extensions, PINNED_TARGET_EXTENSION: target},
-        )
-        return await self._transport.handle_async_request(pinned)
-
-    async def aclose(self) -> None:
-        await self._transport.aclose()
-
-
 TransportFactory = Callable[[str], httpx.AsyncBaseTransport]
+
+
+def _bounded_transport_factory(factory: TransportFactory) -> TransportFactory:
+    """Wrap ``factory`` so every transport it returns also enforces the shared byte ceiling."""
+    return lambda url: BoundedFederationTransport(factory(url), max_bytes=MAX_FEDERATION_FETCH_BYTES)
 
 
 class FederatedTokenVerifier:
@@ -154,29 +126,46 @@ class FederatedTokenVerifier:
     One per app, because each verifier caches its issuer's signing keys. With ``member_issuers``, a token may also
     come from the issuer a member's rule names, verified by a verifier built on its first use; its keys are always
     fetched under the outbound checks with private hosts refused, whatever ``allow_private_hosts`` says, since a
-    member chose the URL. ``transport_factory`` replaces the outbound checks, for tests only.
+    member chose the URL. Every key set fetch is also capped at ``MAX_FEDERATION_FETCH_BYTES``, so a hostile or
+    oversized issuer cannot exhaust memory. ``transport_factory`` replaces the outbound checks beneath that cap,
+    for tests only.
+
+    ``audiences`` is the set this deployment answers to and it is this verifier's own policy, so no caller passes
+    one in. An empty set is refused at construction, so a deployment cannot admit a token minted for another
+    service at the same issuer by leaving it out.
     """
 
     def __init__(
         self,
         issuers: Sequence[FederationIssuer],
         *,
+        audiences: Sequence[str],
         allow_private_hosts: bool = False,
         member_issuers: bool = False,
         transport_factory: TransportFactory | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
+        if not audiences:
+            msg = "A deployment verifying workload identity tokens must answer to at least one audience"
+            raise ValueError(msg)
         self.issuers = tuple(issuers)
+        self.audiences = tuple(audiences)
         self.allow_private_hosts = allow_private_hosts
         self.member_issuers = member_issuers
         self._clock = clock
-        self._member_factory = transport_factory or (lambda _url: _CheckedTransport(allow_private_hosts=False))
-        factory = transport_factory or (lambda _url: _CheckedTransport(allow_private_hosts=allow_private_hosts))
+        self._member_factory = _bounded_transport_factory(
+            transport_factory or (lambda _url: CheckedFederationTransport(allow_private_hosts=False))
+        )
+        factory = _bounded_transport_factory(
+            transport_factory or (lambda _url: CheckedFederationTransport(allow_private_hosts=allow_private_hosts))
+        )
         self._by_issuer: dict[str, WorkloadTokenVerifier | None] = {}
         for entry in self.issuers:
             try:
                 verifier = WorkloadTokenVerifier(
-                    entry.issuer, jwks_url=entry.jwks_uri, transport_factory=factory, clock=clock
+                    [WorkloadIssuer(issuer=entry.issuer, jwks_url=entry.jwks_uri)],
+                    transport_factory=factory,
+                    clock=clock,
                 )
             except ConfigurationError:
                 # Settings validation admits only https issuers, so only an unfetchable URL lands here.
@@ -190,7 +179,7 @@ class FederatedTokenVerifier:
             return self._by_member_issuer[issuer]
         try:
             verifier: WorkloadTokenVerifier | None = WorkloadTokenVerifier(
-                issuer, transport_factory=self._member_factory, clock=self._clock
+                [WorkloadIssuer(issuer=issuer)], transport_factory=self._member_factory, clock=self._clock
             )
         except ConfigurationError:
             # A member's rule admits only https issuers, so only an unfetchable URL lands here.
@@ -203,10 +192,11 @@ class FederatedTokenVerifier:
     async def verify(self, token: str, *, member_issuer: str | None = None) -> FederatedIdentity:
         """Verify ``token`` and return what it says about its bearer.
 
-        The audience is left to the rules, which are what name the accepted ones. ``member_issuer`` is the issuer of
-        the member's rule the token is being checked against, which the token must carry; it is trusted for this
-        token alone, and only when the verifier admits member issuers. An allow-listed issuer is verified as
-        configured either way.
+        The token must name one of the audiences this deployment answers to, which is what proves it was minted
+        for this deployment; a rule's own audience still has to match on top of that. ``member_issuer`` is the
+        issuer of the member's rule the token is being checked against, which the token must carry; it is trusted
+        for this token alone, and only when the verifier admits member issuers. An allow-listed issuer is verified
+        as configured either way.
 
         Raises:
             FederationRefusedError: the token does not verify.
@@ -224,10 +214,12 @@ class FederatedTokenVerifier:
         if verifier is None:
             raise FederationUnavailableError
         try:
-            identity = await verifier.verify(token, audience=None)
+            identity = await verifier.verify(token, audience=self.audiences)
         except TokenExpiredError as exc:
             raise FederationRefusedError("federation_expired") from exc
-        except TokenVerificationError as exc:
+        except TokenValidationError as exc:
+            if exc.reason is TokenValidationReason.AUDIENCE:
+                raise FederationRefusedError("federation_wrong_audience") from exc
             raise FederationRefusedError("federation_invalid_token") from exc
         except IdentityFetchError as exc:
             raise FederationUnavailableError from exc

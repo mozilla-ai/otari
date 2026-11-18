@@ -119,6 +119,7 @@ export function OrganizationBudgetsCard() {
         <Card.Content className="p-0">
           <DataTable
             ariaLabel="Organization budgets"
+            mobileLayout="cards"
             columns={columns}
             rows={rows}
             getRowKey={(row) => row.budget_id}

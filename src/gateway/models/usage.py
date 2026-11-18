@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -13,6 +13,9 @@ from gateway.models.money import UsdCost
 
 # Mirrors ``gateway_usage_settlement.pricing_reference`` on the platform.
 PRICING_REFERENCE_MAX_LENGTH = 511
+
+# Who ended a stream before it completed.
+StreamCutBy = Literal["provider", "client"]
 
 # ``usage_logs.source`` on a row this gateway served itself. Any other value is usage
 # imported through the external-events or OTLP ingest, which reserves this one so an
@@ -130,6 +133,12 @@ class UsageLog(Base):
     # (mozilla-ai/otari-ai#1751). Exact to the micro-dollar; see
     # ``models/money.py`` for what that costs on each engine.
     cost: Mapped[Decimal | None] = mapped_column(UsdCost())
+    # The part of ``cost`` that is per-call tool charges (gateway-run tools and
+    # searches the model's provider ran), so a caller can split a request's bill
+    # into tokens and tools. Zero where no tool was charged; null where ``cost``
+    # is, where looking up the tools' prices failed, and on every row written
+    # before the column existed.
+    tool_cost: Mapped[Decimal | None] = mapped_column(UsdCost())
 
     # Why ``cost`` is the amount it is, which the row cannot re-derive on its own:
     # ``pricing_source`` names the price list that settled it ("organization",
@@ -162,7 +171,8 @@ class UsageLog(Base):
     pricing_version: Mapped[str | None] = mapped_column(String(255))
     calculated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    # "success", "error", or "absorbed". ``absorbed`` is a failed attempt that a
+    # "success", "error", "incomplete" (a stream the client abandoned, billed on an
+    # estimate), or "absorbed". ``absorbed`` is a failed attempt that a
     # routing policy recovered from by trying the next candidate: the request
     # itself succeeded (or failed on a later attempt), so counting it as an error
     # would make a working fallback chain look like an outage. Every error metric
@@ -171,6 +181,13 @@ class UsageLog(Base):
     # request.
     status: Mapped[str] = mapped_column()
     error_message: Mapped[str | None] = mapped_column()
+    # Who ended a stream before it completed: "provider" (the upstream dropped it or
+    # failed after the first chunk) or "client" (the caller disconnected). Null for every other
+    # row, and for rows written before the column existed: null reads as "not cut".
+    # It lets a stream cut by the provider be listed for a refund or a report without
+    # substring-matching ``error_message``. A provider-cut row is an "error" and may carry
+    # estimated tokens and cost, billed under ``stream_missing_usage_policy`` "estimate".
+    stream_cut_by: Mapped[StreamCutBy | None] = mapped_column(String(16))
 
     # Routing attribution. All nullable: a request that named a plain model was not
     # routed through a policy, and null reads correctly as exactly that.
@@ -249,8 +266,10 @@ class UsageLog(Base):
             "billing_meters": self.billing_meters,
             "pricing_breakdown": self.pricing_breakdown,
             "cost": self.cost,
+            "tool_cost": self.tool_cost,
             "status": self.status,
             "error_message": self.error_message,
+            "stream_cut_by": self.stream_cut_by,
             "status_code": self.status_code,
             "latency_ms": self.latency_ms,
             "provider_latency_ms": self.provider_latency_ms,

@@ -297,16 +297,6 @@
 .otari-dialog--lg {
   width: 40rem;
 }
-/* The one size that is about the body's shape rather than its length: a frame
- * whose content is two columns side by side, where `lg` leaves the second one
- * too narrow to hold its own controls. `ShareDialog` is the case, and it is the
- * reason this exists rather than a call site widening itself: a width spelled
- * on the dialog loses to the unlayered `.modal__dialog` rule above, so the only
- * class that can win is one in this family. */
-.otari-form-dialog--xl,
-.otari-dialog--xl {
-  width: 58rem;
-}
 
 /* A field fills this dialog. `Field` and `SecretField` cap themselves at
  * `max-w-md`, which is right on a page (a 448px measure under a 620px column
@@ -380,7 +370,9 @@
     flex-direction: column;
     align-items: stretch;
     gap: 0.5rem;
-    padding: 0.75rem 1rem 1rem;
+    /* The sheet's own 24px inset, the one its header and body keep at this
+       width, so the stacked buttons share the fields' edges. */
+    padding: 0.75rem 1.5rem 1rem;
   }
   .otari-form-dialog__actions,
   .otari-dialog__actions {
@@ -492,9 +484,14 @@
    This said `--color-border` and all sixteen per-table classes overrode it to
    `--color-border-subtle`, so the base was simply the wrong value: sixteen
    consumers and no exceptions is not a default worth keeping. Moved here, and
-   the copies are gone. Must stay in step with the row rule below. */
+   the copies are gone. Must stay in step with the row rule below.
+
+   No fill either, data.md's rest state. HeroUI paints every cell
+   `bg-surface`, and a pinned column sets the page ground so scrolled cells
+   pass under it, so with that fill one row read as two colors. */
 .otari-table .table__row .table__cell {
   border-color: var(--color-border-subtle);
+  background-color: transparent;
 }
 
 /* Aliasing `--separator` is not enough for the row. HeroUI draws a bottom
@@ -507,8 +504,23 @@
   border-color: var(--color-border-subtle);
 }
 
-.otari-table .table__row:hover .table__cell {
-  background-color: var(--color-surface-muted);
+/* Behind a hover-capable pointer only: a tap fakes `:hover` and holds it on
+   the row until the next tap elsewhere, which reads as a selection. */
+@media (hover: hover) {
+  .otari-table .table__row:hover .table__cell {
+    background-color: var(--color-surface-muted);
+  }
+}
+
+/* data.md's selected ground, the one a phone card takes. An image rather than
+   a color, so the translucent tint layers over the hover fill instead of
+   replacing it. HeroUI's own (`bg-surface/10`) does not show on the page
+   ground. */
+.otari-table .table__row[data-selected="true"] .table__cell {
+  background-image: linear-gradient(
+    var(--color-primary-subtle),
+    var(--color-primary-subtle)
+  );
 }
 
 /* Let the text in a row be highlighted with the mouse (issue #478). Two things
@@ -588,6 +600,28 @@
      504px pane). The call site's `max-w-3xl` still caps it. */
   left: calc(50% + var(--rail-width, 0px) / 2);
   width: calc(100% - var(--rail-width, 0px) - 2rem);
+}
+/* A KPI figure that would overrun its cell shrinks to fit it, and one that
+ * fits keeps the role's 30px. Fira Code's figures advance 0.6em, so
+ * `--figure-chars` of them fill the cell's content width (the cell is the
+ * container) at the size below; `KpiCell` sets the count from the value. */
+.otari-kpi-figure {
+  font-size: min(1.875rem, calc(100cqi / (var(--figure-chars, 1) * 0.6)));
+}
+
+/* While the bar is up, the end of the page scrolls clear of it: the bar is
+ * fixed to the viewport, so nothing in flow makes room for it. The space goes
+ * after the content rather than before it, so no row moves when a selection
+ * starts, and is sized to the bar and its 16px offset at each width. */
+main:has(.otari-bulk-bar)::after {
+  content: "";
+  display: block;
+  height: 4.5rem;
+}
+@media (max-width: 639px) {
+  main:has(.otari-bulk-bar)::after {
+    height: 8.5rem;
+  }
 }
 /* Animates `translate`, not `transform`: the bar centers itself with Tailwind's
  * `-translate-x-1/2`, which under Tailwind v4 sets the `translate` property, and
@@ -695,4 +729,62 @@
   .drawer__dialog.otari-side-panel {
     width: 100vw;
   }
+}
+
+/* A row's three-dot menu (`actions/RowMenu`, and `actions/RowAction`'s lane,
+ * which draws the same one). HeroUI has no prop for the trigger's size or the
+ * menu's density, and each item holds a glyph, a label and a sentence under it.
+ * Destructive items come last, set apart by a rule. */
+.otari-row-menu-trigger {
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+@media (hover: hover) {
+  .otari-row-menu-trigger:hover {
+    color: var(--color-text);
+    background: var(--color-surface-muted);
+  }
+}
+/* Inset, because the trigger ends the row, where an outward ring would be
+   clipped by the table's own overflow. */
+.otari-row-menu-trigger[data-focus-visible],
+.otari-row-menu-trigger[aria-expanded="true"] {
+  outline: 2px solid var(--focus-ring-ink, var(--color-focus));
+  outline-offset: -2px;
+}
+@media (min-width: 48rem) and (pointer: fine) {
+  .otari-row-menu-trigger {
+    width: 2rem;
+    height: 2rem;
+  }
+}
+.otari-row-menu {
+  width: 19rem;
+  max-width: calc(100vw - 2rem);
+}
+.otari-row-menu .dropdown__menu {
+  padding: 0;
+}
+.otari-row-menu .menu-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  min-height: 2.75rem;
+  padding: 0.625rem 0.75rem;
+  color: var(--color-text-muted);
+}
+.otari-row-menu .menu-item[data-focused],
+.otari-row-menu .menu-item[data-hovered] {
+  background: var(--color-surface-muted);
+}
+.otari-row-menu
+  .menu-item:not(.otari-row-menu-danger)
+  + .otari-row-menu-danger {
+  border-top: 1px solid var(--color-border-subtle);
 }

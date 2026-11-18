@@ -11,6 +11,8 @@ import { IconButton } from "@/design-system/actions/IconButton"
 import { CodeBlock } from "@/design-system/content/CodeBlock"
 import { Markdown } from "@/design-system/content/Markdown"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+// By its `@/…` specifier, never relatively: that specifier is the seam's alias key.
+import { PlaygroundErrorAction } from "@/features/playground/overlayErrorAction"
 import { SentAttachmentList } from "./AttachmentChips"
 import { parseThinkTags } from "./helpers/parseThinkTags"
 import { splitModelKey } from "./helpers/playgroundModels"
@@ -118,14 +120,20 @@ export function MessageBubble({
       {response ? (
         <Markdown components={ANSWER_MARKDOWN}>{response}</Markdown>
       ) : null}
-      {turn.errorMessage ? (
+      {turn.error ? (
         // Inline rather than a toast: a failure belongs where the answer would
         // have been, so a transcript still reads in order afterwards and a
         // failure scrolled past is still findable.
-        <ErrorBanner error={new Error(turn.errorMessage)} />
+        <>
+          <ErrorBanner error={new Error(turn.error.message)} />
+          <PlaygroundErrorAction
+            status={turn.error.status}
+            code={turn.error.code}
+          />
+        </>
       ) : null}
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 pt-1">
-        {areActionsVisible && (response || turn.errorMessage) ? (
+        {areActionsVisible && (response || turn.error) ? (
           <div className="otari-actions flex shrink-0 items-center gap-3">
             {response ? <CopyButton value={response} label="response" /> : null}
             {onRegenerate ? (

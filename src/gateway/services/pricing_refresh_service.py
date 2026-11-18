@@ -1,21 +1,38 @@
-"""Preview and apply explicit updates to the models.dev price snapshot."""
+"""Preview and apply explicit updates to the models.dev price snapshot, and keep the stored models.dev catalog.
+
+The price snapshot changes only when an operator, or the ``auto`` policy,
+accepts it. The stored catalog carries the model facts, which change no price,
+so the catalog refresher replaces it on each download that differs.
+"""
 
 import asyncio
 import hashlib
 import json
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
-from gateway.core.database import create_session
+from gateway.core.database import DATABASE_ERRORS, create_session, describe_database_error
 from gateway.log_config import logger
 from gateway.models.pricing import PricingSnapshot, PricingSnapshotHistory
-from gateway.services.model_catalog_service import fetch_models_dev_document
+from gateway.services.model_catalog_service import (
+    ModelsDevFetchError,
+    ModelsDevRefusedError,
+    background_catalog_enabled,
+    catalog_refresh_interval,
+    catalog_source_changed,
+    clear_catalog_cache,
+    fetch_models_dev_document,
+    models_dev_base_url,
+    serve_catalog,
+)
 from gateway.services.pricing import (
     MAX_RESIDENT_GENERATIONS,
     ModelsDevPriceIndex,
@@ -25,9 +42,9 @@ from gateway.services.pricing import (
     invalid_rate_count,
     reset_generations,
     set_accepted_generations,
-    trim_catalog,
 )
 from gateway.services.pricing_service import normalize_effective_at
+from gateway.types.models_dev import ModelsDevCatalog, catalog_document, read_catalog_document, snapshot_document
 
 _PREVIEW_CHANGE_LIMIT = 100
 # A candidate that loses more than this share of the active priced models, or
@@ -42,18 +59,27 @@ MODELS_DEV_PENDING_SOURCE = "models.dev-pending"
 MODELS_DEV_POLL_CLAIM_SOURCE = "models.dev-poll-claim"
 # Matches the alias and provider refreshers' cadence.
 PRICE_SNAPSHOT_REFRESH_TTL_SECONDS = 30.0
+# The whole models.dev catalog, for the model facts. Not a price snapshot: its
+# changes take effect without review, and it keeps no history.
+MODELS_DEV_CATALOG_SOURCE = "models.dev-catalog"
+# The row every worker's catalog refresher claims a download on.
+MODELS_DEV_CATALOG_CLAIM_SOURCE = "models.dev-catalog-claim"
+# How soon a failed catalog download is tried again, instead of a whole interval later.
+CATALOG_RETRY_SECONDS = 60.0
 
 # When the active row this worker has applied was last written. A confirm
 # refreshes the worker that served it; the refresher compares this against the
 # row's timestamp alone, so converging sibling workers and replicas reads no
 # payload until the row has changed.
 _applied_updated_at: datetime | None = None
+# The same for the stored catalog row.
+_catalog_applied_at: datetime | None = None
 
 
-def _parse_snapshot(raw_snapshot: str) -> ModelsDevPriceIndex:
-    """Index a stored snapshot, refusing one that carries no models."""
+def _parse_snapshot(raw_snapshot: str, reuse: ModelsDevPriceIndex | None = None) -> ModelsDevPriceIndex:
+    """Index a stored snapshot, refusing one that carries no models; entries ``reuse`` holds are shared with it."""
     try:
-        index = ModelsDevPriceIndex.from_catalog(json.loads(raw_snapshot))
+        index = ModelsDevPriceIndex.from_document(json.loads(raw_snapshot), reuse=reuse)
     except Exception as exc:
         raise ValueError("Invalid models.dev snapshot") from exc
     if len(index) == 0:
@@ -65,6 +91,7 @@ def _parse_snapshot(raw_snapshot: str) -> ModelsDevPriceIndex:
 class _PendingSnapshot:
     index: ModelsDevPriceIndex
     raw_snapshot: str
+    catalog: ModelsDevCatalog
 
 
 class PricingRefreshError(Exception):
@@ -80,7 +107,7 @@ class PricingRefreshChange:
     """One model added, changed, or removed by a snapshot refresh."""
 
     model_key: str
-    change: str
+    change: Literal["added", "changed", "removed"]
 
 
 @dataclass(frozen=True)
@@ -97,12 +124,23 @@ class PricingRefreshPreview:
     needs_review: bool = False
     review_reason: str | None = None
 
+    @property
+    def changes_nothing(self) -> bool:
+        """Whether the fetched prices match the active ones."""
+        return self.added_count + self.changed_count + self.removed_count == 0
+
 
 def _snapshot_prices(index: ModelsDevPriceIndex) -> dict[str, tuple[object, ...]]:
-    """Each priced model's rates, keyed by its models.dev provider and model ids."""
+    """Each priced model's rates and its price block, keyed by its models.dev provider and model ids.
+
+    The block is compared whole: an image or web search price beside a text
+    price moves no rate column, and is a price change all the same.
+    """
 
     return {
-        f"{entry.provider_id}:{entry.model_id}": entry.price_signature() for entry in index.entries() if entry.priced
+        f"{entry.provider_id}:{entry.model_id}": (entry.price_signature(), entry.pricing)
+        for entry in index.entries()
+        if entry.priced
     }
 
 
@@ -136,6 +174,7 @@ def _build_preview(
     removed_count = 0
 
     for model_key in sorted(current_prices.keys() | latest_prices.keys()):
+        change: Literal["added", "changed", "removed"]
         if model_key not in current_prices:
             added_count += 1
             change = "added"
@@ -165,24 +204,26 @@ def _build_preview(
     )
 
 
-def _prepare_document(document: dict[str, object]) -> _PendingSnapshot:
-    trimmed = trim_catalog(document)
-    if (invalid := invalid_rate_count(trimmed)) > 0:
+def _prepare_document(catalog: ModelsDevCatalog) -> _PendingSnapshot:
+    if (invalid := invalid_rate_count(catalog)) > 0:
         raise PricingRefreshError(f"The models.dev data carries {invalid} implausible rates")
-    raw_snapshot = json.dumps(trimmed, separators=(",", ":"), ensure_ascii=False)
+    raw_snapshot = json.dumps(snapshot_document(catalog), separators=(",", ":"), ensure_ascii=False)
     index = _parse_snapshot(raw_snapshot)
     if not any(entry.priced for entry in index.entries()):
         raise PricingRefreshError("The models.dev data prices no models")
-    return _PendingSnapshot(index=index, raw_snapshot=raw_snapshot)
+    return _PendingSnapshot(index=index, raw_snapshot=raw_snapshot, catalog=catalog)
 
 
 async def _fetch_latest_snapshot(config: GatewayConfig | None, reuse_within: float) -> _PendingSnapshot:
     """Fetch the upstream catalog and cut it down to the price fields, without activating it."""
 
-    document = await fetch_models_dev_document(
-        reuse_within=reuse_within, fill_cache=config is not None and config.models_dev_metadata
-    )
-    return await asyncio.to_thread(_prepare_document, document)
+    try:
+        catalog = await fetch_models_dev_document(
+            reuse_within=reuse_within, fill_cache=config is not None and config.models_dev_metadata
+        )
+    except ModelsDevRefusedError as exc:
+        raise PricingRefreshError("The models.dev data has a shape the gateway cannot read") from exc
+    return await asyncio.to_thread(_prepare_document, catalog)
 
 
 async def prepare_price_refresh(
@@ -191,7 +232,9 @@ async def prepare_price_refresh(
     """Fetch and persist a new snapshot until an operator confirms it.
 
     Works whether or not ``models_dev_metadata`` is on; ``config`` only decides
-    whether the download also warms the metadata cache.
+    whether the download also becomes the catalog of model facts every worker
+    serves, so the kinds and details the dashboard shows are as new as the
+    prices it previews. Storing it never fails the preview.
     """
 
     try:
@@ -204,6 +247,15 @@ async def prepare_price_refresh(
 
     fetched_at = datetime.now(UTC)
     preview = _build_preview(current_index(), latest.index, fetched_at, latest.raw_snapshot)
+    if config is not None and config.models_dev_metadata:
+        try:
+            await store_models_dev_catalog(session, latest.catalog)
+        except DATABASE_ERRORS as exc:
+            await session.rollback()
+            logger.warning(
+                "Unable to store the models.dev catalog fetched for the price refresh (%s)",
+                describe_database_error(exc),
+            )
     pending_row = await session.get(PricingSnapshot, MODELS_DEV_PENDING_SOURCE)
     if pending_row is None:
         session.add(PricingSnapshot(source=MODELS_DEV_PENDING_SOURCE, snapshot=latest.raw_snapshot))
@@ -247,7 +299,7 @@ async def confirm_price_refresh(
     """Persist and activate the pending snapshot, returning false when absent.
 
     ``accepted_by`` is recorded on the history row: ``operator`` for a confirm
-    from the dashboard, ``schedule`` when :func:`run_price_update_poller`
+    from the dashboard, ``schedule`` when the scheduled catalog update
     applied it under the ``auto`` policy. With ``digest``, only the snapshot
     that digest names is accepted; a replaced one raises
     :class:`PendingSnapshotChanged` and nothing changes.
@@ -262,7 +314,7 @@ async def confirm_price_refresh(
         return False
     raw_snapshot = pending_row.snapshot
     try:
-        index = await asyncio.to_thread(_parse_snapshot, raw_snapshot)
+        index = await asyncio.to_thread(_parse_snapshot, raw_snapshot, current_index())
     except ValueError as exc:
         await session.rollback()
         raise PricingRefreshError("The pending models.dev data is invalid") from exc
@@ -381,6 +433,15 @@ async def list_accepted_snapshots(session: AsyncSession, limit: int = 50) -> lis
     ]
 
 
+async def _discard_unchanged(session: AsyncSession, preview: PricingRefreshPreview) -> bool:
+    """Discard a fetch that changes nothing; false when a later fetch replaced it first."""
+    try:
+        await reject_price_refresh(session, digest=preview.digest)
+    except PendingSnapshotChanged:
+        return False
+    return True
+
+
 async def poll_price_updates(session: AsyncSession, policy: str, config: GatewayConfig | None = None) -> str:
     """One tick of the scheduled refresh: fetch, then hold or apply per ``policy``.
 
@@ -391,12 +452,8 @@ async def poll_price_updates(session: AsyncSession, policy: str, config: Gateway
     # A catalog the metadata refresher fetched within half an interval is reused.
     reuse_within = config.pricing_refresh_interval_seconds / 2 if config is not None else 0.0
     preview = await prepare_price_refresh(session, config, reuse_within=reuse_within)
-    if preview.added_count + preview.changed_count + preview.removed_count == 0:
-        try:
-            await reject_price_refresh(session, digest=preview.digest)
-        except PendingSnapshotChanged:
-            return "pending"
-        return "unchanged"
+    if preview.changes_nothing:
+        return "unchanged" if await _discard_unchanged(session, preview) else "pending"
     if policy == "auto" and preview.needs_review:
         logger.warning("Leaving the models.dev price update pending for review: %s", preview.review_reason)
         return "pending"
@@ -409,8 +466,10 @@ async def poll_price_updates(session: AsyncSession, policy: str, config: Gateway
     return "pending"
 
 
-async def claim_poll_tick(session: AsyncSession, interval_seconds: float) -> bool:
-    """Whether this worker owns the next scheduled check.
+async def claim_poll_tick(
+    session: AsyncSession, interval_seconds: float, source: str = MODELS_DEV_POLL_CLAIM_SOURCE
+) -> bool:
+    """Whether this worker owns the next scheduled check, claimed on the row ``source`` names.
 
     Every worker and every replica runs the poller, and nothing else separates
     them: each compares the fetch against its own in-memory snapshot, so under
@@ -423,7 +482,7 @@ async def claim_poll_tick(session: AsyncSession, interval_seconds: float) -> boo
     result = await session.execute(
         update(PricingSnapshot)
         .where(
-            PricingSnapshot.source == MODELS_DEV_POLL_CLAIM_SOURCE,
+            PricingSnapshot.source == source,
             PricingSnapshot.updated_at <= now - timedelta(seconds=interval_seconds),
         )
         .values(updated_at=now)
@@ -434,7 +493,7 @@ async def claim_poll_tick(session: AsyncSession, interval_seconds: float) -> boo
         return True
     # Either a sibling holds the tick or the row has never been written; the
     # insert decides which, and losing that race is a sibling's claim too.
-    session.add(PricingSnapshot(source=MODELS_DEV_POLL_CLAIM_SOURCE, snapshot="", updated_at=now))
+    session.add(PricingSnapshot(source=source, snapshot="", updated_at=now))
     try:
         await session.commit()
     except IntegrityError:
@@ -443,29 +502,53 @@ async def claim_poll_tick(session: AsyncSession, interval_seconds: float) -> boo
     return True
 
 
-async def run_price_update_poller(config: GatewayConfig) -> None:
-    """Check upstream models.dev on a schedule, forever.
+class ModelsDevPriceUpdates:
+    """The models.dev price steps of a catalog update.
 
-    The policy is read on every tick rather than captured, because it is a
-    runtime setting: an operator who switches from ``manual`` to ``review`` on
-    the dashboard gets the next check without a restart. The interval is
-    config-only and re-read for symmetry. Every error is swallowed and retried
-    on the next tick, for the reason the snapshot refresher gives.
+    What the hosted catalog update calls for its price half. Each step opens a
+    session of its own and commits there, as the price refresh functions do, so
+    the caller hands over no session and holds none across a step.
     """
-    while True:
-        await asyncio.sleep(config.pricing_refresh_interval_seconds)
-        if config.pricing_refresh == "manual":
-            continue
-        try:
-            async with create_session() as db:
-                if not await claim_poll_tick(db, config.pricing_refresh_interval_seconds):
-                    continue
-                outcome = await poll_price_updates(db, config.pricing_refresh, config)
-            logger.info("Scheduled models.dev price check: %s", outcome)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.warning("Scheduled models.dev price check failed; retrying next interval", exc_info=True)
+
+    def __init__(self, config: GatewayConfig) -> None:
+        self.config = config
+
+    async def claim(self, interval_seconds: float) -> bool:
+        """Whether this worker owns the next scheduled update."""
+        async with create_session() as session:
+            return await claim_poll_tick(session, interval_seconds)
+
+    async def fetch(self) -> PricingRefreshPreview | None:
+        """Fetch the latest prices and hold them as pending, or ``None`` when nothing changed.
+
+        Raises:
+            PricingRefreshError: the data could not be fetched, or was implausible.
+        """
+        async with create_session() as session:
+            preview = await prepare_price_refresh(session, self.config)
+            if not preview.changes_nothing:
+                return preview
+            await _discard_unchanged(session, preview)
+            return None
+
+    async def poll(self, policy: str) -> str:
+        """One scheduled price check under ``policy``: ``unchanged``, ``pending`` or ``applied``.
+
+        Raises:
+            PricingRefreshError: the data could not be fetched, or was implausible.
+        """
+        async with create_session() as session:
+            return await poll_price_updates(session, policy, self.config)
+
+    async def approve(self, digest: str) -> bool:
+        """Apply the pending prices an operator reviewed under ``digest``; false when none is pending.
+
+        Raises:
+            PendingSnapshotChanged: the pending prices are no longer the reviewed ones.
+            PricingRefreshError: they could not be applied.
+        """
+        async with create_session() as session:
+            return await confirm_price_refresh(session, digest=digest)
 
 
 async def reject_price_refresh(session: AsyncSession, *, digest: str | None = None) -> bool:
@@ -506,11 +589,11 @@ def _build_generations(
     if active is not None and all(raw != active[1] for _, raw in rows):
         rows.append(active)
     generations: list[PriceGeneration] = []
+    reuse: ModelsDevPriceIndex | None = None
     for effective_at, raw in rows:
         try:
-            generations.append(
-                PriceGeneration(effective_at=normalize_effective_at(effective_at), index=_parse_snapshot(raw))
-            )
+            reuse = _parse_snapshot(raw, reuse)
+            generations.append(PriceGeneration(effective_at=normalize_effective_at(effective_at), index=reuse))
         except ValueError:
             logger.warning("Ignoring invalid persisted %s pricing snapshot", MODELS_DEV_SOURCE)
     return generations
@@ -605,3 +688,155 @@ def reset_price_refresh_state() -> None:
     global _applied_updated_at
     reset_generations()
     _applied_updated_at = None
+
+
+def reset_catalog_refresh_state() -> None:
+    """Forget the catalog this worker serves and the stored one it read, so the next tick reads it again."""
+    global _catalog_applied_at
+    clear_catalog_cache()
+    _catalog_applied_at = None
+
+
+def _catalog_text(catalog: ModelsDevCatalog, source: str) -> str:
+    return json.dumps(catalog_document(catalog, source=source), separators=(",", ":"), ensure_ascii=False)
+
+
+def _read_stored_catalog(raw: str) -> tuple[ModelsDevCatalog, str | None]:
+    """The stored catalog and the base URL it was downloaded from, None for a row stored before that was recorded."""
+    document = json.loads(raw)
+    meta = document.get("_meta") if isinstance(document, dict) else None
+    source = meta.get("source") if isinstance(meta, dict) else None
+    return read_catalog_document(document), source if isinstance(source, str) else None
+
+
+async def store_models_dev_catalog(session: AsyncSession, catalog: ModelsDevCatalog) -> bool:
+    """Store a downloaded catalog for every worker to serve; false when the stored one is the same.
+
+    An unchanged catalog is not written again, so the other workers read the
+    row only when it has changed. The row records the base URL it came from,
+    so a worker started against another one knows to replace it.
+    """
+    global _catalog_applied_at
+    raw = await asyncio.to_thread(_catalog_text, catalog, models_dev_base_url())
+    row = await session.get(PricingSnapshot, MODELS_DEV_CATALOG_SOURCE)
+    if row is not None and row.snapshot == raw:
+        return False
+    now = datetime.now(UTC)
+    if row is None:
+        session.add(PricingSnapshot(source=MODELS_DEV_CATALOG_SOURCE, snapshot=raw, updated_at=now))
+    else:
+        row.snapshot = raw
+        row.updated_at = now
+    await session.commit()
+    _catalog_applied_at = now
+    return True
+
+
+async def load_stored_models_dev_catalog(session: AsyncSession) -> bool:
+    """Serve the stored catalog when it changed since this worker last read it; false when it did not.
+
+    A row this version cannot read is logged once and skipped, so the worker
+    keeps what it serves.
+    """
+    global _catalog_applied_at
+    updated_at = (
+        await session.execute(
+            select(PricingSnapshot.updated_at).where(PricingSnapshot.source == MODELS_DEV_CATALOG_SOURCE)
+        )
+    ).scalar_one_or_none()
+    if updated_at is None:
+        return False
+    updated_at = normalize_effective_at(updated_at)
+    if updated_at == _catalog_applied_at:
+        return False
+    raw = (
+        await session.execute(
+            select(PricingSnapshot.snapshot).where(PricingSnapshot.source == MODELS_DEV_CATALOG_SOURCE)
+        )
+    ).scalar_one()
+    _catalog_applied_at = updated_at
+    try:
+        catalog, source = await asyncio.to_thread(_read_stored_catalog, raw)
+    except ValueError as exc:
+        logger.warning("Ignoring the stored models.dev catalog: %s", exc)
+        return False
+    serve_catalog(catalog, updated_at, source)
+    return True
+
+
+async def _retry_catalog_download_soon(session: AsyncSession, interval_seconds: float) -> None:
+    """Move the download claim back, so the next download is tried ``CATALOG_RETRY_SECONDS`` from now."""
+    retry_at = datetime.now(UTC) - timedelta(seconds=interval_seconds - CATALOG_RETRY_SECONDS)
+    await session.execute(
+        update(PricingSnapshot)
+        .where(PricingSnapshot.source == MODELS_DEV_CATALOG_CLAIM_SOURCE)
+        .values(updated_at=retry_at)
+    )
+    await session.commit()
+
+
+async def download_models_dev_catalog_if_due(config: GatewayConfig) -> bool:
+    """Download and store the catalog when this worker claims the download; false when it did not.
+
+    One worker in the deployment downloads per interval. A failed download is
+    logged, keeps what is stored, and is tried again ``CATALOG_RETRY_SECONDS``
+    later. A stored catalog from another base URL than the configured one is
+    replaced at that retry cadence too: the claim its download made was on the
+    old source, so it does not hold the new one off for the interval.
+    """
+    interval = catalog_refresh_interval(config)
+    due_within = CATALOG_RETRY_SECONDS if catalog_source_changed() else interval
+    async with create_session() as session:
+        # Read first, so a tick with no download due writes nothing.
+        claimed_at = (
+            await session.execute(
+                select(PricingSnapshot.updated_at).where(PricingSnapshot.source == MODELS_DEV_CATALOG_CLAIM_SOURCE)
+            )
+        ).scalar_one_or_none()
+        if claimed_at is not None and datetime.now(UTC) - normalize_effective_at(claimed_at) < timedelta(
+            seconds=due_within
+        ):
+            return False
+        if not await claim_poll_tick(session, due_within, MODELS_DEV_CATALOG_CLAIM_SOURCE):
+            return False
+    try:
+        catalog = await fetch_models_dev_document(reuse_within=interval / 2, fill_cache=True)
+    except ModelsDevFetchError as exc:
+        level = logging.ERROR if isinstance(exc, ModelsDevRefusedError) else logging.WARNING
+        logger.log(level, "%s; keeping the stored copy", exc)
+        async with create_session() as session:
+            await _retry_catalog_download_soon(session, due_within)
+        return False
+    async with create_session() as session:
+        await store_models_dev_catalog(session, catalog)
+    return True
+
+
+async def run_catalog_refresher(config: GatewayConfig, interval: float = PRICE_SNAPSHOT_REFRESH_TTL_SECONDS) -> None:
+    """Keep the models.dev catalog every worker serves current, so no read waits on a download.
+
+    Each tick serves the stored catalog when another worker changed it, then
+    downloads and stores a new one when this worker claims the download. It
+    starts at once, so a fresh worker serves the stored catalog within one tick.
+
+    Re-checks ``background_catalog_enabled`` every tick rather than being started
+    only when it holds: ``models_dev_metadata`` and ``models_dev_cache_ttl_seconds``
+    are both runtime-settable, so the loop has to be able to start and stop
+    downloading without a restart. The stored catalog is served either way.
+    Every error is logged and retried on the next tick. Cancelled at shutdown.
+    """
+    while True:
+        try:
+            async with create_session() as session:
+                await load_stored_models_dev_catalog(session)
+            if background_catalog_enabled(config):
+                await download_models_dev_catalog_if_due(config)
+        except asyncio.CancelledError:
+            raise
+        except DATABASE_ERRORS as exc:
+            logger.warning(
+                "models.dev catalog refresh failed (%s); retrying in %ss", describe_database_error(exc), interval
+            )
+        except Exception:
+            logger.warning("models.dev catalog refresh failed; retrying in %ss", interval, exc_info=True)
+        await asyncio.sleep(interval)

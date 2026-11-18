@@ -17,6 +17,7 @@ from gateway.models.tenancy import Workspace
 from gateway.models.traces import Trace
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
+from gateway.repositories.users_repository import lock_live_users
 
 from .conftest import MODEL_NAME
 
@@ -332,3 +333,34 @@ def test_delete_user_erases_their_agent_traces(
     assert response.status_code == 204
     db_session.expire_all()
     assert [row.trace_id for row in db_session.query(Trace).all()] == ["s-other"]
+
+
+def test_a_second_delete_keeps_the_first_deletion_time(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """Two deletes of one user record one deletion time, the first one's.
+
+    Both requests pass the live-user load before either commits, because the
+    erasure between the two commits on its own. The one that takes the row lock
+    second must leave the time the first recorded.
+    """
+    client.post(f"{API_ROOT}/users", json={"user_id": "race-user"}, headers=master_key_header)
+    first_deleted_at = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
+
+    async def deleted_by_a_concurrent_request(db: Any, user_ids: Any) -> set[str]:
+        """Commit the other request's deletion, then take the lock as the route would."""
+        db_session.execute(
+            text("UPDATE users SET deleted_at = :at WHERE user_id = 'race-user'"),
+            {"at": first_deleted_at},
+        )
+        db_session.commit()
+        return await lock_live_users(db, user_ids)
+
+    with patch("gateway.api.routes.users.lock_live_users", deleted_by_a_concurrent_request):
+        response = client.delete(f"{API_ROOT}/users/race-user", headers=master_key_header)
+
+    assert response.status_code == 204, response.text
+    stored = db_session.execute(text("SELECT deleted_at FROM users WHERE user_id = 'race-user'")).scalar_one()
+    assert stored == first_deleted_at

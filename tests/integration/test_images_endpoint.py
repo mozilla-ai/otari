@@ -200,13 +200,14 @@ def test_images_cost_tracked_with_pricing(
     api_key_obj: dict[str, Any],
 ) -> None:
     """POST /api/v1/images/generations calculates cost when model pricing exists."""
-    # Set up pricing: input_price_per_million is repurposed as price-per-image
+    # An image rate is USD per million images: $0.04 an image.
     client.post(
         f"{API_ROOT}/pricing",
         json={
             "model_key": "openai:dall-e-3",
-            "input_price_per_million": 0.04,
+            "input_price_per_million": 40000,
             "output_price_per_million": 0.0,
+            "unit": "image",
         },
         headers=master_key_header,
     )
@@ -228,8 +229,61 @@ def test_images_cost_tracked_with_pricing(
     assert len(image_logs) >= 1
     assert image_logs[0]["cost"] is not None
     assert image_logs[0]["cost"] > 0
-    # Cost should be n_images * input_price_per_million = 2 * 0.04 = 0.08
+    # Two images at $0.04 each.
     assert image_logs[0]["cost"] == pytest.approx(0.08)
+    # DALL-E sends no usage, so the response gets one holding just the settled cost.
+    assert resp.json()["usage"] == {"cost_usd": "0.080000", "pricing_source": "deployment"}
+
+
+def test_images_without_pricing_carry_no_inline_cost(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """An unpriced generation returns the provider's body as it came, with no cost fields."""
+    with patch(
+        "gateway.api.routes.images.aimage_generation", new_callable=AsyncMock, return_value=_mock_images_response()
+    ):
+        resp = client.post(
+            f"{API_ROOT}/images/generations",
+            json={"model": "openai:dall-e-3", "prompt": "a cute cat"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 200
+    assert resp.json()["usage"] is None
+
+
+def test_images_still_served_when_the_inline_cost_cannot_be_attached(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+) -> None:
+    """A failure attaching the cost returns the provider's body and counts the cost as unattached."""
+    client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": "openai:dall-e-3",
+            "input_price_per_million": 40000,
+            "output_price_per_million": 0.0,
+            "unit": "image",
+        },
+        headers=master_key_header,
+    )
+    with (
+        patch(
+            "gateway.api.routes.images.aimage_generation", new_callable=AsyncMock, return_value=_mock_images_response()
+        ),
+        patch("gateway.services.inference._passthrough_responses._inline_cost", side_effect=ValueError("bad cost")),
+        patch("gateway.api.routes.images.record_inline_cost_settlement") as settlement,
+    ):
+        resp = client.post(
+            f"{API_ROOT}/images/generations",
+            json={"model": "openai:dall-e-3", "prompt": "a cute cat"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 200
+    assert resp.json()["usage"] is None
+    assert len(resp.json()["data"]) == 1
+    settlement.assert_called_once_with("unattached")
 
 
 def test_images_billing_meters_tracked_with_pricing(
@@ -242,8 +296,9 @@ def test_images_billing_meters_tracked_with_pricing(
         f"{API_ROOT}/pricing",
         json={
             "model_key": "openai:dall-e-3",
-            "input_price_per_million": 0.04,
+            "input_price_per_million": 40000,
             "output_price_per_million": 0.0,
+            "unit": "image",
         },
         headers=master_key_header,
     )
@@ -265,25 +320,24 @@ def test_images_billing_meters_tracked_with_pricing(
     assert len(logs) >= 1
     assert logs[0]["billing_meters"] == {"images": 2}
     breakdown = logs[0]["pricing_breakdown"]
-    assert breakdown == [{"meter": "images", "units": 2, "unit_rate": 0.04, "cost": pytest.approx(0.08)}]
+    assert breakdown == [
+        {"meter": "images", "units": 2, "unit": "image", "unit_rate": 0.04, "cost": pytest.approx(0.08)}
+    ]
 
 
-def test_images_ignores_models_dev_defaults(
+def test_a_catalog_token_rate_prices_nothing_an_image_without_usage_reports(
     client: TestClient,
     master_key_header: dict[str, str],
     api_key_header: dict[str, str],
 ) -> None:
-    """Default (models.dev) rates never price image generation.
+    """A catalog token rate reads as tokens, so an image response that reports none is unpriced, never $5 an image.
 
-    Those rates are USD per million tokens, but images bill per image at a raw
-    per-image rate, so honoring one would charge dollars per image for a rate
-    quoted per million tokens: gpt-image-2 is in the dataset at 5.0 per million, which would
-    bill $5.00 for one image (and reserve it before the call).
+    gpt-image-2 is in the dataset at 5.0 per million tokens.
     """
     configure_default_pricing(True)
     try:
-        # Pin the premise: without a dataset entry to ignore, the assertions below
-        # would pass for the wrong reason and stop guarding anything.
+        # Pin the premise: without a dataset entry, the assertions below would
+        # pass for the wrong reason and stop guarding anything.
         assert default_model_pricing("openai", "gpt-image-2", datetime.now(UTC)) is not None
         with patch(
             "gateway.api.routes.images.aimage_generation",

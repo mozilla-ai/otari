@@ -10,9 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.database import database_refusal
-from gateway.core.unit_of_work import UnitOfWork
+from gateway.core.sql import LIKE_ESCAPE, contains_pattern
+from gateway.core.unit_of_work import UnitOfWork, session_for
 from gateway.exceptions.organizations_exceptions import WorkspaceMemberAlreadyExistsError, WorkspaceNotFoundError
 from gateway.models.tenancy import (
+    WORKSPACE_MEMBER_WORKSPACE_FK,
     User,
     Workspace,
     WorkspaceCreate,
@@ -24,15 +26,13 @@ from gateway.repositories.base_repository import BaseRepository
 from gateway.repositories.tenancy.user_repository import user_alphabetical_order
 
 _MEMBER_UNIQUE = "uq_workspace_member_workspace_user"
-# PostgreSQL's default name for the unnamed workspace foreign key in the tenancy migration.
-_MEMBER_WORKSPACE_FK = "workspace_member_workspace_id_fkey"
 _UNIQUE_VIOLATION = frozenset({"23505", "SQLITE_CONSTRAINT_UNIQUE"})
 # SQLite's foreign-key refusal carries no constraint name, so it cannot be told
 # from any other foreign key on this table and is not listed here.
 _FOREIGN_KEY_VIOLATION = frozenset({"23503"})
 
 
-def ids_in_organization(organization_id: uuid.UUID) -> Select[tuple[uuid.UUID]]:
+def ids_in_organization(organization_id: uuid.UUID) -> Select[uuid.UUID]:
     """Select the ID of every workspace in an organization, for use as a subquery."""
     return select(col(Workspace.id)).where(col(Workspace.organization_id) == organization_id)
 
@@ -77,6 +77,19 @@ class WorkspaceRepository(BaseRepository[Workspace, WorkspaceCreate, WorkspaceUp
         """
         await self.db.execute(select(col(Workspace.id)).where(col(Workspace.id) == workspace_id).with_for_update())
 
+    async def lock_in_organization(self, organization_id: uuid.UUID) -> list[uuid.UUID]:
+        """Take ``lock`` on every workspace in an organization, in id order, and return their ids.
+
+        In id order so two callers locking overlapping sets cannot deadlock.
+        """
+        result = await self.db.execute(
+            select(col(Workspace.id))
+            .where(col(Workspace.organization_id) == organization_id)
+            .order_by(col(Workspace.id))
+            .with_for_update()
+        )
+        return list(result.scalars().all())
+
     async def get_by_ids(self, workspace_ids: Collection[uuid.UUID]) -> Sequence[Workspace]:
         """Return the workspaces named by a batch of ids (order unspecified).
 
@@ -86,6 +99,23 @@ class WorkspaceRepository(BaseRepository[Workspace, WorkspaceCreate, WorkspaceUp
         if not workspace_ids:
             return []
         result = await self.db.execute(select(Workspace).where(col(Workspace.id).in_(list(workspace_ids))))
+        return list(result.scalars().all())
+
+    async def get_by_organization_and_ids(
+        self, organization_id: uuid.UUID, workspace_ids: Collection[uuid.UUID]
+    ) -> Sequence[Workspace]:
+        """Return an organization's own workspaces named by a batch of ids (order unspecified).
+
+        A workspace id outside the organization is excluded by the query, not filtered afterward.
+        """
+        if not workspace_ids:
+            return []
+        result = await self.db.execute(
+            select(Workspace).where(
+                col(Workspace.organization_id) == organization_id,
+                col(Workspace.id).in_(list(workspace_ids)),
+            )
+        )
         return list(result.scalars().all())
 
     async def get_by_organization(
@@ -116,6 +146,32 @@ class WorkspaceRepository(BaseRepository[Workspace, WorkspaceCreate, WorkspaceUp
             select(col(Workspace.id)).where(col(Workspace.organization_id) == organization_id)
         )
         return list(result.scalars().all())
+
+    async def page_for_contributor(
+        self,
+        organization_id: uuid.UUID,
+        *,
+        member_id: uuid.UUID | None,
+        contributor_roles: Collection[str],
+        search: str,
+        skip: int,
+        limit: int,
+    ) -> tuple[Sequence[Workspace], int]:
+        """Search a page of writable workspaces, restricted to active membership for a non-manager."""
+        query = select(Workspace).where(col(Workspace.organization_id) == organization_id)
+        if member_id is not None:
+            query = query.join(WorkspaceMember, col(WorkspaceMember.workspace_id) == col(Workspace.id)).where(
+                col(WorkspaceMember.user_id) == member_id,
+                col(WorkspaceMember.status) == "active",
+                col(WorkspaceMember.role).in_(contributor_roles),
+            )
+        if term := search.strip():
+            query = query.where(func.lower(col(Workspace.name)).like(contains_pattern(term), escape=LIKE_ESCAPE))
+        count = (await self.db.execute(select(func.count()).select_from(query.subquery()))).scalar_one()
+        rows = await self.db.execute(
+            query.order_by(func.lower(col(Workspace.name)), col(Workspace.id)).offset(skip).limit(limit)
+        )
+        return list(rows.scalars().all()), count
 
     async def get_organization_id(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
         """Return the ID of the organization that owns a workspace, or None."""
@@ -169,8 +225,13 @@ class WorkspaceRepository(BaseRepository[Workspace, WorkspaceCreate, WorkspaceUp
 class WorkspaceMemberRepository:
     """Repository for workspace membership rows."""
 
-    def __init__(self, db: AsyncSession):
-        self.db = db
+    def __init__(self, db: AsyncSession | UnitOfWork):
+        self._db = db
+
+    @property
+    def db(self) -> AsyncSession:
+        """The session this repository's operations run on, resolved per call when built on a Unit of Work."""
+        return session_for(self._db) if isinstance(self._db, UnitOfWork) else self._db
 
     async def get_by_workspace(
         self,
@@ -230,6 +291,41 @@ class WorkspaceMemberRepository:
             )
         )
         return result.scalars().first()
+
+    async def active_user_ids_with_roles(self, workspace_id: uuid.UUID, roles: Collection[str]) -> list[uuid.UUID]:
+        """The users holding an active membership of one of ``roles`` in a workspace, oldest membership first."""
+        if not roles:
+            return []
+        result = await self.db.execute(
+            select(col(WorkspaceMember.user_id))
+            .where(
+                col(WorkspaceMember.workspace_id) == workspace_id,
+                col(WorkspaceMember.status) == "active",
+                col(WorkspaceMember.role).in_(list(roles)),
+            )
+            .order_by(col(WorkspaceMember.created_at), col(WorkspaceMember.id))
+        )
+        return list(result.scalars().all())
+
+    async def get_active_pairs(
+        self, workspace_ids: Collection[uuid.UUID], user_ids: Collection[uuid.UUID], *, lock: bool = False
+    ) -> set[tuple[uuid.UUID, uuid.UUID]]:
+        """Return each (workspace, user) of these that an *active* membership joins, in one query.
+
+        ``lock`` holds the memberships found until the caller's transaction ends, so a removal
+        that changes one waits for it (PostgreSQL only).
+        """
+        if not workspace_ids or not user_ids:
+            return set()
+        statement = select(col(WorkspaceMember.workspace_id), col(WorkspaceMember.user_id)).where(
+            col(WorkspaceMember.workspace_id).in_(list(workspace_ids)),
+            col(WorkspaceMember.user_id).in_(list(user_ids)),
+            col(WorkspaceMember.status) == "active",
+        )
+        if lock:
+            statement = statement.with_for_update()
+        result = await self.db.execute(statement)
+        return set(result.tuples().all())
 
     async def get_by_workspaces_and_user(
         self,
@@ -396,7 +492,7 @@ class WorkspaceMemberRepository:
             # besides the generated primary key.
             if code in _UNIQUE_VIOLATION and constraint in (_MEMBER_UNIQUE, None):
                 raise WorkspaceMemberAlreadyExistsError(user_id) from None
-            if code in _FOREIGN_KEY_VIOLATION and constraint == _MEMBER_WORKSPACE_FK:
+            if code in _FOREIGN_KEY_VIOLATION and constraint == WORKSPACE_MEMBER_WORKSPACE_FK:
                 raise WorkspaceNotFoundError(workspace_id) from None
             raise
         await self.db.refresh(member)

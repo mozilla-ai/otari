@@ -28,7 +28,7 @@ class _Answering:
     def __init__(self, answer: Any = None) -> None:
         self._answer = answer
 
-    async def resolve_one(self, workspace_id: uuid.UUID, server_id: uuid.UUID) -> Any:
+    async def resolve_one(self, workspace_id: uuid.UUID, server_id: uuid.UUID, access: object = None) -> Any:
         return self._answer
 
 

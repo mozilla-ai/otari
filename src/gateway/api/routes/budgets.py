@@ -124,7 +124,7 @@ async def list_budgets(
             .where(User.budget_id.in_(page_ids), User.deleted_at.is_(None))
             .group_by(User.budget_id)
         )
-        usage = {row[0]: (int(row[1]), float(row[2]), float(row[3])) for row in usage_rows}
+        usage = {row[0]: (int(row[1]), float(row[2]), float(row[3])) for row in usage_rows if row[0] is not None}
 
     return [
         BudgetResponse.from_model(

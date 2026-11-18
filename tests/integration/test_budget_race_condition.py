@@ -383,18 +383,31 @@ async def test_a_free_model_still_spends_a_token_budget(async_db: Any) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_free_model_on_a_dollars_only_budget_still_reserves_nothing(async_db: Any) -> None:
-    """The hot path is unchanged where no count is capped: no hold, no ledger row."""
+async def test_a_free_model_past_a_dollars_only_budget_is_admitted_on_a_zero_hold(async_db: Any) -> None:
+    """Out of credit is not out of a $0 model, but it holds a row its tool calls grow through the dollar gate."""
     async_db.add(ModelPricing(model_key="openai:free-two", input_price_per_million=0.0, output_price_per_million=0.0))
     async_db.add(Budget(budget_id="dollars-only", max_budget=10.0))
-    async_db.add(User(user_id="dollars-only-user", budget_id="dollars-only"))
+    async_db.add(User(user_id="dollars-only-user", budget_id="dollars-only", spend=Decimal("10.0")))
     await async_db.commit()
 
     handle = await reserve_budget(async_db, "dollars-only-user", 5.0, model="openai:free-two", estimated_tokens=400)
 
+    assert handle.reserved
+    assert handle.reservation_id is not None
+    assert (handle.estimate, handle.token_estimate) == (Decimal(0), 400)
+
+
+@pytest.mark.asyncio
+async def test_a_free_model_on_a_budget_that_caps_nothing_reserves_nothing(async_db: Any) -> None:
+    async_db.add(ModelPricing(model_key="openai:free-three", input_price_per_million=0.0, output_price_per_million=0.0))
+    async_db.add(Budget(budget_id="uncapped", max_budget=None))
+    async_db.add(User(user_id="uncapped-user", budget_id="uncapped"))
+    await async_db.commit()
+
+    handle = await reserve_budget(async_db, "uncapped-user", 5.0, model="openai:free-three", estimated_tokens=400)
+
     assert not handle.reserved
     assert handle.reservation_id is None
-    assert (handle.estimate, handle.token_estimate) == (Decimal(0), 0)
 
 
 @pytest.mark.asyncio
@@ -461,6 +474,29 @@ async def test_a_hold_larger_than_the_headroom_names_both_amounts(async_db: Any)
     )
     assert refusal.value.headers is not None
     assert refusal.value.headers["Otari-Budget-Scope"] == "user"
+
+
+@pytest.mark.asyncio
+async def test_only_an_end_users_refusal_names_its_budget(async_db: Any) -> None:
+    """``Otari-End-User-Budget`` names the budget an end user was put on; a key's own user gets none."""
+    async_db.add(Budget(budget_id="end-user-cap", max_budget=0.0015))
+    async_db.add(User(user_id="service-owner"))
+    async_db.add(
+        User(user_id="end-user-row", budget_id="end-user-cap", parent_user_id="service-owner", external_id="carol")
+    )
+    async_db.add(User(user_id="plain-user", budget_id="end-user-cap"))
+    await async_db.commit()
+
+    with pytest.raises(HTTPException) as end_user_refusal:
+        await reserve_budget(async_db, "end-user-row", Decimal("0.0021"))
+    with pytest.raises(HTTPException) as plain_refusal:
+        await reserve_budget(async_db, "plain-user", Decimal("0.0021"))
+
+    assert end_user_refusal.value.headers is not None
+    assert end_user_refusal.value.headers["Otari-End-User-Budget"] == "end-user-cap"
+    assert plain_refusal.value.headers is not None
+    assert plain_refusal.value.headers["Otari-Budget-Scope"] == "user"
+    assert "Otari-End-User-Budget" not in plain_refusal.value.headers
 
 
 @pytest.mark.asyncio

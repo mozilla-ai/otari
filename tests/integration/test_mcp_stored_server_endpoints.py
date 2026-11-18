@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from mcp.types import CallToolResult, ListToolsResult, TextContent
+from mcp.types import CallToolResult, ListToolsResult, PaginatedRequestParams, TextContent
 from mcp.types import Tool as MCPTool
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -36,7 +36,7 @@ from gateway.models.users import User
 from gateway.services import mcp_stateless
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 
-from .conftest import build_test_client
+from .conftest import ALL_KEY_SCOPES, build_test_client
 
 PUBLIC_URL = "https://93.184.216.34/mcp"
 # The same public host over cleartext, for the credential rule rather than the
@@ -56,11 +56,11 @@ def _secret_key(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 class _FakeSession:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
-        self.tools = [MCPTool(name="create_issue", description="Create an issue", inputSchema={"type": "object"})]
+        self.tools = [MCPTool(name="create_issue", description="Create an issue", input_schema={"type": "object"})]
         self.pages = 0
         self.on_call: Any = None
 
-    async def list_tools(self, cursor: str | None = None) -> ListToolsResult:
+    async def list_tools(self, *, params: PaginatedRequestParams | None = None) -> ListToolsResult:
         self.pages += 1
         return ListToolsResult(tools=self.tools)
 
@@ -266,9 +266,9 @@ def test_discovery_registers_under_its_own_endpoint_while_it_runs(
     seen: list[list[str]] = []
     original = session.list_tools
 
-    async def watched(cursor: str | None = None) -> ListToolsResult:
+    async def watched(*, params: PaginatedRequestParams | None = None) -> ListToolsResult:
         seen.append([entry.endpoint for entry in registry.snapshot()])
-        return await original(cursor)
+        return await original(params=params)
 
     monkeypatch.setattr(session, "list_tools", watched)
     row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]))
@@ -290,7 +290,9 @@ def test_the_authenticated_principal_is_rate_limited_before_any_outbound_access(
     config = test_config.model_copy(update={"rate_limit_rpm": 1})
     for rate_limited_client in build_test_client(config):
         master = {"Otari-Key": f"Bearer {config.master_key}"}
-        key = rate_limited_client.post(f"{API_ROOT}/keys", json={"key_name": "rl"}, headers=master).json()
+        key = rate_limited_client.post(
+            f"{API_ROOT}/keys", json={"scopes": ALL_KEY_SCOPES, "key_name": "rl"}, headers=master
+        ).json()
         header = {"Otari-Key": f"Bearer {key['key']}"}
         with Session(create_engine(postgres_url)) as db:
             row = _store_server(db, _workspace_id(db, key["id"]))
@@ -484,7 +486,7 @@ def test_the_stored_allowlist_narrows_discovery_and_execution_alike(
     session: _FakeSession,
 ) -> None:
     row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]), allowed_tools=["create_issue"])
-    session.tools.append(MCPTool(name="delete_repo", description="danger", inputSchema={"type": "object"}))
+    session.tools.append(MCPTool(name="delete_repo", description="danger", input_schema={"type": "object"}))
 
     tools = client.get(f"{API_ROOT}/mcp/servers/{row.id}/tools", headers=api_key_header)
     refused = client.post(

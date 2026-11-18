@@ -24,6 +24,7 @@ from pydantic import ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from _unavailable_model_support import reporter_with_null_listener
 from gateway.api.deps import ToolPorts, get_workspace_search_keys
 from gateway.api.routes import chat, messages
 from gateway.api.routes._pipeline import DeclaredTools, RequestContext, ToolBackends, prepare_gateway_tools
@@ -34,13 +35,16 @@ from gateway.exceptions.organizations_exceptions import NotAuthorizedError, Work
 from gateway.exceptions.tools_exceptions import (
     WorkspaceMcpServerAlreadyExistsError,
     WorkspaceMcpServerCheckBusyError,
+    WorkspaceMcpServerCheckOriginError,
     WorkspaceMcpServerLimitReachedError,
     WorkspaceMcpServerNotFoundError,
     WorkspaceMcpServerUnsafeUrlError,
 )
+from gateway.models.api_keys import APIKey
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig, ResolvedMcpServer
 from gateway.models.tenancy import Organization, User, Workspace
-from gateway.models.tools import WorkspaceMcpServer
+from gateway.models.tools import WorkspaceMcpServer, WorkspaceMcpServerGrant
+from gateway.models.users import User as BillingUser
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
@@ -51,6 +55,7 @@ from gateway.repositories.tenancy import (
 from gateway.repositories.tools import WorkspaceCodeExecutionPolicyRepository
 from gateway.services import mcp_stateless
 from gateway.services.mcp_stateless import CheckFailure, McpCapacityUnavailable, ServerCheck
+from gateway.services.model_access import McpAccess
 from gateway.services.secret_box import decrypt_secret, generate_secret_key
 from gateway.services.tenancy.workspace_mcp_server_service import (
     MAX_ALLOWED_TOOLS,
@@ -65,6 +70,8 @@ from gateway.services.tenancy.workspace_mcp_server_service import (
 )
 from gateway.services.tenancy.workspace_web_search_service import WorkspaceWebSearchPolicies
 from gateway.services.tools import WorkspaceCodeExecutionPolicies
+
+from .conftest import ALL_KEY_SCOPES_HELD
 
 pytestmark = pytest.mark.asyncio
 
@@ -594,6 +601,7 @@ async def test_resolve_returns_decrypted_configs_in_request_order(async_db: Asyn
         async_db,
         workspace_id=workspace.id,
         server_ids=[second.id, first.id, second.id],
+        access=McpAccess(unrestricted=True),
     )
     assert [server.name for server in resolved] == ["jira", "github"], "de-duplicated, request order preserved"
     assert resolved[0].purpose_hint == "Tickets"
@@ -609,7 +617,12 @@ async def test_resolve_skips_a_disabled_server(async_db: AsyncSession) -> None:
 
     created = await service.create_server(user=owner, workspace_id=workspace.id, request=_create(enabled=False))
 
-    assert await resolve_workspace_mcp_servers(async_db, workspace_id=workspace.id, server_ids=[created.id]) == []
+    assert (
+        await resolve_workspace_mcp_servers(
+            async_db, workspace_id=workspace.id, server_ids=[created.id], access=McpAccess(unrestricted=True)
+        )
+        == []
+    )
 
 
 async def test_resolve_refuses_an_id_from_another_workspace(async_db: AsyncSession) -> None:
@@ -623,7 +636,9 @@ async def test_resolve_refuses_an_id_from_another_workspace(async_db: AsyncSessi
     created = await service.create_server(user=owner, workspace_id=first.id, request=_create())
 
     with pytest.raises(WorkspaceMcpServerNotFoundError):
-        await resolve_workspace_mcp_servers(async_db, workspace_id=second.id, server_ids=[created.id])
+        await resolve_workspace_mcp_servers(
+            async_db, workspace_id=second.id, server_ids=[created.id], access=McpAccess(unrestricted=True)
+        )
 
 
 async def test_resolve_on_a_workspace_that_configured_nothing(async_db: AsyncSession) -> None:
@@ -638,10 +653,17 @@ async def test_resolve_on_a_workspace_that_configured_nothing(async_db: AsyncSes
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     workspace = await _workspace(async_db, organization, owner=owner)
 
-    assert await resolve_workspace_mcp_servers(async_db, workspace_id=workspace.id, server_ids=[]) == []
+    assert (
+        await resolve_workspace_mcp_servers(
+            async_db, workspace_id=workspace.id, server_ids=[], access=McpAccess(unrestricted=True)
+        )
+        == []
+    )
 
     with pytest.raises(WorkspaceMcpServerNotFoundError):
-        await resolve_workspace_mcp_servers(async_db, workspace_id=workspace.id, server_ids=[uuid.uuid4()])
+        await resolve_workspace_mcp_servers(
+            async_db, workspace_id=workspace.id, server_ids=[uuid.uuid4()], access=McpAccess(unrestricted=True)
+        )
 
 
 async def test_deleting_a_workspace_takes_its_servers(async_db: AsyncSession) -> None:
@@ -666,7 +688,10 @@ async def test_deleting_a_workspace_takes_its_servers(async_db: AsyncSession) ->
 
 
 def _request_context(
-    db: AsyncSession, workspace_id: uuid.UUID, organization_id: uuid.UUID | None = None
+    db: AsyncSession,
+    workspace_id: uuid.UUID,
+    organization_id: uuid.UUID | None = None,
+    api_key: APIKey | None = None,
 ) -> RequestContext:
     """A request context of the shape the completion preamble builds.
 
@@ -676,6 +701,7 @@ def _request_context(
     refused before reaching what these cases are about.
     """
     return RequestContext(
+        unavailable_model_reporter=reporter_with_null_listener(),
         config=GatewayConfig(),
         db=db,
         uow=UnitOfWork(db),
@@ -687,6 +713,7 @@ def _request_context(
         started_at=time.monotonic(),
         workspace_id=workspace_id,
         organization_id=organization_id or uuid.uuid4(),
+        api_key=api_key,
     )
 
 
@@ -716,7 +743,7 @@ async def test_prepare_gateway_tools_hands_the_tool_loop_the_workspaces_servers(
         response=Response(),
         declared=DeclaredTools(
             guardrails=None,
-            guardrail_text="",
+            guardrail_targets=tuple,
             tools=None,
             mcp_servers=None,
             mcp_server_ids=[stored.id],
@@ -748,7 +775,7 @@ async def test_prepare_gateway_tools_merges_stored_servers_after_inline_ones(asy
         response=Response(),
         declared=DeclaredTools(
             guardrails=None,
-            guardrail_text="",
+            guardrail_targets=tuple,
             tools=None,
             mcp_servers=[McpServerConfig(name="inline", url=OTHER_PUBLIC_URL)],
             mcp_server_ids=[stored.id],
@@ -781,7 +808,7 @@ async def test_prepare_gateway_tools_is_unchanged_when_nothing_is_configured(asy
         response=Response(),
         declared=DeclaredTools(
             guardrails=None,
-            guardrail_text="",
+            guardrail_targets=tuple,
             tools=None,
             mcp_servers=[McpServerConfig(name="inline", url=PUBLIC_URL)],
             mcp_server_ids=None,
@@ -838,7 +865,7 @@ async def test_a_stored_servers_unsafe_url_is_not_named_to_the_caller(
             response=Response(),
             declared=DeclaredTools(
                 guardrails=None,
-                guardrail_text="",
+                guardrail_targets=tuple,
                 tools=None,
                 mcp_servers=None,
                 mcp_server_ids=[stored.id],
@@ -868,7 +895,7 @@ async def test_prepare_gateway_tools_refuses_an_unknown_id(async_db: AsyncSessio
             response=Response(),
             declared=DeclaredTools(
                 guardrails=None,
-                guardrail_text="",
+                guardrail_targets=tuple,
                 tools=None,
                 mcp_servers=None,
                 mcp_server_ids=[uuid.uuid4()],
@@ -896,7 +923,7 @@ async def test_the_anthropic_envelope_names_an_unknown_id_as_not_found(async_db:
             response=Response(),
             declared=DeclaredTools(
                 guardrails=None,
-                guardrail_text="",
+                guardrail_targets=tuple,
                 tools=None,
                 mcp_servers=None,
                 mcp_server_ids=[uuid.uuid4()],
@@ -1380,17 +1407,45 @@ async def test_an_edit_form_tests_with_the_stored_token_unless_it_sends_one(
         user=owner, workspace_id=workspace.id, request=_create(authorization_token="ghp_stored")
     )
 
+    other_path = PUBLIC_URL.replace("/mcp", ":443/v2/mcp")
     for token in (None, "", "ghp_typed"):
         await service.check_connection(
             user=owner,
             workspace_id=workspace.id,
-            request=WorkspaceMcpServerCheckRequest(
-                url=OTHER_PUBLIC_URL, authorization_token=token, server_id=created.id
-            ),
+            request=WorkspaceMcpServerCheckRequest(url=other_path, authorization_token=token, server_id=created.id),
         )
 
     assert [seen.authorization_token for seen in check.seen[1:]] == ["ghp_stored", None, "ghp_typed"]
-    assert all(seen.url == OTHER_PUBLIC_URL for seen in check.seen[1:])
+    assert all(seen.url == other_path for seen in check.seen[1:])
+
+
+async def test_a_stored_token_is_never_tested_against_another_origin(async_db: AsyncSession, check: _FakeCheck) -> None:
+    """A manager cannot have the stored token sent to an address they type: only a token they typed goes there."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    service = WorkspaceMcpServerService(async_db)
+    created = await service.create_server(
+        user=owner, workspace_id=workspace.id, request=_create(authorization_token="ghp_stored")
+    )
+
+    for url in (OTHER_PUBLIC_URL, PUBLIC_URL.replace("/mcp", ":8443/mcp"), PUBLIC_URL.replace("https:", "http:")):
+        with pytest.raises(WorkspaceMcpServerCheckOriginError):
+            await service.check_connection(
+                user=owner,
+                workspace_id=workspace.id,
+                request=WorkspaceMcpServerCheckRequest(url=url, server_id=created.id),
+            )
+    assert len(check.seen) == 1, "nothing was sent anywhere but by the create's own check"
+
+    await service.check_connection(
+        user=owner,
+        workspace_id=workspace.id,
+        request=WorkspaceMcpServerCheckRequest(
+            url=OTHER_PUBLIC_URL, authorization_token="ghp_typed", server_id=created.id
+        ),
+    )
+    assert (check.seen[-1].url, check.seen[-1].authorization_token) == (OTHER_PUBLIC_URL, "ghp_typed")
 
 
 async def test_a_test_refuses_an_unsafe_url_the_way_a_create_does(async_db: AsyncSession, check: _FakeCheck) -> None:
@@ -1440,3 +1495,182 @@ async def test_an_empty_allow_list_admits_no_tools(async_db: AsyncSession, check
     assert created.health is not None
     assert created.health.tool_count == 0
     assert created.health.tools == ["list_issues", "get_issue"]
+
+
+# --------------------------------------------------------------------------- #
+# A server's access list at admission
+# --------------------------------------------------------------------------- #
+
+
+async def _key(db: AsyncSession, workspace_id: uuid.UUID, *, user_id: str | None = None) -> APIKey:
+    if user_id is not None and await db.get(BillingUser, user_id) is None:
+        db.add(BillingUser(user_id=user_id))
+    key = APIKey(
+        id=str(uuid.uuid4()),
+        workspace_id=workspace_id,
+        key_hash=uuid.uuid4().hex,
+        user_id=user_id,
+        scopes=ALL_KEY_SCOPES_HELD,
+    )
+    db.add(key)
+    await db.flush()
+    return key
+
+
+async def _grant(
+    db: AsyncSession, server_id: uuid.UUID, tools: list[str], *, key: APIKey | None = None, user_id: str | None = None
+) -> None:
+    db.add(
+        WorkspaceMcpServerGrant(
+            server_id=server_id, api_key_id=key.id if key is not None else None, user_id=user_id, tools=tools
+        )
+    )
+    await db.flush()
+
+
+async def _owner(db: AsyncSession, workspace_id: uuid.UUID, user_id: str) -> str:
+    """A user who owns a key in the workspace, so a grant may name them."""
+    await _key(db, workspace_id, user_id=user_id)
+    return user_id
+
+
+async def _admit(
+    db: AsyncSession,
+    workspace_id: uuid.UUID,
+    organization_id: uuid.UUID,
+    *,
+    key: APIKey | None,
+    ids: list[uuid.UUID] | None = None,
+    inline: list[McpServerConfig] | None = None,
+) -> list[McpServerConfig]:
+    tool_ctx = await prepare_gateway_tools(
+        adapter=chat._ADAPTER,
+        ctx=_request_context(db, workspace_id, organization_id, api_key=key),
+        backends=ToolBackends(ports=_tool_ports(db)),
+        response=Response(),
+        declared=DeclaredTools(
+            guardrails=None,
+            guardrail_targets=tuple,
+            tools=None,
+            mcp_servers=inline,
+            mcp_server_ids=ids,
+            max_tool_iterations=None,
+            tools_header=None,
+        ),
+    )
+    return tool_ctx.mcp_server_configs or []
+
+
+async def _two_servers(db: AsyncSession) -> tuple[Organization, Workspace, uuid.UUID, uuid.UUID]:
+    """A workspace with ``shared``, open to everyone, and ``private``, which everyone is denied."""
+    organization = await _organization(db)
+    owner = await _member(db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(db, organization, owner=owner)
+    service = WorkspaceMcpServerService(db)
+    shared = await service.create_server(user=owner, workspace_id=workspace.id, request=_create(name="shared"))
+    private = await service.create_server(
+        user=owner,
+        workspace_id=workspace.id,
+        request=_create(name="private", url=OTHER_PUBLIC_URL, everyone_tools=[]),
+    )
+    return organization, workspace, shared.id, private.id
+
+
+async def test_a_key_without_grants_reaches_what_everyone_may_and_nothing_else(async_db: AsyncSession) -> None:
+    organization, workspace, shared, private = await _two_servers(async_db)
+    key = await _key(async_db, workspace.id)
+
+    configs = await _admit(async_db, workspace.id, organization.id, key=key, ids=[shared])
+    assert [(config.name, config.caller_tool_patterns) for config in configs] == [("shared", None)]
+    assert configs[0].caller_access_source == "mcp_everyone"
+
+    with pytest.raises(HTTPException) as refused:
+        await _admit(async_db, workspace.id, organization.id, key=key, ids=[shared, private])
+    missing = uuid.uuid4()
+    with pytest.raises(HTTPException) as unknown:
+        await _admit(async_db, workspace.id, organization.id, key=key, ids=[missing])
+    assert refused.value.status_code == unknown.value.status_code == 404
+    # A server the key may not reach is refused exactly as an unknown id is.
+    assert refused.value.detail == f"MCP server {private} not found"
+    assert unknown.value.detail == f"MCP server {missing} not found"
+
+
+async def test_a_keys_grant_decides_and_its_patterns_travel_with_the_server(async_db: AsyncSession) -> None:
+    organization, workspace, shared, private = await _two_servers(async_db)
+    key = await _key(async_db, workspace.id)
+    await _grant(async_db, private, ["list_*", "get_x"], key=key)
+    await _grant(async_db, shared, [], key=key)
+
+    configs = await _admit(async_db, workspace.id, organization.id, key=key, ids=[private])
+    assert [(config.name, config.caller_tool_patterns) for config in configs] == [("private", ["list_*", "get_x"])]
+    # The rule that decided travels too, so a refused call's span can name it.
+    assert configs[0].caller_access_source == "mcp_key"
+    with pytest.raises(HTTPException) as refused:
+        await _admit(async_db, workspace.id, organization.id, key=key, ids=[shared])
+    assert refused.value.status_code == 404
+
+    everything = await _key(async_db, workspace.id)
+    await _grant(async_db, private, ["*"], key=everything)
+    configs = await _admit(async_db, workspace.id, organization.id, key=everything, ids=[shared, private])
+    assert [(config.name, config.caller_tool_patterns) for config in configs] == [("shared", None), ("private", None)]
+
+
+async def test_a_users_grant_covers_their_keys_and_a_keys_own_grant_wins(async_db: AsyncSession) -> None:
+    organization, workspace, shared, private = await _two_servers(async_db)
+    await _grant(async_db, private, ["*"], user_id=await _owner(async_db, workspace.id, "someone"))
+    key = await _key(async_db, workspace.id, user_id="someone")
+
+    assert [c.name for c in await _admit(async_db, workspace.id, organization.id, key=key, ids=[private])] == [
+        "private"
+    ]
+
+    own = await _key(async_db, workspace.id, user_id="someone")
+    await _grant(async_db, private, [], key=own)
+    with pytest.raises(HTTPException) as refused:
+        await _admit(async_db, workspace.id, organization.id, key=own, ids=[private])
+    assert refused.value.status_code == 404
+
+
+async def test_the_master_key_and_a_session_reach_every_stored_server(async_db: AsyncSession) -> None:
+    organization, workspace, shared, private = await _two_servers(async_db)
+
+    configs = await _admit(async_db, workspace.id, organization.id, key=None, ids=[shared, private])
+
+    assert [(config.name, config.caller_tool_patterns) for config in configs] == [("shared", None), ("private", None)]
+
+
+async def test_a_declared_server_is_refused_until_the_workspace_turns_them_on(async_db: AsyncSession) -> None:
+    organization, workspace, shared, _ = await _two_servers(async_db)
+    mine = [McpServerConfig(name="mine", url="https://93.184.216.36/mcp")]
+    key = await _key(async_db, workspace.id)
+
+    with pytest.raises(HTTPException) as refused:
+        await _admit(async_db, workspace.id, organization.id, key=key, inline=mine)
+    assert refused.value.status_code == 400
+    assert "does not let a request name MCP servers" in refused.value.detail
+    assert [c.name for c in await _admit(async_db, workspace.id, organization.id, key=None, inline=mine)] == ["mine"]
+
+    workspace.request_mcp_servers_allowed = True
+    await async_db.flush()
+    configs = await _admit(async_db, workspace.id, organization.id, key=key, inline=mine, ids=[shared])
+    assert [config.name for config in configs] == ["mine", "shared"]
+    assert configs[0].caller_tool_patterns is None, "no rule matches a request's own server"
+
+
+async def test_a_key_denied_a_disabled_server_gets_the_unknown_answer(async_db: AsyncSession) -> None:
+    organization, workspace, shared, _ = await _two_servers(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Second")
+    await WorkspaceMemberRepository(async_db).create(workspace_id=workspace.id, user_id=owner.id, role="owner")
+    await WorkspaceMcpServerService(async_db).update_server(
+        user=owner, workspace_id=workspace.id, server_id=shared, request=WorkspaceMcpServerUpdate(enabled=False)
+    )
+    denied = await _key(async_db, workspace.id)
+    await _grant(async_db, shared, [], key=denied)
+
+    with pytest.raises(HTTPException) as refused:
+        await _admit(async_db, workspace.id, organization.id, key=denied, ids=[shared])
+    assert refused.value.status_code == 404
+    assert (
+        await _admit(async_db, workspace.id, organization.id, key=await _key(async_db, workspace.id), ids=[shared])
+        == []
+    )

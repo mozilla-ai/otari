@@ -1,6 +1,6 @@
 import { useState } from "react"
 
-import type { TestHostedProviderRequest } from "@/client"
+import type { HostedProvider, TestHostedProviderRequest } from "@/client"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Field } from "@/design-system/forms/Field"
@@ -24,13 +24,18 @@ import {
   ProviderCredentialFields,
   parseClientArgs,
 } from "@/features/providers/providerFields"
+import { ZeroDataRetentionField } from "@/features/providers/ZeroDataRetentionField"
 import {
   useCreateHostedProvider,
   useTestHostedProvider,
 } from "@/shared/api/hostedProviders"
 import { useProviderDetail } from "@/shared/api/providers"
 
+import { PolicyUrlFields } from "./PolicyUrlFields"
+import { policyUrlError, policyUrlValue } from "./policyUrls"
 import { ServesUnlistedModelsField } from "./ServesUnlistedModelsField"
+import { SupportedCountriesField } from "./SupportedCountriesField"
+import { parseCountries } from "./supportedCountries"
 
 // The form that configures a new hosted provider, in the shape of the
 // organization Providers page's key form: the provider picked from the catalog,
@@ -53,6 +58,10 @@ interface ProviderDraft {
   credentials: CredentialFieldValues
   clientArgs: string
   servesUnlistedModels: boolean
+  supportedCountries: string
+  zeroDataRetention: boolean
+  termsUrl: string
+  privacyUrl: string
 }
 
 const EMPTY_DRAFT: ProviderDraft = {
@@ -63,15 +72,22 @@ const EMPTY_DRAFT: ProviderDraft = {
   credentials: {},
   clientArgs: "",
   servesUnlistedModels: false,
+  supportedCountries: "",
+  zeroDataRetention: false,
+  termsUrl: "",
+  privacyUrl: "",
 }
 
 export function AddHostedProviderForm({
   isOpen,
   onClose,
+  onCreated,
   configuredProviders = [],
 }: {
   isOpen: boolean
   onClose: () => void
+  /** Told the stored provider once the create lands, after the dialog closes. */
+  onCreated?: (provider: HostedProvider) => void
   /** The names config.yml defines, which a stored one would override. */
   configuredProviders?: string[]
 }) {
@@ -88,6 +104,7 @@ export function AddHostedProviderForm({
 
   const spec = credentialSpecFor(draft.provider)
   const parsedClientArgs = parseClientArgs(draft.clientArgs)
+  const countries = parseCountries(draft.supportedCountries)
   const credentialErrors = validateCredentialFields(
     credentialFieldsFor(draft.provider),
     draft.credentials,
@@ -98,6 +115,9 @@ export function AddHostedProviderForm({
     !nameHasDelimiter &&
     (!needsKey || draft.apiKey !== "") &&
     parsedClientArgs.ok &&
+    countries.ok &&
+    policyUrlError(draft.termsUrl) === undefined &&
+    policyUrlError(draft.privacyUrl) === undefined &&
     Object.keys(credentialErrors).length === 0
 
   // One body for the save and the test, so the test tries what would be saved.
@@ -125,10 +145,29 @@ export function AddHostedProviderForm({
 
   const submit = () => {
     const payload = buildPayload()
-    if (!canSubmit || payload === null) return
+    if (!canSubmit || payload === null || !countries.ok) return
     create.mutate(
-      { ...payload, serves_unlisted_models: draft.servesUnlistedModels },
-      { onSuccess: onClose },
+      {
+        ...payload,
+        serves_unlisted_models: draft.servesUnlistedModels,
+        zero_data_retention: draft.zeroDataRetention,
+        ...(countries.value === null
+          ? {}
+          : { supported_countries: countries.value }),
+        // Left out when blank, which the API stores as no link.
+        ...(policyUrlValue(draft.termsUrl) === null
+          ? {}
+          : { terms_url: policyUrlValue(draft.termsUrl) }),
+        ...(policyUrlValue(draft.privacyUrl) === null
+          ? {}
+          : { privacy_url: policyUrlValue(draft.privacyUrl) }),
+      },
+      {
+        onSuccess: (created) => {
+          onClose()
+          onCreated?.(created)
+        },
+      },
     )
   }
 
@@ -211,6 +250,25 @@ export function AddHostedProviderForm({
         onChange={(servesUnlistedModels) =>
           setDraft({ ...draft, servesUnlistedModels })
         }
+      />
+      <ZeroDataRetentionField
+        isSelected={draft.zeroDataRetention}
+        onChange={(zeroDataRetention) =>
+          setDraft({ ...draft, zeroDataRetention })
+        }
+      />
+      <SupportedCountriesField
+        value={draft.supportedCountries}
+        parsed={countries}
+        onChange={(supportedCountries) =>
+          setDraft({ ...draft, supportedCountries })
+        }
+      />
+      <PolicyUrlFields
+        termsUrl={draft.termsUrl}
+        privacyUrl={draft.privacyUrl}
+        onTermsUrlChange={(termsUrl) => setDraft({ ...draft, termsUrl })}
+        onPrivacyUrlChange={(privacyUrl) => setDraft({ ...draft, privacyUrl })}
       />
       <ProviderCredentialFields
         provider={draft.provider}

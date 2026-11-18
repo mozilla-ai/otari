@@ -5,6 +5,9 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import type {
+  BlockedEmailCreated,
+  BlockedEmails,
+  CreateBlockedEmailRequest,
   DashboardBuild,
   DeploymentAdminAccess,
   DeploymentUser,
@@ -60,24 +63,34 @@ export function useDashboardBuild() {
 // 404: a gate cannot be built on a failed request, and hiding a destination
 // grants nothing either way.
 //
-// Read by the deployment accounts and hosted providers pages, to word their own
+// Read by the deployment accounts, hosted providers and subagent router pages, to word their own
 // refusal, and each holds that decision until this lands. Nothing else asks: the rail and the
 // Overview index need the answer before their first paint, so they take
 // `deployment_operator` off the organization context, which is the same
 // server-side predicate on a read the shell already makes (otari#836).
 // ---------------------------------------------------------------------------
 
+// No `enabled` parameter: both callers sit behind routes whose surfaces
+// (`admin`, `hosted_providers`, `agent_recommenders`) every gateway publishes. Not inferred from a
+// 404 either: the ordinary retry policy applies, and a failure is a failure.
+const accessQuery = {
+  queryKey: [DEPLOYMENT_ADMIN, "access"],
+  queryFn: () => apiFetch<DeploymentAdminAccess>("/admin/access"),
+  staleTime: 60_000,
+}
+
 export function useDeploymentAdminAccess() {
+  return useQuery({ ...accessQuery, select: (body) => body.granted })
+}
+
+/**
+ * Whether the caller is the bootstrap operator, the one account that may hand
+ * that role on. A gateway older than the field answers `false`.
+ */
+export function useIsBootstrapOperator() {
   return useQuery({
-    queryKey: [DEPLOYMENT_ADMIN, "access"],
-    queryFn: () =>
-      apiFetch<DeploymentAdminAccess>("/admin/access").then(
-        (body) => body.granted,
-      ),
-    staleTime: 60_000,
-    // No `enabled` parameter: both callers sit behind routes whose surfaces
-    // (`admin`, `hosted_providers`) every gateway publishes. Not inferred from a
-    // 404 either: the ordinary retry policy applies, and a failure is a failure.
+    ...accessQuery,
+    select: (body) => body.is_bootstrap_operator ?? false,
   })
 }
 
@@ -135,6 +148,35 @@ export function useUpdateDeploymentUser() {
 }
 
 /**
+ * Make another operator the bootstrap operator.
+ *
+ * Invalidates the access read as well as the list: the caller stops being the
+ * bootstrap operator, so the control that did this goes away.
+ */
+export function useHandOverBootstrapOperator() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      id,
+      currentPassword,
+    }: {
+      id: string
+      currentPassword: string
+    }) =>
+      apiFetch<void>(
+        `/admin/users/${encodeURIComponent(id)}/bootstrap-operator`,
+        {
+          method: "POST",
+          body: JSON.stringify({ current_password: currentPassword }),
+        },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [DEPLOYMENT_ADMIN] })
+    },
+  })
+}
+
+/**
  * Give an account a single-use link that sets its password.
  *
  * The gateway mails it where it can and otherwise returns it to pass on, so the
@@ -147,5 +189,57 @@ export function useIssuePasswordLink() {
         `/admin/users/${encodeURIComponent(id)}/password-link`,
         { method: "POST" },
       ),
+  })
+}
+
+/** The blocklist reads' key prefix, which every blocklist write invalidates. */
+const BLOCKED_EMAILS = [DEPLOYMENT_ADMIN, "blocked-emails"] as const
+
+/** One page of the deployment's email blocklist, newest entry first. */
+export function useBlockedEmails(
+  { page, pageSize }: { page: number; pageSize: number },
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [...BLOCKED_EMAILS, page, pageSize],
+    queryFn: () => {
+      const params = new URLSearchParams({
+        skip: String(page * pageSize),
+        limit: String(pageSize),
+      })
+      return apiFetch<BlockedEmails>(`/admin/blocked-emails?${params}`)
+    },
+    staleTime: 60_000,
+    placeholderData: keepPreviousData,
+    enabled,
+  })
+}
+
+export function useBlockEmail() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateBlockedEmailRequest) =>
+      apiFetch<BlockedEmailCreated>("/admin/blocked-emails", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    // Blocking ends the matching accounts' sessions, which the accounts list
+    // does not show, so only the blocklist itself goes stale.
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: BLOCKED_EMAILS })
+    },
+  })
+}
+
+export function useUnblockEmail() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/admin/blocked-emails/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: BLOCKED_EMAILS })
+    },
   })
 }

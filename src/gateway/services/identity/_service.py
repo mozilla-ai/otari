@@ -1,32 +1,60 @@
 import secrets
+import unicodedata
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
-from typing import Protocol
+from typing import Protocol, cast
 
+import idna
+
+from gateway.core.email_domains import blocklist_entry, blocklist_keys
+from gateway.core.tokens import generate_shared_token, generate_token, hash_token
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
+    BlockedEmailEntryNotFoundError,
+    BootstrapHandoverRefusedError,
+    BootstrapOperatorProtectedError,
+    CurrentPasswordIncorrectError,
     DeploymentUserNotFoundError,
+    DeploymentUserSelfChangeError,
+    InvalidBlockedEmailEntryError,
     OAuthAccountLinkedElsewhereError,
     OAuthEmailNotVerifiedError,
     OAuthIdentityUnknownError,
     PasswordLinkUnavailableError,
+    SignInBlockedError,
+    SsoIdentityNotAdmittedError,
+    SsoSignInRequiredError,
     TermsNotAcceptedError,
 )
 from gateway.log_config import logger
-from gateway.models.identity import EmailAssertion, MailedLinkStatus, ProviderIdentity
-from gateway.models.tenancy import User
+from gateway.models.identity import (
+    BlockedEmail,
+    EmailAssertion,
+    MailedLinkStatus,
+    OIDCConnection,
+    ProviderIdentity,
+    is_organization_connection_provider,
+)
+from gateway.models.tenancy import Organization, OrganizationDomainRole, User
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.identity import IdentityRepositories
 from gateway.services.dashboard_session_service import hash_session_token
+from gateway.services.identity._blocklist import EmailBlocklist
+from gateway.services.identity._enforcement import (
+    has_link_to_organization,
+    sso_enforcement_refuses_every_membership,
+)
+from gateway.services.identity._membership import VerifiedDomainClaims, organization_for_sso_identity
 from gateway.services.mail import Mailer
 from gateway.services.oauth_service import provider_label
+from gateway.services.organizations import BootstrapOperatorMarker
+from gateway.services.password_service import verify_password_async
 from gateway.services.tenancy import (
     OrganizationService,
-    generate_shared_token,
-    generate_token,
-    hash_token,
     render_password_reset_email,
+    sso_blocks_membership,
     unverified_identity_is_claimable,
 )
 
@@ -63,6 +91,14 @@ class SignIn:
 
 
 @dataclass(frozen=True)
+class EmailBlock:
+    """A new blocklist entry, and how many existing accounts it matched."""
+
+    entry: BlockedEmail
+    blocked_account_count: int
+
+
+@dataclass(frozen=True)
 class PasswordLink:
     """A link that sets an account's password, and how it reaches the person.
 
@@ -86,7 +122,9 @@ class IdentityService:
         repositories: IdentityRepositories,
         *,
         identity_provider: IdentityProviderPort,
+        domain_claims: VerifiedDomainClaims,
         organizations: OrganizationService,
+        bootstrap_operator: BootstrapOperatorMarker,
         sign_in_listener: SignInListener,
         session_ttl_hours: int,
         terms_url: str | None,
@@ -94,14 +132,23 @@ class IdentityService:
         open_signup: bool,
         password_reset_expiry_hours: int,
     ) -> None:
-        """``terms_url`` is the terms the deployment publishes, or ``None`` where it publishes none."""
+        """``terms_url`` is the terms the deployment publishes, or ``None`` where it publishes none.
+
+        ``domain_claims`` looks up a verified email-domain claim, so an SSO identity's organization can
+        be resolved without this service importing another domain's repository.
+        """
         self._uow = uow
+        self._blocked_emails = repositories.blocked_emails
+        self._blocklist = EmailBlocklist(uow, repositories.blocked_emails)
+        self._connections = repositories.connections
         self._links = repositories.links
         self._passkeys = repositories.passkeys
         self._sessions = repositories.sessions
         self._users = repositories.users
         self._identity_provider = identity_provider
+        self._domain_claims = domain_claims
         self._organizations = organizations
+        self._bootstrap_operator = bootstrap_operator
         self._sign_in_listener = sign_in_listener
         self._session_ttl_hours = session_ttl_hours
         self._terms_url = terms_url
@@ -114,7 +161,12 @@ class IdentityService:
 
         An identity linked to an account signs in as that account, and its password and verification stay as they are,
         unless its address is only vouched for: the sign-in then proves it, as a first sign-in does.
-        An identity with no link signs in as the account the identity provider policy returns, and is linked to it.
+        An identity with no link signs in as the account the identity provider policy returns, and is linked to it,
+        except an identity from one organization's own OIDC connection, which instead signs in to the one account
+        that organization's proven domain and connection admit, provisioned fresh on a first sign-in, and never
+        reaches the identity provider policy.
+        Such an identity is held to that admission on every sign-in, so a link does not outlive the proof or the
+        connection it was admitted on.
         An account holds at most one link for each provider.
         Where the deployment publishes terms, a sign-in that creates the account, or is the first way in to one
         nobody had claimed, needs ``terms_accepted`` and records it, as the signup form does.
@@ -126,9 +178,13 @@ class IdentityService:
             OAuthAccountLinkedElsewhereError: If the account the policy returns is linked to another identity
                 at the same provider.
             OAuthIdentityUnknownError: If the account is deactivated or gone.
+            SsoIdentityNotAdmittedError: If no organization both proves an OIDC identity's email domain and
+                holds a connection to the issuer that authenticated it.
             OAuthIdentityLinkConflictError: If a concurrent sign-in linked the identity to another account first.
             TermsNotAcceptedError: If the sign-in would create or first claim an account without the published
                 terms. Nothing the sign-in staged is kept, including an organization the policy provisioned.
+            SignInBlockedError: If the deployment's email blocklist matches the account's address, with the
+                same rollback.
             TenancyError: If the identity provider policy refuses the identity.
 
         """
@@ -136,30 +192,85 @@ class IdentityService:
         if external.email_verified is EmailAssertion.UNVERIFIED:
             raise OAuthEmailNotVerifiedError(label)
         async with self._uow:
+            # Before ``_account_for`` locks the account row, in the order a handover takes the two locks.
+            await self._blocked_emails.lock_shared()
             resolution = await self._account_for(external, label)
             if resolution.new_account:
                 self._record_terms(resolution.identity, terms_accepted=terms_accepted)
-            signed_in = await self.sign_in(resolution.identity)
+            signed_in = await self.sign_in(resolution.identity, asserted_email=external.email)
         return replace(signed_in, new_account=resolution.new_account, password_removed=resolution.password_removed)
 
-    async def sign_in(self, account: User) -> SignIn:
+    async def sign_in(self, account: User, *, asserted_email: str | None) -> SignIn:
         """Sign in an account that has proven who it is, and start its dashboard session.
 
+        ``asserted_email`` is the address a provider asserted for this sign-in, carried to the session
+        for the blocklist, and ``None`` where no provider asserted one.
+
         What the sign-in listener stages and the session commit together.
+
+        Raises:
+            SignInBlockedError: If the deployment's email blocklist matches either address. Nothing the
+                caller staged in the same block is kept, an account a first provider sign-in created included.
+
         """
         async with self._uow:
             await self._sign_in_listener.account_signed_in(account)
-            return await self.start_session(account)
+            return await self.start_session(account, asserted_email=asserted_email)
 
-    async def start_session(self, account: User) -> SignIn:
+    async def start_session(self, account: User, *, asserted_email: str | None) -> SignIn:
         """Start a dashboard session for ``account`` without running the sign-in listener.
 
         The session counts as the account's latest sign-in, and acts in the organization the account can act in.
+
+        ``asserted_email`` is the address a provider asserted for this sign-in, and ``None`` where no
+        provider asserted one. It is the only address an account reached through an organization's own
+        connection has, so the blocklist is checked against it as well as the account's own.
+
+        Raises:
+            SignInBlockedError: If the deployment's email blocklist matches either address. The check holds
+                the blocklist lock until the session commits, so a block cannot commit between the two.
+
         """
+
+        # Resolved once: whether the deployment admits this caller does not vary by organization.
+        is_operator = await self._organizations.is_deployment_operator(account)
+
+        async def sso_enforcement_blocks(organization: Organization) -> bool:
+            membership = await self._organizations.members.get_active_by_organization_and_user(
+                organization.id, account.id
+            )
+            if membership is None:
+                return False
+            linked = await has_link_to_organization(
+                organization, account.id, connections=self._connections, links=self._links
+            )
+            return sso_blocks_membership(
+                organization=organization,
+                membership=membership,
+                is_linked=linked,
+                is_deployment_operator=is_operator,
+            )
+
         async with self._uow:
-            active_organization_id = await self._organizations.active_organization_id_for_sign_in(account)
+            # The shared lock before any row lock, so a block holding it exclusive cannot deadlock against this.
+            await self._blocked_emails.lock_shared()
+            destination = await self._organizations.sign_in_destination(account, blocked=sso_enforcement_blocks)
+            if destination.refused_everywhere:
+                logger.info(
+                    "Refused a sign-in to account %s, which every organization it belongs to admits "
+                    "only through that organization's own connection",
+                    account.id,
+                )
+                raise SsoSignInRequiredError
+            active_organization_id = destination.organization_id
             now = datetime.now(UTC)
+            # A write before the check, so on SQLite, where the lock is a no-op, this transaction holds the one
+            # write lock when it reads the blocklist.
             await self._sessions.prune_expired(now)
+            presented = {email for email in (account.email, asserted_email) if email is not None}
+            if presented and await self.blocked_among(presented):
+                logger.info("Refused a sign-in to account %s, whose address is blocked", account.id)
+                raise SignInBlockedError
             await self._users.record_sign_in(account.id, at=now)
             token = f"{_SESSION_TOKEN_PREFIX}{secrets.token_urlsafe(32)}"
             expires_at = now + timedelta(hours=self._session_ttl_hours)
@@ -174,7 +285,176 @@ class IdentityService:
             session_expires_at=expires_at,
         )
 
-    async def issue_password_link(self, account_id: uuid.UUID) -> PasswordLink:
+    async def blocked_among(self, emails: Collection[str]) -> set[str]:
+        """Return the members of ``emails`` that the deployment's email blocklist matches."""
+        return await self._blocklist.blocked_among(emails)
+
+    async def list_blocked_emails(self, *, skip: int, limit: int) -> tuple[list[BlockedEmail], int]:
+        """Return a page of the email blocklist, newest entry first, and how many entries there are."""
+        async with self._uow:
+            return await self._blocked_emails.list_page(skip=skip, limit=limit)
+
+    async def block_email(self, *, actor: User, value: str, reason: str | None) -> EmailBlock:
+        """Block an address, or a domain and its subdomains, and end the sessions of every account it matches.
+
+        Raises:
+            InvalidBlockedEmailEntryError: If ``value`` is neither an address nor a domain.
+            DeploymentUserSelfChangeError: If the entry matches ``actor``'s own address.
+            BootstrapOperatorProtectedError: If it matches the bootstrap operator's, whose session master-key sign-in
+                mints.
+            BlockedEmailEntryExistsError: If the entry is already blocked.
+
+        """
+        pattern = blocklist_entry(value)
+        if pattern is None:
+            raise InvalidBlockedEmailEntryError(value)
+        async with self._uow:
+            # Before matching, so an account a sign-in in flight creates is either matched here or refused there.
+            await self._blocked_emails.lock_exclusive()
+            matched = await self._accounts_matching(pattern)
+            if actor.id in matched:
+                raise DeploymentUserSelfChangeError("You cannot block your own email address")
+            bootstrap_id = await self._organizations.bootstrap_operator_id()
+            if bootstrap_id is not None and bootstrap_id in matched:
+                raise BootstrapOperatorProtectedError("The deployment's bootstrap operator's address cannot be blocked")
+            entry = await self._blocked_emails.add(
+                pattern=pattern, reason=(reason or "").strip() or None, created_by_user_id=actor.id
+            )
+            await self._sessions.delete_for_users(matched)
+        logger.warning(
+            "Email blocklist entry added by operator: actor=%s entry=%s matched_accounts=%s",
+            actor.id,
+            entry.id,
+            len(matched),
+        )
+        return EmailBlock(entry=entry, blocked_account_count=len(matched))
+
+    async def unblock_email(self, *, actor: User, entry_id: uuid.UUID) -> None:
+        """Remove a blocklist entry, so the accounts it matched may sign in again.
+
+        Raises:
+            BlockedEmailEntryNotFoundError: If there is no such entry.
+
+        """
+        async with self._uow:
+            entry = await self._blocked_emails.get(entry_id)
+            if entry is None:
+                raise BlockedEmailEntryNotFoundError(entry_id)
+            await self._blocked_emails.remove(entry)
+        logger.warning("Email blocklist entry removed by operator: actor=%s entry=%s", actor.id, entry_id)
+
+    async def _accounts_matching(self, pattern: str) -> set[uuid.UUID]:
+        """The ids of every account whose address the entry ``pattern`` blocks.
+
+        An address reaches an account either as the account's own or as the one a provider asserts for it, and
+        both are matched. Queried by every spelling of the domain a stored address may carry, then matched
+        exactly by ``blocklist_keys``.
+        """
+        is_domain = "@" not in pattern
+        domain = pattern if is_domain else pattern.rsplit("@", 1)[1]
+        spellings = {domain}
+        try:
+            decoded = idna.decode(domain)
+        except (idna.IDNAError, UnicodeError):
+            decoded = domain
+        # A stored address may carry its domain composed or decomposed; ``blocklist_keys`` reads both alike.
+        spellings |= {unicodedata.normalize("NFC", decoded), unicodedata.normalize("NFD", decoded)}
+        candidates = await self._users.list_with_email_at(spellings, include_subdomains=is_domain)
+        # An account reached through an organization's own connection holds no address, so the only
+        # address that can match it is the one its provider asserted.
+        candidates += await self._links.list_with_email_at(spellings, include_subdomains=is_domain)
+        return {user_id for user_id, email in candidates if pattern in blocklist_keys(email)}
+
+    async def hand_over_bootstrap_operator(
+        self,
+        *,
+        actor: User,
+        user_id: uuid.UUID,
+        current_password: str | None,
+        by_master_key: bool,
+    ) -> None:
+        """Make another operator the bootstrap operator, keeping the previous one an operator.
+
+        Only the bootstrap operator may do it, which includes a request carrying the master key because
+        that resolves to the same identity. From a session it asks for the caller's current password, as a
+        password change does, and refuses a session whose account has no password: the role cannot be taken
+        back by anyone without the master key, so a stolen cookie must not be enough to give it away.
+
+        The target must be an active operator with a verified, unblocked address and a password. The
+        password is what keeps the deployment claimed, since master-key sign-in is retired by the bootstrap
+        operator's password alone.
+
+        Raises:
+            BootstrapHandoverRefusedError: If the caller is not the bootstrap operator, the target is the
+                caller, or the target could not hold the role.
+            CurrentPasswordIncorrectError: If the current password given does not match.
+            DeploymentUserNotFoundError: If there is no such account.
+        """
+        async with self._uow:
+            bootstrap_id = await self._bootstrap_operator.user_id()
+        if bootstrap_id != actor.id:
+            raise BootstrapHandoverRefusedError(
+                "Only the bootstrap operator, or a request carrying the master key, can hand over the role"
+            )
+        if user_id == actor.id:
+            raise BootstrapHandoverRefusedError("This account is already the bootstrap operator")
+        if not by_master_key:
+            if actor.hashed_password is None:
+                raise BootstrapHandoverRefusedError(
+                    "Set a password for your account first, or hand over the role with the master key"
+                )
+            if not current_password:
+                raise BootstrapHandoverRefusedError("Enter your current password to hand over the role")
+            if not await verify_password_async(current_password, actor.hashed_password):
+                raise CurrentPasswordIncorrectError
+
+        async with self._uow:
+            # The lock ``block_email`` takes, so an address cannot be blocked between the check below and the
+            # commit that makes its account the one whose address may not be blocked.
+            await self._blocked_emails.lock_exclusive()
+            target = await self._users.get_locked(user_id)
+            if target is None:
+                raise DeploymentUserNotFoundError(user_id)
+            await self._require_handover_target(target)
+            if not await self._bootstrap_operator.move(from_user_id=actor.id, to_user_id=target.id):
+                raise BootstrapHandoverRefusedError("The bootstrap operator changed while this was in progress")
+            # A reset link issued before the handover would otherwise set the new bootstrap operator's password.
+            target.password_reset_token_hash = None
+            target.password_reset_token_expires_at = None
+            self._users.stage(target)
+            previous = await self._users.get_locked(actor.id)
+            if previous is not None:
+                # Its operator access came from the marker until now, so it would otherwise lose it with no
+                # one having chosen that.
+                previous.is_superuser = True
+                self._users.stage(previous)
+        logger.warning(
+            "Bootstrap operator handed over: from=%s to=%s via=%s",
+            actor.id,
+            user_id,
+            "master_key" if by_master_key else "session",
+        )
+
+    async def _require_handover_target(self, target: User) -> None:
+        if not target.is_active:
+            raise BootstrapHandoverRefusedError("Reactivate this account before handing it the role")
+        if not target.is_superuser:
+            raise BootstrapHandoverRefusedError("Make this account an operator before handing it the role")
+        if target.email is None:
+            raise BootstrapHandoverRefusedError("This account has no email address to sign in with")
+        if target.hashed_password is None:
+            raise BootstrapHandoverRefusedError("This account has no password; its owner sets one first")
+        if target.email_verified_at is None:
+            raise BootstrapHandoverRefusedError("This account's email address is not verified yet")
+        if target.email_vouched_at is not None:
+            # Its first provider sign-in would remove the password that keeps master-key sign-in retired.
+            raise BootstrapHandoverRefusedError(
+                "This account's email address is only vouched for; its owner proves it by email first"
+            )
+        if await self.blocked_among([target.email]):
+            raise BootstrapHandoverRefusedError("This account's address is blocked")
+
+    async def issue_password_link(self, *, account_id: uuid.UUID, by_master_key: bool) -> PasswordLink:
         """Give an account a single-use link that sets its password, for someone who operates the deployment.
 
         Where this deployment can mail links, the link is mailed to the account's address and not returned.
@@ -184,16 +464,21 @@ class IdentityService:
 
         Raises:
             DeploymentUserNotFoundError: If there is no such account.
-            PasswordLinkUnavailableError: If the account is deactivated, has no address, is verified and has no
-                password, or is unverified and ``unverified_identity_is_claimable`` refuses it, which only
-                happens where ``open_signup`` is off.
+            PasswordLinkUnavailableError: If the account is deactivated, has no address, its address is blocked, is
+                verified and has no password, or is unverified and ``unverified_identity_is_claimable`` refuses it,
+                which only happens where ``open_signup`` is off. Also for the bootstrap operator's account unless the
+                request carries the master key: a link handed back to a session, the account's own included,
+                would set its password without the current one and so get past the handover's step-up.
 
         """
         mailed = self._mailer.can_send_links
         async with self._uow:
+            # Before the row lock, in the order a handover takes the two, so neither waits on the other in a cycle.
+            await self._blocked_emails.lock_shared()
             account = await self._users.get_locked(account_id)
             if account is None:
                 raise DeploymentUserNotFoundError(account_id)
+            await self._refuse_bootstrap_password_link(account.id, by_master_key=by_master_key)
             await self._require_password_link_allowed(account)
             token = generate_token() if mailed else generate_shared_token()
             expires_at = self._stage_reset_token(account, token)
@@ -213,16 +498,26 @@ class IdentityService:
                 return PasswordLink(mail_sent=True, link=None, expires_at=expires_at)
             # The mailed token is replaced, so the link handed back is the only one that works.
             async with self._uow:
+                # Again under the lock: a handover to this account may have landed during the send.
+                if await self._users.get_locked(account.id) is None:
+                    raise DeploymentUserNotFoundError(account_id)
+                await self._refuse_bootstrap_password_link(account.id, by_master_key=by_master_key)
                 token = generate_shared_token()
                 expires_at = self._stage_reset_token(account, token)
         logger.info("Issued a password link to pass on for account %s", account.id)
         return PasswordLink(mail_sent=False, link=self._mailer.link(_reset_path(token)), expires_at=expires_at)
+
+    async def _refuse_bootstrap_password_link(self, account_id: uuid.UUID, *, by_master_key: bool) -> None:
+        if not by_master_key and account_id == await self._bootstrap_operator.user_id():
+            raise PasswordLinkUnavailableError("Only the master key can reset the bootstrap operator's password.")
 
     async def _require_password_link_allowed(self, account: User) -> None:
         if not account.is_active:
             raise PasswordLinkUnavailableError("This account is deactivated. Reactivate it first.")
         if account.email is None:
             raise PasswordLinkUnavailableError("This account has no email address to sign in with.")
+        if await self.blocked_among([account.email]):
+            raise PasswordLinkUnavailableError("This account's address is blocked. Unblock it first.")
         if account.hashed_password is None and account.email_verified_at is not None:
             raise PasswordLinkUnavailableError(
                 "This account has no password and signs in with a provider or a passkey. "
@@ -232,6 +527,12 @@ class IdentityService:
             raise PasswordLinkUnavailableError(
                 "No organization still has this unverified address as a member or invitee. "
                 "Add or invite it again first."
+            )
+        if await sso_enforcement_refuses_every_membership(
+            account, organizations=self._organizations, connections=self._connections, links=self._links
+        ):
+            raise PasswordLinkUnavailableError(
+                "Every organization this account belongs to requires sign-in through its own connection."
             )
 
     def _stage_reset_token(self, account: User, token: str) -> datetime:
@@ -256,9 +557,16 @@ class IdentityService:
     async def _account_for(self, external: ProviderIdentity, label: str) -> IdentityResolution:
         link = await self._links.get_by_identity(provider=external.provider, subject=external.subject)
         if link is not None:
+            if is_organization_connection_provider(external.provider):
+                await self._require_admitting_connection(external)
             account = await self._active_account(link.user_id, label)
             password_removed = await self._prove_vouched_address(account)
+            self._take_display_name_from_sso(account, external)
+            self._links.record_asserted_address(link, external)
             return IdentityResolution(identity=account, new_account=False, password_removed=password_removed)
+
+        if is_organization_connection_provider(external.provider):
+            return await self._account_for_sso(external)
 
         resolution = await self._identity_provider.resolve(external)
         account = await self._active_account(resolution.identity.id, label)
@@ -274,6 +582,59 @@ class IdentityService:
             )
             raise OAuthAccountLinkedElsewhereError(label)
         return replace(resolution, identity=account)
+
+    async def _account_for_sso(self, external: ProviderIdentity) -> IdentityResolution:
+        """Resolve a first sign-in from one organization's own OIDC connection, bypassing the identity provider port.
+
+        What makes the claimed address usable here is the organization's DNS proof of its domain, not the
+        issuer's own assertion about it. A tenant-supplied issuer can assert any address it likes, so the
+        assertion is not read, and ``trust_email_verified`` stays off for every connection.
+
+        Raises:
+            SsoIdentityNotAdmittedError: If no organization both proves the identity's email domain and
+                holds a connection to the issuer that authenticated it.
+
+        """
+        connection = await self._require_admitting_connection(external)
+        account = await self._organizations.provision_sso_tenancy(
+            organization_id=connection.organization_id,
+            full_name=external.full_name,
+            # NOTE: The column is a plain string. Every writer validates it against this Literal first.
+            default_role=cast(OrganizationDomainRole, connection.default_role),
+        )
+        account.oauth_provider = external.provider
+        self._users.stage(account)
+        await self._links.add(external, user_id=account.id)
+        return IdentityResolution(identity=account, new_account=True)
+
+    async def _require_admitting_connection(self, external: ProviderIdentity) -> OIDCConnection:
+        """The connection admitting ``external``, asked on every sign-in rather than once.
+
+        Raises:
+            SsoIdentityNotAdmittedError: If no organization both proves the identity's email domain and
+                holds an enabled connection to the issuer that authenticated it.
+
+        """
+        connection = await organization_for_sso_identity(
+            external, connections=self._connections, domains=self._domain_claims, now=datetime.now(UTC)
+        )
+        if connection is None:
+            raise SsoIdentityNotAdmittedError
+        return connection
+
+    def _take_display_name_from_sso(self, account: User, external: ProviderIdentity) -> None:
+        """Take the display name an organization's own provider reports, for an account only it names.
+
+        Such an account holds no address and no surface here sets its name, so the provider is where
+        the name comes from and a later sign-in is when a change to it arrives. A provider reporting
+        none leaves the name alone rather than clearing it.
+        """
+        if not is_organization_connection_provider(external.provider):
+            return
+        if external.full_name is None or external.full_name == account.full_name:
+            return
+        account.full_name = external.full_name
+        self._users.stage(account)
 
     async def _prove_vouched_address(self, account: User) -> bool:
         """Treat a sign-in through a provider link as proof of a vouched address, and say if a password went.
@@ -317,7 +678,7 @@ class IdentityService:
 
 
 def _reset_path(token: str) -> str:
-    return f"/#/reset-password?token={token}"
+    return f"/reset-password#token={token}"
 
 
 def _link_status(account: User | None, expires_at: datetime | None) -> MailedLinkStatus:

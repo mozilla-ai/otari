@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import pytest
 
 from gateway.core.config import GatewayConfig
-from gateway.exceptions.tools_exceptions import WebSearchInterceptedError
+from gateway.exceptions.tools_exceptions import WebSearchInterceptedError, WebToolExecutorPinnedError
 from gateway.models.tools import CodeExecutor
-from gateway.services.tools import WEB_SEARCH_TOOL_NAME, Dialect, decide_candidate_tools, read_web_declarations
+from gateway.services.tools import (
+    WEB_FETCH_TOOL_NAME,
+    WEB_SEARCH_TOOL_NAME,
+    Dialect,
+    decide_candidate_tools,
+    read_web_declarations,
+)
 from gateway.services.tools._web_declarations import (
     first_provider_web_search_tool,
     parse_web_search_header,
@@ -68,7 +75,9 @@ def test_deepseek_runs_both_keywords_on_the_matching_api_and_responses_on_v4_pro
 
 def test_auto_decides_each_deepseek_candidate_by_its_model() -> None:
     config = GatewayConfig(web_search_url="http://search.invalid")
-    declarations = read_web_declarations([OPENAI_BARE], web_search_header="auto", config=config, uniform=False)
+    declarations = asyncio.run(
+        read_web_declarations([OPENAI_BARE], web_search_header="auto", config=config, uniform=False)
+    )
     decided = decide_candidate_tools(
         declarations,
         providers=["deepseek", "deepseek"],
@@ -81,7 +90,9 @@ def test_auto_decides_each_deepseek_candidate_by_its_model() -> None:
 
 def test_without_models_no_candidate_runs_a_search_only_some_models_run() -> None:
     config = GatewayConfig(web_search_url="http://search.invalid")
-    declarations = read_web_declarations([OPENAI_BARE], web_search_header="auto", config=config, uniform=False)
+    declarations = asyncio.run(
+        read_web_declarations([OPENAI_BARE], web_search_header="auto", config=config, uniform=False)
+    )
     (decided,) = decide_candidate_tools(declarations, providers=["deepseek"], dialect=Dialect.RESPONSES)
     assert WEB_SEARCH_TOOL_NAME in decided.claimed
 
@@ -105,11 +116,13 @@ def _claimed(
     config = GatewayConfig(
         web_search_url="http://search.invalid" if backend_configured else None, web_search_intercept=intercept
     )
-    declarations = read_web_declarations(
-        [entry] if entry is not None else [],
-        web_search_header=requested.value if requested is not None else None,
-        config=config,
-        uniform=uniform,
+    declarations = asyncio.run(
+        read_web_declarations(
+            [entry] if entry is not None else [],
+            web_search_header=requested.value if requested is not None else None,
+            config=config,
+            uniform=uniform,
+        )
     )
     decided = decide_candidate_tools(declarations, providers=providers, dialect=Dialect.MESSAGES)
     return [WEB_SEARCH_TOOL_NAME in candidate.claimed for candidate in decided]
@@ -208,3 +221,103 @@ def test_header_parses_case_insensitively(value: str | None, expected: CodeExecu
 def test_an_unknown_header_value_is_an_error() -> None:
     with pytest.raises(ValueError, match="Otari-Web-Search"):
         parse_web_search_header("gateway")
+
+
+# --- workspace pins ---------------------------------------------------------------
+
+
+def _pinned_claims(
+    tools: list[dict[str, Any]],
+    *,
+    search_pin: CodeExecutor | None = None,
+    fetch_pin: CodeExecutor | None = None,
+    search_header: str | None = None,
+    fetch_header: str | None = None,
+    intercept: bool = False,
+    provider: str = "anthropic",
+) -> set[str]:
+    """What Otari runs on one candidate, with the workspace pins given."""
+
+    async def executors() -> tuple[CodeExecutor | None, CodeExecutor | None]:
+        return search_pin, fetch_pin
+
+    config = GatewayConfig(
+        web_search_url="http://search.invalid", web_search_intercept=intercept, web_fetch_enabled=True
+    )
+    declarations = asyncio.run(
+        read_web_declarations(
+            tools,
+            web_search_header=search_header,
+            web_fetch_header=fetch_header,
+            config=config,
+            uniform=False,
+            resolve_executors=executors,
+        )
+    )
+    (decided,) = decide_candidate_tools(declarations, providers=[provider], dialect=Dialect.MESSAGES)
+    return set(decided.claimed)
+
+
+_ANTHROPIC_FETCH = {"type": "web_fetch_20250910", "name": "web_fetch"}
+
+
+def test_a_workspace_pin_claims_anthropics_own_keywords_without_any_header() -> None:
+    claimed = _pinned_claims(
+        [ANTHROPIC_DATED, _ANTHROPIC_FETCH], search_pin=CodeExecutor.OTARI, fetch_pin=CodeExecutor.OTARI
+    )
+    assert claimed == {WEB_SEARCH_TOOL_NAME, WEB_FETCH_TOOL_NAME}
+
+
+def test_each_tool_has_its_own_pin() -> None:
+    claimed = _pinned_claims([ANTHROPIC_DATED, _ANTHROPIC_FETCH], search_pin=CodeExecutor.OTARI)
+    assert claimed == {WEB_SEARCH_TOOL_NAME}
+
+
+def test_a_provider_pin_forwards_what_the_header_would_have_claimed() -> None:
+    assert _pinned_claims([ANTHROPIC_DATED], search_pin=CodeExecutor.PROVIDER) == set()
+
+
+@pytest.mark.parametrize(
+    ("pin", "header", "fetch"),
+    [
+        (CodeExecutor.PROVIDER, "otari", False),
+        (CodeExecutor.OTARI, "provider", False),
+        (CodeExecutor.OTARI, "auto", True),
+    ],
+)
+def test_a_header_that_disagrees_with_the_pin_is_refused(pin: CodeExecutor, header: str, fetch: bool) -> None:
+    with pytest.raises(WebToolExecutorPinnedError):
+        if fetch:
+            _pinned_claims([_ANTHROPIC_FETCH], fetch_pin=pin, fetch_header=header)
+        else:
+            _pinned_claims([ANTHROPIC_DATED], search_pin=pin, search_header=header)
+
+
+def test_a_header_that_agrees_with_the_pin_is_fine() -> None:
+    claimed = _pinned_claims([ANTHROPIC_DATED], search_pin=CodeExecutor.OTARI, search_header="OTARI")
+    assert claimed == {WEB_SEARCH_TOOL_NAME}
+
+
+def test_interception_claims_a_search_the_workspace_pinned_to_the_provider() -> None:
+    claimed = _pinned_claims([ANTHROPIC_DATED], search_pin=CodeExecutor.PROVIDER, intercept=True)
+    assert claimed == {WEB_SEARCH_TOOL_NAME}
+
+
+def test_the_pins_are_read_only_for_a_provider_keyword_the_deployment_could_run() -> None:
+    read = 0
+
+    async def executors() -> tuple[CodeExecutor | None, CodeExecutor | None]:
+        nonlocal read
+        read += 1
+        return CodeExecutor.OTARI, CodeExecutor.OTARI
+
+    for tools, config in (
+        ([{"type": "otari_web_search"}], GatewayConfig(web_search_url="http://search.invalid")),
+        ([ANTHROPIC_DATED], GatewayConfig(web_search_url=None)),
+    ):
+        asyncio.run(
+            read_web_declarations(
+                tools, web_search_header=None, config=config, uniform=False, resolve_executors=executors
+            )
+        )
+    assert read == 0

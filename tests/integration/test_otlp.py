@@ -21,13 +21,21 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from starlette.requests import Request
 
+from gateway.api.deps import NoSessionOwners, build_trace_service
 from gateway.api.routes import otlp as otlp_routes
 from gateway.core.config import API_ROOT
-from gateway.models.traces import TraceSpan
+from gateway.core.unit_of_work import create_unit_of_work
+from gateway.models.api_keys import APIKey
+from gateway.models.tenancy import OrganizationMember, Workspace
+from gateway.models.tenancy import User as TenancyUser
+from gateway.models.traces import TraceContentBarrier, TraceSpan
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
 from gateway.services.traces import _otlp as trace_otlp
+
+from .conftest import ALL_KEY_SCOPES
 
 
 def _usd(tokens: int, rate_per_million: str) -> Decimal:
@@ -76,7 +84,7 @@ def _exempt_key(client: TestClient, master_key_header: dict[str, str], user_id: 
     client.post(f"{API_ROOT}/users", json={"user_id": user_id}, headers=master_key_header)
     resp = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "cc-otlp", "user_id": user_id, "exclude_from_budget": True},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "cc-otlp", "user_id": user_id, "exclude_from_budget": True},
         headers=master_key_header,
     )
     assert resp.status_code == 200, resp.text
@@ -189,7 +197,7 @@ def test_otlp_requires_exempt_key(client: TestClient, master_key_header: dict[st
     client.post(f"{API_ROOT}/users", json={"user_id": "bob"}, headers=master_key_header)
     key = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "budgeted", "user_id": "bob", "exclude_from_budget": False},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "budgeted", "user_id": "bob", "exclude_from_budget": False},
         headers=master_key_header,
     ).json()["key"]
     resp = client.post(_PATH, json=_otlp(_api_request_record()), headers={"Otari-Key": f"Bearer {key}"})
@@ -262,6 +270,77 @@ def test_otlp_traces_gen_ai_is_ingested(
     expected = _usd(800, "2.5") + _usd(200, "1.25") + _usd(50, "10")
     assert row.cost == expected
     assert row.counts_toward_budget is False
+
+
+def _genai_anthropic_export(scope: str, **attrs: Any) -> dict[str, Any]:
+    """One Anthropic call an instrumentation library reported, with 300 tokens read from the cache."""
+    attrs = {
+        "gen_ai.provider.name": "anthropic",
+        "gen_ai.request.model": "claude-opus-4-8",
+        "gen_ai.response.id": "msg_genai_1",
+        "gen_ai.usage.output_tokens": 20,
+        "gen_ai.usage.cache_read.input_tokens": 300,
+        **attrs,
+    }
+    span = {"startTimeUnixNano": "1784000000000000000", "attributes": [_attr(k, v) for k, v in attrs.items()]}
+    return {"resourceSpans": [{"scopeSpans": [{"scope": {"name": scope}, "spans": [span]}]}]}
+
+
+@pytest.mark.parametrize(
+    ("scope", "input_tokens", "cache_write_key"),
+    [
+        # OpenLLMetry counts the cache inside the input, as the GenAI conventions say it should.
+        ("opentelemetry.instrumentation.anthropic", 510, "gen_ai.usage.cache_creation.input_tokens"),
+        # OpenLIT passes Anthropic's own counts through, with the cache outside it.
+        ("openlit.instrumentation.anthropic", 50, "gen_ai.usage.cache_creation.input_tokens"),
+        # An emitter Otari does not know, on the registry's names, either way.
+        ("example.instrumentation", 510, "gen_ai.usage.cache_write.input_tokens"),
+        ("example.instrumentation", 50, "gen_ai.usage.cache_write.input_tokens"),
+    ],
+)
+def test_otlp_genai_anthropic_cache_is_priced_once_however_the_emitter_counts_it(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+    scope: str,
+    input_tokens: int,
+    cache_write_key: str,
+) -> None:
+    headers = _exempt_key(client, master_key_header)
+    _seed_pricing(client, master_key_header)
+    export = _genai_anthropic_export(scope, **{"gen_ai.usage.input_tokens": input_tokens, cache_write_key: 160})
+
+    resp = client.post("/otlp/v1/traces", json=export, headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    row = db_session.query(UsageLog).filter(UsageLog.source_event_id == "msg_genai_1").one()
+    assert (row.cache_read_tokens, row.cache_write_tokens) == (300, 160)
+    # 50 fresh tokens, 300 read and 160 written, each once.
+    assert row.cost == _usd(50, "15") + _usd(300, "1.5") + _usd(160, "18.75") + _usd(20, "75")
+
+
+def test_otlp_genai_anthropic_cache_write_keeps_its_1h_share(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    headers = _exempt_key(client, master_key_header)
+    _seed_pricing(client, master_key_header)
+    export = _genai_anthropic_export(
+        "example.instrumentation",
+        **{
+            "gen_ai.usage.input_tokens": 510,
+            "gen_ai.usage.cache_write.input_tokens": 160,
+            "anthropic.usage.cache_creation.ephemeral_1h_input_tokens": 80,
+        },
+    )
+
+    resp = client.post("/otlp/v1/traces", json=export, headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    row = db_session.query(UsageLog).filter(UsageLog.source_event_id == "msg_genai_1").one()
+    assert (row.cache_write_tokens, row.cache_write_1h_tokens) == (160, 80)
+    # The 1h writes bill at twice the input rate.
+    expected = _usd(50, "15") + _usd(300, "1.5") + _usd(80, "18.75") + _usd(80, "30") + _usd(20, "75")
+    assert row.cost == expected
 
 
 # --- Codex ----------------------------------------------------------------------
@@ -697,6 +776,94 @@ def test_otlp_spans_are_recorded_only_once_the_exports_usage_is_taken(
     assert writer.writes == []
 
 
+def test_otlp_keeps_content_only_for_a_member_where_the_deployment_and_the_workspace_allow_it(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_writer(client, monkeypatch)
+    kept: list[bool] = []
+    monkeypatch.setattr(
+        otlp_routes, "record_otlp_export", lambda *args, **kwargs: kept.append(kwargs["content_enabled"])
+    )
+    config = cast(FastAPI, client.app).state.config
+    # A billing user no person stands behind, as /api/v1/keys mints one.
+    billing = _exempt_key(client, master_key_header)
+    with db_session_factory() as session:
+        key = session.scalars(select(APIKey).where(APIKey.key_name == "cc-otlp")).one()
+        workspace = session.get(Workspace, key.workspace_id)
+        person = TenancyUser(
+            email="dev@example.test", full_name="Dev", active_organization_id=workspace.organization_id
+        )
+        session.add(person)
+        session.flush()
+        session.add(
+            OrganizationMember(
+                organization_id=workspace.organization_id, user_id=person.id, role="admin", status="active"
+            )
+        )
+        session.commit()
+        person_id = str(person.id)
+    member = _exempt_key(client, master_key_header, user_id=person_id)
+
+    def export(headers: dict[str, str]) -> bool:
+        resp = client.post("/otlp/v1/traces", json=_otlp_traces(_agent_span("1" * 32, "2" * 16)), headers=headers)
+        assert resp.status_code == 200, resp.text
+        return kept[-1]
+
+    def workspace_keeps(value: bool) -> None:
+        with db_session_factory() as session:
+            key = session.scalars(select(APIKey).where(APIKey.key_name == "cc-otlp")).first()
+            session.get(Workspace, key.workspace_id).trace_content_enabled = value
+            session.commit()
+
+    assert export(member) is False
+    monkeypatch.setattr(config, "trace_content_enabled", True)
+    assert export(member) is False
+    workspace_keeps(True)
+    assert export(member) is True
+    # Content nobody could read is not kept: a key for no person keeps none.
+    assert export(billing) is False
+    monkeypatch.setattr(config, "trace_content_enabled", False)
+    assert export(member) is False
+    monkeypatch.setattr(config, "trace_content_enabled", True)
+    workspace_keeps(False)
+    assert export(member) is False
+
+
+def test_otlp_export_carries_the_content_generation_it_was_let_in_with(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Content deleted, or turned off and on, while an export uploads ends the generation that export carries."""
+    headers = _exempt_key(client, master_key_header)
+    _install_writer(client, monkeypatch)
+    carried: list[int | None] = []
+    monkeypatch.setattr(
+        otlp_routes, "record_otlp_export", lambda *args, **kwargs: carried.append(kwargs["content_generation"])
+    )
+    monkeypatch.setattr(cast(FastAPI, client.app).state.config, "trace_content_enabled", True)
+    with db_session_factory() as session:
+        workspace_id = session.scalars(select(APIKey).where(APIKey.key_name == "cc-otlp")).one().workspace_id
+    uploaded = Request.body
+
+    async def deleted_during_upload(request: Request) -> bytes:
+        body = await uploaded(request)
+        async with create_unit_of_work() as uow:
+            await build_trace_service(uow, request.app.state.trace_content, NoSessionOwners()).forget_content(
+                workspace_id
+            )
+        return body
+
+    monkeypatch.setattr(Request, "body", deleted_during_upload)
+
+    resp = client.post("/otlp/v1/traces", json=_otlp_traces(_agent_span("1" * 32, "2" * 16)), headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    with db_session_factory() as session:
+        now = session.scalars(
+            select(TraceContentBarrier.generation).where(TraceContentBarrier.workspace_id == workspace_id)
+        ).one()
+    assert carried == [0] and now > 0
+
+
 def test_otlp_json_hex_ids_are_read_as_the_spec_encodes_them(
     client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -781,7 +948,7 @@ def test_otlp_agent_spans_from_a_budgeted_key_are_not_traced(
     client.post(f"{API_ROOT}/users", json={"user_id": "bob"}, headers=master_key_header)
     key = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "budgeted", "user_id": "bob", "exclude_from_budget": False},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "budgeted", "user_id": "bob", "exclude_from_budget": False},
         headers=master_key_header,
     ).json()["key"]
     writer = _install_writer(client, monkeypatch)
@@ -882,6 +1049,80 @@ def test_otlp_claude_code_request_cost_reaches_its_session_once(
         "otari.llm.rate.cache_read": "1.5",
         "otari.llm.rate.cache_write": "18.75",
     }
+
+
+def test_otlp_genai_calls_cost_reaches_the_session_its_otel_trace_names(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An emitter names its conversation on the root span alone; the call under it is in that session, priced."""
+    headers = _exempt_key(client, master_key_header)
+    _seed_pricing(client, master_key_header)
+    writer = _install_writer(client, monkeypatch)
+    root = _agent_span("1" * 32, "a" * 16, attributes=[_attr("gen_ai.conversation.id", "conv-1")])
+    [call] = _genai_anthropic_export(
+        "opentelemetry.instrumentation.anthropic",
+        **{"gen_ai.operation.name": "chat", "gen_ai.usage.input_tokens": 300},
+    )["resourceSpans"][0]["scopeSpans"][0]["spans"]
+    call = {**call, "traceId": "1" * 32, "spanId": "b" * 16, "parentSpanId": "a" * 16, "name": "anthropic.chat"}
+    export = {
+        "resourceSpans": [
+            {"scopeSpans": [{"scope": {"name": "opentelemetry.instrumentation.anthropic"}, "spans": [root, call]}]}
+        ]
+    }
+
+    assert client.post("/otlp/v1/traces", json=export, headers=headers).status_code == 200
+
+    spans_write, cost_write = writer.writes
+    row = db_session.query(UsageLog).filter(UsageLog.source_event_id == "msg_genai_1").one()
+    assert len(spans_write.spans) == 2
+    assert cost_write.trace_id == spans_write.trace_id
+    [llm] = [span for span in spans_write.spans if span.kind == "llm"]
+    [usage] = cost_write.spans
+    assert (llm.request_id, usage.request_id, usage.cost_snapshot) == ("msg_genai_1", "msg_genai_1", row.cost)
+    assert row.cost is not None and row.cost > 0
+
+
+def test_otlp_a_call_the_claude_sdk_and_an_instrumentation_both_exported_is_one_row(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    headers = _exempt_key(client, master_key_header)
+    _seed_pricing(client, master_key_header)
+    [openllmetry] = _genai_anthropic_export(
+        "opentelemetry.instrumentation.anthropic",
+        **{"gen_ai.response.id": "msg_claude_1", "gen_ai.usage.input_tokens": 1300},
+    )["resourceSpans"]
+    export = _claude_export(_messages_create(), scope="com.anthropic.sdk.python")
+    export["resourceSpans"].append(openllmetry)
+
+    assert client.post("/otlp/v1/traces", json=export, headers=headers).status_code == 200
+
+    rows = db_session.query(UsageLog).filter(UsageLog.source_event_id == "msg_claude_1").all()
+    assert [row.source for row in rows] == ["claude_platform"]
+    [row] = rows
+    assert (row.prompt_tokens, row.cache_read_tokens, row.cache_write_tokens) == (1000, 200, 100)
+    assert row.cache_write_1h_tokens == 40
+    assert row.cost == _usd(700, "15") + _usd(200, "1.5") + _usd(60, "18.75") + _usd(40, "30") + _usd(50, "75")
+
+
+def test_otlp_a_call_two_instrumentations_book_under_different_sources_is_one_row(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    headers = _exempt_key(client, master_key_header)
+    _seed_pricing(client, master_key_header)
+    [first] = _genai_anthropic_export(
+        "opentelemetry.instrumentation.anthropic",
+        **{"gen_ai.usage.input_tokens": 510, "otari.client_name": "agent-a"},
+    )["resourceSpans"]
+    [second] = _genai_anthropic_export(
+        "openlit.instrumentation.anthropic",
+        **{"gen_ai.usage.input_tokens": 50, "otari.client_name": "agent-b"},
+    )["resourceSpans"]
+
+    resp = client.post("/otlp/v1/traces", json={"resourceSpans": [first, second]}, headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    rows = db_session.query(UsageLog).filter(UsageLog.source_event_id == "msg_genai_1").all()
+    assert [row.source for row in rows] == ["agent-a"]
 
 
 def test_otlp_a_judge_gates_cost_reaches_its_gate_on_the_session(

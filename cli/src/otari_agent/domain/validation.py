@@ -12,12 +12,13 @@ clean result.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Collection, Iterator, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
 from otari_agent.domain.evaluators import (
     COMMAND_SEPARATORS,
+    any_path_matches,
     matched_changed_paths,
     tokenize_phrase,
     tokenize_phrase_with_separators,
@@ -273,14 +274,35 @@ def _cap_warning(label: str, code: WarningCode, limit: int, gates: Sequence[Capp
     return Finding("warning", None, message, code=code, accepted=not unaccepted)
 
 
+def _glob_reaches_a_file(glob: str, globs: tuple[str, ...], tree: tuple[str, ...]) -> bool:
+    """Whether `glob` matches a path in `tree`, or so does its shallower twin or the `**` glob it is the twin of.
+
+    A `**` glob and its shallower twin are written as a pair, so a file either one reaches covers both.
+    """
+    pair = tuple(
+        other for other in globs if other == glob or shallower_twin(other) == glob or shallower_twin(glob) == other
+    )
+    return any_path_matches(pair, tree)
+
+
 def validate_policy(
     spec: PolicySpec,
     *,
     judge_gate_limit: int,
     verifier_gate_limit: int,
     probe_verifier: Callable[[VerifierGate], str | None] | None = None,
+    repo_files: Sequence[str] | None = None,
+    tree_gate_ids: Collection[str] | None = None,
 ) -> tuple[Finding, ...]:
     """Check a parsed guardrail for gates that run without meaning what they say.
+
+    ``repo_files`` is the repo-relative POSIX paths a glob can match.
+    Left unset, globs are not checked against the tree, for the same reason as ``probe_verifier``.
+    Only a ``when_changed`` glob is checked: it names paths expected to exist and change, so none matching is a
+    surprise. A ``forbidden`` glob names a path that should not exist, so none matching is the gate working.
+
+    ``tree_gate_ids`` limits that check to these gates, because the tree can only answer for a gate written for
+    this repo, and a user-level gate is written for every repo. Left unset, every gate is checked.
 
     ``probe_verifier`` is given a verifier gate and returns a problem to report about its script,
     or ``None`` when the script is fine.
@@ -295,8 +317,10 @@ def validate_policy(
     file rather than jumping around it.
     """
     findings: list[Finding] = []
+    tree = tuple(repo_files) if repo_files is not None else None
 
     for gate in spec.gates:
+        check_tree = tree is not None and (tree_gate_ids is None or gate.id in tree_gate_ids)
         for field, globs in _glob_fields(gate):
             for glob in globs:
                 dead = unreachable_glob(glob)
@@ -311,6 +335,23 @@ def validate_policy(
                             f"{field} glob {glob!r} contains a backslash, and a glob is matched "
                             "against repo-relative POSIX paths split on '/'. If that was meant as "
                             "a path separator, spell it with '/'.",
+                        )
+                    )
+                # A backslash glob already has its own warning, so it is not reported a second time.
+                if (
+                    check_tree
+                    and tree is not None
+                    and field == "when_changed"
+                    and "\\" not in glob
+                    and not _glob_reaches_a_file(glob, globs, tree)
+                ):
+                    findings.append(
+                        _gate_warning(
+                            gate,
+                            WarningCode.GLOB_MATCHES_NO_FILE,
+                            f"{field} glob {glob!r} matches no file in the repo. "
+                            "If it names a file that does not exist yet, such as build output, "
+                            "accept this warning on the gate.",
                         )
                     )
                 twin = shallower_twin(glob)

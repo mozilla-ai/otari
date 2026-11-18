@@ -1,6 +1,7 @@
 import { Description, FieldError, Input, Label, TextField } from "@heroui/react"
 import type { ReactNode } from "react"
 import { FieldMessages } from "@/design-system/forms/FieldMessages"
+import { allowsFieldAutoFocus } from "@/design-system/helpers/autoFocus"
 
 interface FieldProps {
   label: string
@@ -60,7 +61,7 @@ export function Field({
         type={type}
         inputMode={inputMode}
         placeholder={placeholder}
-        autoFocus={autoFocus}
+        autoFocus={autoFocus && allowsFieldAutoFocus()}
       />
       <FieldMessages shouldReserve={shouldReserveMessage}>
         {description ? (

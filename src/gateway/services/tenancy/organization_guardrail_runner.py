@@ -155,10 +155,25 @@ class _Held:
 class OrganizationGuardrailHandle:
     """A built guardrail, ready to run, with the deadline and the thread around it."""
 
-    def __init__(self, definition_id: uuid.UUID, guardrail_name: GuardrailName, guardrail: Guardrail) -> None:
+    def __init__(
+        self,
+        definition_id: uuid.UUID,
+        guardrail_name: GuardrailName,
+        guardrail: Guardrail,
+        *,
+        fingerprint: datetime | None = None,
+    ) -> None:
         self._definition_id = definition_id
         self._guardrail_name = guardrail_name
         self._guardrail = guardrail
+        self._fingerprint = fingerprint
+
+    @property
+    def identity(self) -> str | None:
+        """The version of the definition this guardrail was built from, which decides its verdicts."""
+        if self._fingerprint is None:
+            return None
+        return f"definition:{self._definition_id}:{self._fingerprint.isoformat()}"
 
     async def check(self, prompt: str, **validate_kwargs: Any) -> GuardrailCheck:
         """Run the guardrail over ``prompt``, in a thread, under a deadline.
@@ -213,7 +228,9 @@ def handle(organization_id: uuid.UUID, definition_id: uuid.UUID) -> Organization
     entry = _held.get((organization_id, definition_id))
     if entry is None or entry.guardrail is None:
         return None
-    return OrganizationGuardrailHandle(definition_id, GuardrailName(entry.guardrail_name), entry.guardrail)
+    return OrganizationGuardrailHandle(
+        definition_id, GuardrailName(entry.guardrail_name), entry.guardrail, fingerprint=entry.fingerprint
+    )
 
 
 def build_state(organization_id: uuid.UUID, definition_id: uuid.UUID, updated_at: datetime) -> BuildState:

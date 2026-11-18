@@ -33,6 +33,7 @@ from any_llm import LLMProvider
 from any_llm.types.completion import CompletionUsage
 
 from gateway.core.config import GatewayConfig
+from gateway.exceptions.api_keys_exceptions import KeyScopeMissingError
 from gateway.exceptions.files_exceptions import (
     AttachedFileUnavailableError,
     InlineAttachmentsTooLargeError,
@@ -40,10 +41,12 @@ from gateway.exceptions.files_exceptions import (
 )
 from gateway.log_config import logger
 from gateway.services.file_extractors import extract_text_from_file, ocr_image, rasterize_pdf
-from gateway.services.files import FileScope, FileService, StagedFile, sandbox_path_for, uploads_attachments
+from gateway.services.files import FileScope, FileService, StagedFile
 from gateway.services.model_capabilities import Capabilities
 from gateway.services.provider_kwargs import effective_credential, get_provider_kwargs
+from gateway.services.providers import CountryNotServedError
 from gateway.services.vision import describe_image
+from gateway.types.key_scope import KeyScope
 from gateway.types.provider_account import ResolvedCredential
 
 WireFormat = Literal["openai", "anthropic", "responses"]
@@ -93,15 +96,14 @@ class NormalizationStats:
     def stage(self, staged: StagedFile) -> StagedFile:
         """Record ``staged`` for the sandbox and return it under its session name.
 
-        A file referenced twice is staged once and keeps the name it got first;
-        the name itself is ``sandbox_path_for``'s, so two uploads named alike do
-        not overwrite each other in the working directory.
+        A file referenced twice is staged once and keeps the name it got first,
+        so two uploads named alike do not overwrite each other in the working
+        directory.
         """
         for existing in self.sandbox_inputs:
             if existing.file_id == staged.file_id:
                 return existing
-        taken = {existing.filename for existing in self.sandbox_inputs}
-        named = replace(staged, filename=sandbox_path_for(staged.filename, taken))
+        named = staged.named_for_sandbox({existing.filename for existing in self.sandbox_inputs})
         self.sandbox_inputs.append(named)
         return named
 
@@ -166,7 +168,7 @@ def inline_limit_for(
     if fmt == "responses" or not candidates or any(c not in _INLINE_LIMITED_PROVIDERS for c in candidates):
         return None
     upload = None
-    if files is not None and uploads_attachments(provider):
+    if files is not None and files.uploads_attachments(provider):
         attachments = files
 
         async def upload(data: bytes, mime: str, filename: str) -> str:
@@ -250,12 +252,34 @@ class _Resolved:
     def source(self, kind: str) -> _Source:
         return _Source(kind, self.data, self.mime, self.filename, None, self.staged is not None, self.staged)
 
+    def attachment(self) -> _Source:
+        """The source of a file block, which is an image when its bytes are one.
+
+        An image is rewritten to the image part a provider reads, because no
+        provider's document part takes one.
+        """
+        if image_type := _image_type(self.mime):
+            return replace(self.source(_IMAGE), mime=image_type, needs_inline=True)
+        return self.source(_DOCUMENT)
+
+
+# The image formats every provider's image part takes. Any other image (SVG,
+# TIFF, BMP) stays a document and goes through extraction.
+_PROVIDER_IMAGE_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
+
+
+def _image_type(mime: str) -> str | None:
+    """``mime`` without parameters when it is one of those formats, the bare type Anthropic's ``media_type`` takes."""
+    bare = mime.split(";", 1)[0].strip().lower()
+    return bare if bare in _PROVIDER_IMAGE_TYPES else None
+
 
 async def _resolve_from_ref(
     ref: dict[str, Any],
     *,
     files: FileService | None,
     user_id: str | None,
+    may_read_files: bool,
     workspace_id: uuid.UUID | None,
     read_bytes: bool = True,
 ) -> _Resolved | None:
@@ -264,16 +288,22 @@ async def _resolve_from_ref(
     ``read_bytes=False`` resolves a ``file_id`` to its record without loading
     the blob, for a block that is only staged into the sandbox and never shown
     to the model.
+
+    Raises:
+        AttachedFileUnavailableError: a ``file_id`` the caller cannot reach. Forwarding
+            it would fail at the provider with no word of why, or let a provider's own
+            file ID of the caller's choosing reach an account that is not the caller's.
     """
     filename = ref.get("filename")
     file_id = ref.get("file_id")
     if file_id and files is not None:
+        if not may_read_files:
+            raise KeyScopeMissingError(KeyScope.FILES_READ, "attaching a stored file")
         # A request with no resolved user owns no file, so it resolves nothing.
         scope = None if user_id is None else FileScope(user_id, workspace_id)
         staged = None if scope is None else await files.staged_upload(str(file_id), scope)
         if staged is None:
-            logger.warning("content normalizer: file_id %s not available to user %s", file_id, user_id)
-            return None
+            raise AttachedFileUnavailableError(str(file_id))
         data = await files.read_bytes(staged) if read_bytes else None
         return _Resolved(data, staged.mime_type, staged.filename, staged)
 
@@ -291,6 +321,7 @@ async def _classify(
     *,
     files: FileService | None,
     user_id: str | None,
+    may_read_files: bool,
     workspace_id: uuid.UUID | None,
     sandbox_requested: bool = False,
     provider_container: bool = False,
@@ -306,6 +337,7 @@ async def _classify(
             block,
             files=files,
             user_id=user_id,
+            may_read_files=may_read_files,
             workspace_id=workspace_id,
             read_bytes=not sandbox_requested and not provider_container,
         )
@@ -321,7 +353,9 @@ async def _classify(
                 data = _decode_data_url(f"data:{src.get('media_type', '')};base64,{src.get('data', '')}")[0]
                 return _Source(_IMAGE, data, src.get("media_type", "image/png"), None, None)
             if src.get("type") == "file":
-                resolved = await _resolve_from_ref(src, files=files, user_id=user_id, workspace_id=workspace_id)
+                resolved = await _resolve_from_ref(
+                    src, files=files, user_id=user_id, may_read_files=may_read_files, workspace_id=workspace_id
+                )
                 if resolved:
                     return resolved.source(_IMAGE)
             return _Source(_IMAGE, None, "image/png", None, src.get("url"))
@@ -329,7 +363,9 @@ async def _classify(
         image_url = block.get("image_url")
         url = image_url.get("url") if isinstance(image_url, dict) else image_url
         if block.get("file_id"):
-            resolved = await _resolve_from_ref(block, files=files, user_id=user_id, workspace_id=workspace_id)
+            resolved = await _resolve_from_ref(
+                block, files=files, user_id=user_id, may_read_files=may_read_files, workspace_id=workspace_id
+            )
             if resolved:
                 return resolved.source(_IMAGE)
         if isinstance(url, str):
@@ -347,16 +383,20 @@ async def _classify(
                 return _Source(_DOCUMENT, str(src.get("data", "")).encode("utf-8"), "text/plain", None, None)
             if src.get("type") == "base64":
                 data = _decode_data_url(f"data:{src.get('media_type', '')};base64,{src.get('data', '')}")[0]
-                return _Source(_DOCUMENT, data, src.get("media_type", "application/pdf"), None, None)
+                return _Resolved(data, src.get("media_type", "application/pdf"), None).attachment()
             if src.get("type") == "file":
-                resolved = await _resolve_from_ref(src, files=files, user_id=user_id, workspace_id=workspace_id)
+                resolved = await _resolve_from_ref(
+                    src, files=files, user_id=user_id, may_read_files=may_read_files, workspace_id=workspace_id
+                )
                 if resolved:
-                    return resolved.source(_DOCUMENT)
+                    return resolved.attachment()
             return _Source(_DOCUMENT, None, "application/pdf", None, src.get("url"))
         ref = block.get("file", block) if btype == "file" else block
-        resolved = await _resolve_from_ref(ref, files=files, user_id=user_id, workspace_id=workspace_id)
+        resolved = await _resolve_from_ref(
+            ref, files=files, user_id=user_id, may_read_files=may_read_files, workspace_id=workspace_id
+        )
         if resolved:
-            return resolved.source(_DOCUMENT)
+            return resolved.attachment()
         return None
 
     return None
@@ -415,6 +455,8 @@ async def _within_inline_limit(
     if limit.upload is not None:
         try:
             uri = await limit.upload(src.data, src.mime, src.filename or "")
+        except CountryNotServedError:
+            raise
         except Exception as exc:  # noqa: BLE001 - counted as oversized and refused by the caller
             logger.warning(
                 "content normalizer: provider upload failed for a %d byte %s: %s", size, src.kind, type(exc).__name__
@@ -427,7 +469,11 @@ async def _within_inline_limit(
 
 
 async def _extract_to_text(
-    src: _Source, config: GatewayConfig, stats: NormalizationStats, upstream_user: str | None
+    src: _Source,
+    config: GatewayConfig,
+    stats: NormalizationStats,
+    upstream_user: str | None,
+    client_country: str | None,
 ) -> str | None:
     """Produce a text rendering of a non-text block for a text-only model."""
     if src.data is None:
@@ -441,21 +487,27 @@ async def _extract_to_text(
             return f"[Attached file: {label}]\n{result.text}\n[End of {label}]"
         # Scanned/image-only PDF → rasterize and describe pages.
         if src.mime.split(";", 1)[0] == "application/pdf":
-            return await _describe_pdf_pages(src, config, stats, upstream_user)
+            return await _describe_pdf_pages(src, config, stats, upstream_user, client_country)
         stats.details.append(f"document extract failed: {result.detail}")
         return None
 
     # image
-    return await _render_image(src, config, stats, upstream_user)
+    return await _render_image(src, config, stats, upstream_user, client_country)
 
 
 async def _render_image(
-    src: _Source, config: GatewayConfig, stats: NormalizationStats, upstream_user: str | None
+    src: _Source,
+    config: GatewayConfig,
+    stats: NormalizationStats,
+    upstream_user: str | None,
+    client_country: str | None,
 ) -> str | None:
     assert src.data is not None
     strategy = config.vision_strategy
     if strategy == "describe":
-        described, usage = await describe_image(config, _to_data_url(src.data, src.mime), upstream_user=upstream_user)
+        described, usage = await describe_image(
+            config, _to_data_url(src.data, src.mime), upstream_user=upstream_user, client_country=client_country
+        )
         if usage is not None:
             stats.vision_prompt_tokens += usage.prompt_tokens or 0
             stats.vision_completion_tokens += usage.completion_tokens or 0
@@ -471,7 +523,11 @@ async def _render_image(
 
 
 async def _describe_pdf_pages(
-    src: _Source, config: GatewayConfig, stats: NormalizationStats, upstream_user: str | None
+    src: _Source,
+    config: GatewayConfig,
+    stats: NormalizationStats,
+    upstream_user: str | None,
+    client_country: str | None,
 ) -> str | None:
     assert src.data is not None
     pages = await rasterize_pdf(src.data)
@@ -481,7 +537,7 @@ async def _describe_pdf_pages(
     descriptions: list[str] = []
     for index, page_png in enumerate(pages, start=1):
         page_src = _Source(_IMAGE, page_png, "image/png", None, None)
-        rendered = await _render_image(page_src, config, stats, upstream_user)
+        rendered = await _render_image(page_src, config, stats, upstream_user, client_country)
         if rendered:
             descriptions.append(f"-- Page {index} --\n{rendered}")
     if not descriptions:
@@ -573,8 +629,10 @@ async def _normalize_block(
     *,
     files: FileService | None,
     user_id: str | None,
+    may_read_files: bool,
     workspace_id: uuid.UUID | None,
     upstream_user: str | None,
+    client_country: str | None = None,
     sandbox_requested: bool = False,
     provider_container: bool = False,
     inline_limit: InlineLimit | None = None,
@@ -587,10 +645,14 @@ async def _normalize_block(
             fmt,
             files=files,
             user_id=user_id,
+            may_read_files=may_read_files,
             workspace_id=workspace_id,
             sandbox_requested=sandbox_requested,
             provider_container=provider_container,
         )
+    except (AttachedFileUnavailableError, KeyScopeMissingError):
+        # Each one is the caller's own answer rather than a block this pass could not make sense of.
+        raise
     except Exception as exc:  # noqa: BLE001 — never fail the request over a block
         logger.warning("content normalizer: failed to classify block: %s", exc)
         if provider_container and _is_container_block(block, fmt):
@@ -619,7 +681,10 @@ async def _normalize_block(
         if staged is not None:
             # The sandbox gets the bytes; the model gets told where they are.
             return _sandbox_file_text(fmt, staged.filename)
-        src.kind = _DOCUMENT
+        if image_type := _image_type(src.mime):
+            src.kind, src.mime, src.needs_inline = _IMAGE, image_type, True
+        else:
+            src.kind = _DOCUMENT
 
     native = caps.image if src.kind == _IMAGE else caps.pdf and _is_native_document(src)
     if native:
@@ -630,7 +695,7 @@ async def _normalize_block(
         return _inline_passthrough(block, fmt, src) if src.needs_inline else block
 
     try:
-        text = await _extract_to_text(src, config, stats, upstream_user)
+        text = await _extract_to_text(src, config, stats, upstream_user, client_country)
     except Exception as exc:  # noqa: BLE001
         logger.warning("content normalizer: extraction failed for %s: %s", src.kind, exc)
         return block
@@ -673,8 +738,10 @@ async def normalize_messages(
     fmt: WireFormat,
     files: FileService | None,
     user_id: str | None,
+    may_read_files: bool,
     workspace_id: uuid.UUID | None = None,
     upstream_user: str | None = None,
+    client_country: str | None = None,
     sandbox_requested: bool = False,
     provider_container: bool = False,
     inline_limit: InlineLimit | None = None,
@@ -686,7 +753,9 @@ async def normalize_messages(
     which is what a master-key request gets: the operator acting deployment-wide.
 
     ``upstream_user`` is the request's end-user identifier, which an image
-    describe side-call carries as the main call does.
+    describe side-call carries as the main call does. ``client_country`` is the
+    country the request comes from, which keeps that side-call within
+    ``provider_supported_countries`` as the main call is.
 
     ``sandbox_requested`` says the request runs the gateway's code-execution
     sandbox. Every stored upload the messages reference is then also recorded on
@@ -715,7 +784,7 @@ async def normalize_messages(
         InlineAttachmentsTooLargeError: attachments pass ``inline_limit`` and could not be moved.
     """
     stats = NormalizationStats()
-    if not config.file_understanding_enabled or not isinstance(messages, list):
+    if not isinstance(messages, list):
         return messages, stats
 
     async def _block(block: Any) -> Any:
@@ -727,8 +796,10 @@ async def normalize_messages(
             stats,
             files=files,
             user_id=user_id,
+            may_read_files=may_read_files,
             workspace_id=workspace_id,
             upstream_user=upstream_user,
+            client_country=client_country,
             sandbox_requested=sandbox_requested,
             provider_container=provider_container,
             inline_limit=inline_limit,

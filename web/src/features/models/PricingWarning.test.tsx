@@ -33,6 +33,8 @@ function mockSettings(
   settings: GatewaySettings,
   rejectedInLastHour = 0,
   context: ContextResult = organizationContext(),
+  /** What `GET /models` lists: each model's id and whether a price is in force for it. */
+  models: { id: string; priced: boolean; dynamic?: boolean }[] = [],
 ) {
   let current = { ...settings }
   return vi
@@ -53,6 +55,25 @@ function mockSettings(
         if (method === "PATCH")
           current = { ...current, ...JSON.parse(String(init?.body)) }
         return jsonResponse(current)
+      }
+      if (url.endsWith(`${API_ROOT}/models`)) {
+        return jsonResponse({
+          object: "list",
+          data: models.map((model) => ({
+            id: model.id,
+            object: "model",
+            created: 0,
+            owned_by: "otari-ai",
+            pricing: model.priced
+              ? { input_price_per_million: 3, output_price_per_million: 15 }
+              : null,
+            pricing_source: model.dynamic
+              ? "dynamic"
+              : model.priced
+                ? "configured"
+                : "none",
+          })),
+        })
       }
       if (url.includes(`${API_ROOT}/usage/count`)) {
         return jsonResponse({ total: rejectedInLastHour })
@@ -128,6 +149,51 @@ describe("PricingWarning", () => {
     )
   })
 
+  it("stays quiet while every model on offer is priced, as after connecting otari.ai", async () => {
+    mockSettings(BASE, 0, organizationContext(), [
+      { id: "openai/gpt-4o-mini", priced: true },
+      { id: "anthropic/claude-sonnet-4-5", priced: true },
+      // A routing policy is priced per request and has no rate of its own.
+      { id: "answers", priced: false, dynamic: true },
+    ])
+    const client = renderPage(<PricingWarning />)
+
+    await waitFor(() =>
+      expect(client.getQueryState(["models", ""])?.status).toBe("success"),
+    )
+    expect(screen.queryByText(/Requests are rejected/)).not.toBeInTheDocument()
+  })
+
+  it("alarms when one model on offer has no price, as a provider of your own may list", async () => {
+    mockSettings(BASE, 0, organizationContext(), [
+      { id: "openai/gpt-4o-mini", priced: true },
+      { id: "openai:o9-preview", priced: false },
+    ])
+    renderPage(<PricingWarning />)
+
+    expect(await screen.findByText(/Requests are rejected/)).toBeInTheDocument()
+  })
+
+  it("alarms when the gateway offers no model at all", async () => {
+    mockSettings(BASE, 0, organizationContext(), [])
+    renderPage(<PricingWarning />)
+
+    expect(await screen.findByText(/Requests are rejected/)).toBeInTheDocument()
+  })
+
+  it("alarms when the catalog cannot be read", async () => {
+    const fetchMock = mockSettings(BASE)
+    const answer = fetchMock.getMockImplementation()
+    fetchMock.mockImplementation(async (input, init) =>
+      String(input).endsWith(`${API_ROOT}/models`)
+        ? jsonResponse({ detail: "Unavailable" }, 503)
+        : (answer?.(input, init) ?? jsonResponse({})),
+    )
+    renderPage(<PricingWarning />)
+
+    expect(await screen.findByText(/Requests are rejected/)).toBeInTheDocument()
+  })
+
   it("stays quiet when default pricing is already on", async () => {
     mockSettings({ ...BASE, require_pricing: true, default_pricing: true })
     renderPage(<PricingWarning />)
@@ -150,7 +216,7 @@ describe("PricingWarning", () => {
     // on reports the same number the banner just claimed.
     expect(
       screen.getByRole("link", { name: "View failed requests" }),
-    ).toHaveAttribute("href", "/activity?status=error&range=1h&source=gateway")
+    ).toHaveAttribute("href", "/requests?status=error&range=1h&source=gateway")
 
     // Counted from the error rows of the last hour, not from all usage.
     const countUrl = String(
@@ -202,13 +268,13 @@ describe("PricingWarning", () => {
     renderPage(<PricingWarning />)
 
     await screen.findByRole("button", { name: "Enable default pricing" })
-    // Settings, the organization context, and the failure count. The context is
-    // the third because the count is organization-scoped for a caller who does
-    // not operate the deployment and waits to learn which they are (otari#837);
-    // in the app it is already cached by the shell. Counted rather than listed
-    // because the point is that everything has settled before the absences below
-    // are asserted.
-    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(3))
+    // Settings, the organization context, the catalog and the failure count.
+    // The context is one of them because the count is organization-scoped for a
+    // caller who does not operate the deployment and waits to learn which they
+    // are (otari#837); in the app it is already cached by the shell. Counted
+    // rather than listed because the point is that everything has settled
+    // before the absences below are asserted.
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(4))
     expect(
       screen.queryByText(/failed in the last hour/),
     ).not.toBeInTheDocument()

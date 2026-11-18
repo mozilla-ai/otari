@@ -126,7 +126,7 @@ async function stubInvitation(page: Page): Promise<void> {
 
 test("signup", async ({ page }) => {
   await withMailReady(page)
-  await page.goto("/#/signup")
+  await page.goto("/signup")
   await expect(
     page.getByRole("heading", { name: "Claim your account" }),
   ).toBeVisible()
@@ -152,7 +152,7 @@ test("signup offering OAuth, address form folded and open", async ({
       },
     })
   })
-  await page.goto("/#/signup")
+  await page.goto("/signup")
   const reveal = page.getByRole("button", { name: /with email/i })
   await expect(reveal).toBeVisible()
   await captureScreenshot(page, "signup-oauth")
@@ -164,7 +164,7 @@ test("signup offering OAuth, address form folded and open", async ({
 test("signup on a gateway that cannot send mail", async ({ page }) => {
   // The hidden-rather-than-broken half of the same page: the sign-in screen
   // offers no link to it here, and this is what a bookmark still reaches.
-  await page.goto("/#/signup")
+  await page.goto("/signup")
   await expect(
     page.getByRole("heading", { name: "Not available on this gateway" }),
   ).toBeVisible()
@@ -175,7 +175,7 @@ test("signup prefilled from an accepted invitation", async ({ page }) => {
   // The other half of the handoff below: the address arrives read-only, because
   // the invitation is bound to it (otari#835).
   await withMailReady(page)
-  await page.goto("/#/signup?email=ada%40example.com")
+  await page.goto("/signup?email=ada%40example.com")
   await expect(page.getByLabel("Email")).toHaveValue("ada@example.com")
   await captureScreenshot(page, "signup-invited")
 })
@@ -187,7 +187,7 @@ test("invitation accepted, ready to claim", async ({ page }) => {
   // signed-in operator, and this project runs in front of a session.
   await withMailReady(page)
   await stubInvitation(page)
-  await page.goto("/#/accept-invitation?token=not-a-real-token")
+  await page.goto("/accept-invitation#token=not-a-real-token")
   await page.getByRole("button", { name: "Accept invitation" }).click()
   await expect(
     page.getByRole("button", { name: "Set your password" }),
@@ -197,7 +197,7 @@ test("invitation accepted, ready to claim", async ({ page }) => {
 
 test("check your email", async ({ page }) => {
   await withMailReady(page)
-  await page.goto("/#/check-email?type=signup")
+  await page.goto("/check-email?type=signup")
   await expect(
     page.getByRole("heading", { name: "Check your email" }),
   ).toBeVisible()
@@ -206,7 +206,7 @@ test("check your email", async ({ page }) => {
 
 test("resend verification", async ({ page }) => {
   await withMailReady(page)
-  await page.goto("/#/resend-verification")
+  await page.goto("/resend-verification")
   await expect(
     page.getByRole("heading", { name: "Send a new verification link" }),
   ).toBeVisible()
@@ -215,7 +215,7 @@ test("resend verification", async ({ page }) => {
 
 test("recover password", async ({ page }) => {
   await withMailReady(page)
-  await page.goto("/#/recover-password")
+  await page.goto("/recover-password")
   await expect(
     page.getByRole("heading", { name: "Set or reset your password" }),
   ).toBeVisible()
@@ -225,7 +225,7 @@ test("recover password", async ({ page }) => {
 test("verify email with a spent link", async ({ page }) => {
   // The gateway's own refusal, not a stub: a token it never issued is exactly
   // what an expired or already-used link looks like to it.
-  await page.goto("/#/verify-email?token=not-a-real-token")
+  await page.goto("/verify-email#token=not-a-real-token")
   await page.getByLabel("Password", { exact: true }).fill("a-real-password")
   await page.getByRole("button", { name: "Verify email" }).click()
   await expect(
@@ -235,11 +235,22 @@ test("verify email with a spent link", async ({ page }) => {
 })
 
 test("reset password", async ({ page }) => {
-  await page.goto("/#/reset-password?token=not-a-real-token")
+  await page.goto("/reset-password#token=not-a-real-token")
   await expect(
     page.getByRole("heading", { name: "Set a new password" }),
   ).toBeVisible()
   await captureScreenshot(page, "reset-password")
+})
+
+test("first-run setup", async ({ page }) => {
+  // Where the link in the gateway's first-run log lands. The key is only spent
+  // on submit, so any value renders the form on this unclaimed deployment.
+  await page.goto("/setup#key=not-a-real-key")
+  await expect(
+    page.getByRole("heading", { name: "Set up Otari" }),
+  ).toBeVisible()
+  await expect(page).toHaveURL(/\/setup$/)
+  await captureScreenshot(page, "setup")
 })
 
 test("sign-in screen offering OAuth", async ({ page }) => {
@@ -261,7 +272,7 @@ test("OAuth callback that did not complete", async ({ page }) => {
   // ending somebody actually sees when a link is stale or opened in the wrong
   // tab; the success ending leaves for the dashboard and has no screen to hold.
   await withGoogleConfigured(page)
-  await page.goto("/#/auth/google/callback?code=not-a-real-code&state=stale")
+  await page.goto("/sign-in/google/callback?code=not-a-real-code&state=stale")
   await expect(
     page.getByRole("heading", { name: "That sign-in did not complete" }),
   ).toBeVisible()
@@ -281,12 +292,15 @@ test("signup offering OAuth behind published terms", async ({ page }) => {
         open_signup: true,
         oauth_providers: ["google", "github"],
         terms_url: "https://example.com/terms",
+        privacy_url: "https://example.com/privacy",
       },
     })
   })
-  await page.goto("/#/signup")
+  await page.goto("/signup")
   await expect(
-    page.getByRole("checkbox", { name: "I accept the terms of service" }),
+    page.getByRole("checkbox", {
+      name: "I accept the Terms of Service and the Privacy Policy",
+    }),
   ).toBeVisible()
   await captureScreenshot(page, "signup-oauth-terms")
 })
@@ -306,6 +320,7 @@ test("OAuth callback asking for the terms a new account needs", async ({
         ...bootstrap,
         oauth_providers: ["google", "github"],
         terms_url: "https://example.com/terms",
+        privacy_url: "https://example.com/privacy",
       },
     })
   })
@@ -321,7 +336,7 @@ test("OAuth callback asking for the terms a new account needs", async ({
   await page.addInitScript(() => {
     window.sessionStorage.setItem("otari.oauth.state", "the-state")
   })
-  await page.goto("/#/auth/google/callback?code=c&state=the-state")
+  await page.goto("/sign-in/google/callback?code=c&state=the-state")
   await expect(
     page.getByRole("heading", { name: "Accept the terms to continue" }),
   ).toBeVisible()
@@ -334,7 +349,7 @@ test("OAuth callback on a gateway that configures no provider", async ({
   // The hidden-rather-than-broken half, the same shape the mail-gated pages
   // have: the sign-in screen offers no button here, and this is what a bookmark
   // or a provider redirect still reaches.
-  await page.goto("/#/auth/github/callback?code=c&state=s")
+  await page.goto("/sign-in/github/callback?code=c&state=s")
   await expect(
     page.getByRole("heading", { name: "Not available on this gateway" }),
   ).toBeVisible()
@@ -360,7 +375,7 @@ const CATALOG_OFFERINGS = [
       input_price_per_million: 0.5,
       output_price_per_million: 2,
       pricing_tiers: [],
-      unit: "tokens",
+      unit: "token",
     },
     price_source: "deployment",
     price_reference: "nebius:zai-org/GLM-5.3",
@@ -382,7 +397,7 @@ const CATALOG_OFFERINGS = [
       input_price_per_million: 0.7,
       output_price_per_million: 2.5,
       pricing_tiers: [],
-      unit: "tokens",
+      unit: "token",
     },
     price_source: "deployment",
     price_reference: "fireworks:accounts/fireworks/models/glm-5p3",
@@ -459,14 +474,14 @@ async function withPublicCatalog(page: Page): Promise<void> {
 
 test("public catalog", async ({ page }) => {
   await withPublicCatalog(page)
-  await page.goto("/#/models")
+  await page.goto("/models")
   await expect(page.getByRole("link", { name: /GLM-5.3/ })).toBeVisible()
   await captureScreenshot(page, "public-catalog")
 })
 
 test("public model page", async ({ page }) => {
   await withPublicCatalog(page)
-  await page.goto("/#/models/z-ai/glm-5.3")
+  await page.goto("/models/z-ai/glm-5.3")
   await expect(page.getByRole("heading", { name: /GLM-5.3/ })).toBeVisible()
   await captureScreenshot(page, "public-model-detail")
 })

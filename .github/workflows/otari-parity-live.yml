@@ -1,0 +1,75 @@
+name: Otari Parity Live
+
+# The path-parity matrix (tests/integration/test_path_parity.py) against real
+# providers: every endpoint, streamed or not, by model or by routing policy, with
+# and without a gateway tool loop, checked against the tokens the provider itself
+# reported. Pull requests run the same matrix on its scripted provider, which
+# needs no credential; this runs it live once a change has landed, where the
+# provider keys are available.
+#
+# A provider runs when its key is set; one whose key is missing is named in a
+# notice and skipped. Adding a provider is a BACKENDS entry in the test module,
+# a secret, and a line below.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/gateway/**'
+      - 'any-search/**'
+      - 'any-fetch/**'
+      - 'tests/integration/test_path_parity.py'
+      - 'tests/integration/parity_provider.py'
+      - 'tests/integration/conftest.py'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/otari-parity-live.yml'
+  workflow_dispatch:
+
+# One live run at a time: a newer commit on main supersedes an older run, which
+# would only spend on a state that no longer exists.
+concurrency:
+  group: otari-parity-live-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  parity-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # `secrets` cannot be read in a job-level `if`, so the presence check is a step.
+      HAS_DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_API_KEY != '' }}
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - name: Choose the providers with a key
+      id: backends
+      run: |
+        backends=()
+        if [ "$HAS_DEEPSEEK_KEY" = "true" ]; then backends+=(deepseek); else echo "::notice::DEEPSEEK_API_KEY is not set; DeepSeek is skipped."; fi
+        joined=$(IFS=,; echo "${backends[*]}")
+        echo "list=$joined" >> "$GITHUB_OUTPUT"
+        if [ -z "$joined" ]; then echo "::notice::No provider key is set, so no live parity run."; fi
+
+    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      if: steps.backends.outputs.list != ''
+      with:
+        python-version: 3.14
+        activate-environment: true
+
+    - name: Install dependencies
+      if: steps.backends.outputs.list != ''
+      run: uv sync --dev --frozen
+
+    - name: Run the parity matrix against live providers
+      if: steps.backends.outputs.list != ''
+      env:
+        PARITY_BACKENDS: ${{ steps.backends.outputs.list }}
+        DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      run: uv run pytest tests/integration/test_path_parity.py -v -n 4

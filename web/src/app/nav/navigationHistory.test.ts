@@ -25,34 +25,59 @@ describe("rail location memory", () => {
   })
 
   it("files a destination under the rail that declares it", () => {
-    rememberLocation("/usage", showsEverything)
+    rememberLocation("/keys", showsEverything)
     rememberLocation("/budgets", showsEverything)
 
     // Two rails, two memories: recording an organization page must not overwrite
     // where you were on the workspace one, which is the whole point.
-    expect(lastLocation("workspace", showsEverything)).toEqual({ to: "/usage" })
+    expect(lastLocation("workspace", showsEverything)).toEqual({ to: "/keys" })
     expect(lastLocation("organization", showsEverything)).toEqual({
       to: "/budgets",
     })
   })
 
   it("remembers a nested destination, not just a top-level one", () => {
-    // "Including its subpage" is the part the shell used to lose: it sent you to
-    // the rail's landing page however deep you had been.
-    rememberLocation("/tools/web-search", showsEverything)
+    // A group's row, so coming back to the rail reopens it rather than the
+    // rail's landing page.
+    rememberLocation("/organization/web-search-keys", showsEverything)
+
+    expect(lastLocation("organization", showsEverything)).toEqual({
+      to: "/organization/web-search-keys",
+    })
+  })
+
+  it.each(["/people", "/rules"])("returns to %s", (path) => {
+    rememberLocation(path, showsEverything)
+
+    expect(lastLocation("workspace", showsEverything)).toEqual({ to: path })
+  })
+
+  it("remembers a destination with no row under the workspace rail", () => {
+    // Routing opens from Rules and has no row, but it is a page of its own to
+    // come back to.
+    rememberLocation("/routing", showsEverything)
 
     expect(lastLocation("workspace", showsEverything)).toEqual({
-      to: "/tools/web-search",
+      to: "/routing",
+    })
+  })
+
+  it("remembers which tab of a destination was open", () => {
+    // Sessions is one row with a URL per view: coming back reopens the view.
+    rememberLocation("/requests", showsEverything)
+
+    expect(lastLocation("workspace", showsEverything)).toEqual({
+      to: "/requests",
     })
   })
 
   it("ignores a path the registry does not declare", () => {
-    rememberLocation("/usage", showsEverything)
+    rememberLocation("/keys", showsEverything)
     rememberLocation("/account", showsEverything)
 
     // The account page and the 404 splat are not places to return to, so the last real
     // destination stands rather than being replaced by one.
-    expect(lastLocation("workspace", showsEverything)).toEqual({ to: "/usage" })
+    expect(lastLocation("workspace", showsEverything)).toEqual({ to: "/keys" })
   })
 
   it("ignores a destination this deployment gates off", () => {
@@ -67,10 +92,10 @@ describe("rail location memory", () => {
     })
   })
 
-  it("ignores a nested destination whose own surface is gated off", () => {
+  it("ignores a destination with no row whose own surface is gated off", () => {
     rememberLocation("/routing", showsEverything)
-    // Guardrails is grouped under Routing and served by the tools surface, so
-    // the child's surface is the one that has to be consulted, not its parent's.
+    // The workspace's guardrails open from Rules and are served by the tools
+    // surface, so that surface is the one consulted, not the row's.
     rememberLocation("/tools/guardrails", withoutSurface("tools"))
 
     expect(lastLocation("workspace", showsEverything)).toEqual({
@@ -94,13 +119,13 @@ describe("rail location memory", () => {
     // A destination that is still gated, which is the whole point of the case:
     // an unregistered path is dropped by the test above for a different reason,
     // so using one here would keep passing while testing nothing.
-    window.localStorage.setItem(ORGANIZATION_KEY, "/organization/usage")
+    window.localStorage.setItem(ORGANIZATION_KEY, "/workspaces")
 
     expect(
-      lastLocation("organization", withoutSurface("organization_usage")),
+      lastLocation("organization", withoutSurface("workspaces")),
     ).toBeUndefined()
     expect(lastLocation("organization", showsEverything)).toEqual({
-      to: "/organization/usage",
+      to: "/workspaces",
     })
   })
 
@@ -152,7 +177,7 @@ describe("rail location memory", () => {
   it("drops a stored value that belongs to the other rail", () => {
     // Both keys are read through the same registry check, so a destination that
     // has since moved rails cannot land you on the wrong one.
-    window.localStorage.setItem(ORGANIZATION_KEY, "/usage")
+    window.localStorage.setItem(ORGANIZATION_KEY, "/keys")
 
     expect(lastLocation("organization", showsEverything)).toBeUndefined()
   })

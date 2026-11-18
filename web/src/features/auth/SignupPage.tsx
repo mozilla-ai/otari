@@ -4,17 +4,18 @@ import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PublicAuthFields } from "@/features/auth/overlayPublicAuthFields"
 import { useSignup } from "@/shared/api/auth"
-import { ApiError } from "@/shared/api/client"
-import { emailFromHash } from "@/shared/helpers/hashParams"
+import { ApiError, createSession } from "@/shared/api/client"
+import { navigateTo } from "@/shared/helpers/appLocation"
 import {
   MAX_PASSWORD_BYTES,
   MIN_PASSWORD_LENGTH,
   newPasswordProblem,
 } from "@/shared/helpers/password"
+import { emailFromRoute, inviteFromRoute } from "@/shared/helpers/routeParams"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
-
+import { useAuth } from "./AuthContext"
 import { AuthEmailField, AuthPasswordField } from "./AuthFields"
 import { AuthHelp } from "./AuthHelp"
 import {
@@ -37,7 +38,7 @@ import { rememberSignInAddress } from "./signInAddress"
 import { TermsAcceptanceField } from "./TermsAcceptanceField"
 
 /**
- * `#/signup`: register an address, or claim one an admin already added.
+ * `/signup`: register an address, or claim one an admin already added.
  *
  * Which of the two is the deployment's own posture, published as `open_signup`
  * in the bootstrap (otari-ai#2100). Closed, the default, `POST /v1/auth/signup`
@@ -59,7 +60,7 @@ import { TermsAcceptanceField } from "./TermsAcceptanceField"
  *
  * **The response says nothing about the address**, under either posture. It is
  * enumeration-safe: unknown, already claimed, and genuinely just claimed all
- * answer the same sentence. So success navigates to `#/check-email`, which is
+ * answer the same sentence. So success navigates to `/check-email`, which is
  * written in the conditional the server's own message uses, and nothing here
  * branches on what came back.
  *
@@ -84,15 +85,19 @@ import { TermsAcceptanceField } from "./TermsAcceptanceField"
  * address. Not a credential and not treated as one: `POST /v1/auth/signup`
  * checks this address against the roster itself.
  */
-export function SignupPage({ hash }: { hash: string }) {
+export function SignupPage({ route }: { route: string }) {
   const signup = useSignup()
   const { recordEvent } = useTelemetry()
   const { open_signup, terms_url, oauth_providers } = useDeployment()
   const providers = open_signup ? renderableOAuthProviders(oauth_providers) : []
   // Read straight from the prop rather than held in state: `PublicAuthPage` is
-  // keyed on the whole hash, so a second link pasted into an open tab remounts
+  // keyed on the whole route, so a second link pasted into an open tab remounts
   // this page instead of re-rendering it with the first link's address.
-  const invitedEmail = emailFromHash(hash)
+  const invitedEmail = emailFromRoute(route)
+  // An invitation a build mailed to `invitedEmail`: it proves the mailbox, so a
+  // sign-up carrying it is verified at once and signs straight in.
+  const invite = inviteFromRoute(route)
+  const { login } = useAuth()
   const [isFormOpen, setIsFormOpen] = useState(
     () => providers.length === 0 || invitedEmail !== null,
   )
@@ -144,9 +149,29 @@ export function SignupPage({ hash }: { hash: string }) {
         // checkbox nobody saw. The box below is required, so reaching here with
         // terms published means it was ticked.
         ...(terms_url !== null ? { terms_accepted: true } : {}),
+        ...(invite !== null ? { invite } : {}),
       },
       {
-        onSuccess: () => {
+        onSuccess: async (response) => {
+          if (response.verified) {
+            recordEvent(TELEMETRY_EVENTS.SIGNUP_SUCCESS, {
+              authentication_method: "password",
+              requires_verification: false,
+            })
+            rememberSignInAddress(email.trim())
+            // The account is verified either way; a sign-in that fails here
+            // leaves the person on the sign-in screen with their address in it.
+            const signedIn = await createSession({
+              email: email.trim(),
+              password,
+            }).then(
+              (session) => session.isOk,
+              () => false,
+            )
+            navigateTo("/")
+            if (signedIn) login()
+            return
+          }
           // Always verification-bound, and not a reading of the response: this
           // endpoint is enumeration-safe and says nothing about the address, so
           // the page navigates to check-email whatever came back.
@@ -155,7 +180,7 @@ export function SignupPage({ hash }: { hash: string }) {
             requires_verification: true,
           })
           rememberSignInAddress(email.trim())
-          goToPublicAuthPage("#/check-email?type=signup")
+          goToPublicAuthPage("/check-email?type=signup")
         },
         onError: (error) => {
           recordEvent(TELEMETRY_EVENTS.SIGNUP_FAILED, {
@@ -213,6 +238,16 @@ export function SignupPage({ hash }: { hash: string }) {
     }
   }
 
+  // One checkbox holds the providers and the form alike.
+  const terms =
+    terms_url === null ? null : (
+      <TermsAcceptanceField
+        termsUrl={terms_url}
+        isAccepted={isTermsAccepted}
+        onChange={setIsTermsAccepted}
+      />
+    )
+
   return (
     <PublicAuthLayout
       isBusy={isBusy}
@@ -224,7 +259,7 @@ export function SignupPage({ hash }: { hash: string }) {
       }
       footer={
         <div className="otari-auth-actions flex flex-wrap items-center justify-between gap-x-4">
-          <PublicAuthLink to="#/">Sign in instead</PublicAuthLink>
+          <PublicAuthLink to="/">Sign in instead</PublicAuthLink>
           <AuthHelp offersRecovery />
         </div>
       }
@@ -238,15 +273,6 @@ export function SignupPage({ hash }: { hash: string }) {
 
         {providers.length > 0 ? (
           <>
-            {terms_url !== null ? (
-              <div className="pb-3">
-                <TermsAcceptanceField
-                  termsUrl={terms_url}
-                  isAccepted={isTermsAccepted}
-                  onChange={setIsTermsAccepted}
-                />
-              </div>
-            ) : null}
             <AuthProviderRows
               providers={providers}
               layout={isFormOpen ? "two-up" : "stacked"}
@@ -294,7 +320,7 @@ export function SignupPage({ hash }: { hash: string }) {
                 someone who has just tried to type over a read-only field is
                 looking here, not three rows below the submit button. */}
             {invitedEmail ? (
-              <PublicAuthLink to="#/signup">
+              <PublicAuthLink to="/signup">
                 Claim a different address instead
               </PublicAuthLink>
             ) : null}
@@ -311,13 +337,7 @@ export function SignupPage({ hash }: { hash: string }) {
               errorMessage={problem ?? undefined}
             />
 
-            {terms_url !== null && providers.length === 0 ? (
-              <TermsAcceptanceField
-                termsUrl={terms_url}
-                isAccepted={isTermsAccepted}
-                onChange={setIsTermsAccepted}
-              />
-            ) : null}
+            {terms}
 
             <ErrorBanner error={signup.error} />
 
@@ -354,6 +374,9 @@ export function SignupPage({ hash }: { hash: string }) {
           >
             Sign up with email
           </AuthMethodRow>
+        )}
+        {isFormOpen || terms === null ? null : (
+          <div className="pt-3">{terms}</div>
         )}
       </div>
     </PublicAuthLayout>

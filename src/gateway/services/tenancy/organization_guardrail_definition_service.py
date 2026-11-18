@@ -21,7 +21,7 @@ of a definition answers two questions at once, what was saved and whether it is
 running, and the second belongs to the runner. The runner already imports this
 module, for the one function that undoes the secret split, so importing it back
 would close a cycle. The composition root passes the two functions in instead
-(`api/deps.py`), which is also what lets a test say what a worker holds without
+(`api/deps/`), which is also what lets a test say what a worker holds without
 one.
 
 **Almost every rule is read off the catalog.** A list of guardrails, arguments
@@ -51,7 +51,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Collection, Iterator
 from datetime import datetime
 from typing import Annotated, Any, Literal, Protocol
 
@@ -138,9 +138,8 @@ class OrganizationGuardrailDefinitionCreate(BaseModel):
     # A body the server would actually accept, which the derived one is not: the
     # generator fills every string with "string", and ``guardrail_name`` has to
     # name a guardrail the catalog lists. A sample that fails validation teaches
-    # the wrong shape, and it reaches a reader through the OpenAPI spec and the
-    # Postman collection (`OrganizationGuardrailCreate` carries one for the same
-    # reason).
+    # the wrong shape, and it reaches a reader through the OpenAPI spec
+    # (`OrganizationGuardrailCreate` carries one for the same reason).
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -709,6 +708,12 @@ class OrganizationGuardrailDefinitionService:
         self._build_state = build_state
         self._rebuild = rebuild
         self._handle = handle
+
+    async def forget_secrets(
+        self, organization_ids: Collection[uuid.UUID], workspace_ids: Collection[uuid.UUID]
+    ) -> None:
+        """Stage clearing the guardrail secrets these organizations hold, for the caller's transaction."""
+        await self._definitions.forget_secrets(organization_ids, workspace_ids)
 
     async def _rebuilt(self, definition: OrganizationGuardrailDefinition) -> GuardrailBuildState:
         """Bring this worker in step with a row that just changed, and say what it holds.

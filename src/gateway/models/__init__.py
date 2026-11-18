@@ -11,11 +11,14 @@ in the list; one that declares none (`base`, `mcp`) stays out.
 from gateway.models import (  # noqa: F401
     api_keys,
     budgets,
+    catalog,
     files,
     guardrails,
     health_checks,
     identity,
     inference,
+    mcp_catalog,
+    organizations,
     platform,
     playground,
     pricing,
@@ -26,6 +29,7 @@ from gateway.models import (  # noqa: F401
     tenancy,
     tools,
     traces,
+    update_check,
     usage,
     users,
 )

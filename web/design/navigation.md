@@ -44,6 +44,10 @@ No track and no underline: the selected fill (`surface-subtle`) is the whole
 signal. Deliberately not `role="tablist"`, because these do not promise the
 roving-focus contract a tablist implies; they are buttons in a row.
 
+A row that runs past its column scrolls rather than wraps, and fades out on the
+edge that has more beyond it, so a tab cut at the screen's edge reads as more to
+reach rather than as a rendering fault.
+
 ## Segmented
 
 The track is what says "these are the alternatives and there are no others". Native
@@ -97,6 +101,15 @@ and labels in a tooltip. The states are the same values; only the label goes.
 
 Never hand-write a nav row. `rowStyles.ts` owns the classes and
 `rowStyles.test.ts` asserts them; a page adds a route to the registry instead.
+
+The selected row is announced as current (`aria-current="page"`), on a detail
+page too. A destination with no row of its own selects the row that stands for
+it: Routing selects Rules, the workspace roster People (`railPathForPath`).
+
+The workspace rail opens with its one action, **Create API key**, a primary
+button above the rows for anyone who may create a key; collapsed, it is a "+"
+named by a tooltip. Its foot carries the team budget for an organization owner
+or admin once a limit exists: spent, of how much, and a meter.
 
 ## Section headings in the rail
 

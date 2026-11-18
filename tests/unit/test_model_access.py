@@ -8,15 +8,18 @@ import pytest
 from gateway.core.config import GatewayConfig
 from gateway.core.error_codes import INVALID_MODEL, MODEL_NOT_ALLOWED, MODEL_NOT_FOUND, MODEL_NOT_SERVING
 from gateway.core.settings.tools import ALL_SEARCH_TOOLS
+from gateway.services.catalog import OfferingRow, build_selector_index, reset_selector_index, set_selector_index
 from gateway.services.model_access import (
     effective_allowlist,
     effective_tool_allowlist,
+    intersect_allowlists,
     is_allowlist_subset,
     is_model_allowed,
     is_tool_allowed,
     is_tool_allowlist_subset,
     key_model_refusal,
     legacy_tool_grants,
+    misspelled_model_refusal,
     org_model_refusal,
     tool_not_allowed_detail,
     tools_within_user,
@@ -220,6 +223,26 @@ def test_a_tool_list_names_configured_tools_or_the_star() -> None:
         validate_allowed_tools(_TOOLS, "deepseek")  # type: ignore[arg-type]
 
 
+def test_a_tool_list_names_fetch_tools_and_the_built_in_fetcher_too() -> None:
+    config = GatewayConfig(
+        search_tools={"exa-search": {"provider": "exa"}}, fetch_tools={"tab": {"provider": "tabstack"}}
+    )
+    assert validate_allowed_tools(config, ["tab", "builtin_fetch", "exa-search"]) == [
+        "tab",
+        "builtin_fetch",
+        "exa-search",
+    ]
+    with pytest.raises(ValueError, match="is not a search or fetch tool"):
+        validate_allowed_tools(config, ["nope"])
+
+
+def test_the_refusal_names_the_tools_kind() -> None:
+    assert tool_not_allowed_detail("tab", "tabstack:tab", kind="fetch").startswith("Fetch tool 'tab' is not permitted")
+    assert tool_not_allowed_detail("deepseek", "deepseek:deepseek").startswith(
+        "Search tool 'deepseek' is not permitted"
+    )
+
+
 def test_the_refusal_says_a_model_wildcard_grants_models_only_when_one_matched() -> None:
     plain = tool_not_allowed_detail("deepseek", "deepseek:deepseek")
     assert "Name it in allowed_tools" in plain and "wildcard" not in plain
@@ -336,7 +359,7 @@ def test_a_restricted_key_is_told_an_unresolvable_selector_is_invalid_not_forbid
     assert refusal is not None
     assert (refusal.code, refusal.status_code) == (INVALID_MODEL, 400)
     assert "no-such-model" in refusal.detail
-    assert "'provider:model' selector, an alias, or a model id from the catalog" in refusal.detail
+    assert "Send a model id from the catalog (GET /api/v1/models) such as 'vendor/model'" in refusal.detail
 
 
 def test_a_restricted_key_is_refused_a_model_its_list_excludes() -> None:
@@ -397,3 +420,62 @@ def test_an_undated_name_behind_an_alias_does_not_name_the_dated_builds(workspac
     assert refusal.code == MODEL_NOT_FOUND
     assert "20250101" not in refusal.detail
     assert "20250601" not in refusal.detail
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "allowed", "refused"),
+    [
+        (None, ["openai:*"], ["openai:gpt-5"], ["anthropic:claude"]),
+        (["openai:*"], None, ["openai:gpt-5"], ["anthropic:claude"]),
+        (["openai:*"], ["openai:gpt-5"], ["openai:gpt-5"], ["openai:gpt-4o"]),
+        (["openai:gpt-*"], ["openai:gpt-5*", "anthropic:*"], ["openai:gpt-5-mini"], ["openai:gpt-4o", "anthropic:x"]),
+        (["openai:gpt-5"], ["anthropic:*"], [], ["openai:gpt-5", "anthropic:x"]),
+    ],
+)
+def test_intersect_allowlists_permits_exactly_what_both_permit(
+    first: list[str] | None, second: list[str] | None, allowed: list[str], refused: list[str]
+) -> None:
+    both = intersect_allowlists(first, second)
+    for key in allowed:
+        assert is_model_allowed(both, key), key
+    for key in refused:
+        assert not is_model_allowed(both, key), key
+
+
+def test_intersect_allowlists_of_two_unrestricted_lists_is_unrestricted() -> None:
+    assert intersect_allowlists(None, None) is None
+
+
+@pytest.fixture
+def gpt_oss_catalog() -> Iterator[None]:
+    """Two gpt-oss models offered on groq."""
+    offerings = {"openai/gpt-oss-120b": "groq:openai/gpt-oss-120b", "openai/gpt-oss-20b": "groq:openai/gpt-oss-20b"}
+    rows = [OfferingRow(selector, "groq", "groq", 0.15) for selector in offerings.values()]
+    models = {model: (model, (selector,)) for model, selector in offerings.items()}
+    set_selector_index(build_selector_index(rows, models))
+    yield
+    reset_selector_index()
+
+
+@pytest.mark.usefixtures("gpt_oss_catalog")
+def test_a_misspelled_model_is_refused_naming_the_nearest_ids() -> None:
+    refusal = misspelled_model_refusal(
+        None, instance="openai", provider="openai", model="gpt-oss-12", selector="OpenAI/gpt-oss-12"
+    )
+
+    assert refusal is not None
+    assert (refusal.code, refusal.status_code) == (MODEL_NOT_FOUND, 404)
+    assert refusal.detail == (
+        "Unknown model 'OpenAI/gpt-oss-12'. Did you mean openai/gpt-oss-120b or openai/gpt-oss-20b?"
+        " See GET /api/v1/models."
+    )
+
+
+@pytest.mark.usefixtures("gpt_oss_catalog")
+@pytest.mark.parametrize(
+    ("instance", "model"),
+    [("openai", "gpt-oss-120b"), ("mistral", "no-such-model")],
+    ids=["a model the catalog has", "a prefix the catalog has nothing under"],
+)
+def test_a_model_that_does_not_look_misspelled_is_not_refused(instance: str, model: str) -> None:
+    assert misspelled_model_refusal(None, instance=instance, provider=instance, model=model, selector=model) is None

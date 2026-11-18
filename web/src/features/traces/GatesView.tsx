@@ -1,6 +1,8 @@
 import type { TraceGateSummary } from "@/client"
 import { Chip, type ChipTone } from "@/design-system/indicators/Chip"
+import { formatNumber } from "@/shared/helpers/format"
 
+import { plural } from "./format"
 import { GATE_KIND, says } from "./gateWords"
 
 const GATE_COUNTS: {
@@ -9,15 +11,11 @@ const GATE_COUNTS: {
   tone: ChipTone
 }[] = [
   { key: "blocked", label: "blocked", tone: "warning" },
-  { key: "refused", label: "could not decide, held", tone: "danger" },
+  { key: "refused", label: "could not decide, blocked", tone: "danger" },
   { key: "undecided", label: "could not decide", tone: "danger" },
   { key: "flagged", label: "flagged", tone: "warning" },
   { key: "passed", label: "passed", tone: "success" },
 ]
-
-function checks(count: number): string {
-  return count === 1 ? "1 check" : `${count} checks`
-}
 
 // A gate that could not decide but is required holds the agent as surely as one that blocked.
 export function stoppedBy(gate: TraceGateSummary): number {
@@ -49,10 +47,9 @@ export function GatesView({
       <section className="flex flex-col gap-1.5">
         <h3 className="text-overline">Agent guardrail gates</h3>
         <p className="text-caption text-subtle">
-          {ran.length === 1 ? "1 gate" : `${ran.length} gates`} ran{" "}
-          {checks(count)}
+          {plural(ran.length, "gate")} ran {plural(count, "check")}
           {blocked > 0
-            ? `, and stopped the agent ${blocked === 1 ? "once" : `${blocked} times`}.`
+            ? `, and stopped the agent ${blocked === 1 ? "once" : `${formatNumber(blocked)} times`}.`
             : ", and none stopped the agent."}
         </p>
         <ul className="flex flex-col border-t border-border">
@@ -72,7 +69,7 @@ export function GatesView({
                     {GATE_COUNTS.filter(({ key }) => gate[key] > 0).map(
                       ({ key, label, tone }) => (
                         <Chip key={key} tone={tone}>
-                          {gate[key]} {label}
+                          {formatNumber(gate[key])} {label}
                         </Chip>
                       ),
                     )}

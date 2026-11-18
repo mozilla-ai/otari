@@ -84,14 +84,14 @@ describe("canSubmitDraft", () => {
   it("needs only the input rate when the price is per request or image", () => {
     expect(
       canSubmitDraft(
-        draft({ model: "rerank-v3", unit: "requests", input: "2" }),
+        draft({ model: "rerank-v3", unit: "request", input: "2" }),
         true,
       ),
     ).toBe(true)
     // The hidden token boxes are not read, whatever they still hold.
     expect(
       canSubmitDraft(
-        draft({ model: "rerank-v3", unit: "images", input: "2", output: "x" }),
+        draft({ model: "rerank-v3", unit: "image", input: "2", output: "x" }),
         false,
       ),
     ).toBe(true)
@@ -127,7 +127,7 @@ describe("createBody", () => {
       input_price_per_million: 2.5,
       output_price_per_million: 10,
       cache_write_price_per_million: 3.75,
-      unit: "tokens",
+      unit: "token",
     })
   })
 
@@ -136,7 +136,7 @@ describe("createBody", () => {
       createBody(
         draft({
           model: "rerank-v3",
-          unit: "requests",
+          unit: "request",
           input: "2",
           output: "10",
           cacheRead: "1",
@@ -146,7 +146,7 @@ describe("createBody", () => {
       model: "rerank-v3",
       input_price_per_million: 2000,
       output_price_per_million: 0,
-      unit: "requests",
+      unit: "request",
     })
   })
 })
@@ -162,19 +162,19 @@ describe("repriceBody", () => {
       output_price_per_million: 12,
       cache_read_price_per_million: 0.3,
       cache_write_price_per_million: null,
-      unit: "tokens",
+      unit: "token",
     })
   })
 
   it("clears the cache rates when the price moves to images", () => {
     expect(
-      repriceBody(draft({ model: "gpt-image-1", unit: "images", input: "40" })),
+      repriceBody(draft({ model: "gpt-image-1", unit: "image", input: "40" })),
     ).toEqual({
       input_price_per_million: 40000,
       output_price_per_million: 0,
       cache_read_price_per_million: null,
       cache_write_price_per_million: null,
-      unit: "images",
+      unit: "image",
     })
   })
 })
@@ -189,7 +189,7 @@ describe("draftFrom", () => {
       output_price_per_million: 10,
       cache_read_price_per_million: 0.25,
       cache_write_price_per_million: null,
-      unit: "tokens",
+      unit: "token",
       price_source: "defaults",
       enabled: true,
       created_at: "2026-09-16T00:00:00Z",
@@ -197,7 +197,7 @@ describe("draftFrom", () => {
     }
     expect(draftFrom(row)).toEqual({
       model: "gpt-4o",
-      unit: "tokens",
+      unit: "token",
       input: "2.5",
       output: "10",
       cacheRead: "0.25",
@@ -214,14 +214,14 @@ describe("draftFrom", () => {
       output_price_per_million: 0,
       cache_read_price_per_million: null,
       cache_write_price_per_million: null,
-      unit: "requests",
+      unit: "request",
       price_source: "deployment",
       enabled: true,
       created_at: "2026-09-16T00:00:00Z",
       updated_at: null,
     }
     expect(draftFrom(row)).toMatchObject({
-      unit: "requests",
+      unit: "request",
       input: "2",
       output: "",
     })
@@ -236,7 +236,7 @@ describe("draftFrom", () => {
       output_price_per_million: 0,
       cache_read_price_per_million: 0.25,
       cache_write_price_per_million: 3.75,
-      unit: "images",
+      unit: "image",
       price_source: "deployment",
       enabled: true,
       created_at: "2026-09-16T00:00:00Z",

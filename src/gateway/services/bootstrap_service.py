@@ -11,12 +11,20 @@ from gateway.models.api_keys import APIKey
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.repositories.users_repository import get_or_create_default_user
 from gateway.services.workspace_scope import default_workspace_id
+from gateway.types.key_scope import KeyScopeSet
 
 
 async def bootstrap_first_api_key(config: GatewayConfig, db: AsyncSession, key_format: ApiKeyFormatPort) -> None:
-    """Create a first API key for new installations, in this build's format."""
+    """Create a first API key for new installations, in this build's format.
+
+    Not where the gateway generated its own master key, unless ``bootstrap_api_key``
+    was set explicitly: that deployment starts from the setup link, and its
+    operator creates the first key in the dashboard.
+    """
 
     if not config.bootstrap_api_key:
+        return
+    if not config.master_key and "bootstrap_api_key" not in config.model_fields_set:
         return
 
     existing_key = (await db.execute(select(APIKey.id).limit(1))).scalar_one_or_none()
@@ -41,6 +49,8 @@ async def bootstrap_first_api_key(config: GatewayConfig, db: AsyncSession, key_f
         key_suffix=key_suffix(api_key),
         key_name="bootstrap",
         user_id=user.user_id,
+        # The key a new deployment is tried out with, so it reaches what any key could before scopes existed.
+        scopes=KeyScopeSet.unscoped(is_service_key=False),
         metadata_={"bootstrap": True},
     )
     db.add(db_key)
@@ -52,6 +62,9 @@ async def bootstrap_first_api_key(config: GatewayConfig, db: AsyncSession, key_f
         raise
 
     log_secret(
-        "No API keys found. Created bootstrap key for first run. Save this key now:",
+        (
+            "No API keys found, so created a 'bootstrap' API key to make the first request with; "
+            "set bootstrap_api_key to false (OTARI_BOOTSTRAP_API_KEY=false) to skip it. Save this key now:"
+        ),
         api_key,
     )

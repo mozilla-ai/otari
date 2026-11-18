@@ -2,12 +2,15 @@ import { describe, expect, it } from "vitest"
 import type {
   HostedCatalogProviderRefresh as CatalogProviderRefresh,
   HostedCatalogRefresh as CatalogRefresh,
+  HostedCatalogPriceUpdate,
   HostedModelsRefresh,
 } from "@/client"
 import {
   catalogPreviewOutcome,
   catalogRefreshFailures,
   catalogRefreshOutcome,
+  modelsPreviewOutcome,
+  pricePreviewOutcome,
   refreshOutcome,
 } from "./refreshOutcome"
 
@@ -261,6 +264,86 @@ describe("catalogPreviewOutcome", () => {
 
     expect(catalogPreviewOutcome(result)).toBe(
       "1 model will be removed, taking 1 stored rate and 0 organization overrides with it.",
+    )
+  })
+})
+
+const prices = (
+  patch: Partial<HostedCatalogPriceUpdate>,
+): HostedCatalogPriceUpdate => ({
+  fetched_at: "2026-10-21T00:00:00Z",
+  added_count: 0,
+  changed_count: 0,
+  removed_count: 0,
+  changes: [],
+  changes_truncated: false,
+  digest: "d",
+  needs_review: false,
+  review_reason: null,
+  ...patch,
+})
+
+const noCatalog: CatalogRefresh = {
+  providers: [],
+  removed: [],
+  removed_count: 0,
+  removed_price_rows: 0,
+  removed_override_rows: 0,
+  kept: [],
+}
+
+describe("pricePreviewOutcome", () => {
+  it("says a failed fetch rather than that nothing changed", () => {
+    expect(
+      pricePreviewOutcome({
+        prices: null,
+        price_error: "Unable to fetch",
+        catalog: noCatalog,
+      }),
+    ).toBe("Unable to fetch")
+  })
+
+  it("says so when models.dev changed nothing", () => {
+    expect(pricePreviewOutcome({ prices: null, catalog: noCatalog })).toBe(
+      "models.dev prices are unchanged.",
+    )
+  })
+
+  it("counts each kind of change, in the singular for one", () => {
+    expect(
+      pricePreviewOutcome({
+        prices: prices({ changed_count: 1 }),
+        catalog: noCatalog,
+      }),
+    ).toBe("models.dev has 1 changed price to apply.")
+    expect(
+      pricePreviewOutcome({
+        prices: prices({ added_count: 3, removed_count: 2 }),
+        catalog: noCatalog,
+      }),
+    ).toBe("models.dev has 3 new, 2 removed prices to apply.")
+  })
+})
+
+describe("modelsPreviewOutcome", () => {
+  it("names the providers with new models and counts them", () => {
+    expect(
+      modelsPreviewOutcome({
+        ...noCatalog,
+        providers: [
+          provider({ provider: "fireworks", added: ["a", "b"] }),
+          provider({ provider: "nebius", added: [] }),
+          provider({ provider: "together", added: ["c"] }),
+        ],
+      }),
+    ).toBe(
+      "3 new models to offer on fireworks, together, each served once something prices it.",
+    )
+  })
+
+  it("says so when no provider lists anything new", () => {
+    expect(modelsPreviewOutcome(noCatalog)).toBe(
+      "No provider lists a model it does not already offer.",
     )
   })
 })

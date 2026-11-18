@@ -6,6 +6,7 @@ import { vi } from "vitest"
 import type {
   AutomaticFallback,
   CatalogModelSummary,
+  ExplainPolicyResponse,
   OrganizationContext,
   OrganizationMember,
   PolicySpec,
@@ -45,9 +46,10 @@ export const CHAIN: PolicySpec = {
   on_failure: ["anthropic:claude-haiku-4-5"],
 }
 
-export const LEARNED: PolicySpec = {
+/** A policy naming a router backend this build does not have. */
+export const UNKNOWN_ROUTER: PolicySpec = {
   select: [
-    { router: "knn", candidates: ["openai:gpt-5-nano", "openai:gpt-5"] },
+    { router: "cheapest", candidates: ["openai:gpt-5-nano", "openai:gpt-5"] },
     { default: "openai:gpt-5" },
   ],
 }
@@ -96,6 +98,30 @@ export const MEMBERS = [
   }),
 ]
 
+/** A plan with one candidate and one left out, what explain answers by default. */
+export const EXPLAINED: ExplainPolicyResponse = {
+  name: "fast",
+  selection_reason: "default",
+  is_dynamic: false,
+  candidates: [
+    {
+      position: 1,
+      instance: "openai",
+      model: "gpt-5-mini",
+      selection_reason: "default",
+      dispatch_model: "openai:gpt-5-mini",
+    },
+  ],
+  dropped: [
+    {
+      selector: "anthropic:claude-haiku-4-5",
+      reason: "not_allowed",
+      detail: "is not in allowed_models for this caller",
+    },
+  ],
+  guardrails: [],
+}
+
 export function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status: 200,
@@ -142,6 +168,8 @@ export function mockApi(
     catalog?: CatalogModelSummary[]
     // What /api/v1/organizations/me/automatic-fallbacks answers.
     fallbacks?: AutomaticFallback[]
+    // What either surface's policy explain answers.
+    explain?: ExplainPolicyResponse
   } = {},
 ) {
   let list = [...policies]
@@ -159,6 +187,12 @@ export function mockApi(
         init?.body === undefined ? undefined : JSON.parse(String(init.body))
       calls.push({ url, method, body })
 
+      if (
+        url.endsWith(`${API_ROOT}/organizations/me/routing-policies/explain`) ||
+        url.endsWith(`${API_ROOT}/routing/policies/explain`)
+      ) {
+        return jsonResponse(opts.explain ?? EXPLAINED)
+      }
       if (url.includes(`${API_ROOT}/organizations/me/routing-policies`)) {
         if (method === "POST") {
           const row = policy(body.name, body.spec)
@@ -213,58 +247,6 @@ export function mockApi(
       if (url.includes(`${API_ROOT}/organizations/me/members`)) {
         const members = opts.members ?? []
         return jsonResponse({ data: members, count: members.length })
-      }
-      if (url.includes(`${API_ROOT}/routing/policies/explain`)) {
-        return jsonResponse({
-          name: "fast",
-          selection_reason: "default",
-          is_dynamic: false,
-          candidates: [
-            {
-              position: 1,
-              instance: "openai",
-              model: "gpt-5-mini",
-              selection_reason: "default",
-              dispatch_model: "openai:gpt-5-mini",
-            },
-          ],
-          dropped: [
-            {
-              selector: "anthropic:claude-haiku-4-5",
-              reason: "not_allowed",
-              detail: "is not in allowed_models for this caller",
-            },
-          ],
-          guardrails: [],
-        })
-      }
-      if (url.includes(`${API_ROOT}/routing/status`)) {
-        return jsonResponse({
-          user_id: "alice",
-          embedding_model: "openai:text-embedding-3-small",
-          seed_count: 20,
-          granularity: "trace_sticky",
-          alpha: 0.3,
-          k: 5,
-          confidence_floor: 0,
-          default_pool: { records: 6, warm: false },
-          tasks: [{ task_id: "summaries", records: 21, warm: true }],
-          policies: [
-            {
-              name: "smart",
-              backend: "knn",
-              candidates: ["openai:gpt-5-nano", "openai:gpt-5"],
-              default_target: "openai:gpt-5",
-            },
-          ],
-        })
-      }
-      if (url.includes(`${API_ROOT}/routing/preferences/rank`)) {
-        return jsonResponse({
-          recorded: (body as { examples: unknown[] }).examples.length,
-          seed_count: 20,
-          pools: [{ task_id: null, records: 7, warm: false }],
-        })
       }
       if (url.includes(`${API_ROOT}/routing/policies`)) {
         if (method === "POST") {

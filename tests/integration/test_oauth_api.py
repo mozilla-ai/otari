@@ -16,6 +16,7 @@ import logging
 import re
 import uuid
 from base64 import urlsafe_b64encode
+from collections.abc import Generator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
@@ -25,7 +26,7 @@ from typing import Any, cast
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
-from apron_auth import OAuthClient
+from apron_auth import StoredStateClient
 from fastapi import FastAPI
 from fastapi.routing import APIRoute, iter_route_contexts
 from fastapi.testclient import TestClient
@@ -35,6 +36,7 @@ from sqlalchemy.orm import Session
 from sqlmodel import col, delete, update
 
 from gateway.api.routes import auth_oauth
+from gateway.api.routes._flow_cookies import MAX_LIVE_FLOWS
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.exceptions.identity_exceptions import OAuthIdentityLinkConflictError, OAuthProviderUnavailableError
 from gateway.log_config import logger as gateway_logger
@@ -45,14 +47,23 @@ from gateway.repositories.tenancy import UserRepository
 from gateway.services import oauth_service
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
 from gateway.services.identity import IdentityService
-from gateway.services.oauth_service import FLOW_COOKIE_NAME, FLOW_COOKIE_PATH
 from gateway.services.tenancy.organization_service import OrganizationService, SignupRegistration
 
-ORIGIN = "http://testserver"
+from .conftest import build_test_client
+
+# https, not http: a redirect URI must be https or a loopback host, and the
+# client fixture below matches it.
+ORIGIN = "https://testserver"
 PASSWORD = "a-real-password"  # pragma: allowlist secret
 UNPROVEN_PASSWORD = "set-before-verification"  # pragma: allowlist secret
 
 _TOKEN_IN_LINK = re.compile(r"token=([\w-]+)")
+
+
+@pytest.fixture
+def client(test_config: GatewayConfig, clean_database: None) -> Generator[TestClient]:
+    """A client whose base URL is ``ORIGIN``, so the scheme the server sees matches ``public_base_url``."""
+    yield from build_test_client(test_config, base_url=ORIGIN)
 
 
 @pytest.fixture
@@ -81,7 +92,7 @@ def stub_exchange(
     spent: list[str] = []
 
     async def _exchange(
-        _config: GatewayConfig, provider: str, *, code: str, state: str, flow_secret: str | None, db: Any
+        _config: GatewayConfig, provider: str, *, code: str, state: str, browser_token: str | None, db: Any
     ) -> ProviderIdentity:
         spent.append(code)
         return ProviderIdentity(
@@ -142,6 +153,28 @@ def test_a_provider_missing_its_secret_is_not_published(
 # ---------- starting the flow ----------
 
 
+def test_a_plain_http_base_url_refuses_sign_in_without_naming_the_library(
+    client: TestClient, test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deployment whose address cannot build an https redirect URI is told which setting to fix."""
+    monkeypatch.setattr(test_config, "public_base_url", "http://example.com")
+    monkeypatch.setattr(test_config, "oauth_google_client_id", "google-id")
+    monkeypatch.setattr(test_config, "oauth_google_client_secret", "google-secret")
+
+    response = client.get(f"{API_ROOT}/auth/oauth/google/authorize")
+
+    assert response.status_code == 503, response.text
+    assert "public_base_url" in response.text
+    for leaked in (
+        "apron-auth",
+        "apron_auth",
+        "pydantic",
+        "ValidationError",
+        "must use https, or http on a loopback host",
+    ):
+        assert leaked not in response.text
+
+
 @pytest.mark.parametrize("provider", ["google", "github"])
 def test_authorize_hands_back_a_consent_url_and_a_fresh_state(
     client: TestClient, oauth_configured: None, provider: str
@@ -178,7 +211,8 @@ def test_the_flow_cookie_reaches_every_route_that_reads_it(client: TestClient, o
     jar: SimpleCookie = SimpleCookie()
     for header in response.headers.get_list("set-cookie"):
         jar.load(header)
-    cookie_path = jar[FLOW_COOKIE_NAME]["path"]
+    (cookie,) = jar.values()
+    cookie_path = cookie["path"]
     assert cookie_path, "the flow cookie is unscoped, so this check would hold vacuously"
 
     app = cast(FastAPI, client.app)
@@ -529,6 +563,25 @@ def test_a_second_sign_in_on_a_registered_address_founds_no_second_tenant(
     assert second.json()["active_organization_id"] == first.json()["active_organization_id"]
 
 
+def test_the_sign_in_that_made_the_account_says_so_and_the_next_one_does_not(
+    client: TestClient,
+    oauth_configured: None,
+    signup_open: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The dashboard records the first as a signup and the second as a login.
+    stub_exchange(monkeypatch, email="stranger@example.com")
+
+    first = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
+    client.cookies.clear()
+    second = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c2", "state": "s"})
+
+    assert first.status_code == 200, first.text
+    assert first.json()["new_account"] is True
+    assert second.status_code == 200, second.text
+    assert second.json()["new_account"] is False
+
+
 def test_open_signup_registers_nobody_from_an_address_the_provider_would_not_verify(
     client: TestClient,
     oauth_configured: None,
@@ -543,6 +596,28 @@ def test_open_signup_registers_nobody_from_an_address_the_provider_would_not_ver
 
     assert response.status_code == 401
     assert db_session.execute(select(User).where(col(User.email) == "stranger@example.com")).first() is None
+
+
+def test_open_signup_registers_nobody_from_a_blocked_address(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    oauth_configured: None,
+    signup_open: None,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    # The identity provider provisions the account before the sign-in gate refuses it, so the refusal rolls it back.
+    blocked = client.post(f"{API_ROOT}/admin/blocked-emails", json={"value": "spam.example"}, headers=master_key_header)
+    assert blocked.status_code == 201, blocked.text
+    stub_exchange(monkeypatch, email="stranger@spam.example")
+    organizations_before = len(db_session.execute(select(Organization)).all())
+
+    response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
+
+    assert response.status_code == 403, response.text
+    assert SESSION_COOKIE_NAME not in response.cookies
+    assert db_session.execute(select(User).where(col(User.email) == "stranger@spam.example")).first() is None
+    assert len(db_session.execute(select(Organization)).all()) == organizations_before
 
 
 def test_open_signup_does_not_register_a_deactivated_identity_afresh(
@@ -1268,7 +1343,7 @@ def test_a_first_sign_in_links_the_account_to_the_provider_identity(
 
     assert _links(db_session, user_id) == [("google", "ada-subject")]
     link = db_session.execute(select(OAuthIdentityLink)).scalar_one()
-    assert (link.email_at_link, link.email_assertion_at_link) == ("ada@example.com", EmailAssertion.VERIFIED)
+    assert (link.asserted_email, link.email_assertion) == ("ada@example.com", EmailAssertion.VERIFIED)
 
 
 def test_one_account_holds_a_link_at_each_provider(
@@ -1759,7 +1834,7 @@ def stub_token_endpoint(monkeypatch: pytest.MonkeyPatch, *, id_token_nonce: str 
     store gave back, unless ``id_token_nonce`` names another.
     """
     endpoint = _TokenEndpoint()
-    consume = oauth_service._DatabaseStateStore.consume
+    consume = oauth_service.DatabaseStateStore.consume
 
     async def _consume(self: Any, state_key: str) -> Any:
         pending = await consume(self, state_key)
@@ -1771,30 +1846,39 @@ def stub_token_endpoint(monkeypatch: pytest.MonkeyPatch, *, id_token_nonce: str 
         response: dict[str, Any] = {"access_token": "an-access-token", "token_type": "Bearer"}
         nonce = id_token_nonce or endpoint.claimed_nonces[-1]
         if nonce is not None:
-            response["id_token"] = _unsigned_id_token(nonce=nonce)
+            response["id_token"] = _unsigned_id_token(nonce=nonce, aud=self._config.client_id)
         return response
 
     async def _fetch_identity(self: Any, _tokens: Any) -> Any:
         return SimpleNamespace(subject="ada-subject", email="ada@example.com", name="Ada Lovelace", email_verified=True)
 
-    async def _revoke_token(self: Any, token: str) -> bool:
-        endpoint.revoked.append(token)
+    async def _revoke_token(self: Any, token: Any) -> bool:
+        # The library hands revocation a wrapped token; a provider's endpoint receives its value.
+        endpoint.revoked.append(token.get_secret_value())
         return True
 
-    monkeypatch.setattr(oauth_service._DatabaseStateStore, "consume", _consume)
-    monkeypatch.setattr(OAuthClient, "_token_request", _token_request)
-    monkeypatch.setattr(OAuthClient, "fetch_identity", _fetch_identity)
-    monkeypatch.setattr(OAuthClient, "revoke_token", _revoke_token)
+    monkeypatch.setattr(oauth_service.DatabaseStateStore, "consume", _consume)
+    monkeypatch.setattr(StoredStateClient, "_token_request", _token_request)
+    monkeypatch.setattr(StoredStateClient, "fetch_identity", _fetch_identity)
+    monkeypatch.setattr(StoredStateClient, "revoke_token", _revoke_token)
     return endpoint
 
 
 def _unsigned_id_token(**claims: Any) -> str:
-    """An ID token for the nonce check, which reads claims only; ``fetch_identity`` is stubbed above."""
+    """An ID token for the nonce and claims checks; ``fetch_identity`` is stubbed above.
+
+    Carries a future ``exp`` by default, so apron-auth's claims check (OpenID Connect
+    Core section 3.1.3.7) accepts it.
+    """
+    base: dict[str, Any] = {
+        "sub": "ada-subject",
+        "exp": int((datetime.now(UTC) + timedelta(hours=1)).timestamp()),
+    }
 
     def segment(value: dict[str, Any]) -> str:
         return urlsafe_b64encode(json.dumps(value).encode()).rstrip(b"=").decode()
 
-    return f"{segment({'alg': 'RS256'})}.{segment({'sub': 'ada-subject', **claims})}.signature"
+    return f"{segment({'alg': 'RS256'})}.{segment({**base, **claims})}.signature"
 
 
 def test_a_code_with_no_authorize_behind_it_is_refused(
@@ -1971,7 +2055,7 @@ def test_a_refused_exchange_leaves_the_state_spendable_for_the_retry(
     async def _boom(self: Any, _data: dict[str, str]) -> Any:
         raise RuntimeError("the provider was unreachable")
 
-    monkeypatch.setattr(OAuthClient, "_token_request", _boom)
+    monkeypatch.setattr(StoredStateClient, "_token_request", _boom)
     failed = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": state})
 
     # An unreachable provider is an upstream failure, not the caller's.
@@ -1990,9 +2074,9 @@ def test_authorize_sets_the_flow_cookie_the_callback_requires(
 
     assert started.status_code == 200, started.text
     cookie = started.headers["set-cookie"]
-    assert cookie.startswith(f"{FLOW_COOKIE_NAME}=")
+    assert cookie.startswith("otari_oauth_flow_")
     assert "HttpOnly" in cookie
-    assert f"Path={FLOW_COOKIE_PATH}" in cookie
+    assert f"Path={API_ROOT}/auth/oauth;" in cookie
     assert "samesite=lax" in cookie.lower()
 
 
@@ -2011,8 +2095,8 @@ def test_a_callback_from_a_browser_that_did_not_start_the_flow_is_refused(
     """
     add_member(client, master_key_header, email="ada@example.com")
     posted = stub_token_endpoint(monkeypatch).posted
-    state = client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()["state"]
-    victims_cookie = client.cookies[FLOW_COOKIE_NAME]
+    started = client.get(f"{API_ROOT}/auth/oauth/google/authorize")
+    state = started.json()["state"]
 
     client.cookies.clear()
     without = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": state})
@@ -2020,35 +2104,182 @@ def test_a_callback_from_a_browser_that_did_not_start_the_flow_is_refused(
     assert posted == []
 
     client.get(f"{API_ROOT}/auth/oauth/google/authorize")  # a different browser's own cookie
-    assert client.cookies[FLOW_COOKIE_NAME] != victims_cookie
     other = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": state})
     assert other.status_code == 400, other.text
     assert posted == []
 
     # The refusals rolled the claim back, so the browser that started it can still finish.
-    client.cookies.set(FLOW_COOKIE_NAME, victims_cookie)
+    client.cookies.extract_cookies(started)
     finished = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": state})
     assert finished.status_code == 200, finished.text
 
 
-def test_two_tabs_in_one_browser_share_the_cookie_and_both_finish(
+def test_two_tabs_in_one_browser_both_finish(
     client: TestClient,
     oauth_configured: None,
     master_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The browser holds a token per live flow, under a name the state that flow sends derives.
+
+    Two tabs is something a person does without meaning to, and a sign-in the
+    browser started and then cannot finish looks like a broken product.
+    """
     add_member(client, master_key_header, email="ada@example.com")
     stub_token_endpoint(monkeypatch)
     first = client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()["state"]
-    cookie = client.cookies[FLOW_COOKIE_NAME]
-    second = client.get(f"{API_ROOT}/auth/oauth/github/authorize").json()["state"]
+    second = client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()["state"]
 
-    # The second call reused the cookie instead of rotating it out from under the first tab.
-    assert client.cookies[FLOW_COOKIE_NAME] == cookie
+    assert first != second
+    earlier = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c1", "state": first})
+    assert earlier.status_code == 200, earlier.text
+    later = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c2", "state": second})
+    assert later.status_code == 200, later.text
+
+
+def test_two_tabs_that_start_together_both_finish(
+    client: TestClient,
+    oauth_configured: None,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Neither authorize response has landed when the other request is sent."""
+    add_member(client, master_key_header, email="ada@example.com")
+    stub_token_endpoint(monkeypatch)
+    first = client.get(f"{API_ROOT}/auth/oauth/google/authorize")
+    client.cookies.clear()
+    second = client.get(f"{API_ROOT}/auth/oauth/google/authorize")
+    client.cookies.extract_cookies(first)
+
+    for started in (first, second):
+        finished = client.post(
+            f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": started.json()["state"]}
+        )
+        assert finished.status_code == 200, finished.text
+
+
+def test_a_browser_that_starts_one_flow_too_many_loses_its_oldest(
+    client: TestClient,
+    oauth_configured: None,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cookies a browser keeps adding need a bound, and the oldest flow is the one to drop."""
+    add_member(client, master_key_header, email="ada@example.com")
+    posted = stub_token_endpoint(monkeypatch).posted
+    # The bound takes more calls to reach than the throttle allows in a minute.
+    monkeypatch.setattr(cast(FastAPI, client.app).state, "public_auth_rate_limiter", None)
+    states = [client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()["state"] for _ in range(MAX_LIVE_FLOWS + 1)]
+
+    evicted = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c1", "state": states[0]})
+    assert evicted.status_code == 400, evicted.text
+    assert posted == []
+    kept = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c2", "state": states[1]})
+    assert kept.status_code == 200, kept.text
+
+
+def test_a_state_the_cookie_does_not_name_is_left_to_the_library_to_refuse(
+    client: TestClient,
+    oauth_configured: None,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nothing here refuses first: the state travels to apron-auth with no token and it decides.
+
+    One binding check in the flow cannot come to differ from a second one, and
+    the flow the state names stays live for the browser that started it.
+    """
+    add_member(client, master_key_header, email="ada@example.com")
+    posted = stub_token_endpoint(monkeypatch).posted
+    started_elsewhere = client.get(f"{API_ROOT}/auth/oauth/google/authorize")
+    elsewhere = started_elsewhere.json()["state"]
+    client.cookies.clear()
+    client.get(f"{API_ROOT}/auth/oauth/google/authorize")
+
+    refused = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": elsewhere})
+
+    assert refused.status_code == 400, refused.text
+    assert posted == []
+    client.cookies.clear()
+    client.cookies.extract_cookies(started_elsewhere)
+    finished = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": elsewhere})
+    assert finished.status_code == 200, finished.text
+
+
+def _flow_cookies(client: TestClient) -> list[str]:
+    """The name of each flow cookie the browser holds."""
+    return [cookie.name for cookie in client.cookies.jar if cookie.name.startswith("otari_oauth_flow_")]
+
+
+def test_a_finished_sign_in_takes_its_own_flow_out_of_the_browser(
+    client: TestClient,
+    oauth_configured: None,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A redeemed flow's token can buy nothing, so the browser stops holding it."""
+    add_member(client, master_key_header, email="ada@example.com")
+    stub_token_endpoint(monkeypatch)
+    first = client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()["state"]
+    (first_cookie,) = _flow_cookies(client)
+    second = client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()["state"]
+    assert len(_flow_cookies(client)) == 2
+
     assert client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c1", "state": first}).status_code == 200
+    assert first_cookie not in _flow_cookies(client)
+    assert len(_flow_cookies(client)) == 1
+
     assert (
-        client.post(f"{API_ROOT}/auth/oauth/github/callback", json={"code": "c2", "state": second}).status_code == 200
+        client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c2", "state": second}).status_code == 200
     )
+    assert _flow_cookies(client) == []
+
+
+def test_a_flow_cookie_holding_another_token_refuses_the_sign_in_and_nothing_else(
+    client: TestClient,
+    oauth_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stale or planted cookie costs a sign-in to start again, never a failed request."""
+    posted = stub_token_endpoint(monkeypatch).posted
+    state = client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()["state"]
+    (name,) = _flow_cookies(client)
+    client.cookies.clear()
+    client.cookies.set(name, "a-token-this-deployment-never-minted", path=f"{API_ROOT}/auth/oauth")
+
+    refused = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": state})
+
+    assert refused.status_code == 400, refused.text
+    assert posted == []
+
+
+def test_a_state_that_carries_a_header_is_refused_like_any_unknown_state(
+    client: TestClient,
+    oauth_configured: None,
+) -> None:
+    """The callback's state is the caller's own text, and it names the cookie the callback reads."""
+    refused = client.post(
+        f"{API_ROOT}/auth/oauth/google/callback",
+        json={"code": "c", "state": "state\r\nSet-Cookie: otari_session=planted"},
+    )
+
+    assert refused.status_code == 400, refused.text
+    assert "set-cookie" not in refused.headers
+
+
+def test_a_callback_stating_no_code_is_refused_rather_than_called_an_outage(
+    client: TestClient,
+    oauth_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A callback carrying no code to redeem never reached the provider, so it is not the provider failing."""
+    posted = stub_token_endpoint(monkeypatch).posted
+    state = client.get(f"{API_ROOT}/auth/oauth/google/authorize").json()["state"]
+
+    refused = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "", "state": state})
+
+    assert refused.status_code == 400, refused.text
+    assert posted == []
 
 
 def test_the_refusal_does_not_say_which_way_the_state_was_wrong(
@@ -2089,7 +2320,7 @@ def test_the_provider_redirect_path_bounces_into_the_dashboard_hash_route(client
     response = client.get(f"/auth/{provider}/callback?code=the-code&state=the-state", follow_redirects=False)
 
     assert response.status_code == 303
-    assert response.headers["location"] == (f"/#/auth/{provider}/callback?code=the-code&state=the-state")
+    assert response.headers["location"] == (f"/sign-in/{provider}/callback?code=the-code&state=the-state")
 
 
 def test_the_provider_redirect_path_carries_an_error_query_through_too(
@@ -2098,14 +2329,14 @@ def test_the_provider_redirect_path_carries_an_error_query_through_too(
     response = client.get("/auth/google/callback?error=access_denied&state=s", follow_redirects=False)
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/#/auth/google/callback?error=access_denied&state=s"
+    assert response.headers["location"] == "/sign-in/google/callback?error=access_denied&state=s"
 
 
 def test_the_provider_redirect_path_works_with_no_query_at_all(client: TestClient) -> None:
     response = client.get("/auth/google/callback", follow_redirects=False)
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/#/auth/google/callback"
+    assert response.headers["location"] == "/sign-in/google/callback"
 
 
 def test_the_provider_redirect_path_needs_no_credential(client: TestClient) -> None:

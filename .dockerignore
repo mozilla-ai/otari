@@ -115,6 +115,7 @@ config.example.yml
 
 # Database files
 *.db
+**/*.secret-key
 *.sqlite
 
 # Misc

@@ -6,13 +6,14 @@ Every check reads only active organization and workspace membership.
 """
 
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.exceptions.organizations_exceptions import NotAuthorizedError, WorkspaceNotFoundError
 from gateway.models.tenancy import MANAGEMENT_ROLES, Organization, User, Workspace
-from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRepository
+from gateway.repositories.tenancy import UserRepository, WorkspaceMemberRepository, WorkspaceRepository
 from gateway.services.tenancy.organization_service import OrganizationService
 
 
@@ -128,6 +129,30 @@ class WorkspaceAccess:
         await require_workspace_management_access(
             self._db, user=user, workspace=workspace, organizations=self._organizations
         )
+
+    async def has_workspace_management_access(self, *, user: User, workspace: Workspace) -> bool:
+        """See :func:`has_workspace_management_access`."""
+        return await has_workspace_management_access(
+            self._db, user=user, workspace=workspace, organizations=self._organizations
+        )
+
+    async def lock_workspace(self, workspace_id: uuid.UUID) -> None:
+        """Take the workspace's row lock, so what is read and written against it runs as if serialized."""
+        await WorkspaceRepository(self._db).lock(workspace_id)
+
+    async def workspace_managers(self, workspace: Workspace) -> list[User]:
+        """The active accounts that may manage a workspace: its own owners and admins, then its organization's."""
+        user_ids = await WorkspaceMemberRepository(self._db).active_user_ids_with_roles(workspace.id, MANAGEMENT_ROLES)
+        user_ids += await self._organizations.members.active_user_ids_with_roles(
+            workspace.organization_id, MANAGEMENT_ROLES
+        )
+        ordered = list(dict.fromkeys(user_ids))
+        accounts = {account.id: account for account in await self.people(ordered)}
+        return [accounts[user_id] for user_id in ordered if user_id in accounts and accounts[user_id].is_active]
+
+    async def people(self, user_ids: Collection[uuid.UUID]) -> list[User]:
+        """The accounts these ids name."""
+        return await UserRepository(self._db).get_by_ids(user_ids)
 
 
 @dataclass(frozen=True)

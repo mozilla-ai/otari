@@ -1,14 +1,18 @@
 import uuid
 from collections.abc import Collection, Sequence
+from datetime import datetime
 from typing import Never
 
-from sqlalchemy import select
+from sqlalchemy import Update, case, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.api_keys import APIKey
+from gateway.models.api_keys import APIKey, DisabledReason
 from gateway.repositories.base_repository import BaseRepository
+from gateway.types.key_scope import KeyScopeSet
+
+_NAMES_BATCH = 10_000
 
 
 class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
@@ -20,15 +24,143 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
     def __init__(self, db: AsyncSession | UnitOfWork) -> None:
         super().__init__(db, APIKey)
 
+    async def issue_app_key(
+        self,
+        *,
+        key_id: str,
+        key_hash: str,
+        prefix: str,
+        suffix: str,
+        name: str,
+        user_id: str,
+        workspace_id: uuid.UUID,
+        client_id: str,
+        scopes: KeyScopeSet,
+    ) -> None:
+        """Stage a budget-enforced, self-service key with inherited access restrictions."""
+        self.db.add(
+            APIKey(
+                id=key_id,
+                key_hash=key_hash,
+                key_prefix=prefix,
+                key_suffix=suffix,
+                key_name=name,
+                user_id=user_id,
+                workspace_id=workspace_id,
+                self_service=True,
+                exclude_from_budget=False,
+                scopes=scopes,
+                metadata_={"oauth_client_id": client_id},
+            )
+        )
+        await self.db.flush()
+
     async def get_workspace_id_for_key(self, key_id: str) -> uuid.UUID | None:
         """Return the ID of the workspace that owns a key, or None when no key has that ID."""
         result = await self.db.execute(select(APIKey.workspace_id).where(APIKey.id == key_id))
         return result.scalar_one_or_none()
 
+    async def revoke_by_hash(self, key_hash: str) -> None:
+        """Possession of a key grants revocation of that credential only, and no caller can undo it."""
+        await self.db.execute(
+            update(APIKey)
+            .where(APIKey.key_hash == key_hash)
+            .values(is_active=False, disabled_reason=DisabledReason.REVOKED)
+        )
+
     async def get_key_ids_in_workspaces(self, workspace_ids: Sequence[uuid.UUID]) -> list[str]:
         """Return the IDs of the keys in these workspaces, in no particular order."""
         result = await self.db.execute(select(APIKey.id).where(APIKey.workspace_id.in_(workspace_ids)))
         return list(result.scalars().all())
+
+    async def revoke_in_workspaces(self, workspace_ids: Collection[uuid.UUID]) -> None:
+        """Stage revoking every key in these workspaces, whoever it is billed to."""
+        if not workspace_ids:
+            return
+        await self.db.execute(
+            update(APIKey)
+            .where(APIKey.workspace_id.in_(list(workspace_ids)))
+            .values(is_active=False, disabled_reason=DisabledReason.REVOKED)
+            .execution_options(synchronize_session=False)
+        )
+
+    async def reload_locked(self, key: APIKey) -> None:
+        """Re-read ``key`` from the database and lock its row until the commit."""
+        await self.db.refresh(key, with_for_update=True)
+
+    def _owned_in_workspaces(
+        self, user_id: str, workspace_ids: Collection[uuid.UUID], *, self_service_only: bool
+    ) -> Update:
+        """An UPDATE over the keys billed to ``user_id`` in these workspaces."""
+        statement = update(APIKey).where(APIKey.user_id == user_id, APIKey.workspace_id.in_(workspace_ids))
+        return statement.where(APIKey.self_service.is_(True)) if self_service_only else statement
+
+    async def disable_owned_in_workspaces(
+        self, user_id: str, workspace_ids: Collection[uuid.UUID], *, self_service_only: bool
+    ) -> None:
+        """Disable the keys billed to ``user_id`` that are still enabled in these workspaces.
+
+        Records no reason, so the owner can enable them again.
+        ``self_service_only`` narrows it to the keys the owner created themselves.
+        """
+        if not workspace_ids:
+            return
+        statement = self._owned_in_workspaces(user_id, workspace_ids, self_service_only=self_service_only)
+        await self.db.execute(statement.where(APIKey.is_active.is_(True)).values(is_active=False))
+
+    async def disable_owned_in_workspaces_with_reason(
+        self,
+        user_id: str,
+        workspace_ids: Collection[uuid.UUID],
+        *,
+        self_service_only: bool,
+        reason: DisabledReason,
+    ) -> None:
+        """Disable every key billed to ``user_id`` in these workspaces and record ``reason`` on it.
+
+        Reaches a key the owner had already disabled, since the reason is what the
+        owner cannot clear. A key that already carries a reason keeps it, so this
+        never replaces one with a reason that is easier to clear.
+        ``self_service_only`` narrows it to the keys the owner created themselves.
+        """
+        if not workspace_ids:
+            return
+        await self.db.execute(
+            self._owned_in_workspaces(user_id, workspace_ids, self_service_only=self_service_only).values(
+                is_active=False,
+                disabled_reason=case((APIKey.disabled_reason.is_(None), reason), else_=APIKey.disabled_reason),
+            )
+        )
+
+    async def disable_self_service_owned(self, user_id: str) -> None:
+        """Disable the still-enabled keys ``user_id`` created themselves, in every workspace.
+
+        Records no reason, so the owner can enable them again once their account is active.
+        """
+        await self.db.execute(
+            update(APIKey)
+            .where(APIKey.user_id == user_id, APIKey.self_service.is_(True), APIKey.is_active.is_(True))
+            .values(is_active=False)
+        )
+
+    async def names_by_id(
+        self, key_ids: Collection[str], *, workspace_ids: Collection[uuid.UUID] | None
+    ) -> dict[str, str | None]:
+        """Each of these keys that still exists in these workspaces, or in any with ``None``, to its name.
+
+        Read in batches, so the ids never exceed a driver's bound-parameter limit.
+        """
+        ids = sorted(key_ids)
+        names: dict[str, str | None] = {}
+        in_workspaces = [] if workspace_ids is None else [APIKey.workspace_id.in_(sorted(workspace_ids))]
+        for start in range(0, len(ids), _NAMES_BATCH):
+            result = await self.db.execute(
+                select(APIKey.id, APIKey.key_name).where(
+                    APIKey.id.in_(ids[start : start + _NAMES_BATCH]), *in_workspaces
+                )
+            )
+            names.update({key_id: name for key_id, name in result.all()})
+        return names
 
     async def names_defaulting_end_users_to(self, budget_id: str) -> list[str]:
         """Name each key that starts its end users on ``budget_id`` by default, by its name or else its id."""
@@ -36,6 +168,31 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
             select(APIKey.key_name, APIKey.id).where(APIKey.end_user_budget_id == budget_id).order_by(APIKey.id)
         )
         return [name or key_id for name, key_id in result.all()]
+
+    async def summaries_in_workspace(
+        self, workspace_id: uuid.UUID, key_ids: Collection[str] | None = None
+    ) -> list[tuple[str, str | None, str | None, bool]]:
+        """A workspace's keys as ``(id, name, user id, active)``, oldest first; only ``key_ids`` when given."""
+        statement = (
+            select(APIKey.id, APIKey.key_name, APIKey.user_id, APIKey.is_active)
+            .where(APIKey.workspace_id == workspace_id)
+            .order_by(APIKey.created_at, APIKey.id)
+        )
+        if key_ids is not None:
+            statement = statement.where(APIKey.id.in_(list(key_ids)))
+        return [
+            (key_id, name, user_id, active)
+            for key_id, name, user_id, active in (await self.db.execute(statement)).all()
+        ]
+
+    async def owners_in_workspace(self, workspace_id: uuid.UUID, user_ids: Collection[str]) -> set[str]:
+        """Which of ``user_ids`` own at least one key in the workspace."""
+        result = await self.db.execute(
+            select(APIKey.user_id)
+            .where(APIKey.workspace_id == workspace_id, APIKey.user_id.in_(list(user_ids)))
+            .distinct()
+        )
+        return {user_id for user_id in result.scalars().all() if user_id is not None}
 
     async def remove_end_user_budget(self, budget_id: str) -> None:
         """Take ``budget_id`` off every key's ``end_user_budget_ids``.
@@ -73,6 +230,10 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         """Return the key whose secret hashes to ``key_hash``, or None."""
         result = await self.db.execute(select(APIKey).where(APIKey.key_hash == key_hash))
         return result.scalar_one_or_none()
+
+    async def touch_last_used(self, key_id: str, when: datetime) -> None:
+        """Record that the key ``key_id`` was used at ``when``."""
+        await self.db.execute(update(APIKey).where(APIKey.id == key_id).values(last_used_at=when))
 
     async def add_declared_if_absent(
         self,

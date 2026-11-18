@@ -29,12 +29,14 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.core.error_codes import ERROR_CODE_HEADER, WEB_ACCESS_DISABLED
 from gateway.models.tools import WorkspaceWebSearchConfig
 from gateway.services.tools import WebSearchBackend
 from gateway.services.tools._web_admission import WEB_SEARCH_NOT_CONFIGURED_DETAIL
 from gateway.services.web_retrieval_policy import canonicalize_domain_rules
 
-_SEARCH_URL = "http://127.0.0.1:9998/search"
+from .conftest import ALL_KEY_SCOPES
+
 _REQUEST = {
     "model": "anthropic:claude-3-5-sonnet-20241022",
     "messages": [{"role": "user", "content": "what happened today"}],
@@ -87,6 +89,10 @@ class _Dispatch:
         self.backend_kwargs: dict[str, Any] = {}
         self.ran = False
 
+    def domains(self, field: str) -> tuple[str, ...]:
+        """The hosts of the ``allowed`` or ``blocked`` domain rules the backend was given."""
+        return tuple(rule.value for rule in getattr(self.backend_kwargs["policy"], field))
+
 
 def _post_with_search_patched(
     client: TestClient, headers: dict[str, str], body: dict[str, Any]
@@ -99,7 +105,7 @@ def _post_with_search_patched(
         seen.ran = True
         return _text_response("via-search-loop")
 
-    def fake_backend(**kwargs: Any) -> Any:
+    def fake_backend(_search: Any, **kwargs: Any) -> Any:
         seen.backend_kwargs = kwargs
         backend = AsyncMock()
         backend.purpose_hints = lambda: []
@@ -107,7 +113,7 @@ def _post_with_search_patched(
 
     with (
         patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
-        patch("gateway.api.routes._tools.WebRetrievalBackend", new=fake_backend),
+        patch("gateway.services.tools._web_build.WebSearchBackend", new=fake_backend),
     ):
         response = client.post(f"{API_ROOT}/messages", json=body, headers=headers)
     return response, seen
@@ -116,18 +122,18 @@ def _post_with_search_patched(
 def test_no_row_leaves_the_request_exactly_as_it_was(
     client: TestClient,
     api_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
     """The zero-rows requirement: a deployment that configured nothing is unchanged."""
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
+    serve_search_on_fake()
 
     response, seen = _post_with_search_patched(client, api_key_header, _REQUEST)
 
     assert response.status_code == 200
     assert seen.ran is True
     assert seen.backend_kwargs["max_results"] == 5, "the backend's own default"
-    assert "allowed_domains" not in seen.backend_kwargs
-    assert "blocked_domains" not in seen.backend_kwargs
+    assert seen.domains("allowed") == ()
+    assert seen.domains("blocked") == ()
 
 
 @pytest.mark.parametrize(
@@ -144,9 +150,9 @@ def test_invalid_request_domain_rules_are_rejected_before_dispatch(
     values: list[str],
     client: TestClient,
     api_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
+    serve_search_on_fake()
     body = {
         **_REQUEST,
         "tools": [{"type": "otari_web_search", field: values}],
@@ -188,9 +194,9 @@ def test_invalid_request_domain_rules_are_rejected_for_other_completion_shapes(
     body: dict[str, Any],
     client: TestClient,
     api_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
+    serve_search_on_fake()
 
     response = client.post(path, json=body, headers=api_key_header)
 
@@ -203,10 +209,10 @@ def test_invalid_request_domain_rules_are_rejected_for_other_completion_shapes(
 def test_a_request_domain_in_cookie_syntax_is_served_as_the_bare_host(
     client: TestClient,
     api_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
     """A request reads ``.example.com`` as a workspace's policy does, not as a 400."""
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
+    serve_search_on_fake()
 
     response, seen = _post_with_search_patched(
         client,
@@ -215,7 +221,7 @@ def test_a_request_domain_in_cookie_syntax_is_served_as_the_bare_host(
     )
 
     assert response.status_code == 200, response.text
-    assert list(seen.backend_kwargs["allowed_domains"]) == ["example.com"]
+    assert seen.domains("allowed") == ("example.com",)
 
 
 def test_invalid_legacy_domain_rule_fails_closed_but_remains_visible_for_repair(
@@ -223,9 +229,9 @@ def test_invalid_legacy_domain_rule_fails_closed_but_remains_visible_for_repair(
     api_key_header: dict[str, str],
     master_key_header: dict[str, str],
     db_session_factory: Callable[[], Session],
-    monkeypatch: pytest.MonkeyPatch,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
+    serve_search_on_fake()
     workspace_id = _default_workspace_id(client, master_key_header)
     _set_config(client, master_key_header, workspace_id, enabled=True, allowed_domains=["example.com"])
 
@@ -249,9 +255,9 @@ def test_a_disabled_workspace_is_refused_before_the_provider_is_called(
     client: TestClient,
     api_key_header: dict[str, str],
     master_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
+    serve_search_on_fake()
     workspace_id = _default_workspace_id(client, master_key_header)
     _set_config(client, master_key_header, workspace_id, enabled=False)
 
@@ -261,6 +267,7 @@ def test_a_disabled_workspace_is_refused_before_the_provider_is_called(
     # Anthropic-shaped body, the same mapping every other refusal on this route gets.
     detail = response.json()
     assert detail["error"]["message"] == "web search is not enabled for this workspace"
+    assert response.headers[ERROR_CODE_HEADER] == WEB_ACCESS_DISABLED
     assert seen.ran is False, "the tool loop must never have run"
 
 
@@ -300,10 +307,10 @@ def test_a_disabled_workspace_still_serves_a_request_that_asks_for_no_search(
     client: TestClient,
     api_key_header: dict[str, str],
     master_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
     """The veto is over the tool, not over the workspace's traffic."""
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
+    serve_search_on_fake()
     workspace_id = _default_workspace_id(client, master_key_header)
     _set_config(client, master_key_header, workspace_id, enabled=False)
 
@@ -329,9 +336,9 @@ def test_the_workspace_ceiling_lowers_the_result_count(
     client: TestClient,
     api_key_header: dict[str, str],
     master_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
+    serve_search_on_fake()
     workspace_id = _default_workspace_id(client, master_key_header)
     _set_config(client, master_key_header, workspace_id, enabled=True, max_results=2)
 
@@ -349,10 +356,10 @@ def test_a_request_asking_for_less_than_the_workspace_allows_keeps_its_own_numbe
     client: TestClient,
     api_key_header: dict[str, str],
     master_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
     """The ceiling is a floor operation, so the stricter of the two wins."""
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
+    serve_search_on_fake()
     workspace_id = _default_workspace_id(client, master_key_header)
     _set_config(client, master_key_header, workspace_id, enabled=True, max_results=9)
 
@@ -371,6 +378,7 @@ def test_a_workspace_ceiling_above_the_deployments_own_raises_nothing(
     api_key_header: dict[str, str],
     master_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
     """A row may only narrow, and the thing it narrows includes the operator's own number.
 
@@ -378,7 +386,7 @@ def test_a_workspace_ceiling_above_the_deployments_own_raises_nothing(
     a deployment that caps at 3 would have *raised* the operator's cap for every
     request that named none of its own.
     """
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
+    serve_search_on_fake()
     monkeypatch.setenv("OTARI_WEB_SEARCH_MAX_RESULTS", "3")
     workspace_id = _default_workspace_id(client, master_key_header)
     _set_config(client, master_key_header, workspace_id, enabled=True, max_results=9)
@@ -393,10 +401,10 @@ def test_a_request_cannot_shed_the_workspace_block_list(
     client: TestClient,
     api_key_header: dict[str, str],
     master_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
     """The fail-open case a default-only precedence would allow."""
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
+    serve_search_on_fake()
     workspace_id = _default_workspace_id(client, master_key_header)
     _set_config(client, master_key_header, workspace_id, enabled=True, blocked_domains=["banned.example"])
 
@@ -407,24 +415,21 @@ def test_a_request_cannot_shed_the_workspace_block_list(
     )
 
     assert response.status_code == 200
-    assert set(seen.backend_kwargs["blocked_domains"]) == {"noise.example", "banned.example"}
+    assert set(seen.domains("blocked")) == {"noise.example", "banned.example"}
 
 
-def test_a_search_on_an_instance_is_narrowed_as_one_on_the_old_backend(
+def test_a_search_on_an_instance_is_narrowed_by_the_workspace_row(
     client: TestClient,
     api_key_header: dict[str, str],
     master_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
-    test_config: GatewayConfig,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
-    """The ceiling and the block list reach the search backend on any-search, as they reach the old one.
+    """The ceiling and the block list reach the search backend the instance runs on.
 
     A workspace option the provider does not take is dropped with a warning, and the
     request's own options are layered over the instance's.
     """
-    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
-    monkeypatch.setattr(test_config, "search_tools", {"fake-search": {"provider": "fake"}})
-    monkeypatch.setattr(test_config, "web_search_default_tool", "fake-search")
+    serve_search_on_fake({"cost": 0.001, "delay": 0.0})
     workspace_id = _default_workspace_id(client, master_key_header)
     _set_config(
         client,
@@ -450,16 +455,49 @@ def test_a_search_on_an_instance_is_narrowed_as_one_on_the_old_backend(
     assert isinstance(search, WebSearchBackend)
     assert search._max_results == 2
     assert search._policy.blocked == canonicalize_domain_rules(["banned.example"])
-    assert dict(search._search.options) == {"cost": 0.01}
+    assert dict(search._search.options) == {"cost": 0.01, "delay": 0.0}
+
+
+def test_a_search_on_the_legacy_provider_pair_is_narrowed_by_the_workspace_row(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    test_config: GatewayConfig,
+) -> None:
+    """The ceiling and the block list reach the search backend the legacy Tavily pair runs on."""
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+    monkeypatch.setattr(test_config, "web_search_provider", "tavily")
+    monkeypatch.setattr(test_config, "web_search_provider_api_key", "tvly-key")
+    workspace_id = _default_workspace_id(client, master_key_header)
+    _set_config(
+        client, master_key_header, workspace_id, enabled=True, max_results=2, blocked_domains=["banned.example"]
+    )
+    pools: list[Any] = []
+
+    async def fake_loop(*, completion_kwargs: Any, pool: Any, max_iterations: int, **_extra: Any) -> MessageResponse:
+        pools.append(pool)
+        return _text_response("via-search-loop")
+
+    tool = {"type": "otari_web_search", "max_results": 15, "blocked_domains": ["noise.example"]}
+    with patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop):
+        response = client.post(f"{API_ROOT}/messages", json={**_REQUEST, "tools": [tool]}, headers=api_key_header)
+
+    assert response.status_code == 200, response.text
+    [search] = pools
+    assert isinstance(search, WebSearchBackend)
+    assert search._search.provider == "tavily"
+    assert search._max_results == 2
+    assert search._policy.blocked == canonicalize_domain_rules(["noise.example", "banned.example"])
 
 
 def test_a_request_allow_list_is_intersected_with_the_workspace_one(
     client: TestClient,
     api_key_header: dict[str, str],
     master_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
+    serve_search_on_fake()
     workspace_id = _default_workspace_id(client, master_key_header)
     _set_config(
         client,
@@ -476,14 +514,14 @@ def test_a_request_allow_list_is_intersected_with_the_workspace_one(
     )
 
     assert response.status_code == 200
-    assert seen.backend_kwargs["allowed_domains"] == ("arxiv.org",)
+    assert seen.domains("allowed") == ("arxiv.org",)
 
 
 def test_a_request_scoped_to_a_subdomain_of_a_permitted_domain_is_served(
     client: TestClient,
     api_key_header: dict[str, str],
     master_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
     """End to end for the suffix semantics the backend's own filter uses.
 
@@ -493,7 +531,7 @@ def test_a_request_scoped_to_a_subdomain_of_a_permitted_domain_is_served(
     intersection is empty and the whole completion 403s, which is the shape of
     bug the unit tests alone would have let through to the request path.
     """
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
+    serve_search_on_fake()
     workspace_id = _default_workspace_id(client, master_key_header)
     _set_config(client, master_key_header, workspace_id, enabled=True, allowed_domains=["example.com"])
 
@@ -504,17 +542,17 @@ def test_a_request_scoped_to_a_subdomain_of_a_permitted_domain_is_served(
     )
 
     assert response.status_code == 200, response.text
-    assert seen.backend_kwargs["allowed_domains"] == ("docs.example.com",)
+    assert seen.domains("allowed") == ("docs.example.com",)
 
 
 def test_a_request_naming_only_domains_the_workspace_forbids_is_refused(
     client: TestClient,
     api_key_header: dict[str, str],
     master_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
     """An empty intersection cannot narrow to an empty list: that reads as no list at all."""
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
+    serve_search_on_fake()
     workspace_id = _default_workspace_id(client, master_key_header)
     _set_config(client, master_key_header, workspace_id, enabled=True, allowed_domains=["arxiv.org"])
 
@@ -532,9 +570,9 @@ def test_the_workspace_hint_fills_in_only_when_the_request_gave_none(
     client: TestClient,
     api_key_header: dict[str, str],
     master_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
+    serve_search_on_fake()
     workspace_id = _default_workspace_id(client, master_key_header)
     _set_config(client, master_key_header, workspace_id, enabled=True, purpose_hint="workspace hint")
 
@@ -553,9 +591,9 @@ def test_clearing_the_row_puts_the_request_back_where_it_started(
     client: TestClient,
     api_key_header: dict[str, str],
     master_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
+    serve_search_on_fake()
     workspace_id = _default_workspace_id(client, master_key_header)
     _set_config(client, master_key_header, workspace_id, enabled=False)
 
@@ -573,14 +611,14 @@ def test_a_streaming_request_gets_the_same_narrowing(
     client: TestClient,
     api_key_header: dict[str, str],
     master_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
     """The streaming dispatch builds its own backend, so it needs its own case.
 
     A ceiling that reached only the non-streaming path would leave the longest
     running requests, the streamed ones, unnarrowed.
     """
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
+    serve_search_on_fake()
     workspace_id = _default_workspace_id(client, master_key_header)
     _set_config(
         client,
@@ -599,7 +637,7 @@ def test_a_streaming_request_gets_the_same_narrowing(
         seen.ran = True
         yield MessageStopEvent(type="message_stop")
 
-    def fake_backend(**kwargs: Any) -> Any:
+    def fake_backend(_search: Any, **kwargs: Any) -> Any:
         seen.backend_kwargs = kwargs
         backend = AsyncMock()
         backend.purpose_hints = lambda: []
@@ -609,20 +647,20 @@ def test_a_streaming_request_gets_the_same_narrowing(
 
     with (
         patch("gateway.api.routes.messages.anthropic_tool_loop_stream", new=fake_loop_stream),
-        patch("gateway.api.routes._tools.WebRetrievalBackend", new=fake_backend),
+        patch("gateway.services.tools._web_build.WebSearchBackend", new=fake_backend),
     ):
         response = client.post(f"{API_ROOT}/messages", json={**_REQUEST, "stream": True}, headers=api_key_header)
 
     assert response.status_code == 200, response.text
     assert seen.backend_kwargs["max_results"] == 2
-    assert seen.backend_kwargs["blocked_domains"] == ("banned.example",)
+    assert seen.domains("blocked") == ("banned.example",)
 
 
 def test_a_master_key_request_is_narrowed_by_the_default_workspace(
     client: TestClient,
     master_key_header: dict[str, str],
     test_user: dict[str, Any],
-    monkeypatch: pytest.MonkeyPatch,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
     """A master-key request has no key row, so it bills to the default workspace.
 
@@ -630,7 +668,7 @@ def test_a_master_key_request_is_narrowed_by_the_default_workspace(
     write, so narrowing that workspace narrows the operator's own requests too.
     Worth pinning: it is the one case where the workspace is not read off a key.
     """
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
+    serve_search_on_fake()
     workspace_id = _default_workspace_id(client, master_key_header)
     _set_config(client, master_key_header, workspace_id, enabled=False)
 
@@ -681,6 +719,7 @@ def test_a_config_read_that_fails_releases_the_budget_reservation(
     master_key_header: dict[str, str],
     db_session_factory: Any,
     monkeypatch: pytest.MonkeyPatch,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
     """A database error in admission must not stay debited against the caller.
 
@@ -693,7 +732,7 @@ def test_a_config_read_that_fails_releases_the_budget_reservation(
     gate, which is only possible if pricing matched and the estimate really was
     nonzero.
     """
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
+    serve_search_on_fake()
     priced = client.post(
         f"{API_ROOT}/pricing",
         json={
@@ -756,12 +795,12 @@ def test_a_config_read_that_fails_releases_the_budget_reservation(
 def _stored_search_tool(client: TestClient, master_key_header: dict[str, str], name: str) -> None:
     """Add a runtime search tool, the way an operator without a config file does.
 
-    ``searxng`` because it is the one provider that needs no API key, so the
-    fixture needs no ``OTARI_SECRET_KEY``.
+    ``fake`` because it needs no API key, so the fixture needs no
+    ``OTARI_SECRET_KEY``, and answers with canned hits.
     """
     created = client.post(
         f"{API_ROOT}/search-tools",
-        json={"name": name, "provider": "searxng", "api_base": _SEARCH_URL},
+        json={"name": name, "provider": "fake"},
         headers=master_key_header,
     )
     assert created.status_code == 201, created.text
@@ -784,11 +823,11 @@ def test_the_direct_search_endpoint_honors_the_same_veto(
     client.post(f"{API_ROOT}/users", json={"user_id": "direct-search-user"}, headers=master_key_header)
     key = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "direct-search-key", "user_id": "direct-search-user"},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "direct-search-key", "user_id": "direct-search-user"},
         headers=master_key_header,
     ).json()
 
-    with patch("gateway.services.search_backend.run_search", new=AsyncMock()) as ran:
+    with patch("gateway.services.tools._direct_tool_call.run_direct_search", new=AsyncMock()) as ran:
         response = client.post(
             f"{API_ROOT}/search/stub-search",
             json={"query": "anything"},
@@ -797,6 +836,7 @@ def test_the_direct_search_endpoint_honors_the_same_veto(
 
     assert response.status_code == 403, response.text
     assert response.json()["detail"] == "web search is not enabled for this workspace"
+    assert response.headers[ERROR_CODE_HEADER] == WEB_ACCESS_DISABLED
     assert ran.await_count == 0
 
     rows = client.get(
@@ -827,11 +867,15 @@ def test_invalid_legacy_domain_rule_returns_503_from_direct_search(
     client.post(f"{API_ROOT}/users", json={"user_id": "invalid-config-search-user"}, headers=master_key_header)
     key = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "invalid-config-search-key", "user_id": "invalid-config-search-user"},
+        json={
+            "scopes": ALL_KEY_SCOPES,
+            "key_name": "invalid-config-search-key",
+            "user_id": "invalid-config-search-user",
+        },
         headers=master_key_header,
     ).json()
 
-    with patch("gateway.services.search_backend.run_search", new=AsyncMock()) as ran:
+    with patch("gateway.services.tools._direct_tool_call.run_direct_search", new=AsyncMock()) as ran:
         response = client.post(
             f"{API_ROOT}/search/invalid-config-search",
             json={"query": "anything"},
@@ -852,19 +896,15 @@ def test_the_direct_search_endpoint_is_unchanged_for_a_workspace_with_no_row(
     client.post(f"{API_ROOT}/users", json={"user_id": "open-search-user"}, headers=master_key_header)
     key = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "open-search-key", "user_id": "open-search-user"},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "open-search-key", "user_id": "open-search-user"},
         headers=master_key_header,
     ).json()
 
-    from gateway.services.search_backend import SearchHit, SearchOutcome
-
-    outcome = SearchOutcome(results=[SearchHit(url="https://example.com", title="t", snippet="s")], cost_usd=0.0)
-    with patch("gateway.services.search_backend.run_search", new=AsyncMock(return_value=outcome)):
-        response = client.post(
-            f"{API_ROOT}/search/open-stub-search",
-            json={"query": "anything"},
-            headers={API_KEY_HEADER: f"Bearer {key['key']}"},
-        )
+    response = client.post(
+        f"{API_ROOT}/search/open-stub-search",
+        json={"query": "anything"},
+        headers={API_KEY_HEADER: f"Bearer {key['key']}"},
+    )
 
     assert response.status_code == 200, response.text
 
@@ -894,9 +934,9 @@ def test_no_row_is_refused_like_a_disabled_row_where_web_access_is_opt_in(
     client: TestClient,
     api_key_header: dict[str, str],
     master_key_header: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
+    serve_search_on_fake()
 
     refused, seen = _post_with_search_patched(client, api_key_header, _REQUEST)
 
@@ -920,11 +960,11 @@ def test_the_direct_search_endpoint_refuses_a_workspace_with_no_row_where_web_ac
     client.post(f"{API_ROOT}/users", json={"user_id": "opt-in-search-user"}, headers=master_key_header)
     key = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "opt-in-search-key", "user_id": "opt-in-search-user"},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "opt-in-search-key", "user_id": "opt-in-search-user"},
         headers=master_key_header,
     ).json()
 
-    with patch("gateway.services.search_backend.run_search", new=AsyncMock()) as ran:
+    with patch("gateway.services.tools._direct_tool_call.run_direct_search", new=AsyncMock()) as ran:
         response = client.post(
             f"{API_ROOT}/search/opt-in-search",
             json={"query": "anything"},

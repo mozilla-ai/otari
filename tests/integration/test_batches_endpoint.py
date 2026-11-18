@@ -16,10 +16,11 @@ from fastapi.testclient import TestClient
 from openai.types.batch import Batch
 from openai.types.batch_request_counts import BatchRequestCounts
 
-from gateway.api.routes._pipeline import PROVIDER_CREDENTIALS_DETAIL
-from gateway.core.config import API_KEY_HEADER, API_ROOT
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.error_codes import ERROR_CODE_HEADER, PROVIDER_CREDENTIAL_REJECTED
+from gateway.core.error_details import ProviderDetail
 
+from .conftest import ALL_KEY_SCOPES, build_test_client
 from .test_rate_limiting import _make_rate_limit_client
 
 
@@ -212,7 +213,7 @@ def _credential_rejected() -> Exception:
 def _assert_credential_rejected(resp: Any) -> None:
     assert resp.status_code == 424, resp.text
     assert resp.headers[ERROR_CODE_HEADER] == PROVIDER_CREDENTIAL_REJECTED
-    assert resp.json()["detail"] == PROVIDER_CREDENTIALS_DETAIL
+    assert resp.json()["detail"] == ProviderDetail.CREDENTIALS
     assert "sk-proj" not in resp.text
 
 
@@ -452,7 +453,9 @@ def test_retrieve_batch_results(
         results=[
             BatchResultItem(custom_id="req-1", result=completion, error=None),
             BatchResultItem(
-                custom_id="req-2", result=None, error=BatchResultError(code="rate_limit", message="Rate limit exceeded")
+                custom_id="req-2",
+                result=None,
+                error=BatchResultError(code="rate_limit", message="Quota exceeded; retry after 60 seconds"),
             ),
         ]
     )
@@ -479,7 +482,7 @@ def test_retrieve_batch_results(
     assert data["results"][1]["custom_id"] == "req-2"
     assert data["results"][1]["result"] is None
     assert data["results"][1]["error"]["code"] == "rate_limit"
-    assert data["results"][1]["error"]["message"] == "Rate limit exceeded"
+    assert data["results"][1]["error"]["message"] == "Quota exceeded; retry after 60 seconds"
 
 
 def test_retrieve_batch_results_not_complete(
@@ -1005,6 +1008,87 @@ def test_recorded_batch_results_accounted_once(
     assert user_resp.json()["spend"] == pytest.approx(expected_cost)
 
 
+def test_recorded_batch_results_log_each_item_and_redact_errors(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    """A mixed batch writes one safe, correctly priced usage row per item exactly once."""
+    user_id = api_key_obj["user_id"]
+    pricing_resp = client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": "openai:gpt-4o-mini",
+            "input_price_per_million": 1.0,
+            "output_price_per_million": 2.0,
+        },
+        headers=master_key_header,
+    )
+    assert pricing_resp.status_code == 200
+    batch_id = _create_recorded_batch(client, api_key_header)
+
+    completion = MagicMock()
+    completion.model = "gpt-4o-mini"
+    completion.usage = CompletionUsage(prompt_tokens=100, completion_tokens=50, total_tokens=150)
+    completion.model_dump.return_value = {"id": "chatcmpl-1", "choices": []}
+    raw_error = "Model not found at https://provider.example/v1 using key sk-proj-AAAAAAAAAAAAAAAA"
+    mock_result = BatchResult(
+        results=[
+            BatchResultItem(custom_id="success", result=completion, error=None),
+            BatchResultItem(
+                custom_id="failure",
+                result=None,
+                error=BatchResultError(code="model_not_found", message=raw_error),
+            ),
+        ]
+    )
+
+    with (
+        patch(
+            "gateway.api.routes.batches.aretrieve_batch",
+            new_callable=AsyncMock,
+            return_value=_mock_batch(status="completed"),
+        ),
+        patch("gateway.api.routes.batches.aretrieve_batch_results", new_callable=AsyncMock, return_value=mock_result),
+    ):
+        with (
+            patch(
+                "gateway.api.deps.record_external_spend",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("spend fold failed"),
+            ),
+            pytest.raises(RuntimeError, match="spend fold failed"),
+        ):
+            client.get(f"{API_ROOT}/batches/{batch_id}/results?provider=openai", headers=api_key_header)
+        first = client.get(f"{API_ROOT}/batches/{batch_id}/results?provider=openai", headers=api_key_header)
+        second = client.get(f"{API_ROOT}/batches/{batch_id}/results?provider=openai", headers=api_key_header)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    public_error = first.json()["results"][1]["error"]
+    assert public_error["code"] == "model_not_found"
+    assert "sk-proj-AAAAAAAAAAAAAAAA" not in public_error["message"]
+    assert "https://provider.example/v1" not in public_error["message"]
+    assert "[redacted]" in public_error["message"]
+
+    usage_resp = client.get(f"{API_ROOT}/users/{user_id}/usage", headers=master_key_header)
+    results_logs = [log for log in usage_resp.json() if log["endpoint"] == "/v1/batches/results"]
+    assert len(results_logs) == 2
+    success_log = next(log for log in results_logs if log["status"] == "success")
+    error_log = next(log for log in results_logs if log["status"] == "error")
+    expected_cost = 100 / 1_000_000 * 1.0 + 50 / 1_000_000 * 2.0
+    assert success_log["prompt_tokens"] == 100
+    assert success_log["completion_tokens"] == 50
+    assert success_log["cost"] == pytest.approx(expected_cost)
+    assert error_log["error_message"] == public_error["message"]
+    assert "sk-proj-AAAAAAAAAAAAAAAA" not in error_log["error_message"]
+    assert error_log["cost"] is None
+
+    user_resp = client.get(f"{API_ROOT}/users/{user_id}", headers=master_key_header)
+    assert user_resp.json()["spend"] == pytest.approx(expected_cost)
+
+
 def test_batch_lines_are_priced_one_request_at_a_time(
     client: TestClient,
     master_key_header: dict[str, str],
@@ -1042,12 +1126,12 @@ def test_batch_lines_are_priced_one_request_at_a_time(
 
     usage_resp = client.get(f"{API_ROOT}/users/{user_id}/usage", headers=master_key_header)
     results_logs = [log for log in usage_resp.json() if log["endpoint"] == "/v1/batches/results"]
-    assert len(results_logs) == 1
-    assert results_logs[0]["prompt_tokens"] == 300_000
+    assert len(results_logs) == 3
+    assert sum(log["prompt_tokens"] or 0 for log in results_logs) == 300_000
 
     # Base rates, three times over: 100k input at $1/M plus 1k output at $2/M.
     expected_cost = 3 * (100_000 / 1_000_000 * 1.0 + 1_000 / 1_000_000 * 2.0)
-    assert results_logs[0]["cost"] == pytest.approx(expected_cost)
+    assert sum(log["cost"] or 0 for log in results_logs) == pytest.approx(expected_cost)
 
 
 def test_batch_lines_keep_their_cached_token_discount(
@@ -1133,7 +1217,7 @@ def test_a_batch_is_rounded_once_not_once_per_line(
 
     usage_resp = client.get(f"{API_ROOT}/users/{user_id}/usage", headers=master_key_header)
     results_logs = [log for log in usage_resp.json() if log["endpoint"] == "/v1/batches/results"]
-    assert results_logs[0]["cost"] == pytest.approx(0.000094)
+    assert sum(log["cost"] or 0 for log in results_logs) == pytest.approx(0.000094)
 
 
 def test_recorded_batch_results_defers_accounting_until_pricing_exists(
@@ -1194,6 +1278,86 @@ def test_recorded_batch_results_defers_accounting_until_pricing_exists(
     assert user_resp.json()["spend"] == pytest.approx(expected_cost)
 
 
+def _served_model_patches(served_model: str, tokens: CompletionUsage) -> tuple[Any, Any]:
+    """Patches for a completed batch whose result line names ``served_model``."""
+    mock_completion = MagicMock()
+    mock_completion.model = served_model
+    mock_completion.usage = tokens
+    mock_completion.model_dump.return_value = {"id": "chatcmpl-1", "choices": []}
+    mock_result = BatchResult(results=[BatchResultItem(custom_id="req-1", result=mock_completion, error=None)])
+    return (
+        patch(
+            "gateway.api.routes.batches.aretrieve_batch",
+            new_callable=AsyncMock,
+            return_value=_mock_batch(status="completed"),
+        ),
+        patch("gateway.api.routes.batches.aretrieve_batch_results", new_callable=AsyncMock, return_value=mock_result),
+    )
+
+
+def test_recorded_batch_is_priced_at_the_requested_model_not_the_served_one(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    """A result line names the checkpoint the upstream served, not the model asked for."""
+    pricing_resp = client.post(
+        f"{API_ROOT}/pricing",
+        json={"model_key": "openai:gpt-4o-mini", "input_price_per_million": 1.0, "output_price_per_million": 2.0},
+        headers=master_key_header,
+    )
+    assert pricing_resp.status_code == 200
+    batch_id = _create_recorded_batch(client, api_key_header)
+
+    retrieve_patch, results_patch = _served_model_patches(
+        "gpt-4o-mini-2024-07-18", CompletionUsage(prompt_tokens=100, completion_tokens=50, total_tokens=150)
+    )
+    with retrieve_patch, results_patch:
+        resp = client.get(f"{API_ROOT}/batches/{batch_id}/results?provider=openai", headers=api_key_header)
+    assert resp.status_code == 200
+
+    usage_resp = client.get(f"{API_ROOT}/users/{api_key_obj['user_id']}/usage", headers=master_key_header)
+    results_logs = [log for log in usage_resp.json() if log["endpoint"] == "/v1/batches/results"]
+    assert len(results_logs) == 1
+    assert results_logs[0]["cost"] == pytest.approx(100 / 1_000_000 * 1.0 + 50 / 1_000_000 * 2.0)
+
+
+def test_recorded_batch_on_a_named_instance_is_priced_under_the_instance(postgres_url: str) -> None:
+    """``otium:otium-echo`` is priced under ``otium``, not under ``openai:<served model>``."""
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        auto_migrate=False,
+        require_pricing=False,
+        model_discovery=False,
+        providers={"otium": {"provider_type": "openai", "api_base": "http://otium.test/v1", "api_key": "k"}},
+    )
+    headers = {API_KEY_HEADER: "Bearer test-master-key"}
+    for client in build_test_client(config):
+        assert client.post(f"{API_ROOT}/users", json={"user_id": "otium-user"}, headers=headers).status_code == 200
+        for model_key, price in (("otium:otium-echo", 0.0), ("openai:echo", 5.0)):
+            resp = client.post(
+                f"{API_ROOT}/pricing",
+                json={"model_key": model_key, "input_price_per_million": price, "output_price_per_million": price},
+                headers=headers,
+            )
+            assert resp.status_code == 200
+        batch_id = _create_recorded_batch(client, headers, model="otium:otium-echo", user="otium-user")
+
+        retrieve_patch, results_patch = _served_model_patches(
+            "echo", CompletionUsage(prompt_tokens=57, completion_tokens=19, total_tokens=76)
+        )
+        with retrieve_patch, results_patch:
+            resp = client.get(f"{API_ROOT}/batches/{batch_id}/results?provider=otium", headers=headers)
+        assert resp.status_code == 200
+
+        usage_resp = client.get(f"{API_ROOT}/users/otium-user/usage", headers=headers)
+        results_logs = [log for log in usage_resp.json() if log["endpoint"] == "/v1/batches/results"]
+        assert len(results_logs) == 1
+        assert results_logs[0]["cost"] == 0
+
+
 def test_unrecorded_batch_results_logs_every_retrieval(
     client: TestClient,
     master_key_header: dict[str, str],
@@ -1219,6 +1383,41 @@ def test_unrecorded_batch_results_logs_every_retrieval(
     assert len(results_logs) == 2
 
 
+def test_an_unrecorded_batch_is_priced_at_the_time_the_provider_created_it(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    """A clock rule reads the batch's creation (2024-04-30), not the time its results are read."""
+    created_then = {"date": {"lt": "2025-01-01"}}
+    pricing_resp = client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": "openai:gpt-4o-mini",
+            "rates": {
+                "text": {
+                    "input": {"price": 1, "overrides": [{"when": created_then, "price": 2}]},
+                    "output": {"price": 4},
+                }
+            },
+        },
+        headers=master_key_header,
+    )
+    assert pricing_resp.status_code == 200, pricing_resp.text
+
+    retrieve_patch, results_patch = _completed_results_patches(
+        CompletionUsage(prompt_tokens=1_000_000, completion_tokens=0, total_tokens=1_000_000)
+    )
+    with retrieve_patch, results_patch:
+        resp = client.get(f"{API_ROOT}/batches/legacy_batch/results?provider=openai", headers=api_key_header)
+    assert resp.status_code == 200
+
+    logs = client.get(f"{API_ROOT}/users/{api_key_obj['user_id']}/usage", headers=master_key_header).json()
+    row = next(log for log in logs if log["endpoint"] == "/v1/batches/results")
+    assert row["cost"] == pytest.approx(2.0)
+
+
 def test_recorded_batch_foreign_caller_never_reaches_the_provider(
     client: TestClient,
     master_key_header: dict[str, str],
@@ -1239,7 +1438,7 @@ def test_recorded_batch_foreign_caller_never_reaches_the_provider(
 
     other_key_resp = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "foreign-caller", "user_id": "batch-foreign-caller"},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "foreign-caller", "user_id": "batch-foreign-caller"},
         headers=master_key_header,
     )
     assert other_key_resp.status_code == 200
@@ -1262,7 +1461,7 @@ def test_recorded_batch_cancel_by_foreign_caller_never_reaches_the_provider(
 
     other_key_resp = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "foreign-canceller", "user_id": "batch-foreign-canceller"},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "foreign-canceller", "user_id": "batch-foreign-canceller"},
         headers=master_key_header,
     )
     assert other_key_resp.status_code == 200
@@ -1285,7 +1484,7 @@ def test_recorded_batch_results_by_foreign_caller_never_reaches_the_provider(
 
     other_key_resp = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "foreign-results", "user_id": "batch-foreign-results"},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "foreign-results", "user_id": "batch-foreign-results"},
         headers=master_key_header,
     )
     assert other_key_resp.status_code == 200
@@ -1308,7 +1507,7 @@ def test_recorded_batch_strict_ownership_ignores_missing_metadata(
 
     other_key_resp = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "other", "user_id": "batch-other-user"},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "other", "user_id": "batch-other-user"},
         headers=master_key_header,
     )
     assert other_key_resp.status_code == 200
@@ -1333,7 +1532,7 @@ def test_recorded_batch_list_hides_foreign_without_metadata(
     """List filtering uses the records table, so an unmarked foreign batch is hidden."""
     other_key_resp = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "other-list", "user_id": "batch-list-other"},
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "other-list", "user_id": "batch-list-other"},
         headers=master_key_header,
     )
     assert other_key_resp.status_code == 200

@@ -12,7 +12,6 @@ from typing import Any
 
 import pytest
 
-from gateway.api.routes._pipeline import ToolContext
 from gateway.api.routes.messages import _strip_gateway_minted_blocks
 from gateway.core.config import GatewayConfig
 from gateway.services.mcp_loop_messages import MCP_ACTIVITY_ID_PREFIX
@@ -95,53 +94,6 @@ def test_keeps_real_tool_use_and_tool_result_blocks() -> None:
 def test_non_list_input_passes_through() -> None:
     assert _strip_gateway_minted_blocks(None) is None
     assert _strip_gateway_minted_blocks("not a list") == "not a list"
-
-
-# --- web-search interception capability ---------------------------------------
-
-
-def _tool_ctx(config: GatewayConfig) -> ToolContext:
-    """A ToolContext carrying nothing but the two inputs the property reads."""
-    return ToolContext(
-        config=config,
-        mcp_server_configs=None,
-        use_sandbox=False,
-        sandbox_tool_entry=None,
-        code_execution_port=None,
-        remaining_user_tools=None,
-        max_tool_iterations=10,
-        tools_header=None,
-    )
-
-
-def test_gate_is_off_without_the_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("OTARI_WEB_SEARCH_INTERCEPT", raising=False)
-    config = GatewayConfig(web_search_url="http://searxng:8080")
-    assert _tool_ctx(config).intercepts_web_search is False
-
-
-def test_gate_is_on_when_opted_in_with_a_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("OTARI_WEB_SEARCH_INTERCEPT", raising=False)
-    config = GatewayConfig(web_search_intercept=True, web_search_url="http://searxng:8080")
-    assert _tool_ctx(config).intercepts_web_search is True
-
-
-def test_gate_is_off_when_opted_in_without_a_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With nothing to intercept to, the provider remains the search owner."""
-    monkeypatch.delenv("OTARI_WEB_SEARCH_INTERCEPT", raising=False)
-    config = GatewayConfig(web_search_intercept=True)
-    assert config.web_search_url is None
-    assert _tool_ctx(config).intercepts_web_search is False
-
-
-def test_gate_is_on_when_opted_in_with_a_search_instance(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A deployment whose only search is one instance can intercept to it."""
-    monkeypatch.delenv("OTARI_WEB_SEARCH_INTERCEPT", raising=False)
-    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
-    instance = {"exa": {"provider": "fake"}}
-    assert _tool_ctx(GatewayConfig(web_search_intercept=True, search_tools=instance)).intercepts_web_search is True
-    turned_off = GatewayConfig(web_search_intercept=True, search_tools=instance, web_search_default_tool="none")
-    assert _tool_ctx(turned_off).intercepts_web_search is False
 
 
 @pytest.mark.asyncio

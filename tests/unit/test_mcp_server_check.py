@@ -17,12 +17,11 @@ import uuid
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-import httpx
+import httpx2
 import pytest
 import uvicorn
-from mcp.server.fastmcp import FastMCP
-from mcp.shared.exceptions import McpError
-from mcp.types import ErrorData
+from mcp.server.mcpserver import MCPServer
+from mcp.shared.exceptions import MCPError
 
 from gateway.models.mcp import ResolvedMcpServer
 from gateway.services import mcp_stateless
@@ -33,6 +32,7 @@ from gateway.services.mcp_stateless import (
     check_stored_server,
     classify_check_failure,
     refuse_unusable_answer,
+    tool_summary,
 )
 
 
@@ -79,7 +79,7 @@ def refusing() -> Iterator[str]:
 @pytest.fixture(scope="module", params=[False, True], ids=["sse", "json"])
 def mcp_url(request: pytest.FixtureRequest) -> Iterator[str]:
     """A real streamable HTTP MCP server, answering in both of the transport's response modes."""
-    app = FastMCP("check", json_response=request.param)
+    app = MCPServer("check")
 
     @app.tool()
     def list_issues() -> str:
@@ -87,12 +87,21 @@ def mcp_url(request: pytest.FixtureRequest) -> Iterator[str]:
 
     @app.tool()
     def close_issue(number: int) -> str:
+        """
+
+        Close one issue by its number.
+        The issue stays readable.
+        """
         return str(number)
 
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    server = uvicorn.Server(uvicorn.Config(app.streamable_http_app(), host="127.0.0.1", port=port, log_level="error"))
+    server = uvicorn.Server(
+        uvicorn.Config(
+            app.streamable_http_app(json_response=request.param), host="127.0.0.1", port=port, log_level="error"
+        )
+    )
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     for _ in range(100):
@@ -112,6 +121,7 @@ async def test_a_working_server_reports_its_tools(mcp_url: str) -> None:
 
     assert check.failure is None
     assert sorted(check.tool_names) == ["close_issue", "list_issues"]
+    assert check.descriptions == {"close_issue": "Close one issue by its number."}, "the first line, and none for none"
 
 
 @pytest.mark.asyncio
@@ -193,25 +203,25 @@ async def test_a_check_with_no_free_slot_raises_rather_than_reporting_the_server
 @pytest.mark.asyncio
 async def test_a_notification_acknowledged_without_a_body_is_not_refused() -> None:
     """Only a request is owed an MCP body; a 200 for a notification may carry none."""
-    notification = httpx.Request(
+    notification = httpx2.Request(
         "POST", "https://mcp.example.com/mcp", json={"jsonrpc": "2.0", "method": "notifications/initialized"}
     )
-    request = httpx.Request("POST", "https://mcp.example.com/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "x"})
+    request = httpx2.Request("POST", "https://mcp.example.com/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "x"})
 
-    await refuse_unusable_answer(httpx.Response(200, request=notification))
+    await refuse_unusable_answer(httpx2.Response(200, request=notification))
     with pytest.raises(Exception) as raised:
-        await refuse_unusable_answer(httpx.Response(200, request=request))
+        await refuse_unusable_answer(httpx2.Response(200, request=request))
     assert classify_check_failure(raised.value) == (CheckFailure.NOT_MCP, None)
 
 
 @pytest.mark.asyncio
 async def test_the_event_stream_get_may_be_refused() -> None:
     """The SDK opens a GET stream after initializing and treats a 405 there as normal."""
-    await refuse_unusable_answer(httpx.Response(405, request=httpx.Request("GET", "https://mcp.example.com/mcp")))
+    await refuse_unusable_answer(httpx2.Response(405, request=httpx2.Request("GET", "https://mcp.example.com/mcp")))
 
 
 def test_a_protocol_error_inside_a_group_is_not_mcp() -> None:
-    group = ExceptionGroup("tg", [ExceptionGroup("inner", [McpError(ErrorData(code=-32600, message="x"))])])
+    group = ExceptionGroup("tg", [ExceptionGroup("inner", [MCPError(-32600, "x")])])
 
     assert classify_check_failure(group) == (CheckFailure.NOT_MCP, None)
 
@@ -219,3 +229,11 @@ def test_a_protocol_error_inside_a_group_is_not_mcp() -> None:
 def test_an_unrecognized_failure_is_named_generically() -> None:
     assert classify_check_failure(RuntimeError("boom")) == (CheckFailure.CONNECTION_FAILED, None)
     assert classify_check_failure(asyncio.CancelledError()) == (CheckFailure.CONNECTION_FAILED, None)
+
+
+def test_a_tool_summary_is_one_short_line() -> None:
+    assert tool_summary(None) is None
+    assert tool_summary("  \n\t\n") is None
+    assert tool_summary("\n  Search issues.  \nMore detail.") == "Search issues."
+    long = tool_summary("x" * 500)
+    assert long is not None and len(long) == mcp_stateless.TOOL_SUMMARY_MAX_LENGTH and long.endswith("…")

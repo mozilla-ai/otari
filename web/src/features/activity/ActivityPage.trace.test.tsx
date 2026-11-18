@@ -22,7 +22,7 @@ async function openRow() {
 }
 
 describe("ActivityPage trace link", () => {
-  it("links a traced request to its session, opened on this row's LLM call", async () => {
+  it("links a traced request to its session, opened on this row's model request", async () => {
     const { calls } = mockApi({
       rows: [entry({ id: "attempt-1", request_group_id: "req-1" })],
       requestTrace: traceSummary(),
@@ -53,7 +53,9 @@ describe("ActivityPage trace link", () => {
     await openRow()
 
     await waitFor(() => expect(lookups(calls)).toHaveLength(1))
-    expect(screen.getByText("Request detail")).toBeInTheDocument()
+    expect(
+      screen.getByRole("complementary", { name: "Request detail" }),
+    ).toBeInTheDocument()
     expect(
       screen.queryByRole("link", { name: "View trace" }),
     ).not.toBeInTheDocument()
@@ -68,7 +70,9 @@ describe("ActivityPage trace link", () => {
 
     await openRow()
 
-    expect(await screen.findByText("Request detail")).toBeInTheDocument()
+    expect(
+      await screen.findByRole("complementary", { name: "Request detail" }),
+    ).toBeInTheDocument()
     expect(lookups(calls)).toEqual([])
     expect(
       screen.queryByRole("link", { name: "View trace" }),

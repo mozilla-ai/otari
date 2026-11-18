@@ -19,7 +19,7 @@ from gateway.models.tenancy import Workspace
 from gateway.models.traces import Trace
 from gateway.models.users import User
 
-from .conftest import MODEL_NAME
+from .conftest import ALL_SERVICE_KEY_SCOPES, MODEL_NAME, all_scopes
 
 END_USERS = f"{API_ROOT}/end-users"
 END_USER_BUDGETS = f"{API_ROOT}/end-user-budgets"
@@ -60,7 +60,14 @@ def _budgets(client: TestClient, master_key_header: dict[str, str]) -> None:
 
 def _key(client: TestClient, master_key_header: dict[str, str], owner: str, **settings: Any) -> dict[str, str]:
     created = client.post(
-        f"{API_ROOT}/keys", json={"key_name": owner, "user_id": owner, **settings}, headers=master_key_header
+        f"{API_ROOT}/keys",
+        json={
+            "scopes": all_scopes(settings),
+            "key_name": owner,
+            "user_id": owner,
+            **settings,
+        },
+        headers=master_key_header,
     )
     assert created.status_code == 200, created.text
     return {API_KEY_HEADER: f"Bearer {created.json()['key']}"}
@@ -271,7 +278,9 @@ def test_only_a_service_key_authenticates(client: TestClient, master_key_header:
 def test_an_inactive_service_key_is_refused(client: TestClient, master_key_header: dict[str, str]) -> None:
     _budgets(client, master_key_header)
     created = client.post(
-        f"{API_ROOT}/keys", json={"user_id": "mlpa", "is_service_key": True}, headers=master_key_header
+        f"{API_ROOT}/keys",
+        json={"scopes": ALL_SERVICE_KEY_SCOPES, "user_id": "mlpa", "is_service_key": True},
+        headers=master_key_header,
     ).json()
     client.patch(f"{API_ROOT}/keys/{created['id']}", json={"is_active": False}, headers=master_key_header)
     mlpa = {API_KEY_HEADER: f"Bearer {created['key']}"}
@@ -323,10 +332,51 @@ def test_a_service_key_counts_its_end_users_on_each_of_its_budgets(
     counted = client.get(END_USER_BUDGETS, headers=mlpa)
 
     assert counted.status_code == 200, counted.text
-    assert counted.json() == [
+    assert [
+        {k: budget[k] for k in ("budget_id", "is_default", "end_user_count", "blocked_end_user_count")}
+        for budget in counted.json()
+    ] == [
         {"budget_id": "eu-ai", "is_default": True, "end_user_count": 2, "blocked_end_user_count": 1},
         {"budget_id": "eu-memories", "is_default": False, "end_user_count": 1, "blocked_end_user_count": 0},
     ]
+
+
+def test_end_user_budgets_carry_the_limits_end_users_are_held_to(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    _budgets(client, master_key_header)
+    guest = client.put(
+        f"{API_ROOT}/budgets/eu-memories",
+        json={"name": "guest", "max_budget": 0.02, "reset_alignment": "calendar_month", "budget_duration_sec": None},
+        headers=master_key_header,
+    )
+    assert guest.status_code == 200, guest.text
+    mlpa = _service_key(client, master_key_header, "mlpa")
+
+    listed = client.get(END_USER_BUDGETS, headers=mlpa)
+
+    assert listed.status_code == 200, listed.text
+    by_id = {budget["budget_id"]: budget for budget in listed.json()}
+    assert by_id["eu-ai"] | {"end_user_count": 0} == {
+        "budget_id": "eu-ai",
+        "name": None,
+        "max_budget": None,
+        "token_limit": None,
+        "request_limit": 5,
+        "rpm_limit": None,
+        "tpm_limit": None,
+        "budget_duration_sec": 86400,
+        "reset_alignment": None,
+        "is_default": True,
+        "end_user_count": 0,
+        "blocked_end_user_count": 0,
+    }
+    assert by_id["eu-memories"]["name"] == "guest"
+    assert by_id["eu-memories"]["max_budget"] == 0.02
+    assert by_id["eu-memories"]["reset_alignment"] == "calendar_month"
+    assert by_id["eu-memories"]["budget_duration_sec"] is None
+    # Only the budgets on the key's list, never another of the deployment's.
+    assert "eu-other" not in by_id
 
 
 def test_a_service_key_of_a_blocked_owner_manages_none_of_its_end_users(
@@ -359,6 +409,18 @@ def test_a_service_key_of_a_blocked_owner_manages_none_of_its_end_users(
     assert read.json()["budget_id"] == "eu-ai"
 
 
+def test_a_key_reads_its_end_users_against_its_cap(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """A list with no default starts an end user on no budget, and the cap counts that one too."""
+    _budgets(client, master_key_header)
+    mlpa = _key(client, master_key_header, "mlpa", is_service_key=True, end_user_budget_ids=["eu-ai"], max_end_users=5)
+
+    assert client.get(f"{API_ROOT}/key/budget", headers=mlpa).json()["end_users"] == {"count": 0, "max_end_users": 5}
+    assert _chat(client, mlpa, "a").status_code == 200
+    assert client.put(f"{END_USERS}/b", json={"budget_id": "eu-ai"}, headers=mlpa).status_code == 201
+
+    assert client.get(f"{API_ROOT}/key/budget", headers=mlpa).json()["end_users"] == {"count": 2, "max_end_users": 5}
+
+
 def test_a_key_with_a_cap_refuses_one_end_user_more(
     client: TestClient, master_key_header: dict[str, str], db_session: Session
 ) -> None:
@@ -375,12 +437,14 @@ def test_a_key_with_a_cap_refuses_one_end_user_more(
 
     first = _chat(client, mlpa, "a")
     second = client.put(f"{END_USERS}/b", json={"budget_id": "eu-ai"}, headers=mlpa)
+    seats = client.get(f"{API_ROOT}/key/budget", headers=mlpa)
     by_request = _chat(client, mlpa, "c")
     by_put = client.put(f"{END_USERS}/c", json={"budget_id": "eu-ai"}, headers=mlpa)
     existing = _chat(client, mlpa, "a")
 
     assert first.status_code == 200, first.text
     assert second.status_code == 201, second.text
+    assert seats.json()["end_users"] == {"count": 2, "max_end_users": 2}
     assert by_request.status_code == 403
     assert by_request.headers["Otari-Error-Code"] == "end_user_limit_reached"
     assert by_put.status_code == 403
@@ -411,6 +475,7 @@ def test_two_keys_of_one_owner_count_their_own_budgets(client: TestClient, maste
     guests = client.post(
         f"{API_ROOT}/keys",
         json={
+            "scopes": ALL_SERVICE_KEY_SCOPES,
             "key_name": "mlpa-guest",
             "user_id": "mlpa",
             "is_service_key": True,
@@ -444,6 +509,7 @@ def test_moving_an_end_user_onto_a_capped_keys_budget_takes_a_place(
     capped = client.post(
         f"{API_ROOT}/keys",
         json={
+            "scopes": ALL_SERVICE_KEY_SCOPES,
             "key_name": "mlpa-guest",
             "user_id": "mlpa",
             "is_service_key": True,
@@ -492,7 +558,13 @@ def test_the_cap_is_read_and_changed_through_the_keys_api(
     _budgets(client, master_key_header)
     created = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "mlpa", "user_id": "mlpa", "is_service_key": True, "max_end_users": 10},
+        json={
+            "scopes": ALL_SERVICE_KEY_SCOPES,
+            "key_name": "mlpa",
+            "user_id": "mlpa",
+            "is_service_key": True,
+            "max_end_users": 10,
+        },
         headers=master_key_header,
     ).json()
     raised = client.patch(f"{API_ROOT}/keys/{created['id']}", json={"max_end_users": 20}, headers=master_key_header)

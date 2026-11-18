@@ -19,6 +19,11 @@ import {
   orgProviderModel,
 } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
+import {
+  findRowMenuItem,
+  pressRowAction,
+  rowMenuTriggers,
+} from "@/tests/rowMenu"
 
 const KEY_ID = "66666666-6666-6666-6666-666666666666"
 
@@ -403,6 +408,67 @@ describe("OrganizationProvidersPage", () => {
     })
   })
 
+  it("asks a key with its own endpoint for the prefix requests will name it by", async () => {
+    const requests = mockApi()
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider key" }),
+    )
+    await user.click(screen.getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Anthropic" }))
+    await user.type(screen.getByRole("textbox", { name: /Name/ }), "Synthetic")
+    expect(screen.queryByRole("textbox", { name: /Request prefix/ })).toBeNull()
+    await user.type(
+      screen.getByRole("textbox", { name: /API base URL/ }),
+      "https://api.synthetic.new/openai/v1",
+    )
+    const prefix = screen.getByRole("textbox", { name: /Request prefix/ })
+    expect(prefix).toHaveAttribute("placeholder", "synthetic")
+    await user.type(prefix, "syn")
+    await user.click(
+      screen.getByRole("button", { name: "Add provider key", hidden: false }),
+    )
+
+    await waitFor(() => {
+      const post = requests.find(
+        (request) =>
+          request.method === "POST" &&
+          request.url.endsWith(`${API_ROOT}/organizations/me/provider-keys`),
+      )
+      expect(post?.body).toMatchObject({ provider: "anthropic", slug: "syn" })
+    })
+  })
+
+  it("still finds a provider by the name the gateway gives it", async () => {
+    mockApi({
+      catalog: [
+        { id: "deepinfra", name: "Deep Infra" },
+        { id: "azure", name: "Azure" },
+        { id: "azureopenai", name: "Azure" },
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider key" }),
+    )
+    const box = screen.getByRole("combobox", { name: "Provider" })
+    await user.click(box)
+    expect(
+      await screen.findByRole("option", { name: "Azure AI Foundry" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("option", { name: "Azure OpenAI" }),
+    ).toBeInTheDocument()
+    await user.type(box, "deep infra")
+    expect(
+      await screen.findByRole("option", { name: "DeepInfra" }),
+    ).toBeInTheDocument()
+  })
+
   it("asks Bedrock for its region by name and sends it in client_args", async () => {
     const requests = mockApi({ catalog: [{ id: "bedrock", name: "Bedrock" }] })
     const user = userEvent.setup()
@@ -412,7 +478,9 @@ describe("OrganizationProvidersPage", () => {
       await screen.findByRole("button", { name: "Add provider key" }),
     )
     await user.click(screen.getByRole("combobox", { name: "Provider" }))
-    await user.click(await screen.findByRole("option", { name: "Bedrock" }))
+    await user.click(
+      await screen.findByRole("option", { name: "Amazon Bedrock" }),
+    )
     await user.type(screen.getByRole("textbox", { name: /Name/ }), "Prod")
     // Not called an API key here: Bedrock's credential is a bearer token or an
     // IAM secret, depending on which shape the organization uses.
@@ -446,7 +514,9 @@ describe("OrganizationProvidersPage", () => {
       await screen.findByRole("button", { name: "Add provider key" }),
     )
     await user.click(screen.getByRole("combobox", { name: "Provider" }))
-    await user.click(await screen.findByRole("option", { name: "Bedrock" }))
+    await user.click(
+      await screen.findByRole("option", { name: "Amazon Bedrock" }),
+    )
     await user.type(screen.getByRole("textbox", { name: /Name/ }), "Prod")
 
     const submit = screen.getByRole("button", {
@@ -482,7 +552,9 @@ describe("OrganizationProvidersPage", () => {
       await screen.findByRole("button", { name: "Add provider key" }),
     )
     await user.click(screen.getByRole("combobox", { name: "Provider" }))
-    await user.click(await screen.findByRole("option", { name: "Bedrock" }))
+    await user.click(
+      await screen.findByRole("option", { name: "Amazon Bedrock" }),
+    )
     await user.type(screen.getByRole("textbox", { name: /Name/ }), "Prod")
     await user.type(
       screen.getByRole("textbox", { name: /AWS region/ }),
@@ -576,7 +648,7 @@ describe("OrganizationProvidersPage", () => {
     const user = userEvent.setup()
     await renderPage(<OrganizationProvidersPage />)
 
-    await user.click(await screen.findByRole("button", { name: "Edit" }))
+    await pressRowAction(user, "Edit…")
     expect(
       await screen.findByRole("textbox", { name: /AWS region/ }),
     ).toHaveValue("us-east-1")
@@ -623,7 +695,7 @@ describe("OrganizationProvidersPage", () => {
     const user = userEvent.setup()
     await renderPage(<OrganizationProvidersPage />)
 
-    await user.click(await screen.findByRole("button", { name: "Edit" }))
+    await pressRowAction(user, "Edit…")
     await user.click(await screen.findByRole("button", { name: "Save" }))
 
     await waitFor(() => {
@@ -633,20 +705,58 @@ describe("OrganizationProvidersPage", () => {
     expect(patch?.body).not.toHaveProperty("api_key")
   })
 
+  it("marks a key declared zero data retention and lets an edit change it", async () => {
+    const requests = mockApi({
+      keys: [orgProviderKey({ zero_data_retention: true })],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    expect(await screen.findByText("ZERO DATA RETENTION")).toBeInTheDocument()
+    await pressRowAction(user, "Edit…")
+    const box = await screen.findByRole("checkbox", {
+      name: "Zero data retention",
+    })
+    expect(box).toBeChecked()
+    await user.click(box)
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => {
+      expect(requests.some((request) => request.method === "PATCH")).toBe(true)
+    })
+    const patch = requests.find((request) => request.method === "PATCH")
+    expect(patch?.body).toMatchObject({ zero_data_retention: false })
+  })
+
   it("makes a key the organization default", async () => {
     const requests = mockApi({ keys: [orgProviderKey()] })
     const user = userEvent.setup()
     await renderPage(<OrganizationProvidersPage />)
 
-    await user.click(
-      await screen.findByRole("button", { name: "Make default provider" }),
-    )
+    await pressRowAction(user, "Make default provider")
 
     await waitFor(() => {
       expect(requests.some((request) => request.url.endsWith("/default"))).toBe(
         true,
       )
     })
+  })
+
+  it("offers no default on a key named by its own prefix", async () => {
+    mockApi({
+      keys: [
+        orgProviderKey({
+          name: "Synthetic",
+          slug: "synthetic",
+          api_base: "https://api.synthetic.new/openai/v1",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    expect(await screen.findByText("synthetic:")).toBeInTheDocument()
+    expect(await findRowMenuItem(user, "Make default provider")).toBeNull()
   })
 
   it("removes the organization default from the key that holds it", async () => {
@@ -656,11 +766,7 @@ describe("OrganizationProvidersPage", () => {
     const user = userEvent.setup()
     await renderPage(<OrganizationProvidersPage />)
 
-    await user.click(
-      await screen.findByRole("button", {
-        name: "Default provider, click to remove",
-      }),
-    )
+    await pressRowAction(user, "Default provider, click to remove")
 
     await waitFor(() => {
       expect(
@@ -690,13 +796,14 @@ describe("OrganizationProvidersPage", () => {
     expect(screen.queryByText("Retired")).toBeNull()
     // Delete is permanent and the API accepts it for an archived key alone, so
     // it is never offered beside a live one.
-    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull()
+    expect(await findRowMenuItem(user, "Delete…")).toBeNull()
 
     await user.click(screen.getByText("Show archived (1)"))
 
     expect(await screen.findByText("Retired")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Restore" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument()
+    expect(await findRowMenuItem(user, "Restore")).toBeInTheDocument()
+    await user.keyboard("{Escape}")
+    expect(await findRowMenuItem(user, "Delete…")).toBeInTheDocument()
   })
 
   it("deletes an archived key only through the confirm dialog", async () => {
@@ -715,7 +822,7 @@ describe("OrganizationProvidersPage", () => {
     await renderPage(<OrganizationProvidersPage />)
 
     await user.click(await screen.findByText("Show archived (1)"))
-    await user.click(screen.getByRole("button", { name: "Delete" }))
+    await pressRowAction(user, "Delete…")
 
     const dialog = await screen.findByRole("alertdialog")
     expect(within(dialog).getByText(/Retired and its stored/)).toBeVisible()
@@ -765,7 +872,7 @@ describe("OrganizationProvidersPage", () => {
     expect(
       screen.queryByRole("button", { name: "Add provider key" }),
     ).toBeNull()
-    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull()
+    expect(rowMenuTriggers()).toHaveLength(0)
     expect(
       requests.some((request) =>
         request.url.includes(`${API_ROOT}/organizations/me/provider-keys`),
@@ -923,11 +1030,7 @@ describe("OrganizationProvidersPage", () => {
     await user.keyboard("{Escape}")
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
 
-    await user.click(
-      await screen.findByRole("button", {
-        name: "Set your rate for gpt-4o-mini",
-      }),
-    )
+    await pressRowAction(user, "Set your rate for gpt-4o-mini")
 
     const second = await screen.findByRole("dialog")
     await waitFor(() =>
@@ -935,6 +1038,35 @@ describe("OrganizationProvidersPage", () => {
         "0.15",
       ),
     )
+  })
+
+  it("sets the rate of a key's model under the key's own prefix", async () => {
+    // #2899: under the provider's name the rate was refused as the deployment's,
+    // because the deployment serves that provider too.
+    const user = userEvent.setup()
+    mockApi({
+      keys: [
+        orgProviderKey({
+          id: KEY_ID,
+          name: "Synthetic",
+          slug: "synthetic",
+          api_base: "https://api.synthetic.new/openai/v1",
+        }),
+      ],
+      models: [orgProviderModel({ id: "m1", model: "hf:Qwen/Qwen3.8-27B" })],
+    })
+
+    await renderPage(
+      <OrganizationProvidersPage />,
+      `/organization/provider-keys?provider=${KEY_ID}`,
+    )
+    await screen.findByText("hf:Qwen/Qwen3.8-27B")
+    await pressRowAction(user, "Set your rate for hf:Qwen/Qwen3.8-27B")
+
+    const dialog = await screen.findByRole("dialog")
+    expect(
+      within(dialog).getByRole("combobox", { name: /Model key/ }),
+    ).toHaveValue("synthetic:hf:Qwen/Qwen3.8-27B")
   })
 
   it("expands the provider named by the URL", async () => {
@@ -962,10 +1094,9 @@ describe("OrganizationProvidersPage", () => {
       models: [orgProviderModel({ model: "gpt-4o" })],
     })
 
+    const user = userEvent.setup()
     await renderPage(<OrganizationProvidersPage />)
-    await userEvent.click(
-      await screen.findByRole("button", { name: "Models on Production" }),
-    )
+    await pressRowAction(user, "Models on Production")
 
     const panel = await screen.findByRole("region", {
       name: "Models on Production",
@@ -984,9 +1115,7 @@ describe("OrganizationProvidersPage", () => {
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy()
 
-    await userEvent.click(
-      screen.getByRole("button", { name: "Models on Production" }),
-    )
+    await pressRowAction(user, "Models on Production")
     await waitFor(() =>
       expect(
         screen.queryByRole("region", { name: "Models on Production" }),

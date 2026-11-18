@@ -4,8 +4,8 @@
 any-search's shared parameters, so they are mapped per provider: the domain
 filter, the country and the page budget become a provider's native options
 where it has them, and otherwise the hits are filtered and cut here. The count
-is the shared ``max_results``. The old clients left in
-``services/search_backend.py`` read the same query and use the same helpers.
+is the shared ``max_results``. The old client left in
+``services/search_backend.py`` reads the same query and uses the same helpers.
 """
 
 from collections.abc import Callable, Mapping, Sequence
@@ -140,6 +140,7 @@ def _none(_query: SearchQuery, _options: Mapping[str, Any]) -> dict[str, Any]:
 
 _MAPPINGS: dict[str, _Mapping] = {
     "exa": _Mapping(native=_exa_options, filters_domains=True, bounds_text=True, date_fields=("publishedDate",)),
+    "searxng": _Mapping(native=_none, filters_domains=False, bounds_text=False, date_fields=("publishedDate",)),
 }
 # A provider with no native equivalents: the hits are filtered and cut here, and the country is left out.
 _NO_EQUIVALENTS = _Mapping(native=_none, filters_domains=False, bounds_text=False, date_fields=())

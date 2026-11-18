@@ -26,9 +26,7 @@ import { ConfirmRowAction } from "@/design-system/actions/ConfirmRowAction"
  * audits. Asserting the arm/confirm wiring is not the same as asserting where
  * the caret ends up.
  *
- * Scope is arm and cancel. The post-confirm case, where the row unmounts along
- * with the focused Confirm button, is a real gap and a separate one: it needs a
- * ruling on where focus should land that no shared behavior currently answers.
+ * Scope is arm and cancel; the post-confirm case is in `useConfirmationFocus.test`.
  */
 describe("ConfirmRowAction focus", () => {
   const setup = () => {

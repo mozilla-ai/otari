@@ -45,20 +45,10 @@ from gateway.log_config import logger
 # ``web_search_provider`` without the config layer importing
 # `gateway.services.web_search_providers`, which imports this name.
 WEB_SEARCH_PROVIDERS = ("tavily", "brave")
-# Providers that authenticate with an API key, for the direct endpoint's own
-# clients and the catalog's entries for providers without an adapter. Validation
-# asks the library's metadata instead, so a provider any-search adds is held to
-# its own requirement.
-SEARCH_PROVIDERS_REQUIRING_API_KEY = ("exa",)
-# Providers with no endpoint of their own to default to, so the tool has to say
-# where the backend is. The only one today is ``searxng``, which speaks the same
-# wire contract as the in-loop otari_web_search backend and therefore inherits
-# ``web_search_url`` when the tool declares no ``api_base``.
+# The providers whose search tools inherit the legacy SearXNG settings (contract
+# C8): ``web_search_url`` with no ``api_base``, ``web_search_engines`` with no
+# ``engines``.
 SEARCH_PROVIDERS_REQUIRING_API_BASE = ("searxng",)
-# Accepted in ``search_tools`` although any-search has no adapter for it: the
-# direct endpoint serves it through its own client, its options passed unchecked
-# since there is no schema to check them against. It needs no key.
-SEARCH_PROVIDERS_WITHOUT_ADAPTER = ("searxng",)
 
 # The fetch instance that always exists: the built-in fetcher, on any-fetch's
 # ``builtin`` provider, which no declared instance may use.
@@ -77,13 +67,10 @@ DEFAULT_WEB_SEARCH_MAX_CALLS = 10
 # The engines the old in-loop backend asks a SearXNG service for when
 # ``web_search_engines`` is unset; why these four is said where it uses them.
 DEFAULT_SEARXNG_ENGINES = ("duckduckgo", "mojeek", "qwant", "wikipedia")
-# What otari has always sent these providers, applied below every other option
-# layer so that moving a provider onto its library adapter changes nothing: GET
-# for SearXNG, which some SearXNG-shaped backends require, and page text from
-# Tavily, so its hits need no enrichment. An instance that sets the key wins.
-PROVIDER_DEFAULT_OPTIONS: Mapping[str, Mapping[str, Any]] = MappingProxyType(
+# The options a search on the legacy settings sends its provider: page text from
+# Tavily, so its hits need no page fetches.
+LEGACY_SETTINGS_OPTIONS: Mapping[str, Mapping[str, Any]] = MappingProxyType(
     {
-        "searxng": MappingProxyType({"method": "get"}),
         "tavily": MappingProxyType({"include_raw_content": True}),
     }
 )
@@ -94,7 +81,7 @@ ToolKind = Literal["search", "fetch"]
 
 def supported_search_providers() -> tuple[str, ...]:
     """The providers a ``search_tools`` entry may name."""
-    return (*any_search.AnySearch.get_supported_providers(), *SEARCH_PROVIDERS_WITHOUT_ADAPTER)
+    return tuple(any_search.AnySearch.get_supported_providers())
 
 
 def supported_fetch_providers() -> tuple[str, ...]:
@@ -108,16 +95,12 @@ def is_test_tier(kind: ToolKind, provider: str) -> bool:
     """Whether the provider exists for tests: accepted in configuration, never offered."""
     if kind == "fetch":
         return any_fetch.AnyFetch.get_provider_metadata(provider).tier == "test"
-    if provider in SEARCH_PROVIDERS_WITHOUT_ADAPTER:
-        return False
     return any_search.AnySearch.get_provider_metadata(provider).tier == "test"
 
 
 def _requires_api_key(kind: ToolKind, provider: str) -> bool:
     if kind == "fetch":
         return any_fetch.AnyFetch.get_provider_metadata(provider).requires_api_key
-    if provider in SEARCH_PROVIDERS_WITHOUT_ADAPTER:
-        return False
     return any_search.AnySearch.get_provider_metadata(provider).requires_api_key
 
 
@@ -188,7 +171,7 @@ def instance_name_problems(name: str) -> list[str]:
 
 
 def _validate_transport(section: str, name: str, api_base: Any, api_key: Any) -> None:
-    if not api_key or not api_base:
+    if not api_key or not str(api_base or "").strip():
         return
     try:
         scheme = urlsplit(str(api_base).strip()).scheme.lower()
@@ -259,8 +242,7 @@ def validate_search_tool_entry(name: str, entry: Any) -> None:
     (``/api/v1/search-tools``) can hold a dashboard-written tool to the same rules
     the config file is held to at startup, instead of restating them.
 
-    The provider is one any-search serves, or ``searxng`` until it has an
-    adapter. Whether it needs a key is the library's metadata's answer; a keyless
+    The provider is one any-search serves. Whether it needs a key is the library's metadata's answer; a keyless
     provider (a self-hosted SearXNG or an adapter fronting one) is allowed to
     declare none. The tool name doubles as a ``/api/v1/search/{tool}`` path
     segment, so it must not contain a slash.
@@ -297,10 +279,8 @@ class ToolInstance:
     ``library_backed`` is whether any-search or any-fetch serves the provider;
     ``dropped_options`` are the option keys the provider's schema does not know
     or refuses the value of, which load with a warning, for the resolver to
-    leave out of a call. ``provider_defaults`` are :data:`PROVIDER_DEFAULT_OPTIONS`' entry for
-    the provider, below every other option layer. Both option maps are read-only
-    copies, so a reader cannot change the configuration they came from, and are
-    left out of the hash.
+    leave out of a call. ``options`` is a read-only copy, so a reader cannot change
+    the configuration it came from, and is left out of the hash.
     """
 
     name: str
@@ -312,7 +292,6 @@ class ToolInstance:
     timeout: float | None = None
     options: Mapping[str, Any] = field(default=_NO_OPTIONS, repr=False, hash=False)
     dropped_options: frozenset[str] = frozenset()
-    provider_defaults: Mapping[str, Any] = field(default=_NO_OPTIONS, hash=False)
     fetch_tool: str | None = None
 
 
@@ -324,18 +303,20 @@ BUILTIN_FETCH_INSTANCE = ToolInstance(
 
 @dataclass(frozen=True)
 class SynthesizedSearchInstance:
-    """The in-loop search backend the legacy settings describe.
+    """The search backend the legacy settings describe, priced under ``otari:web_search``.
 
-    It is not in either map, so it cannot be named by a default or by the direct
-    endpoint's path, and it is priced under ``otari:web_search``. Its name is
-    its provider's.
+    It is not in either map, so no default can name it. The in-loop tool falls
+    back to it, and on a deployment with no search instance the direct endpoint
+    serves it too. Its name is its provider's,
+    so a search instance of that name can later replace it unnoticed.
+    ``options`` are what the legacy settings send their provider.
     """
 
     provider: str
     api_key: str | None = field(default=None, repr=False)
     api_base: str | None = field(default=None, repr=False)
     engines: tuple[str, ...] = ()
-    provider_defaults: Mapping[str, Any] = field(default=_NO_OPTIONS, hash=False)
+    options: Mapping[str, Any] = field(default=_NO_OPTIONS, hash=False)
 
     @property
     def name(self) -> str:
@@ -375,29 +356,34 @@ class ToolSettings(BaseModel):
     web_fetch_enabled: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
         default=False,
         description=(
-            "Whether Otari may execute the managed otari_web_fetch tool. Off by default because "
-            "enabling it permits model-directed outbound requests to public web destinations."
+            "Whether Otari fetches pages: the managed otari_web_fetch tool and POST /api/v1/fetch. Off by "
+            "default because enabling it permits outbound requests to public web destinations, model-directed "
+            "ones included."
         ),
     )
     web_search_url: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
         default=None,
         description=(
-            "Base URL of the web-search backend (SearXNG instance or a search adapter) for "
-            "otari_web_search tools. When unset, otari_web_search requests are rejected with 400. "
-            "docker-compose sets this to the bundled SearXNG container."
+            "Deprecated, and removed by a coming breaking release: use a search tool with provider "
+            "searxng and its own api_base. The SearXNG instance otari_web_search searches when no "
+            "search tool is its default and no web_search_provider with its key is set, and the api_base of a searxng "
+            "search tool that sets none. "
+            "docker-compose sets it to the bundled SearXNG container unless OTARI_WEB_SEARCH_URL is "
+            "set, even to an empty value."
         ),
     )
     web_search_provider: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
         default=None,
         description=(
-            "Licensed search API the web-search backend calls directly ('tavily' or 'brave'), "
-            "instead of the SearXNG-shaped service web_search_url names. Requires "
-            "web_search_provider_api_key. When both are set, web_search_url is not needed."
+            "Deprecated, and removed by a coming breaking release: use a search tool with provider tavily or "
+            "brave and its own api_key, named in web_search_default_tool. The licensed search API "
+            "('tavily' or 'brave') otari_web_search calls, with web_search_provider_api_key, when no search "
+            "tool is its default. When both are set, web_search_url is not needed."
         ),
     )
     web_search_provider_api_key: Annotated[str | None, SECRET] = Field(
         default=None,
-        description=("Credential for web_search_provider."),
+        description="Deprecated with web_search_provider: the key it searches with.",
     )
     web_search_purpose_hint: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
         default=None,
@@ -409,8 +395,10 @@ class ToolSettings(BaseModel):
     web_search_engines: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
         default=None,
         description=(
-            "Comma-separated SearXNG engine list for the web-search backend (e.g. 'google,bing'). "
-            "When unset, the backend default engines are used."
+            "Deprecated, and removed with web_search_url: use a searxng search tool's engines option. "
+            "Comma-separated SearXNG engines for web_search_url, and for a searxng search tool that "
+            "sets no engines option. When unset, web_search_url searches duckduckgo, mojeek, qwant "
+            "and wikipedia."
         ),
     )
     web_search_max_results: Annotated[int | None, Shown(SettingsGroup.TOOLS)] = Field(
@@ -485,13 +473,12 @@ class ToolSettings(BaseModel):
         ge=1,
         description=(
             "How many search and fetch tool calls one request may make, together. A call past it "
-            "gets a tool error the model can recover from. When unset: 10. Requests the old search "
-            "backend serves keep a fixed limit of 10: see docs/configuration.md."
+            "gets a tool error the model can recover from. When unset: 10."
         ),
     )
 
     # The config-file tools as loaded, before any dashboard-stored tool is
-    # overlaid by ``search_tool_store_service``, one baseline per map.
+    # overlaid by ``services/tools/_search_tool_overlay``, one baseline per map.
     _search_tool_baseline: dict[str, dict[str, Any]] | None = PrivateAttr(default=None)
     _fetch_tool_baseline: dict[str, dict[str, Any]] | None = PrivateAttr(default=None)
 
@@ -554,9 +541,7 @@ class ToolSettings(BaseModel):
         return [
             name
             for name, entry in self.search_tools.items()
-            if isinstance(entry, dict)
-            and str(entry.get("provider") or name) in SEARCH_PROVIDERS_REQUIRING_API_BASE
-            and not entry.get("api_base")
+            if isinstance(entry, dict) and inherits_web_search_url(name, entry)
         ]
 
     def warn_about_half_configured_web_search(self) -> None:
@@ -584,7 +569,7 @@ class ToolSettings(BaseModel):
         )
         logger.warning(
             "Web search through a licensed provider is configured but will not run: %s, and %s is not set. "
-            "Set both, or neither and point web_search_url at a SearXNG-shaped backend instead.",
+            "Set both, or neither and add a search tool under search_tools instead.",
             present,
             missing,
         )
@@ -597,10 +582,7 @@ class ToolSettings(BaseModel):
         """
         for name, entry in self.search_tools.items():
             validate_search_tool_entry(name, entry)
-            if not isinstance(entry, dict):
-                continue
-            provider = str(entry.get("provider") or name)
-            if provider in SEARCH_PROVIDERS_REQUIRING_API_BASE and not entry.get("api_base"):
+            if isinstance(entry, dict) and inherits_web_search_url(name, entry):
                 validate_search_tool_transport(name, self.web_search_url, entry.get("api_key"))
 
     def validate_fetch_tools(self) -> None:
@@ -640,19 +622,36 @@ class ToolSettings(BaseModel):
         return normalized
 
 
+def inherits_web_search_url(name: str, entry: Mapping[str, Any]) -> bool:
+    """Whether a search tool entry takes ``web_search_url`` as its address.
+
+    It does when its provider, its name when it names none, needs an address
+    and it declares no ``api_base`` of its own; a blank one counts as none.
+    """
+    return (
+        str(entry.get("provider") or name) in SEARCH_PROVIDERS_REQUIRING_API_BASE
+        and not str(entry.get("api_base") or "").strip()
+    )
+
+
+def inherits_web_search_engines(provider: str, options: Mapping[str, Any]) -> bool:
+    """Whether a search tool takes ``web_search_engines``: a provider that needs an address, and no ``engines`` key."""
+    return provider in SEARCH_PROVIDERS_REQUIRING_API_BASE and "engines" not in options
+
+
 def default_api_base(settings: ToolSettings, provider: str) -> str | None:
     """The base URL a search instance inherits when it declares no ``api_base``.
 
-    A ``searxng`` tool falls back to ``web_search_url``, the backend the in-loop
-    ``otari_web_search`` tool already speaks to over the same contract, so a
-    deployment that runs one exposes it on ``POST /v1/search`` with a single
-    ``provider: searxng`` line. Read off the field alone: only the in-loop reads
-    fall back to the environment. Any other provider takes any-search's own.
+    A ``searxng`` tool falls back to ``web_search_url``, the SearXNG instance
+    the legacy in-loop settings search, so a deployment that runs one exposes it
+    on ``POST /v1/search`` with a single ``provider: searxng`` line (contract C8).
+    Read off the field alone: only the in-loop reads fall back to the
+    environment. Any other provider takes any-search's own.
 
     Public because the dashboard's add-a-search-tool form shows the same value as
     the placeholder for an omitted ``api_base``.
     """
-    if provider in SEARCH_PROVIDERS_WITHOUT_ADAPTER:
+    if provider in SEARCH_PROVIDERS_REQUIRING_API_BASE:
         return (settings.web_search_url or "").strip() or None
     if provider not in any_search.AnySearch.get_supported_providers():
         return None
@@ -671,11 +670,10 @@ def _instance(kind: ToolKind, name: str, entry: Mapping[str, Any], *, library_ba
         provider=provider,
         library_backed=library_backed,
         api_key=entry.get("api_key") or None,
-        api_base=entry.get("api_base") or None,
+        api_base=str(entry.get("api_base") or "").strip() or None,
         timeout=float(timeout) if isinstance(timeout, (int, float)) and not isinstance(timeout, bool) else None,
         options=MappingProxyType(copy.deepcopy(options)),
         dropped_options=frozenset(option_problems(kind, provider, options)),
-        provider_defaults=PROVIDER_DEFAULT_OPTIONS.get(provider, _NO_OPTIONS),
         fetch_tool=fetch_tool.strip() if isinstance(fetch_tool, str) and fetch_tool.strip() else None,
     )
 
@@ -745,6 +743,17 @@ def configured_fetch_default(settings: ToolSettings) -> str:
     return str(value) if value is not None else BUILTIN_FETCH
 
 
+def enrichment_enabled(settings: ToolSettings) -> bool:
+    """Whether a search's hits without page text have their pages read.
+
+    ``web_search_extract`` as set, else the environment, else yes.
+    """
+    value = _runtime_or_env(settings, "web_search_extract")
+    if isinstance(value, bool):
+        return value
+    return value is None or str(value).lower() not in {"0", "false", "no", "off"}
+
+
 def effective_web_search_max_calls(settings: ToolSettings) -> int:
     """How many search and fetch calls one request may make."""
     value = _runtime_or_env(settings, "web_search_max_calls")
@@ -769,8 +778,9 @@ def synthesized_search_instance(settings: ToolSettings) -> SynthesizedSearchInst
         provider = settings.web_search_provider
         return SynthesizedSearchInstance(
             provider=provider,
-            api_key=settings.web_search_provider_api_key,
-            provider_defaults=PROVIDER_DEFAULT_OPTIONS.get(provider, _NO_OPTIONS),
+            # A key read from a file can end in a newline, which no HTTP header takes.
+            api_key=(settings.web_search_provider_api_key or "").strip() or None,
+            options=LEGACY_SETTINGS_OPTIONS.get(provider, _NO_OPTIONS),
         )
     url = (settings.web_search_url or otari_env("WEB_SEARCH_URL") or "").strip()
     if not url:
@@ -781,7 +791,6 @@ def synthesized_search_instance(settings: ToolSettings) -> SynthesizedSearchInst
         provider="searxng",
         api_base=url,
         engines=engines or DEFAULT_SEARXNG_ENGINES,
-        provider_defaults=PROVIDER_DEFAULT_OPTIONS["searxng"],
     )
 
 

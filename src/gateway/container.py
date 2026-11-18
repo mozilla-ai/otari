@@ -34,13 +34,16 @@ from gateway.adapters.agent_model_recommender_adapter import DecisionProviderRec
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.billing_adapter import NullBillingAdapter
 from gateway.adapters.code_execution_adapter import build_code_execution_port, verify_code_execution_ready
+from gateway.adapters.content_key_adapter import build_content_key_port
 from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter
+from gateway.adapters.feedback_delivery_adapter import ReceiverFeedbackDeliveryAdapter
 from gateway.adapters.file_storage_adapter import build_file_storage_port
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
 from gateway.adapters.model_provider_adapter import HostedProviderModelProviderAdapter
 from gateway.adapters.provider_file_adapter import AnyLlmProviderFiles
 from gateway.adapters.rate_limit_store_adapter import build_rate_limit_store
+from gateway.adapters.signup_invite_adapter import NullSignupInviteAdapter
 from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
 from gateway.adapters.usage_signal_adapter import NullUsageSignalAdapter
 from gateway.core.config import GatewayConfig
@@ -50,13 +53,16 @@ from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import BillingPort
 from gateway.ports.code_execution_port import CodeExecutionPort
+from gateway.ports.content_key_port import ContentKeyPort
 from gateway.ports.entitlement_port import EntitlementPort
+from gateway.ports.feedback_delivery_port import FeedbackDeliveryPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
+from gateway.ports.signup_invite_port import SignupInvitePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.usage_signal_port import UsageSignalPort
 from gateway.repositories.tenancy import UserRepository
@@ -265,9 +271,20 @@ def _telemetry_storage_adapter(session: AsyncSession | None) -> TelemetryStorage
     return DatabaseTelemetryStorageAdapter(session)
 
 
+def _feedback_delivery_adapter(session: AsyncSession | None) -> FeedbackDeliveryPort:
+    """Build the core ``FeedbackDeliveryPort`` adapter, which needs no session."""
+    return ReceiverFeedbackDeliveryAdapter()
+
+
 def _growth_signal_adapter(session: AsyncSession | None) -> GrowthSignalPort:
     """Build the core ``GrowthSignalPort`` adapter for one request."""
     return NullGrowthSignalAdapter(session)
+
+
+def _signup_invite_adapter(session: AsyncSession | None) -> SignupInvitePort:
+    """Build the core ``SignupInvitePort`` adapter, which knows no token."""
+    del session
+    return NullSignupInviteAdapter()
 
 
 def _usage_signal_adapter(session: AsyncSession | None) -> UsageSignalPort:
@@ -410,6 +427,27 @@ def _file_storage_port_factory(config: GatewayConfig | None) -> PortFactory[File
     return factory
 
 
+def _content_key_port_factory(config: GatewayConfig | None) -> PortFactory[ContentKeyPort]:
+    """The core ``ContentKeyPort`` factory, closed over this app's config.
+
+    Built on first resolve and reused, so a process holds one KMS client.
+    A container built without config resolves this port only to raise.
+    """
+    keys: ContentKeyPort | None = None
+
+    def factory(session: AsyncSession | None) -> ContentKeyPort:
+        del session
+        nonlocal keys
+        if config is None:
+            msg = "ContentKeyPort needs the deployment config; build the container with it"
+            raise ContainerError(msg)
+        if keys is None:
+            keys = build_content_key_port(config)
+        return keys
+
+    return factory
+
+
 def _rate_limit_store_port_factory(config: GatewayConfig | None) -> PortFactory[RateLimitStorePort]:
     """The core ``RateLimitStorePort`` factory, closed over this app's config.
 
@@ -432,36 +470,16 @@ def _rate_limit_store_port_factory(config: GatewayConfig | None) -> PortFactory[
     return factory
 
 
-def _agent_model_recommender_factory(config: GatewayConfig | None) -> PortFactory[AgentModelRecommenderPort]:
-    """The core ``AgentModelRecommenderPort`` factory, closed over this app's config.
+def _agent_model_recommender(session: AsyncSession | None) -> AgentModelRecommenderPort:
+    """The core ``AgentModelRecommenderPort`` adapter, a fresh one per resolve.
 
-    Config rather than a session, because which decision model answers is a
-    deployment setting (``agent_recommender_model``) and not a per-request fact,
-    and the adapter holds nothing per request, so one serves every request.
-    A container built without config resolves this port only to raise.
+    No session: which decision model answers is read from the stored routers
+    held in memory, never from this request's database. Fresh, because the
+    adapter keeps the router it quoted for the call that follows, and a switch
+    the operator makes in between must not reprice that call.
     """
-    if config is None:
-        return _requires_config(AgentModelRecommenderPort)
-    return _shared(DecisionProviderRecommender(config))
-
-
-def _requires_config(port: PortKey[T]) -> PortFactory[T]:
-    """A factory that refuses every resolve, for a container built without config."""
-
-    def factory(session: AsyncSession | None) -> T:
-        del session
-        msg = f"{_port_name(port)} needs the deployment config; build the container with it"
-        raise ContainerError(msg)
-
-    return factory
-
-
-def _shared(adapter: T) -> PortFactory[T]:
-    """A factory that serves the one ``adapter`` to every request.
-
-    NOTE: The adapter must hold no per-request state, because concurrent requests share it.
-    """
-    return lambda session: adapter
+    del session
+    return DecisionProviderRecommender()
 
 
 def build_container(
@@ -505,6 +523,8 @@ def build_container(
     # Growth and support-messenger notifications: the base has no vendor of its
     # own, so every lifecycle event is a no-op.
     container.bind(GrowthSignalPort, _growth_signal_adapter)
+    # Invitations that prove an address at sign-up: the base sends none.
+    container.bind(SignupInvitePort, _signup_invite_adapter)
     # Settled usage rows: the base reports them to nobody, its usage table
     # being the whole record. Resolved once, when the usage log writer is built.
     container.bind(UsageSignalPort, _usage_signal_adapter)
@@ -529,6 +549,9 @@ def build_container(
     # bucket or any fsspec filesystem, whichever ``files_backend`` names. An
     # overlay binds a store of its own and changes nothing above the port.
     container.bind(FileStoragePort, _file_storage_port_factory(config))
+    # Stored content's data keys: the base wraps them with OTARI_SECRET_KEY, or
+    # has AWS KMS make them, whichever ``trace_content_key_backend`` names.
+    container.bind(ContentKeyPort, _content_key_port_factory(config))
     # A provider's own files: the base reaches them through any-llm with the
     # credential a request dispatches with. An overlay that must not hand a
     # managed credential to this process binds a transfer of its own.
@@ -536,12 +559,15 @@ def build_container(
     # Rate-limit counts: the base keeps them in this process, or in Redis
     # where ``rate_limit_store`` asks for one count shared by every replica.
     container.bind(RateLimitStorePort, _rate_limit_store_port_factory(config))
-    # A subagent's model: the base puts one choice question to the decision
-    # model ``agent_recommender_model`` names, which may be a local one. A
+    # A subagent's model: the base puts one choice question to the subagent
+    # router switched on in the dashboard, which may be a local one. A
     # hosted overlay binds a recommender of its own behind the same port, at a
     # price of its own, and changes nothing above it: the call is metered and
     # recorded here either way.
-    container.bind(AgentModelRecommenderPort, _agent_model_recommender_factory(config))
+    container.bind(AgentModelRecommenderPort, _agent_model_recommender)
+    # Feedback: the base forwards each message to the otari.ai intake. The
+    # build that runs the intake delivers in its own process instead.
+    container.bind(FeedbackDeliveryPort, _feedback_delivery_adapter)
     if config is not None:
         # Asked once, at build, rather than per request: selecting a hosted
         # provider is itself what publishes code execution on ``/v1/tools``, in
@@ -556,7 +582,7 @@ def build_container(
         # it is recorded rather than refused. Worth stating even so: which build
         # a process is running is otherwise invisible until traffic exposes it.
         container.summary = f"no bootstrap, core defaults for {_port_names(container)}"
-        logger.info("Composition root: %s", container.summary)
+        logger.debug("Composition root: %s", container.summary)
         return container
     if not bootstrap_selector.strip():
         # A blank-but-present selector is a broken deployment rather than a
@@ -585,6 +611,8 @@ def build_container(
     rebound = sorted(_port_name(port) for port, factory in container.bindings() if defaults.get(port) is not factory)
     _verify_port_shape(container, ModelProviderPort)
     _verify_port_shape(container, UsageSignalPort)
+    _verify_port_shape(container, FeedbackDeliveryPort)
+    _verify_port_shape(container, GrowthSignalPort)
     container.summary = f"{bootstrap_selector} rebound {', '.join(rebound) or 'no ports'}"
     contributed = ", ".join(contribution.capability for contribution in container.router_contributions())
     if contributed:

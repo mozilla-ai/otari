@@ -25,6 +25,7 @@ import {
   ServedUncheckedBanner,
 } from "@/features/guardrails/GuardrailStatus"
 import {
+  checksLabel,
   credentialsLabel,
   definitionChecks,
   guardrailLabel,
@@ -170,13 +171,14 @@ export function OrganizationGuardrailsPage() {
             />
             <RowAction
               icon={FiEdit2}
-              label="Edit"
+              label="Edit…"
               ariaLabel={`Edit ${row.name}`}
               onPress={() => openDialog("definition", row.id)}
             />
             <RowAction
               icon={FiTrash2}
-              label="Remove"
+              label="Remove…"
+              isDestructive
               ariaLabel={`Remove ${row.name}`}
               onPress={() => setPendingDefinitionDelete(row)}
             />
@@ -207,6 +209,11 @@ export function OrganizationGuardrailsPage() {
       cell: (row) => (
         <span className="text-muted">{runsOnLabel(row, defined)}</span>
       ),
+    },
+    {
+      id: "checks",
+      header: "Checks",
+      cell: (row) => <span className="text-muted">{checksLabel(row)}</span>,
     },
     {
       id: "mode",
@@ -269,13 +276,14 @@ export function OrganizationGuardrailsPage() {
           )}
           <RowAction
             icon={FiEdit2}
-            label="Edit"
+            label="Edit…"
             ariaLabel={`Edit ${row.profile}`}
             onPress={() => openDialog("mandate", row.id)}
           />
           <RowAction
             icon={FiTrash2}
-            label="Remove"
+            label="Remove…"
+            isDestructive
             ariaLabel={`Remove ${row.profile}`}
             onPress={() => setPendingMandateDelete(row)}
           />
@@ -302,12 +310,7 @@ export function OrganizationGuardrailsPage() {
             </div>
           ) : null
         }
-      >
-        The organization&rsquo;s own checks on what users send to a model, such
-        as prompt injection or personal data. Each one runs in the workspaces
-        you choose, and can block a request or only record it. Vendor keys are
-        encrypted at rest and never shown again.
-      </PageIntro>
+      />
 
       <ErrorBanner
         error={
@@ -339,6 +342,7 @@ export function OrganizationGuardrailsPage() {
             <TableScrollFrame className="otari-guardrail-definitions-table">
               <DataTable
                 ariaLabel="Guardrails you have configured"
+                mobileLayout="cards"
                 columns={definitionColumns}
                 rows={defined}
                 getRowKey={(row) => row.id}
@@ -352,6 +356,7 @@ export function OrganizationGuardrailsPage() {
             <TableScrollFrame className="otari-guardrail-mandates-table">
               <DataTable
                 ariaLabel="Where they run"
+                mobileLayout="cards"
                 columns={mandateColumns}
                 rows={entries}
                 getRowKey={(row) => row.id}

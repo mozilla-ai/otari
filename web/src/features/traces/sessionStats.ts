@@ -32,8 +32,8 @@ export interface SessionStats {
   tools: ToolTally[]
   /** Each agent guardrail gate a hook ran, by what it decided. */
   gates: { runs: number; verdicts: Partial<Record<GuardrailVerdict, number>> }
-  /** The judge gates that called a model: what they ran on and what the priced ones cost. */
-  judges: { calls: number; models: string[]; cost: number; priced: number }
+  /** The judge gates that called a model, and what the priced ones cost. */
+  judges: { calls: number; cost: number; priced: number }
   /**
    * Each overlapping span counted once. A tool runs until any subagent it started
    * finishes, and that subagent's requests count as model time too, so these can
@@ -111,17 +111,79 @@ function rates(
   return out as Record<(typeof METERS)[number], number>
 }
 
-// A session at a glance: what it did, where its time went and what its money
-// paid for, read off its spans.
-export function sessionStats(
-  summary: TraceSummary,
-  detail: TraceDetail,
-): SessionStats {
-  const byId = new Map(detail.spans.map((span) => [span.span_id, span]))
-  const inSubagent = (span: TraceSpan): boolean => {
+/**
+ * The model requests whose tokens count: one per call an agent exported. Two
+ * instrumentations of one process can each describe the same call, sharing its
+ * response id, and the span reporting the most tokens is counted, carrying the
+ * rates its call was priced at, and its model, from whichever span holds them.
+ * A gateway request's spans share its request id across calls, and a span's own
+ * id stands in where it carried no response id, so neither is matched.
+ */
+export function countedOnce(llm: readonly TraceSpan[]): TraceSpan[] {
+  const shared = (span: TraceSpan) =>
+    span.origin === "otlp" &&
+    !!span.request_id &&
+    span.request_id !== span.otel_span_id
+  const weight = (span: TraceSpan) => [
+    (span.input_tokens ?? 0) + (span.output_tokens ?? 0),
+    span.cache_read_tokens ?? 0,
+    span.cache_write_tokens ?? 0,
+  ]
+  const heavier = (a: TraceSpan, b: TraceSpan) => {
+    const [x, y] = [weight(a), weight(b)]
+    const index = x.findIndex((value, i) => value !== y[i])
+    return index >= 0 && x[index] > y[index]
+  }
+  const richest = new Map<string, TraceSpan>()
+  const priced = new Map<string, TraceSpan>()
+  for (const span of llm) {
+    if (!shared(span) || !span.request_id) continue
+    const kept = richest.get(span.request_id)
+    if (!kept || heavier(span, kept)) richest.set(span.request_id, span)
+    if (rates(span)) priced.set(span.request_id, span)
+  }
+  const counted: TraceSpan[] = []
+  for (const span of llm) {
+    if (!shared(span) || !span.request_id) {
+      counted.push(span)
+      continue
+    }
+    if (richest.get(span.request_id) !== span) continue
+    const rated = priced.get(span.request_id)
+    if (!rated || rated === span) {
+      counted.push(span)
+      continue
+    }
+    // The priced copy also names the model its cost is tallied under.
+    counted.push({
+      ...span,
+      model: rated.model ?? span.model,
+      attributes: rates(span)
+        ? span.attributes
+        : {
+            ...span.attributes,
+            ...Object.fromEntries(
+              METERS.map((meter) => [
+                `otari.llm.rate.${meter}`,
+                rated.attributes[`otari.llm.rate.${meter}`],
+              ]),
+            ),
+          },
+    })
+  }
+  return counted
+}
+
+/** Whether a span of these ran inside a subagent: under a tool call that started one. */
+export function inSubagentOf(
+  spans: readonly TraceSpan[],
+): (spanId: string) => boolean {
+  const byId = new Map(spans.map((span) => [span.span_id, span]))
+  return (spanId) => {
     // Parent ids are as the exporter sent them, so a walk guards against a cycle.
-    const seen = new Set([span.span_id])
-    let parent = span.parent_span_id ? byId.get(span.parent_span_id) : undefined
+    const seen = new Set([spanId])
+    const parentId = byId.get(spanId)?.parent_span_id
+    let parent = parentId ? byId.get(parentId) : undefined
     while (parent && !seen.has(parent.span_id)) {
       seen.add(parent.span_id)
       if (parent.operation === EXECUTION) return true
@@ -131,10 +193,21 @@ export function sessionStats(
     }
     return false
   }
+}
+
+// A session at a glance: what it did, where its time went and what its money
+// paid for, read off its spans.
+export function sessionStats(
+  summary: TraceSummary,
+  detail: TraceDetail,
+): SessionStats {
+  const isInSubagent = inSubagentOf(detail.spans)
+  const inSubagent = (span: TraceSpan) => isInSubagent(span.span_id)
   const tools = detail.spans.filter(
     (span) => span.kind === "tool" && !NOT_A_TOOL.has(span.tool_name ?? ""),
   )
   const llm = detail.spans.filter((span) => span.kind === "llm")
+  const calls = countedOnce(llm)
   const runs = new Map<string, TraceSpan[]>()
   for (const span of detail.spans) {
     if (span.operation === EXECUTION && span.parent_span_id) {
@@ -204,12 +277,21 @@ export function sessionStats(
   let cacheSaved = 0
   let pricedRequests = 0
   const models = new Map<string, ModelTally>()
-  for (const span of llm) {
+  const tallyOf = (span: TraceSpan) => {
     const model = span.model ?? "unknown model"
     const tally = models.get(model) ?? { model, requests: 0, cost: null }
-    tally.requests += 1
-    if (span.cost != null) tally.cost = (tally.cost ?? 0) + span.cost
     models.set(model, tally)
+    return tally
+  }
+  // A call's cost is on one of its spans, which need not be the one counted.
+  for (const span of llm) {
+    if (span.cost != null) {
+      const tally = tallyOf(span)
+      tally.cost = (tally.cost ?? 0) + span.cost
+    }
+  }
+  for (const span of calls) {
+    tallyOf(span).requests += 1
     const cacheRead = span.cache_read_tokens ?? 0
     const cacheWrite = span.cache_write_tokens ?? 0
     const used: Meters = {
@@ -236,12 +318,7 @@ export function sessionStats(
   // A gateway guardrail is a guardrail span too, but not a hook's.
   const hooks = detail.spans.filter((span) => gateVerdict(span))
   const gates: SessionStats["gates"] = { runs: 0, verdicts: {} }
-  const judges: SessionStats["judges"] = {
-    calls: 0,
-    models: [],
-    cost: 0,
-    priced: 0,
-  }
+  const judges: SessionStats["judges"] = { calls: 0, cost: 0, priced: 0 }
   for (const span of detail.spans) {
     const verdict = gateVerdict(span)
     if (!verdict) continue
@@ -249,7 +326,6 @@ export function sessionStats(
     gates.verdicts[verdict] = (gates.verdicts[verdict] ?? 0) + 1
     if (!span.model) continue
     judges.calls += 1
-    if (!judges.models.includes(span.model)) judges.models.push(span.model)
     if (span.cost != null) {
       judges.cost += span.cost
       judges.priced += 1
@@ -267,7 +343,7 @@ export function sessionStats(
       activeMs,
       Date.parse(summary.last_activity_at) - Date.parse(summary.started_at),
     ),
-    requests: llm.length,
+    requests: calls.length,
     toolCalls: tools.length,
     inSubagents: tools.filter(inSubagent).length,
     tools: [...tallies]

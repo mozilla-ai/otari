@@ -17,10 +17,12 @@ import { useOrganizationContext } from "@/shared/api/organizations"
 import { fetchAllRows } from "@/shared/api/paging"
 import {
   CATALOG,
+  HOSTED_PROVIDERS,
   MODELS,
   ORGANIZATION_PRICING,
   ORGANIZATION_PROVIDER_MODELS,
   PRICING,
+  SEARCH_TOOLS,
 } from "@/shared/api/queryKeys"
 
 const fetchAllPricing = () => fetchAllRows<PricingResponse>("/pricing")
@@ -64,6 +66,17 @@ export function usePricesInEffect(keys: readonly PricedKey[], enabled = true) {
   })
 }
 
+// Both provider model lists show the deployment's price where it is the rung
+// that answers, so a deployment price moves a row in each.
+function invalidateProviderModels(
+  queryClient: ReturnType<typeof useQueryClient>,
+) {
+  void queryClient.invalidateQueries({
+    queryKey: [ORGANIZATION_PROVIDER_MODELS],
+  })
+  void queryClient.invalidateQueries({ queryKey: [HOSTED_PROVIDERS, "models"] })
+}
+
 export function useSetPricing() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -76,6 +89,37 @@ export function useSetPricing() {
       void queryClient.invalidateQueries({ queryKey: [PRICING] })
       void queryClient.invalidateQueries({ queryKey: [MODELS] })
       void queryClient.invalidateQueries({ queryKey: [CATALOG] })
+      // The search and fetch tool listing carries each tool's price.
+      void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] })
+      invalidateProviderModels(queryClient)
+    },
+  })
+}
+
+/**
+ * Deletes every version of one key's deployment price, of one kind.
+ *
+ * A 404 means nothing priced the key, which is what the caller asked for, so
+ * it resolves rather than fails.
+ */
+export function useDeletePricing() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ kind, modelKey }: PricedKey) =>
+      apiFetch<void>(
+        `/pricing/${encodeURIComponent(modelKey)}?kind=${encodeURIComponent(kind)}`,
+        { method: "DELETE" },
+      ).catch((error: unknown) => {
+        if (error instanceof ApiError && error.status === 404) return
+        throw error
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [PRICING] })
+      void queryClient.invalidateQueries({ queryKey: [MODELS] })
+      void queryClient.invalidateQueries({ queryKey: [CATALOG] })
+      // The search and fetch tool listing carries each tool's price.
+      void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] })
+      invalidateProviderModels(queryClient)
     },
   })
 }

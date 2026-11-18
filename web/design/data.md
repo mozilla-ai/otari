@@ -38,9 +38,14 @@ column with id `actions` sits beside it, and every other column is a label and v
 line. Selection, `onRowAction` and `renderDetail` carry over; sorting and resize do not.
 Without it the grid stays and scrolls sideways.
 
-A white body on the page canvas, ruled by hairlines. The header is the accent tint
-(`--color-primary-subtle`) set in the `text-overline` role, so it never outweighs
-the rows it labels.
+No fill on the body: the rows sit on the page canvas, ruled by hairlines, and a
+pinned column takes the canvas color so a scrolled cell passes under it without a
+seam. The header is set in the `text-overline` role, so it never outweighs the
+rows it labels.
+
+In the card layout an `align: "end"` cell is shrunk to its content, so its figure
+starts in the card's value lane with the others rather than at the screen's right
+edge.
 
 ```tsx
 // Correct
@@ -121,7 +126,7 @@ tracks horizontal scroll so a first column can pin, and the per-page class is wh
 `otari-provider-keys-table`, `otari-offered-models-table`,
 `otari-workspaces-table`, `otari-accounts-table`, `otari-activity-table`,
 `otari-budgets-table`, `otari-mcp-table`, `otari-offerings-table`,
-`otari-sessions-table`. Inventing one
+`otari-sessions-table`, `otari-rules-table`, `otari-spend-table`. Inventing one
 at the call site compiles and styles nothing.
 
 A new page adds its class to `src/styles/globals.css`, beside the others, and the

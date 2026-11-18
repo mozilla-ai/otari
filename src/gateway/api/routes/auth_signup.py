@@ -24,8 +24,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     GrowthSignalPortDep,
+    IdentityServiceDep,
     MembershipOrganizationServiceDep,
     OrganizationServiceDep,
+    SignupInvitePortDep,
     UnitOfWorkDep,
     get_config,
     get_db,
@@ -36,12 +38,12 @@ from gateway.api.routes._public_auth import (
     refuse_exhausted_verification_attempts,
     throttle_public_auth,
 )
+from gateway.core.addresses import MAX_STORED_ADDRESS_LENGTH
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.identity_exceptions import VerificationTokenInvalidError
 from gateway.models.tenancy import MAX_FULL_NAME_LENGTH
 from gateway.services.mail import MailNotConfiguredError
 from gateway.services.tenancy import report_new_account
-from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH
 from gateway.services.tenancy.user_service import (
     create_user_for_signup,
     resend_verification_email,
@@ -64,7 +66,7 @@ class SignupRequest(BaseModel):
     """Set a password for an address, claiming or registering it."""
 
     email: str = Field(
-        max_length=MAX_EMAIL_LENGTH,
+        max_length=MAX_STORED_ADDRESS_LENGTH,
         description=(
             "The address to sign in with. An address an admin added or invited where this "
             "deployment keeps signup closed; any address where the bootstrap reports open_signup."
@@ -84,12 +86,24 @@ class SignupRequest(BaseModel):
             "Whether the caller accepted this deployment's terms. Required where the bootstrap reports a terms_url."
         ),
     )
+    invite: str | None = Field(
+        default=None,
+        max_length=_MAX_SUBMITTED_TOKEN,
+        description=(
+            "An invitation token from a link emailed to this address. Where it names the same address, the "
+            "account is verified at once and no verification email is sent."
+        ),
+    )
 
 
 class SignupResponse(BaseModel):
     """The same message whether or not the address had anything to claim."""
 
     message: str = Field(description="What the caller should do next.")
+    verified: bool = Field(
+        default=False,
+        description="The account is verified already, through its invitation, so the caller can sign in now.",
+    )
 
 
 class VerifyEmailRequest(BaseModel):
@@ -108,7 +122,9 @@ class VerifyEmailResponse(BaseModel):
 
 
 class ResendVerificationRequest(BaseModel):
-    email: str = Field(max_length=MAX_EMAIL_LENGTH, description="The address to resend a verification link to.")
+    email: str = Field(
+        max_length=MAX_STORED_ADDRESS_LENGTH, description="The address to resend a verification link to."
+    )
 
 
 class ResendVerificationResponse(BaseModel):
@@ -121,6 +137,7 @@ class ResendVerificationResponse(BaseModel):
 # open wording would promise a closed one an account it will not create.
 _SIGNUP_MESSAGE = "If this address is on our roster and unclaimed, check your email to verify it, then sign in."
 _OPEN_SIGNUP_MESSAGE = "If this address can be signed up, check your email to verify it, then sign in."
+_INVITED_MESSAGE = "Your account is ready. Sign in to continue."
 _RESEND_MESSAGE = "If this address is registered and unverified, a verification email is on its way."
 
 
@@ -132,8 +149,10 @@ async def signup(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     growth: GrowthSignalPortDep,
+    invites: SignupInvitePortDep,
     uow: UnitOfWorkDep,
     organizations: MembershipOrganizationServiceDep,
+    identities: IdentityServiceDep,
 ) -> SignupResponse:
     """Claim a roster identity, register a new one, or do nothing: the response never says which.
 
@@ -145,8 +164,14 @@ async def signup(
 
     Refused with a 400 where the deployment publishes terms and ``terms_accepted``
     is not set, whatever the address.
+
+    With an ``invite`` that names this address, the account is verified as it is
+    created and ``verified`` says so: the invitation reached the mailbox, so a
+    verification email would prove nothing more. Only the token's holder learns that.
     """
     throttle_public_auth(request)
+    invited = await invites.invited_email(body.invite) if body.invite else None
+    address_proven = invited is not None and invited.strip().lower() == body.email.strip().lower()
     try:
         claimed = await create_user_for_signup(
             db,
@@ -156,12 +181,16 @@ async def signup(
             password=body.password,
             uow=uow,
             organizations=organizations,
+            blocked_addresses=identities,
             full_name=body.full_name,
             terms_accepted=body.terms_accepted,
+            address_proven=address_proven,
         )
     except MailNotConfiguredError as exc:
         raise mail_unavailable(exc) from None
     await report_new_account(growth, claimed, background_tasks=background_tasks)
+    if address_proven and claimed is not None:
+        return SignupResponse(message=_INVITED_MESSAGE, verified=True)
     return SignupResponse(message=_OPEN_SIGNUP_MESSAGE if config.open_signup else _SIGNUP_MESSAGE)
 
 
@@ -172,6 +201,7 @@ async def verify_email_route(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     organizations: MembershipOrganizationServiceDep,
+    identities: IdentityServiceDep,
 ) -> VerifyEmailResponse:
     """Confirm an address from its verification link and the password chosen at signup, lifting the sign-in gate.
 
@@ -183,7 +213,12 @@ async def verify_email_route(
     refuse_exhausted_verification_attempts(request)
     try:
         identity = await verify_email(
-            db, organizations=organizations, token=body.token, password=body.password, open_signup=config.open_signup
+            db,
+            organizations=organizations,
+            blocked_addresses=identities,
+            token=body.token,
+            password=body.password,
+            open_signup=config.open_signup,
         )
     except VerificationTokenInvalidError:
         count_failed_verification(request)
@@ -200,12 +235,18 @@ async def resend_verification(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     organizations: OrganizationServiceDep,
+    identities: IdentityServiceDep,
 ) -> ResendVerificationResponse:
     """Mail a fresh verification link, or do nothing: the response never says which."""
     throttle_public_auth(request)
     try:
         await resend_verification_email(
-            db, config, organizations=organizations, background_tasks=background_tasks, email=body.email
+            db,
+            config,
+            organizations=organizations,
+            blocked_addresses=identities,
+            background_tasks=background_tasks,
+            email=body.email,
         )
     except MailNotConfiguredError as exc:
         raise mail_unavailable(exc) from None

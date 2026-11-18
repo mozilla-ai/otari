@@ -13,8 +13,18 @@ from typing import Self
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.database import DATABASE_ERRORS, create_log_session, create_session, describe_database_error
+from gateway.core.database import (
+    DATABASE_ERRORS,
+    create_log_session,
+    create_session,
+    describe_database_error,
+    release_session,
+)
 from gateway.log_config import logger
+
+
+class InsideUnitOfWorkError(RuntimeError):
+    """The connection was asked to go back to the pool while a block of its Unit of Work was open."""
 
 
 class OutsideUnitOfWorkError(RuntimeError):
@@ -75,12 +85,71 @@ class UnitOfWork:
             await self._roll_back()
             raise
 
+    @asynccontextmanager
+    async def savepoint(self) -> AsyncIterator[Self]:
+        """A block whose failure undoes only its own work, for a step the caller can do without.
+
+        The error still reaches the caller, but the transaction around the block, and
+        what the session already loaded, are left as they were. Outermost, it commits
+        on success as any block does.
+        """
+        self._depth += 1
+        outer_failure = self._first_failure
+        try:
+            async with self._session.begin_nested():
+                yield self
+        except BaseException:
+            # A block inside that failed was undone with the savepoint, so it fails nothing outside it.
+            self._first_failure = outer_failure
+            raise
+        finally:
+            self._depth -= 1
+        if self._depth == 0:
+            try:
+                await self._session.commit()
+            except BaseException:
+                await self._roll_back()
+                raise
+
+    async def abandon(self) -> None:
+        """Roll back what a step that ended outside any block left staged, so the session can be used again.
+
+        For a request whose step failed on the database or was cancelled mid-statement before it
+        could clean up: a failed statement leaves the session unusable for whatever runs next.
+        A database error from the rollback is logged, never raised.
+
+        Raises:
+            InsideUnitOfWorkError: a block is open, which rolls back as it ends.
+        """
+        if self._depth > 0:
+            msg = "A step cannot be abandoned while a block is open"
+            raise InsideUnitOfWorkError(msg)
+        await self._roll_back()
+
     async def _roll_back(self) -> None:
         """Roll back, leaving the error that ended the step as the one the caller sees."""
         try:
             await self._session.rollback()
         except DATABASE_ERRORS as exc:
             logger.warning("Could not roll back a unit of work: %s", describe_database_error(exc))
+
+    async def release(self) -> bool:
+        """Commit and return the connection to the pool, for a slow outbound call about to run.
+
+        Returns whether the staged work was committed.
+        The world is free to move while the call that follows is out,
+        so a step must re-read afterward anything it read before calling this.
+
+        NOTE: A release that fails rolls the staged work back, so a caller that needs what it
+        staged to be durable must check the answer.
+
+        Raises:
+            InsideUnitOfWorkError: a block is currently open.
+        """
+        if self._depth > 0:
+            msg = "The unit of work's connection cannot be released while a block is open"
+            raise InsideUnitOfWorkError(msg)
+        return await release_session(self._session)
 
 
 def session_for(uow: UnitOfWork) -> AsyncSession:
@@ -126,6 +195,7 @@ async def create_unit_of_work_with_session() -> AsyncIterator[tuple[AsyncSession
 
 
 __all__ = [
+    "InsideUnitOfWorkError",
     "OutsideUnitOfWorkError",
     "UnitOfWork",
     "UnitOfWorkRolledBackError",

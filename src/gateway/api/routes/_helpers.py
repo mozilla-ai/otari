@@ -1,107 +1,87 @@
 from __future__ import annotations
 
-import json
 import uuid
-from collections.abc import Collection, Iterator, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
+from starlette.types import Message
 
-from gateway.core.config import CONVERSATION_HEADER, ROUTER_HEADER, ROUTER_TASK_HEADER
+from gateway.api.request_id import set_request_id
+from gateway.core.config import (
+    CONVERSATION_HEADER,
+    COST_USD_HEADER,
+    END_USER_BUDGET_HEADER,
+    PRICING_SOURCE_HEADER,
+    ROUTER_HEADER,
+)
 from gateway.core.database import DATA_ERRORS, DATABASE_ERRORS, describe_database_error
-from gateway.core.env import otari_env
+from gateway.core.error_codes import COUNTRY_NOT_SUPPORTED, error_headers
 from gateway.log_config import logger
-from gateway.models.guardrails import GuardrailConfig
 from gateway.models.tenancy import Workspace
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
-from gateway.services.guardrails import GuardrailsNotReachableError, InProcessGuardrail, run_input_guardrails
-from gateway.services.inference import is_retry_futile
+from gateway.services.inference import is_retry_futile, request_country_gate
 from gateway.services.routing import RoutingSignal
-from gateway.services.traces import RequestTrace, TraceService, TraceWriter
-from gateway.services.url_safety import UnsafeURLError
+from gateway.services.tools import DirectCaller
+from gateway.services.traces import TraceService, TraceWriter
 from gateway.services.workspace_scope import default_workspace_id
 
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
-    from gateway.db import APIKey
+    from gateway.models.api_keys import APIKey
+    from gateway.services.provider_kwargs import MissingCredential
+    from gateway.services.providers import CountryGate
+    from gateway.services.tools import DirectToolOutcome
 
 
 GUARDRAILS_RESULT_HEADER = "Otari-Guardrails"
 """Response header carrying a compact JSON summary of guardrail verdicts when a
 ``monitor``-mode (or otherwise non-blocking) check ran."""
 
+# How the OpenAPI spec describes the inline-cost headers a served direct tool call answers with.
+DIRECT_TOOL_COST_HEADERS: dict[str, Any] = {
+    COST_USD_HEADER: {
+        "description": "What the call cost, as a six-decimal USD string; absent when it was not priced",
+        "schema": {"type": "string"},
+    },
+    PRICING_SOURCE_HEADER: {
+        "description": (
+            "What priced it: organization, deployment or defaults (a rate), or reported (the provider's own "
+            "charge); absent when it was not priced"
+        ),
+        "schema": {"type": "string"},
+    },
+}
 
-def resolve_user_id(
-    user_id_from_request: str | None,
-    api_key: APIKey | None,
-    is_master_key: bool,
-    *,
-    master_key_error: HTTPException,
-    no_api_key_error: HTTPException,
-    no_user_error: HTTPException,
-    forbidden_user_error: HTTPException,
-    reject_mismatch: bool = True,
-) -> str:
-    """Resolve the effective user_id from request context.
 
-    The resolution order is:
-    1. If master key is used, the request *must* supply a user_id, and may
-       name any user (the master key is trusted to act on behalf of others).
-    2. For a non-master key, spend is *always* bound to the key's own user.
-       The request may echo the same user_id (e.g. OpenAI's ``user`` field for
-       tracking), but naming a *different* user is rejected — otherwise any key
-       could charge spend to, and exhaust the budget of, another user.
+def bounded_body(request: Request, max_bytes: int, too_large: str) -> Request:
+    """``request``, refusing its body with 413 once more than ``max_bytes`` arrive, whatever ``Content-Length`` says.
 
-    Args:
-        user_id_from_request: User identifier extracted from the request body
-        api_key: Authenticated API key object (None when using master key)
-        is_master_key: Whether the request was authenticated with a master key
-        master_key_error: Raised when master key is used but no user_id is provided
-        no_api_key_error: Raised when no API key is available
-        no_user_error: Raised when the API key has no associated user
-        forbidden_user_error: Raised when a non-master key names a user other
-            than its own (only when ``reject_mismatch`` is True)
-        reject_mismatch: The deployment-wide default. When True, a non-master key
-            naming a different user is rejected. When False, the mismatch is
-            ignored and spend is still bound to the key's own user (the client
-            ``user`` is treated as a provider-side tag only). A key whose own
-            ``reject_user_mismatch`` is not None overrides this in either
-            direction. Spend is bound to the key's user however this resolves;
-            leniency never lets a key charge another user.
-
-    Returns:
-        Resolved user_id string
-
+    For a route that reads its own multipart form after its auth check: FastAPI
+    parses ``File`` parameters before any dependency runs. A declared length over
+    the limit is refused before any byte is read, and a client that disconnects
+    mid-upload gets 400 rather than surfacing as a server error.
     """
-    if is_master_key:
-        if not user_id_from_request:
-            raise master_key_error
-        return user_id_from_request
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > max_bytes:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, too_large)
+    received = 0
 
-    if api_key is None:
-        raise no_api_key_error
-    if not api_key.user_id:
-        raise no_user_error
-    key_user_id = str(api_key.user_id)
+    async def receive() -> Message:
+        nonlocal received
+        message = await request.receive()
+        if message["type"] == "http.disconnect":
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "The upload was interrupted.")
+        received += len(message.get("body", b""))
+        if received > max_bytes:
+            raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, too_large)
+        return message
 
-    # A non-master key is bound to its own user. Allow the request to echo that
-    # same id; a different id is rejected (strict) or ignored (lenient) — either
-    # way spend binds to key_user_id, so a key can never charge another user.
-    # A key may override the deployment-wide default in either direction (NULL =
-    # inherit), so one client whose ``user`` field is telemetry can be let through
-    # without relaxing the check for every key, and a deployment that relaxed it
-    # globally can still pin an individual key strict.
-    if api_key.reject_user_mismatch is not None:
-        reject_mismatch = api_key.reject_user_mismatch
-    if reject_mismatch and user_id_from_request and user_id_from_request != key_user_id:
-        raise forbidden_user_error
-
-    return key_user_id
+    return Request(request.scope, receive)
 
 
 def text_from_content(content: Any) -> str:
@@ -110,8 +90,7 @@ def text_from_content(content: Any) -> str:
     Handles the two wire shapes shared across the chat and Anthropic-messages
     formats: a bare string, or a list of content parts where text parts look
     like ``{"type": "text", "text": "..."}``. Non-text parts (images, tool
-    results, etc.) are ignored — guardrails like prompt-injection detection
-    operate on the textual prompt.
+    results, etc.) are ignored; a tool result is read as content of its own.
 
     Returns:
         The flattened text, or an empty string for unrecognized shapes.
@@ -129,66 +108,14 @@ def text_from_content(content: Any) -> str:
     return ""
 
 
-def latest_user_text(messages: Sequence[Any]) -> str:
-    """Return the text of the most recent ``role == "user"`` message.
-
-    Falls back to the last message of any role if no user message is present.
-    Used to feed input-direction guardrails the prompt the model is about to
-    see.
-
-    Returns:
-        The latest user message's text, or an empty string if ``messages`` is
-        empty.
-    """
-    for message in reversed(messages):
-        if isinstance(message, dict) and message.get("role") == "user":
-            return text_from_content(message.get("content"))
-    if messages and isinstance(messages[-1], dict):
-        return text_from_content(messages[-1].get("content"))
-    return ""
-
-
 _ROUTER_HEADER_OFF = frozenset({"off", "false", "0", "no", "none", "disabled"})
 _ROUTER_HEADER_ON = frozenset({"on", "true", "1", "yes", "auto", "default"})
 
 
-def routing_signal_from_messages(messages: Sequence[Any], raw_request: Request, *, has_tools: bool) -> RoutingSignal:
-    """Build the router's view of a chat-shaped request.
-
-    Flattens the prompt the same way guardrails do and reads the three routing
-    headers. Called on every request through the endpoint, whether or not the
-    model names a policy with a router, so it stays cheap: three header lookups
-    and one pass over the messages.
-    """
+def routing_signal(raw_request: Request) -> RoutingSignal:
+    """Build the router's view of a request from its routing headers."""
     return RoutingSignal(
-        task_signal=latest_user_text(messages),
-        trace_signal=first_user_text(messages),
-        trace_anchor=conversation_opening_text(messages),
         conversation_id=_header_value(raw_request, CONVERSATION_HEADER),
-        task_id=_header_value(raw_request, ROUTER_TASK_HEADER),
-        has_tools=has_tools,
-        # A conversation with an assistant turn is one whose routing decision has
-        # already been made, so trace-sticky reuse applies rather than a fresh
-        # decision.
-        is_continuation=any(isinstance(message, dict) and message.get("role") == "assistant" for message in messages),
-        opted_out=routing_opted_out(raw_request),
-    )
-
-
-def routing_signal_from_text(text: str, raw_request: Request, *, has_tools: bool) -> RoutingSignal:
-    """Build the router's view of a request with no message list (the responses API).
-
-    One text blob serves as all three signals: there is no turn structure to draw
-    a conversation opening from, so a routed responses request re-decides per call
-    unless the client sends a conversation id.
-    """
-    return RoutingSignal(
-        task_signal=text,
-        trace_signal=text,
-        trace_anchor=text,
-        conversation_id=_header_value(raw_request, CONVERSATION_HEADER),
-        task_id=_header_value(raw_request, ROUTER_TASK_HEADER),
-        has_tools=has_tools,
         opted_out=routing_opted_out(raw_request),
     )
 
@@ -226,169 +153,6 @@ def routing_opted_out(raw_request: Request) -> bool:
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=f"Invalid {ROUTER_HEADER} header '{raw}': expected 'on' or 'off'.",
     )
-
-
-def first_user_text(messages: Sequence[Any]) -> str:
-    """Return the text of the *first* ``role == "user"`` message.
-
-    The stable task signal for a conversation: it does not change as turns are
-    appended, so trace-sticky routing embeds the same thing on every turn and a
-    router that has forgotten its decision reproduces it rather than drifting.
-    Falls back to :func:`latest_user_text` when no user message is present.
-    """
-    for message in messages:
-        if isinstance(message, dict) and message.get("role") == "user":
-            text = text_from_content(message.get("content"))
-            if text:
-                return text
-    return latest_user_text(messages)
-
-
-def conversation_opening_text(messages: Sequence[Any]) -> str:
-    """Every turn before the first assistant reply, flattened.
-
-    Used to identify a conversation when the client sends no
-    ``Otari-Conversation-Id``. Richer than the first user turn alone, so it
-    separates conversations that share an opening question but differ in their
-    system preamble. Two conversations whose entire opening is identical still
-    collapse to one identity; only a client-supplied id can tell those apart.
-    """
-    parts: list[str] = []
-    for message in messages:
-        if not isinstance(message, dict):
-            continue
-        if message.get("role") == "assistant":
-            break
-        text = text_from_content(message.get("content"))
-        if text:
-            parts.append(text)
-    if parts:
-        return "\n".join(parts)
-    return first_user_text(messages)
-
-
-async def apply_input_guardrails(
-    guardrails: list[GuardrailConfig] | None,
-    input_text: str,
-    *,
-    response: Response,
-    config: GatewayConfig | None = None,
-    credentials: Mapping[str, str] | None = None,
-    mandated: Collection[str] | None = None,
-    in_process: Mapping[str, InProcessGuardrail | None] | None = None,
-    trace: RequestTrace | None = None,
-) -> None:
-    """Enforce the input guardrails for a request before the provider call.
-
-    ``guardrails`` is the effective list: the caller's own, merged with any the
-    caller's organization mandates and any a routing policy mandates (see
-    :func:`gateway.api.routes._pipeline.merge_guardrail_layers`, which is where
-    the merge happens so every completion endpoint enforces a mandate alike).
-    ``credentials`` carries the bearer credential an organization entry stores
-    for the endpoint it names, keyed by profile; it never comes from the request
-    body. ``mandated`` names the profiles a layer above the caller supplied,
-    which is what decides whether a URL that fails its safety check is the
-    caller's malformed request (a 400 naming their own URL) or a stored entry
-    being unevaluable (governed by its ``mode`` / ``on_unavailable``, with the
-    endpoint kept out of the response). ``in_process`` carries the guardrails
-    this worker holds for the organization's own definitions, keyed by profile;
-    one of those is answered here rather than sent to any service, and a profile
-    whose guardrail this worker does not hold arrives as ``None`` and is
-    unevaluable.
-
-    No-op when ``guardrails`` is empty/None (zero overhead for the common
-    case). On a ``block``-mode flag, raises ``403`` and the provider is never
-    called. On a non-blocking flag (``monitor`` mode), attaches a compact
-    summary to the :data:`GUARDRAILS_RESULT_HEADER` response header and lets
-    the request proceed.
-
-    Service-failure handling depends on ``mode`` and ``on_unavailable`` (see
-    :func:`gateway.services.guardrails.run_input_guardrails`): a ``block``
-    guardrail that can't be evaluated fails closed (``502``) unless it sets
-    ``on_unavailable="monitor"``; a ``monitor`` guardrail fails open (logged,
-    request proceeds).
-
-    Note:
-        The header is set on the injected ``response``, so it reaches
-        non-streaming responses. For streamed responses (where the route
-        returns its own ``StreamingResponse``) the ``monitor`` annotation is
-        not currently propagated; ``block`` still applies (it raises before any
-        bytes are streamed).
-
-    Raises:
-        HTTPException: ``400`` when a *caller-supplied* guardrail's ``url``
-            fails the SSRF/scheme safety check (a mandated entry's failure is a
-            502 or a recorded inconclusive instead, per its own settings);
-            ``403`` when a ``block`` guardrail flags the input; ``502`` when a
-            ``block`` guardrail that fails closed can't be evaluated. The 502
-            body names the profile and not the endpoint, which goes to the log
-            instead.
-    """
-    if not guardrails:
-        return
-
-    # Effective guardrails URL: dashboard override / config / env, falling back to
-    # the env var when no config is threaded in (e.g. unit tests). A dashboard
-    # override mutates config, so it hot-applies on the next request.
-    default_url = (config.guardrails_url if config is not None else None) or otari_env("GUARDRAILS_URL") or None
-    started = datetime.now(UTC)
-    try:
-        verdict = await run_input_guardrails(
-            guardrails,
-            input_text,
-            default_url=default_url,
-            credentials=credentials,
-            mandated=mandated,
-            in_process=in_process,
-        )
-    except UnsafeURLError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except GuardrailsNotReachableError as exc:
-        if trace is not None:
-            ended = datetime.now(UTC)
-            for guardrail in guardrails:
-                trace.record_guardrail(
-                    profile=guardrail.profile, mode=guardrail.mode, valid=None, started=started, ended=ended
-                )
-        # The full reason, endpoint included, goes to the log; the caller gets
-        # the error's `public_detail`, which names the profile and nothing else.
-        # An organization's guardrail endpoint is not the caller's to see
-        # (otari#654), and it is not theirs to fix either.
-        logger.warning("guardrail check could not be evaluated: %s", exc)
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.public_detail) from exc
-
-    if trace is not None:
-        # The checks run concurrently, so each span covers the whole evaluation.
-        ended = datetime.now(UTC)
-        for result in verdict.results:
-            trace.record_guardrail(
-                profile=result.profile, mode=result.mode, valid=result.valid, started=started, ended=ended
-            )
-
-    if verdict.blocked:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "message": "Request blocked by guardrail policy.",
-                "code": "guardrail_violation",
-                "guardrails": [
-                    {
-                        "profile": r.profile,
-                        "explanation": r.explanation,
-                        "score": r.score,
-                    }
-                    for r in verdict.flagged
-                    if r.mode == "block"
-                ],
-            },
-        )
-
-    if verdict.results:
-        # Non-blocking: surface the verdict for observability (monitor mode, or
-        # a passing block-mode check). Header value is kept compact and free of
-        # the freeform `explanation` to avoid oversized / non-ASCII headers.
-        summary = [{"profile": r.profile, "mode": r.mode, "valid": r.valid, "score": r.score} for r in verdict.results]
-        response.headers[GUARDRAILS_RESULT_HEADER] = json.dumps(summary, separators=(",", ":"))
 
 
 async def resolve_managed_workspace_id(db: AsyncSession, workspace_id: uuid.UUID | None) -> uuid.UUID:
@@ -444,6 +208,11 @@ def database_error(operation: str, exc: BaseException) -> HTTPException:
     """
     logger.error("%s failed: %s", operation, describe_database_error(exc))
     return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
+
+
+def missing_credential_error(missing: MissingCredential) -> HTTPException:
+    """The answer for a call refused because no credential resolved for its provider."""
+    return HTTPException(status_code=missing.status_code, detail=missing.detail, headers=error_headers(missing.code))
 
 
 # The OpenAI and Anthropic SDKs read this header before their own retry rule
@@ -506,3 +275,43 @@ async def erase_user_records(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not erase this user's agent traces; the user was not deleted",
         ) from None
+
+
+def country_gate_for(config: GatewayConfig, raw_request: Request) -> CountryGate:
+    """The country gate for ``raw_request``."""
+    client = raw_request.client
+    return request_country_gate(config, raw_request.headers, client.host if client is not None else None)
+
+
+def country_not_supported(gate: CountryGate, selector: str, *, noun: str = "Model") -> HTTPException:
+    """The 403 for a ``selector`` whose provider ``gate`` closes to the request's country."""
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=gate.refusal_detail(selector, noun=noun),
+        headers=error_headers(COUNTRY_NOT_SUPPORTED),
+    )
+
+
+async def answer_direct_tool_call[T](
+    raw_request: Request,
+    response: Response,
+    *,
+    auth_result: tuple[APIKey | None, bool],
+    user: str | None,
+    run: Callable[[DirectCaller], Awaitable[DirectToolOutcome[T]]],
+) -> T:
+    """Run a direct tool call for the authenticated caller under a fresh request id, and answer with its headers."""
+    api_key, is_master_key = auth_result
+    request_id = str(uuid.uuid4())
+    set_request_id(raw_request, response, request_id)
+    caller = DirectCaller(
+        api_key=api_key,
+        is_master_key=is_master_key,
+        user=user,
+        end_user_budget_id=raw_request.headers.get(END_USER_BUDGET_HEADER) or None,
+        request_id=request_id,
+    )
+    outcome = await run(caller)
+    for name, value in outcome.headers.items():
+        response.headers[name] = value
+    return outcome.response

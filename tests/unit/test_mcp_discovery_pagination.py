@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from mcp.types import ListToolsResult
+from mcp.types import ListToolsResult, PaginatedRequestParams
 from mcp.types import Tool as MCPTool
 
 from gateway.services.mcp_stateless import (
@@ -23,7 +23,7 @@ from gateway.services.mcp_stateless import (
 
 
 def _tool(name: str, description: str = "a tool") -> MCPTool:
-    return MCPTool(name=name, description=description, inputSchema={"type": "object"})
+    return MCPTool(name=name, description=description, input_schema={"type": "object"})
 
 
 class _FakeSession:
@@ -33,13 +33,13 @@ class _FakeSession:
         self._pages = pages
         self.cursors: list[str | None] = []
 
-    async def list_tools(self, cursor: str | None = None) -> Any:
-        self.cursors.append(cursor)
+    async def list_tools(self, *, params: PaginatedRequestParams | None = None) -> Any:
+        self.cursors.append(None if params is None else params.cursor)
         return self._pages[len(self.cursors) - 1]
 
 
 def _page(tools: list[MCPTool], next_cursor: str | None = None) -> ListToolsResult:
-    return ListToolsResult(tools=tools, nextCursor=next_cursor)
+    return ListToolsResult(tools=tools, next_cursor=next_cursor)
 
 
 @pytest.mark.asyncio

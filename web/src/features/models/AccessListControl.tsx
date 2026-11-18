@@ -2,6 +2,7 @@ import { ComboBox, Input, ListBox, ListBoxItem } from "@heroui/react"
 import { type ReactNode, useMemo, useState } from "react"
 import { ComboBoxEmpty } from "@/design-system/forms/ComboBoxEmpty"
 import { ControlField } from "@/design-system/forms/FieldMessages"
+import { MultiSelect } from "@/design-system/forms/MultiSelect"
 import { DismissChip } from "@/design-system/indicators/DismissChip"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 
@@ -24,6 +25,8 @@ export interface AccessOption {
   id: string
   // What the operator sees in the dropdown.
   label: string
+  // A muted second line, searched and read out with the label.
+  hint?: string
 }
 
 export interface AccessListCopy {
@@ -33,52 +36,50 @@ export interface AccessListCopy {
   // The notice under "block", after "Blocked from ".
   blocked: ReactNode
   pickPrompt: string
-  inputLabel: string
-  placeholder: string
+  inputLabel?: string
+  placeholder?: string
 }
 
 const MAX_VISIBLE = 50
 
-// The shell both the model and the search tool access-lists share; each
-// wrapper builds its own catalog and copy, and says what is still loading.
+// One combobox of the list, over a catalog of its own. A control with more than
+// one shows each picker's label above it.
+export interface AccessPicker {
+  label: string
+  catalog: AccessOption[]
+  inputLabel: string
+  placeholder: string
+  // Said in the empty dropdown while the catalog is still being read; "" when it is not.
+  loadingMessage: string
+}
+
+// The shell the model and tool access-lists share. One ``catalog`` is picked in
+// a MultiSelect; ``pickers`` are comboboxes, each over its own catalog, all
+// adding to the same list of entries.
 export function AccessListControl({
   initial,
   onChange,
   title,
   description,
   copy,
-  catalog,
+  catalog = [],
+  pickers,
   hint,
-  loadingMessage,
-  showPicker = true,
+  loadingMessage = null,
 }: {
   initial: string[] | undefined
   onChange: (value: string[] | undefined, valid: boolean) => void
   title: ReactNode
   description: ReactNode
   copy: AccessListCopy
-  catalog: AccessOption[]
+  catalog?: AccessOption[]
+  pickers?: AccessPicker[]
   hint: string | null
   // Said in the empty dropdown while the catalog is still being read.
-  loadingMessage: string | null
-  showPicker?: boolean
+  loadingMessage?: string | null
 }) {
   const [mode, setMode] = useState<Mode>(modeOf(initial))
   const [entries, setEntries] = useState<string[]>(initial ?? [])
-  const [query, setQuery] = useState("")
-
-  const visible = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return catalog
-      .filter((option) => !entries.includes(option.id))
-      .filter(
-        (option) =>
-          !q ||
-          option.id.toLowerCase().includes(q) ||
-          option.label.toLowerCase().includes(q),
-      )
-      .slice(0, MAX_VISIBLE)
-  }, [catalog, entries, query])
 
   const emit = (nextMode: Mode, nextEntries: string[]) => {
     if (nextMode === "inherit") onChange(undefined, true)
@@ -94,12 +95,16 @@ export function AccessListControl({
   const addEntry = (id: string) => {
     const next = entries.includes(id) ? entries : [...entries, id]
     setEntries(next)
-    setQuery("")
     emit("only", next)
   }
 
   const removeEntry = (id: string) => {
     const next = entries.filter((entry) => entry !== id)
+    setEntries(next)
+    emit("only", next)
+  }
+
+  const pick = (next: string[]) => {
     setEntries(next)
     emit("only", next)
   }
@@ -134,9 +139,25 @@ export function AccessListControl({
         </div>
       ) : null}
 
-      {mode === "only" ? (
-        <div className="flex flex-col gap-2">
-          <div className="flex flex-wrap gap-1.5">
+      {mode === "only" && !pickers ? (
+        <MultiSelect
+          label={copy.inputLabel ?? ""}
+          options={catalog}
+          value={entries}
+          onChange={pick}
+          description={
+            [hint, entries.length === 0 ? copy.pickPrompt : null]
+              .filter(Boolean)
+              .join(" ") || undefined
+          }
+          searchPlaceholder={copy.placeholder}
+          emptyMessage={loadingMessage ?? hint ?? undefined}
+        />
+      ) : null}
+
+      {mode === "only" && pickers ? (
+        <div className="flex flex-col gap-2 pointer-coarse:gap-3">
+          <div className="flex flex-wrap gap-1.5 pointer-coarse:gap-y-5">
             {entries.length === 0 ? (
               <span className="text-caption">{copy.pickPrompt}</span>
             ) : (
@@ -151,56 +172,98 @@ export function AccessListControl({
             )}
           </div>
           {hint ? <span className="text-caption">{hint}</span> : null}
-          {showPicker ? (
-            <ComboBox.Root
-              allowsEmptyCollection
-              menuTrigger="input"
-              inputValue={query}
-              onInputChange={setQuery}
-              selectedKey={null}
-              onSelectionChange={(key) => {
-                if (key != null) addEntry(String(key))
-              }}
-              // Cap the width so the field and its dropdown trigger stay within
-              // easy reach instead of stretching across a wide form.
-              className="flex max-w-md flex-col gap-1"
-            >
-              <ComboBox.InputGroup>
-                <Input
-                  aria-label={copy.inputLabel}
-                  placeholder={copy.placeholder}
-                  autoComplete="off"
-                />
-                <ComboBox.Trigger />
-              </ComboBox.InputGroup>
-              <ComboBox.Popover>
-                <ListBox
-                  items={visible}
-                  className="max-h-72 overflow-auto"
-                  renderEmptyState={() => (
-                    <ComboBoxEmpty
-                      isSourceEmpty={catalog.every((option) =>
-                        entries.includes(option.id),
-                      )}
-                      emptyMessage={
-                        loadingMessage ??
-                        "Everything available is already on the list."
-                      }
-                      noMatchesMessage="Nothing matches what you typed."
-                    />
-                  )}
-                >
-                  {(option: AccessOption) => (
-                    <ListBoxItem id={option.id} textValue={option.label}>
-                      {option.label}
-                    </ListBoxItem>
-                  )}
-                </ListBox>
-              </ComboBox.Popover>
-            </ComboBox.Root>
-          ) : null}
+          {pickers.map((picker) => (
+            <EntryPicker
+              key={picker.inputLabel}
+              picker={picker}
+              entries={entries}
+              onAdd={addEntry}
+            />
+          ))}
         </div>
       ) : null}
+    </div>
+  )
+}
+
+function EntryPicker({
+  picker,
+  entries,
+  onAdd,
+}: {
+  picker: AccessPicker
+  entries: string[]
+  onAdd: (id: string) => void
+}) {
+  const [query, setQuery] = useState("")
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return picker.catalog
+      .filter((option) => !entries.includes(option.id))
+      .filter(
+        (option) =>
+          !q ||
+          option.id.toLowerCase().includes(q) ||
+          option.label.toLowerCase().includes(q),
+      )
+      .slice(0, MAX_VISIBLE)
+  }, [picker.catalog, entries, query])
+
+  return (
+    <div className="flex flex-col gap-1">
+      {picker.label ? (
+        <span className="text-caption">{picker.label}</span>
+      ) : null}
+      <ComboBox.Root
+        allowsEmptyCollection
+        menuTrigger="input"
+        inputValue={query}
+        onInputChange={setQuery}
+        selectedKey={null}
+        onSelectionChange={(key) => {
+          if (key != null) {
+            onAdd(String(key))
+            setQuery("")
+          }
+        }}
+        // Cap the width so the field and its dropdown trigger stay within
+        // easy reach instead of stretching across a wide form.
+        className="flex max-w-md flex-col gap-1"
+      >
+        <ComboBox.InputGroup>
+          <Input
+            aria-label={picker.inputLabel}
+            placeholder={picker.placeholder}
+            autoComplete="off"
+          />
+          <ComboBox.Trigger />
+        </ComboBox.InputGroup>
+        <ComboBox.Popover>
+          <ListBox
+            items={visible}
+            className="max-h-72 overflow-auto"
+            renderEmptyState={() => (
+              <ComboBoxEmpty
+                isSourceEmpty={picker.catalog.every((option) =>
+                  entries.includes(option.id),
+                )}
+                emptyMessage={
+                  picker.loadingMessage ||
+                  "Everything available is already on the list."
+                }
+                noMatchesMessage="Nothing matches what you typed."
+              />
+            )}
+          >
+            {(option: AccessOption) => (
+              <ListBoxItem id={option.id} textValue={option.label}>
+                {option.label}
+              </ListBoxItem>
+            )}
+          </ListBox>
+        </ComboBox.Popover>
+      </ComboBox.Root>
     </div>
   )
 }

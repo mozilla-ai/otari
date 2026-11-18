@@ -21,6 +21,7 @@ const PROVIDER_MARK_IDS: ReadonlySet<string> = new Set([
   "azure",
   "azureanthropic",
   "azureopenai",
+  "bedrock",
   "cerebras",
   "cohere",
   "dashscope",
@@ -83,6 +84,28 @@ const MAKER_MARK_SLUGS: ReadonlySet<string> = new Set([
   "z-ai",
 ])
 
+/** Agent harnesses with a mark, by the name a session shows. */
+const HARNESS_MARK_IDS: ReadonlySet<string> = new Set([
+  "claude-code",
+  "codex",
+  "opencode",
+  "amp",
+  "goose",
+  "kilo-code",
+  "pi",
+  "roo-code",
+  "openhands",
+  "hermes-agent",
+  "openclaw",
+  "oh-my-pi",
+  "mistral-vibe",
+  "kimi-code",
+  "qwen-code",
+  "github-copilot",
+  "zed",
+  "curl",
+])
+
 /**
  * The ids this deployment serves its own models under.
  *
@@ -93,8 +116,11 @@ const MAKER_MARK_SLUGS: ReadonlySet<string> = new Set([
  * They are named for the reason every vendor is. A deployment serving its own
  * models would otherwise show a lettermark tile while every third party got a
  * logo, which is the bug this pair of modules exists to fix, pointed at us.
+ * `otari-ai` is the instance **Connect otari.ai** creates
+ * (`PLATFORM_PROVIDER_NAME`), whose offerings can arrive without a type.
  */
-const PRODUCT_MARK_IDS: readonly string[] = ["mzai", "otari"]
+
+const PRODUCT_MARK_IDS: readonly string[] = ["mzai", "otari", "otari-ai"]
 
 const normalize = (value: string): string => value.trim().toLowerCase()
 
@@ -121,8 +147,14 @@ export function hasMakerMark(vendorSlug: string): boolean {
   return MAKER_MARK_SLUGS.has(normalize(vendorSlug))
 }
 
+/** The same question for an agent harness, by the name a session shows. */
+export function hasHarnessMark(harness: string): boolean {
+  return HARNESS_MARK_IDS.has(normalize(harness))
+}
+
 /** Read by the drift gate beside this module, not by the app. */
 export const MARK_KEYS_FOR_TEST = {
   providers: PROVIDER_MARK_IDS,
   makers: MAKER_MARK_SLUGS,
+  harnesses: HARNESS_MARK_IDS,
 }

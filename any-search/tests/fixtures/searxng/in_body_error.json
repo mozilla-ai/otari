@@ -1,0 +1,17 @@
+{
+  "status": 200,
+  "body": {
+    "query": "python release",
+    "results": [],
+    "answers": [],
+    "corrections": [],
+    "infoboxes": [],
+    "suggestions": [],
+    "unresponsive_engines": [
+      [
+        "google news",
+        "Suspended: access denied"
+      ]
+    ]
+  }
+}

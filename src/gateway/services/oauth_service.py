@@ -21,16 +21,16 @@ when the authorization URL is built and consumed by the exchange. apron-auth's
 mints the verifier and ``exchange_code`` reads it back, and neither the code
 challenge nor the state comparison is this module's own arithmetic.
 
-**The row is bound to the browser as well as to the flow.** A ``code`` and a
-``state`` travel together in one redirect URL, and that URL is written to the
-access log and to browser history, so a row keyed on the state alone would let
-whoever reads either finish the sign-in for the full TTL. So ``/authorize``
-also sets an HttpOnly cookie carrying a random flow secret, the row keeps that
-secret's digest, and the callback must present the cookie (RFC 9700, section
-4.7.1). One secret per browser rather than per flow: a second tab starting a
-sign-in reuses the cookie it finds, so neither tab's callback breaks the other.
+**The authorization is bound to the browser as well as to the flow.** A
+``code`` and a ``state`` travel together in one redirect URL, and that URL is
+written to the access log and to browser history, so a flow keyed on the state
+alone would let whoever reads either finish the sign-in for the full TTL
+(RFC 9700, section 4.7.1). apron-auth issues a browser token per authorization
+request and refuses a callback that token does not match. The token lives in an
+HttpOnly cookie of its own per sign-in in flight, which is what lets two tabs
+each finish their own.
 
-What is this module's own is the two overrides in ``_provider_config``: the
+What is this module's own is the two overrides in ``_as_configured_here``: the
 presets widen scopes and, for Google, ask for offline access, and neither is
 wanted here. See that function.
 
@@ -42,24 +42,25 @@ in different directions. See ``web/src/features/auth/OAuthCallbackPage.tsx``.
 """
 
 import hashlib
-import hmac
-import secrets
-import string
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
-from apron_auth import OAuthClient, ProviderConfig
-from apron_auth.errors import INVALID_GRANT, NonceValidationError, StateError, TokenExchangeError
+from apron_auth import AuthorizationCallback, ProviderConfig, StoredStateClient
+from apron_auth.errors import (
+    INVALID_GRANT,
+    AuthorizationResponseError,
+    ConfigurationError,
+    NonceValidationError,
+    StateError,
+    TokenExchangeError,
+)
 from apron_auth.models import OAuthPendingState as PendingState
 from apron_auth.providers import github as apron_github
 from apron_auth.providers import google as apron_google
-from fastapi import Response
-from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import col
 
-from gateway.core.config import API_ROOT, OAUTH_PROVIDERS, GatewayConfig
+from gateway.core.config import OAUTH_PROVIDERS, GatewayConfig
 from gateway.exceptions.identity_exceptions import (
     OAuthExchangeError,
     OAuthNotConfiguredError,
@@ -67,8 +68,13 @@ from gateway.exceptions.identity_exceptions import (
     OAuthStateError,
 )
 from gateway.log_config import logger
-from gateway.models.identity import EmailAssertion, ProviderIdentity
-from gateway.models.tenancy import OAUTH_STATE_TTL_SECONDS, OAuthPendingState
+from gateway.models.identity import (
+    EmailAssertion,
+    ProviderIdentity,
+    is_organization_connection_provider,
+)
+from gateway.models.tenancy import OAUTH_STATE_TTL_SECONDS
+from gateway.repositories.identity.oauth_pending_state_repository import OAuthPendingStateRepository
 
 # Which scopes each provider is asked for, and what it calls itself.
 #
@@ -79,6 +85,22 @@ from gateway.models.tenancy import OAUTH_STATE_TTL_SECONDS, OAuthPendingState
 # otherwise merge its own base scopes over them.
 #
 # The consent-screen endpoints are the presets' own and are not restated here.
+
+
+@dataclass(frozen=True)
+class BrowserAuthorization:
+    """One authorization request, built for the browser that asked for it.
+
+    ``state`` names the flow wherever one is recorded or looked up, and reveals
+    nothing about ``browser_token``.
+
+    NOTE: ``browser_token`` belongs in an HttpOnly cookie and nowhere script
+    can read it.
+    """
+
+    url: str
+    state: str
+    browser_token: str
 
 
 @dataclass(frozen=True)
@@ -93,19 +115,6 @@ class _Provider:
     email_claim_trusted: bool
 
 
-# The resource the OAuth routes are mounted at. The router takes its prefix from
-# here and the flow cookie its path, so the cookie cannot end up scoped to
-# somewhere the routes are not.
-OAUTH_ROUTE_PREFIX = "/auth/oauth"
-# The cookie that binds a pending authorization to the browser that started it.
-# Scoped to the OAuth routes, which are the only ones that read it.
-FLOW_COOKIE_NAME = "otari_oauth_flow"
-FLOW_COOKIE_PATH = f"{API_ROOT}{OAUTH_ROUTE_PREFIX}"
-# What ``secrets.token_urlsafe(32)`` produces; anything else in the cookie is
-# not ours and is replaced rather than reused.
-_FLOW_SECRET_LENGTH = 43
-_URLSAFE_CHARACTERS = frozenset(string.ascii_letters + string.digits + "-_")
-
 _PROVIDERS: dict[str, _Provider] = {
     "google": _Provider(label="Google", scopes=("openid", "email", "profile"), email_claim_trusted=True),
     "github": _Provider(label="GitHub", scopes=("read:user", "user:email"), email_claim_trusted=True),
@@ -119,12 +128,16 @@ assert set(_PROVIDERS) == set(OAUTH_PROVIDERS), "OAUTH_PROVIDERS and _PROVIDERS 
 def provider_label(provider: str) -> str:
     """The provider's own name, cased the way it writes it, for a message.
 
-    An unknown provider answers with the string it was given rather than
-    raising: the only caller is an error message, and a refusal that fails to
-    render is worse than one naming a provider nobody configured.
+    An organization's own connection answers with what the person chose on the sign-in card, because
+    the value naming it is this deployment's key for an issuer and means nothing to whoever reads a
+    refusal. An otherwise unknown provider answers with the string it was given rather than raising:
+    the only caller is an error message, and a refusal that fails to render is worse than one naming
+    a provider nobody configured.
     """
     known = _PROVIDERS.get(provider)
-    return known.label if known else provider
+    if known is not None:
+        return known.label
+    return "company sign-in" if is_organization_connection_provider(provider) else provider
 
 
 def trusts_email_claim(provider: str) -> bool:
@@ -145,11 +158,10 @@ def redirect_uri(config: GatewayConfig, provider: str) -> str:
     for the client, so a mismatch is caught at the provider either way; deriving
     it just means a browser cannot choose what this server sends.
 
-    **It carries no fragment, which is why it is not a dashboard hash path.**
-    Every page the dashboard serves in front of a session is a hash route, and
-    RFC 6749 forbids a fragment in a redirection URI (Google rejects one
-    outright). So this names an ordinary path, which ``gateway.main`` serves
-    with a redirect into the hash route that finishes the sign-in.
+    **It is not the dashboard page that finishes the sign-in.** The dashboard
+    may live on another origin or under another path than this process, so this
+    names a path the gateway itself always answers, and ``gateway.main``
+    redirects it to that page (:func:`callback_landing_target`).
     """
     return f"{base_url(config)}/auth/{provider}/callback"
 
@@ -170,61 +182,58 @@ def base_url(config: GatewayConfig) -> str:
 def callback_landing_target(config: GatewayConfig, provider: str, query: str) -> str:
     """Where ``/auth/{provider}/callback`` sends the browser to finish signing in.
 
-    The interface's own hash route, carrying whatever query the provider
-    appended. Built from ``effective_ui_base_url`` and not the redirect URI's
-    base: the ``state`` in that query is checked against a value scoped to the
-    origin that minted it, so a browser landed elsewhere cannot finish.
+    The interface's own page, carrying whatever query the provider appended.
+    Named apart from ``/auth/{provider}/callback`` so a dashboard served by this
+    same process is not redirected back into the route that sent it. Built from
+    ``effective_ui_base_url`` and not the redirect URI's base: the ``state`` in
+    that query is checked against a value scoped to the origin that minted it,
+    so a browser landed elsewhere cannot finish.
 
     Relative to that base rather than to the request, because the request's path
     is what a reverse proxy may already have rewritten, and this has to name a
     URL in the browser's address bar rather than in this process.
     """
-    route = f"/#/auth/{quote(provider, safe='')}/callback"
+    route = f"/sign-in/{quote(provider, safe='')}/callback"
     return config.ui_link(f"{route}?{query}" if query else route)
 
 
-class _DatabaseStateStore:
-    """apron-auth's ``StateStore``, backed by ``oauth_pending_state``.
+class DatabaseStateStore:
+    """apron-auth's ``StateStore``, over the authorizations this deployment holds in flight.
 
-    Two methods and no repository, because it is not the shape a repository
-    serves: apron-auth calls these, and both are a single statement against one
-    table that nothing else reads.
+    A caller outside this module builds one with a provider value of its own, such as an
+    organization's own OIDC connection, so the table is shared rather than owned by the built-in
+    sign-in alone.
 
-    Rows are staged on the caller's transaction and never committed here. The
-    caller owns the commit boundary, which is what lets a callback that fails
-    after consuming a state roll the consumption back and leave the person a
-    flow to retry.
+    Rows are staged on the caller's transaction and never committed here. The caller owns the
+    commit boundary, which is what lets a callback that fails after consuming a state roll the
+    consumption back and leave the person a flow to retry.
     """
 
-    def __init__(self, db: AsyncSession, provider: str, flow_hash: str) -> None:
-        self._db = db
+    def __init__(self, pending: OAuthPendingStateRepository, provider: str) -> None:
+        self._pending = pending
         self._provider = provider
-        self._flow_hash = flow_hash
 
     async def save(self, state: PendingState) -> None:
         """Stage one pending authorization, and sweep whatever has expired."""
-        if state.metadata:
+        if state.context:
             # The row has no column for it, so a caller that starts relying on
             # apron-auth's save/consume round trip finds out at the write rather
             # than by reading an empty ``TokenSet.context`` later.
-            msg = "oauth_pending_state does not carry apron-auth state metadata"
+            msg = "A pending sign-in cannot carry state beyond the fields recorded here"
             raise ValueError(msg)
         now = datetime.now(UTC)
         # The sweep rides here rather than on a scheduler because this is the
         # only write the table takes, so it is the only place that can grow it.
-        await self._db.execute(delete(OAuthPendingState).where(col(OAuthPendingState.expires_at) <= now))
-        self._db.add(
-            OAuthPendingState(
-                state_hash=_state_hash(state.state),
-                provider=self._provider,
-                flow_hash=self._flow_hash,
-                code_verifier=state.code_verifier,
-                nonce=state.nonce,
-                redirect_uri=state.redirect_uri,
-                expires_at=now + timedelta(seconds=OAUTH_STATE_TTL_SECONDS),
-            )
+        await self._pending.delete_expired(now)
+        await self._pending.stage(
+            state_hash=state_hash(state.state),
+            provider=self._provider,
+            code_verifier=state.code_verifier,
+            nonce=state.nonce,
+            openid_requested=state.openid_requested,
+            redirect_uri=state.redirect_uri,
+            expires_at=now + timedelta(seconds=OAUTH_STATE_TTL_SECONDS),
         )
-        await self._db.flush()
 
     async def consume(self, state_key: str) -> PendingState | None:
         """Claim one pending authorization, or answer ``None``.
@@ -236,123 +245,72 @@ class _DatabaseStateStore:
         by primary key and reading what came back means exactly one of them
         does.
 
-        ``provider`` and the flow secret are compared after the row is claimed
-        rather than added to the WHERE clause, so a state minted for one
-        provider and returned to another, or presented from a browser other
-        than the one that started it, is refused as itself rather than as an
-        unknown state. The delete is staged on the request's transaction and
-        the refusal keeps that transaction from committing, so the row survives
-        for the callback it was minted for.
+        ``provider`` is compared after the row is claimed rather than added to
+        the WHERE clause, so a state minted for one provider and returned to
+        another is refused as itself rather than as an unknown state. The
+        delete is staged on the request's transaction and the refusal keeps
+        that transaction from committing, so the row survives for the callback
+        it was minted for.
         """
-        row = (
-            await self._db.execute(
-                delete(OAuthPendingState)
-                .where(col(OAuthPendingState.state_hash) == _state_hash(state_key))
-                .returning(
-                    col(OAuthPendingState.provider),
-                    col(OAuthPendingState.flow_hash),
-                    col(OAuthPendingState.code_verifier),
-                    col(OAuthPendingState.nonce),
-                    col(OAuthPendingState.redirect_uri),
-                    col(OAuthPendingState.created_at),
-                    col(OAuthPendingState.expires_at),
-                )
-            )
-        ).first()
-        if row is None:
+        claimed = await self._pending.claim(state_hash(state_key))
+        if claimed is None:
             return None
-        provider, flow_hash, code_verifier, nonce, redirect_uri, created_at, expires_at = row
-        if provider != self._provider:
-            logger.warning("OAuth state minted for %s was returned to %s", provider, self._provider)
+        if claimed.provider != self._provider:
+            logger.warning("OAuth state minted for %s was returned to %s", claimed.provider, self._provider)
             return None
-        if not hmac.compare_digest(flow_hash, self._flow_hash):
-            logger.warning("OAuth %s callback came from a browser other than the one that started it", provider)
+        if claimed.expires_at <= datetime.now(UTC):
             return None
-        if expires_at <= datetime.now(UTC):
-            return None
-        if nonce is None and "openid" in _PROVIDERS[provider].scopes:
-            # Minted before the column existed. apron-auth would refuse it as a
-            # nonce failure; as a state no longer pending, the person is told to
-            # start again.
-            logger.warning("OAuth %s state carried no nonce for an OpenID sign-in", provider)
+        if claimed.nonce is None and claimed.openid_requested:
+            # The library refuses a state whose nonce and flag disagree, as a nonce failure. Refused
+            # here instead, as a state no longer pending, so the person is told to start again.
+            logger.warning("OAuth %s state carried no nonce for an OpenID sign-in", claimed.provider)
             return None
         return PendingState(
             state=state_key,
-            redirect_uri=redirect_uri,
-            code_verifier=code_verifier,
-            nonce=nonce,
-            created_at=created_at.timestamp(),
+            redirect_uri=claimed.redirect_uri,
+            code_verifier=claimed.code_verifier,
+            nonce=claimed.nonce,
+            openid_requested=claimed.openid_requested,
+            created_at=claimed.created_at.timestamp(),
         )
 
 
-def _flow_hash(flow_secret: str) -> str:
-    """The digest a row keeps of the browser's flow secret; same reasoning as ``_state_hash``."""
-    return hashlib.sha256(flow_secret.encode()).hexdigest()
-
-
-def _state_hash(state: str) -> str:
+def state_hash(state: str) -> str:
     """The key a state is stored under: its SHA-256, hex.
 
-    The state is a 256-bit random value from ``secrets``, so this is a lookup
-    key and not a password hash; a single round is right and a KDF would be
-    theater. What it buys is that a reader of the table holds digests, and the
-    callback compares against the preimage.
+    The state is already unguessable, so this is a lookup key and not a
+    password hash; a single round is right and a KDF would be theater. What it
+    buys is that a reader of the table holds digests, and the callback compares
+    against the preimage.
     """
     return hashlib.sha256(state.encode()).hexdigest()
 
 
-def flow_secret_for(existing: str | None) -> str:
-    """The flow secret this browser's authorizations are bound under.
+async def pending_flow_provider(pending: OAuthPendingStateRepository, state: str) -> str | None:
+    """The provider of the pending authorization ``state`` names, without consuming it.
 
-    Reused when the browser already holds one of ours, so a second tab starting
-    a sign-in does not invalidate the first tab's; minted otherwise. A cookie
-    that is not the shape this module issues is somebody else's and is replaced.
+    A caller that must resolve which client's credentials to spend before it can build the client
+    that consumes the row, such as an organization's own OIDC connection, reads it here: single use
+    is still enforced by the conditional DELETE ``DatabaseStateStore.consume`` performs, and a wrong
+    guess here only fails the exchange that follows.
     """
-    if existing and len(existing) == _FLOW_SECRET_LENGTH and _is_urlsafe(existing):
-        return existing
-    return secrets.token_urlsafe(32)
+    return await pending.get_provider(state_hash(state))
 
 
-def _is_urlsafe(value: str) -> bool:
-    return all(character in _URLSAFE_CHARACTERS for character in value)
-
-
-def apply_flow_cookie(response: Response, secret: str, *, secure: bool) -> None:
-    """Set (or refresh) the flow cookie with the attributes the session cookie uses.
-
-    ``Lax`` rather than ``Strict`` because the request that spends it is a
-    same-origin POST from the dashboard, which either setting carries; ``Lax``
-    just does not depend on that staying true. The path keeps it off every
-    request that is not an OAuth one.
-    """
-    response.set_cookie(
-        FLOW_COOKIE_NAME,
-        secret,
-        max_age=OAUTH_STATE_TTL_SECONDS,
-        httponly=True,
-        secure=secure,
-        samesite="lax",
-        path=FLOW_COOKIE_PATH,
-    )
-
-
-async def authorization_url(
-    config: GatewayConfig, provider: str, *, db: AsyncSession, flow_secret: str
-) -> tuple[str, str]:
-    """The provider consent screen to send the browser to, and the state to keep.
+async def authorization_url(config: GatewayConfig, provider: str, *, db: AsyncSession) -> BrowserAuthorization:
+    """The provider consent screen to send the browser to, the state to keep, and the token that binds them.
 
     Staged, not committed: the caller commits, so an authorization URL is never
-    handed back over a row that failed to write. ``flow_secret`` is the value
-    the browser will hold in ``FLOW_COOKIE_NAME``; only its digest is stored.
+    handed back over a row that failed to write.
 
     Raises:
         OAuthNotConfiguredError: If this deployment configured no client
             credentials for ``provider``, or does not know its own address.
 
     """
-    client = _client(config, provider, db, flow_secret)
-    url, pending = await client.get_authorization_url(redirect_uri=redirect_uri(config, provider))
-    return url, pending.state
+    client = _client(config, provider, db)
+    bound = await client.get_authorization_url(redirect_uri=redirect_uri(config, provider))
+    return BrowserAuthorization(url=bound.url, state=bound.state, browser_token=bound.browser_token)
 
 
 async def exchange_code(
@@ -361,7 +319,7 @@ async def exchange_code(
     *,
     code: str,
     state: str,
-    flow_secret: str | None,
+    browser_token: str | None,
     db: AsyncSession,
 ) -> ProviderIdentity:
     """Trade an authorization code for the identity the provider vouches for.
@@ -371,35 +329,47 @@ async def exchange_code(
     claim also yields the PKCE verifier and the redirect URI the authorization
     request was built with, which is why neither is passed here.
 
-    ``flow_secret`` is the browser's ``FLOW_COOKIE_NAME`` cookie, or ``None``
-    when it sent none. A callback without it is refused before the database is
-    touched: there is no row it could match.
+    ``browser_token`` is the token the browser's flow cookie holds for
+    ``state``, or ``None`` where it holds none. The ``state`` must be the one
+    that token mints, which is checked before the row is claimed and before the
+    provider is called, so a callback presented from anywhere else redeems
+    nothing and leaves the authorization live.
 
     Raises:
         OAuthNotConfiguredError: If this deployment configured no client
             credentials for ``provider``, or does not know its own address.
         OAuthStateError: If ``state`` names no authorization this deployment is
             still waiting on, for ``provider``, from this browser.
-        OAuthExchangeError: If the provider says the code is invalid, expired or spent, the ID token does not
-            carry the nonce the authorization request sent, or the identity does not fit the link table.
+        OAuthExchangeError: If the callback states no code to redeem, the provider says the code is invalid,
+            expired or spent, the ID token does not carry the nonce the authorization request sent, or the
+            identity does not fit the link table.
         OAuthProviderUnavailableError: If the provider fails or cannot be reached during the exchange or the
             identity fetch.
             The provider's own words stay on the traceback and out of the response, as that error's docstring says.
 
     """
-    if flow_secret is None:
-        logger.warning("Refused a %s callback that carried no flow cookie", provider)
-        raise OAuthStateError
-    client = _client(config, provider, db, flow_secret)
+    client = _client(config, provider, db)
     try:
-        tokens = await client.exchange_code(code=code, state=state)
+        tokens = await client.exchange_code(AuthorizationCallback(code=code, state=state), browser_token=browser_token)
         profile = await client.fetch_identity(tokens)
     except StateError as error:
         # Ahead of the catch-all below, which would otherwise render a refused
         # state as "the provider did not complete the sign-in" and send an
         # operator looking at a provider that was never contacted.
-        logger.warning("Refused a %s callback whose state matched no pending sign-in", provider)
+        if browser_token is None:
+            logger.warning(
+                "Refused a %s callback the browser presented no flow token for: its cookie did not arrive, "
+                "or no longer holds that sign-in",
+                provider,
+            )
+        else:
+            logger.warning("Refused a %s callback whose state names no sign-in this deployment is waiting on", provider)
         raise OAuthStateError from error
+    except AuthorizationResponseError as error:
+        # Also ahead of the catch-all: the response states no code to redeem, so
+        # nothing was asked of the provider and nothing there failed.
+        logger.warning("Refused a %s callback that states no authorization code", provider)
+        raise OAuthExchangeError(provider_label(provider)) from error
     except NonceValidationError as error:
         # Also ahead of the catch-all: a token response that does not answer the
         # request this deployment made is a refused sign-in, not an outage.
@@ -409,7 +379,7 @@ async def exchange_code(
         # Logged with the exception so an operator can see the provider's own
         # error and description, which the response deliberately does not carry.
         logger.warning("OAuth code exchange with %s failed", provider, exc_info=True)
-        if _provider_refused_the_code(error):
+        if provider_refused_the_code(error):
             raise OAuthExchangeError(provider_label(provider)) from error
         raise OAuthProviderUnavailableError(provider_label(provider)) from error
 
@@ -426,7 +396,7 @@ async def exchange_code(
         raise OAuthExchangeError(provider_label(provider)) from error
 
 
-def _provider_refused_the_code(error: Exception) -> bool:
+def provider_refused_the_code(error: Exception) -> bool:
     """Whether the token endpoint said the authorization code is invalid, expired or already spent.
 
     Only ``invalid_grant`` says that. Every other failure is the provider's or this deployment's: no answer, a
@@ -445,10 +415,34 @@ def require_configured(config: GatewayConfig, provider: str) -> None:
 
     Raises:
         OAuthNotConfiguredError: If ``provider`` is unknown here, either half of
-            its client credentials is missing, or ``public_base_url`` is.
+            its client credentials is missing, ``public_base_url`` is, or the
+            redirect URI it builds is neither https nor a loopback address.
 
     """
-    _credentials(config, provider)
+    client_id, client_secret = _credentials(config, provider)
+    try:
+        _provider_config(config, provider, client_id, client_secret)
+    except ConfigurationError:
+        # Two settings of public_base_url reach the library's one refusal, and an operator told to
+        # set https on an address that is already https has nowhere to go. The credential case is
+        # asked here rather than read back off the library's message.
+        if _address_carries_credentials(config):
+            raise OAuthNotConfiguredError.address_carries_credentials(provider) from None
+        raise OAuthNotConfiguredError.insecure_address(provider) from None
+
+
+def _address_carries_credentials(config: GatewayConfig) -> bool:
+    """Whether this deployment's own address embeds a user or a password.
+
+    An address this cannot parse carries nothing to report, and the refusal it is deciding between
+    is the right answer for it either way: this only runs once the library has already refused the
+    redirect URI the address built.
+    """
+    try:
+        parsed = urlsplit(config.public_base_url or "")
+    except ValueError:
+        return False
+    return parsed.username is not None or parsed.password is not None
 
 
 def _credentials(config: GatewayConfig, provider: str) -> tuple[str, str]:
@@ -466,25 +460,34 @@ def _credentials(config: GatewayConfig, provider: str) -> tuple[str, str]:
     return credentials
 
 
-def _client(config: GatewayConfig, provider: str, db: AsyncSession, flow_secret: str) -> OAuthClient:
-    """The apron-auth client that builds ``provider``'s authorization URL and spends its code."""
-    client_id, client_secret = _credentials(config, provider)
+def _provider_config(config: GatewayConfig, provider: str, client_id: str, client_secret: str) -> ProviderConfig:
+    """Build ``provider``'s configuration from this deployment's own settings.
+
+    Raises:
+        ConfigurationError: If the redirect URI this builds is neither https nor
+            a loopback address.
+
+    """
     preset = apron_google.preset if provider == "google" else apron_github.preset
-    identity_handler = (
-        apron_google.GoogleIdentityHandler() if provider == "google" else apron_github.GitHubIdentityHandler()
-    )
-    provider_config, revocation_handler = preset(
+    provider_config = preset(
         client_id=client_id,
         client_secret=client_secret,
         scopes=list(_PROVIDERS[provider].scopes),
         redirect_uri=redirect_uri(config, provider),
     )
-    return OAuthClient(
-        _as_configured_here(provider_config, provider),
-        state_store=_DatabaseStateStore(db, provider, _flow_hash(flow_secret)),
+    return _as_configured_here(provider_config, provider)
+
+
+def _client(config: GatewayConfig, provider: str, db: AsyncSession) -> StoredStateClient:
+    """The apron-auth client that builds ``provider``'s authorization URL and spends its code."""
+    client_id, client_secret = _credentials(config, provider)
+    identity_handler = (
+        apron_google.GoogleIdentityHandler() if provider == "google" else apron_github.GitHubIdentityHandler()
+    )
+    return StoredStateClient(
+        _provider_config(config, provider, client_id, client_secret),
+        DatabaseStateStore(OAuthPendingStateRepository(db), provider),
         identity_handler=identity_handler,
-        # Used when apron-auth revokes the tokens of a response it refused.
-        revocation_handler=revocation_handler,
     )
 
 
@@ -516,17 +519,17 @@ def _as_configured_here(provider_config: ProviderConfig, provider: str) -> Provi
 
 
 __all__ = [
-    "FLOW_COOKIE_NAME",
-    "FLOW_COOKIE_PATH",
-    "OAUTH_ROUTE_PREFIX",
-    "apply_flow_cookie",
+    "BrowserAuthorization",
+    "DatabaseStateStore",
     "authorization_url",
     "base_url",
     "callback_landing_target",
     "exchange_code",
-    "flow_secret_for",
+    "pending_flow_provider",
     "provider_label",
+    "provider_refused_the_code",
     "redirect_uri",
     "require_configured",
+    "state_hash",
     "trusts_email_claim",
 ]

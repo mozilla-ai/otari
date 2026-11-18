@@ -95,7 +95,7 @@ def test_declining_the_starter_policy_still_registers_the_hook(repo: Path) -> No
     assert entry["hooks"][0]["command"] == f"{_FAKE_OTARI_PATH} hook --harness claude-code"
 
 
-def test_accepting_the_starter_policy_writes_one_and_its_command_gate_adds_bash(repo: Path) -> None:
+def test_accepting_the_starter_policy_writes_one_and_its_gates_widen_the_matcher(repo: Path) -> None:
     """The single file, the smaller of the two shapes to start with."""
     result = _invoke(input="y\n")
     assert result.exit_code == 0, result.output
@@ -104,7 +104,24 @@ def test_accepting_the_starter_policy_writes_one_and_its_command_gate_adds_bash(
     assert not (repo / hook_cli.GUARDRAIL_DIR).is_dir()
     assert "command" in gates_file.read_text(encoding="utf-8")
     settings = _read_settings(repo)
-    assert settings["hooks"]["PreToolUse"][0]["matcher"] == "Edit|Write|NotebookEdit|Bash"
+    assert settings["hooks"]["PreToolUse"][0]["matcher"] == "Edit|Write|NotebookEdit|Read|Bash"
+
+
+def test_the_starter_policy_gates_a_shell_read_of_the_env_file(repo: Path) -> None:
+    """A read gate alone sees the Read tool, so the starter pairs it with a command gate."""
+    assert _invoke(input="y\n").exit_code == 0
+    body = (repo / hook_cli.GUARDRAIL_FILE).read_text(encoding="utf-8")
+    assert "pre_tool_use.read_target" in body
+    assert "pre_tool_use.command" in body
+    assert body.count(".env") >= 2
+
+
+def test_the_starter_policy_validates_with_no_unaccepted_warning(repo: Path) -> None:
+    """The starter has to demonstrate the pairing it ships, not trip the warning that asks for it."""
+    assert _invoke(input="y\n").exit_code == 0
+    result = CliRunner().invoke(hook_cli.guardrails, ["validate", "--strict"])
+    assert result.exit_code == 0, result.output
+    assert "shell-read-unseen" not in result.output
 
 
 def test_an_existing_path_only_policy_keeps_bash_out_of_the_matcher(repo: Path) -> None:
@@ -144,6 +161,156 @@ def test_a_user_level_read_gate_adds_read_to_the_matcher(repo: Path, isolated_ho
     result = _invoke()
     assert result.exit_code == 0, result.output
     assert _read_settings(repo)["hooks"]["PreToolUse"][0]["matcher"] == "Edit|Write|NotebookEdit|Read"
+
+
+def test_repo_only_writes_the_flag_into_the_registration(repo: Path) -> None:
+    """The flag has to reach the registered command, or a later `setup` run silently drops it.
+
+    `_merge_hook_entry` matches an existing entry on the binary and "hook" alone and then replaces
+    the whole command string, so a flag added to the file by hand does not survive a re-run.
+    """
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    result = _invoke("--repo-only")
+    assert result.exit_code == 0, result.output
+    settings = _read_settings(repo)
+    for event in ("PreToolUse", "Stop"):
+        command = settings["hooks"][event][0]["hooks"][0]["command"]
+        assert command == f"{_FAKE_OTARI_PATH} hook --harness claude-code --repo-only"
+
+
+def test_without_repo_only_the_registration_carries_no_such_flag(repo: Path) -> None:
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    result = _invoke()
+    assert result.exit_code == 0, result.output
+    command = _read_settings(repo)["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+    assert command == f"{_FAKE_OTARI_PATH} hook --harness claude-code"
+
+
+def test_repo_only_keeps_a_user_level_read_gate_out_of_the_matcher(repo: Path, isolated_home: Path) -> None:
+    """The matcher is picked from the gates the hook will run, so `--repo-only` must narrow it too.
+
+    Without this, a personal read gate widens the matcher for a repo that never checks it, and the
+    hook is invoked on every Read for nothing.
+    """
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    _guardrail_path(isolated_home).write_text(_READ_GATES.replace("id: g\n", "id: personal\n"), encoding="utf-8")
+    result = _invoke("--repo-only")
+    assert result.exit_code == 0, result.output
+    assert _read_settings(repo)["hooks"]["PreToolUse"][0]["matcher"] == "Edit|Write|NotebookEdit"
+
+
+def _write_global_registration(
+    isolated_home: Path, *, repo_only: bool = False, command: str | None = None, config_dir: Path | None = None
+) -> Path:
+    """A claude-code hook entry in the user settings file, as if registered for every repository."""
+    path = (config_dir or isolated_home / ".claude") / "settings.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if command is None:
+        command = f"{_FAKE_OTARI_PATH} hook --harness claude-code" + (" --repo-only" if repo_only else "")
+    path.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {"matcher": "Edit|Write|NotebookEdit", "hooks": [{"type": "command", "command": command}]}
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_repo_only_warns_of_a_global_registration_without_it(repo: Path, isolated_home: Path) -> None:
+    """A global registration that still omits the flag would still enforce personal gates here."""
+    global_settings = _write_global_registration(isolated_home)
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    result = _invoke("--repo-only")
+    assert result.exit_code == 0, result.output
+    assert str(global_settings) in result.output
+    assert "--repo-only" in result.output
+
+
+def test_repo_only_does_not_warn_when_the_global_registration_already_has_it(repo: Path, isolated_home: Path) -> None:
+    global_settings = _write_global_registration(isolated_home, repo_only=True)
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    result = _invoke("--repo-only")
+    assert result.exit_code == 0, result.output
+    assert str(global_settings) not in result.output
+
+
+def test_without_repo_only_a_global_registration_draws_no_warning(repo: Path, isolated_home: Path) -> None:
+    """Both registrations already enforce the same gates here, so there is nothing to warn about."""
+    global_settings = _write_global_registration(isolated_home)
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    result = _invoke()
+    assert result.exit_code == 0, result.output
+    assert str(global_settings) not in result.output
+
+
+def test_repo_only_warns_of_a_global_registration_that_names_otari_on_the_path(repo: Path, isolated_home: Path) -> None:
+    """The entry runs the same hook whether or not it spells otari as an absolute path."""
+    global_settings = _write_global_registration(isolated_home, command="otari hook --harness claude-code")
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    result = _invoke("--repo-only")
+    assert result.exit_code == 0, result.output
+    assert str(global_settings) in result.output
+
+
+def test_repo_only_ignores_a_global_entry_that_does_not_run_otari_hook(repo: Path, isolated_home: Path) -> None:
+    global_settings = _write_global_registration(isolated_home, command="otari guardrails check")
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    result = _invoke("--repo-only")
+    assert result.exit_code == 0, result.output
+    assert str(global_settings) not in result.output
+
+
+def test_the_global_registration_warning_names_the_cost_and_the_alternative(repo: Path, isolated_home: Path) -> None:
+    """Flagging the global entry turns the person's gates off everywhere, so the warning says so."""
+    _write_global_registration(isolated_home)
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    result = _invoke("--repo-only")
+    assert result.exit_code == 0, result.output
+    assert "every repository" in result.output
+    assert "per repository" in result.output
+
+
+def test_repo_only_warns_of_a_global_registration_in_a_relocated_config_dir(
+    repo: Path, isolated_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CLAUDE_CONFIG_DIR moves the user settings file, and the registration there still runs here."""
+    config_dir = tmp_path / "elsewhere"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+    global_settings = _write_global_registration(isolated_home, config_dir=config_dir)
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    result = _invoke("--repo-only")
+    assert result.exit_code == 0, result.output
+    assert str(global_settings) in result.output
+
+
+def test_a_relocated_config_dir_is_the_only_place_looked(
+    repo: Path, isolated_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Claude Code reads the configured directory instead of the home one, so neither should this."""
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "elsewhere"))
+    home_settings = _write_global_registration(isolated_home)
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    result = _invoke("--repo-only")
+    assert result.exit_code == 0, result.output
+    assert str(home_settings) not in result.output
+
+
+def test_an_empty_config_dir_variable_falls_back_to_the_home_directory(
+    repo: Path, isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An exported but empty variable names no directory, so it must not hide the default."""
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "")
+    global_settings = _write_global_registration(isolated_home)
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    result = _invoke("--repo-only")
+    assert result.exit_code == 0, result.output
+    assert str(global_settings) in result.output
 
 
 def test_a_broken_repo_file_still_leaves_the_user_level_gates_in_the_matcher(repo: Path, isolated_home: Path) -> None:
@@ -221,6 +388,195 @@ def test_rerunning_updates_the_existing_entry_instead_of_duplicating_it(repo: Pa
     assert len(settings["hooks"]["PreToolUse"]) == 1
     command = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
     assert command == f"{_FAKE_OTARI_PATH} hook --harness claude-code"
+
+
+def test_a_narrowed_matcher_leaves_a_shared_entrys_sibling_command_alone(repo: Path) -> None:
+    """A matcher belongs to its entry, so narrowing ours must not narrow a sibling command's."""
+    settings = repo / ".claude" / "settings.local.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Edit|Write|NotebookEdit|Read",
+                            "hooks": [
+                                {"type": "command", "command": f"{_FAKE_OTARI_PATH} hook --harness claude-code"},
+                                {"type": "command", "command": "sibling-hook"},
+                            ],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+
+    result = _invoke("--repo-only")
+    assert result.exit_code == 0, result.output
+
+    entries = _read_settings(repo)["hooks"]["PreToolUse"]
+    shared = next(entry for entry in entries if any(h["command"] == "sibling-hook" for h in entry["hooks"]))
+    assert shared["matcher"] == "Edit|Write|NotebookEdit|Read"
+    assert [h["command"] for h in shared["hooks"]] == ["sibling-hook"]
+
+    ours = next(entry for entry in entries if any("otari" in h["command"] for h in entry["hooks"]))
+    assert ours is not shared
+    assert ours["matcher"] == "Edit|Write|NotebookEdit"
+    assert ours["hooks"] == [
+        {"type": "command", "command": f"{_FAKE_OTARI_PATH} hook --harness claude-code --repo-only"}
+    ]
+
+
+def test_splitting_a_shared_entry_keeps_the_hook_items_other_fields(repo: Path) -> None:
+    """Only the command is setup's to rewrite, so a field a person added to the item survives the move."""
+    settings = repo / ".claude" / "settings.local.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Edit|Write|NotebookEdit|Read",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": f"{_FAKE_OTARI_PATH} hook --harness claude-code",
+                                    "timeout": 30,
+                                },
+                                {"type": "command", "command": "sibling-hook"},
+                            ],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+
+    assert _invoke("--repo-only").exit_code == 0
+
+    entries = _read_settings(repo)["hooks"]["PreToolUse"]
+    ours = next(entry for entry in entries if any("otari" in h["command"] for h in entry["hooks"]))
+    assert ours["hooks"] == [
+        {
+            "type": "command",
+            "command": f"{_FAKE_OTARI_PATH} hook --harness claude-code --repo-only",
+            "timeout": 30,
+        }
+    ]
+
+
+def _write_repo_settings(repo: Path, entries: list[dict[str, Any]]) -> None:
+    """`PreToolUse` registered as `entries`, as if a person had written the file by hand."""
+    path = repo / ".claude" / "settings.local.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"hooks": {"PreToolUse": entries}}), encoding="utf-8")
+
+
+def _otari_commands(repo: Path) -> list[str]:
+    return [
+        item["command"]
+        for entry in _read_settings(repo)["hooks"]["PreToolUse"]
+        for item in entry["hooks"]
+        if "otari" in item["command"]
+    ]
+
+
+def test_repo_only_flags_every_existing_otari_registration(repo: Path) -> None:
+    """Claude Code runs every entry whose matcher matches, so one left unflagged still enforces personal gates."""
+    _write_repo_settings(
+        repo,
+        [
+            {
+                "matcher": "Edit|Write|NotebookEdit",
+                "hooks": [{"type": "command", "command": f"{_FAKE_OTARI_PATH} hook --harness claude-code"}],
+            },
+            {
+                "matcher": "Read",
+                "hooks": [{"type": "command", "command": f"{_FAKE_OTARI_PATH} hook --harness claude-code"}],
+            },
+        ],
+    )
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+
+    assert _invoke("--repo-only").exit_code == 0
+
+    commands = _otari_commands(repo)
+    assert len(commands) == 2
+    assert all(command.endswith("--repo-only") for command in commands), commands
+
+
+def test_setup_rewrites_every_existing_otari_registration(repo: Path) -> None:
+    """The same holds without the flag: a second entry must not keep a stale command."""
+    _write_repo_settings(
+        repo,
+        [
+            {"hooks": [{"type": "command", "command": "/old/path/otari hook --harness claude-code --repo-only"}]},
+            {"hooks": [{"type": "command", "command": "/other/otari hook --harness claude-code --repo-only"}]},
+        ],
+    )
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+
+    assert _invoke().exit_code == 0
+
+    assert _otari_commands(repo) == [f"{_FAKE_OTARI_PATH} hook --harness claude-code"] * 2
+
+
+def test_repo_only_splits_every_shared_entry_it_finds(repo: Path) -> None:
+    """Two shared entries each owe their sibling its own matcher, so both of ours move out."""
+    _write_repo_settings(
+        repo,
+        [
+            {
+                "matcher": "Edit|Write|NotebookEdit|Read",
+                "hooks": [
+                    {"type": "command", "command": f"{_FAKE_OTARI_PATH} hook --harness claude-code"},
+                    {"type": "command", "command": "first-sibling"},
+                ],
+            },
+            {
+                "matcher": "Bash|Read",
+                "hooks": [
+                    {"type": "command", "command": "second-sibling"},
+                    {"type": "command", "command": f"{_FAKE_OTARI_PATH} hook --harness claude-code"},
+                ],
+            },
+        ],
+    )
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+
+    assert _invoke("--repo-only").exit_code == 0
+
+    entries = _read_settings(repo)["hooks"]["PreToolUse"]
+    siblings = {
+        item["command"]: entry["matcher"]
+        for entry in entries
+        for item in entry["hooks"]
+        if "sibling" in item["command"]
+    }
+    assert siblings == {"first-sibling": "Edit|Write|NotebookEdit|Read", "second-sibling": "Bash|Read"}
+
+    ours = [entry for entry in entries if any("otari" in item["command"] for item in entry["hooks"])]
+    assert len(ours) == 2
+    for entry in ours:
+        assert entry["matcher"] == "Edit|Write|NotebookEdit"
+        assert [item["command"] for item in entry["hooks"]] == [
+            f"{_FAKE_OTARI_PATH} hook --harness claude-code --repo-only"
+        ]
+
+
+def test_rerunning_still_updates_a_solo_entry_in_place(repo: Path) -> None:
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    assert _invoke().exit_code == 0
+    assert _invoke("--repo-only").exit_code == 0
+    entries = _read_settings(repo)["hooks"]["PreToolUse"]
+    assert len(entries) == 1
+    assert entries[0]["hooks"][0]["command"].endswith("--repo-only")
 
 
 def test_rerunning_preserves_unrelated_hooks_and_permissions(repo: Path) -> None:

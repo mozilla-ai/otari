@@ -15,9 +15,9 @@ signs in, and both routes are throttled per client IP through
 **Where the browser's part begins and ends.** ``/authorize`` mints a CSRF
 ``state`` and hands back the consent-screen URL; the dashboard stores that state
 in ``sessionStorage`` and sends the person to the provider. The provider returns
-them to ``/auth/{provider}/callback``, an ordinary path (a redirect URI may not
-carry a fragment, so it cannot be the hash route directly) which
-``gateway.main`` redirects into the dashboard's own callback page. That page
+them to ``/auth/{provider}/callback``, a path the gateway always answers (the
+dashboard may be served elsewhere), which ``gateway.main`` redirects into the
+dashboard's own callback page. That page
 compares the returned state against the stored one and, only then, posts the
 code and the state here, where the state is checked again against the row
 ``/authorize`` wrote. Two checks that fail in different directions: the
@@ -25,10 +25,10 @@ browser's binds a callback to the tab that started the flow, and this one binds
 it to a flow this deployment started.
 
 **And to the browser that started it.** ``/authorize`` also sets an HttpOnly
-flow cookie whose digest the row keeps, and the callback refuses without it.
-The code and the state share one redirect URL that the access log and browser
-history both record; the cookie is the half of the flow that neither does. See
-``gateway.services.oauth_service``.
+flow cookie holding that flow's token. The callback presents the token its
+own state names, and a state that token does not match is refused. The code and
+the state share one redirect URL that the access log and browser history both
+record; the cookie is the half of the flow that neither does.
 
 **What this route decides, and what it does not.** It proves the person holds the provider account.
 ``IdentityService`` decides which account that person signs in as here, through ``IdentityProviderPort``,
@@ -39,7 +39,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, Path, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,6 +51,7 @@ from gateway.api.deps import (
     get_db,
     record_auth_failure,
 )
+from gateway.api.routes._flow_cookies import FlowCookies
 from gateway.api.routes._helpers import database_error
 from gateway.api.routes._public_auth import throttle_public_auth
 
@@ -58,13 +59,14 @@ from gateway.api.routes._public_auth import throttle_public_auth
 # restated: the freeze is one deployment-wide state, and three sign-in routes
 # wording it differently would tell a person the doors closed for three reasons.
 from gateway.api.routes.auth_session import MAINTENANCE_MODE_REFUSAL
-from gateway.core.config import OAUTH_PROVIDERS, GatewayConfig
+from gateway.core.config import API_ROOT, OAUTH_PROVIDERS, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.exceptions import TenancyError
 from gateway.exceptions.identity_exceptions import (
     OAuthIdentityLinkConflictError,
     OAuthNotConfiguredError,
     OAuthProviderUnavailableError,
+    SignInBlockedError,
     TermsNotAcceptedError,
 )
 from gateway.log_config import logger
@@ -74,39 +76,30 @@ from gateway.services.dashboard_session_service import (
 )
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.oauth_service import (
-    FLOW_COOKIE_NAME,
-    OAUTH_ROUTE_PREFIX,
-    apply_flow_cookie,
     authorization_url,
     exchange_code,
-    flow_secret_for,
     provider_label,
     require_configured,
 )
-from gateway.services.tenancy import report_new_account
+from gateway.services.tenancy import report_new_account, report_sign_in
 
-router = APIRouter(prefix=OAUTH_ROUTE_PREFIX, tags=["auth"])
+router = APIRouter(prefix="/auth/oauth", tags=["auth"])
+
+_FLOWS = FlowCookies(prefix="otari_oauth_flow", path=f"{API_ROOT}{router.prefix}")
 
 # A code is a provider-issued opaque string, a few hundred characters at most;
 # this is a sanity ceiling on an unauthenticated request body rather than a
 # format, matching the bounds ``auth_session.CreateSessionRequest`` sets.
 _MAX_SUBMITTED_CODE = 2048
-# A state this deployment issued is 43 characters (``secrets.token_urlsafe(32)``).
-# The ceiling is loose rather than exact because the value is looked up by hash
-# and a wrong length is simply a state that matches nothing; what it bounds is
-# how much an unauthenticated caller can make this process hash.
+# A loose ceiling rather than a format: a state of the wrong length matches
+# nothing. What it bounds is how much an unauthenticated caller can make this
+# process hash.
 _MAX_SUBMITTED_STATE = 512
 
 # Only a provider this deployment could ever configure is a path this router
 # answers at all, so an unknown segment is the framework's own 422 rather than a
 # handler deciding what to do with it. Spelled from the config vocabulary so the
 # two cannot drift.
-# The browser's flow cookie, when it sent one. Bounded for the same reason the
-# state is: it is hashed before anything looks at it.
-FlowCookie = Annotated[
-    str | None, Cookie(alias=FLOW_COOKIE_NAME, max_length=_MAX_SUBMITTED_STATE, include_in_schema=False)
-]
-
 ProviderPath = Annotated[
     str,
     Path(
@@ -146,10 +139,8 @@ class OAuthCallbackRequest(BaseModel):
     what this server sends to a provider.
 
     ``state`` is required, and is what binds this callback to an authorization
-    request this deployment actually made: it is claimed from
-    ``oauth_pending_state`` before the code is sent anywhere, and the row it
-    claims is what carries the PKCE verifier the exchange needs. The flow
-    cookie ``/authorize`` set travels alongside and binds it to the browser.
+    request this deployment actually made. The flow cookie carries the token
+    that state names, so it binds the callback to the browser as well.
     """
 
     code: str = Field(
@@ -173,8 +164,9 @@ class OAuthCallbackRequest(BaseModel):
 class OAuthSessionResponse(BaseModel):
     """A dashboard session minted by an OAuth sign-in (the token travels only in the cookie).
 
-    The same three fields ``POST /api/v1/auth/session`` answers, deliberately: the
-    dashboard's sign-in path does not care which credential got it here.
+    The three fields ``POST /api/v1/auth/session`` answers, deliberately, so the
+    dashboard's sign-in path does not care which credential got it here, and two
+    only a provider sign-in can produce: ``password_removed`` and ``new_account``.
     """
 
     expires_at: datetime = Field(description="When the session cookie stops being accepted.")
@@ -191,6 +183,13 @@ class OAuthSessionResponse(BaseModel):
             "Whether this sign-in removed a password the account held: the first provider sign-in on an "
             "address nobody had proven removes the password set before then. The person can set a new one "
             "from Account settings."
+        ),
+    )
+    new_account: bool = Field(
+        default=False,
+        description=(
+            "Whether this sign-in created the account, or is the first way in to one nobody had claimed. "
+            "False for a sign-in to an account that was already usable."
         ),
     )
 
@@ -231,34 +230,27 @@ async def authorize(
     response: Response,
     config: Annotated[GatewayConfig, Depends(get_config)],
     db: Annotated[AsyncSession, Depends(get_db)],
-    flow_cookie: FlowCookie = None,
 ) -> AuthorizeResponse:
     """Start an OAuth sign-in: where to send the browser, and the state to keep.
 
-    A GET that writes, which is the one thing to know about it. It records the
-    authorization it is about to start (the state's hash, the PKCE verifier the
-    exchange will need, and the digest of a flow secret it sets as an HttpOnly
-    cookie) so the callback has something to check against, and that record is
-    the whole reason the callback can refuse a code this deployment never asked
-    for, or one presented from a browser other than the one that asked.
+    Safe to repeat. Each call keeps the sign-ins the browser already has in
+    flight, up to a few at once, after which the oldest is dropped.
 
-    Still safe to repeat: each call mints its own state, and only the one the
-    browser kept is the one it sends back. The rows the others leave expire on
-    their own and are swept by the next call. The cookie is reused when the
-    browser already holds one, so a second tab does not break the first.
+    NOTE: This GET writes. It records the authorization and sets an HttpOnly
+    cookie, and that pair is what lets the callback refuse a code this
+    deployment never asked for, or one presented from another browser.
     """
     throttle_public_auth(request)
-    flow_secret = flow_secret_for(flow_cookie)
     try:
-        url, state = await authorization_url(config, provider, db=db, flow_secret=flow_secret)
+        started = await authorization_url(config, provider, db=db)
         await db.commit()
     # Not DATABASE_ERRORS: building the URL calls the OAuth client, which can
     # raise TimeoutError for reasons that are not the database's.
     except SQLAlchemyError as exc:
         await db.rollback()
         raise database_error(f"record a pending {provider} sign-in", exc) from None
-    apply_flow_cookie(response, flow_secret, secure=request_is_https(request))
-    return AuthorizeResponse(authorization_url=url, state=state)
+    _FLOWS.start(request, response, state=started.state, browser_token=started.browser_token)
+    return AuthorizeResponse(authorization_url=started.url, state=started.state)
 
 
 @router.post(
@@ -276,7 +268,6 @@ async def callback(
     background_tasks: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-    flow_cookie: FlowCookie = None,
 ) -> OAuthSessionResponse:
     """Exchange an authorization code and set the HttpOnly session cookie.
 
@@ -313,11 +304,17 @@ async def callback(
         )
     try:
         external = await exchange_code(
-            config, provider, code=body.code, state=body.state, flow_secret=flow_cookie, db=db
+            config,
+            provider,
+            code=body.code,
+            state=body.state,
+            browser_token=_FLOWS.browser_token(request, body.state),
+            db=db,
         )
         signed_in = await identities.sign_in_with_oauth(external, terms_accepted=body.terms_accepted)
-    except (OAuthIdentityLinkConflictError, TermsNotAcceptedError):
-        # A concurrent sign-in finished first, or the terms are still to accept, so nobody failed to authenticate.
+    except (OAuthIdentityLinkConflictError, SignInBlockedError, TermsNotAcceptedError):
+        # A concurrent sign-in finished first, the address is blocked, or the terms are still to accept, so nobody
+        # failed to authenticate.
         raise
     except OAuthProviderUnavailableError as exc:
         # Rendered here so the 502 keeps its message, which the tenancy handler would blank.
@@ -330,6 +327,8 @@ async def callback(
     identity = signed_in.account
     logger.info("Signed in %s with %s", identity.id, provider_label(provider))
     await report_new_account(growth, identity, background_tasks=background_tasks, new_account=signed_in.new_account)
+    await report_sign_in(growth, identity, background_tasks=background_tasks)
+    _FLOWS.finish(request, response, body.state)
     apply_session_cookie(
         response, signed_in.session_token, signed_in.session_expires_at, secure=request_is_https(request)
     )
@@ -338,6 +337,7 @@ async def callback(
         user_id=identity.id,
         active_organization_id=signed_in.active_organization_id,
         password_removed=signed_in.password_removed,
+        new_account=signed_in.new_account,
     )
 
 

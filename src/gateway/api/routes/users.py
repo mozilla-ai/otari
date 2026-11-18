@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import (
     ApiKeyServiceDep,
     CallerOrganization,
+    McpConnectionServiceDep,
     TelemetryStoragePortDep,
     TraceServiceDep,
     get_config,
@@ -26,9 +27,15 @@ from gateway.models.budgets import Budget
 from gateway.models.money import as_float
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
-from gateway.repositories.users_repository import UserFilter, count_users, in_organization, page_users
+from gateway.repositories.users_repository import (
+    UserFilter,
+    count_users,
+    in_organization,
+    lock_live_users,
+    page_users,
+)
 from gateway.services.budgets import budget_window
-from gateway.services.model_access import validate_allowed_models, validate_allowed_tools
+from gateway.services.model_access import revoke_user_mcp_grants, validate_allowed_models, validate_allowed_tools
 from gateway.services.organizations import AccessLists
 
 router = APIRouter(
@@ -53,8 +60,9 @@ class CreateUserRequest(BaseModel):
     )
     allowed_tools: list[str] | None = Field(
         default=None,
-        description="Default search tool access-list this user's keys inherit: null = the tools allowed_models "
-        "grants, [] = no tool, or search tool names ('*' for every search tool).",
+        description="Default tool access-list this user's keys inherit, for POST /api/v1/search and /api/v1/fetch: "
+        "null = the search tools allowed_models grants, [] = no tool, "
+        "or search and fetch tool names ('*' for every tool).",
     )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
 
@@ -428,6 +436,7 @@ async def delete_user(
     storage: TelemetryStoragePortDep,
     traces: TraceServiceDep,
     organization_id: CallerOrganization,
+    connections: McpConnectionServiceDep,
 ) -> None:
     """Delete a user in the caller's organization, and erase their telemetry and agent traces."""
     user = await _load_user_in_organization(db, user_id, organization_id)
@@ -437,18 +446,27 @@ async def delete_user(
     # and the telemetry FK's SET NULL never fires here regardless of its setting.
     await erase_user_records(request, storage, traces, user_id)
 
+    # After the erasure, which commits, so the lock is held by the transaction that removes the user's grants and
+    # marks them deleted: a grant to this user committing meanwhile waits for it and is then refused.
+    if user_id not in await lock_live_users(db, [user_id]):
+        # Another delete of this user held the lock first and has already revoked their
+        # grants and recorded when they were deleted. Erasure is idempotent and the
+        # answer is the same, so the first deletion's time is left as the one that stands.
+        return
     await db.execute(
         update(APIKey)
         .where(APIKey.user_id == user_id)
         .values(is_active=False)
         .execution_options(synchronize_session=False)
     )
+    await revoke_user_mcp_grants(db, user_id)
     user.deleted_at = datetime.now(UTC)
 
     try:
-        await db.commit()
+        # Its block commits the deletion staged above with the connections it removes, and asks the
+        # authorization servers to end them only once that has committed.
+        await connections.end_for_deleted_user(user_id)
     except DATABASE_ERRORS as exc:
-        await db.rollback()
         raise database_error("delete user", exc) from None
 
 

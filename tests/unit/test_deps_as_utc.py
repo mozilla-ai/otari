@@ -1,4 +1,4 @@
-"""Unit tests for the ``_as_utc`` helper in ``gateway.api.deps``.
+"""Unit tests for the ``_as_utc`` helper in ``gateway.api.deps.auth``.
 
 Regression coverage for the SQLite-naive-datetime bug surfaced during
 manual QA on PR #58: ``DateTime(timezone=True)`` columns come back naive
@@ -10,7 +10,7 @@ contract.
 
 from datetime import UTC, datetime, timedelta, timezone
 
-from gateway.api.deps import _as_utc
+from gateway.api.deps.auth import _as_utc
 
 
 def test_none_passes_through() -> None:

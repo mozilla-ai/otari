@@ -1,0 +1,60 @@
+# Review usage and requests
+
+**Home**, the page the dashboard opens on, shows what a time window cost and
+where the spend went. The per-request log is the **Requests** view of
+**Sessions**, beside its list of agent sessions (see [Sessions](sessions.md)).
+
+## Home
+
+Pick the window at the top: **This month**, **7 days**, **30 days** or
+**90 days**. What Home shows depends on your role.
+
+An organization owner or admin sees the whole organization, or one workspace
+picked beside the window when there is more than one:
+
+- What the window cost, against the same span before it, with spend per day.
+- How much of the organization's spend limit is used, and what the period is on
+  pace to cost. With no limit set, **Set a team budget** sets one.
+- **Failures**: the share of requests that failed.
+- Billed tokens, and how much of the input was read from cache.
+- **People active**: how many members spent anything in the window, and how
+  many sessions ran. **See the sessions** opens them.
+
+**Where it went** then breaks the window's spend down by **People**,
+**API keys**, **Models** or **Workspaces** (offered when there is more than one
+workspace). Each row shows what it spent, its tokens and its share of the total;
+outside **Models**, it also shows its top model and the spend limit it works
+under. The five largest rows show first, and **Show all** lists the rest. A row
+opens its sessions over the same window, and a workspace's row narrows the table
+to that workspace's people. A row's menu sets or changes its spend limit, and a
+key's row can be opened in **API keys**.
+
+Anyone else sees only their own requests in the selected workspace: what they
+spent, the spend limit on them there, their tokens and their sessions.
+**Where it went** breaks their spend down by **API keys** or **Models**, and a
+row opens its sessions. Someone with no active key and no session yet is offered
+**Create API key**; someone who may not create keys is told whom to ask.
+
+### Get started
+
+On a gateway with nothing to route to and nothing served yet, Home opens with
+**Get started with Otari**. The operator is offered **Add your first provider**,
+an organization owner or admin **Add a provider key**, and anyone else is told
+to ask an owner or admin.
+
+## Requests
+
+Open **Sessions** and pick **Requests** for the per-request log. The two views
+share one time range and the model, user, API key and status filters, which
+stay in place when you switch views and are kept in the URL. **Status** narrows
+Requests, and Sessions for errors and successes. On Requests, dragging across
+the chart narrows the range. Both views show everyone's requests in the workspace; pick
+yourself under **User** to see only yours.
+
+## Find one request
+
+To find one request, open `/requests?request=<id>` with the `Otari-Request-ID`
+its response carried. Routed requests share a request group, so the log shows
+each model tried and the one that served the response. Imported usage is labeled
+by its source and does not use a budget (see
+[Import usage from outside Otari](external-usage.md)).

@@ -26,14 +26,12 @@ gated, mirroring the other management routers.
   returned: the GET reports only where it comes from and its last four characters.
 * ``GET /api/v1/tool-settings/guardrails/profiles`` reads the guardrail catalog off
   the service ``guardrails_url`` names. It sits here because that field is the
-  only input it takes, and on the reader router for the reason the GET above is:
-  a profile name is what a caller puts in a request body, so the set of them is
-  not the operator's to withhold, and the endpoint they were read from does not
-  appear in the answer.
+  only input it takes, and on the catalog router because a profile name is what
+  a caller puts in a request body, so any API key may list them. The answer is
+  cached per worker, and the endpoint it was read from does not appear in it.
 * ``GET /api/v1/tool-settings/guardrails/catalog`` lists the guardrails this
-  gateway can run itself, from the installed ``any_guardrail``. On the operator
-  router, unlike the profiles read beside it: it is the picker behind a form that
-  stores a vendor credential deployment-wide, which is not a tenant's to read.
+  gateway can run itself, from the installed ``any_guardrail``. Also on the
+  catalog router: it is the picker an organization's guardrail form fills from.
 """
 
 from typing import Annotated, Literal, cast
@@ -44,6 +42,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    SearchToolServiceDep,
     UnitOfWorkDep,
     get_config,
     get_db,
@@ -52,6 +51,7 @@ from gateway.api.deps import (
     verify_catalog_reader,
     verify_master_key,
 )
+from gateway.api.key_scopes import key_scope
 from gateway.api.routes._helpers import database_error
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
@@ -64,11 +64,10 @@ from gateway.services.guardrail_catalog import (
     BuiltInGuardrailCatalog,
     GuardrailCatalog,
     build_builtin_guardrail_catalog,
-    fetch_guardrail_catalog,
+    cached_guardrail_catalog,
 )
 from gateway.services.runtime_settings_service import SettingValue
-from gateway.services.search_tool_store_service import refresh_search_tool_cache
-from gateway.services.tenancy.deployment_user_service import DeploymentUserService
+from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess
 from gateway.services.tool_settings_service import (
     GUARDRAILS_URL,
     SERVICE_URL_FIELD,
@@ -108,11 +107,12 @@ reader_router = APIRouter(
     tags=["tool-settings"],
     dependencies=[Depends(verify_master_key)],
 )
-# The built-in catalog, which describes the installed ``any_guardrail`` rather
-# than anything this deployment configured. A tenant reaches it: the organization
-# guardrail form is the picker's other caller, and it is owners and admins who
-# fill it, never an operator. Gated like the other catalog reads so admitting a
-# session is spelled at the router (see ``deps.verify_catalog_reader``).
+# The two guardrail catalogs: the installed ``any_guardrail`` and the profiles the
+# deployment's guardrails service built. A tenant reaches both: the organization
+# guardrail form is the pickers' other caller, filled by owners and admins rather
+# than an operator, and a profile name is what any caller sends. Gated like the
+# other catalog reads so admitting a session is spelled at the router (see
+# ``deps.verify_catalog_reader``).
 catalog_router = APIRouter(
     prefix="/tool-settings",
     tags=["tool-settings"],
@@ -168,7 +168,7 @@ class UpdateToolSettingsRequest(BaseModel):
     """Change one or more tool settings. Omitted fields are left unchanged; an
     explicit ``null`` clears a field back to the configured env/YAML default."""
 
-    # A valid partial update, so the generated OpenAPI/Postman example is runnable
+    # A valid partial update, so the generated OpenAPI example is runnable
     # (omitted fields stay unchanged; the URL is well-formed and max_results >= 1).
     model_config = ConfigDict(
         json_schema_extra={"example": {"web_search_url": "http://searxng:8080", "web_search_max_results": 5}}
@@ -262,13 +262,13 @@ async def get_tool_settings(
     a session reads everything only while it operates the deployment, and
     otherwise gets the fields without the service endpoints in them.
     """
-    include_urls = session_identity is None or await DeploymentUserService(db).has_administration_access(
+    include_urls = session_identity is None or await DeploymentAdministrationAccess(db).has_administration_access(
         session_identity
     )
     return _current_fields(config, include_urls=include_urls)
 
 
-@reader_router.get("/guardrails/profiles")
+@catalog_router.get("/guardrails/profiles", openapi_extra=key_scope(None))
 async def list_guardrail_profiles(
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> GuardrailCatalog:
@@ -291,15 +291,15 @@ async def list_guardrail_profiles(
     caller-supplied and fetching it here would make this a way to have the
     gateway request an address of the caller's choosing.
 
-    Not on ``verify_catalog_reader``, despite being a catalog read: that gate
-    admits any API key to the deployment-describing reads, and admitting a key
-    here would let any workspace credential dial the deployment's guardrails
-    service. This is a management read, so it takes the router's own gate.
+    On ``verify_catalog_reader``, so any API key reads it: a caller who may send
+    a profile name may learn which ones exist (otari#2690). The answer is cached
+    for 30 seconds per worker, so however many reads arrive, a worker sends the
+    deployment's guardrails service at most one request in that time.
     """
-    return await fetch_guardrail_catalog(cast("str | None", effective_value(config, GUARDRAILS_URL)))
+    return await cached_guardrail_catalog(cast("str | None", effective_value(config, GUARDRAILS_URL)))
 
 
-@catalog_router.get("/guardrails/catalog")
+@catalog_router.get("/guardrails/catalog", openapi_extra=key_scope(None))
 async def list_builtin_guardrails() -> BuiltInGuardrailCatalog:
     """List the guardrails this gateway can run itself, for the form that defines one.
 
@@ -326,10 +326,8 @@ async def list_builtin_guardrails() -> BuiltInGuardrailCatalog:
     every deployment of the same build, and a parameter's environment variable is
     a name, never whether that name is set.
 
-    The profiles read next door keeps the stricter gate, and the difference is
-    reach rather than audience. That one dials ``guardrails_url``, so admitting a
-    key there would let a workspace credential probe the deployment's own
-    service. This one dials nothing.
+    The profiles read next door takes the same gate. It differs in reach: that
+    one dials ``guardrails_url``, from a short cache, and this one dials nothing.
     """
     return build_builtin_guardrail_catalog()
 
@@ -339,6 +337,7 @@ async def update_tool_settings(
     request: UpdateToolSettingsRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    search_tools: SearchToolServiceDep,
 ) -> ToolSettingsResponse:
     """Persist and apply tool/guardrail setting changes.
 
@@ -355,7 +354,7 @@ async def update_tool_settings(
                 # A search tool stored through another replica since this worker's
                 # overlay last refreshed can be the one a search default names, or
                 # take a fetch default's name and so leave that fetch instance out.
-                await refresh_search_tool_cache(db, config)
+                await search_tools.refresh_rows()
             normalized = {key: await stage_override(db, key, value) for key, value in updates.items()}
             # Here rather than in the service's own check, which also runs at
             # startup, before the stored search tools a default may name.

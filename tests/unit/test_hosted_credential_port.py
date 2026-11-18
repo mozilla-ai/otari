@@ -23,7 +23,7 @@ plain build:
 import asyncio
 import logging
 import uuid
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Iterator, Mapping
 from contextlib import asynccontextmanager
 from decimal import Decimal
 from typing import Any, cast
@@ -34,13 +34,14 @@ from any_llm import LLMProvider
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from _unavailable_model_support import reporter_with_null_listener
 from gateway.api.routes import _pipeline as pipeline
 from gateway.api.routes import chat, messages, responses
 from gateway.container import build_container
 from gateway.core.config import GatewayConfig
 from gateway.core.error_codes import ERROR_CODE_HEADER, INSUFFICIENT_FUNDS, PROVIDER_NOT_CONFIGURED
 from gateway.log_config import logger as gateway_logger
-from gateway.ports.billing_port import BillingPort, InsufficientFundsError
+from gateway.ports.billing_port import NO_TOOLS, BilledModel, BillingPort, InsufficientFundsError, ToolUse
 from gateway.ports.model_provider_port import (
     NO_ORGANIZATION,
     HostedAccessDeniedError,
@@ -153,6 +154,7 @@ def _ctx(
     config: GatewayConfig | None = None,
 ) -> pipeline.RequestContext:
     return pipeline.RequestContext(
+        unavailable_model_reporter=reporter_with_null_listener(),
         config=config or GatewayConfig(),
         db=cast(AsyncSession, AsyncMock()),
         uow=cast(Any, AsyncMock()),
@@ -499,11 +501,13 @@ async def test_a_named_hosted_provider_is_dispatched_as_its_implementation_under
 
 
 @pytest.mark.asyncio
-async def test_a_multi_candidate_plan_asks_for_each_candidate_only_when_the_walk_reaches_it() -> None:
+@pytest.mark.parametrize("candidate_count", [1, 2])
+async def test_a_walk_asks_for_each_candidate_only_when_it_reaches_it(candidate_count: int) -> None:
     """A routed chain dispatches from the plan's own kwargs, so the port is asked per candidate, as it is sent."""
 
     class _Plan:
-        attempts = (_uncredentialed(), _uncredentialed())
+        attempts = (_uncredentialed(),) * candidate_count
+        automatic = object() if candidate_count == 1 else None
 
     port = RecordingPort(credential=HostedCredential(api_key="hosted", api_base=None, response_provider="openai"))
     ctx = _ctx(resolved_provider=_uncredentialed(), plan=_Plan())
@@ -793,14 +797,38 @@ class RecordingBilling:
         self.refuse = refuse
         self.charge_error = charge_error
         self.calls: list[tuple[Any, ...]] = []
+        self.billed: list[BilledModel | None] = []
 
     async def apply_due_credit(self, *, organization_id: uuid.UUID) -> None:
         self.calls.append(("apply_due_credit", organization_id))
 
-    async def require_funds_on_deposit(self, *, organization_id: uuid.UUID) -> None:
+    async def require_funds_on_deposit(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        billed: BilledModel | None,
+        tools: frozenset[str],
+        actor_user_id: uuid.UUID | None,
+    ) -> None:
         self.calls.append(("require_funds_on_deposit", organization_id))
+        self.billed.append(billed)
         if self.refuse is not None:
             raise self.refuse
+
+    async def has_funds_on_deposit(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        billed: BilledModel | None,
+        tools: frozenset[str],
+        actor_user_id: uuid.UUID | None,
+    ) -> bool:
+        raise AssertionError("the completion path reads funds through its gate")
+
+    async def concurrency_limit(
+        self, *, organization_id: uuid.UUID, billed: BilledModel, actor_user_id: uuid.UUID | None
+    ) -> int | None:
+        return None
 
     async def require_unheld_funds(self, *, organization_id: uuid.UUID) -> None:
         raise AssertionError("the completion path places no holds")
@@ -816,11 +844,14 @@ class RecordingBilling:
         *,
         organization_id: uuid.UUID,
         amount: Decimal,
+        billed: BilledModel | None,
+        tools: Mapping[str, ToolUse],
         description: str | None = None,
         actor_user_id: uuid.UUID | None = None,
         api_key_id: str | None = None,
     ) -> None:
         self.calls.append(("charge", organization_id, amount, description, actor_user_id, api_key_id))
+        self.billed.append(billed)
         if self.charge_error is not None:
             raise self.charge_error
 
@@ -858,6 +889,10 @@ async def test_a_hosted_credential_is_gated_on_funds_and_armed_for_a_charge() ->
     assert ctx.deployment_charge is not None
     assert ctx.deployment_charge.organization_id == ORGANIZATION_ID
     assert ctx.deployment_charge.billing is billing
+    # The gate and the charge both learn the model the request is served on.
+    served = BilledModel(provider="openai", model="gpt-4o", open_weights=False)
+    assert billing.billed == [served]
+    assert ctx.deployment_charge.billed == served
 
 
 @pytest.mark.asyncio
@@ -997,6 +1032,7 @@ def _charge(billing: RecordingBilling) -> DeploymentCharge:
         api_key_id="key-1",
         actor_user_id=WORKSPACE_ID,
         request_id="req-1",
+        billed=None,
     )
 
 
@@ -1006,7 +1042,13 @@ async def test_a_settled_cost_is_charged_in_a_savepoint() -> None:
     db = _SavepointSession()
 
     await pipeline.charge_deployment_paid(
-        _charge(billing), cast(Any, db), Decimal("0.0125"), provider="openai", model="gpt-4o", expects_cost=True
+        _charge(billing),
+        cast(Any, db),
+        Decimal("0.0125"),
+        tools=NO_TOOLS,
+        provider="openai",
+        model="gpt-4o",
+        expects_cost=True,
     )
 
     assert billing.calls == [("charge", ORGANIZATION_ID, Decimal("0.0125"), "openai:gpt-4o", WORKSPACE_ID, "key-1")]
@@ -1018,7 +1060,13 @@ async def test_a_settled_cost_is_charged_in_a_savepoint() -> None:
 async def test_nothing_is_charged_for_no_cost(cost: Decimal) -> None:
     billing = RecordingBilling()
     await pipeline.charge_deployment_paid(
-        _charge(billing), cast(Any, _SavepointSession()), cost, provider="openai", model="gpt-4o", expects_cost=True
+        _charge(billing),
+        cast(Any, _SavepointSession()),
+        cost,
+        tools=NO_TOOLS,
+        provider="openai",
+        model="gpt-4o",
+        expects_cost=True,
     )
     assert billing.calls == []
 
@@ -1028,7 +1076,13 @@ async def test_an_unpriced_settlement_is_not_charged_and_says_so(gateway_logs: p
     billing = RecordingBilling()
 
     await pipeline.charge_deployment_paid(
-        _charge(billing), cast(Any, _SavepointSession()), None, provider="openai", model="gpt-4o", expects_cost=True
+        _charge(billing),
+        cast(Any, _SavepointSession()),
+        None,
+        tools=NO_TOOLS,
+        provider="openai",
+        model="gpt-4o",
+        expects_cost=True,
     )
 
     assert billing.calls == []
@@ -1045,6 +1099,7 @@ async def test_a_settlement_owing_nothing_is_not_warned_about(gateway_logs: pyte
         _charge(RecordingBilling()),
         cast(Any, _SavepointSession()),
         None,
+        tools=NO_TOOLS,
         provider="openai",
         model="gpt-4o",
         expects_cost=False,
@@ -1058,7 +1113,13 @@ async def test_a_failed_charge_is_logged_and_does_not_raise(gateway_logs: pytest
     db = _SavepointSession()
 
     await pipeline.charge_deployment_paid(
-        _charge(billing), cast(Any, db), Decimal("1"), provider="openai", model="gpt-4o", expects_cost=True
+        _charge(billing),
+        cast(Any, db),
+        Decimal("1"),
+        tools=NO_TOOLS,
+        provider="openai",
+        model="gpt-4o",
+        expects_cost=True,
     )
 
     # Its savepoint is rolled back, so nothing it wrote reaches the settlement's commit.
@@ -1072,7 +1133,7 @@ async def test_a_failed_charge_is_logged_and_does_not_raise(gateway_logs: pytest
 async def test_a_request_that_is_not_deployment_paid_is_never_charged() -> None:
     db = _SavepointSession()
     await pipeline.charge_deployment_paid(
-        None, cast(Any, db), Decimal("1"), provider="openai", model="gpt-4o", expects_cost=True
+        None, cast(Any, db), Decimal("1"), tools=NO_TOOLS, provider="openai", model="gpt-4o", expects_cost=True
     )
     assert db.released == 0
 

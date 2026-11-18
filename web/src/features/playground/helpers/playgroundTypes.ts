@@ -52,7 +52,16 @@ export interface ChatTurn {
   /** Present once an assistant turn has finished and reported its usage. */
   usage?: TurnUsage
   /** Set instead of `usage` when the turn ended in a refusal or a fault. */
-  errorMessage?: string
+  error?: TurnError
+}
+
+/** Why a turn failed, with what the gateway said when it refused the request. */
+export interface TurnError {
+  message: string
+  /** The HTTP status of a refusal; undefined for a fault mid-stream or no response, which have none. */
+  status?: number
+  /** The refusal's error `code` (`insufficient_funds`, say), or "" without one. */
+  code: string
 }
 
 export interface PanelState {
@@ -63,6 +72,12 @@ export interface PanelState {
   isAwaitingFirstToken: boolean
   /** True for the whole request, including while tokens are still arriving. */
   isStreaming: boolean
+  /**
+   * The id every request of this panel's conversation sends as
+   * `Otari-Conversation-Id`, so the gateway groups them into one session.
+   * Unset until the first send; clearing the turns clears it too.
+   */
+  sessionId?: string
 }
 
 export const EMPTY_PANEL: PanelState = {

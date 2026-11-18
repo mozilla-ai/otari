@@ -10,7 +10,7 @@ from any_llm.types.completion import (
     CompletionUsage,
 )
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import Field, field_validator
+from pydantic import Field, PrivateAttr, field_validator, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
@@ -26,36 +26,32 @@ from gateway.api.deps import (
     get_log_writer,
     get_unit_of_work,
 )
-from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages, with_retry_hint
+from gateway.api.key_scopes import key_scope, may_read_files
+from gateway.api.routes._guardrail_targets import chat_targets
+from gateway.api.routes._helpers import routing_signal, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuard, IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
     DeclaredTools,
-    ErrorKind,
     ToolBackends,
     ToolContext,
-    classify_provider_error,
     log_usage,
     prepare_gateway_tools,
-    provider_error_headers,
-    provider_failure_detail,
-    rate_limit_headers,
     resolve_dispatch_provider,
     resolve_request_context,
     run_non_stream,
     run_single_attempt_stream,
     scope_prompt_cache_key,
-    stream_error_code,
-    stream_error_message,
 )
 from gateway.api.routes._request_tags import RequestMetadata, RequestTagsHeader, resolved_tags
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
+from gateway.core.error_codes import ErrorKind
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.core.usage import GatewayUsage, reasoning_tokens_of
+from gateway.core.usage import GatewayUsage, cache_write_1h_tokens_of, provider_web_searches_of, reasoning_tokens_of
 from gateway.log_config import logger
-from gateway.models.guardrails import GuardrailConfig
+from gateway.models.guardrails import RequestedGuardrails
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT
 from gateway.ports.billing_port import BillingPort
@@ -64,6 +60,7 @@ from gateway.provider_fields import surface_provider_fields
 from gateway.schemas.inference import SettledCost
 from gateway.services.files import FileService, StagedFile
 from gateway.services.inference import (
+    UpstreamFailure,
     bind_upstream_user,
     chat_user_fields,
     is_chat_stream_cost_carrier,
@@ -74,13 +71,15 @@ from gateway.services.inference import (
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import (
     MAX_TOOL_ITERATIONS_CAP,
+    RoundGate,
     ToolBackend,
     inject_purpose_hints,
     mcp_tool_loop,
     mcp_tool_loop_stream,
     reports_tool_activity,
 )
-from gateway.services.provider_kwargs import apply_endpoint_defaults
+from gateway.services.pricing import PriceFacts
+from gateway.services.provider_kwargs import apply_endpoint_defaults, with_request_fields
 from gateway.services.providers import acompletion
 from gateway.services.tools import (
     CODE_EXECUTION_HEADER,
@@ -92,9 +91,10 @@ from gateway.services.tools import (
     with_typed_code_execution_tool,
     without_otari_tool_calls,
 )
-from gateway.services.traces import read_turn
+from gateway.services.traces import read_context, read_turn
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt
+from gateway.types.key_scope import KeyScope
 from gateway.types.normalization_target import NormalizationTarget
 from gateway.types.session_principal import SessionPrincipal
 
@@ -108,7 +108,6 @@ __all__ = [
     "ChatCompletionRequest",
     "chat_completions",
     "log_usage",
-    "rate_limit_headers",
     "router",
     "run_chat_completion",
 ]
@@ -120,14 +119,19 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     The completion-param fields are derived from any-llm's ``CompletionParams``
     (see ``_schema_derive``) so the schema cannot silently drop a param any-llm
     forwards. Fields below either tighten a derived field (``messages``,
-    ``response_format``), declare an OpenAI wire param ``CompletionParams`` does
-    not model (``service_tier``, forwarded as an any-llm ``**kwargs`` param), add
-    gateway-internal behavior (``mcp_servers``, ``mcp_server_ids``,
-    ``guardrails``, ``tools_header``, ``max_tool_iterations``) that is stripped
-    before the request is forwarded upstream, or restate a derived field
-    unchanged to document it (``max_completion_tokens``), which is only worth
-    doing where the wire contract is not guessable from the field itself.
+    ``response_format``), add gateway-internal behavior (``mcp_servers``,
+    ``mcp_server_ids``, ``guardrails``, ``tools_header``,
+    ``max_tool_iterations``) that is stripped before the request is forwarded
+    upstream, or restate a derived field unchanged to document it
+    (``max_completion_tokens``), which is only worth doing where the wire
+    contract is not guessable from the field itself.
     """
+
+    # A field beyond the ones below is set aside here rather than kept on the
+    # model, so ``model_dump`` still never carries one (a caller's ``api_key``
+    # would otherwise override the gateway's). It reaches the provider only when
+    # its instance lists it in ``request_fields``; see ``with_request_fields``.
+    _extra_fields: dict[str, Any] = PrivateAttr(default_factory=dict)
 
     messages: list[dict[str, Any]] = Field(min_length=1)
     # any-llm types this as ``dict | type | None``; the wire body only ever
@@ -136,21 +140,6 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     # any-llm types ``stream`` as ``bool | None``; keep the OpenAI wire contract
     # (a non-nullable boolean defaulting to false) for stable SDK generation.
     stream: bool = False
-    # Part of the OpenAI chat wire contract, but absent from any-llm's
-    # ``CompletionParams``, so derivation cannot supply it and the derived base
-    # (pydantic's default ``extra="ignore"``) dropped a caller's value before the
-    # provider call. Declared here so it survives ``model_dump`` and rides
-    # any-llm's ``**kwargs`` passthrough into the provider request. Left as a
-    # free-form string rather than an enum: the tier vocabulary is
-    # provider-specific ("auto"/"default"/"flex"/"scale"/"priority" on OpenAI,
-    # "auto"/"standard_only" on Anthropic) and grows independently of this
-    # gateway, so the provider is the right place to reject an unknown value.
-    # ``ResponsesParams`` already declares it, so /api/v1/responses never had the gap.
-    #
-    # Stopgap: remove this declaration once ``CompletionParams`` models the param
-    # and the SDK pin is bumped (mozilla-ai/any-llm#1269, tracked in #565). Until
-    # then it also shadows whatever annotation any-llm picks for it.
-    service_tier: str | None = None
     # Redeclared only to carry a description: the field is derived, but the
     # relationship between the two output-cap fields is the whole reason a caller
     # gets a completion instead of a 502, and it is not guessable from the schema.
@@ -175,7 +164,7 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     # Bounded on the list arm, not the union, so the ceiling caps the number of
     # ids rather than the length of any one value (see `core/sql.MAX_FILTER_VALUES`).
     mcp_server_ids: Annotated[list[uuid.UUID], Field(max_length=MAX_MCP_SERVER_IDS)] | None = None
-    guardrails: list[GuardrailConfig] | None = Field(default=None, max_length=8)
+    guardrails: RequestedGuardrails | None = None
     tools_header: str | None = Field(
         default=None,
         max_length=4000,
@@ -201,6 +190,19 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     # OpenAI's chat field, absent from ``CompletionParams``: read for request tags
     # and never forwarded, since a provider other than OpenAI would reject it.
     metadata: RequestMetadata = None
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _set_extra_fields_aside(cls, data: Any, handler: Any) -> "ChatCompletionRequest":
+        request: ChatCompletionRequest = handler(data)
+        if isinstance(data, dict):
+            request._extra_fields = {name: value for name, value in data.items() if name not in cls.model_fields}
+        return request
+
+    @property
+    def extra_fields(self) -> dict[str, Any]:
+        """The fields the request carried beyond its schema's."""
+        return dict(self._extra_fields)
 
 
 def _every_choice_finishes() -> Callable[[ChatCompletionChunk], bool]:
@@ -253,11 +255,22 @@ class _ChatAdapter:
     stream_format: StreamFormat = OPENAI_STREAM_FORMAT
     log_success_without_usage = True
 
-    def __init__(self, endpoint: str = USAGE_ENDPOINT) -> None:
-        # The only thing that varies between instances, and the only reason
-        # there is more than one: the Playground's rows carry their own label.
-        # Everything else about the format is identical, which is the point.
+    def __init__(self, endpoint: str = USAGE_ENDPOINT, *, forwards_usage_chunk: bool = True) -> None:
+        # What varies between instances: the Playground's rows carry their own
+        # label, and a stream whose caller turned include_usage off keeps the
+        # usage chunk off the wire. Everything else about the format is identical.
         self.endpoint = endpoint
+        self.forwards_usage_chunk = forwards_usage_chunk
+
+    def for_stream_options(self, stream_options: dict[str, Any] | None) -> "_ChatAdapter":
+        """This adapter, or one that drops the usage chunk when the caller set ``include_usage`` off.
+
+        The provider is asked for that chunk regardless (``prepare_stream_kwargs``), since the
+        stream is billed on it; the caller still gets the stream it asked for.
+        """
+        if stream_options is None or stream_options.get("include_usage"):
+            return self
+        return _ChatAdapter(self.endpoint, forwards_usage_chunk=False)
 
     def error(
         self,
@@ -269,16 +282,17 @@ class _ChatAdapter:
         return HTTPException(status_code=status_code, detail=message, headers=headers)
 
     def provider_error(self, exc: BaseException, model: str | None = None) -> HTTPException:
-        mapping = classify_provider_error(exc, model=model)
+        failure = UpstreamFailure(exc, model=model)
+        mapping = failure.mapping
         if mapping is not None:
             return HTTPException(
                 status_code=mapping.status_code,
                 detail=mapping.detail,
-                headers=with_retry_hint(exc, mapping.status_code, provider_error_headers(exc, mapping.status_code)),
+                headers=with_retry_hint(exc, mapping.status_code, failure.headers),
             )
         return HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=provider_failure_detail(exc),
+            detail=failure.unclassified_detail(),
             headers=with_retry_hint(exc, status.HTTP_502_BAD_GATEWAY, None),
         )
 
@@ -287,14 +301,17 @@ class _ChatAdapter:
 
     def stream_error_payload(self, exc: BaseException, provider: str | None = None) -> str:
         failure = provider_failure(exc, provider)
+        upstream = UpstreamFailure(exc)
         return openai_error_event(
             self.stream_format,
-            stream_error_code(exc),
-            stream_error_message(exc),
+            upstream.stream_code,
+            upstream.stream_message,
             failure.as_dict() if failure is not None else None,
         )
 
     def format_chunk(self, chunk: ChatCompletionChunk) -> str:
+        if not self.forwards_usage_chunk and chunk.usage is not None and not chunk.choices:
+            return ""
         return f"data: {json.dumps(_without_nulls(chunk), separators=(',', ':'))}\n\n"
 
     def extract_stream_usage(self, chunk: ChatCompletionChunk) -> CompletionUsage | None:
@@ -311,14 +328,18 @@ class _ChatAdapter:
             prompt_tokens_details=details,
             cache_read_tokens=(details.cached_tokens or 0) if details is not None else 0,
             cache_write_tokens=(details.cache_write_tokens or 0) if details is not None else 0,
+            cache_write_1h_tokens=cache_write_1h_tokens_of(chunk.usage),
             reasoning_tokens=reasoning_tokens_of(chunk.usage),
+            provider_web_searches=provider_web_searches_of(chunk.usage),
+            service_tier=chunk.service_tier,
+            inference_geo=chunk.usage.inference_geo,
         )
         return GatewayUsage(**fields)
 
     def extract_usage(self, result: ChatCompletion) -> CompletionUsage | None:
         if result.usage is None:
             return None
-        return GatewayUsage.from_completion_usage(result.usage)
+        return GatewayUsage.from_completion_usage(result.usage, service_tier=result.service_tier)
 
     def attach_cost(
         self,
@@ -327,12 +348,7 @@ class _ChatAdapter:
     ) -> bool:
         if value.usage is None:
             return False
-        value.usage = value.usage.model_copy(
-            update={
-                "cost_usd": settlement.cost_usd,
-                "pricing_source": settlement.pricing_source,
-            }
-        )
+        value.usage = value.usage.model_copy(update=settlement.usage_fields())
         return True
 
     def is_stream_cost_carrier(self, chunk: ChatCompletionChunk) -> bool:
@@ -346,8 +362,8 @@ class _ChatAdapter:
         return await acompletion(**_with_upstream_user(kwargs))  # type: ignore[return-value]
 
     def prepare_stream_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        if kwargs.get("stream_options") is None:
-            kwargs["stream_options"] = {"include_usage": True}
+        # The usage chunk is what the stream is billed on, so it is asked for whatever the caller sent.
+        kwargs["stream_options"] = {**(kwargs.get("stream_options") or {}), "include_usage": True}
         return kwargs
 
     async def run_tool_loop(
@@ -359,8 +375,9 @@ class _ChatAdapter:
         *,
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
+        round_gate: RoundGate | None = None,
     ) -> ChatCompletion:
-        # ``native_tools`` names the web tools whose calls the answer reports in
+        # ``native_tools`` names the built-in tools whose calls the answer reports in
         # ``otari_tool_calls``; ``use_budget`` caps what the caller is billed for.
         # Each kwarg is passed only when set, so test fakes can mirror each call shape.
         extra: dict[str, Any] = {}
@@ -368,6 +385,8 @@ class _ChatAdapter:
             extra["on_first_response"] = on_first_response
         if use_budget is not None:
             extra["use_budget"] = use_budget
+        if round_gate is not None:
+            extra["round_gate"] = round_gate
         if native_tools:
             extra["native_tools"] = native_tools
         return await mcp_tool_loop(
@@ -385,10 +404,16 @@ class _ChatAdapter:
         *,
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
+        round_gate: RoundGate | None = None,
+        on_first_response: Callable[[], None] | None = None,
     ) -> AsyncIterator[ChatCompletionChunk]:
         extra: dict[str, Any] = {}
+        if on_first_response is not None:
+            extra["on_first_response"] = on_first_response
         if use_budget is not None:
             extra["use_budget"] = use_budget
+        if round_gate is not None:
+            extra["round_gate"] = round_gate
         if native_tools:
             extra["native_tools"] = native_tools
         if reports_tool_activity(self.endpoint):
@@ -465,11 +490,18 @@ def _effective_output_cap(max_tokens: int | None, max_completion_tokens: int | N
     return max_completion_tokens
 
 
+def _held_output_tokens(output_cap: int | None, n: int | None, default_output_tokens: int) -> int | None:
+    """The output tokens a request's budget hold covers: one cap for each of the ``n`` choices it asks for."""
+    if n is None or n <= 1:
+        return output_cap
+    return (output_cap if output_cap is not None else default_output_tokens) * n
+
+
 _MASTER_KEY_USER_REQUIRED = "When using master key, 'user' field is required in request body"
 _USER_FORBIDDEN = "'user' field does not match the authenticated API key's user"
 
 
-@router.post("/completions", response_model=None)
+@router.post("/completions", response_model=None, openapi_extra=key_scope(KeyScope.INFERENCE_RUN))
 async def chat_completions(
     raw_request: Request,
     response: Response,
@@ -545,7 +577,9 @@ async def run_chat_completion(
     also what picks the usage row's endpoint label, so a Playground request is
     countable separately from a customer's (``PLAYGROUND_USAGE_ENDPOINT``).
     """
-    adapter = _PLAYGROUND_ADAPTER if session_principal is not None else _ADAPTER
+    adapter = (_PLAYGROUND_ADAPTER if session_principal is not None else _ADAPTER).for_stream_options(
+        request.stream_options
+    )
     if not request.model.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -566,8 +600,7 @@ async def run_chat_completion(
     async def _normalize(target: NormalizationTarget) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the wire payload (extract to
         # text for text-only models, inline for natively-capable ones) before
-        # the cost estimate. A no-op when the files feature is off or the
-        # request has no attachments.
+        # the cost estimate. A no-op when the request has no attachments.
         request.messages, stats = await normalize_request_messages(
             request.messages,
             fmt="openai",
@@ -575,13 +608,15 @@ async def run_chat_completion(
             provider=target.provider,
             model=target.model,
             files=files,
-            user_id=target.user_id,
+            user_id=target.file_user_id,
+            may_read_files=target.may_read_files,
             instance=target.instance,
             workspace_id=target.file_workspace_id,
             candidates=target.candidate_providers,
             credential_workspace_id=target.credential_workspace_id,
             hosted_credential=target.hosted_credential,
             upstream_user=target.upstream_user,
+            client_country=target.client_country,
             sandbox_requested=sandbox_requested(
                 request.tools,
                 config=config,
@@ -596,6 +631,19 @@ async def run_chat_completion(
 
     output_cap = _effective_output_cap(request.max_tokens, request.max_completion_tokens)
 
+    declared = DeclaredTools(
+        guardrails=request.guardrails,
+        guardrail_targets=lambda: chat_targets(request.messages),
+        tools=request.tools,
+        mcp_servers=request.mcp_servers,
+        mcp_server_ids=request.mcp_server_ids,
+        max_tool_iterations=request.max_tool_iterations,
+        tools_header=request.tools_header,
+        code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
+        web_fetch_header=raw_request.headers.get(WEB_FETCH_HEADER),
+        web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
+    )
+
     try:
         ctx = await resolve_request_context(
             adapter=adapter,
@@ -608,42 +656,35 @@ async def run_chat_completion(
             model=request.model,
             user_id_from_request=request.user,
             safety_identifier=request.safety_identifier,
+            price_facts=PriceFacts(service_tier=request.service_tier),
             estimate_prompt_chars=len(str(request.messages)),
-            estimate_max_output_tokens=output_cap,
+            estimate_max_output_tokens=_held_output_tokens(
+                output_cap, request.n, config.budget_estimate_default_output_tokens
+            ),
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
             user_forbidden_detail=_USER_FORBIDDEN,
             session_principal=session_principal,
-            routing_signal=lambda: routing_signal_from_messages(
-                request.messages, raw_request, has_tools=bool(request.tools)
-            ),
+            streaming=bool(request.stream),
+            routing_signal=lambda: routing_signal(raw_request),
             normalize_messages=_normalize,
-            tools=request.tools,
+            declared=declared,
             code_execution_policies=tool_ports.code_execution_policy,
             model_provider=model_provider,
             idempotency=None if request.stream else idempotency,
             tags=resolved_tags(tags_header, request.metadata),
             turn=read_turn("chat", request.messages),
+            context=lambda: read_context("chat", request.messages, tools=request.tools),
             session_label=request.session_label,
         )
     except IdempotentReplay as replay:
         return replay.response()
+    ctx.request_extras = request.extra_fields
 
     tool_ctx = await prepare_gateway_tools(
         adapter=adapter,
         ctx=ctx,
         response=response,
-        declared=DeclaredTools(
-            guardrails=request.guardrails,
-            guardrail_text=latest_user_text(request.messages),
-            tools=request.tools,
-            mcp_servers=request.mcp_servers,
-            mcp_server_ids=request.mcp_server_ids,
-            max_tool_iterations=request.max_tool_iterations,
-            tools_header=request.tools_header,
-            code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
-            web_fetch_header=raw_request.headers.get(WEB_FETCH_HEADER),
-            web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
-        ),
+        declared=declared,
         backends=ToolBackends(
             ports=tool_ports,
             sandbox_containers=build_sandbox_container_registry(
@@ -652,6 +693,7 @@ async def run_chat_completion(
                 user_id=ctx.user_id,
                 workspace_id=ctx.workspace_id,
                 port=tool_ports.code_execution,
+                may_read_stored_files=may_read_files(ctx.api_key),
             ),
             sandbox_files=build_sandbox_file_bridge(
                 raw_request=raw_request,
@@ -661,6 +703,7 @@ async def run_chat_completion(
                 workspace_id=ctx.workspace_id,
                 inputs=sandbox_inputs,
             ),
+            billing=billing,
         ),
     )
 
@@ -696,7 +739,14 @@ async def run_chat_completion(
             ctx, config, request.model, adapter=adapter, model_provider=model_provider, billing=billing
         )
         call_kwargs = provider_attempt_kwargs(
-            apply_endpoint_defaults({**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved)
+            apply_endpoint_defaults(
+                {
+                    **resolved.kwargs,
+                    **with_request_fields(config, resolved.instance, request_fields, ctx.request_extras),
+                    "model": resolved.dispatch_model,
+                },
+                resolved,
+            )
         )
         return await run_single_attempt_stream(
             adapter=adapter,
@@ -707,13 +757,21 @@ async def run_chat_completion(
             model=resolved.model,
             display_model=resolved.alias,
             base_request_fields=request_fields,
+            response=response,
         )
 
     resolved = await resolve_dispatch_provider(
         ctx, config, request.model, adapter=adapter, model_provider=model_provider, billing=billing
     )
     call_kwargs = provider_attempt_kwargs(
-        apply_endpoint_defaults({**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved)
+        apply_endpoint_defaults(
+            {
+                **resolved.kwargs,
+                **with_request_fields(config, resolved.instance, request_fields, ctx.request_extras),
+                "model": resolved.dispatch_model,
+            },
+            resolved,
+        )
     )
     result = await run_non_stream(
         adapter=adapter,

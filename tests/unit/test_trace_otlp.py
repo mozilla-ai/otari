@@ -10,10 +10,31 @@ from opentelemetry.proto.common.v1.common_pb2 import AnyValue, ArrayValue, KeyVa
 
 from gateway.api.routes.otlp import _attributes
 from gateway.core.config import GatewayConfig
-from gateway.services.traces import MAX_SPANS_PER_EXPORT, OtlpSpan, TraceWriter, project_otlp_spans
+from gateway.services.external_usage_service import (
+    CLAUDE_SOURCE,
+    ExternalUsageEvent,
+    PricedEvent,
+    ReadUsage,
+    one_booking_per_response,
+)
+from gateway.services.traces import (
+    MAX_SPANS_PER_EXPORT,
+    OtlpSpan,
+    SessionRef,
+    TraceWriter,
+    project_otlp_spans,
+    record_otlp_export,
+)
 from gateway.services.traces._collector import call_id_digest
-from gateway.services.traces._otlp import MAX_TRACES_PER_EXPORT, PricedRequest, record_priced_requests
+from gateway.services.traces._otlp import (
+    MAX_TRACES_PER_EXPORT,
+    PricedRequest,
+    otlp_sessions,
+    priced_requests,
+    record_priced_requests,
+)
 from gateway.services.traces._reading import _gate_summaries
+from gateway.services.traces._service import _growth
 from gateway.types.traces import TraceWrite, is_identifier
 
 _WORKSPACE = uuid.uuid4()
@@ -96,6 +117,64 @@ def test_spans_naming_one_conversation_share_a_trace_across_otel_traces() -> Non
     )
 
     assert sorted(len(write.spans) for write in writes) == [1, 2]
+
+
+def test_a_conversation_named_on_the_root_alone_holds_its_whole_otel_trace() -> None:
+    writes = _project(
+        _span("root", attrs={"gen_ai.conversation.id": "conv-1"}),
+        _span("chat", parent="root", attrs={"gen_ai.operation.name": "chat"}),
+        _span("tool", parent="chat", attrs={"gen_ai.operation.name": "execute_tool"}),
+    )
+
+    [write] = writes
+    assert len(write.spans) == 3
+
+
+def test_a_conversation_named_below_the_root_holds_the_spans_around_it() -> None:
+    writes = _project(
+        _span("root"),
+        _span("agent", parent="root", attrs={"gen_ai.conversation.id": "conv-1"}),
+        _span("sibling", parent="root"),
+    )
+
+    [write] = writes
+    assert len(write.spans) == 3
+
+
+def test_a_session_label_an_agent_names_for_its_user_holds_the_spans_under_it() -> None:
+    sessions = otlp_sessions(
+        [
+            _span("root", attrs={"otari.user_session_label": "project:otari", "otari.session_label": "other"}),
+            _span("chat", parent="root", attrs={"gen_ai.operation.name": "chat"}),
+        ]
+    )
+
+    assert set(sessions.values()) == {SessionRef(source="otlp", key="project:otari")}
+
+
+def test_a_long_chain_of_spans_naming_nothing_is_in_the_session_its_root_names() -> None:
+    depth = 20_000
+    chain = [_span("s0", attrs={"gen_ai.conversation.id": "conv-1"})]
+    chain += [_span(f"s{i}", parent=f"s{i - 1}") for i in range(1, depth)]
+
+    sessions = otlp_sessions(reversed(chain))
+
+    assert set(sessions.values()) == {SessionRef(source="otlp", key="conv-1")}
+    assert len(sessions) == depth
+
+
+def test_two_conversations_in_one_otel_trace_each_keep_the_spans_under_them() -> None:
+    writes = _project(
+        _span("a", attrs={"gen_ai.conversation.id": "conv-a"}),
+        _span("a1", parent="a"),
+        _span("b", attrs={"gen_ai.conversation.id": "conv-b"}),
+        _span("b1", parent="b"),
+    )
+
+    assert sorted(sorted(span.otel_span_id or "" for span in write.spans) for write in writes) == [
+        ["a", "a1"],
+        ["b", "b1"],
+    ]
 
 
 def test_a_claude_sessions_threads_share_one_trace() -> None:
@@ -511,13 +590,14 @@ def test_token_counts_are_clamped_and_malformed_ones_dropped() -> None:
 
 
 @pytest.mark.parametrize(
-    ("provider", "input_tokens", "cache_read_key", "cache_write_key"),
+    ("provider", "input_tokens", "cache_read_key", "cache_write_key", "scope"),
     [
         pytest.param(
             "anthropic",
             48_210,
             "gen_ai.usage.cache_read.input_tokens",
-            "gen_ai.usage.cache_creation.input_tokens",
+            "gen_ai.usage.cache_write.input_tokens",
+            "",
             id="inside-as-the-conventions-count-them",
         ),
         pytest.param(
@@ -525,6 +605,7 @@ def test_token_counts_are_clamped_and_malformed_ones_dropped() -> None:
             48_210,
             "gen_ai.usage.cached_tokens",
             "gen_ai.usage.cache_write_tokens",
+            "",
             id="inside-under-older-names",
         ),
         pytest.param(
@@ -532,12 +613,29 @@ def test_token_counts_are_clamped_and_malformed_ones_dropped() -> None:
             300,
             "gen_ai.usage.cache_read_tokens",
             "gen_ai.usage.cache_write_tokens",
+            "",
             id="on-top-when-they-outnumber-it",
+        ),
+        pytest.param(
+            "anthropic",
+            48_210,
+            "gen_ai.usage.cache_read.input_tokens",
+            "gen_ai.usage.cache_creation.input_tokens",
+            "opentelemetry.instrumentation.anthropic",
+            id="inside-from-openllmetry",
+        ),
+        pytest.param(
+            "anthropic",
+            300,
+            "gen_ai.usage.cache_read.input_tokens",
+            "gen_ai.usage.cache_creation.input_tokens",
+            "openlit.instrumentation.anthropic",
+            id="on-top-from-openlit",
         ),
     ],
 )
 def test_an_llm_span_counts_the_whole_prompt_whichever_way_the_exporter_reported_its_cache(
-    provider: str, input_tokens: int, cache_read_key: str, cache_write_key: str
+    provider: str, input_tokens: int, cache_read_key: str, cache_write_key: str, scope: str
 ) -> None:
     attrs = {
         "gen_ai.provider.name": provider,
@@ -546,11 +644,54 @@ def test_an_llm_span_counts_the_whole_prompt_whichever_way_the_exporter_reported
         cache_write_key: 6_010,
         "gen_ai.usage.reasoning.output_tokens": 12,
     }
-    [write] = _project(_span("a", attrs=attrs))
+    [write] = _project(_span("a", attrs=attrs, scope=scope))
 
     [span] = write.spans
     assert (span.input_tokens, span.cache_read_tokens, span.cache_write_tokens) == (48_210, 41_900, 6_010)
     assert span.reasoning_tokens == 12
+
+
+def test_a_known_emitters_cache_is_counted_its_way_even_where_fresh_input_outnumbers_it() -> None:
+    attrs = {
+        "gen_ai.provider.name": "anthropic",
+        "gen_ai.usage.input_tokens": 50_000,
+        "gen_ai.usage.cache_read.input_tokens": 300,
+        "gen_ai.usage.cache_creation.input_tokens": 150,
+    }
+    [write] = _project(_span("a", attrs=attrs, scope="openlit.instrumentation.anthropic"))
+
+    assert write.spans[0].input_tokens == 50_450
+
+
+@pytest.mark.parametrize(
+    ("attrs", "request_id"),
+    [({"gen_ai.response.id": "msg_1"}, "msg_1"), ({}, "a"), ({"gen_ai.response.id": "not an id"}, None)],
+)
+def test_an_llm_span_carries_the_id_the_ledger_priced_its_call_by(
+    attrs: dict[str, str], request_id: str | None
+) -> None:
+    [write] = _project(_span("a", attrs={"gen_ai.operation.name": "chat", **attrs}))
+
+    assert write.spans[0].request_id == request_id
+
+
+def test_a_managed_agents_turn_carries_the_id_its_usage_was_booked_by() -> None:
+    attrs = {"gen_ai.operation.name": "chat", "anthropic.session.id": "sesn_1", "gen_ai.response.id": "msg_1"}
+    [write] = _project(_span("a", name="anthropic.model_request", attrs=attrs, scope="com.anthropic.claude-platform"))
+
+    assert write.spans[0].request_id == f"{'t' * 32}:a"
+
+
+def test_a_cache_write_reported_under_two_names_is_counted_as_the_larger() -> None:
+    attrs = {
+        "gen_ai.usage.input_tokens": 100,
+        "gen_ai.usage.cache_write.input_tokens": 0,
+        "gen_ai.usage.cache_creation.input_tokens": 160,
+    }
+    [write] = _project(_span("a", attrs=attrs, scope="openlit.instrumentation.anthropic"))
+
+    [span] = write.spans
+    assert (span.input_tokens, span.cache_write_tokens) == (260, 160)
 
 
 def test_a_reported_zero_cache_count_is_kept_not_stored_as_unknown() -> None:
@@ -747,6 +888,25 @@ def test_a_priced_request_reaches_a_session_only_from_a_source_the_trace_store_h
     assert len(writer.writes) == written
 
 
+def test_a_priced_request_read_off_its_exported_span_reaches_that_session_from_any_source() -> None:
+    writer = _Writer()
+
+    record_priced_requests(
+        cast(TraceWriter, writer),
+        [PricedRequest("msg_1", "conv-1", datetime.now(UTC), Decimal("0.01"), "otel", traced=True, harness=None)],
+        budget_exempt=True,
+        workspace_id=_WORKSPACE,
+        user_id=None,
+        api_key_id=None,
+        retention=timedelta(days=30),
+    )
+
+    [write] = writer.writes
+    assert write.harness is None
+    assert write.trace_id == SessionRef(source="otlp", key="conv-1").trace_id(_WORKSPACE, None, None)
+    assert [(span.request_id, span.cost_snapshot) for span in write.spans] == [("msg_1", Decimal("0.01"))]
+
+
 def test_a_priced_request_whose_id_a_span_cannot_carry_is_skipped_and_the_rest_recorded() -> None:
     writer = _Writer()
 
@@ -765,3 +925,221 @@ def test_a_priced_request_whose_id_a_span_cannot_carry_is_skipped_and_the_rest_r
 
     [write] = writer.writes
     assert [span.request_id for span in write.spans] == ["req_2"]
+
+
+def test_an_exports_spans_are_taken_in_when_it_was_admitted_not_when_it_finished() -> None:
+    """An upload that outlasts an erasure of its user is judged from when it was let in."""
+    admitted = _NOW - timedelta(minutes=11)
+
+    [write] = project_otlp_spans(
+        [_claude("i1", "interaction", user_prompt="Fix the flaky test")],
+        workspace_id=_WORKSPACE,
+        user_id="alice",
+        api_key_id="k",
+        retention=_RETENTION,
+        now=_NOW,
+        keep_content=True,
+        content_generation=0,
+        captured_at=admitted,
+    ).writes
+
+    assert write.captured_at == admitted
+
+
+def test_a_call_two_instrumentations_both_exported_counts_its_tokens_once_in_the_session() -> None:
+    call = {"gen_ai.operation.name": "chat", "gen_ai.usage.input_tokens": 500, "gen_ai.usage.output_tokens": 20}
+    [write] = _project(
+        _span("sdk", attrs={**call, "gen_ai.response.id": "msg_1"}),
+        _span("openllmetry", attrs={**call, "gen_ai.response.id": "msg_1"}),
+        _span("next", attrs={**call, "gen_ai.response.id": "msg_2"}),
+    )
+
+    growth = _growth((_WORKSPACE, write.trace_id), list(write.spans), _NOW)
+
+    # Both spans of the call are kept.
+    assert len(write.spans) == 3
+    assert (growth.input_tokens, growth.output_tokens) == (1000, 40)
+
+
+def test_a_call_two_instrumentations_exported_counts_the_tokens_of_the_one_reporting_them() -> None:
+    call = {"gen_ai.operation.name": "chat", "gen_ai.response.id": "msg_1"}
+    [write] = _project(
+        _span("wrapper", attrs=call),
+        _span("openllmetry", attrs={**call, "gen_ai.usage.input_tokens": 500, "gen_ai.usage.output_tokens": 20}),
+    )
+
+    growth = _growth((_WORKSPACE, write.trace_id), list(write.spans), _NOW)
+
+    assert (growth.input_tokens, growth.output_tokens) == (500, 20)
+
+
+def _usage(
+    event_id: str,
+    *,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0,
+) -> ExternalUsageEvent:
+    return ExternalUsageEvent(
+        source_event_id=event_id,
+        timestamp=_T0,
+        provider="anthropic",
+        model="claude-opus-4-8",
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cache_read_tokens=cache_read_tokens,
+        cache_write_tokens=cache_write_tokens,
+    )
+
+
+def test_a_response_the_claude_sdk_booked_is_priced_on_its_span_even_where_another_span_came_first() -> None:
+    pairs, event_spans = one_booking_per_response(
+        [
+            ReadUsage("otel", _usage("msg_1", input_tokens=1300), ("t", "openllmetry")),
+            ReadUsage(CLAUDE_SOURCE, _usage("msg_1", input_tokens=1000), ("t", "sdk")),
+        ]
+    )
+
+    assert [source for source, _ in pairs] == [CLAUDE_SOURCE]
+    assert event_spans == {(CLAUDE_SOURCE, "msg_1"): ("t", "sdk")}
+
+
+def test_a_response_two_libraries_booked_keeps_the_booking_reporting_most_tokens() -> None:
+    pairs, event_spans = one_booking_per_response(
+        [
+            ReadUsage("agent-a", _usage("msg_1", output_tokens=20), ("t", "wrapper")),
+            ReadUsage("agent-b", _usage("msg_1", input_tokens=500, output_tokens=20), ("t", "full")),
+            ReadUsage("agent-a", _usage("msg_2", input_tokens=10), ("t", "other")),
+        ]
+    )
+
+    assert [(source, event.source_event_id) for source, event in pairs] == [("agent-b", "msg_1"), ("agent-a", "msg_2")]
+    assert event_spans == {("agent-b", "msg_1"): ("t", "full"), ("agent-a", "msg_2"): ("t", "other")}
+
+
+def test_a_response_whose_cache_one_library_counts_on_top_keeps_the_booking_with_its_cache_writes() -> None:
+    pairs, _ = one_booking_per_response(
+        [
+            ReadUsage("agent-a", _usage("msg_1", input_tokens=50, output_tokens=20), ("t", "a")),
+            ReadUsage(
+                "agent-b", _usage("msg_1", input_tokens=50, output_tokens=20, cache_write_tokens=160), ("t", "b")
+            ),
+        ]
+    )
+
+    assert [(source, event.cache_write_tokens) for source, event in pairs] == [("agent-b", 160)]
+
+
+def test_two_calls_whose_ids_are_their_span_ids_are_never_merged() -> None:
+    pairs, event_spans = one_booking_per_response(
+        [
+            ReadUsage("agent-a", _usage("00000000000000a1", input_tokens=5), ("t1", "00000000000000a1"), False),
+            ReadUsage("agent-b", _usage("00000000000000a1", input_tokens=9), ("t2", "00000000000000a1"), False),
+        ]
+    )
+
+    assert [source for source, _ in pairs] == ["agent-a", "agent-b"]
+    # Each booking's cost reaches the span it was read from.
+    assert event_spans == {
+        ("agent-a", "00000000000000a1"): ("t1", "00000000000000a1"),
+        ("agent-b", "00000000000000a1"): ("t2", "00000000000000a1"),
+    }
+
+
+class _CappedWriter:
+    def __init__(self) -> None:
+        self.writes: list[TraceWrite] = []
+
+    def submit(self, write: TraceWrite, *, truncated: int = 0) -> None:
+        self.writes.append(write)
+
+
+def test_a_span_kept_under_the_cap_is_in_the_session_a_span_past_it_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("gateway.services.traces._otlp.MAX_SPANS_PER_EXPORT", 1)
+    writer = _CappedWriter()
+
+    record_otlp_export(
+        cast(TraceWriter, writer),
+        [_span("call", parent="root"), _span("root", attrs={"gen_ai.conversation.id": "conv-1"})],
+        total=2,
+        budget_exempt=True,
+        workspace_id=_WORKSPACE,
+        user_id="alice",
+        api_key_id="k",
+        retention=_RETENTION,
+    )
+
+    [write] = writer.writes
+    assert [span.otel_span_id for span in write.spans] == ["call"]
+    assert write.trace_id == SessionRef(source="otlp", key="conv-1").trace_id(_WORKSPACE, "alice", "k")
+
+
+def test_a_session_whose_calls_were_exported_is_never_the_one_the_session_cap_drops(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("gateway.services.traces._otlp.MAX_TRACES_PER_EXPORT", 1)
+    writer = _Writer()
+    at = datetime.now(UTC)
+
+    record_priced_requests(
+        cast(TraceWriter, writer),
+        [
+            PricedRequest("req_1", "labeled", at, Decimal("0.01"), "claude_code"),
+            PricedRequest("msg_1", "conv-1", at, Decimal("0.02"), "otel", traced=True),
+        ],
+        budget_exempt=True,
+        workspace_id=_WORKSPACE,
+        user_id=None,
+        api_key_id="k",
+        retention=_RETENTION,
+    )
+
+    [write] = writer.writes
+    assert write.trace_id == SessionRef(source="otlp", key="conv-1").trace_id(_WORKSPACE, None, "k")
+
+
+def test_a_response_whose_input_counts_its_cache_is_ranked_by_its_input_alone() -> None:
+    inclusive = _usage("msg_1", input_tokens=100, output_tokens=10, cache_read_tokens=80)
+    inclusive = inclusive.model_copy(update={"cache_tokens_in_prompt": True})
+    pairs, _ = one_booking_per_response(
+        [
+            ReadUsage("agent-a", inclusive, ("t", "a")),
+            ReadUsage("agent-b", _usage("msg_1", input_tokens=150, output_tokens=10), ("t", "b")),
+        ]
+    )
+
+    assert [source for source, _ in pairs] == ["agent-b"]
+
+
+def test_a_claude_response_reported_twice_keeps_the_report_that_splits_its_1h_cache_writes() -> None:
+    streamed = _usage("msg_1", input_tokens=1000, cache_write_tokens=100)
+    served = streamed.model_copy(update={"cache_write_1h_tokens": 40})
+    pairs, event_spans = one_booking_per_response(
+        [
+            ReadUsage(CLAUDE_SOURCE, streamed, ("t", "sdk")),
+            ReadUsage(CLAUDE_SOURCE, served, ("t", "api")),
+        ]
+    )
+
+    assert [event.cache_write_1h_tokens for _, event in pairs] == [40]
+    # The cost still reaches the span the response was first read from.
+    assert event_spans == {(CLAUDE_SOURCE, "msg_1"): ("t", "sdk")}
+
+
+def test_a_priced_call_on_a_stored_span_comes_before_one_past_the_export_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("gateway.services.traces._otlp.MAX_SPANS_PER_EXPORT", 1)
+    at = datetime.now(UTC)
+
+    def priced(event_id: str) -> PricedEvent:
+        return PricedEvent(event_id, None, at, Decimal("0.01"), "otel", {})
+
+    requests = priced_requests(
+        [priced("msg_late"), priced("msg_kept")],
+        [_span("kept", attrs={"gen_ai.conversation.id": "c"}), _span("late", attrs={"gen_ai.conversation.id": "c"})],
+        {("otel", "msg_kept"): ("t" * 32, "kept"), ("otel", "msg_late"): ("t" * 32, "late")},
+    )
+
+    assert [request.request_id for request in requests] == ["msg_kept", "msg_late"]

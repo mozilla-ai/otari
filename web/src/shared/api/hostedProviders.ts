@@ -6,26 +6,38 @@ import type {
   DeploymentProviderMigration,
   DeploymentProviderMigrationReviewedRow,
   HostedAvailableModels,
-  HostedCatalogRefresh,
+  HostedCatalogUpdatePreview,
+  HostedCatalogUpdateRequest,
+  HostedCatalogUpdateResult,
   HostedModel,
   HostedModels,
   HostedModelsRefresh,
+  HostedPriceReset,
   HostedProvider,
   HostedProviders,
   HostedProviderTestResult,
+  HostedVendor,
+  HostedVendorModelsSwitch,
+  PlatformConnectStart,
+  PlatformConnectStatus,
   ReencryptHostedProvidersResult,
+  SwitchHostedVendorModelsRequest,
   TestHostedProviderRequest,
   UpdateHostedModelRequest,
   UpdateHostedProviderRequest,
+  UpdateHostedVendorRequest,
 } from "@/client"
 import { apiFetch, longRequestSignal } from "@/shared/api/client"
 import {
+  AUTOMATIC_FALLBACKS,
   CATALOG,
+  HOSTED_CATALOG_UPDATE_PREVIEW,
+  HOSTED_PRICE_RESET_PREVIEW,
   HOSTED_PROVIDER_AVAILABLE_MODELS,
   HOSTED_PROVIDERS,
-  HOSTED_PROVIDERS_REFRESH_PREVIEW,
   MODELS,
   NO_RETRY,
+  PLATFORM_CONNECT,
   PRICING,
   PROVIDER_HEALTH,
   PROVIDERS,
@@ -42,7 +54,7 @@ import {
 // because a hosted model's rate is the deployment price list's.
 //
 // The create, both refreshes, the preview and the model picker dial the
-// upstream (every provider, for the sweep), so they carry `longRequestSignal`
+// upstream (every provider, for the catalog update), so they carry `longRequestSignal`
 // rather than the default request deadline.
 
 /**
@@ -50,6 +62,9 @@ import {
  * the whole list.
  */
 const PROVIDER_PAGE_LIMIT = 1000
+
+/** The API's maximum for one provider's models. */
+const MODEL_LIST_LIMIT = 1000
 
 const providerPath = (provider: string) =>
   `/hosted-providers/${encodeURIComponent(provider)}`
@@ -61,18 +76,29 @@ function useInvalidateHosted() {
     void queryClient.invalidateQueries({ queryKey: [PRICING] })
     void queryClient.invalidateQueries({ queryKey: [MODELS] })
     void queryClient.invalidateQueries({ queryKey: [CATALOG] })
+    void queryClient.invalidateQueries({ queryKey: [AUTOMATIC_FALLBACKS] })
     void queryClient.invalidateQueries({ queryKey: [PROVIDER_HEALTH] })
   }
 }
 
-export function useHostedProviders(enabled = true) {
+/**
+ * Every hosted provider. `isFresh` reads the list again rather than trusting a
+ * cached one, for a page opened on one provider by name, which must not answer
+ * "not found" from a list cached before that provider was added elsewhere.
+ */
+export function useHostedProviders(
+  enabled = true,
+  { isFresh = false }: { isFresh?: boolean } = {},
+) {
   return useQuery({
     queryKey: [HOSTED_PROVIDERS, "list"],
     queryFn: () =>
       apiFetch<HostedProviders>(
         `/hosted-providers?limit=${PROVIDER_PAGE_LIMIT}`,
       ),
-    staleTime: 30_000,
+    // Zero rather than `refetchOnMount`, which never fires for a query that
+    // is still waiting on the operator gate when the page mounts.
+    staleTime: isFresh ? 0 : 30_000,
     enabled,
   })
 }
@@ -110,37 +136,200 @@ export function useUpdateHostedProvider() {
 }
 
 export function useDeleteHostedProvider() {
+  const queryClient = useQueryClient()
   const invalidate = useInvalidateHosted()
   return useMutation({
     mutationFn: (provider: string) =>
       apiFetch<{ message: string }>(providerPath(provider), {
         method: "DELETE",
       }),
+    onSuccess: () => {
+      invalidate()
+      // Removing the connected provider is how a deployment disconnects.
+      void queryClient.invalidateQueries({ queryKey: [PLATFORM_CONNECT] })
+    },
+  })
+}
+
+// Connecting the deployment to otari.ai (`/platform/connect`): the gateway asks
+// otari.ai for a code, the operator approves it there, and the gateway stores
+// the key as the `otari-ai` hosted provider. Offered only where the bootstrap
+// says so (`platform_connect`), which is also what keeps the status read from
+// being sent to a gateway that mounts no such route.
+
+/** How often an open page asks whether a pending code was approved. */
+const PLATFORM_CONNECT_POLL_MS = 3_000
+
+/**
+ * Where the connection stands, polled only while a code is waiting to be
+ * approved: every other status is one that does not change on its own.
+ *
+ * The gateway asks otari.ai at most once per interval however often this is
+ * read. The read that first finds the attempt connected also refreshes the
+ * provider and model lists, which the gateway changed while answering it.
+ */
+export function usePlatformConnectStatus(enabled: boolean) {
+  const queryClient = useQueryClient()
+  const invalidate = useInvalidateHosted()
+  return useQuery({
+    queryKey: [PLATFORM_CONNECT],
+    queryFn: async () => {
+      const before = queryClient.getQueryData<PlatformConnectStatus>([
+        PLATFORM_CONNECT,
+      ])
+      const status = await apiFetch<PlatformConnectStatus>("/platform/connect")
+      // Also on a first read: the gateway may have stored the provider while
+      // answering it, beside a provider list fetched at the same moment.
+      if (before?.status !== "connected" && status.status === "connected") {
+        if (before?.status === "pending") {
+          // The catalog's short model ids are re-indexed once a minute, and
+          // the setup guide hands one out right after this. Best effort: a
+          // failure only means the id resolves at the next tick.
+          await apiFetch("/catalog/selectors/refresh", {
+            method: "POST",
+          }).catch(() => undefined)
+        }
+        invalidate()
+      }
+      return status
+    },
+    enabled,
+    refetchInterval: (query) =>
+      query.state.data?.status === "pending" ? PLATFORM_CONNECT_POLL_MS : false,
+    // A failed read is shown where the code is, and the next poll asks again.
+    ...NO_RETRY,
+  })
+}
+
+/** Ask otari.ai for a code. The answer seeds the status, so the page shows the code at once. */
+export function useStartPlatformConnect() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<PlatformConnectStart>("/platform/connect", { method: "POST" }),
+    onSuccess: (started) => {
+      queryClient.setQueryData<PlatformConnectStatus>([PLATFORM_CONNECT], {
+        status: "pending",
+        ...started,
+      })
+    },
+  })
+}
+
+export function useCancelPlatformConnect() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => apiFetch<void>("/platform/connect", { method: "DELETE" }),
+    onSuccess: () => {
+      queryClient.setQueryData<PlatformConnectStatus>([PLATFORM_CONNECT], {
+        status: "idle",
+        user_code: null,
+        verification_uri_complete: null,
+        expires_in: null,
+      })
+    },
+  })
+}
+
+/**
+ * A provider's offered models, all of them, with each vendor's switch and counts.
+ *
+ * Not paged: the models are shown under their vendors, and a vendor's models
+ * split across pages would hide what its switch covers. The API's maximum is
+ * the bound, which no provider here comes near.
+ *
+ * The provider is part of the key, so the placeholder is kept only while the
+ * same provider is shown: a bare `keepPreviousData` would paint one provider's
+ * models under another's name for a frame.
+ */
+export function useHostedModels(
+  provider: string,
+  /** One kind of model (`ModelType`, or `unknown`); empty for every kind. */
+  type = "",
+  /** Only models whose name or vendor contains this text; empty for every model. */
+  search = "",
+  /** Only served models, or only withheld ones; undefined for both. */
+  served?: boolean,
+) {
+  return useQuery({
+    queryKey: [HOSTED_PROVIDERS, "models", provider, type, search, served],
+    queryFn: () =>
+      apiFetch<HostedModels>(
+        `${providerPath(provider)}/models?limit=${MODEL_LIST_LIMIT}${type ? `&type=${encodeURIComponent(type)}` : ""}${search ? `&search=${encodeURIComponent(search)}` : ""}${served === undefined ? "" : `&enabled=${served}`}`,
+      ),
+    staleTime: 30_000,
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[2] === provider ? previous : undefined,
+  })
+}
+
+/** Switch one vendor on or off on a provider; its models keep their own switches. */
+export function useSetHostedVendor(provider: string) {
+  const invalidate = useInvalidateHosted()
+  return useMutation({
+    mutationFn: (body: UpdateHostedVendorRequest) =>
+      apiFetch<HostedVendor>(`${providerPath(provider)}/vendors`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: invalidate,
+  })
+}
+
+/** Set every model of one vendor's switch at once. */
+export function useSwitchHostedVendorModels(provider: string) {
+  const invalidate = useInvalidateHosted()
+  return useMutation({
+    mutationFn: (body: SwitchHostedVendorModelsRequest) =>
+      apiFetch<HostedVendorModelsSwitch>(
+        `${providerPath(provider)}/models/switch`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
     onSuccess: invalidate,
   })
 }
 
 /**
- * One page of a provider's offered models.
+ * What putting a provider's operator-set prices back on the default would
+ * change, read once per opening of the sync dialog.
  *
- * The provider is part of the key, so the placeholder is kept only while the
- * same provider pages: a bare `keepPreviousData` would paint one provider's
- * models under another's name for a frame when a different row is opened.
+ * A dry-run POST read as a query, keyed on the opening for the reason
+ * `useHostedCatalogUpdatePreview` gives: a reopen shows the pending state
+ * rather than the last opening's answer.
  */
-export function useHostedModels(
+export function useHostedPriceResetPreview(
   provider: string,
-  page: number,
-  pageSize: number,
+  opening: number,
+  /** One vendor's models; empty for every vendor. */
+  vendor = "",
 ) {
   return useQuery({
-    queryKey: [HOSTED_PROVIDERS, "models", provider, page, pageSize],
+    ...NO_RETRY,
+    queryKey: [HOSTED_PRICE_RESET_PREVIEW, provider, opening, vendor],
     queryFn: () =>
-      apiFetch<HostedModels>(
-        `${providerPath(provider)}/models?skip=${page * pageSize}&limit=${pageSize}`,
+      apiFetch<HostedPriceReset>(
+        `${providerPath(provider)}/models/reset-prices`,
+        {
+          method: "POST",
+          body: JSON.stringify({ dry_run: true, vendor: vendor || null }),
+        },
       ),
-    staleTime: 30_000,
-    placeholderData: (previous, previousQuery) =>
-      previousQuery?.queryKey[2] === provider ? previous : undefined,
+    enabled: opening > 0,
+    staleTime: Number.POSITIVE_INFINITY,
+    gcTime: 0,
+  })
+}
+
+/** Put the named models back on the default price. */
+export function useResetHostedModelPrices(provider: string) {
+  const invalidate = useInvalidateHosted()
+  return useMutation({
+    mutationFn: (models: string[]) =>
+      apiFetch<HostedPriceReset>(
+        `${providerPath(provider)}/models/reset-prices`,
+        { method: "POST", body: JSON.stringify({ models, dry_run: false }) },
+      ),
+    onSuccess: invalidate,
   })
 }
 
@@ -216,23 +405,34 @@ export function useRefreshHostedModels(provider: string) {
 }
 
 /**
- * What a catalog sweep would remove, read once per opening of its confirm
- * dialog.
+ * What updating the catalog would do, read once per opening of its confirm
+ * dialog, and again when the cleanup is ticked or cleared.
  *
- * `opening` counts the openings and is 0 while the dialog is closed. Keying on
- * it gives every opening a query with no data, so a reopen shows the pending
- * state rather than the last opening's list, and `gcTime: 0` drops that list
- * once nothing observes it. Never stale within an opening, so a window focus
- * cannot swap the list under a confirm that was about to fire on it.
+ * A POST that the dialog reads as a query: it fetches the latest models.dev
+ * prices and holds them as pending for the update to name by digest, and it
+ * dials every provider; nothing else is written. `opening` counts the openings
+ * and is 0 while the dialog is closed. Keying on it gives every opening a query
+ * with no data, so a reopen shows the pending state rather than the last
+ * opening's answer, and `gcTime: 0` drops that answer once nothing observes it.
+ * Never stale within an opening, so a window focus cannot swap the preview under
+ * a confirm that was about to fire on it.
  */
-export function useHostedCatalogRefreshPreview(opening: number) {
+export function useHostedCatalogUpdatePreview(
+  opening: number,
+  cleanup: boolean,
+) {
   return useQuery({
     ...NO_RETRY,
-    queryKey: [HOSTED_PROVIDERS_REFRESH_PREVIEW, opening],
+    queryKey: [HOSTED_CATALOG_UPDATE_PREVIEW, opening, cleanup],
     queryFn: () =>
-      apiFetch<HostedCatalogRefresh>("/hosted-providers/refresh/preview", {
-        signal: longRequestSignal(),
-      }),
+      apiFetch<HostedCatalogUpdatePreview>(
+        "/hosted-providers/catalog-update/preview",
+        {
+          method: "POST",
+          body: JSON.stringify({ cleanup }),
+          signal: longRequestSignal(),
+        },
+      ),
     enabled: opening > 0,
     staleTime: Number.POSITIVE_INFINITY,
     gcTime: 0,
@@ -240,15 +440,16 @@ export function useHostedCatalogRefreshPreview(opening: number) {
 }
 
 /**
- * The deployment-wide sweep: every enabled provider is asked again what it
- * lists, then every priced model nothing here serves leaves the catalog.
+ * The catalog update: the reviewed models.dev prices, then every provider's
+ * models, then the cleanup if it was asked for.
  */
-export function useHostedCatalogRefresh() {
+export function useHostedCatalogUpdate() {
   const invalidate = useInvalidateHosted()
   return useMutation({
-    mutationFn: () =>
-      apiFetch<HostedCatalogRefresh>("/hosted-providers/refresh", {
+    mutationFn: (body: HostedCatalogUpdateRequest) =>
+      apiFetch<HostedCatalogUpdateResult>("/hosted-providers/catalog-update", {
         method: "POST",
+        body: JSON.stringify(body),
         signal: longRequestSignal(),
       }),
     onSuccess: invalidate,

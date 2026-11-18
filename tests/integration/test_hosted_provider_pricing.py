@@ -22,18 +22,22 @@ from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choi
 from any_llm.types.model import Model
 from fastapi import status
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.models.api_keys import APIKey
+from gateway.models.budgets import RESERVATION_ACTIVE, Budget, BudgetReservation
 from gateway.models.provider_keys import OrgProviderKey
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace
 from gateway.models.usage import UsageLog
+from gateway.models.users import User as BillingUser
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
+from gateway.services.model_access import model_not_allowed_detail
 from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 
-from .conftest import build_test_client, shared_test_config
+from .conftest import build_test_client, held_reservations, shared_test_config
 
 
 @pytest.fixture(scope="module")
@@ -331,6 +335,168 @@ def strict_client(postgres_url: str) -> Generator[TestClient]:
         model_discovery=False,
     )
     yield from build_test_client(config)
+
+
+SPEECH = "openai:tts-1"
+
+
+def _keyless_tenant(
+    client: TestClient, master: dict[str, str], db_session_factory: Callable[[], Session], *, slug: str
+) -> tuple[_Tenant, uuid.UUID]:
+    """An organization with no provider key of its own, and its one workspace's id."""
+    _provision(client, master)
+    session = db_session_factory()
+    try:
+        organization = Organization(name=slug.title(), slug=slug)
+        session.add(organization)
+        session.commit()
+        session.refresh(organization)
+        workspace = Workspace(name=f"{slug.title()} one", organization_id=organization.id)
+        session.add(workspace)
+        session.commit()
+        session.refresh(workspace)
+        tenant = _Tenant(
+            organization_id=organization.id,
+            owner=_session(session, email=f"{slug}@{slug}.test", organization_id=organization.id),
+            operator="",
+        )
+        return tenant, workspace.id
+    finally:
+        session.close()
+
+
+def _hosted_speech(
+    client: TestClient, master: dict[str, str], tenant: _Tenant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stale token override of the tenant's, and the deployment hosting the model at a character rate."""
+    assert _override(client, tenant.owner, 0.6, SPEECH).status_code == status.HTTP_201_CREATED
+    priced = client.post(
+        f"{API_ROOT}/pricing",
+        json={"model_key": SPEECH, "input_price_per_million": 15, "output_price_per_million": 0, "unit": "character"},
+        headers=master,
+    )
+    assert priced.status_code == status.HTTP_200_OK, priced.text
+
+    async def _lists_tts(impl_name: str, **_: object) -> ProviderDiscovery:
+        return ProviderDiscovery(
+            provider=impl_name, models=[Model(id="tts-1", object="model", created=0, owned_by=impl_name)]
+        )
+
+    monkeypatch.setattr("gateway.services.providers._hosted_provider_service.test_provider_credentials", _lists_tts)
+    _hosted_openai(client, master)
+    [offered] = client.get(f"{API_ROOT}/hosted-providers/openai/models", headers=master).json()["data"]
+    assert offered["model"] == "tts-1"
+    if not offered["enabled"]:
+        switched_on = client.patch(
+            f"{API_ROOT}/hosted-providers/openai/models/{offered['id']}", json={"enabled": True}, headers=master
+        )
+        assert switched_on.status_code == status.HTTP_200_OK, switched_on.text
+
+
+def _speak(client: TestClient, headers: dict[str, str]) -> tuple[Any, AsyncMock]:
+    provider = AsyncMock(return_value=b"audio")
+    with patch("gateway.api.routes.audio.aspeech", new=provider):
+        response = client.post(
+            f"{API_ROOT}/audio/speech",
+            json={"model": SPEECH, "input": "Hello world", "voice": "alloy"},
+            headers=headers,
+        )
+    return response, provider
+
+
+def test_a_stale_token_override_does_not_refuse_a_hosted_speech_request(
+    strict_client: TestClient, db_session_factory: Callable[[], Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The organization's own token rate prices nothing the deployment hosts, so the hosted character rate is judged."""
+    master = {API_KEY_HEADER: "Bearer test-master-key"}
+    tenant, _workspace_id = _keyless_tenant(strict_client, master, db_session_factory, slug="erin")
+    _hosted_speech(strict_client, master, tenant, monkeypatch)
+
+    response, _ = _speak(strict_client, _api_key(strict_client, tenant))
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert response.headers["Otari-Pricing-Source"] == "deployment"
+    assert response.headers["Otari-Usage-Unit"] == "characters"
+    assert response.headers["Otari-Usage-Units"] == "11"
+    assert response.headers["Otari-Cost-USD"] == "0.000165"
+
+
+def test_a_hosted_upstream_the_workspace_may_not_use_is_refused_as_such_not_as_unpriced(
+    strict_client: TestClient, db_session_factory: Callable[[], Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The gate's hosted lookup fails for the switched-off upstream, so the hosted dispatch answers, refund included."""
+    master = {API_KEY_HEADER: "Bearer test-master-key"}
+    tenant, workspace_id = _keyless_tenant(strict_client, master, db_session_factory, slug="fay")
+    _hosted_speech(strict_client, master, tenant, monkeypatch)
+    off = _as(
+        strict_client,
+        tenant.owner,
+        "PUT",
+        f"/workspaces/{workspace_id}/hosted-providers/openai",
+        json={"enabled": False},
+    )
+    assert off.status_code == status.HTTP_200_OK, off.text
+
+    with held_reservations() as held:
+        response, provider = _speak(strict_client, _api_key(strict_client, tenant))
+
+    assert response.status_code == status.HTTP_403_FORBIDDEN, response.text
+    assert response.headers["Otari-Error-Code"] == "model_not_allowed"
+    assert response.json()["detail"] == model_not_allowed_detail(SPEECH)
+    provider.assert_not_called()
+    assert held == [Decimal(0)]
+    with db_session_factory() as db:
+        rows = list(db.scalars(select(UsageLog).where(UsageLog.model == "tts-1")))
+        assert [row.status_code for row in rows] == [status.HTTP_403_FORBIDDEN]
+        assert db.scalar(select(func.count()).select_from(BillingUser).where(BillingUser.reserved > 0)) == 0
+
+
+def test_a_failure_of_the_gates_hosted_lookup_that_is_no_refusal_propagates(
+    strict_client: TestClient, db_session_factory: Callable[[], Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the refusals the hosted dispatch answers for are deferred; any other error is raised, its hold refunded."""
+    master = {API_KEY_HEADER: "Bearer test-master-key"}
+    tenant, _workspace_id = _keyless_tenant(strict_client, master, db_session_factory, slug="gus")
+    _hosted_speech(strict_client, master, tenant, monkeypatch)
+    headers = _api_key(strict_client, tenant)
+    # A request-capped budget on the key's user, so the reservation holds one request even at a zero estimate.
+    with db_session_factory() as db:
+        user_id = db.scalar(select(APIKey.user_id).where(APIKey.key_name == "carol key"))
+        assert user_id is not None
+        db.add(Budget(budget_id="gus-requests", max_budget=None, request_limit=10))
+        user = db.get(BillingUser, user_id)
+        assert user is not None
+        user.budget_id = "gus-requests"
+        db.commit()
+    broken = AsyncMock(side_effect=RuntimeError("the lookup broke"))
+
+    with (
+        held_reservations() as held,
+        patch("gateway.api.routes._passthrough.serve_on_hosted_provider", new=broken),
+        patch("gateway.api.routes.audio.aspeech", new=AsyncMock(return_value=b"audio")) as provider,
+        pytest.raises(RuntimeError, match="the lookup broke"),
+    ):
+        strict_client.post(
+            f"{API_ROOT}/audio/speech",
+            json={"model": SPEECH, "input": "Hello world", "voice": "alloy"},
+            headers=headers,
+        )
+
+    broken.assert_awaited_once()
+    provider.assert_not_called()
+    assert held == [Decimal(0)]
+    with db_session_factory() as db:
+        user = db.get(BillingUser, user_id)
+        assert user is not None
+        assert (user.reserved, user.reserved_requests) == (Decimal(0), 0)
+        assert (
+            db.scalar(
+                select(func.count())
+                .select_from(BudgetReservation)
+                .where(BudgetReservation.user_id == user_id, BudgetReservation.status == RESERVATION_ACTIVE)
+            )
+            == 0
+        )
 
 
 def test_a_zero_override_cannot_carry_an_unpriced_hosted_model_past_require_pricing(

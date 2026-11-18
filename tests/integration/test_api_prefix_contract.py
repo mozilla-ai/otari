@@ -33,7 +33,9 @@ from gateway.api.routes import (
     audio,
     batches,
     chat,
+    code_execution,
     embeddings,
+    fetch,
     images,
     mcp,
     messages,
@@ -42,6 +44,7 @@ from gateway.api.routes import (
     responses,
     retired_root,
     search,
+    videos,
 )
 from gateway.core.config import API_ROOT, OTLP_ROOT, GatewayConfig
 from gateway.main import (
@@ -255,9 +258,12 @@ FROZEN_LABELS = frozenset(
         batches.USAGE_ENDPOINT,
         batches.USAGE_ENDPOINT_RESULTS,
         chat.USAGE_ENDPOINT,
+        code_execution.CODE_EXECUTE_ENDPOINT,
         _passthrough.DECISIONS_ENDPOINT,
         embeddings.USAGE_ENDPOINT,
+        fetch.FETCH_ENDPOINT,
         images.USAGE_ENDPOINT,
+        images.USAGE_ENDPOINT_EDITS,
         mcp.EXECUTE_ENDPOINT,
         mcp.TOOLS_ENDPOINT,
         messages.USAGE_ENDPOINT,
@@ -265,6 +271,8 @@ FROZEN_LABELS = frozenset(
         rerank.USAGE_ENDPOINT,
         responses.USAGE_ENDPOINT,
         search.SEARCH_ENDPOINT,
+        videos.USAGE_ENDPOINT,
+        videos.USAGE_ENDPOINT_COMPLETED,
         PLAYGROUND_USAGE_ENDPOINT,
     }
 )

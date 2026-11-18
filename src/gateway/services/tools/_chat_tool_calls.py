@@ -1,4 +1,4 @@
-"""Chat Completions' ``otari_tool_calls``: the gateway's report of the web tool calls it ran (decision 67).
+"""Chat Completions' ``otari_tool_calls``: the gateway's report of the tool calls it ran (decision 67).
 
 Chat Completions has no vocabulary for a call the server ran, so the gateway adds a
 field of its own at the top level of the response and of each streamed chunk, beside
@@ -12,19 +12,27 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Literal
 
 from gateway.schemas.tools import OtariToolCall, OtariToolCallError
-from gateway.services.tools._web_tool_failure import CALL_LIMIT_TAG, WebToolFailure
+from gateway.services.tools._native import Refusal
+from gateway.services.tools._web_tool_failure import CALL_LIMIT_TAG, INVALID_INPUT_TAG, WebToolFailure
 
 if TYPE_CHECKING:
     from gateway.services.tools._native import NativeCall
 
 OTARI_TOOL_CALLS_FIELD = "otari_tool_calls"
 
+# The gateway's own MCP entry ids, beside the ``otari_ws_`` ids of its searches.
+MCP_CALL_ID_PREFIX = "otari_mcp_"
+
+# A tool's text can be a whole page or a long log; an entry carries at most this many
+# UTF-8 bytes of each, while the model reads it whole.
+REPORTED_TEXT_MAX_BYTES = 64 * 1024
+
 
 def chat_entry(
     call: NativeCall,
     *,
     id_prefix: str,
-    kind: Literal["web_search", "web_fetch"],
+    kind: Literal["web_search", "web_fetch", "code_execution", "mcp"],
     status: Literal["in_progress", "completed", "failed"],
     **fields: Any,
 ) -> dict[str, Any]:
@@ -37,9 +45,38 @@ def chat_entry(
     return entry.model_dump(mode="json", exclude_unset=True)
 
 
-def call_limit_error() -> OtariToolCallError:
-    """The ``error`` of a call refused because the request used up its calls, which reached no provider."""
-    return OtariToolCallError.model_validate(WebToolFailure.of(None, None, CALL_LIMIT_TAG).as_dict())
+def capped(text: str) -> tuple[str, bool]:
+    """``text`` cut to :data:`REPORTED_TEXT_MAX_BYTES` at a character boundary, and whether it was cut."""
+    encoded = text.encode()
+    if len(encoded) <= REPORTED_TEXT_MAX_BYTES:
+        return text, False
+    return encoded[:REPORTED_TEXT_MAX_BYTES].decode(errors="ignore"), True
+
+
+def mcp_entry(
+    call: NativeCall,
+    server: str,
+    status: Literal["in_progress", "completed", "failed"],
+    output: str | None = None,
+) -> dict[str, Any]:
+    """The entry for a call to an MCP server's tool, with the text it returned once it ended."""
+    text, truncated = capped(output) if output is not None else (None, None)
+    return chat_entry(
+        call,
+        id_prefix=MCP_CALL_ID_PREFIX,
+        kind="mcp",
+        status=status,
+        server=server,
+        name=call.name,
+        output=text,
+        truncated=truncated or None,
+    )
+
+
+def refusal_error(reason: Refusal) -> OtariToolCallError:
+    """The ``error`` of a call refused for ``reason`` before it reached a provider."""
+    tag = CALL_LIMIT_TAG if reason is Refusal.CALL_LIMIT else INVALID_INPUT_TAG
+    return OtariToolCallError.model_validate(WebToolFailure.of(None, None, tag).as_dict())
 
 
 def without_otari_tool_calls(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:

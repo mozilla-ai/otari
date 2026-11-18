@@ -1,6 +1,8 @@
 """Errors that the inference domain may raise, each carrying the status it renders as."""
 
-from gateway.exceptions import TenancyValidationError
+from fastapi import status
+
+from gateway.exceptions import TenancyConflictError, TenancyError, TenancyNotFoundError, TenancyValidationError
 
 
 class EmbeddingOptionUnsupportedError(TenancyValidationError):
@@ -14,3 +16,52 @@ class EmbeddingOptionUnsupportedError(TenancyValidationError):
         # The selector the caller sent, never the resolved provider, so an alias
         # does not reveal its target.
         super().__init__(f"'{option}' is not supported for model '{selector}'")
+
+
+class StoredStateOnManagedCredentialError(TenancyValidationError):
+    """A request continued stored provider state on a provider account this gateway shares across workspaces."""
+
+    def __init__(self, field: str) -> None:
+        super().__init__(
+            f"{field} cannot be used on this route: it resolves to a provider account this gateway manages "
+            "on behalf of many workspaces, and the id addresses state stored on that account rather than on "
+            "your workspace. Send the previous turns in input instead, or use a model served by your own "
+            "provider key."
+        )
+
+
+class CountryDatabaseInvalidError(TenancyValidationError):
+    """An uploaded file is no MaxMind DB country file. The file stored before stays in place."""
+
+
+class CountryDatabaseTooLargeError(TenancyError):
+    """An uploaded file is larger than a country file can be."""
+
+    status_code = status.HTTP_413_CONTENT_TOO_LARGE
+
+    def __init__(self, limit_bytes: int) -> None:
+        super().__init__(f"The file is larger than {limit_bytes // (1024 * 1024)} MiB")
+
+
+class CountryDatabaseNotFoundError(TenancyNotFoundError):
+    """No country file is stored."""
+
+    def __init__(self) -> None:
+        super().__init__("No country file is stored")
+
+
+class VideoJobNotFoundError(TenancyNotFoundError):
+    """No video job with this id was started here, or not by this caller in this workspace."""
+
+    def __init__(self, video_id: str) -> None:
+        super().__init__(f"Video '{video_id}' not found")
+
+
+class CountryDatabaseInUseError(TenancyConflictError):
+    """The stored country file is the only country source a list of supported countries has."""
+
+    def __init__(self, needed_by: str) -> None:
+        super().__init__(
+            f"The stored country file is the only country source for {needed_by}: set client_country_header or "
+            "client_country_database before removing it"
+        )

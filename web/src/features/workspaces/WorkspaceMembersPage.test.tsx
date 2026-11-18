@@ -90,6 +90,39 @@ describe("WorkspaceMembersPage", () => {
     expect(await screen.findByText("Members of Alpha")).toBeInTheDocument()
   })
 
+  it("draws each member with the face they picked, matched by user id", async () => {
+    mockApi({
+      members: [
+        workspaceMember({ id: "m-1", user_id: USER }),
+        workspaceMember({ id: "m-2", user_id: SECOND_USER }),
+      ],
+      // The roster in the other order, so a lookup by position would swap them.
+      orgMembers: [
+        organizationMember({
+          organization_member_id: "o-2",
+          user_id: SECOND_USER,
+          full_name: "Blair Brook",
+          avatar_face: 7,
+        }),
+        organizationMember({
+          user_id: USER,
+          full_name: "Alex Avery",
+          avatar_face: 42,
+        }),
+      ],
+    })
+    await renderPage()
+
+    const faceOf = async (name: string) => {
+      const row = (await screen.findByText(name)).closest("li")
+      return Number(
+        row?.querySelector("[data-face]")?.getAttribute("data-face"),
+      )
+    }
+    expect(await faceOf("Alex Avery")).toBe(42)
+    expect(await faceOf("Blair Brook")).toBe(7)
+  })
+
   it("says so rather than showing an empty roster when there is no workspace", async () => {
     mockApi({ memberships: [] })
     await renderPage()
@@ -191,6 +224,30 @@ describe("WorkspaceMembersPage", () => {
       dialog.getByText(/an organization owner or admin has to add someone/),
     ).toBeInTheDocument()
     expect(dialog.queryByRole("link")).toBeNull()
+  })
+
+  it("marks an SSO-admitted colleague for a reader who cannot reach the organization page", async () => {
+    // This card is the only members list that reader gets, so the mark has to
+    // reach it too or the blank address is unexplained for them.
+    mockApi({
+      context: organizationContext({ role: "member" }),
+      orgMembers: [
+        organizationMember({ user_id: USER, full_name: "Alex Avery" }),
+        organizationMember({
+          organization_member_id: "22222222-0000-0000-0000-000000000009",
+          user_id: "99999999-0000-0000-0000-000000000009",
+          full_name: "Ada Lovelace",
+          email: null,
+          is_sso_account: true,
+        }),
+      ],
+    })
+    await renderPage()
+
+    const row = (await screen.findAllByRole("row")).find(
+      (candidate) => within(candidate).queryByText("Ada Lovelace") !== null,
+    ) as HTMLElement
+    expect(within(row).getByText("SSO")).toBeInTheDocument()
   })
 
   it("reports a roster that failed instead of calling the workspace full", async () => {

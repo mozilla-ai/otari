@@ -33,12 +33,22 @@ AnySearch.get_provider_metadata("fake")
   timeout, and never closes it or changes its settings. Without one, the provider opens a client
   with httpx's defaults and closes it in `aclose()`, which `async with` calls.
 
+Every request a provider sends carries `User-Agent: any-search/<version>`, the library's own
+version (`any_search.__version__`, which a change to the library bumps in the same PR), so a
+provider, or a proxy that allowlists outbound traffic, can tell the library's requests apart. A
+`client` that sets a `User-Agent` of its own keeps it: httpx's default is replaced, and a client
+that carries none is filled in.
+
 `search` takes two shared parameters, which every provider maps onto its own: `max_results` and
 `time_range` (`day`, `week`, `month` or `year`). Every other keyword is a native option, passed to
 the provider under its own name. An option the provider's metadata does not list raises
-`UnsupportedParameterError` rather than being dropped. `SHARED_PARAMETERS` lists the shared
-parameters, so a host can tell them from native options, and `shared_parameter_problems` says which
-values `search` refuses, so a host can check them before the call.
+`UnsupportedParameterError` rather than being dropped. Two adapters check a value before the
+request: SearXNG's `method` and Perplexity's `search_type` raise `UnsupportedValueError`, a
+`ValueError` too, whose message names the allowed values. Any other value is the provider's to
+refuse, which comes back as a `ProviderError`, as the `fake` provider's does.
+`SHARED_PARAMETERS` lists the shared parameters, so a host can tell them from native options, and
+`shared_parameter_problems` says which values `search` refuses, so a host can check them before the
+call.
 
 ## What comes back
 
@@ -56,9 +66,17 @@ fails the call rather than degrading it. A missing key raises `MissingCredential
 
 `ProviderMetadata` says what a host needs before calling: where the key comes from, whether the
 query or the key travels in the URL, the provider's `tier` (`production` or `test`), its
-`max_results`, and its native options as `OptionSpec`s (`name`, `type`, `enum`, `default`,
-`description` and `operator_only`, for an option only a deployment's operator should set; the
-library accepts it from anyone, and enforcing that is the host's job).
+`max_results`, whether it `reports_cost`, and its native options as `OptionSpec`s (`name`,
+`type`, `enum`, `default`, `description`, `operator_only`, for an option only a deployment's
+operator should set, and `cost_tier`, for the option whose values are the provider's cost tiers;
+the library accepts both from anyone, and acting on them is the host's job).
+
+A provider's cost tiers are the values of one option for which its pricing lists a price per call
+of its own, such as a quick search and a thorough one. The option's `enum` lists them and its
+`default` is the tier the provider uses when the option is not sent. The metadata records no
+amount: each adapter's docstring has the provider's pricing, with the date it was read. A host
+that bills searches at a price per call for a provider that does not report its cost can let only
+whoever set that price choose the tier.
 
 ## Logging
 
@@ -91,6 +109,37 @@ when it parses. `--json` prints the result as JSON without `raw`, `--raw` prints
 own response, and both together print the result with `raw` kept. `--describe PROVIDER` prints the
 provider's metadata and each native option with its type, allowed values, default and
 description, then exits without searching.
+
+## Brave
+
+`brave` calls Brave's [Web Search API](https://api-dashboard.search.brave.com/api-reference/web/search/get),
+`GET /res/v1/web/search`, with the key read from `BRAVE_API_KEY` when not passed. The key travels
+in the `X-Subscription-Token` header; the query travels in the URL, which the log filter above
+keeps out of httpx's log.
+
+| `SearchHit` | From Brave |
+|---|---|
+| `url`, `title` | `url`, `title` of each item in `web.results` |
+| `snippet` | `description`, or `""` when Brave sends none or null; Brave returns no page text, so `text` is always `None` |
+| `published` | `page_age`, an ISO 8601 date, read as UTC when it has no zone; `None` when Brave sends none or one that does not parse, which stays in `raw` |
+
+Brave reports no cost. `max_results` becomes `count`, at most 20. `time_range` becomes Brave's
+`freshness`, `pd`, `pw`, `pm` or `py`, and wins over the `freshness` option; Brave ignores a
+`freshness` value it does not know. The other native options are Brave's own query parameters,
+such as `country`, `search_lang`, `offset` and `safesearch`; `--describe brave` lists them. An
+option set to `None` is not sent. Two options trim the answer: `result_filter: web` leaves out the
+videos, news and other sections Brave adds by default, which the adapter does not read, and
+`text_decorations: false` leaves out the HTML, such as `<strong>`, that marks the query's words in
+snippets.
+
+Any status from 400 raises `ProviderError`, tagged with Brave's `error.code` in lower case, else
+`http_error`: `subscription_token_invalid` for a refused key, which comes as a 422, and
+`validation` for a parameter out of range. The rest of the body never reaches the error.
+
+Every field read from a successful answer is checked. An answer without `web`, or with `web`
+null, found nothing and has no hits. A `web` without a `results` list, a result whose `url` or `title` is missing or not a
+string, or whose `description` or `page_age` is neither a string nor null, raises `ProviderError`
+with the tag `unexpected_response`.
 
 ## DeepSeek
 
@@ -205,6 +254,170 @@ request (`timestamp` with `date=1`), so neither is required: the date is read fr
 is present and not 0, else from `timestamp`, and the field read must be a Unix time. A `timestamp`
 behind a usable `pdate` is not read. Fields the adapter does not read are ignored.
 
+## Perplexity
+
+`perplexity` calls Perplexity's [Search API](https://docs.perplexity.ai/api-reference/search-post),
+`POST /search`, with the key read from `PERPLEXITY_API_KEY` and the base URL from
+`PERPLEXITY_BASE_URL` when not passed, as Perplexity's SDK reads them. The key travels as a
+Bearer token in the `Authorization` header, and the query in the JSON body.
+
+| `SearchHit` | From Perplexity |
+|---|---|
+| `url`, `title` | `url`, `title` |
+| `snippet` | always `""` |
+| `text` | `snippet`: the passages Perplexity takes from the page, cut to `max_tokens_per_page`; none when it is empty |
+| `published` | `date`, an ISO 8601 date, when Perplexity sends one; a date without a zone is UTC |
+
+`max_results` is sent as Perplexity's `max_results`, at most 20; without it Perplexity returns 10.
+`time_range` becomes `search_recency_filter`, and wins over that option when both are passed.
+Native options, under Perplexity's own names: `search_type` (`web` or `fast`, the cost tier),
+`search_recency_filter` (`hour` to `year`), `search_domain_filter`, `country`,
+`search_language_filter`, `max_tokens_per_page`, `max_tokens`, and the date filters
+`search_after_date_filter`, `search_before_date_filter`, `last_updated_after_filter` and
+`last_updated_before_filter`, as `MM/DD/YYYY`. Perplexity refuses a recency filter, `time_range`
+included, together with `search_after_date_filter` or `search_before_date_filter`. Its `people`
+search type is not offered: Perplexity runs it, so the adapter refuses any `search_type` but `web`
+and `fast` with `UnsupportedValueError`. An option passed as `None` is left out of the request, as if not
+passed, so `search_type=None` searches at Perplexity's default, `web`. Perplexity reports no cost.
+
+Perplexity signals every failure with an HTTP status and an `error` object. Any status from 400
+raises `ProviderError`, tagged with `error.type` (`invalid_api_key`, `invalid_request`,
+`invalid_country_code`), else `http_error`; the message never reaches the error.
+
+Every field read from a successful answer is checked: an answer without `results`, or with an item
+lacking `url`, `title` or `snippet`, or with one of them not a string, or with a `date` that is
+neither a string nor null, or that does not parse, raises `ProviderError` with the tag
+`unexpected_response`. Fields the adapter does not read, `last_updated` among them, are ignored.
+
+## SearXNG
+
+`searxng` calls a [SearXNG](https://docs.searxng.org/dev/search_api.html) instance's search API,
+`GET /search` with `format=json`, at the instance's root URL, passed as `api_base` or read from
+`SEARXNG_BASE_URL`. It needs no key. The instance must list `json` under `search.formats` in its
+`settings.yml`; otherwise it answers 403. The query travels in the URL, which the log filter above
+keeps out of httpx's log; `method="post"` sends the same fields as form data, which keeps the
+query out of the instance's access log too. Any other `method` is refused before a request.
+
+| `SearchHit` | From SearXNG |
+|---|---|
+| `url` | `url`; a result without one is dropped |
+| `title` | `title`, empty when absent |
+| `snippet` | `content`, empty when absent; SearXNG returns no page text, so `text` is always `None` |
+| `published` | `publishedDate`, ISO 8601, often `null`; without a zone, UTC; in another form, `None`, and the value stays in `raw` |
+
+SearXNG reports no cost and has no count parameter: it answers one page of the merged results of
+its engines, which the adapter cuts to `max_results`, at most 100. `time_range` is sent as it is,
+since SearXNG takes `day`, `week`, `month` and `year`; an engine with no time filter is left out of
+a search that sets one. The other native options are SearXNG's own parameters, `engines`,
+`categories`, `language`, `safesearch` and `pageno`, and `method`; `--describe searxng` lists
+them. `engines` and `method` are operator-only. An option set to `None` is not sent.
+
+An engine that fails, by a timeout, a CAPTCHA or a suspension, is named in `unresponsive_engines`
+inside a 200. A search that leaves no usable hit while at least one engine failed is returned as
+`SearchResult.error`, tagged `engines_unresponsive`; with hits, the failures stay in `raw`. Any
+status from 400 raises `ProviderError`: a 403 tagged `forbidden`, which SearXNG answers when
+`json` is not enabled and which a proxy in front of it can answer too; a 400 whose `error` starts
+`Invalid value` or `Empty` tagged `invalid_parameter`; any other `http_error`. SearXNG's sentence
+never reaches the error.
+
+SearXNG's documentation describes none of its answer's fields, so only `results`, without which
+the adapter cannot answer, is required. `unresponsive_engines` must be a list when present. Each
+item read before the count is reached must have a `url` that is a string, `null` or absent, a
+`title` and a `content` that are strings or absent, and a `publishedDate` that, when it starts
+like an ISO 8601 date, is one; anything else raises `ProviderError` with the tag
+`unexpected_response`. A result whose `url` is `null`, absent, or not an http or https URL with a
+host, such as a torrent engine's `magnet:` link, is dropped, and the count is filled from the
+items after it. Infoboxes, answers and suggestions come in fields of their own, which the adapter
+does not read.
+
+## Serply
+
+`serply` calls Serply's [Google Search API](https://serply.io/docs/resources/google-search),
+`GET /v1/search`, with the key read from `SERPLY_API_KEY` when not passed. The key travels in the
+`X-Api-Key` header; the query travels in the URL, which the log filter above keeps out of httpx's
+log.
+
+| `SearchHit` | From Serply |
+|---|---|
+| `url`, `title` | `link`, `title` |
+| `snippet` | `description`; Serply returns no page text, so `text` is always `None` |
+| `published` | always `None`: Serply shows a result's date as display text in the language of the region that served the search, such as `May 27, 2026`, `17 hours ago` or `27.05.2026`, so it stays in `raw` |
+
+Serply reports no cost. `max_results` becomes `num`, at most 10, one page of Google's results;
+a page can hold one more than asked for, so the hits are cut to the count as well. `time_range`
+becomes Google's `tbs` window, `qdr:d`, `qdr:w`, `qdr:m` or `qdr:y`, and wins over the `tbs`
+option. The other native options are `gl`, `start`, `tbs` and `tbm` (`nws` for Google News),
+sent as query parameters, and `X-Proxy-Location` and `X-User-Agent`, sent as headers under those
+names; `--describe serply` lists them. An option set to `None` is not sent.
+
+Serply signals every failure with an HTTP status and a `detail` sentence in the body. Any status
+from 400 raises `ProviderError`, tagged `invalid_api_key` or `missing_api_key` from how the detail
+starts, else `http_error`; the detail itself never reaches the error.
+
+Every field read from a successful answer is checked: an answer without `results`, or with an item
+lacking `link`, `title` or `description`, or with any of these of the wrong type, raises
+`ProviderError` with the tag `unexpected_response`. A `link` that is not an http or https URL
+with a host, such as an opaque Google redirect token, which Serply sometimes returns in its place,
+is dropped rather than failing the search, and the count is filled from the items after it. Ads, the
+knowledge graph and Serply's other SERP features come in fields of their own, which the adapter
+does not read, so a field Serply adds breaks nothing.
+
+## Synthetic
+
+`synthetic` calls Synthetic's [search API](https://dev.synthetic.new/docs/synthetic/search),
+`POST /v2/search`, with the key read from `SYNTHETIC_API_KEY` when not passed. The key travels as
+a Bearer token in the `Authorization` header, and the query in the JSON body.
+
+| `SearchHit` | From Synthetic |
+|---|---|
+| `url`, `title` | `url`, `title` |
+| `snippet` | always `""`: Synthetic returns page text and no snippet |
+| `text` | `text`, when present and not empty |
+| `published` | `published`, an ISO 8601 date-time; one without a zone is UTC |
+
+Synthetic reports no cost and takes nothing but the query: it has no native options, no result
+count and no recency filter. `max_results` cuts the hits it returns, at most 10, and `time_range`
+drops the hits dated before the range's first day, in UTC; a hit without a date is kept.
+
+Synthetic signals every failure with an HTTP status and an `error` sentence in the body. Any
+status from 400 raises `ProviderError`, tagged `invalid_api_key`, `missing_api_key` or, for a key whose
+account has no subscription, `subscription_required`, from how the sentence starts, else `http_error`; the sentence itself never reaches the error.
+
+Every field read from a successful answer is checked: an answer without `results`, or with an item
+lacking `url` or `title`, or with either of the wrong type, or with a `text` or `published` that is
+neither a string nor null, or a `published` that does not parse, raises `ProviderError` with the
+tag `unexpected_response`. Fields the adapter does not read are ignored.
+
+## Tavily
+
+`tavily` calls Tavily's [Search API](https://docs.tavily.com/documentation/api-reference/endpoint/search),
+`POST /search`, with the key read from `TAVILY_API_KEY` when not passed. The key travels as a
+Bearer token.
+
+| `SearchHit` | From Tavily |
+|---|---|
+| `url`, `title` | `url`, `title` of each item in `results` |
+| `snippet` | `content`, the passages of the page relevant to the query |
+| `text` | `raw_content`, the page's full text, which Tavily returns only when `include_raw_content` asks for it; else `None` |
+| `published` | `published_date`, an RFC 1123 date such as `Thu, 15 Oct 2026 00:00:00 GMT`; `None` when Tavily sends none or one that does not parse, which stays in `raw` |
+
+Tavily reports credits, not dollars, so it reports no cost. `search_depth` is its cost tier:
+`basic`, `fast` and `ultra-fast` cost 1 credit a search, `advanced` 2. `auto_parameters` is not
+offered, since it always costs 2 credits. `max_results` is sent at most 20, and only when passed;
+`time_range` is Tavily's own parameter of that name. The other native options are Tavily's own,
+such as `topic`, `include_domains` and `include_published_date`; `--describe tavily` lists them.
+An option set to `None` is not sent.
+
+Tavily signals every failure with an HTTP status and a sentence, which never reaches the error.
+Any status from 400 raises `ProviderError`, tagged by its status: `unauthorized` (401),
+`rate_limited` (429), `plan_limit_exceeded` (432), `pay_as_you_go_limit_exceeded` (433), else
+`http_error`.
+
+Every field read from a successful answer is checked. An answer without a `results` list, a
+result whose `url`, `title` or `content` is missing or not a string, or whose `raw_content` or
+`published_date` is neither a string nor null, raises `ProviderError` with the tag
+`unexpected_response`.
+
 ## The fake provider
 
 `fake` is a provider like any other, in the `test` tier. It answers from canned data and takes its
@@ -221,6 +434,7 @@ network or a monkeypatch:
 | `in_body_error` | Answer with no hits and this tag as `SearchResult.error`. |
 | `leak_query` | Raise a `RuntimeError` whose message carries the query, as a careless adapter might, so a host can prove it never passes exception text on. |
 | `account` | Echoed in `raw`. Operator-only, so a host can exercise that rule. |
+| `depth` | `basic` or `advanced`, echoed in `raw`. A cost tier, so a host can exercise its rule for cost tiers. |
 
 `raw` echoes the request, the query left out, so a test can see what reached the provider.
 

@@ -13,7 +13,9 @@ from typing import Any, cast
 import pytest
 
 from gateway.api.routes._pipeline import _copying_produced_files
-from gateway.services.files import ProviderFile
+from gateway.services.files._provider_files import produced_files_for
+from gateway.services.files._provider_files import store_inline_outputs as _store_inline_outputs
+from gateway.types.provider_file import ProviderFile
 
 _CITATION = {"type": "container_file_citation", "file_id": "cfile_1", "filename": "plot.png", "container_id": "c_1"}
 
@@ -32,7 +34,10 @@ async def _order_of(dialect: str, *events: Any) -> list[str]:
         order.append(f"stored {len(data)} bytes")
         return "file-stored"
 
-    bridge = SimpleNamespace(store_provider_output=store)
+    async def store_inline_outputs(reply_dialect: str, reply: Any) -> None:
+        await _store_inline_outputs(reply_dialect, reply, store)
+
+    bridge = SimpleNamespace(store_inline_outputs=store_inline_outputs, produced_files=produced_files_for)
     async for event in _copying_produced_files(upstream(), dialect, copy, cast(Any, bridge)):
         order.append(f"sent {event.type}")  # noqa: PERF401 - the test checks when each append happens
     return order

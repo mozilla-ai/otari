@@ -285,3 +285,14 @@ def test_a_switch_changed_after_the_app_is_built_moves_nothing(
     assert probe_status == (200 if built_enabled else 404)
     assert ("probe" in surfaces) is built_enabled
     assert worker_started is built_enabled
+
+
+def test_trace_retention_runs_with_capture_off(tmp_path: Path) -> None:
+    """Stopping capture must not stop deleting what was captured, its content, shares and reads with it."""
+    config = _gateway_config(tmp_path).model_copy(update={"trace_capture_enabled": False})
+
+    app = create_app(config)
+
+    enabled = {feature.name: feature for feature in app.state.enabled_features}
+    assert "traces" not in enabled
+    assert enabled["trace_retention"].worker is not None

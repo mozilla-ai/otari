@@ -18,6 +18,7 @@ import type {
   UpdateHostedModelRequest,
 } from "@/client"
 import {
+  hasOutputRate,
   type PricingUnit,
   pricingUnitOf,
   toEnteredRate,
@@ -35,7 +36,7 @@ export interface PriceDraft {
 
 export const EMPTY_DRAFT: PriceDraft = {
   model: "",
-  unit: "tokens",
+  unit: "token",
   input: "",
   output: "",
   cacheRead: "",
@@ -53,19 +54,25 @@ const asText = (value: number | null | undefined) =>
 export function draftFrom(model: HostedModel): PriceDraft {
   const unit = pricingUnitOf(model.unit)
   const input = model.input_price_per_million
+  const output = model.output_price_per_million
   return {
     model: model.model,
     unit,
     input: asText(
-      input === null || input === undefined || unit === "tokens"
+      input === null || input === undefined || unit === "token"
         ? input
         : toEnteredRate(input, unit),
     ),
-    output: unit === "tokens" ? asText(model.output_price_per_million) : "",
+    output:
+      unit === "token"
+        ? asText(output)
+        : hasOutputRate(unit) && output !== null && output !== undefined
+          ? asText(toEnteredRate(output, unit))
+          : "",
     cacheRead:
-      unit === "tokens" ? asText(model.cache_read_price_per_million) : "",
+      unit === "token" ? asText(model.cache_read_price_per_million) : "",
     cacheWrite:
-      unit === "tokens" ? asText(model.cache_write_price_per_million) : "",
+      unit === "token" ? asText(model.cache_write_price_per_million) : "",
   }
 }
 
@@ -99,14 +106,16 @@ export function readDraft(draft: PriceDraft): DraftReading {
     cacheRead: parsePrice(draft.cacheRead),
     cacheWrite: parsePrice(draft.cacheWrite),
   }
-  // A request or image price is one rate: the hidden boxes are not read.
-  if (draft.unit !== "tokens") {
+  // A request or image price is one rate: the hidden boxes are not read. A
+  // minute of audio reads its output box too, a blank one pricing no output.
+  if (draft.unit !== "token") {
     return {
       parsed,
       hasBasePair: parsed.input.value !== undefined,
       halfAPair: false,
       hasCacheRate: false,
-      allParse: parsed.input.ok,
+      allParse:
+        parsed.input.ok && (!hasOutputRate(draft.unit) || parsed.output.ok),
     }
   }
   return {
@@ -138,10 +147,12 @@ function priceFields(draft: PriceDraft) {
   const { parsed } = readDraft(draft)
   // The fallbacks are unreachable behind `canSubmitDraft`, which required the pair.
   const input = parsed.input.value ?? 0
-  if (draft.unit !== "tokens") {
+  if (draft.unit !== "token") {
     return {
       input_price_per_million: toStoredRate(input, draft.unit),
-      output_price_per_million: 0,
+      output_price_per_million: hasOutputRate(draft.unit)
+        ? toStoredRate(parsed.output.value ?? 0, draft.unit)
+        : 0,
       cache_read_price_per_million: null,
       cache_write_price_per_million: null,
       unit: draft.unit,

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
+  CountryDatabaseStatus,
   GatewaySettings,
   MailSettings,
   MaintenanceMode,
@@ -10,6 +11,7 @@ import type {
 import { apiFetch } from "@/shared/api/client"
 import {
   CATALOG,
+  COUNTRY_DATABASE,
   DISCOVERABLE,
   MAIL_SETTINGS,
   MAINTENANCE_MODE,
@@ -88,6 +90,47 @@ export function useSetMaintenanceMode() {
       }),
     onSuccess: (data) => {
       queryClient.setQueryData([MAINTENANCE_MODE], data)
+    },
+  })
+}
+
+export function useCountryDatabase() {
+  return useQuery({
+    queryKey: [COUNTRY_DATABASE],
+    queryFn: () =>
+      apiFetch<CountryDatabaseStatus>("/settings/country-database"),
+    staleTime: 60_000,
+  })
+}
+
+// A country file is 8 to 10 MB, so the upload gets longer than a JSON call.
+const COUNTRY_DATABASE_UPLOAD_TIMEOUT_MS = 5 * 60_000
+
+export function useUploadCountryDatabase() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (file: File) => {
+      const body = new FormData()
+      body.append("file", file)
+      return apiFetch<CountryDatabaseStatus>("/settings/country-database", {
+        method: "PUT",
+        body,
+        signal: AbortSignal.timeout(COUNTRY_DATABASE_UPLOAD_TIMEOUT_MS),
+      })
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData([COUNTRY_DATABASE], data)
+    },
+  })
+}
+
+export function useRemoveCountryDatabase() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<void>("/settings/country-database", { method: "DELETE" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [COUNTRY_DATABASE] })
     },
   })
 }

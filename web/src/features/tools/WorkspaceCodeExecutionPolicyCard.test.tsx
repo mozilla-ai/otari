@@ -78,13 +78,42 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     window.localStorage.clear()
   })
 
-  it("reads a workspace with no policy as allowed, with nothing else to set", async () => {
+  it("reads a workspace with no policy as allowed and unpinned", async () => {
     mockApi()
     await renderLoaded()
 
     expect(screen.getByRole("switch", { name: SWITCH })).toBeChecked()
+    expect(
+      screen.getByRole("button", { name: /Who runs provider code tools/ }),
+    ).toHaveTextContent("Not set")
     expect(screen.queryByRole("textbox")).toBeNull()
     expect(screen.queryByRole("button", { name: /Advanced/ })).toBeNull()
+  })
+
+  it("pins who runs a provider's own code tool, keeping API-set limits", async () => {
+    const calls = mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        configured: true,
+        enabled: true,
+        max_iterations: 3,
+      }),
+    })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.click(
+      screen.getByRole("button", { name: /Who runs provider code tools/ }),
+    )
+    await user.click(
+      await screen.findByRole("option", { name: "Always Otari" }),
+    )
+
+    expect(await putBody(calls)).toMatchObject({
+      enabled: true,
+      executor: "otari",
+      max_iterations: 3,
+    })
   })
 
   it("shows a blocked policy switched off", async () => {

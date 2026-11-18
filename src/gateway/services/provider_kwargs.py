@@ -64,7 +64,7 @@ from gateway.log_config import logger
 from gateway.services.alias_service import resolve_effective_alias
 from gateway.services.catalog import resolve_catalog_offerings, resolve_catalog_selector, resolve_undated_selector
 from gateway.services.policy_store import resolve_effective_policy
-from gateway.services.tenancy.org_provider_key_service import cached_org_provider_kwargs
+from gateway.services.tenancy.org_provider_key_service import cached_org_provider_kwargs, cached_org_slug_provider
 from gateway.types.provider_account import ProviderAccount, ResolvedCredential
 
 if TYPE_CHECKING:
@@ -72,7 +72,7 @@ if TYPE_CHECKING:
 
 # Keys that describe an instance to otari but are not credentials any-llm
 # understands, so they must be stripped before the provider call.
-_INSTANCE_META_KEYS = ("provider_type", "models", "max_retries", "messages_api")
+_INSTANCE_META_KEYS = ("provider_type", "models", "max_retries", "messages_api", "request_fields")
 
 # How long a Bedrock client waits for the next byte of a response. botocore's
 # default of 60s fails a stream whose model goes quiet for a minute, which a model
@@ -514,6 +514,14 @@ def reaches_organization_key(config: GatewayConfig, instance: str) -> bool:
     return instance not in config.providers and _hosted_names(instance) is None
 
 
+def org_key_slug_provider(name: str, workspace_id: uuid.UUID | None) -> LLMProvider | None:
+    """The implementation of the organization key ``name`` is the slug of in this workspace, if it is one."""
+    if workspace_id is None:
+        return None
+    implementation = cached_org_slug_provider(workspace_id, name)
+    return LLMProvider(implementation) if implementation is not None else None
+
+
 def get_provider_kwargs(
     config: GatewayConfig,
     provider: LLMProvider,
@@ -544,7 +552,9 @@ def get_provider_kwargs(
     kwargs: dict[str, Any] = {}
     raw_config = config.providers.get(lookup)
     if raw_config is None and workspace_id is not None:
-        raw_config = cached_org_provider_kwargs(workspace_id, provider.value)
+        # A slug names one key of its own; any other instance reads the provider's.
+        named = lookup if cached_org_slug_provider(workspace_id, lookup) is not None else provider.value
+        raw_config = cached_org_provider_kwargs(workspace_id, named)
     if raw_config is not None:
         provider_config = {k: v for k, v in raw_config.items() if k not in _INSTANCE_META_KEYS}
 
@@ -909,7 +919,7 @@ def resolve_provider_selector(
         alias is None
         and (written := split_selector(model_selector)) is not None
         and written[0] not in config.providers
-        and _hosted_names(written[0]) is None
+        and (_hosted_names(written[0]) is None or org_key_slug_provider(written[0], workspace_id) is not None)
     ):
         # An organization key serves only the ids it offers, so a provider's
         # undated name reaches its one dated build there. A ``providers:``
@@ -937,6 +947,18 @@ def resolve_provider_selector(
             provider=provider,
             model=model,
             kwargs=get_provider_kwargs(config, provider, instance=instance),
+            alias=model_selector if alias is not None else None,
+        )
+
+    if split is not None and (slug_provider := org_key_slug_provider(split[0], workspace_id)) is not None:
+        # An organization key with a custom endpoint, named by its slug: only that
+        # key serves it, and its provider's own name never reaches it.
+        instance, model = split
+        return ResolvedProvider(
+            instance=instance,
+            provider=slug_provider,
+            model=model,
+            kwargs=get_provider_kwargs(config, slug_provider, instance=instance, workspace_id=workspace_id),
             alias=model_selector if alias is not None else None,
         )
 
@@ -1088,3 +1110,22 @@ def no_candidate_configured_detail(missing: Sequence[MissingCredential]) -> str:
         f"No credential is configured for any provider this request could use ({len(missing)} attempts: {names}). "
         f"{_CONFIGURE_A_CREDENTIAL}"
     )
+
+
+def with_request_fields(
+    config: GatewayConfig, instance: str, request_fields: dict[str, Any], extras: Mapping[str, Any]
+) -> dict[str, Any]:
+    """``request_fields`` plus the caller's extra fields this instance's ``request_fields`` lets through.
+
+    ``extras`` are the fields a request carried beyond the ones its schema declares,
+    which are otherwise dropped. Only the names the operator listed for this provider
+    instance in config.yml are forwarded, in ``extra_body``, which the OpenAI SDK and
+    the SDKs built the same way merge into the request body. An ``extra_body`` the
+    fields already carry keeps its entries. Another instance, or an instance listing
+    none, gets the request fields unchanged.
+    """
+    allowed = (config.providers.get(instance) or {}).get("request_fields") or ()
+    passed = {name: extras[name] for name in allowed if name in extras}
+    if not passed:
+        return request_fields
+    return {**request_fields, "extra_body": {**passed, **(request_fields.get("extra_body") or {})}}

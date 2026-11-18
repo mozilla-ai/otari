@@ -1,6 +1,7 @@
-"""Web search on the libraries: the in-loop default, the resolver, the in-loop backend, and the direct endpoint."""
+"""Web search on the libraries: the in-loop default, the resolver, the in-loop backend, and the direct endpoints."""
 
 from gateway.services.tools._web_search._backend import WebSearchBackend
+from gateway.services.tools._web_search._cost_tier import refused_cost_tier
 from gateway.services.tools._web_search._default import (
     in_loop_default,
     search_default_to_pin,
@@ -10,10 +11,24 @@ from gateway.services.tools._web_search._default import (
 from gateway.services.tools._web_search._direct import (
     DirectSearch,
     DirectSearchResult,
+    direct_search_rate_key,
+    legacy_search_instance,
+    organization_key_search_instance,
     pick_direct_search_instance,
-    refuse_unpriced_direct_search,
     resolve_direct_search,
+    resolve_organization_key_search,
     run_direct_search,
+    servable_direct_search_instances,
+    unnamed_direct_search_tool,
+    unpriced_direct_search_detail,
+)
+from gateway.services.tools._web_search._direct_fetch import (
+    DirectFetch,
+    DirectFetchResult,
+    pick_direct_fetch_instance,
+    resolve_direct_fetch,
+    run_direct_fetch,
+    unpriced_direct_fetch_detail,
 )
 from gateway.services.tools._web_search._litellm import (
     CHARS_PER_TOKEN,
@@ -28,16 +43,22 @@ from gateway.services.tools._web_search._resolve import (
     ResolvedFetch,
     ResolvedSearch,
     builtin_fetch_resolved,
+    configuration_only_options,
+    fetch_resolves,
     in_loop_search_for,
     resolve_fetch,
     resolve_in_loop_search,
     resolve_search,
+    search_resolves,
+    served_fetch_instances,
 )
 
 __all__ = [
     "CHARS_PER_TOKEN",
     "DEFAULT_MAX_TOKENS_PER_PAGE",
     "DIRECT_DEFAULT_MAX_RESULTS",
+    "DirectFetch",
+    "DirectFetchResult",
     "DirectSearch",
     "DirectSearchResult",
     "InLoopSearch",
@@ -46,18 +67,33 @@ __all__ = [
     "SearchQuery",
     "WebSearchBackend",
     "builtin_fetch_resolved",
+    "configuration_only_options",
+    "fetch_resolves",
     "filter_hits_by_domain",
     "in_loop_default",
     "in_loop_search_for",
     "page_budget_chars",
+    "pick_direct_fetch_instance",
+    "refused_cost_tier",
+    "organization_key_search_instance",
+    "direct_search_rate_key",
+    "legacy_search_instance",
     "pick_direct_search_instance",
-    "refuse_unpriced_direct_search",
+    "resolve_direct_fetch",
     "resolve_direct_search",
+    "resolve_organization_key_search",
     "resolve_fetch",
     "resolve_in_loop_search",
     "resolve_search",
+    "run_direct_fetch",
     "run_direct_search",
     "search_default_to_pin",
+    "search_resolves",
+    "servable_direct_search_instances",
+    "served_fetch_instances",
+    "unnamed_direct_search_tool",
+    "unpriced_direct_fetch_detail",
+    "unpriced_direct_search_detail",
     "warn_about_tool_instances",
     "web_search_configured",
 ]

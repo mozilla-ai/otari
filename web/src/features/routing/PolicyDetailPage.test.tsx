@@ -8,12 +8,13 @@ import { API_ROOT } from "@/shared/api/client"
 import {
   adminContext,
   CHAIN,
-  LEARNED,
+  EXPLAINED,
   mockApi,
   policy,
   policyWrites,
   renderInWorkspace,
   renderPage,
+  UNKNOWN_ROUTER,
   WEIGHTED,
 } from "@/tests/routing"
 
@@ -22,6 +23,13 @@ afterEach(() => {
 })
 
 type TestUser = ReturnType<typeof userEvent.setup>
+
+const PRIORITY: PolicySpec = {
+  select: [
+    { router: "priority", candidates: ["openai:gpt-5-nano", "openai:gpt-5"] },
+    { default: "openai:gpt-5" },
+  ],
+}
 
 /** Every section a policy can combine, at once. */
 const COMBINED: PolicySpec = {
@@ -60,6 +68,24 @@ function lastWrite(calls: { url: string; method: string; body: unknown }[]) {
 }
 
 describe("PolicyDetailPage", () => {
+  it("opens a policy naming an unknown router read-only", async () => {
+    const { calls } = mockApi([
+      policy("smart", UNKNOWN_ROUTER, { is_dynamic: true }),
+    ])
+    renderPolicy("smart")
+
+    expect(
+      await screen.findByText(/Uses options this page cannot show yet/),
+    ).toBeInTheDocument()
+    const spec = await section("Stored spec")
+    expect(spec.getByText(/"cheapest"/)).toBeInTheDocument()
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /^Save / }),
+    ).not.toBeInTheDocument()
+    expect(policyWrites(calls)).toHaveLength(0)
+  })
+
   it("shows every section of a policy and where its requests go", async () => {
     mockApi([policy("fast", CHAIN)])
     renderPolicy("fast")
@@ -67,6 +93,9 @@ describe("PolicyDetailPage", () => {
     expect(
       await screen.findByRole("heading", { level: 1, name: "fast" }),
     ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("radio", { name: "Smart router" }),
+    ).not.toBeInTheDocument()
     for (const title of [
       "Name",
       "Main selection",
@@ -207,9 +236,9 @@ describe("PolicyDetailPage", () => {
   })
 
   it("goes back to one model, the one the pool had marked", async () => {
-    const { calls } = mockApi([policy("smart", LEARNED, { is_dynamic: true })])
+    const { calls } = mockApi([policy("spill", PRIORITY, { is_dynamic: true })])
     const user = userEvent.setup()
-    renderPolicy("smart")
+    renderPolicy("spill")
 
     await user.click(await screen.findByRole("radio", { name: "One model" }))
     await save(user, "Save main selection")
@@ -223,14 +252,14 @@ describe("PolicyDetailPage", () => {
     // A stored spec that omitted its default from `candidates` still shows
     // it, because the gateway appends it.
     mockApi([
-      policy("smart", {
+      policy("spill", {
         select: [
-          { router: "knn", candidates: ["openai:gpt-5-nano"] },
+          { router: "priority", candidates: ["openai:gpt-5-nano"] },
           { default: "openai:gpt-5" },
         ],
       }),
     ])
-    renderPolicy("smart")
+    renderPolicy("spill")
 
     expect(
       await screen.findByRole("combobox", { name: /model 1/i }),
@@ -239,7 +268,7 @@ describe("PolicyDetailPage", () => {
       "openai:gpt-5",
     )
     expect(
-      screen.getAllByRole("radio", { name: /serves when unsure/i })[1],
+      screen.getAllByRole("radio", { name: /serves on opt-out/i })[1],
     ).toBeChecked()
     expect(
       screen.queryByRole("combobox", { name: /^main model$/i }),
@@ -247,25 +276,25 @@ describe("PolicyDetailPage", () => {
   })
 
   it("marking a different model changes the saved default, not the pool", async () => {
-    const { calls } = mockApi([policy("smart", LEARNED, { is_dynamic: true })])
+    const { calls } = mockApi([policy("spill", PRIORITY, { is_dynamic: true })])
     const user = userEvent.setup()
-    renderPolicy("smart")
+    renderPolicy("spill")
 
     await user.click(
-      (await screen.findAllByRole("radio", { name: /serves when unsure/i }))[0],
+      (await screen.findAllByRole("radio", { name: /serves on opt-out/i }))[0],
     )
     await save(user, "Save main selection")
 
     expect(lastWrite(calls).spec.select).toEqual([
-      { router: "knn", candidates: ["openai:gpt-5-nano", "openai:gpt-5"] },
+      { router: "priority", candidates: ["openai:gpt-5-nano", "openai:gpt-5"] },
       { default: "openai:gpt-5-nano" },
     ])
   })
 
-  it("keeps a learned policy's pool when another section is saved", async () => {
-    const { calls } = mockApi([policy("smart", LEARNED, { is_dynamic: true })])
+  it("keeps a priority policy's pool when another section is saved", async () => {
+    const { calls } = mockApi([policy("spill", PRIORITY, { is_dynamic: true })])
     const user = userEvent.setup()
-    renderPolicy("smart")
+    renderPolicy("spill")
 
     const chain = await section("Fallback chain")
     await user.click(chain.getByRole("button", { name: "Add a backup" }))
@@ -277,7 +306,7 @@ describe("PolicyDetailPage", () => {
     await save(user, "Save fallback chain")
 
     expect(lastWrite(calls).spec).toEqual({
-      ...LEARNED,
+      ...PRIORITY,
       on_failure: ["anthropic:claude-haiku-4-5"],
     })
   })
@@ -435,7 +464,7 @@ describe("PolicyDetailPage", () => {
       policy("wide", {
         select: [
           {
-            router: "knn",
+            router: "priority",
             candidates: [
               "openai:gpt-5-nano",
               "openai:gpt-5-mini",
@@ -546,14 +575,13 @@ describe("PolicyDetailPage", () => {
   it("opens the user's own row when the address names one", async () => {
     mockApi([
       policy("cheap", CHAIN),
-      policy("cheap", LEARNED, { user_id: "u-bob" }),
+      policy("cheap", PRIORITY, { user_id: "u-bob" }),
     ])
     renderPolicy("cheap", "/routing/cheap?user=u-bob")
 
     expect(
       await screen.findByRole("combobox", { name: /model 1/i }),
     ).toHaveValue("openai:gpt-5-nano")
-    expect(screen.getByText("u-bob")).toBeInTheDocument()
   })
 
   it("says so when the policy is not there", async () => {
@@ -642,7 +670,11 @@ describe("PolicyDetailPage read-only", () => {
       await screen.findByText(/Set in config.yml, so it is read-only here/),
     ).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /^Save/ })).toBeNull()
-    expect(screen.queryByRole("textbox")).toBeNull()
+    // The one field is the test's simulated budget, which writes nothing.
+    const test = await section("Test")
+    expect(screen.getAllByRole("textbox")).toEqual([
+      test.getByRole("textbox", { name: /Budget used/ }),
+    ])
     expect(
       screen.getByText(/From 80% of budget: gpt-5-nano · OpenAI/),
     ).toBeInTheDocument()
@@ -664,6 +696,100 @@ describe("PolicyDetailPage read-only", () => {
     ).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /^Save/ })).toBeNull()
     expect(screen.getByText(/"key_id": "k-1"/)).toBeInTheDocument()
+  })
+})
+
+describe("PolicyDetailPage test section", () => {
+  it("shows what the stored spec compiles to, and what it left out", async () => {
+    const { calls } = mockApi()
+    renderPolicy("fast")
+
+    const test = await section("Test")
+    expect(await test.findByText(/gpt-5-mini · OpenAI/)).toBeInTheDocument()
+    expect(test.getByText(/main model/)).toBeInTheDocument()
+    expect(
+      test.getByText(/is not in allowed_models for this caller/),
+    ).toBeInTheDocument()
+    const sent = calls.find((call) =>
+      call.url.endsWith(`${API_ROOT}/routing/policies/explain`),
+    )
+    expect(sent?.body).toMatchObject({ name: "fast", spec: CHAIN })
+    expect(policyWrites(calls)).toEqual([])
+  })
+
+  it("sends a config.yml policy by name and compiles again for a simulated budget", async () => {
+    const user = userEvent.setup()
+    const { calls } = mockApi()
+    renderPolicy("auto")
+
+    const test = await section("Test")
+    await test.findByText(/gpt-5-mini · OpenAI/)
+    const explains = () =>
+      calls.filter((call) => call.url.endsWith("/routing/policies/explain"))
+    expect(explains()[0].body).not.toHaveProperty("spec")
+
+    const budget = test.getByRole("textbox", { name: /Budget used/ })
+    // Blank after trimming is no budget at all, so past the debounce nothing
+    // compiles again, rather than once more at 0%.
+    const before = explains().length
+    await user.type(budget, "  ")
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    expect(explains()).toHaveLength(before)
+
+    // A budget that is not a number hides the plan rather than leaving the
+    // last one under the field as if it answered it.
+    await user.clear(budget)
+    await user.type(budget, "abc")
+    await waitFor(() =>
+      expect(test.queryByRole("list", { name: "Tried in order" })).toBeNull(),
+    )
+
+    await user.clear(budget)
+    await user.type(budget, "85")
+    // Until the new value compiles, the last plan is marked as not current.
+    expect(
+      test.getByRole("list", { name: "Tried in order" }).parentElement,
+    ).toHaveAttribute("aria-busy", "true")
+    await waitFor(() =>
+      expect(explains().at(-1)?.body).toMatchObject({
+        name: "auto",
+        budget_used_pct: 85,
+      }),
+    )
+  })
+
+  it("says so when no model is left", async () => {
+    mockApi(undefined, undefined, [], {
+      explain: { ...EXPLAINED, candidates: [], selection_reason: "none" },
+    })
+    renderPolicy("fast")
+
+    const test = await section("Test")
+    expect(
+      await test.findByText("No model can serve this policy."),
+    ).toBeInTheDocument()
+  })
+
+  it("asks the tenant surface, in the selected workspace", async () => {
+    const { calls } = mockApi([], undefined, [], {
+      context: adminContext(),
+      memberPolicies: [policy("tenant-fast", CHAIN)],
+    })
+    renderInWorkspace(
+      <PolicyDetailPage name="tenant-fast" />,
+      "/routing/tenant-fast",
+    )
+
+    await (await section("Test")).findByText(/gpt-5-mini · OpenAI/)
+    const sent = calls.find((call) =>
+      call.url.endsWith(
+        `${API_ROOT}/organizations/me/routing-policies/explain`,
+      ),
+    )
+    expect(sent?.body).toMatchObject({
+      name: "tenant-fast",
+      workspace_id: expect.any(String),
+    })
   })
 })
 

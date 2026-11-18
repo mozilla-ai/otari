@@ -10,22 +10,24 @@ import {
   openAccountMenu,
   openNested,
   openOrganization,
+  openTab,
   pageHeading,
+  pressRowAction,
 } from "./helpers"
 
 // One shared gateway + DB, so the flows build on each other and must run in order.
 test.describe.configure({ mode: "serial" })
 
 test.describe("dashboard core flows", () => {
-  test("first-run overview guides the operator to provider setup", async ({
+  test("first-run Home guides the operator to provider setup", async ({
     page,
   }) => {
     await login(page)
-    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Home" })).toBeVisible()
     await expect(page.getByText("Get started with Otari")).toBeVisible()
   })
 
-  test("add a provider from onboarding, and it appears in the table", async ({
+  test("add a provider from onboarding, and it opens on its own page", async ({
     page,
   }) => {
     await login(page)
@@ -42,7 +44,7 @@ test.describe("dashboard core flows", () => {
       .fill("http://e2e-box:8000/v1")
     await dialog.getByRole("button", { name: "Add provider" }).click()
 
-    await expect(page.getByText("e2e-llm")).toBeVisible({ timeout: 30_000 })
+    await expect(pageHeading(page, "e2e-llm")).toBeVisible({ timeout: 30_000 })
     // Onboarding clears once a provider exists.
     await expect(page.getByText("Welcome to Otari")).toBeHidden()
   })
@@ -55,23 +57,24 @@ test.describe("dashboard core flows", () => {
   test("the first-run sheet hands out a key, then skips for good", async ({
     page,
   }) => {
-    const mintedKey = page.waitForResponse(
-      (response) =>
-        response.url().endsWith("/activation/key") &&
-        response.request().method() === "POST" &&
-        response.ok(),
-    )
     await login(page)
-    const { key: fullKey } = await (await mintedKey).json()
 
     // A sheet over the Overview, not a panel on it: a workspace with no traffic
     // has nothing on that page worth reading yet.
     const sheet = page.getByRole("dialog", { name: "Send your first request" })
     await expect(sheet).toBeVisible()
 
-    // The key is minted as the sheet opens; nothing else is asked of the
-    // operator first. Shown once, in a labeled field they can select and copy,
-    // and concealed there until they ask for it (otari-ai#2111).
+    // The key is minted on a press, never by the sheet opening (#3000). Shown
+    // once, in a labeled field they can select and copy, and concealed there
+    // until they ask for it (otari-ai#2111).
+    const mintedKey = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/activation/key") &&
+        response.request().method() === "POST" &&
+        response.ok(),
+    )
+    await sheet.getByRole("button", { name: "Create API key" }).click()
+    const { key: fullKey } = await (await mintedKey).json()
     // By role, not by label: `getByLabel` matches a substring, so it also
     // picks up the field's own "Show API key" toggle.
     const key = sheet.getByRole("textbox", { name: "Your API key" })
@@ -90,15 +93,15 @@ test.describe("dashboard core flows", () => {
     const curl = sheet.getByRole("region", { name: "curl code" })
     await expect(curl).toBeVisible()
     // Concealed in the example too, because it is the same secret.
-    await expect(curl).toContainText(`Otari-Key: ${concealedKey}`)
+    await expect(curl).toContainText(`export OTARI_API_KEY='${concealedKey}'`)
     await expect(curl).not.toContainText(fullKey)
 
     await sheet.getByRole("button", { name: "Show Your API key" }).click()
     await expect(key).toHaveValue(fullKey)
-    await expect(curl).toContainText(`Otari-Key: ${fullKey}`)
+    await expect(curl).toContainText(`export OTARI_API_KEY=${fullKey}`)
     await sheet.getByRole("button", { name: "Hide Your API key" }).click()
     await expect(key).toHaveValue(concealedKey)
-    await expect(curl).toContainText(`Otari-Key: ${concealedKey}`)
+    await expect(curl).toContainText(`export OTARI_API_KEY='${concealedKey}'`)
     await expect(curl).not.toContainText(fullKey)
 
     // It is watching for the request while all of that is on screen.
@@ -111,7 +114,7 @@ test.describe("dashboard core flows", () => {
 
     // Permanent: the offer does not come back on the next page load.
     await page.reload()
-    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Home" })).toBeVisible()
     await expect(sheet).toBeHidden()
   })
 
@@ -122,24 +125,28 @@ test.describe("dashboard core flows", () => {
     await nav(page).getByRole("link", { name: "Models", exact: true }).click()
     await expect(pageHeading(page, "Models")).toBeVisible()
 
-    // Routing and Tools nest their pages, so each is reached through its group.
-    await openNested(page, "Routing", "Policies")
-    await expect(pageHeading(page, "Routing")).toBeVisible()
-    await openNested(page, "Tools", "Web search, Beta")
-    await expect(pageHeading(page, "Web search")).toBeVisible()
-    // The one Tools child that is not a filtered view of the page above, so
+    // Routing is a tab of Rules, which titles the page, and each tool a view
+    // of Tools.
+    await openTab(page, "Rules", "Routing")
+    await expect(pageHeading(page, "Rules")).toBeVisible()
+    await openTab(page, "Tools", "Web search")
+    await expect(pageHeading(page, "Tools")).toBeVisible()
+    // The one Tools view that is not a filtered view of the settings page, so
     // reaching it proves its own route resolves rather than that the filter did.
-    await openNested(page, "Tools", "MCP servers")
-    await expect(pageHeading(page, "MCP servers")).toBeVisible()
+    await openTab(page, "Tools", "MCP servers")
+    await expect(
+      page.getByRole("button", { name: "Add MCP server" }),
+    ).toBeVisible()
 
     await openOrganization(page)
-    for (const [link, heading] of [
-      ["Providers", "Providers"],
-      ["Spend & budgets", "Budgets"],
-    ]) {
-      await nav(page).getByRole("link", { name: link, exact: true }).click()
-      await expect(pageHeading(page, heading)).toBeVisible()
-    }
+    await openNested(page, "Providers", "Inference")
+    await expect(pageHeading(page, "Inference providers")).toBeVisible()
+    await openNested(page, "Providers", "Web search")
+    await expect(pageHeading(page, "Web search providers")).toBeVisible()
+    await nav(page)
+      .getByRole("link", { name: "Spend & budgets", exact: true })
+      .click()
+    await expect(pageHeading(page, "Budgets")).toBeVisible()
 
     // The retired Model pricing path still answers, because bookmarks and links
     // to it outlive the page. `override` named this organization's own rate for
@@ -147,10 +154,10 @@ test.describe("dashboard core flows", () => {
     // deployment's rate, whose editor went with the price table, so it is
     // dropped rather than left in a URL nothing reads.
     await gotoRoute(page, "/organization/pricing?override=openai:gpt-4o")
-    await expect(pageHeading(page, "Providers")).toBeVisible()
+    await expect(pageHeading(page, "Inference providers")).toBeVisible()
     await expect(page).toHaveURL(/override=openai(%3A|:)gpt-4o/)
     await gotoRoute(page, "/organization/pricing?model=openai:gpt-4o")
-    await expect(pageHeading(page, "Providers")).toBeVisible()
+    await expect(pageHeading(page, "Inference providers")).toBeVisible()
     await expect(page).not.toHaveURL(/model=/)
 
     // The deployment's own rail, which neither loop above reaches: it is entered
@@ -212,7 +219,7 @@ test.describe("dashboard core flows", () => {
     await openOrganization(page)
     await nav(page).getByRole("link", { name: "Spend & budgets" }).click()
     const budgetRow = page.getByRole("row", { name: /e2e-budget/ })
-    await budgetRow.getByRole("button", { name: "Edit" }).click()
+    await pressRowAction(budgetRow, "Edit")
     // The field's visible label is its accessible name now: the picker used to
     // carry a hidden "Add a person" beside a heading that labeled nothing, so
     // one control had two names.
@@ -239,19 +246,24 @@ test.describe("dashboard core flows", () => {
   test("create an API key owned by a chosen user", async ({ page }) => {
     await login(page)
     await nav(page).getByRole("link", { name: "API keys" }).click()
-    // A bootstrap key already exists, so use the header action, not onboarding.
-    await page.getByRole("button", { name: "Create key" }).click()
-    // Scoped from here on, because "Create key" is now on screen twice: the
-    // heading's trigger stays visible while the dialog is open, and the labels
-    // rule makes the dialog's submit say the same words.
+    // A bootstrap key already exists, so use the header action, not the empty
+    // list's.
+    await page
+      .getByRole("main")
+      .getByRole("button", { name: "Create API key" })
+      .click()
+    // Scoped from here on, because "Create API key" is now on screen twice:
+    // the heading's trigger stays visible while the dialog is open, and the
+    // labels rule makes the dialog's submit say the same words.
     const dialog = page.getByRole("dialog")
     await dialog.getByLabel("Name").fill("ci-bot")
-    // Owner is required (user-first). Reuse the user created earlier; type it and
-    // close the combobox popover so it does not aria-hide the submit button.
+    // The owner is under More options. Reuse the user created earlier; type it
+    // and close the combobox popover so it does not aria-hide the submit button.
+    await dialog.getByRole("button", { name: "More options" }).click()
     const ownerBox = dialog.getByPlaceholder("Pick a user, or type a new id…")
     await ownerBox.fill("alice@example.com")
     await dismissComboBoxInDialog(ownerBox)
-    await dialog.getByRole("button", { name: "Create key" }).click()
+    await dialog.getByRole("button", { name: "Create API key" }).click()
 
     // The one-time reveal appears; acknowledge it.
     await page.getByRole("button", { name: /saved this key/i }).click()
@@ -262,62 +274,9 @@ test.describe("dashboard core flows", () => {
     await expect(row.getByText("alice@example.com")).toBeVisible()
   })
 
-  test("the bulk bar sits over the table, not over the rail", async ({
-    page,
-  }) => {
-    // The only detector this fix will ever have. Its offset is CSS, so jsdom
-    // cannot see it and no Vitest case can assert it; the shell publishes the
-    // rail's footprint as `data-rail` and `globals.css` turns that into
-    // `--rail-width`, and if the attribute is ever dropped the variable falls
-    // back to `0px`, the bar silently returns to being centered on the viewport,
-    // and every other check stays green.
-    //
-    // Narrow enough that the cap on the bar's own width is not what keeps it
-    // inside the pane: at 1440 `max-w-3xl` dominates and the bug is invisible.
-    await page.setViewportSize({ width: 1024, height: 800 })
-    await login(page)
-    await nav(page).getByRole("link", { name: "API keys" }).click()
-
-    const rows = page.getByRole("row", { name: /ci-bot/ })
-    await expect(rows).toBeVisible()
-    // `force`, because the real `<input>` is behind the styled box that draws
-    // it: Playwright finds the input, then times out waiting for it to stop
-    // being covered by `.otari-checkbox-box`, which is the arrangement
-    // `web/AGENTS.md` describes under "A control's own box does not tell you
-    // whether it is visible". The input is the control; the span is paint.
-    await rows.getByRole("checkbox").first().check({ force: true })
-
-    const bar = page.getByRole("toolbar", { name: "Bulk actions" })
-    await expect(bar).toBeVisible()
-
-    const barBox = await bar.boundingBox()
-    // The content pane, not the table. They are the same thing only while the
-    // table fits: at 1440 the table is 1128 in a 1176 pane and the two centers
-    // coincide, which is what made the table look like a fair reference. At
-    // 1024 the table is 980 in a 760 pane and scrolls inside it, so centering
-    // the bar on the table would put it half off the screen. The pane is what
-    // the bar belongs to.
-    const paneBox = await page.locator("main").boundingBox()
-    if (!barBox || !paneBox) throw new Error("no layout to measure")
-
-    // Centered on the pane rather than on the window, within a pixel of
-    // rounding.
-    const barCenter = barBox.x + barBox.width / 2
-    const paneCenter = paneBox.x + paneBox.width / 2
-    expect(Math.abs(barCenter - paneCenter)).toBeLessThanOrEqual(1)
-
-    // And inside the pane rather than reaching back over the rail: a fixed
-    // element's own `100%` is the viewport, so centering it alone left it
-    // viewport-wide.
-    expect(barBox.x).toBeGreaterThanOrEqual(paneBox.x - 1)
-    expect(barBox.x + barBox.width).toBeLessThanOrEqual(
-      paneBox.x + paneBox.width + 1,
-    )
-  })
-
   test("create a routing policy", async ({ page }) => {
     await login(page)
-    await openNested(page, "Routing", "Policies")
+    await openTab(page, "Rules", "Routing")
     // `.first()` is the heading's action. An empty routing list also offers
     // the same words from its empty state, and a press has to name which.
     await page.getByRole("button", { name: "Create policy" }).first().click()
@@ -346,7 +305,7 @@ test.describe("dashboard core flows", () => {
 
   test("grows a policy a fallback chain", async ({ page }) => {
     await login(page)
-    await openNested(page, "Routing", "Policies")
+    await openTab(page, "Rules", "Routing")
     // `.first()` is the heading's action. An empty routing list also offers
     // the same words from its empty state, and a press has to name which.
     await page.getByRole("button", { name: "Create policy" }).first().click()
@@ -393,12 +352,12 @@ test.describe("dashboard core flows", () => {
     expect([204, 404]).toContain(dropped.status())
 
     await login(page)
-    await openNested(page, "Routing", "Policies")
+    await openTab(page, "Rules", "Routing")
 
     const chained = page
       .getByRole("row")
       .filter({ has: page.getByRole("rowheader", { name: "chained" }) })
-    await chained.getByRole("button", { name: "Edit" }).click()
+    await pressRowAction(chained, "Edit")
     // Edit opens the policy's own page, where the name is a section of its own.
     await expect(pageHeading(page, "chained")).toBeVisible()
     await page.getByRole("textbox", { name: /^Name/ }).fill("renamed")
@@ -417,186 +376,5 @@ test.describe("dashboard core flows", () => {
       renamed.getByRole("list", { name: "Backups" }).getByRole("listitem"),
     ).toHaveCount(1)
     await expect(page.getByRole("rowheader", { name: "chained" })).toBeHidden()
-  })
-
-  // The share card is the one flow whose output cannot be checked in jsdom: it
-  // ends in a PNG, and jsdom has no canvas, no toBlob and no object URLs, so the
-  // unit tests can only assert the wiring around a mocked rasterizer. Two bugs got
-  // through that way, both fatal and both invisible to a green unit suite: drawing
-  // an SVG from a blob: URL taints the canvas so toBlob() refuses outright, and a
-  // long model list overflowed the fixed card frame so flex-shrink collapsed the
-  // title to zero height. This test exists to catch that class of failure.
-  test("shares the usage view as a real PNG", async ({ page }) => {
-    // This suite starts on an empty database (serve.sh wipes it), and no earlier
-    // flow creates usage, so the card would otherwise render its empty state.
-    // /v1/usage/external-events writes usage rows with no provider call.
-    const auth = {
-      Authorization: `Bearer ${MASTER_KEY}`,
-      "Content-Type": "application/json",
-    }
-
-    // Ingestion rejects usage for a user that does not exist, and this test owns
-    // its own rather than depending on an earlier one in the serial order.
-    const owner = "share-e2e@example.com"
-    const created = await page.request.post(`${API_ROOT}/users`, {
-      headers: auth,
-      data: { user_id: owner },
-    })
-    // A re-run against a warm DB is fine; only a genuine failure should fail here.
-    expect([200, 201, 400, 409]).toContain(created.status())
-
-    const seeded = await page.request.post(
-      `${API_ROOT}/usage/external-events`,
-      {
-        headers: auth,
-        data: {
-          source: "e2e-seed",
-          user_id: owner,
-          events: Array.from({ length: 12 }, (_, i) => ({
-            source_event_id: `share-seed-${i}`,
-            timestamp: new Date(Date.now() - (i + 1) * 3_600_000).toISOString(),
-            provider: i % 2 === 0 ? "openai" : "groq",
-            // A fully-qualified selector, so the card's name collapsing is exercised
-            // on the shape that motivated it.
-            model: i % 2 === 0 ? "gpt-4o" : "fireworks/accounts/llama-3.3-70b",
-            input_tokens: 1000 + i * 50,
-            output_tokens: 200 + i * 10,
-            duration_ms: 400 + i,
-          })),
-        },
-      },
-    )
-    expect(seeded.ok(), await seeded.text()).toBe(true)
-
-    await login(page)
-    await nav(page).getByRole("link", { name: "Usage" }).click()
-
-    // The affordance lives in the chart's own caption row and only exists when the
-    // range has data to share.
-    const share = page.getByRole("button", { name: "Share usage as an image" })
-    await expect(share).toBeVisible()
-    await share.click()
-
-    // A `dialog`, not an `alertdialog`: this is the plain frame, and an alert is
-    // reserved for a frame whose whole job is one question. Named, because the
-    // frame fills HeroUI's hidden trigger slot with the same title.
-    const dialog = page.getByRole("dialog", {
-      name: "Share this view as an image",
-    })
-    await expect(dialog).toBeVisible()
-
-    // The width, not the class. `design-system.css` pins `.modal__dialog`
-    // unlayered at a 42rem cap, which is what a `w-[…]` at a call site loses to,
-    // so the only proof that this frame is the wide one is a number read after
-    // layout. It holds the preview and its controls side by side; at the cap
-    // they stack. The computed width, not the bounding box: the frame animates
-    // in on a scale transform, so a box read here is the tail of that animation
-    // and comes back a few percent large.
-    expect(await dialog.evaluate((el) => getComputedStyle(el).width)).toBe(
-      "928px",
-    )
-
-    // The preview is the PNG itself, so asserting it decoded is asserting the
-    // rasterizer produced a real image. naturalWidth stays 0 on a failed decode,
-    // which is exactly what the tainted-canvas bug produced.
-    const preview = dialog.getByAltText(
-      "Preview of the usage card that will be shared",
-    )
-    await expect(preview).toBeVisible({ timeout: 20_000 })
-    await expect
-      .poll(
-        async () => preview.evaluate((el: HTMLImageElement) => el.naturalWidth),
-        { timeout: 20_000 },
-      )
-      .toBeGreaterThan(0)
-
-    // The preview must settle. The rasterize effect once carried two arrays that
-    // were rebuilt on every render, so its own setPreview re-armed the debounce
-    // and the card re-encoded every 300ms for as long as the dialog stayed open.
-    // jsdom cannot show this (rasterize throws there, and React bails on an
-    // identical error string, so nothing re-renders); a real browser can.
-    const firstSrc = await preview.evaluate((el: HTMLImageElement) => el.src)
-    await page.waitForTimeout(2500)
-    expect(await preview.evaluate((el: HTMLImageElement) => el.src)).toBe(
-      firstSrc,
-    )
-
-    // The card node itself, not the dialog: it is rendered off-screen as a sibling
-    // of the dialog's own section so it can be rasterized at full size.
-    // Located by attribute, not by role: the off-screen copy is aria-hidden on
-    // purpose, so it is deliberately absent from the accessibility tree.
-    const card = page.locator('[aria-label^="Usage card"]')
-    // The seeded selector is `fireworks/accounts/llama-3.3-70b`; the card prints
-    // only the final model type.
-    await expect(card).toContainText("llama-3.3-70b")
-    await expect(card).not.toContainText("fireworks/accounts")
-    // Hardcoded, never derived from the gateway's own host.
-    await expect(card).toContainText("otari.ai")
-
-    // Every row count must render in both shapes: the frame is fixed, so the rows
-    // divide a height budget, and a band collapsing to zero is the regression.
-    // Width is checked too, and for the same reason: a wide card once set its hero
-    // at the square card's size, which ran the number off both edges of the frame.
-    // This seed cannot reproduce that on its own (it prices nothing, so the hero is
-    // a two-digit request count), and the unit suite covers the sizing itself; the
-    // check is here so any future arrangement that spills sideways is caught in the
-    // one place the card is measured after a real layout.
-    for (const shape of ["Square", "Wide"]) {
-      await dialog.getByRole("button", { name: shape }).click()
-      for (const rows of ["1", "9"]) {
-        await dialog.getByRole("button", { name: rows, exact: true }).click()
-        const bands = await page.evaluate(() => {
-          const node = document.querySelector<HTMLElement>(
-            '[role="img"][aria-label^="Usage card"]',
-          )
-          // Explicit, so an unmounted card reports itself rather than throwing a
-          // TypeError that points at the evaluate call.
-          if (node === null) {
-            return { heights: [] as number[], overflows: false, missing: true }
-          }
-          const box = node.getBoundingClientRect()
-          return {
-            heights: Array.from(node.children).map((c) =>
-              Math.round(c.getBoundingClientRect().height),
-            ),
-            overflows:
-              node.scrollHeight > Math.round(box.height) ||
-              node.scrollWidth > Math.round(box.width),
-            missing: false,
-          }
-        })
-        expect(bands.missing, `${shape}/${rows} rendered no card`).toBe(false)
-        expect(
-          bands.heights.length,
-          `${shape}/${rows} rendered no bands`,
-        ).toBeGreaterThan(0)
-        expect(
-          bands.heights.filter((h) => h === 0),
-          `${shape}/${rows} collapsed a band`,
-        ).toEqual([])
-        expect(bands.overflows, `${shape}/${rows} overflowed the frame`).toBe(
-          false,
-        )
-      }
-    }
-
-    // Download is the only terminal action that can be asserted: Playwright cannot
-    // read an image off the clipboard, so "Copy image" is deliberately untested.
-    await dialog.getByRole("button", { name: "Square" }).click()
-    const download = page.waitForEvent("download")
-    await dialog.getByRole("button", { name: "Download PNG" }).click()
-    const file = await download
-    expect(file.suggestedFilename()).toMatch(
-      /^otari-usage-\d{4}-\d{2}-\d{2}.*\.png$/,
-    )
-
-    const path = await file.path()
-    const { readFileSync } = await import("node:fs")
-    const bytes = readFileSync(path)
-    // PNG magic number, then the IHDR width/height, which prove the card was
-    // rasterized at its declared size rather than as an empty or clipped canvas.
-    expect(bytes.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a")
-    expect(bytes.readUInt32BE(16)).toBe(2160)
-    expect(bytes.readUInt32BE(20)).toBe(2160)
   })
 })

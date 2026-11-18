@@ -1,5 +1,11 @@
 import { RouterProvider } from "@tanstack/react-router"
-import { lazy, Suspense, useEffect, useState } from "react"
+import {
+  lazy,
+  Suspense,
+  useLayoutEffect,
+  useState,
+  useSyncExternalStore,
+} from "react"
 import { PublicPageTitle } from "@/app/PublicPageTitle"
 import { router } from "@/app/router"
 import { ErrorBoundary } from "@/design-system/feedback/ErrorBoundary"
@@ -10,22 +16,30 @@ import { Login } from "@/features/auth/Login"
 import { PublicAuthPage } from "@/features/auth/PublicAuthPage"
 import {
   isAcceptInvitationPath,
+  isSsoAuthorizePath,
   type PublicAuthPath,
   publicAuthPath,
 } from "@/features/auth/publicAuthPaths"
 import { AcceptInvitationPage } from "@/features/invitations/AcceptInvitationPage"
 import {
-  publicCatalogHref,
   publicCatalogPath,
+  publicCatalogRoute,
   takeRememberedModel,
 } from "@/features/models/publicCatalog"
+import { publicProvidersPath } from "@/features/providers/publicProviders"
+import {
+  currentRoute,
+  routeHref,
+  routePath,
+} from "@/shared/helpers/appLocation"
 import type { WireBootstrap } from "@/shared/helpers/bootstrap"
 import { normalizeBootstrap } from "@/shared/helpers/bootstrap"
+import { providerDisplayName } from "@/shared/helpers/providers"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider, useDeployment } from "@/shared/hooks/useDeployment"
 
 /**
- * The hash path, live: it changes without a reload (following an emailed
+ * The route, live: it changes without a reload (following an emailed
  * link while a tab is already open, or the accept page navigating away when
  * it is done), and both `App` and `DeploymentRoot` have to notice, unlike the
  * bootstrap and auth state everything else here reads once per load. Read once
@@ -42,14 +56,26 @@ const PublicCatalogPage = lazy(() =>
   })),
 )
 
-function useHashPath(): string {
-  const [hash, setHash] = useState(() => window.location.hash)
-  useEffect(() => {
-    const onHashChange = () => setHash(window.location.hash)
-    window.addEventListener("hashchange", onHashChange)
-    return () => window.removeEventListener("hashchange", onHashChange)
-  }, [])
-  return hash
+// Split for the same reason as the catalog above.
+const PublicProvidersPage = lazy(() =>
+  import("@/features/providers/PublicProvidersPage").then((module) => ({
+    default: module.PublicProvidersPage,
+  })),
+)
+
+function subscribeToLocation(onChange: () => void): () => void {
+  return router.history.subscribe(onChange)
+}
+
+// Read off the router's history rather than `window.location`: it notifies as
+// a navigation is queued, before the browser's address catches up, and it also
+// hears `navigateTo` and Back, since it wraps `pushState` and `replaceState`.
+function readRoute(): string {
+  return currentRoute(router.history.location)
+}
+
+function useRoute(): string {
+  return useSyncExternalStore(subscribeToLocation, readRoute)
 }
 
 export default function App({
@@ -62,9 +88,9 @@ export default function App({
   bootstrap: WireBootstrap | null
 }) {
   // Read here rather than only in `DeploymentRoot` because the boundary below
-  // resets on it: which branch renders is a function of the hash, so a throw in
+  // resets on it: which branch renders is a function of the route, so a throw in
   // one of them must not outlive the navigation away from it.
-  const hash = useHashPath()
+  const route = useRoute()
 
   // Null means /v1/bootstrap did not answer (see main.tsx). The app deliberately
   // has no fallback deployment to assume: rendering a management dashboard at a
@@ -86,9 +112,9 @@ export default function App({
   // correction memo reads `sign_in_methods` and is therefore one of the things
   // that can throw on a bootstrap this dashboard did not expect.
   return (
-    <ErrorBoundary resetKey={hash}>
+    <ErrorBoundary resetKey={route}>
       <DeploymentProvider value={normalizeBootstrap(bootstrap)}>
-        <DeploymentRoot hash={hash} />
+        <DeploymentRoot route={route} />
       </DeploymentProvider>
     </ErrorBoundary>
   )
@@ -100,7 +126,13 @@ export default function App({
  * one decision no route gets to make, and accepting an invitation is one no
  * *session* gets to require.
  */
-function DeploymentRoot({ hash }: { hash: string }) {
+const AppAuthorizationPage = lazy(() =>
+  import("@/features/auth/AppAuthorizationPage").then((module) => ({
+    default: module.AppAuthorizationPage,
+  })),
+)
+
+function DeploymentRoot({ route }: { route: string }) {
   const { public_catalog, open_signup } = useDeployment()
   const { isAuthenticated } = useAuth()
 
@@ -108,20 +140,20 @@ function DeploymentRoot({ hash }: { hash: string }) {
   // the recipient of an emailed invitation holds neither. Every route under
   // `src/routes/` lives behind the auth gate below, on purpose, so this has to
   // be checked ahead of it rather than added there. `AcceptInvitationPage`
-  // itself changes the hash away from this prefix once it is done, which is
+  // itself changes the route away from this prefix once it is done, which is
   // what makes this reactive to the URL rather than only to the first paint.
   //
-  // Keyed on the hash itself, not just gated by it: the page reads its token
-  // from the hash exactly once, in its own initial state, so a second
+  // Keyed on the route itself, not just gated by it: the page reads its token
+  // from the route exactly once, in its own initial state, so a second
   // invitation link opened in the same tab (pasted over the first without a
   // full reload) would otherwise re-render the *same* component instance and
   // keep validating and accepting the first token. The key forces React to
-  // tear down and remount on any hash change under this prefix, which is what
+  // tear down and remount on any route change under this prefix, which is what
   // makes "once" mean once per link rather than once per tab.
-  if (isAcceptInvitationPath(hash)) {
+  if (isAcceptInvitationPath(route)) {
     return (
       <PublicPageTitle page="Accept invitation">
-        <AcceptInvitationPage key={hash} />
+        <AcceptInvitationPage key={route} />
       </PublicPageTitle>
     )
   }
@@ -129,36 +161,59 @@ function DeploymentRoot({ hash }: { hash: string }) {
   // The rest of the auth surface a visitor may reach without a session
   // (otari#650): claiming a rostered identity, confirming an address from an
   // emailed link, and recovering a forgotten password. Checked here for the
-  // same reason as the line above, and keyed on the hash for a version of the
-  // same reason: `#/verify-email` verifies on mount and `#/reset-password`
+  // same reason as the line above, and keyed on the route for a version of the
+  // same reason: `/verify-email` verifies on mount and `/reset-password`
   // holds a typed-in password, so a second emailed link pasted over the first
   // in an open tab has to tear both down rather than re-render on top of the
   // previous link's result.
-  const publicAuth = publicAuthPath(hash)
-  if (publicAuth) {
+  const publicAuth = publicAuthPath(route)
+  if (publicAuth || isSsoAuthorizePath(route)) {
     // Signup's heading is "Claim your account" where signup is closed, so its
-    // tab says the same.
+    // tab says the same. A direct link naming an organization's slug carries
+    // no entry of its own in that fixed table, so it falls back to the one
+    // title every sign-in surface here shares.
     const title =
       publicAuth === "/signup" && !open_signup
         ? "Claim account"
-        : PUBLIC_AUTH_TITLES[publicAuth]
+        : publicAuth
+          ? PUBLIC_AUTH_TITLES[publicAuth]
+          : "Sign in"
     return (
       <PublicPageTitle page={title}>
-        <PublicAuthPage path={publicAuth} hash={hash} key={hash} />
+        <PublicAuthPage path={publicAuth} route={route} key={route} />
       </PublicPageTitle>
     )
   }
 
   // The catalog, where the deployment has opened it to visitors. Only for a
   // visitor: a signed-in caller reaches the same pages through the router,
-  // priced for their organization. Keyed on the hash so a second model opened
+  // priced for their organization. Keyed on the route so a second model opened
   // in the tab remounts the view with its own selection.
-  const publicCatalog = publicCatalogPath(hash)
+  const publicCatalog = publicCatalogPath(route)
   if (public_catalog && !isAuthenticated && publicCatalog !== null) {
     return (
       <PublicPageTitle page="Models">
         <Suspense fallback={<PageLoading label="Loading models…" />}>
-          <PublicCatalogPage key={hash} modelId={publicCatalog.modelId} />
+          <PublicCatalogPage key={route} modelId={publicCatalog.modelId} />
+        </Suspense>
+      </PublicPageTitle>
+    )
+  }
+
+  // The providers the catalog is served by, under the same switch and for the
+  // same visitor.
+  const publicProviders = publicProvidersPath(route)
+  if (public_catalog && !isAuthenticated && publicProviders !== null) {
+    return (
+      <PublicPageTitle
+        page={
+          publicProviders.name
+            ? providerDisplayName(publicProviders.name)
+            : "Providers"
+        }
+      >
+        <Suspense fallback={<PageLoading label="Loading providers…" />}>
+          <PublicProvidersPage key={route} name={publicProviders.name} />
         </Suspense>
       </PublicPageTitle>
     )
@@ -176,6 +231,13 @@ function DeploymentRoot({ hash }: { hash: string }) {
   // Auth gates the router rather than living inside it: signing in is the one
   // decision no route gets to make. The route table and the shell it renders
   // into are in src/routes, wired up in src/app/router.tsx.
+  if (routePath(route) === "/oauth/authorize") {
+    return (
+      <Suspense fallback={<PageLoading label="Loading authorization…" />}>
+        <AppAuthorizationPage key={route} />
+      </Suspense>
+    )
+  }
   return <SignedInRoot />
 }
 
@@ -188,11 +250,22 @@ function DeploymentRoot({ hash }: { hash: string }) {
 function SignedInRoot() {
   useState(() => {
     const modelId = takeRememberedModel()
-    const path = window.location.hash.replace(/^#/, "")
-    if (modelId && (path === "" || path === "/")) {
-      router.history.replace(publicCatalogHref(modelId).replace(/^#/, ""))
+    if (modelId && routePath(currentRoute()) === "/") {
+      router.history.replace(routeHref(publicCatalogRoute(modelId)))
     }
   })
+  // The router outlives this component: signing out unmounts it and signing in
+  // mounts it again, and the pages in front of a session can move the address
+  // in between (sign-in to recovery and back). On a remount TanStack loads only
+  // when it has never loaded, so without this it keeps showing the page it last
+  // resolved under the new address. A child's layout effect runs first, so the
+  // router is subscribed and has read the address by the time this asks.
+  useLayoutEffect(() => {
+    const resolved = router.state.resolvedLocation
+    if (resolved && resolved.href !== router.latestLocation.href) {
+      void router.load()
+    }
+  }, [])
   // The selected workspace wraps the router because the shell's switcher and the
   // pages below it read the same selection, and it is seeded from the
   // organization context, which needs a session: inside the auth gate, never
@@ -211,6 +284,8 @@ const PUBLIC_AUTH_TITLES: Record<PublicAuthPath, string> = {
   "/recover-password": "Recover password",
   "/verify-email": "Verify email",
   "/reset-password": "Reset password",
-  "/auth/google/callback": "Sign in",
-  "/auth/github/callback": "Sign in",
+  "/setup": "Set up",
+  "/sign-in/google/callback": "Sign in",
+  "/sign-in/github/callback": "Sign in",
+  "/sign-in/sso/callback": "Sign in",
 }

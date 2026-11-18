@@ -104,6 +104,7 @@ class _ReservationMoves:
                 max_output_tokens=estimate_inputs.max_output_tokens,
                 default_output_tokens=estimate_inputs.default_output_tokens,
                 cache_write_ttl=estimate_inputs.cache_write_ttl,
+                facts=estimate_inputs.facts,
             )
         else:
             amount = handle.scoped_estimate if handle.scoped_budgets else handle.estimate
@@ -127,10 +128,8 @@ class _ReservationMoves:
         unchanged = tuple(ceiling.scoped_budget_id for ceiling in target) == handle.scoped_budget_ids
         if unchanged and held.amount <= handle.scoped_estimate:
             return None
-        # A free request that holds no dollars is not gated on them, and on ceilings that cap no count holds nothing.
+        # A free request that holds no dollars is not gated on them, but still holds its ceilings for its tools to grow.
         free = is_free_pricing(pricing) and held.amount == ZERO
-        if free and not any(to_applicable_budget(ceiling).caps_counts for ceiling in target):
-            return None
         target_ids = {ceiling.scoped_budget_id for ceiling in target}
         held_ids = set(handle.scoped_budget_ids)
         return ReservationMove(

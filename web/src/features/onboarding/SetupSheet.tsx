@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router"
-import { useState } from "react"
+import { useRef, useState } from "react"
 
+import type { ActivationAttempt, ActivationIssuedKey } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import {
   CONCEALED_SECRET,
@@ -12,6 +13,7 @@ import { Dialog, DialogSection } from "@/design-system/feedback/Dialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { ListeningPanel } from "@/features/onboarding/ListeningPanel"
+import { setupSuccessFace } from "@/features/onboarding/SetupSuccess"
 import type { SetupFailure } from "@/features/onboarding/setupFailureCopy"
 import {
   buildSetupSnippets,
@@ -19,6 +21,7 @@ import {
   SETUP_TABS,
   type SetupSnippetId,
 } from "@/features/onboarding/setupSnippets"
+import { useLandingTransition } from "@/features/onboarding/setupTransition"
 import {
   SNIPPET_KEY_ENV_VAR,
   SNIPPET_MODEL_PLACEHOLDER,
@@ -30,13 +33,16 @@ import {
  *
  * **A sheet rather than a panel on the page**, which is what the platform's
  * flow was and what this replaces. Nothing else on a dashboard with no traffic
- * in it is worth reading, so the guide is allowed to be the screen; it offers a
- * way out in the footer and never comes back once taken.
+ * in it is worth reading, so the guide is allowed to be the screen, offered
+ * once per workspace.
  *
  * **Divided rather than stacked.** Each part is a `DialogSection`, so the key,
  * the example and the wait are separated by hairlines that run the width of the
  * frame. A column of gaps would have read as three cards floating in a sheet,
  * which is the thing this design system does not do.
+ *
+ * When the first request lands, the sheet turns into its success face
+ * (`SetupSuccess`) in the same frame (`setupTransition`).
  *
  * Presentational, and controlled by `SetupGuide` above it: every piece of state
  * here is either the tab somebody picked or whether the key is on screen.
@@ -46,6 +52,9 @@ export function SetupSheet({
   apiKey,
   keyPrefix,
   keySuffix,
+  issuedKey,
+  isUsingIssuedKey,
+  onUseIssuedKey,
   baseUrl,
   model,
   failure,
@@ -53,18 +62,26 @@ export function SetupSheet({
   isChecking,
   checkFailed,
   keyError,
+  isCreatingKey,
   skipError,
   isSkipping,
+  onCreateKey,
   onCheckNow,
   onSkip,
-  onDismiss,
+  onLeave,
+  landed,
 }: {
   workspaceName?: string
-  /** The issued key's plaintext, or undefined while it is being minted. */
+  /** The issued key's plaintext, or undefined until one is created. */
   apiKey?: string
   /** The fingerprint the server stored for the issued key, shown while it is concealed. */
   keyPrefix?: string
   keySuffix?: string
+  /** The setup key this workspace already holds, when this visit has not minted one. */
+  issuedKey?: ActivationIssuedKey
+  /** Whether the caller chose to keep `issuedKey` rather than replace it. */
+  isUsingIssuedKey: boolean
+  onUseIssuedKey: () => void
   /** Where a request belongs. */
   baseUrl: string
   /** The first model the gateway can serve, when it can serve one. */
@@ -74,52 +91,92 @@ export function SetupSheet({
   isChecking: boolean
   checkFailed: boolean
   keyError: unknown
+  isCreatingKey: boolean
   skipError: unknown
   isSkipping: boolean
+  /** Mints the key. Nothing is minted until somebody asks, so leaving first leaves no key behind. */
+  onCreateKey: () => void
   onCheckNow: () => void
   onSkip: () => void
-  /** Closes the sheet without retiring the guide, so it is offered again. */
-  onDismiss: () => void
+  /** Retires the guide on the way to a page a guidance link names. */
+  onLeave: () => void
+  /** Set once the first request has landed: the sheet then shows its payoff. */
+  landed?: {
+    /** The request that succeeded. Absent if the gateway reported none. */
+    attempt?: ActivationAttempt
+    onDismiss: () => void
+    onOpenActivity: () => void
+  }
 }) {
   const [tab, setTab] = useState<SetupSnippetId>(DEFAULT_SETUP_TAB)
   // One reveal for the whole sheet: the key field and the example built around
   // it hide the same secret, so revealing one and not the other would be a
   // distinction with nothing behind it.
   const [isRevealed, setIsRevealed] = useState(false)
+  const faceRef = useRef<HTMLDivElement>(null)
+  const showsSuccess = useLandingTransition(faceRef, landed !== undefined)
 
   const concealedKey =
     apiKey === undefined
       ? CONCEALED_SECRET
       : concealedFingerprint(keyPrefix, keySuffix)
+  // A kept key's plaintext is gone, so the examples read the variable it was
+  // exported as, and a copy of them still runs.
+  const keyInUse =
+    apiKey ??
+    (issuedKey && isUsingIssuedKey ? `$${SNIPPET_KEY_ENV_VAR}` : undefined)
 
   const instruction = SETUP_TABS.find(({ id }) => id === tab)?.instruction ?? ""
-  // Built from the stand-in whenever the key is not on screen, which includes
-  // the moment before it exists: what is rendered needs no key, so the examples
-  // are here from the first frame rather than appearing under the operator once
-  // the mint lands. Only the copy waits for the real thing.
+  // A minted key shows its stand-in until revealed, a kept key the variable,
+  // and no key yet the stand-in, so the examples are there from the first frame.
   const shown = buildSetupSnippets({
     baseUrl,
-    apiKey: isRevealed && apiKey !== undefined ? apiKey : concealedKey,
+    apiKey:
+      apiKey === undefined
+        ? (keyInUse ?? concealedKey)
+        : isRevealed
+          ? apiKey
+          : concealedKey,
     model,
   })
-  // What a copy yields, always the real key: an operator who copies without
-  // revealing still gets something that runs. Undefined until there is a key,
-  // and `CodeBlock` then offers no copy control rather than a dead one.
+  // A copy always runs: the minted key itself or the kept key's variable. With
+  // neither, `CodeBlock` offers no copy control rather than a dead one.
   const copied =
-    apiKey === undefined
+    keyInUse === undefined
       ? undefined
-      : buildSetupSnippets({ baseUrl, apiKey, model })
+      : buildSetupSnippets({ baseUrl, apiKey: keyInUse, model })
+
+  // The same `Dialog` in the same place, so the frame stays open across faces.
+  if (showsSuccess && landed) {
+    return (
+      <Dialog
+        isOpen
+        onOpenChange={(isOpen) => {
+          if (!isOpen) landed.onDismiss()
+        }}
+        size="lg"
+        isAnnouncement
+        faceRef={faceRef}
+        {...setupSuccessFace({
+          attempt: landed.attempt,
+          workspaceName,
+          onOpenActivity: landed.onOpenActivity,
+        })}
+      />
+    )
+  }
 
   return (
     <Dialog
       isOpen
       // Empty, because this sheet is not dismissable: `Dialog` gates the
       // callback on that, so a handler here would be a dismissal path that
-      // cannot run. `onDismiss` reaches it from the guidance links instead.
+      // cannot run. `onLeave` reaches it from the guidance links instead.
       onOpenChange={() => {}}
       size="lg"
       isAnnouncement
       isDismissable={false}
+      faceRef={faceRef}
       isScanning={!checkFailed}
       scanTone={failure ? "danger" : "accent"}
       title="Send your first request"
@@ -140,7 +197,7 @@ export function SetupSheet({
           checkFailed={checkFailed}
           onCheckNow={onCheckNow}
           onOpenTab={setTab}
-          onLeave={onDismiss}
+          onLeave={onLeave}
         />
       }
       footerStart={
@@ -162,21 +219,7 @@ export function SetupSheet({
       <DialogSection>
         <ErrorBanner error={keyError} />
         <ErrorBanner error={skipError} />
-        {apiKey === undefined ? (
-          // Not a `CopyField` holding an empty string: every credential field
-          // here conceals, so an empty one would show the same run of bullets a
-          // real key does and invite a copy that yields nothing. The field
-          // arrives with the key it is for.
-          <div className="flex flex-col gap-2">
-            <span className="text-emphasis">Your API key</span>
-            <p
-              aria-live="polite"
-              className="border-border bg-surface-alt text-mono-caption text-subtle border px-3 py-2"
-            >
-              Creating your API key…
-            </p>
-          </div>
-        ) : (
+        {apiKey !== undefined ? (
           <CopyField
             label="Your API key"
             value={apiKey}
@@ -184,12 +227,43 @@ export function SetupSheet({
             isRevealed={isRevealed}
             onRevealChange={setIsRevealed}
           />
+        ) : issuedKey ? (
+          <IssuedKey
+            issuedKey={issuedKey}
+            isUsing={isUsingIssuedKey}
+            isReplacing={isCreatingKey}
+            onUse={onUseIssuedKey}
+            onReplace={onCreateKey}
+          />
+        ) : (
+          // Not a `CopyField` holding an empty string: every credential field
+          // here conceals, so an empty one would show the same run of bullets a
+          // real key does and invite a copy that yields nothing. The field
+          // arrives with the key it is for.
+          <div className="flex flex-col items-start gap-2">
+            <span className="text-emphasis">Your API key</span>
+            <Button
+              variant="primary"
+              isPending={isCreatingKey}
+              onPress={onCreateKey}
+            >
+              Create API key
+            </Button>
+          </div>
         )}
-        <p className="text-caption text-subtle">
-          Shown once. Reveal it to read it, or copy it without. Set it as{" "}
-          <code>{SNIPPET_KEY_ENV_VAR}</code> in your environment; reopening this
-          guide issues a new key in its place.
-        </p>
+        {apiKey === undefined && issuedKey ? (
+          isUsingIssuedKey ? (
+            <p className="text-caption text-subtle">
+              The examples read it from <code>{SNIPPET_KEY_ENV_VAR}</code> in
+              your environment.
+            </p>
+          ) : null
+        ) : (
+          <p className="text-caption text-subtle">
+            Shown once. Reveal it to read it, or copy it without. Set it as{" "}
+            <code>{SNIPPET_KEY_ENV_VAR}</code> in your environment.
+          </p>
+        )}
       </DialogSection>
 
       <DialogSection>
@@ -216,7 +290,9 @@ export function SetupSheet({
         <p className="text-caption text-subtle">
           {tab === "agent"
             ? "Works with Claude Code, Codex, and Cursor. Reads your key from the environment."
-            : "Hidden keys use a stand-in; copies include your real key."}
+            : tab === "curl"
+              ? "Hidden keys use a stand-in; copies include your real key."
+              : `Reads your key from ${SNIPPET_KEY_ENV_VAR}; export it as the cURL tab shows.`}
         </p>
         {model === undefined ? (
           <p className="text-caption text-subtle">
@@ -225,7 +301,7 @@ export function SetupSheet({
             the{" "}
             <Link
               to="/models"
-              onClick={onDismiss}
+              onClick={onLeave}
               className="text-link hover:text-link-hover font-medium"
             >
               Models
@@ -235,5 +311,54 @@ export function SetupSheet({
         ) : null}
       </DialogSection>
     </Dialog>
+  )
+}
+
+/**
+ * The setup key a previous visit issued. Its plaintext was shown once and is
+ * gone, and replacing it rotates the row, so keeping it is the default and the
+ * replacement says what it costs.
+ */
+function IssuedKey({
+  issuedKey,
+  isUsing,
+  isReplacing,
+  onUse,
+  onReplace,
+}: {
+  issuedKey: ActivationIssuedKey
+  isUsing: boolean
+  isReplacing: boolean
+  onUse: () => void
+  onReplace: () => void
+}) {
+  const ending = issuedKey.key_suffix ? (
+    <>
+      {" "}
+      ending <code>••{issuedKey.key_suffix}</code>
+    </>
+  ) : null
+  return (
+    <div className="flex flex-col items-start gap-2">
+      <span className="text-emphasis">Your API key</span>
+      <p className="text-body">
+        {isUsing ? "Using your setup key" : "You already have a setup key"}
+        {ending}.
+      </p>
+      {isUsing ? null : (
+        <Button variant="primary" onPress={onUse}>
+          Use it
+        </Button>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-caption text-subtle">Lost it?</span>
+        <Button size="sm" isPending={isReplacing} onPress={onReplace}>
+          Replace it
+        </Button>
+        <span className="text-caption text-subtle">
+          The old key stops working.
+        </span>
+      </div>
+    </div>
   )
 }

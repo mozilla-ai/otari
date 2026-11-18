@@ -721,6 +721,15 @@ describe('DataTable on a phone with mobileLayout="cards"', () => {
     ).toBeInTheDocument()
   })
 
+  it("starts an end-aligned figure in the card's value lane", () => {
+    stubPhone(true)
+    render(<DataTable {...base({ columns, mobileLayout: "cards" })} />)
+    const alpha = screen.getByText("Alpha").closest("li") as HTMLElement
+    // Shrunk to its content, so the column's end alignment cannot carry the
+    // figure across the lane to the card's far edge.
+    expect(within(alpha).getByText("3").classList).toContain("w-fit")
+  })
+
   it("keeps the grid on a wide viewport", () => {
     stubPhone(false)
     render(<DataTable {...base({ columns, mobileLayout: "cards" })} />)

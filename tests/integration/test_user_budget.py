@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -429,6 +430,28 @@ def test_a_responses_refusal_names_its_own_output_limit(
     assert "max_tokens" not in detail
 
 
+@pytest.mark.parametrize(("output_limit", "held"), [({"max_tokens": 50}, 400), ({}, 8192)])
+def test_a_request_for_n_choices_holds_an_output_limit_for_each(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_messages: list[dict[str, str]],
+    output_limit: dict[str, int],
+    held: int,
+) -> None:
+    """The provider bills every choice, so 8 choices of 50 tokens hold 400, which $0.0015 at $10/M cannot cover."""
+    _too_large_setup(client, master_key_header, "n-choices-user", "openai:gpt-4o", (2.5, 10.0))
+
+    response = client.post(
+        f"{API_ROOT}/chat/completions",
+        json={"model": "openai:gpt-4o", "messages": test_messages, "n": 8, "user": "n-choices-user", **output_limit},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "budget_exceeded"
+    assert f"The estimate assumes {held} output tokens" in response.json()["detail"]
+
+
 def test_an_input_only_price_gets_no_output_limit_advice(
     client: TestClient,
     master_key_header: dict[str, str],
@@ -488,6 +511,39 @@ def test_user_exceeded_budget_allowed_on_free_model(
         headers=master_key_header,
     )
     assert response.status_code != 403
+
+
+def test_user_exceeded_budget_blocked_on_a_free_model_whose_rules_price_the_request(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_messages: list[dict[str, str]],
+) -> None:
+    budget_id = client.post(f"{API_ROOT}/budgets", json={"max_budget": 0.0}, headers=master_key_header).json()[
+        "budget_id"
+    ]
+    client.post(
+        f"{API_ROOT}/users", json={"user_id": "test-user-budget", "budget_id": budget_id}, headers=master_key_header
+    )
+    always = {"date": {"gte": "2000-01-01"}}
+    created = client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": "openai:gpt-4o-mini",
+            "rates": {
+                "text": {"input": {"price": 0, "overrides": [{"when": always, "price": 5}]}, "output": {"price": 0}}
+            },
+        },
+        headers=master_key_header,
+    )
+    assert created.status_code == 200, created.text
+
+    response = client.post(
+        f"{API_ROOT}/chat/completions",
+        json={"model": "openai:gpt-4o-mini", "messages": test_messages, "user": "test-user-budget"},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 403, response.text
 
 
 def test_user_exceeded_budget_blocked_on_unknown_pricing(

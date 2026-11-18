@@ -21,8 +21,15 @@ import type {
 import { ModelDetailPage } from "@/features/models/ModelDetailPage"
 import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { bootstrap, organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
+import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
+
+vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
+  const { telemetrySpy } = await import("@/tests/telemetry")
+  return { useTelemetry: vi.fn(() => telemetrySpy) }
+})
 
 const CAPABILITIES = {
   reasoning: true,
@@ -59,6 +66,7 @@ const GLM: CatalogModelSummary = {
   price_sources: ["defaults", "deployment"],
   unpriced_count: 0,
   discovered: true,
+  price_unit: "token",
   min_input_price_per_million: 0.5,
   min_output_price_per_million: 2,
 }
@@ -82,6 +90,7 @@ const KIMI: CatalogModelSummary = {
   price_sources: ["defaults"],
   unpriced_count: 0,
   discovered: true,
+  price_unit: "token",
   min_input_price_per_million: 0.6,
   min_output_price_per_million: 2.4,
 }
@@ -94,6 +103,7 @@ function offering(overrides: Partial<CatalogOffering>): CatalogOffering {
     provider_type: "nebius",
     credential: "deployment",
     discovered: true,
+    zero_data_retention: false,
     context_window: 200_000,
     max_output_tokens: 128_000,
     quantization: null,
@@ -103,7 +113,7 @@ function offering(overrides: Partial<CatalogOffering>): CatalogOffering {
       cache_read_price_per_million: 0.05,
       cache_write_price_per_million: null,
       pricing_tiers: [],
-      unit: "tokens",
+      unit: "token",
     },
     price_source: "deployment",
     price_reference: "nebius:zai-org/GLM-5.3",
@@ -121,6 +131,7 @@ const GLM_DETAIL: CatalogModelDetail = {
       short_selector: "fireworks:z-ai/glm-5.3",
       provider: "fireworks",
       provider_type: "fireworks",
+      zero_data_retention: true,
       context_window: 131_072,
       max_output_tokens: 16_384,
       pricing: {
@@ -129,7 +140,7 @@ const GLM_DETAIL: CatalogModelDetail = {
         cache_read_price_per_million: null,
         cache_write_price_per_million: null,
         pricing_tiers: [],
-        unit: "tokens",
+        unit: "token",
       },
       price_source: "defaults",
       price_reference: "fireworks:glm-5p3",
@@ -154,14 +165,18 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 function mockApi(
-  options: { catalog?: CatalogResponse; context?: OrganizationContext } = {},
+  options: {
+    catalog?: CatalogResponse
+    context?: OrganizationContext
+    detail?: CatalogModelDetail
+  } = {},
 ) {
   const catalog = options.catalog ?? CATALOG
   const context = options.context ?? organizationContext()
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input)
     if (url.includes(`${API_ROOT}/catalog/models/z-ai/glm-5.3`)) {
-      return jsonResponse(GLM_DETAIL)
+      return jsonResponse(options.detail ?? GLM_DETAIL)
     }
     if (url.includes(`${API_ROOT}/catalog/models/`)) {
       return jsonResponse({ detail: "Model 'nope' not found" }, 404)
@@ -173,10 +188,11 @@ function mockApi(
   })
 }
 
-function renderPage(ui: ReactElement, url = "/models/z-ai/glm-5.3") {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  })
+function renderPage(
+  ui: ReactElement,
+  url = "/models/z-ai/glm-5.3",
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+) {
   return render(
     <DeploymentProvider value={bootstrap()}>
       <QueryClientProvider client={client}>{ui}</QueryClientProvider>
@@ -223,7 +239,7 @@ describe("ModelDetailPage", () => {
     expect(rows).toHaveLength(2)
     // Cheapest first: Fireworks' sub-cent rate keeps its digits (otari#700).
     expect(
-      within(rows[0] as HTMLElement).getByText("$0.075"),
+      within(rows[0] as HTMLElement).getByText("$0.075 / 1M"),
     ).toBeInTheDocument()
     expect(
       within(rows[0] as HTMLElement).getByText("DEFAULT"),
@@ -287,6 +303,126 @@ describe("ModelDetailPage", () => {
     })
   })
 
+  it("names the rules a price carries, under the offerings, and nothing when none does", async () => {
+    const [nebius, ...rest] = GLM_DETAIL.offerings
+    mockApi({
+      detail: {
+        ...GLM_DETAIL,
+        offerings: [
+          {
+            ...(nebius as CatalogOffering),
+            pricing: {
+              ...(nebius as CatalogOffering).pricing!,
+              rates: {
+                text: { input: { price: 0.5 }, output: { price: 2 } },
+                multipliers: [
+                  { when: { service_tier: { equals: "flex" } }, factor: 0.5 },
+                ],
+              },
+            },
+          },
+          ...rest,
+        ],
+      },
+    })
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    const rules = await screen.findByRole("list", {
+      name: "Price rules of nebius:zai-org/GLM-5.3",
+    })
+    expect(
+      screen.getByRole("heading", { name: "Price rules" }),
+    ).toBeInTheDocument()
+    expect(rules).toHaveTextContent(
+      "×0.5 on every price when service tier is flex",
+    )
+    expect(
+      screen.queryByRole("list", { name: /Price rules of fireworks/ }),
+    ).toBeNull()
+  })
+
+  it("shows a price for media the model makes under Output, as the provider tables do", async () => {
+    const [nebius] = GLM_DETAIL.offerings
+    const offering = (
+      unit: NonNullable<CatalogOffering["pricing"]>["unit"],
+      input: number,
+      output: number,
+    ) => ({
+      ...(nebius as CatalogOffering),
+      pricing: {
+        ...(nebius as CatalogOffering).pricing!,
+        unit,
+        input_price_per_million: input,
+        output_price_per_million: output,
+        rates: {},
+      },
+    })
+    mockApi({
+      detail: {
+        ...GLM_DETAIL,
+        type: "image",
+        offerings: [offering("image", 40000, 0)],
+      },
+    })
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    const row = await screen.findByRole("row", { name: /Nebius/ })
+    const [input, output] = within(row).getAllByRole("gridcell")
+    expect(input).toHaveTextContent("—")
+    expect(output).toHaveTextContent("$0.04 per image")
+  })
+
+  it("shows a minute of audio's two rates on their own sides", async () => {
+    const [nebius] = GLM_DETAIL.offerings
+    mockApi({
+      detail: {
+        ...GLM_DETAIL,
+        type: "transcription",
+        offerings: [
+          {
+            ...(nebius as CatalogOffering),
+            pricing: {
+              ...(nebius as CatalogOffering).pricing!,
+              unit: "minute",
+              input_price_per_million: 6000,
+              output_price_per_million: 15000,
+              rates: {},
+            },
+          },
+        ],
+      },
+    })
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    const row = await screen.findByRole("row", { name: /Nebius/ })
+    const [input, output] = within(row).getAllByRole("gridcell")
+    expect(input).toHaveTextContent("$0.006 per minute")
+    expect(output).toHaveTextContent("$0.015 per minute")
+  })
+
+  it("draws no rules section where no price has a rule", async () => {
+    mockApi()
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    await screen.findByRole("grid", { name: "Offerings of GLM-5.3" })
+    expect(screen.queryByRole("heading", { name: "Price rules" })).toBeNull()
+  })
+
+  it("says which offerings are declared zero data retention", async () => {
+    mockApi()
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    const offerings = await screen.findByRole("grid", {
+      name: "Offerings of GLM-5.3",
+    })
+    const marked = within(offerings)
+      .getAllByRole("row")
+      .slice(1)
+      .filter((row) => row.textContent?.includes("Zero data retention"))
+    expect(marked).toHaveLength(1)
+    expect(marked[0]).toHaveTextContent("Fireworks")
+  })
+
   it("names each offering's model ID under its provider", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
@@ -327,6 +463,21 @@ describe("ModelDetailPage", () => {
     expect(byText("global.zai.glm-5.3")).toHaveLength(1)
     expect(byText("us.zai.glm-5.3")).toHaveLength(1)
     expect(byText("zai-org/GLM-5.3")).toHaveLength(1)
+  })
+
+  it("records the press with the model it was for", async () => {
+    resetTelemetrySpy()
+    mockApi()
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Use this model" }),
+    )
+
+    expect(recordEvent).toHaveBeenCalledExactlyOnceWith(
+      TELEMETRY_EVENTS.USE_MODEL_CLICKED,
+      { model: "z-ai/glm-5.3", signed_in: true },
+    )
   })
 
   it("opens the drawer with the request to send, to the gateway's pick or a pinned provider", async () => {
@@ -445,6 +596,199 @@ describe("ModelDetailPage", () => {
     ).toBeInTheDocument()
   })
 
+  describe("the drawer's request", () => {
+    /** GLM with each offering served on the routes given, in order. */
+    const servedOn = (
+      ...routes: NonNullable<CatalogOffering["endpoints"]>[]
+    ): CatalogModelDetail => ({
+      ...GLM_DETAIL,
+      offerings: GLM_DETAIL.offerings.map((each, index) => ({
+        ...each,
+        endpoints: routes[index] ?? [],
+      })),
+    })
+
+    async function openDrawer(detail: CatalogModelDetail) {
+      mockApi({ detail })
+      renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+      const user = userEvent.setup()
+      await user.click(
+        await screen.findByRole("button", { name: "Use this model" }),
+      )
+      const drawer = await screen.findByRole("dialog", {
+        name: "Use this model",
+      })
+      const curl = () =>
+        (within(drawer).getByLabelText("cURL") as HTMLTextAreaElement).value
+      return { user, drawer, curl }
+    }
+
+    it("calls the route the gateway's pick is served on", async () => {
+      const { drawer, curl } = await openDrawer(servedOn(["/embeddings"]))
+
+      expect(curl()).toContain(`${API_ROOT}/embeddings`)
+      expect(within(drawer).getByText(/^Calls/)).toHaveTextContent(
+        `Calls POST ${API_ROOT}/embeddings.`,
+      )
+      // One route needs no choice.
+      expect(within(drawer).queryByRole("button", { name: /Route/ })).toBeNull()
+    })
+
+    it("follows the pinned offering's routes", async () => {
+      const { user, drawer, curl } = await openDrawer(
+        servedOn(["/embeddings"], ["/images/generations", "/images/edits"]),
+      )
+
+      await user.click(
+        within(drawer).getByRole("button", { name: /Let the gateway choose/ }),
+      )
+      await user.click(screen.getByRole("option", { name: /^Fireworks/ }))
+
+      // Two routes: the first, in models.dev's order, until another is picked.
+      await waitFor(() =>
+        expect(curl()).toContain(`${API_ROOT}/images/generations`),
+      )
+      await user.click(
+        within(drawer).getByRole("button", {
+          name: new RegExp(`${API_ROOT}/images/generations`),
+        }),
+      )
+      await user.click(
+        screen.getByRole("option", { name: `${API_ROOT}/images/edits` }),
+      )
+      await waitFor(() => expect(curl()).toContain("-F image=@image.png"))
+      expect(
+        within(drawer).getByText(/with the path to your own file/),
+      ).toHaveTextContent("Replace image.png with the path to your own file.")
+    })
+
+    it("opens another offering on its own first route", async () => {
+      const { user, drawer, curl } = await openDrawer(
+        servedOn(
+          ["/responses", "/messages"],
+          ["/chat/completions", "/messages"],
+        ),
+      )
+
+      // A route picked on the gateway's pick, which the next offering lists second.
+      await user.click(
+        within(drawer).getByRole("button", {
+          name: new RegExp(`${API_ROOT}/responses`),
+        }),
+      )
+      await user.click(
+        screen.getByRole("option", { name: `${API_ROOT}/messages` }),
+      )
+      await waitFor(() => expect(curl()).toContain(`${API_ROOT}/messages`))
+
+      await user.click(
+        within(drawer).getByRole("button", { name: /Let the gateway choose/ }),
+      )
+      await user.click(screen.getByRole("option", { name: /^Fireworks/ }))
+
+      await waitFor(() =>
+        expect(curl()).toContain(`${API_ROOT}/chat/completions`),
+      )
+
+      // Back on the gateway's pick, the earlier choice is gone too.
+      await user.click(
+        within(drawer).getByRole("button", { name: /^Fireworks/ }),
+      )
+      await user.click(
+        screen.getByRole("option", { name: "Let the gateway choose" }),
+      )
+      await waitFor(() => expect(curl()).toContain(`${API_ROOT}/responses`))
+    })
+
+    it("opens on the first route of a new gateway pick after a refresh", async () => {
+      const detail = servedOn(
+        ["/responses", "/messages"],
+        ["/chat/completions", "/messages"],
+      )
+      mockApi({ detail })
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      })
+      renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />, undefined, client)
+      const user = userEvent.setup()
+      await user.click(
+        await screen.findByRole("button", { name: "Use this model" }),
+      )
+      const drawer = await screen.findByRole("dialog", {
+        name: "Use this model",
+      })
+      const curl = () =>
+        (within(drawer).getByLabelText("cURL") as HTMLTextAreaElement).value
+
+      await user.click(
+        within(drawer).getByRole("button", {
+          name: new RegExp(`${API_ROOT}/responses`),
+        }),
+      )
+      await user.click(
+        screen.getByRole("option", { name: `${API_ROOT}/messages` }),
+      )
+      await waitFor(() => expect(curl()).toContain(`${API_ROOT}/messages`))
+
+      // The gateway now picks Fireworks, which lists `/messages` second.
+      mockApi({
+        detail: {
+          ...detail,
+          resolves_to: detail.offerings[1]?.selector ?? null,
+        },
+      })
+      await client.invalidateQueries()
+
+      await waitFor(() =>
+        expect(curl()).toContain(`${API_ROOT}/chat/completions`),
+      )
+    })
+
+    it("says a speech request's voice differs by provider", async () => {
+      const { drawer, curl } = await openDrawer(servedOn(["/audio/speech"]))
+
+      expect(curl()).toContain('"voice": "alloy"')
+      expect(
+        within(drawer).getByText(/Voices differ by provider/),
+      ).toHaveTextContent(
+        "Voices differ by provider: if this one does not list alloy, use one it does.",
+      )
+    })
+
+    it("names the package the Python request needs", async () => {
+      const { user, drawer } = await openDrawer(servedOn(["/messages"]))
+
+      await user.click(within(drawer).getByRole("button", { name: "Python" }))
+
+      expect(
+        (within(drawer).getByLabelText("Python") as HTMLTextAreaElement).value,
+      ).toContain("from anthropic import Anthropic")
+      expect(within(drawer).getByText("pip install anthropic")).toBeVisible()
+    })
+
+    it("falls back to chat, and says so, where no route is known", async () => {
+      const { drawer, curl } = await openDrawer(servedOn())
+
+      expect(curl()).toContain(`${API_ROOT}/chat/completions`)
+      expect(
+        within(drawer).getByText(/models.dev names no route for this offering/),
+      ).toBeInTheDocument()
+    })
+
+    it("sends a decision route to its docs instead of a request", async () => {
+      const { drawer } = await openDrawer(servedOn(["/decisions"]))
+
+      expect(within(drawer).queryByLabelText("cURL")).toBeNull()
+      expect(within(drawer).getByText(/decision_providers/)).toBeInTheDocument()
+      expect(
+        within(drawer).getByRole("link", { name: /How to ask for a decision/ }),
+      ).toHaveAttribute(
+        "href",
+        expect.stringContaining("api-reference.md#decisions"),
+      )
+    })
+  })
+
   it("offers a deployment operator no rate link on a deployment-supplied offering", async () => {
     // Operating the deployment stopped being a pricing authority here when the
     // deployment price editor went away: rates are set per model on Providers,
@@ -513,6 +857,90 @@ describe("ModelDetailPage", () => {
     expect(screen.queryByRole("link", { name: "Set your rate" })).toBeNull()
   })
 
+  it("lets a deployment operator set the details of a deployment offering", async () => {
+    const user = userEvent.setup()
+    const fetchSpy = mockApi({
+      detail: { ...GLM_DETAIL, offerings: [offering({})] },
+    })
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Edit details" }),
+    )
+    await user.type(screen.getByLabelText("Context window"), "1048576")
+    await user.click(screen.getByRole("button", { name: "Save details" }))
+
+    await waitFor(() => {
+      const put = fetchSpy.mock.calls.find(
+        ([, init]) => (init as RequestInit | undefined)?.method === "PUT",
+      )
+      expect(String(put?.[0])).toContain(
+        `${API_ROOT}/model-overrides/nebius%3Azai-org%2FGLM-5.3`,
+      )
+      const init = put?.[1] as RequestInit | undefined
+      expect(JSON.parse(String(init?.body))).toEqual({
+        context_window: 1048576,
+        max_output_tokens: null,
+        tool_call: null,
+        reasoning: null,
+        structured_output: null,
+        input_modalities: null,
+      })
+    })
+  })
+
+  it("says who set an offering's limits", async () => {
+    mockApi({
+      detail: {
+        ...GLM_DETAIL,
+        offerings: [offering({ metadata_override: { context_window: 8192 } })],
+      },
+    })
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    expect(await screen.findByText("Set by the operator")).toBeInTheDocument()
+  })
+
+  it("lets an organization admin set the details of its own offering only", async () => {
+    const user = userEvent.setup()
+    const fetchSpy = mockApi({
+      context: organizationContext({
+        role: "admin",
+        deployment_operator: false,
+      }),
+      detail: {
+        ...GLM_DETAIL,
+        offerings: [
+          offering({ credential: "organization" }),
+          offering({
+            selector: "together:zai-org/GLM-5.3",
+            provider: "together",
+            credential: "deployment",
+          }),
+        ],
+      },
+    })
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    const edits = await screen.findAllByRole("button", { name: "Edit details" })
+    expect(edits).toHaveLength(1)
+    await user.click(edits[0])
+    await user.type(screen.getByLabelText("Max output tokens"), "65536")
+    await user.click(screen.getByRole("button", { name: "Save details" }))
+
+    await waitFor(() =>
+      expect(
+        fetchSpy.mock.calls.some(
+          ([url, init]) =>
+            (init as RequestInit | undefined)?.method === "PUT" &&
+            String(url).includes(
+              `${API_ROOT}/organizations/me/model-overrides/nebius%3Azai-org%2FGLM-5.3`,
+            ),
+        ),
+      ).toBe(true),
+    )
+  })
+
   it("shows what the organization was charged for an offering", async () => {
     mockApi()
     GLM_DETAIL.offerings[0] = offering({
@@ -534,28 +962,14 @@ describe("ModelDetailPage", () => {
       expect(
         within(grid).getByRole("columnheader", { name: "Yours, 30d" }),
       ).toBeInTheDocument()
-      expect(within(grid).getByText("42 req · cache 25%")).toBeInTheDocument()
-    } finally {
-      GLM_DETAIL.offerings[0] = offering({})
-    }
-  })
-
-  it("marks a metered rate that differs from the provider's list price", async () => {
-    mockApi()
-    GLM_DETAIL.offerings[0] = offering({
-      metadata_input_price_per_million: 1,
-      metadata_output_price_per_million: 2.01,
-    })
-    try {
-      renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
-
-      await screen.findByRole("grid", { name: "Offerings of GLM-5.3" })
-      // Input is metered at half the list price and says so; output is within
-      // rounding of it and does not.
-      expect(screen.getByText("list $1.00")).toBeInTheDocument()
-      expect(screen.queryByText("list $2.01")).toBeNull()
       expect(
-        screen.getByText(/differs from the price the provider publishes/),
+        within(grid).getByText("42 requests · cache 25%"),
+      ).toBeInTheDocument()
+      // Spend over every token, so the rate names its unit and what it is.
+      expect(within(grid).getByText("$0.40 / 1M effective")).toBeInTheDocument()
+      // Said on the page too, since a tooltip never opens on a phone.
+      expect(
+        screen.getByText(/Yours, 30d is the blended input and output price/),
       ).toBeInTheDocument()
     } finally {
       GLM_DETAIL.offerings[0] = offering({})
@@ -618,5 +1032,63 @@ describe("ModelDetailPage", () => {
         /Default pricing is off, so an offering with no stored rate/,
       ),
     ).toBeInTheDocument()
+  })
+
+  it("renders a metered rate alone when it differs from the provider's list price", async () => {
+    // Without a metadata price on each offering the rates agree with models.dev
+    // by construction and the absences below would hold for any page, so both
+    // are set far from the metered rate.
+    mockApi()
+    GLM_DETAIL.offerings[0] = offering({
+      price_source: "organization",
+      metadata_input_price_per_million: 1,
+      metadata_output_price_per_million: 4,
+    })
+    GLM_DETAIL.offerings[1] = offering({
+      selector: "fireworks:accounts/fireworks/models/glm-5p3",
+      short_selector: "fireworks:z-ai/glm-5.3",
+      provider: "fireworks",
+      provider_type: "fireworks",
+      pricing: {
+        input_price_per_million: 0.075,
+        output_price_per_million: 2.5,
+        cache_read_price_per_million: null,
+        cache_write_price_per_million: null,
+        pricing_tiers: [],
+        unit: "token",
+      },
+      price_source: "defaults",
+      price_reference: "fireworks:glm-5p3",
+      metadata_input_price_per_million: 0.2,
+      metadata_output_price_per_million: 3,
+    })
+
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    const grid = await screen.findByRole("grid", {
+      name: "Offerings of GLM-5.3",
+    })
+    const rows = within(grid).getAllByRole("row").slice(1)
+    expect(rows).toHaveLength(2)
+    expect(
+      within(rows[0] as HTMLElement).getByRole("gridcell", {
+        name: /\$0\.075/,
+      }),
+    ).toBeInTheDocument()
+    expect(
+      within(rows[1] as HTMLElement).getByRole("gridcell", { name: /\$0\.50/ }),
+    ).toBeInTheDocument()
+
+    expect(within(grid).queryByText(/list \$/i)).toBeNull()
+    expect(within(grid).queryByText(/^list$/i)).toBeNull()
+    expect(
+      screen.queryByText(/differs from the price the provider publishes/i),
+    ).toBeNull()
+
+    expect(
+      within(grid).getByRole("columnheader", { name: "Price from" }),
+    ).toBeInTheDocument()
+    expect(within(grid).getByText("DEFAULT")).toBeInTheDocument()
+    expect(within(grid).getByText("YOUR RATE")).toBeInTheDocument()
   })
 })

@@ -1,24 +1,45 @@
 """OpenAI-compatible audio transcription and speech endpoints."""
 
+import asyncio
 import io
 import mimetypes
+from decimal import Decimal
 from typing import Annotated, Any
 
 from any_llm import aspeech, atranscription
 from any_llm.types.audio import AudioSpeechParams, Transcription
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
+from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
+from gateway.api.deps import (
+    get_config,
+    get_db,
+    get_log_writer,
+    verify_api_key_or_master_key,
+    verify_api_key_or_master_key_for_upload,
+)
+from gateway.api.key_scopes import key_scope
+from gateway.api.routes._helpers import bounded_body
 from gateway.api.routes._passthrough import run_passthrough
+from gateway.api.routes._request_body import MULTIPART_OVERHEAD_BYTES, form_field
 from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
-from gateway.core.config import GatewayConfig
+from gateway.core.config import (
+    COST_USD_HEADER,
+    PRICING_SOURCE_HEADER,
+    USAGE_UNIT_HEADER,
+    USAGE_UNITS_HEADER,
+    GatewayConfig,
+)
 from gateway.models.api_keys import APIKey
-from gateway.services.inference import ONE_REQUEST_BILLING, TRANSCRIPTION_BILLING
+from gateway.models.pricing import ModelPricing
+from gateway.services.budgets import report_estimate
+from gateway.services.inference import audio_seconds, speech_billing, speech_cost_headers, transcription_billing
 from gateway.services.log_writer import LogWriter
 from gateway.services.provider_kwargs import ResolvedProvider
+from gateway.types.key_scope import KeyScope
 
 router = APIRouter(tags=["audio"])
 
@@ -28,6 +49,24 @@ USAGE_ENDPOINT_SPEECH = "/v1/audio/speech"
 
 # Maximum upload size for audio files (25 MB, matching OpenAI's limit)
 _MAX_AUDIO_UPLOAD_BYTES = 25 * 1024 * 1024
+_UPLOAD_FILE_ADAPTER: TypeAdapter[UploadFile] = TypeAdapter(UploadFile)
+_STRING_ADAPTER: TypeAdapter[str] = TypeAdapter(str)
+_OPTIONAL_STRING_ADAPTER: TypeAdapter[str | None] = TypeAdapter(str | None)
+_OPTIONAL_FLOAT_ADAPTER: TypeAdapter[float | None] = TypeAdapter(float | None)
+_TRANSCRIPTION_BODY_SCHEMA = {
+    "title": "Body_audio-create_transcription",
+    "type": "object",
+    "properties": {
+        "file": {"contentMediaType": "application/octet-stream", "title": "File", "type": "string"},
+        "language": {"anyOf": [{"type": "string"}, {"type": "null"}], "title": "Language"},
+        "model": {"title": "Model", "type": "string"},
+        "prompt": {"anyOf": [{"type": "string"}, {"type": "null"}], "title": "Prompt"},
+        "response_format": {"anyOf": [{"type": "string"}, {"type": "null"}], "title": "Response Format"},
+        "temperature": {"anyOf": [{"type": "number"}, {"type": "null"}], "title": "Temperature"},
+        "user": {"anyOf": [{"type": "string"}, {"type": "null"}], "title": "User"},
+    },
+    "required": ["file", "model"],
+}
 
 # Mapping from response_format to MIME type for speech endpoint
 _SPEECH_CONTENT_TYPES: dict[str | None, str] = {
@@ -56,21 +95,31 @@ def _named_audio(data: bytes, upload: UploadFile) -> io.BytesIO:
     return named
 
 
-@router.post("/audio/transcriptions", response_model=None)
+@router.post(
+    "/audio/transcriptions",
+    response_model=None,
+    responses={
+        413: {"description": "The audio upload exceeds the maximum request size."},
+        422: {
+            "description": "Validation Error",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}},
+        },
+    },
+    openapi_extra=key_scope(
+        KeyScope.INFERENCE_RUN,
+        requestBody={
+            "required": True,
+            "content": {"multipart/form-data": {"schema": _TRANSCRIPTION_BODY_SCHEMA}},
+        },
+    ),
+)
 async def create_transcription(
     raw_request: Request,
     response: Response,
-    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
+    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key_for_upload)],
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
-    file: UploadFile = File(...),
-    model: str = Form(...),
-    language: str | None = Form(None),
-    prompt: str | None = Form(None),
-    response_format: str | None = Form(None),
-    temperature: float | None = Form(None),
-    user: str | None = Form(None),
 ) -> dict[str, Any]:
     """OpenAI-compatible audio transcription endpoint.
 
@@ -79,69 +128,85 @@ async def create_transcription(
     - API key + user field: Use specified user (must exist)
     - API key without user field: Use the shared "default" user
     """
+    async with bounded_body(
+        raw_request,
+        _MAX_AUDIO_UPLOAD_BYTES + MULTIPART_OVERHEAD_BYTES,
+        f"Audio upload request exceeds the maximum size of {_MAX_AUDIO_UPLOAD_BYTES // (1024 * 1024)} MB.",
+    ).form() as form:
+        file = form_field(form, "file", _UPLOAD_FILE_ADAPTER, required=True)
+        model = form_field(form, "model", _STRING_ADAPTER, required=True)
+        language = form_field(form, "language", _OPTIONAL_STRING_ADAPTER)
+        prompt = form_field(form, "prompt", _OPTIONAL_STRING_ADAPTER)
+        response_format = form_field(form, "response_format", _OPTIONAL_STRING_ADAPTER)
+        temperature = form_field(form, "temperature", _OPTIONAL_FLOAT_ADAPTER)
+        user = form_field(form, "user", _OPTIONAL_STRING_ADAPTER)
 
-    async def call_provider(resolved: ResolvedProvider) -> Transcription:
-        await file.seek(0)
-        file_bytes = await file.read()
-        if len(file_bytes) > _MAX_AUDIO_UPLOAD_BYTES:
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=f"Audio file exceeds maximum upload size of {_MAX_AUDIO_UPLOAD_BYTES // (1024 * 1024)} MB",
-            )
+        # The upload's own length, for a model that reports tokens and no
+        # duration. Read off the loop on the first dispatch, so a request
+        # refused before it is never read, and kept for any fallback.
+        measured: list[Decimal | None] = []
 
-        transcription_kwargs: dict[str, Any] = {
-            "model": resolved.model,
-            "file": _named_audio(file_bytes, file),
-            "provider": resolved.provider,
-            **resolved.kwargs,
-        }
-        if language is not None:
-            transcription_kwargs["language"] = language
-        if prompt is not None:
-            transcription_kwargs["prompt"] = prompt
-        if response_format is not None:
-            transcription_kwargs["response_format"] = response_format
-        if temperature is not None:
-            transcription_kwargs["temperature"] = temperature
+        async def call_provider(resolved: ResolvedProvider) -> Transcription:
+            if file.size is not None and file.size > _MAX_AUDIO_UPLOAD_BYTES:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=f"Audio file exceeds maximum upload size of {_MAX_AUDIO_UPLOAD_BYTES // (1024 * 1024)} MB",
+                )
+            if not measured:
+                await file.seek(0)
+                measured.append(await asyncio.to_thread(audio_seconds, file.file))
+            await file.seek(0)
+            file_bytes = await file.read()
 
-        return await atranscription(**transcription_kwargs)
+            transcription_kwargs: dict[str, Any] = {
+                "model": resolved.model,
+                "file": _named_audio(file_bytes, file),
+                "provider": resolved.provider,
+                **resolved.kwargs,
+            }
+            if language is not None:
+                transcription_kwargs["language"] = language
+            if prompt is not None:
+                transcription_kwargs["prompt"] = prompt
+            if response_format is not None:
+                transcription_kwargs["response_format"] = response_format
+            if temperature is not None:
+                transcription_kwargs["temperature"] = temperature
 
-    # Audio is exempt from require_pricing and has no measurable cost unit yet
-    # (tokens, seconds, etc.), so the reservation estimate is 0; the reservation
-    # still enforces existing per-user state (user exists, not blocked, not
-    # already over budget). When pricing is configured, the cost is recorded as
-    # an auditable per-request charge line. Only an explicitly configured rate
-    # counts (pricing_use_defaults=False): models.dev quotes audio models such
-    # as gpt-4o-transcribe per million tokens, which this per-request convention
-    # would misread as a per-million-request rate.
-    outcome = await run_passthrough(
-        endpoint=USAGE_ENDPOINT_TRANSCRIPTIONS,
-        raw_request=raw_request,
-        response=response,
-        auth_result=auth_result,
-        db=db,
-        config=config,
-        log_writer=log_writer,
-        model=model,
-        user=user,
-        call_provider=call_provider,
-        request_params=[
-            name
-            for name, value in (
-                ("language", language),
-                ("prompt", prompt),
-                ("response_format", response_format),
-                ("temperature", temperature),
-            )
-            if value is not None
-        ],
-        lookup_pricing=True,
-        pricing_use_defaults=False,
-        reserve_before_resolve=True,
-        relabel=False,
-        billing=TRANSCRIPTION_BILLING,
-    )
-    return outcome.result.model_dump()
+            return await atranscription(**transcription_kwargs)
+
+        # Transcription is exempt from require_pricing. The reservation estimate
+        # is 0: the reservation still enforces per-user state (user exists, not
+        # blocked, not already over budget), and settlement bills the length the
+        # provider reports, else the length measured, or the tokens it reports,
+        # or one request, as the rate prices them.
+        outcome = await run_passthrough(
+            endpoint=USAGE_ENDPOINT_TRANSCRIPTIONS,
+            raw_request=raw_request,
+            response=response,
+            auth_result=auth_result,
+            db=db,
+            config=config,
+            log_writer=log_writer,
+            model=model,
+            user=user,
+            call_provider=call_provider,
+            request_params=[
+                name
+                for name, value in (
+                    ("language", language),
+                    ("prompt", prompt),
+                    ("response_format", response_format),
+                    ("temperature", temperature),
+                )
+                if value is not None
+            ],
+            lookup_pricing=True,
+            reserve_before_resolve=True,
+            relabel=False,
+            billing=transcription_billing(lambda: measured[0] if measured else None),
+        )
+        return outcome.result.model_dump()
 
 
 class AudioSpeechRequest(derive_request_base(AudioSpeechParams)):  # type: ignore[misc]
@@ -159,12 +224,33 @@ class AudioSpeechRequest(derive_request_base(AudioSpeechParams)):  # type: ignor
     user: str | None = None
 
 
+_SPEECH_COST_HEADERS: dict[str, Any] = {
+    COST_USD_HEADER: {
+        "description": "What the request cost, as a six-decimal USD string; absent when it was not priced",
+        "schema": {"type": "string"},
+    },
+    PRICING_SOURCE_HEADER: {
+        "description": "Which rate priced it: organization, deployment or defaults; absent when it was not priced",
+        "schema": {"type": "string"},
+    },
+    USAGE_UNIT_HEADER: {
+        "description": "The meter the request was billed on, characters or requests; absent when nothing was billed",
+        "schema": {"type": "string"},
+    },
+    USAGE_UNITS_HEADER: {
+        "description": "How many of that meter were billed; absent when nothing was billed",
+        "schema": {"type": "integer"},
+    },
+}
+
+
 @router.post(
     "/audio/speech",
     response_model=None,
     responses={
         200: {
             "description": "Audio bytes in the requested format",
+            "headers": _SPEECH_COST_HEADERS,
             "content": {
                 "audio/mpeg": {"schema": {"type": "string", "format": "binary"}},
                 "audio/opus": {"schema": {"type": "string", "format": "binary"}},
@@ -175,6 +261,7 @@ class AudioSpeechRequest(derive_request_base(AudioSpeechParams)):  # type: ignor
             },
         },
     },
+    openapi_extra=key_scope(KeyScope.INFERENCE_RUN),
 )
 async def create_speech(
     raw_request: Request,
@@ -186,6 +273,14 @@ async def create_speech(
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
 ) -> StreamingResponse:
     """OpenAI-compatible audio speech (TTS) endpoint.
+
+    Billed on the characters of ``input`` at a rate priced per character, or
+    one request at a rate priced per request. A model with no rate is refused
+    under ``require_pricing``. The body is audio, so the settled cost rides
+    the response headers: ``Otari-Cost-USD`` and ``Otari-Pricing-Source``, the
+    ``cost_usd`` and ``pricing_source`` other responses carry on ``usage``, and
+    ``Otari-Usage-Unit`` and ``Otari-Usage-Units`` for the meter billed and
+    its count.
 
     Authentication modes:
     - Master key + user field: Use specified user (must exist)
@@ -208,14 +303,16 @@ async def create_speech(
         }
         return await aspeech(**speech_kwargs)
 
-    # Audio is exempt from require_pricing and has no measurable cost unit yet
-    # (tokens, seconds, characters, etc.), so the reservation estimate is 0; the
-    # reservation still enforces existing per-user state. When pricing is
-    # configured, the cost is recorded as an auditable per-request charge line.
-    # Only an explicitly configured rate counts (pricing_use_defaults=False):
-    # models.dev quotes speech models such as gpt-4o-mini-tts per million
-    # tokens, which this per-request convention would misread as a
-    # per-million-request rate.
+    # The characters spoken are known before the call, so they are held at a
+    # per-character rate, or one request at a per-request one; a speech result
+    # reports nothing more to settle on, which is why a token rate prices it
+    # nothing and ``require_pricing`` refuses it as it refuses a model with no rate.
+    characters = len(request.input)
+    billing = speech_billing(characters)
+
+    def estimate(pricing: ModelPricing | None) -> Decimal:
+        return report_estimate(pricing, slot=billing.slot, quantities={"character": characters}, units={"requests": 1})
+
     outcome = await run_passthrough(
         endpoint=USAGE_ENDPOINT_SPEECH,
         raw_request=raw_request,
@@ -229,10 +326,10 @@ async def create_speech(
         call_provider=call_provider,
         request_params=request.model_fields_set,
         lookup_pricing=True,
-        pricing_use_defaults=False,
-        reserve_before_resolve=True,
+        estimate=estimate,
+        enforce_require_pricing=True,
         relabel=False,
-        billing=ONE_REQUEST_BILLING,
+        billing=billing,
     )
 
     content_type = _SPEECH_CONTENT_TYPES.get(request.response_format, "audio/mpeg")
@@ -240,5 +337,5 @@ async def create_speech(
     return StreamingResponse(
         content=iter([outcome.result]),
         media_type=content_type,
-        headers=outcome.headers,
+        headers={**outcome.headers, **speech_cost_headers(pricing=outcome.pricing, charge=outcome.charge)},
     )

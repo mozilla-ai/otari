@@ -1,18 +1,25 @@
 import uuid
-from collections.abc import Callable, Collection, Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from typing import Any, NamedTuple
 
+from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
 from gateway.core.settings.api_keys import ApiKeyConfig, https_url_problem
+from gateway.core.settings.tools import ToolKind
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.api_keys_exceptions import (
+    AppKeyOwnerInactiveError,
     FederationIssuerInvalidError,
     FederationIssuerNotAllowedError,
     FederationRuleExistsError,
     FederationRuleLimitError,
     FederationRuleNotFoundError,
+    KeyEnableRefusedError,
 )
 from gateway.log_config import logger
 from gateway.models.api_keys import MAX_FEDERATION_RULES_PER_KEY, APIKey
+from gateway.models.tenancy import User
+from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.repositories.api_keys import ApiKeyRepositories
 from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
 from gateway.services.api_keys._declared import apply_declared_key
@@ -29,14 +36,24 @@ from gateway.services.model_access import (
     validate_allowed_tools,
 )
 from gateway.services.organizations import AccessLists, UserAccess
+from gateway.types.key_scope import KeyScope, KeyScopeSet
+
+
+class KeySummary(NamedTuple):
+    """A key as an access list shows it: never its secret."""
+
+    id: str
+    name: str | None
+    user_id: str | None
+    is_active: bool
 
 
 class ApiKeyService:
     """Answer questions about API keys and their workspaces, and manage their federation rules and access lists.
 
     The lookups run in the caller's Unit of Work block and raise ``OutsideUnitOfWorkError`` outside one; the
-    federation-rule and access-list methods are business steps of their own. A key's owner's lists come from
-    ``users``.
+    federation-rule and access-list methods and ``key_names`` are business steps of their own. A key's owner's
+    lists come from ``users``.
     """
 
     def __init__(self, uow: UnitOfWork, repositories: ApiKeyRepositories, *, users: UserAccess) -> None:
@@ -45,13 +62,78 @@ class ApiKeyService:
         self._federation_rules = repositories.federation_rules
         self._users = users
 
+    async def revoke_in_workspaces(self, workspace_ids: Collection[uuid.UUID]) -> None:
+        """Revoke every key in these workspaces, so none of them can be enabled again."""
+        async with self._uow:
+            await self._keys.revoke_in_workspaces(workspace_ids)
+
     async def get_workspace_id_for_key(self, key_id: str) -> uuid.UUID | None:
         """Return the ID of the workspace that owns a key, or None when no key has that ID."""
         return await self._keys.get_workspace_id_for_key(key_id)
 
+    async def issue_app_key(
+        self,
+        *,
+        user: User,
+        workspace_id: uuid.UUID,
+        client_id: str,
+        app_name: str,
+        scopes: Iterable[KeyScope],
+        key_format: ApiKeyFormatPort,
+    ) -> str:
+        """Mint a budget-enforced app credential inside the caller's authority transaction.
+
+        Raises:
+            ValueError: ``scopes`` is empty or names one an app key may not hold.
+        """
+        held = KeyScopeSet.checked(scopes, is_service_key=False)
+        if not await self._users.ensure_app_key_owner(str(user.id), user.full_name or user.email or "OAuth app user"):
+            raise AppKeyOwnerInactiveError
+        key = key_format.mint()
+        await self._keys.issue_app_key(
+            key_id=str(uuid.uuid4()),
+            key_hash=hash_key(key),
+            prefix=key_format.fingerprint(key),
+            suffix=key_suffix(key),
+            name=f"{app_name} (OAuth)",
+            user_id=str(user.id),
+            workspace_id=workspace_id,
+            client_id=client_id,
+            scopes=held,
+        )
+        return key
+
+    async def revoke_key_by_token(self, token: str) -> None:
+        """Permanently revoke the presented API key, preserving its usage history."""
+        async with self._uow:
+            await self._keys.revoke_by_hash(hash_key(token))
+
     async def get_key_ids_in_workspaces(self, workspace_ids: Sequence[uuid.UUID]) -> list[str]:
         """Return the IDs of the keys in these workspaces, in no particular order."""
         return await self._keys.get_key_ids_in_workspaces(workspace_ids)
+
+    async def key_names(
+        self, key_ids: Collection[str], *, workspace_ids: Collection[uuid.UUID] | None
+    ) -> dict[str, str | None]:
+        """Each of these keys that still exists in these workspaces, or in any with ``None``, to its name.
+
+        Read in a block of its own.
+        """
+        async with self._uow:
+            return await self._keys.names_by_id(key_ids, workspace_ids=workspace_ids)
+
+    async def summaries_in_workspace(
+        self, workspace_id: uuid.UUID, key_ids: Collection[str] | None = None
+    ) -> list[KeySummary]:
+        """A workspace's keys, oldest first; only those of ``key_ids`` when given. A business step of its own."""
+        async with self._uow:
+            rows = await self._keys.summaries_in_workspace(workspace_id, key_ids)
+        return [KeySummary(*row) for row in rows]
+
+    async def owners_in_workspace(self, workspace_id: uuid.UUID, user_ids: Collection[str]) -> set[str]:
+        """Which of ``user_ids`` own a key in the workspace. A business step of its own."""
+        async with self._uow:
+            return await self._keys.owners_in_workspace(workspace_id, user_ids)
 
     async def keys_defaulting_end_users_to(self, budget_id: str) -> list[str]:
         """Name the keys that start a new end user on this budget when a request names none."""
@@ -165,6 +247,35 @@ class ApiKeyService:
                 raise FederationRuleNotFoundError(rule_id)
             await self._federation_rules.delete(row)
 
+    async def update_owned(
+        self, config: GatewayConfig, key: APIKey, changes: Mapping[str, Any], *, owner_id: str
+    ) -> None:
+        """Apply the owner's ``changes`` (column to new value; a column left out keeps its value) to their ``key``.
+
+        Re-reads the key under its row lock first, so a switch-off or a narrowing an
+        operator committed after the caller loaded it is decided on and kept rather
+        than written over. A changed access list must fit the owner's own.
+
+        Raises:
+            KeyEnableRefusedError: the changes enable a key disabled for a reason the owner cannot clear.
+            ValueError: a changed access list names something unknown, or grants more than the owner's.
+        """
+        async with self._uow:
+            await self._keys.reload_locked(key)
+            if changes.get("is_active") is True and key.disabled_reason is not None:
+                raise KeyEnableRefusedError(key.disabled_reason)
+            stored = AccessLists(key.allowed_models, key.allowed_tools)
+            access = await self.check_access_lists(
+                config,
+                AccessLists(changes.get("allowed_models", stored.models), changes.get("allowed_tools", stored.tools)),
+                stored=stored,
+                owner_id=owner_id,
+            )
+            for column, value in changes.items():
+                setattr(key, column, value)
+            key.allowed_models = access.models
+            key.allowed_tools = access.tools
+
     async def check_access_lists(
         self, config: GatewayConfig, requested: AccessLists, *, stored: AccessLists, owner_id: str | None
     ) -> AccessLists:
@@ -201,16 +312,32 @@ class ApiKeyService:
             raise ValueError(KEY_TOOLS_EXCEED_USER_DETAIL)
         return checked
 
-    async def search_tool_refusal(
-        self, config: GatewayConfig, api_key: APIKey | None, *, provider: str, tool: str
+    async def tool_refusal(
+        self, config: GatewayConfig, api_key: APIKey | None, *, kind: ToolKind, provider: str, tool: str
     ) -> str | None:
-        """Why a request's key may not run a search tool, or ``None`` when it may.
+        """Why a request's key may not run a search or fetch tool, or ``None`` when it may.
 
         Master-key callers (``api_key is None``) run every tool. The key's owner's
         lists are read only when the key has no ``allowed_tools`` of its own.
         """
         if api_key is None:
             return None
+        allowed, owner = await self._tool_access(config, api_key)
+        if is_tool_allowed(allowed, tool):
+            return None
+        # With no allowed_tools on either, the answer was read off the model lists, the deprecated way.
+        legacy_models: list[list[str]] = []
+        if api_key.allowed_tools is None and owner.tools is None:
+            legacy_models = [models for models in (api_key.allowed_models, owner.models) if models is not None]
+        return tool_not_allowed_detail(tool, f"{provider}:{tool}", legacy_models, kind=kind)
+
+    async def tool_allowlist(self, config: GatewayConfig, api_key: APIKey) -> list[str] | None:
+        """The search and fetch tools ``api_key`` may run, as :meth:`tool_refusal` decides; ``None`` for all."""
+        allowed, _owner = await self._tool_access(config, api_key)
+        return allowed
+
+    async def _tool_access(self, config: GatewayConfig, api_key: APIKey) -> tuple[list[str] | None, AccessLists]:
+        """The key's tool allow-list and its owner's lists, read only when the key has no ``allowed_tools``."""
         owner = AccessLists(None, None)
         if api_key.allowed_tools is None and api_key.user_id is not None:
             async with self._uow:
@@ -222,13 +349,7 @@ class ApiKeyService:
             user_tools=owner.tools,
             user_models=owner.models,
         )
-        if is_tool_allowed(allowed, tool):
-            return None
-        # With no allowed_tools on either, the answer was read off the model lists, the deprecated way.
-        legacy_models: list[list[str]] = []
-        if api_key.allowed_tools is None and owner.tools is None:
-            legacy_models = [models for models in (api_key.allowed_models, owner.models) if models is not None]
-        return tool_not_allowed_detail(tool, f"{provider}:{tool}", legacy_models)
+        return allowed, owner
 
     async def pin_before_user_grant(
         self, config: GatewayConfig, user_id: str, *, before: AccessLists, user_tools: list[str] | None

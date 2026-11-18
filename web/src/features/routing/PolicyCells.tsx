@@ -10,7 +10,6 @@ import {
   findFallthroughTarget,
   findRouterBackend,
   findWeights,
-  KNN_BACKEND,
   PRIORITY_BACKEND,
   type RoutingRow,
   WEIGHTED_BACKEND,
@@ -20,13 +19,12 @@ import {
  * What to call the backend that decides, for a mark or a one-line summary.
  *
  * Named per backend rather than "Dynamic", because the backend's name is what
- * tells the reader what to do next (teach it, or move the shares). A backend
+ * tells the reader what to do next (move the shares, or the order). A backend
  * this build does not know gets the neutral word.
  */
 export function routerLabelOf(spec: PolicySpec): string {
   const backend = findRouterBackend(spec)
   if (backend === WEIGHTED_BACKEND) return "Weighted"
-  if (backend === KNN_BACKEND) return "Learned"
   if (backend === PRIORITY_BACKEND) return "Priority"
   return "Routed"
 }

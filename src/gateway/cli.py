@@ -4,12 +4,15 @@ import re
 import shutil
 import subprocess
 import sys
+import warnings
 
 import click
 import uvicorn
+from pydantic import ValidationError
+from sqlalchemy.exc import SAWarning
 from uvicorn.config import logger
 
-from gateway.core.config import API_ROOT, load_config
+from gateway.core.config import API_ROOT, GatewayConfig, load_config
 from gateway.log_config import setup_logger, uvicorn_log_config
 from gateway.services.url_safety import redact_url_secrets
 
@@ -37,6 +40,28 @@ def _parse_log_level(ctx: click.Context, param: click.Parameter, value: str | No
     )
 
 
+# What a container health check, a load balancer or an orchestrator polls.
+HEALTH_PROBE_PATHS = tuple(f"{API_ROOT}/health{suffix}" for suffix in ("", "/liveness", "/readiness"))
+
+
+def _load_config_or_fail(config_path: str | None) -> GatewayConfig:
+    """``load_config``, with a refused value reported by its field and message and never by its value.
+
+    Pydantic's own rendering repeats the input of every failed field, and a
+    config value can be a credential, such as a URL with a password in it.
+    """
+    try:
+        return load_config(config_path)
+    except ValidationError as exc:
+        lines = [
+            f"{'.'.join(str(part) for part in error['loc']) or 'config'}: {error['msg']}"
+            for error in exc.errors(include_url=False, include_input=False)
+        ]
+        raise click.ClickException("Invalid configuration:\n  " + "\n  ".join(lines)) from exc
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
 @click.group()
 def cli() -> None:
     """Otari CLI."""
@@ -47,6 +72,8 @@ def cli() -> None:
     "--config",
     "-c",
     type=click.Path(exists=True, dir_okay=False),
+    envvar="OTARI_CONFIG_PATH",
+    show_envvar=True,
     help="Path to config YAML file",
     default=None,
 )
@@ -97,11 +124,11 @@ def serve(
             "To scale out, run several otari processes behind a load balancer or process manager. "
             "Re-run with --workers 1 (the default)."
         )
-    try:
-        gateway_config = load_config(config)
-    except ValueError as e:
-        raise click.ClickException(str(e)) from e
+    gateway_config = _load_config_or_fail(config)
     setup_logger(level=log_level)
+    if log_level > logging.DEBUG:
+        # SQLAlchemy's advice to developers, printed raw to stderr among the startup lines.
+        warnings.filterwarnings("ignore", category=SAWarning)
 
     if host:
         gateway_config.host = host
@@ -134,7 +161,7 @@ def serve(
             host=gateway_config.host,
             port=gateway_config.port,
             forwarded_allow_ips=gateway_config.forwarded_allow_ips,
-            log_config=uvicorn_log_config(),
+            log_config=uvicorn_log_config(log_level, probe_paths=HEALTH_PROBE_PATHS),
         )
     except KeyboardInterrupt:
         logger.info("\nShutting down Otari...")
@@ -142,13 +169,20 @@ def serve(
 
 
 @cli.command()
-@click.option("--config", "-c", type=click.Path(exists=True), help="Path to config YAML file")
+@click.option(
+    "--config",
+    "-c",
+    type=click.Path(exists=True, dir_okay=False),
+    envvar="OTARI_CONFIG_PATH",
+    show_envvar=True,
+    help="Path to config YAML file",
+)
 @click.option("--database-url", envvar="DATABASE_URL", help="Database connection URL")
 def init_db(config: str | None, database_url: str | None) -> None:
     """Initialize the database schema."""
     from gateway.db import init_db as db_init
 
-    gateway_config = load_config(config)
+    gateway_config = _load_config_or_fail(config)
 
     if database_url:
         gateway_config.database_url = database_url
@@ -161,12 +195,19 @@ def init_db(config: str | None, database_url: str | None) -> None:
 
 
 @cli.command()
-@click.option("--config", "-c", type=click.Path(exists=True), help="Path to config YAML file")
+@click.option(
+    "--config",
+    "-c",
+    type=click.Path(exists=True, dir_okay=False),
+    envvar="OTARI_CONFIG_PATH",
+    show_envvar=True,
+    help="Path to config YAML file",
+)
 @click.option("--database-url", envvar="DATABASE_URL", help="Database connection URL")
 @click.option("--revision", default="head", help="Target revision (default: head)")
 def migrate(config: str | None, database_url: str | None, revision: str) -> None:
     """Run database migrations using Alembic."""
-    gateway_config = load_config(config)
+    gateway_config = _load_config_or_fail(config)
 
     if database_url:
         gateway_config.database_url = database_url
@@ -237,6 +278,8 @@ def routing() -> None:
     "--config",
     "-c",
     type=click.Path(exists=True, dir_okay=False),
+    envvar="OTARI_CONFIG_PATH",
+    show_envvar=True,
     help="Path to config YAML file",
     default=None,
 )
@@ -291,7 +334,7 @@ def routing_explain(
         explain_router_ordering,
     )
 
-    cfg = load_config(config)
+    cfg = _load_config_or_fail(config)
     if not cfg.routing.policies:
         click.echo(
             "No routing policies are configured in config.yml. Add a `routing.policies` block there, or, if "
@@ -354,7 +397,7 @@ def routing_explain(
         click.echo(f"  x  {dropped.selector}    dropped: {dropped.detail}")
     # Keyed on the backend rather than on the shares: a weighted policy whose whole
     # split is filtered out for this caller has no shares to print, and the decline
-    # text below is the learned router's vocabulary, which would misdescribe it.
+    # text below would misdescribe it.
     if backend_is_weighted(spec.router_backend):
         click.echo(
             "  weighted: one candidate is drawn per request in proportion to its share, and a candidate "
@@ -371,14 +414,13 @@ def routing_explain(
             "rate limits, then on_failure. A candidate that fails before responding falls to the next one."
         )
     elif spec.router_backend is not None:
-        # The plan above is the *decline* path, because a router needs a live
-        # request (a prompt to embed, stored examples to compare it against) and
-        # this command deliberately touches neither. Saying so beats printing a
-        # one-candidate plan that looks like the router was ignored.
+        # The plan above is the *decline* path: this command sends no request, so
+        # no other router is asked. Saying so beats printing a one-candidate plan
+        # that looks like the router was ignored.
         click.echo(
             f"  router: '{spec.router_backend}' ranks {', '.join(spec.router_candidates)} at request time. "
-            f"The plan above is what serves when it declines (cold pool, low confidence, tools present, "
-            f"or Otari-Router: off)."
+            f"The plan above is what serves when it declines, when this build has no such router, "
+            f"or on Otari-Router: off."
         )
     if plan.guardrails:
         click.echo("  guardrails (always enforced):")

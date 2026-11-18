@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 OptionType = Literal["string", "integer", "number", "boolean", "array", "object"]
 
@@ -23,6 +23,18 @@ class OptionSpec(BaseModel):
     # Only the deployment's operator may set it, never a tenant or a request.
     # The library accepts it from anyone; enforcing that is the host's job.
     operator_only: bool = False
+    # The option's values are the provider's cost tiers: a call made with one
+    # value is billed at that tier's own price per call, as the provider's
+    # pricing lists. It records no amount; the adapter's pricing note has those.
+    # ``enum`` lists the tiers and ``default`` is the one the provider uses when
+    # the option is not sent.
+    cost_tier: bool = False
+
+    @model_validator(mode="after")
+    def _a_cost_tier_lists_its_tiers(self) -> "OptionSpec":
+        if self.cost_tier and not (self.enum and self.default in self.enum):
+            raise ValueError(f"cost tier option {self.name!r} needs an enum and a default from it")
+        return self
 
 
 class FetchError(BaseModel):
@@ -75,6 +87,16 @@ class ProviderMetadata(BaseModel):
     reports_final_url: bool
     formats: list[str]
     options: list[OptionSpec]
+    # The provider's answer says what each call cost, which the adapter returns
+    # as the page's cost.
+    reports_cost: bool = False
+
+    @model_validator(mode="after")
+    def _one_cost_tier_at_most(self) -> "ProviderMetadata":
+        tiers = [option.name for option in self.options if option.cost_tier]
+        if len(tiers) > 1:
+            raise ValueError(f"provider {self.name!r} has more than one cost tier option: {', '.join(tiers)}")
+        return self
 
 
 class BuiltinFetcher(Protocol):

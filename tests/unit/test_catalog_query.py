@@ -7,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from gateway.schemas.catalog import CatalogCapabilities, CatalogModelSummary, CatalogQuery
-from gateway.services.catalog import query_catalog
+from gateway.services.catalog import common_price_unit, query_catalog
 
 
 def model(identifier: str, **overrides: Any) -> CatalogModelSummary:
@@ -37,14 +37,17 @@ GLM = model(
     context_window=200_000,
     release_date="2026-07-01",
     providers=["fireworks", "nebius"],
+    zero_data_retention_providers=["fireworks"],
     provider_count=2,
     selectors=["fireworks:accounts/fireworks/models/glm-5p3", "nebius:zai-org/GLM-5.3"],
     price_sources=["defaults", "deployment"],
     min_input_price_per_million=0.5,
     min_output_price_per_million=2,
+    price_unit="token",
     unpriced_count=0,
     discovered=True,
     open_weights=True,
+    type="chat",
 )
 KIMI = model(
     "moonshotai/kimi-k2.6",
@@ -59,8 +62,10 @@ KIMI = model(
     price_sources=["defaults"],
     min_input_price_per_million=0.6,
     min_output_price_per_million=2.4,
+    price_unit="token",
     unpriced_count=0,
     discovered=True,
+    type="image",
 )
 LOCAL = model("qwen3-32b")
 MODELS = [GLM, KIMI, LOCAL]
@@ -73,7 +78,13 @@ MODELS = [GLM, KIMI, LOCAL]
         ({"search": "  MOONSHOT  "}, [KIMI]),
         ({"search": "glm-5"}, [GLM]),
         ({"search": "accounts/fireworks"}, [GLM]),
-        ({"search": "nebius"}, [GLM, KIMI]),
+        ({"search": "nebius"}, []),
+        ({"search": "fireworks"}, []),
+        ({"search": "glm-5p3"}, [GLM]),
+        ({"search": "nebius:zai-org/glm"}, [GLM]),
+        ({"search": "Z.ai: GLM-5.3"}, [GLM]),
+        ({"search": "k2.6 moonshot"}, [KIMI]),
+        ({"search": "moonshot glm"}, []),
         ({"search": "does-not-exist"}, []),
         ({"provider": ["fireworks"]}, [GLM]),
         ({"provider": ["fireworks", "home_lab"]}, [GLM, LOCAL]),
@@ -97,6 +108,11 @@ MODELS = [GLM, KIMI, LOCAL]
         ({"source": "custom"}, [LOCAL]),
         ({"source": "discovered"}, [GLM, KIMI]),
         ({"provider": ["nebius"], "capability": ["reasoning"], "max_input": 0.5}, [GLM]),
+        ({"type": ["chat"]}, [GLM]),
+        ({"type": ["chat", "image"]}, [GLM, KIMI]),
+        ({"type": ["embedding"]}, []),
+        ({"zero_data_retention": True}, [GLM]),
+        ({"zero_data_retention": True, "provider": ["nebius"]}, [GLM]),
     ],
 )
 def test_filters_preserve_the_dashboard_semantics(filters: dict[str, Any], expected: list[CatalogModelSummary]) -> None:
@@ -104,8 +120,41 @@ def test_filters_preserve_the_dashboard_semantics(filters: dict[str, Any], expec
 
 
 def test_free_prices_and_organization_overrides_are_not_unknown() -> None:
-    free = model("free", min_input_price_per_million=0, price_sources=["organization"], unpriced_count=0)
+    free = model(
+        "free", min_input_price_per_million=0, price_unit="token", price_sources=["organization"], unpriced_count=0
+    )
     assert query_catalog([LOCAL, free], CatalogQuery(max_input=0, pricing="custom")).models == [free]
+
+
+# $0.04 an image, as the per-million column holds it.
+IMAGE = model(
+    "black-forest-labs/flux-2",
+    min_input_price_per_million=40_000,
+    min_output_price_per_million=0,
+    price_unit="image",
+    price_sources=["defaults"],
+    unpriced_count=0,
+)
+# Priced per token by one provider and per image by another: no cheapest price compares the two.
+MIXED = model("mixed", offering_count=2, provider_count=2, price_sources=["defaults"], unpriced_count=0)
+
+
+def test_a_price_in_another_unit_is_not_a_token_price() -> None:
+    assert query_catalog([GLM, IMAGE, MIXED], CatalogQuery(max_input=1_000_000)).models == [GLM]
+
+
+def test_a_model_priced_in_several_units_is_priced() -> None:
+    assert query_catalog([LOCAL, MIXED], CatalogQuery(pricing="priced")).models == [MIXED]
+    assert query_catalog([LOCAL, MIXED], CatalogQuery(pricing="unpriced")).models == [LOCAL]
+
+
+@pytest.mark.parametrize("direction", ["asc", "desc"])
+def test_prices_sort_within_their_unit_with_tokens_first(direction: str) -> None:
+    cheap_image = IMAGE.model_copy(update={"id": "x/cheap", "name": "cheap", "min_input_price_per_million": 10_000})
+    models = [IMAGE, MIXED, cheap_image, LOCAL, KIMI, GLM]
+    result = query_catalog(models, CatalogQuery.model_validate({"sort": "input", "direction": direction})).models
+    tokens, images = ([GLM, KIMI], [cheap_image, IMAGE]) if direction == "asc" else ([KIMI, GLM], [IMAGE, cheap_image])
+    assert result == [*tokens, *images, MIXED, LOCAL]
 
 
 def test_release_windows_include_the_boundary_but_not_unknown_or_future_dates() -> None:
@@ -151,6 +200,7 @@ def test_facets_list_every_authorized_choice_whatever_the_filters_match() -> Non
     assert facets.providers == ["fireworks", "home_lab", "nebius"]
     assert [facet.value for facet in facets.vendors] == ["", "Moonshot AI", "Z.ai"]
     assert next(facet for facet in facets.vendors if facet.value == "Z.ai").vendor_slug == "z-ai"
+    assert facets.types == ["chat", "image"]
     empty = query_catalog(MODELS, CatalogQuery(search="no-match", include_facets=True)).facets
     assert empty == facets
 
@@ -183,8 +233,18 @@ def test_matches_and_choices_beyond_the_old_thousand_model_window_are_available(
         {"capability": ["invalid"]},
         {"search": "x" * 201},
         {"provider": ["x"] * 101},
+        {"type": ["invalid"]},
+        {"type": ["chat"] * 101},
     ],
 )
 def test_invalid_queries_are_rejected(params: dict[str, Any]) -> None:
     with pytest.raises(ValidationError):
         CatalogQuery(**params)
+
+
+def test_a_model_has_one_price_unit_only_where_every_priced_offering_bills_in_it() -> None:
+    """The cheapest price compares offerings in one unit, never a token price with an image price."""
+    assert common_price_unit(["token", "token"]) == "token"
+    assert common_price_unit(["image"]) == "image"
+    assert common_price_unit(["token", "image"]) is None
+    assert common_price_unit([]) is None

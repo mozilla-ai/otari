@@ -19,8 +19,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from gateway.api.routes.usage import UsageEntry
-from gateway.schemas.usage_and_telemetry import TokenChargeLine, ToolChargeLine, UnitChargeLine
+from gateway.schemas.usage_and_telemetry import TokenChargeLine, ToolChargeLine, UnitChargeLine, UsageEntry
 
 # Every charge line the gateway writes today, one per producer. Sourced from
 # rerank.py, embeddings.py, images.py, metered_pricing.py and pricing_service.py

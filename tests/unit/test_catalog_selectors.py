@@ -199,6 +199,26 @@ def test_a_legacy_spelling_of_an_organizations_own_offering_lists_it_first() -> 
         selectors.reset_selector_index()
 
 
+def test_organization_offerings_name_only_that_organizations_own_keys() -> None:
+    deployment = [selectors.OfferingRow("azure:gpt-4o", "azure", "azureopenai", 2.5)]
+    own = [selectors.OfferingRow("openai:gpt-4o", "openai", "openai", 2.5)]
+    identities: dict[str, tuple[str, tuple[str, ...]]] = {
+        "openai/gpt-4o": ("gpt-4o", ("azure:gpt-4o", "openai:gpt-4o"))
+    }
+    view = selectors.build_organization_selectors(deployment, own, identities)
+    selectors.set_selector_index(
+        selectors.build_selector_index(
+            deployment, {"openai/gpt-4o": ("gpt-4o", ("azure:gpt-4o",))}, organizations={_ORG_A: view}
+        )
+    )
+    try:
+        assert selectors.organization_offerings(organization_id=_ORG_A) == frozenset({"openai:gpt-4o"})
+        assert selectors.organization_offerings(organization_id=_ORG_B) == frozenset()
+        assert selectors.organization_offerings() == frozenset()
+    finally:
+        selectors.reset_selector_index()
+
+
 def test_a_vendor_is_matched_to_its_own_provider_by_the_identity_table() -> None:
     """``moonshotai`` is the vendor's id segment; ``moonshot`` is the provider it publishes on."""
     rows = [
@@ -335,6 +355,31 @@ def test_catalog_models_list_each_id_in_the_callers_view_with_its_order_and_name
     assert theirs["openai/gpt-oss-120b"].name == "openai/gpt-oss-120b"
 
 
+def test_an_offerings_input_rate_is_the_one_the_callers_organization_pays() -> None:
+    """The organization's view answers for the offerings it touches, the deployment's for the rest."""
+    own = [selectors.OfferingRow("together:zai-org/GLM-5.3", "together", "together", 0.9)]
+    repriced = [selectors.OfferingRow("nebius:zai-org/GLM-5.3", "nebius", "nebius", 0.4), *_ROWS[1:]]
+    identities = {
+        **_IDENTITIES,
+        "z-ai/glm-5.3": ("glm-5.3", (*_IDENTITIES["z-ai/glm-5.3"][1], "together:zai-org/GLM-5.3")),
+    }
+    selectors.set_selector_index(
+        selectors.build_selector_index(
+            _ROWS,
+            _IDENTITIES,
+            organizations={_ORG_A: selectors.build_organization_selectors(repriced, own, identities)},
+        )
+    )
+    try:
+        assert selectors.offering_input_rate("nebius:zai-org/GLM-5.3", organization_id=_ORG_A) == 0.4
+        assert selectors.offering_input_rate("together:zai-org/GLM-5.3", organization_id=_ORG_A) == 0.9
+        assert selectors.offering_input_rate("nebius:zai-org/GLM-5.3", organization_id=_ORG_B) == 0.5
+        assert selectors.offering_input_rate("together:zai-org/GLM-5.3", organization_id=_ORG_B) is None
+        assert selectors.offering_input_rate("cerebras:gpt-oss-120b", organization_id=_ORG_A) is None
+    finally:
+        selectors.reset_selector_index()
+
+
 def test_an_organizations_unpriced_key_follows_the_priced_offerings() -> None:
     """An unpriced offering would settle at no cost, so a priced one answers first."""
     own = [selectors.OfferingRow("together:zai-org/GLM-5.3", "together", "together", None)]
@@ -411,3 +456,106 @@ async def test_only_an_operator_triggered_rebuild_may_dial(fetch: bool, expected
     assert build.await_args.kwargs["model_provider"] is None
     # Indexed by real offering, so an aliased model keeps its selectors.
     assert build.await_args.kwargs["withhold_alias_targets"] is False
+
+
+@pytest.fixture
+def claude_index() -> Iterator[selectors.SelectorIndex]:
+    """Claude Code names models bare; ``llama-4`` ends two catalog ids."""
+    rows = [
+        selectors.OfferingRow("anthropic:claude-opus-5-5", "anthropic", "anthropic", 5.0),
+        selectors.OfferingRow("bedrock:anthropic.claude-opus-5-5", "bedrock", "bedrock", 4.0),
+        selectors.OfferingRow("groq:llama-4", "groq", "groq", 0.1),
+        selectors.OfferingRow("together:llama-4", "together", "together", 0.2),
+    ]
+    identities: dict[str, tuple[str, tuple[str, ...]]] = {
+        "anthropic/claude-opus-5-5": (
+            "claude-opus-5-5",
+            ("anthropic:claude-opus-5-5", "bedrock:anthropic.claude-opus-5-5"),
+        ),
+        "meta/llama-4": ("llama-4", ("groq:llama-4",)),
+        "acme/llama-4": ("acme-llama-4", ("together:llama-4",)),
+    }
+    built = selectors.build_selector_index(rows, identities)
+    selectors.set_selector_index(built)
+    yield built
+    selectors.reset_selector_index()
+
+
+def test_a_bare_name_resolves_as_the_one_catalog_id_ending_in_it(claude_index: selectors.SelectorIndex) -> None:
+    assert selectors.resolve_catalog_selector("claude-opus-5-5") == "anthropic:claude-opus-5-5"
+    assert selectors.resolve_catalog_selector("Claude-Opus-5-5") == "anthropic:claude-opus-5-5"
+    assert selectors.resolve_catalog_offerings("claude-opus-5-5") == claude_index.offerings["anthropic/claude-opus-5-5"]
+
+    config = GatewayConfig(master_key="k", providers={"anthropic": {"api_key": "x"}, "bedrock": {"api_key": "x"}})
+    resolved = resolve_provider_selector(config, "claude-opus-5-5")
+    assert (resolved.instance, resolved.model, resolved.alias) == ("anthropic", "claude-opus-5-5", "claude-opus-5-5")
+
+
+def test_a_bare_name_two_catalog_ids_end_in_resolves_to_nothing(claude_index: selectors.SelectorIndex) -> None:
+    assert claude_index.bare["llama-4"] == ("meta/llama-4", "acme/llama-4")
+    assert selectors.resolve_catalog_selector("llama-4") is None
+    assert selectors.resolve_catalog_offerings("llama-4") == ()
+
+
+def test_an_alias_wins_over_a_bare_name(claude_index: selectors.SelectorIndex) -> None:
+    config = GatewayConfig(
+        master_key="k",
+        providers={"anthropic": {"api_key": "x"}, "bedrock": {"api_key": "x"}},
+        aliases={"claude-opus-5-5": "bedrock:anthropic.claude-opus-5-5"},
+    )
+    resolved = resolve_provider_selector(config, "claude-opus-5-5")
+    assert (resolved.instance, resolved.model) == ("bedrock", "anthropic.claude-opus-5-5")
+
+
+def test_a_bare_name_reaches_an_organizations_own_key_first() -> None:
+    deployment = [selectors.OfferingRow("bedrock:anthropic.claude-opus-5-5", "bedrock", "bedrock", 4.0)]
+    own = [selectors.OfferingRow("anthropic:claude-opus-5-5", "anthropic", "anthropic", 5.0)]
+    identities: dict[str, tuple[str, tuple[str, ...]]] = {
+        "anthropic/claude-opus-5-5": (
+            "claude-opus-5-5",
+            ("anthropic:claude-opus-5-5", "bedrock:anthropic.claude-opus-5-5"),
+        )
+    }
+    view = selectors.build_organization_selectors(deployment, own, identities)
+    selectors.set_selector_index(
+        selectors.build_selector_index(
+            deployment,
+            {"anthropic/claude-opus-5-5": ("claude-opus-5-5", ("bedrock:anthropic.claude-opus-5-5",))},
+            organizations={_ORG_A: view},
+            workspace_organization={_WORKSPACE_A: _ORG_A},
+        )
+    )
+    try:
+        assert selectors.resolve_catalog_selector("claude-opus-5-5", workspace_id=_WORKSPACE_A) == (
+            "anthropic:claude-opus-5-5"
+        )
+        assert selectors.resolve_catalog_selector("claude-opus-5-5", workspace_id=_WORKSPACE_B) == (
+            "bedrock:anthropic.claude-opus-5-5"
+        )
+    finally:
+        selectors.reset_selector_index()
+
+
+def test_a_bare_name_an_organizations_own_model_makes_ambiguous_resolves_to_nothing_for_it() -> None:
+    """The deployment serves one ``llama-4``; the organization's key adds another, so its callers get neither."""
+    deployment = [selectors.OfferingRow("groq:llama-4", "groq", "groq", 0.1)]
+    own = [selectors.OfferingRow("together:llama-4", "together", "together", 0.2)]
+    union: dict[str, tuple[str, tuple[str, ...]]] = {
+        "meta/llama-4": ("llama-4", ("groq:llama-4",)),
+        "acme/llama-4": ("acme-llama-4", ("together:llama-4",)),
+    }
+    view = selectors.build_organization_selectors(deployment, own, union)
+    selectors.set_selector_index(
+        selectors.build_selector_index(
+            deployment,
+            {"meta/llama-4": ("llama-4", ("groq:llama-4",))},
+            organizations={_ORG_A: view},
+            workspace_organization={_WORKSPACE_A: _ORG_A},
+        )
+    )
+    try:
+        assert selectors.resolve_catalog_selector("llama-4", workspace_id=_WORKSPACE_A) is None
+        assert selectors.resolve_catalog_offerings("llama-4", workspace_id=_WORKSPACE_A) == ()
+        assert selectors.resolve_catalog_selector("llama-4", workspace_id=_WORKSPACE_B) == "groq:llama-4"
+    finally:
+        selectors.reset_selector_index()

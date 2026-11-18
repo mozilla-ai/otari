@@ -9,9 +9,9 @@ import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"
 import { readSignInAddress, rememberSignInAddress } from "./signInAddress"
 
 /**
- * `#/recover-password`: ask for a password-reset link.
+ * `/recover-password`: ask for a password-reset link.
  *
- * Confirms in place rather than navigating to `#/check-email`, which is where
+ * Confirms in place rather than navigating to `/check-email`, which is where
  * signup and a verification resend both land. The two messages are different
  * ("a reset link" against "a verification link"), and one page that had to say
  * which flow sent it would need a third `?type=`; the platform's own recover
@@ -50,7 +50,7 @@ export function RecoverPasswordPage() {
       <PublicAuthLayout
         title="Check your email"
         description="If that address has an account on this gateway, a link to set or reset its password is on its way."
-        footer={<PublicAuthLink to="#/">Back to sign in</PublicAuthLink>}
+        footer={<PublicAuthLink to="/">Back to sign in</PublicAuthLink>}
       >
         <p className="text-center text-caption">
           The link is single-use and expires. Requesting another replaces the
@@ -65,7 +65,7 @@ export function RecoverPasswordPage() {
       isBusy={request.isPending}
       title="Set or reset your password"
       description="Enter your address and we will mail a link to choose a password, whether it is your first or a forgotten one."
-      footer={<PublicAuthLink to="#/">Back to sign in</PublicAuthLink>}
+      footer={<PublicAuthLink to="/">Back to sign in</PublicAuthLink>}
     >
       <form
         className="flex flex-col gap-4"

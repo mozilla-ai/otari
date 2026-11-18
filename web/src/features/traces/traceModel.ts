@@ -81,7 +81,7 @@ export function clipPath(path: string): string {
 export function spanLabel(span: TraceSpan): string {
   switch (span.kind) {
     case "llm":
-      return span.model || "LLM call"
+      return span.model || "Model request"
     case "tool": {
       const name = span.tool_name || "Tool call"
       const { command, file_path: path } = span.content
@@ -110,7 +110,7 @@ export function spanLabel(span: TraceSpan): string {
   }
 }
 
-// A row of the activity list is a session (requests that named one) or a single
+// A row of the Sessions list is a session (requests that named one) or a single
 // request that named none; both are traces, so they share one list.
 export function traceKind(summary: TraceSummary): "Session" | "Request" {
   return summary.session_source === "none" ? "Request" : "Session"

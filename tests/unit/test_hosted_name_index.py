@@ -13,6 +13,7 @@ class _Row:
     def __init__(self, name: str, provider: str) -> None:
         self.name = name
         self.provider = provider
+        self.zero_data_retention = False
 
 
 class _Uow:

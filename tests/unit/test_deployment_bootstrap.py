@@ -77,9 +77,9 @@ def test_the_bootstrap_reports_the_full_surface_set(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert response.json() == {
-        # The trace explorer and the Health page are core features, published on top of the declared surfaces
-        # while they are on.
-        "surfaces": sorted({*SURFACES, "health_checks", "traces"}),
+        # The trace explorer, the Health page, the MCP catalog and the update check are core features, published
+        # on top of the declared surfaces while they are on.
+        "surfaces": sorted({*SURFACES, "health_checks", "mcp_catalog", "traces", "update_check"}),
         "sign_in_methods": ["master_key"],
         "docs_url": None,
         "terms_url": None,
@@ -89,7 +89,8 @@ def test_the_bootstrap_reports_the_full_surface_set(tmp_path: Path) -> None:
         "passkeys_enabled": True,
         "passkeys_ready": False,
         "oauth_providers": [],
-        "feedback_enabled": True,
+        "feedback_enabled": False,
+        "platform_connect": True,
         "federation_member_rules": False,
         "mail_ready": False,
         "public_catalog": False,
@@ -216,6 +217,7 @@ def test_member_federation_rules_are_published_when_the_setting_is_on(
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
     on = _gateway_config(tmp_path)
     on.federation_member_rules = True
+    on.federation_audiences = ["https://otari.example.com"]
 
     with TestClient(create_app(on)) as client:
         assert client.get(f"{API_ROOT}/bootstrap").json()["federation_member_rules"] is True
@@ -285,8 +287,11 @@ def test_open_signup_is_published_only_with_mail_to_carry_the_verification(tmp_p
 # check is for is a surface whose API went away, and a name that reaches one
 # mounted route has not.
 SURFACE_ROUTE_PREFIXES = {
+    "agent_recommenders": f"{API_ROOT}/routing/recommenders",
     "hosted_providers": f"{API_ROOT}/hosted-providers",
     "health_checks": f"{API_ROOT}/health-checks",
+    "mcp_catalog": f"{API_ROOT}/mcp-catalog",
+    "update_check": f"{API_ROOT}/update-check",
     "organization_guardrails": f"{API_ROOT}/organizations/me/guardrails",
     "organization_providers": f"{API_ROOT}/organizations/me/provider-keys",
     "organization_usage": f"{API_ROOT}/organizations/me/usage",

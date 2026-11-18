@@ -67,7 +67,7 @@ export const Default: Story = {
 
 /**
  * A description explains the field, and an option's `isDisabled` shows a choice
- * that exists but cannot be taken. `reserveMessage` holds the caption line open
+ * that exists but cannot be taken. `shouldReserveMessage` holds the caption line open
  * so a message appearing does not move the form.
  */
 export const WithDescription: Story = {

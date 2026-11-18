@@ -20,7 +20,7 @@ import {
   useSetRoutingPolicy,
 } from "@/shared/api/routing"
 import { useUsers } from "@/shared/api/users"
-
+import { useNarrowingWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { BackupList } from "./BackupList"
 import { nameProblemOf, PolicyNameField } from "./PolicyNameField"
 import { PolicyPreview } from "./PolicyPreview"
@@ -44,7 +44,6 @@ import { TierDownSection } from "./TierDownSection"
 const TITLES: Record<Intent, string> = {
   fallback: "New fallback",
   weighted: "New traffic split",
-  knn: "New smart router",
   priority: "New spill-over policy",
   tierdown: "New budget tier-down",
 }
@@ -52,7 +51,6 @@ const TITLES: Record<Intent, string> = {
 const DESCRIPTIONS: Record<Intent, string> = {
   fallback: "the model that serves it, and the backups tried when it fails.",
   weighted: "and the models its traffic is split across.",
-  knn: "and the models a router picks between.",
   priority: "and the models tried in order as each fills up.",
   tierdown: "its main model, and the cheaper one used once the budget fills.",
 }
@@ -98,6 +96,9 @@ export function CreatePolicyDialog({
   workspaceId: string | null
   onClose: () => void
 }) {
+  // The pickers read the selected workspace rather than `workspaceId`, which is
+  // null for an operator writing deployment-wide.
+  const catalogWorkspaceId = useNarrowingWorkspace()
   const save = useSetRoutingPolicy()
   const saveOrgPolicy = useSetOrganizationRoutingPolicy()
   const isTenantScoped = !isDeploymentWide
@@ -270,6 +271,7 @@ export function CreatePolicyDialog({
             // Reads the catalog, not discovery, which lists only the
             // process-wide providers and misses organization keys.
             <OfferingPicker
+              workspaceId={catalogWorkspaceId}
               id="main-model"
               label="Main model"
               value={draft.target}

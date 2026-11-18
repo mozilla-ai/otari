@@ -24,7 +24,7 @@ from gateway.core.settings.api_keys import FederationIssuer
 from gateway.services.api_keys import FederatedTokenVerifier
 from gateway.services.secret_box import generate_secret_key
 
-from .conftest import MODEL_NAME, build_test_client
+from .conftest import ALL_KEY_SCOPES, MODEL_NAME, all_scopes, build_test_client
 
 ISSUER = "https://issuer.example.com"
 UNLISTED_ISSUER = "https://unlisted.example.com"
@@ -71,7 +71,11 @@ def _bearer(token: str) -> dict[str, str]:
 @pytest.fixture
 def federation_config(test_config: GatewayConfig) -> GatewayConfig:
     return test_config.model_copy(
-        update={"federation_issuers": [FederationIssuer(issuer=ISSUER, jwks_uri=JWKS_URI)]}, deep=True
+        update={
+            "federation_issuers": [FederationIssuer(issuer=ISSUER, jwks_uri=JWKS_URI)],
+            "federation_audiences": [AUDIENCE],
+        },
+        deep=True,
     )
 
 
@@ -83,7 +87,9 @@ def client(
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
     for test_client in build_test_client(federation_config):
         test_client.app.state.federated_token_verifier = FederatedTokenVerifier(  # type: ignore[attr-defined]
-            federation_config.federation_issuers, transport_factory=_issuer
+            federation_config.federation_issuers,
+            audiences=federation_config.federation_audiences,
+            transport_factory=_issuer,
         )
         yield test_client
 
@@ -107,7 +113,11 @@ def _chat(client: TestClient, headers: dict[str, str]) -> Any:
 
 
 def _key(client: TestClient, master_key_header: dict[str, str], owner: str = "hackbot", **settings: Any) -> str:
-    created = client.post(KEYS, json={"key_name": owner, "user_id": owner, **settings}, headers=master_key_header)
+    created = client.post(
+        KEYS,
+        json={"scopes": all_scopes(settings), "key_name": owner, "user_id": owner, **settings},
+        headers=master_key_header,
+    )
     assert created.status_code == 200, created.text
     return str(created.json()["id"])
 
@@ -193,7 +203,9 @@ def test_a_rule_overlapping_another_keys_rule_is_refused(client: TestClient, mas
 
 def test_rules_are_managed_by_the_operator_only(client: TestClient, master_key_header: dict[str, str]) -> None:
     key_id = _federated_key(client, master_key_header)
-    plain_key = client.post(KEYS, json={"user_id": "other"}, headers=master_key_header).json()["key"]
+    plain_key = client.post(
+        KEYS, json={"scopes": ALL_KEY_SCOPES, "user_id": "other"}, headers=master_key_header
+    ).json()["key"]
     rules = f"{KEYS}/{key_id}/federation-rules"
 
     assert client.get(rules, headers={API_KEY_HEADER: f"Bearer {plain_key}"}).status_code == 401
@@ -262,7 +274,7 @@ def test_a_token_is_never_the_master_key(client: TestClient, master_key_header: 
 
 _REFUSALS: dict[str, tuple[dict[str, Any], str]] = {
     "unlisted-issuer": ({"iss": UNLISTED_ISSUER}, "federation_unknown_issuer"),
-    "wrong-audience": ({"aud": "https://elsewhere.example.com"}, "federation_no_rule"),
+    "wrong-audience": ({"aud": "https://elsewhere.example.com"}, "federation_wrong_audience"),
     "other-email": ({"email": "someone@project.iam.gserviceaccount.com"}, "federation_no_rule"),
     "unverified-email": ({"email_verified": False}, "federation_no_rule"),
     "expired": ({"iat": int(time.time()) - 7200, "exp": int(time.time()) - 600}, "federation_expired"),
@@ -379,7 +391,7 @@ def test_an_unreachable_issuer_fails_closed(client: TestClient, master_key_heade
         return httpx.MockTransport(lambda _request: httpx.Response(503))
 
     client.app.state.federated_token_verifier = FederatedTokenVerifier(  # type: ignore[attr-defined]
-        [FederationIssuer(issuer=ISSUER, jwks_uri=JWKS_URI)], transport_factory=unreachable
+        [FederationIssuer(issuer=ISSUER, jwks_uri=JWKS_URI)], audiences=[AUDIENCE], transport_factory=unreachable
     )
 
     refused = _chat(client, _bearer(_token()))
@@ -388,7 +400,7 @@ def test_an_unreachable_issuer_fails_closed(client: TestClient, master_key_heade
 
 
 def test_a_plain_api_key_still_authenticates(client: TestClient, master_key_header: dict[str, str]) -> None:
-    created = client.post(KEYS, json={"user_id": "plain"}, headers=master_key_header).json()
+    created = client.post(KEYS, json={"scopes": ALL_KEY_SCOPES, "user_id": "plain"}, headers=master_key_header).json()
 
     assert _chat(client, {API_KEY_HEADER: f"Bearer {created['key']}"}).status_code == 200
 

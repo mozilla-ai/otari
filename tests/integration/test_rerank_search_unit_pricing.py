@@ -110,7 +110,7 @@ def _user(client: TestClient, headers: dict[str, str]) -> dict[str, Any]:
 def test_reported_search_units_are_billed_at_the_per_request_rate(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
-    _price(client, master_key_header, unit="requests", rate=PER_UNIT_RATE)
+    _price(client, master_key_header, unit="request", rate=PER_UNIT_RATE)
     headers = _user_key(client, master_key_header)
 
     response, reserved = _rerank(client, headers, _response(search_units=2.0))
@@ -142,7 +142,7 @@ def test_reported_search_units_are_billed_at_the_per_request_rate(
 def test_a_provider_reporting_no_units_is_billed_one(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
-    _price(client, master_key_header, unit="requests", rate=PER_UNIT_RATE)
+    _price(client, master_key_header, unit="request", rate=PER_UNIT_RATE)
     headers = _user_key(client, master_key_header)
 
     response, _ = _rerank(client, headers, _response(search_units=None))
@@ -162,7 +162,7 @@ def test_a_provider_reporting_no_units_is_billed_one(
 def test_a_token_priced_model_still_bills_reported_tokens(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
-    _price(client, master_key_header, unit="tokens", rate=TOKEN_RATE)
+    _price(client, master_key_header, unit="token", rate=TOKEN_RATE)
     headers = _user_key(client, master_key_header)
 
     response, _ = _rerank(client, headers, _response(search_units=1.0, tokens=1000))
@@ -187,7 +187,7 @@ def test_a_token_priced_model_with_only_search_units_stays_unpriced(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
     """A token rate cannot price a count of searches, so the row carries no cost."""
-    _price(client, master_key_header, unit="tokens", rate=TOKEN_RATE)
+    _price(client, master_key_header, unit="token", rate=TOKEN_RATE)
     headers = _user_key(client, master_key_header)
 
     response, _ = _rerank(client, headers, _response(search_units=1.0))
@@ -228,8 +228,8 @@ def test_an_organization_override_is_named_as_the_source(
     client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
     """The organization's own rate wins over the deployment's, and both the response and the row say so."""
-    _price(client, master_key_header, unit="requests", rate=PER_UNIT_RATE * 10)
-    _price(client, master_key_header, unit="requests", rate=PER_UNIT_RATE, organization=True)
+    _price(client, master_key_header, unit="request", rate=PER_UNIT_RATE * 10)
+    _price(client, master_key_header, unit="request", rate=PER_UNIT_RATE, organization=True)
     headers = _user_key(client, master_key_header)
 
     response, _ = _rerank(client, headers, _response(search_units=1.0))

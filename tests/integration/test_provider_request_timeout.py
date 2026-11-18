@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import any_llm
 import httpx
+import httpx2
 import pytest
 from fastapi.testclient import TestClient
 
@@ -41,15 +42,15 @@ def test_large_max_tokens_non_streaming_message_reaches_anthropic(
     test_config: GatewayConfig,
 ) -> None:
     """The real any-llm and anthropic SDK path, over a mock transport."""
-    sent: list[httpx.Request] = []
+    sent: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         sent.append(request)
-        return httpx.Response(200, json=_ANTHROPIC_MESSAGE)
+        return httpx2.Response(200, json=_ANTHROPIC_MESSAGE)
 
     async def real_amessages(**kwargs: Any) -> Any:
         kwargs.setdefault("api_key", "sk-ant-test")
-        kwargs["client_args"] = {"http_client": httpx.AsyncClient(transport=httpx.MockTransport(handler))}
+        kwargs["client_args"] = {"http_client": httpx2.AsyncClient(transport=httpx2.MockTransport(handler))}
         return await any_llm.amessages(**kwargs)
 
     with patch("gateway.api.routes.messages.amessages", new=real_amessages):
@@ -92,6 +93,15 @@ def test_chat_completion_carries_the_default_timeout(
 ) -> None:
     captured = _capture_chat(client, api_key_header, "openai:gpt-4o")
     assert captured["timeout"] == httpx.Timeout(600.0, connect=5.0)
+
+
+def test_an_anthropic_sdk_provider_gets_an_httpx2_timeout(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """Anthropic's SDK runs on httpx2 and refuses httpx's ``Timeout``."""
+    captured = _capture_chat(client, api_key_header, "anthropic:claude-sonnet-4-5")
+    assert captured["timeout"] == httpx2.Timeout(600.0, connect=5.0)
 
 
 def test_a_mapped_provider_gets_seconds(

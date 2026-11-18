@@ -20,8 +20,11 @@ tests can keep monkeypatching them there.
 
 from __future__ import annotations
 
+import copy
+import json
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
-from contextlib import AbstractAsyncContextManager, aclosing, nullcontext
+from contextlib import AbstractAsyncContextManager, aclosing, nullcontext, suppress
+from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any, Generic, Protocol, TypeVar, cast
 
@@ -54,6 +57,26 @@ class ToolBackend(Protocol):
     def purpose_hints(self) -> list[tuple[str, str]]: ...
 
 
+class RoundGate(Protocol):
+    """Holds each tool-loop round after the first on the request's budgets before the round is sent.
+
+    The request's own hold covers its first round and one output limit. Every
+    later round resends the whole transcript and is billed too, so it is held on
+    its own, together with what the round before it wrote, which leaves the one
+    output limit free for the round being sent. A round the budgets cannot hold
+    is sent as the loop's last, without the gateway's tools, so the request still
+    ends with an answer.
+    """
+
+    async def admit(self, prompt_chars: int, output_tokens: int | None) -> bool:
+        """Whether a round whose request is ``prompt_chars`` long fits the request's budgets.
+
+        ``output_tokens`` is what the round before reported writing, or None where
+        it reported no usage.
+        """
+        ...
+
+
 def tool_failure_detail(pool: ToolBackend, name: str) -> str:
     """What the model and the caller are told when a call to ``name`` raised.
 
@@ -72,8 +95,86 @@ def log_tool_failure(name: str, detail: str, exc: BaseException) -> None:
     logger.warning("%s: %s", detail, name, extra={"error_type": type(exc).__name__})
 
 
+INVALID_ARGUMENTS_ERROR = (
+    "[tool error] invalid_input: the arguments were not a JSON object, so the tool did not run. "
+    "Call the tool again with its arguments as a JSON object."
+)
+
+
+def parse_tool_arguments(name: str, raw: str | None) -> dict[str, Any] | None:
+    """The arguments the model sent for a call to ``name``, or ``None`` when they are not a JSON object.
+
+    Empty or blank arguments read as none. A call whose arguments are ``None`` here is refused
+    with :data:`INVALID_ARGUMENTS_ERROR` rather than run with arguments it did not send.
+    """
+    try:
+        parsed = json.loads((raw or "").strip() or "{}")
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, dict):
+        return parsed
+    logger.warning("Tool call arguments are not a JSON object; not running %s", name)
+    return None
+
+
 class MaxToolIterationsExceeded(Exception):
     """Raised when the loop fails to reach a non-tool-call finish in N rounds."""
+
+
+_ANSWERED_ROUNDS = "otari_answered_rounds"
+
+
+@dataclass(frozen=True)
+class AnsweredRounds:
+    """The usage of the rounds a failed tool loop had answered, carried on the exception it raised.
+
+    The provider bills every round it answers, but a loop that fails on a later round,
+    or in one of the gateway's own tool steps, returns no answer to fold their usage onto. The rounds'
+    summed usage rides on the exception instead, so the failure row can bill it:
+    ``result`` is the last answered round as a finished loop would have returned it,
+    and ``events`` are a stream's terminal events in the same form.
+    """
+
+    result: Any = None
+    events: tuple[Any, ...] = ()
+
+    def attach(self, exc: BaseException) -> None:
+        """Leave these rounds on ``exc``, for whichever handler records the failure."""
+        with suppress(AttributeError):
+            setattr(exc, _ANSWERED_ROUNDS, self)
+
+    @staticmethod
+    def of(exc: BaseException | None) -> AnsweredRounds | None:
+        """The rounds a tool loop left on ``exc``, or None when it raised before one was answered."""
+        return getattr(exc, _ANSWERED_ROUNDS, None)
+
+
+def _carry_answered(exc: BaseException, strategy: ToolLoopStrategy[Any, Any], answered: Any, acc: Any) -> None:
+    """Fold the rounds answered so far onto the last of them, and leave it on ``exc``."""
+    if answered is not None:
+        strategy.fold_usage(answered, acc)
+        AnsweredRounds(result=answered).attach(exc)
+
+
+def _carry_answered_stream(exc: BaseException, strategy: StreamToolLoopStrategy[Any, Any, Any], answered: Any) -> None:
+    """Leave the terminal events of the last continued round, with every answered round's usage, on ``exc``.
+
+    ``answered`` is that round's state and the usage of the rounds before it.
+    """
+    if answered is not None:
+        AnsweredRounds(events=tuple(strategy.terminal_events(*answered))).attach(exc)
+
+
+async def _carrying_answered(
+    stream: AsyncIterator[Any], strategy: StreamToolLoopStrategy[Any, Any, Any], answered: Any
+) -> AsyncGenerator[Any]:
+    """``stream``'s events, leaving the rounds answered before it on an exception it raises."""
+    try:
+        async for event in stream:
+            yield event
+    except Exception as exc:
+        _carry_answered_stream(exc, strategy, answered)
+        raise
 
 
 class StreamAction(Enum):
@@ -93,11 +194,7 @@ class ToolLoopStrategy(Protocol, Generic[ResultT, AccT]):
     """Per-format hooks for :func:`run_tool_loop`.
 
     ``transcript_key`` names the kwargs entry carrying the conversation
-    (``messages`` for chat/messages, ``input_data`` for responses). The exit
-    hooks preserve each format's historical check ordering: chat inspects the
-    finish_reason before splitting (``exit_before_split``), while messages
-    checks the stop_reason only after the foreign-tool branch
-    (``exit_after_split``); see :func:`run_tool_loop` for the consequences.
+    (``messages`` for chat/messages, ``input_data`` for responses).
     """
 
     transcript_key: str
@@ -112,19 +209,21 @@ class ToolLoopStrategy(Protocol, Generic[ResultT, AccT]):
 
     def accumulate_usage(self, acc: AccT, result: ResultT) -> None: ...
 
+    def output_tokens(self, acc: AccT) -> int: ...
+
     def fold_usage(self, result: ResultT, acc: AccT) -> None: ...
 
     def exit_before_split(self, result: ResultT) -> bool: ...
 
     def split_owned(self, result: ResultT, pool: ToolBackend) -> tuple[list[Any], bool]: ...
 
-    def exit_after_split(self, result: ResultT) -> bool: ...
-
     async def execute_owned(
         self, pool: ToolBackend, owned: list[Any], acc: AccT | None = None
     ) -> list[dict[str, Any]]: ...
 
     def filter_owned(self, result: ResultT, owned: list[Any], pool: ToolBackend) -> None: ...
+
+    def end_answer(self, result: ResultT) -> None: ...
 
     async def advance_transcript(
         self,
@@ -166,6 +265,8 @@ class StreamToolLoopStrategy(Protocol, Generic[ChunkT, StateT, AccT]):
 
     def accumulate_stream_usage(self, acc: AccT, state: StateT) -> None: ...
 
+    def stream_output_tokens(self, acc: AccT) -> int: ...
+
     def advance_stream_transcript(
         self,
         transcript: list[Any],
@@ -177,6 +278,8 @@ class StreamToolLoopStrategy(Protocol, Generic[ChunkT, StateT, AccT]):
     def synthetic_events(self, state: StateT, acc: AccT) -> list[ChunkT]: ...
 
     def finalize_exit(self, state: StateT, pool: ToolBackend, acc: AccT) -> AsyncIterator[ChunkT]: ...
+
+    def end_stream_answer(self, state: StateT) -> None: ...
 
 
 def _prepare(
@@ -206,9 +309,112 @@ def _tool_name(entry: Any) -> str | None:
     return name if isinstance(name, str) else None
 
 
+def _released_tool_choice(choice: Any) -> Any:
+    """``choice`` once its round has run, with any force lifted; ``None`` drops it.
+
+    A forced choice (``required``, Messages' ``any``, a named tool) is met by the
+    round that ran it, and the loop only reaches another round after one did. Sent
+    again, it would make the model call a tool every round and only answer on the
+    last one. Messages keeps ``disable_parallel_tool_use`` and an ``allowed_tools``
+    choice keeps its list, since neither is a force.
+    """
+    if choice == "required":
+        return None
+    if not isinstance(choice, dict) or choice.get("type") in {"auto", "none"}:
+        return choice
+    if choice.get("type") == "allowed_tools":
+        # Chat Completions nests the mode and the list; Responses has them at the top level.
+        nested = choice.get("allowed_tools")
+        if isinstance(nested, dict):
+            return {**choice, "allowed_tools": {**nested, "mode": "auto"}}
+        return {**choice, "mode": "auto"}
+    if "disable_parallel_tool_use" in choice:
+        return {"type": "auto", "disable_parallel_tool_use": choice["disable_parallel_tool_use"]}
+    return None
+
+
 # What the last round tells the model. Withholding the tools is not enough on its own:
 # Gemini 2.5, denied the call it wants mid-task, ends with no answer at all.
 FINAL_ROUND_NOTE = "No more tool calls are available for this request. Answer now from the results you already have."
+
+
+# What one inline image or audio clip counts toward a round's size: about the
+# tokens an image costs, not its encoded length.
+_INLINE_MEDIA_CHARS = 6_000
+
+
+def _is_inline_media(part: dict[str, Any]) -> bool:
+    """Whether a content part is an image or audio clip sent inline as base64.
+
+    A file such as a PDF is not: it bills by its pages, which its encoded length
+    overstates but an image's allowance can understate many times over.
+    """
+    kind = part.get("type")
+    if kind == "input_audio":
+        return True
+    if kind == "image":
+        source = part.get("source")
+        return isinstance(source, dict) and source.get("type") == "base64"
+    if kind in {"image_url", "input_image"}:
+        # Chat Completions nests the URL in an object; Responses gives it as a string.
+        url = part.get("image_url")
+        if isinstance(url, dict):
+            url = url.get("url")
+        return isinstance(url, str) and url.startswith("data:image/")
+    return False
+
+
+def _request_chars(value: Any) -> int:
+    """The size of a round's request, with each inline image or audio part at :data:`_INLINE_MEDIA_CHARS`.
+
+    Every round resends the whole transcript, so an image counted at its encoded
+    length would grow the hold by hundreds of thousands of tokens on each round
+    for an image the provider bills a few thousand for.
+    """
+    if isinstance(value, str):
+        return len(value)
+    if isinstance(value, dict):
+        if _is_inline_media(value):
+            return _INLINE_MEDIA_CHARS
+        return sum(len(str(key)) + _request_chars(item) for key, item in value.items())
+    if isinstance(value, (list, tuple)):
+        return sum(_request_chars(item) for item in value)
+    if hasattr(value, "model_dump"):
+        return _request_chars(value.model_dump(exclude_none=True))
+    return len(str(value))
+
+
+async def _round_fits(
+    gate: RoundGate | None, iteration: int, kwargs: dict[str, Any], output_tokens: int | None
+) -> bool:
+    """Whether round ``iteration``, sent as ``kwargs``, fits the request's budgets; the first rides on its own hold."""
+    return gate is None or iteration == 1 or await gate.admit(_request_chars(kwargs), output_tokens)
+
+
+def _written(before: int, after: int) -> int | None:
+    """What one round wrote, from the loop's output count before and after it.
+
+    A round the loop continues from wrote at least its tool calls, so a count that
+    did not move means the round reported no usage.
+    """
+    return after - before or None
+
+
+def _round_request(
+    transcript_key: str,
+    base: dict[str, Any],
+    merged_tools: list[dict[str, Any]],
+    user_tools: list[dict[str, Any]],
+    pool: ToolBackend,
+    transcript: list[Any],
+    *,
+    first: bool,
+    final: bool,
+) -> dict[str, Any]:
+    """What one round sends: its tool arguments and its transcript."""
+    kwargs = _round_kwargs(base, merged_tools, user_tools, pool, first=first, final=final)
+    kwargs[transcript_key] = _round_transcript(transcript, final=final)
+    return kwargs
 
 
 def _round_kwargs(
@@ -217,11 +423,13 @@ def _round_kwargs(
     user_tools: list[dict[str, Any]],
     pool: ToolBackend,
     *,
+    first: bool,
     final: bool,
 ) -> dict[str, Any]:
     """The tool arguments for one round.
 
-    The last round the loop allows withholds the gateway's own tools, so the model
+    A forced ``tool_choice`` applies to the first round only (see
+    :func:`_released_tool_choice`). The last round the loop allows withholds the gateway's own tools, so the model
     answers from what its earlier rounds gathered rather than calling a tool whose
     result could never reach it. The caller's tools stay, since a call of one ends
     the loop anyway. Every provider the loop serves accepts a transcript holding
@@ -231,6 +439,12 @@ def _round_kwargs(
     kwargs = dict(base)
     if tools:
         kwargs["tools"] = tools
+    if not first and "tool_choice" in kwargs:
+        released = _released_tool_choice(kwargs["tool_choice"])
+        if released is None:
+            kwargs.pop("tool_choice")
+        else:
+            kwargs["tool_choice"] = released
     if final:
         choice_name = _tool_name(kwargs.get("tool_choice"))
         if not tools or (choice_name is not None and pool.owns_tool(choice_name)):
@@ -271,6 +485,7 @@ async def run_tool_loop(
     max_iterations: int,
     on_first_response: Callable[[], None] | None = None,
     check_first_response: Callable[[ResultT], ResultT] | None = None,
+    round_gate: RoundGate | None = None,
 ) -> ResultT:
     """Non-streaming tool loop, generic over the wire format.
 
@@ -279,17 +494,16 @@ async def run_tool_loop(
 
     1. ``exit_before_split``: format-level terminal check that runs before any
        tool accounting (chat: no choices, or finish_reason is not
-       ``tool_calls``). When it fires, nothing is executed even if the result
-       carries gateway-owned calls.
+       ``tool_calls``; messages: stop_reason is not ``tool_use``; responses:
+       ``incomplete_details`` is set). When it fires, nothing is executed even
+       if the result carries gateway-owned calls. They are filtered out as in
+       step 3.
     2. Foreign tools present: mixed batches execute the owned subset for its
        side effects and filter it from the returned result, so the caller only
-       sees calls it can dispatch itself. Note the ordering divergence kept
-       from the pre-engine modules: messages/responses run this branch before
-       any stop-reason check, so a mixed batch executes owned calls even when
-       the model stopped for another reason, while chat never reaches this
-       branch unless finish_reason was ``tool_calls``.
-    3. Nothing owned, or ``exit_after_split`` (messages: stop_reason is not
-       ``tool_use``): return the result as the final answer.
+       sees calls it can dispatch itself.
+    3. Nothing owned, the round stopped in step 1, or it is the last round the
+       loop allows: return the result as the final answer, without the owned
+       calls, as the streaming loop does.
     4. Otherwise execute the owned calls, extend the transcript, and iterate.
 
     ``on_first_response`` is invoked once, right after the first upstream call
@@ -310,37 +524,72 @@ async def run_tool_loop(
     )
     acc = strategy.new_usage_accumulator()
     first_response_signaled = False
+    written: int | None = None
+    answered: ResultT | None = None
 
     for iteration in range(1, max_iterations + 1):
-        kwargs = _round_kwargs(base, merged_tools, user_tools, pool, final=iteration == max_iterations)
-        kwargs[strategy.transcript_key] = _round_transcript(transcript, final=iteration == max_iterations)
+        final = iteration == max_iterations
+        kwargs = _round_request(
+            strategy.transcript_key, base, merged_tools, user_tools, pool, transcript, first=iteration == 1, final=final
+        )
+        if not await _round_fits(round_gate, iteration, kwargs, written):
+            final = True
+            kwargs = _round_request(
+                strategy.transcript_key,
+                base,
+                merged_tools,
+                user_tools,
+                pool,
+                transcript,
+                first=iteration == 1,
+                final=True,
+            )
         kwargs["stream"] = False
 
-        result = await strategy.call(kwargs)
+        try:
+            result = await strategy.call(kwargs)
+        except Exception as exc:
+            _carry_answered(exc, strategy, answered, acc)
+            raise
         if not first_response_signaled:
             if check_first_response is not None:
                 result = check_first_response(result)
             first_response_signaled = True
             if on_first_response is not None:
                 on_first_response()
+        before = strategy.output_tokens(acc)
         strategy.accumulate_usage(acc, result)
+        written = _written(before, strategy.output_tokens(acc))
+        answered = result
 
-        if strategy.exit_before_split(result):
-            strategy.fold_usage(result, acc)
-            return result
-
+        stopped = strategy.exit_before_split(result)
         owned, has_foreign = strategy.split_owned(result, pool)
-        if has_foreign:
+        if has_foreign and not stopped:
             if owned:
-                await strategy.execute_owned(pool, owned, acc)
+                try:
+                    await strategy.execute_owned(pool, owned, acc)
+                except Exception as exc:
+                    _carry_answered(exc, strategy, answered, acc)
+                    raise
                 strategy.filter_owned(result, owned, pool)
             strategy.fold_usage(result, acc)
             return result
-        if not owned or strategy.exit_after_split(result):
+        if stopped or not owned or final:
+            if owned:
+                # The model stopped before finishing these calls (a token limit, say), or
+                # called a tool on the last round the loop allows, so the gateway does not
+                # run them, and the caller never declared the tools.
+                strategy.filter_owned(result, owned, pool)
+            if owned and not stopped:
+                strategy.end_answer(result)
             strategy.fold_usage(result, acc)
             return result
 
-        await strategy.advance_transcript(transcript, result, owned, pool, acc)
+        try:
+            await strategy.advance_transcript(transcript, result, owned, pool, acc)
+        except Exception as exc:
+            _carry_answered(exc, strategy, answered, acc)
+            raise
 
     raise MaxToolIterationsExceeded(f"Exceeded max_tool_iterations={max_iterations}")
 
@@ -351,6 +600,8 @@ async def run_tool_loop_stream(
     completion_kwargs: dict[str, Any],
     pool: ToolBackend,
     max_iterations: int,
+    on_first_response: Callable[[], None] | None = None,
+    round_gate: RoundGate | None = None,
 ) -> AsyncGenerator[ChunkT, None]:
     """Streaming tool loop, generic over the wire format.
 
@@ -375,6 +626,10 @@ async def run_tool_loop_stream(
 
     The upstream stream is closed when the loop stops consuming it early;
     see :func:`_stream_scope`.
+
+    ``on_first_response`` is invoked once the first upstream stream has ended, as
+    :func:`run_tool_loop` invokes it: a round can run the gateway's tools without
+    forwarding anything, so this, not the first forwarded event, is the lock-in.
     """
     transcript, merged_tools, user_tools, base = _prepare(
         strategy.transcript_key,
@@ -386,17 +641,38 @@ async def run_tool_loop_stream(
     )
     base["stream"] = True
     acc = strategy.new_stream_accumulator()
+    written: int | None = None
+    # The last round the loop continued past, and the usage of the rounds before it.
+    answered: tuple[Any, Any] | None = None
 
     for iteration in range(1, max_iterations + 1):
-        kwargs = _round_kwargs(base, merged_tools, user_tools, pool, final=iteration == max_iterations)
-        kwargs[strategy.transcript_key] = _round_transcript(transcript, final=iteration == max_iterations)
+        final = iteration == max_iterations
+        kwargs = _round_request(
+            strategy.transcript_key, base, merged_tools, user_tools, pool, transcript, first=iteration == 1, final=final
+        )
+        if not await _round_fits(round_gate, iteration, kwargs, written):
+            final = True
+            kwargs = _round_request(
+                strategy.transcript_key,
+                base,
+                merged_tools,
+                user_tools,
+                pool,
+                transcript,
+                first=iteration == 1,
+                final=True,
+            )
 
-        stream = await strategy.open_stream(kwargs)
+        try:
+            stream = await strategy.open_stream(kwargs)
+        except Exception as exc:
+            _carry_answered_stream(exc, strategy, answered)
+            raise
         state = strategy.new_stream_state()
         events = 0
 
-        async with _stream_scope(stream):
-            async for event in stream:
+        async with _stream_scope(stream), aclosing(_carrying_answered(stream, strategy, answered)) as carried:
+            async for event in carried:
                 events += 1
                 action, visible = strategy.observe(state, event, pool, acc)
                 if action is StreamAction.BREAK:
@@ -404,6 +680,8 @@ async def run_tool_loop_stream(
                 if action is StreamAction.FORWARD:
                     yield visible
 
+        if iteration == 1 and on_first_response is not None:
+            on_first_response()
         if events == 0:
             # Nothing to continue from, so the loop exits with whatever it has sent.
             # The route decides whether that is a complete stream; this line says
@@ -417,14 +695,28 @@ async def run_tool_loop_stream(
             # search and would get silence. Executing them for their side effects is
             # what the non-streaming loop already does before returning a mixed
             # result (see ``run_tool_loop``), so the two agree.
-            async for activity in strategy.finalize_exit(state, pool, acc):
+            exiting = (state, copy.deepcopy(acc))
+            async for activity in _carrying_answered(strategy.finalize_exit(state, pool, acc), strategy, exiting):
                 yield activity
             for terminal in strategy.terminal_events(state, acc):
                 yield terminal
             return
+        if final:
+            # The model called the gateway's tools on the last round the loop allows,
+            # which withholds them (a provider that must declare the tools a
+            # conversation already called, such as Bedrock, offers them anyway). Their
+            # calls were hidden from the stream, so the round ends as the answer.
+            strategy.end_stream_answer(state)
+            for terminal in strategy.terminal_events(state, acc):
+                yield terminal
+            return
 
+        before = strategy.stream_output_tokens(acc)
+        answered = (state, copy.deepcopy(acc))
         strategy.accumulate_stream_usage(acc, state)
-        async for activity in strategy.advance_stream_transcript(transcript, state, pool, acc):
+        written = _written(before, strategy.stream_output_tokens(acc))
+        advancing = strategy.advance_stream_transcript(transcript, state, pool, acc)
+        async for activity in _carrying_answered(advancing, strategy, answered):
             yield activity
         # A format with a native vocabulary for server-side tool calls announces
         # the calls the gateway just ran, in place of the raw tool-call events that

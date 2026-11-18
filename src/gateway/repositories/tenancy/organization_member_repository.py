@@ -2,19 +2,21 @@
 
 import uuid
 from collections.abc import Collection, Iterable
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from gateway.core.addresses import stored_address
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.budgets import Budget, ScopedBudget
 from gateway.models.tenancy import (
     Organization,
     OrganizationMember,
     OrganizationMemberCreate,
+    OrganizationMemberRole,
     OrganizationMemberUpdate,
     User,
     Workspace,
@@ -65,6 +67,60 @@ class OrganizationMemberRepository(
         )
         return result.scalars().first()
 
+    async def active_role(self, organization_id: uuid.UUID, user_id: uuid.UUID) -> OrganizationMemberRole | None:
+        """Return the role of the active membership joining a user to an organization, read from the row.
+
+        A read rather than an attribute of an instance already in hand,
+        because an in-hand instance may predate the write that changed its role,
+        and the attribute would still hold the old value.
+        """
+        result = await self.db.execute(
+            select(col(OrganizationMember.role)).where(
+                col(OrganizationMember.organization_id) == organization_id,
+                col(OrganizationMember.user_id) == user_id,
+                col(OrganizationMember.status) == "active",
+            )
+        )
+        role = result.scalar_one_or_none()
+        return cast(OrganizationMemberRole, role) if role is not None else None
+
+    async def get_active_roles(
+        self, organization_ids: Collection[uuid.UUID], user_ids: Collection[uuid.UUID]
+    ) -> dict[tuple[uuid.UUID, uuid.UUID], str]:
+        """Return the role of each active membership joining one of these users to one of these organizations."""
+        if not organization_ids or not user_ids:
+            return {}
+        result = await self.db.execute(
+            select(
+                col(OrganizationMember.organization_id), col(OrganizationMember.user_id), col(OrganizationMember.role)
+            ).where(
+                col(OrganizationMember.organization_id).in_(list(organization_ids)),
+                col(OrganizationMember.user_id).in_(list(user_ids)),
+                col(OrganizationMember.status) == "active",
+            )
+        )
+        return {(organization_id, user_id): role for organization_id, user_id, role in result.tuples().all()}
+
+    async def active_member_addresses(self, organization_id: uuid.UUID, emails: Collection[str]) -> set[str]:
+        """Which of these addresses belong to an account with an active membership of the organization.
+
+        Matched case-insensitively, and against a stored address stripped of stray edge whitespace.
+        """
+        normalized = {address for email in emails if (address := stored_address(email)) is not None}
+        if not normalized:
+            return set()
+        result = await self.db.execute(
+            select(func.lower(func.trim(col(User.email))))
+            .select_from(OrganizationMember)
+            .join(User, col(OrganizationMember.user_id) == col(User.id))
+            .where(
+                col(OrganizationMember.organization_id) == organization_id,
+                col(OrganizationMember.status) == "active",
+                func.lower(func.trim(col(User.email))).in_(normalized),
+            )
+        )
+        return {address for address in result.scalars().all() if address is not None}
+
     async def get_by_id_and_organization(
         self,
         organization_member_id: uuid.UUID,
@@ -105,12 +161,21 @@ class OrganizationMemberRepository(
         )
         return result.scalars().first()
 
-    async def get_by_user(self, user_id: uuid.UUID, *, active_only: bool = False) -> list[OrganizationMember]:
-        """Return a user's memberships, oldest first."""
+    async def get_by_user(
+        self, user_id: uuid.UUID, *, active_only: bool = False, refresh: bool = False
+    ) -> list[OrganizationMember]:
+        """Return a user's memberships, oldest first.
+
+        ``refresh`` overwrites memberships this session already loaded with what is committed now,
+        for a read taken again under a lock.
+        """
         statement = select(OrganizationMember).where(col(OrganizationMember.user_id) == user_id)
         if active_only:
             statement = statement.where(col(OrganizationMember.status) == "active")
-        result = await self.db.execute(statement.order_by(col(OrganizationMember.created_at)))
+        statement = statement.order_by(col(OrganizationMember.created_at))
+        if refresh:
+            statement = statement.execution_options(populate_existing=True)
+        result = await self.db.execute(statement)
         return list(result.scalars().all())
 
     async def get_first_active_for_user(self, user_id: uuid.UUID, *, lock: bool = False) -> OrganizationMember | None:
@@ -142,31 +207,64 @@ class OrganizationMemberRepository(
         result = await self.db.execute(statement)
         return result.scalars().first()
 
-    async def first_active_organization_ids(
+    async def active_with_roles(
         self,
+        organization_id: uuid.UUID,
         user_ids: Collection[uuid.UUID],
+        roles: Collection[str],
         *,
-        excluding: uuid.UUID,
-    ) -> dict[uuid.UUID, uuid.UUID]:
-        """Map each identity to the organization of its oldest active membership outside ``excluding``.
+        lock: bool = False,
+    ) -> set[uuid.UUID]:
+        """Which of ``user_ids`` hold an active membership of one of ``roles`` in the organization, in one query.
 
-        Ordered as ``get_first_active_for_user`` is. An identity with no such membership is absent.
+        ``lock`` holds the memberships found until the caller's transaction ends, so a removal or a
+        demotion that changes one waits for it (PostgreSQL only).
         """
-        if not user_ids:
-            return {}
+        if not user_ids or not roles:
+            return set()
+        statement = select(col(OrganizationMember.user_id)).where(
+            col(OrganizationMember.organization_id) == organization_id,
+            col(OrganizationMember.user_id).in_(list(user_ids)),
+            col(OrganizationMember.status) == "active",
+            col(OrganizationMember.role).in_(list(roles)),
+        )
+        if lock:
+            statement = statement.with_for_update()
+        result = await self.db.execute(statement)
+        return set(result.scalars().all())
+
+    async def active_user_ids_with_roles(self, organization_id: uuid.UUID, roles: Collection[str]) -> list[uuid.UUID]:
+        """The users holding an active membership of one of ``roles`` in an organization, oldest membership first."""
+        if not roles:
+            return []
         result = await self.db.execute(
-            select(col(OrganizationMember.user_id), col(OrganizationMember.organization_id))
+            select(col(OrganizationMember.user_id))
             .where(
-                col(OrganizationMember.user_id).in_(user_ids),
+                col(OrganizationMember.organization_id) == organization_id,
                 col(OrganizationMember.status) == "active",
-                col(OrganizationMember.organization_id) != excluding,
+                col(OrganizationMember.role).in_(list(roles)),
             )
             .order_by(col(OrganizationMember.created_at), col(OrganizationMember.id))
         )
-        first: dict[uuid.UUID, uuid.UUID] = {}
-        for user_id, organization_id in result.tuples():
-            first.setdefault(user_id, organization_id)
-        return first
+        return list(result.scalars().all())
+
+    async def get_active_by_user_with_organizations(
+        self, user_id: uuid.UUID
+    ) -> list[tuple[OrganizationMember, Organization]]:
+        """Return every active membership of a user, joined to its organization, oldest first.
+
+        Unpaginated, for choosing among a caller's own memberships rather than rendering a page.
+        """
+        result = await self.db.execute(
+            select(OrganizationMember, Organization)
+            .join(Organization, col(OrganizationMember.organization_id) == col(Organization.id))
+            .where(
+                col(OrganizationMember.user_id) == user_id,
+                col(OrganizationMember.status) == "active",
+            )
+            .order_by(col(OrganizationMember.created_at), col(OrganizationMember.id))
+        )
+        return [(member, organization) for member, organization in result.all()]
 
     async def get_organization_id(self, organization_member_id: uuid.UUID) -> uuid.UUID | None:
         """Return the ID of the organization a membership belongs to, or None."""
@@ -230,6 +328,18 @@ class OrganizationMemberRepository(
         await self.db.flush()
         await self.db.refresh(member)
         return member
+
+    async def count_active(self, organization_id: uuid.UUID) -> int:
+        """Count an organization's active memberships."""
+        result = await self.db.execute(
+            select(func.count())
+            .select_from(OrganizationMember)
+            .where(
+                col(OrganizationMember.organization_id) == organization_id,
+                col(OrganizationMember.status) == "active",
+            )
+        )
+        return result.scalar_one()
 
     async def count_active_owners(self, organization_id: uuid.UUID) -> int:
         """Count an organization's active owners.
@@ -307,6 +417,23 @@ class OrganizationMemberRepository(
             .limit(limit)
         )
         return [(member, user) for member, user in result.all()], count
+
+    async def get_active_by_organization_with_users(
+        self, organization_id: uuid.UUID
+    ) -> list[tuple[OrganizationMember, User]]:
+        """Return every active member of an organization, joined to its identity.
+
+        Unpaginated, for a sweep over every active membership rather than a page to render.
+        """
+        result = await self.db.execute(
+            select(OrganizationMember, User)
+            .join(User, col(OrganizationMember.user_id) == col(User.id))
+            .where(
+                col(OrganizationMember.organization_id) == organization_id,
+                col(OrganizationMember.status) == "active",
+            )
+        )
+        return [(member, user) for member, user in result.all()]
 
     async def get_by_users_with_organizations(
         self,

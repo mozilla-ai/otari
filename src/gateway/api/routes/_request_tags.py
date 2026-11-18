@@ -221,7 +221,7 @@ def _header_error(exc: ValueError) -> RequestValidationError:
     return RequestValidationError([{"type": "value_error", "loc": ("header", TAGS_HEADER), "msg": str(exc)}])
 
 
-def _tags_header(
+async def _tags_header(
     raw_request: Request,
     _declared: Annotated[str | None, Header(alias=TAGS_HEADER, description=TAGS_HEADER_DESC)] = None,
 ) -> str | None:

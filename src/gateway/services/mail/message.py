@@ -29,6 +29,8 @@ class MailEnvelope:
     sender_email: str
     sender_name: str
     message: MailMessage
+    # Where a reply goes when that is not the sender, as for a message relayed on someone's behalf.
+    reply_to: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

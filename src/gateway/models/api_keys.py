@@ -2,17 +2,45 @@
 
 import uuid
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, String, Uuid, false, func
+from sqlalchemy import JSON, CheckConstraint, DateTime, Enum, ForeignKey, Index, String, Uuid, false, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from gateway.models.base import Base, UtcDateTime
+from gateway.models.base import Base, KeyScopeColumn, UtcDateTime
+from gateway.types.key_scope import KeyScopeSet
 
 # How many budgets one key may list for its end users.
 MAX_END_USER_BUDGETS = 100
+# Prefixes the owner minted for an organization's service key. Not a UUID, so it
+# is never mistaken for a member's attribution row.
+SERVICE_KEY_OWNER_ID_PREFIX = "svc_"
 # How many federation rules one key may hold.
 MAX_FEDERATION_RULES_PER_KEY = 20
+
+
+class DisabledReason(StrEnum):
+    """Represents the reason an API key cannot be enabled.
+
+    Every reason blocks the key's owner. Some also block an operator, which
+    ``operator_may_clear`` records. A key with no reason set can be enabled by
+    its owner.
+    """
+
+    OPERATOR = ("operator", True)
+    """Disabled by an operator, or by a removal from the key's workspace or organization."""
+    REVOKED = ("revoked", False)
+    """The credential was revoked. No caller can enable the key."""
+
+    # Declared per member, so a new member has to supply it.
+    operator_may_clear: bool
+
+    def __new__(cls, value: str, operator_may_clear: bool) -> "DisabledReason":
+        member = str.__new__(cls, value)
+        member._value_ = value
+        member.operator_may_clear = operator_may_clear
+        return member
 
 
 class APIKey(Base):
@@ -51,6 +79,23 @@ class APIKey(Base):
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     is_active: Mapped[bool] = mapped_column(default=True)
+    # True for a key a member minted for themselves on the member key surface,
+    # false for one an operator issued or config.yml declared, NULL where the
+    # key predates the column and its origin is unrecorded. Demoting a member
+    # to viewer switches off only the true ones.
+    self_service: Mapped[bool | None] = mapped_column(default=None)
+    # The reason the owner cannot enable this key. NULL for every other key,
+    # including one the owner disabled.
+    disabled_reason: Mapped[DisabledReason | None] = mapped_column(
+        Enum(
+            DisabledReason,
+            native_enum=False,
+            length=16,
+            values_callable=lambda members: [member.value for member in members],
+            validate_strings=True,
+        ),
+        default=None,
+    )
     # When true, requests authenticated with this key are logged with their computed
     # cost but skip budget reservation/reconciliation: their spend is never written to
     # User.spend and never gates enforcement. Default false keeps every existing key
@@ -78,6 +123,10 @@ class APIKey(Base):
     # allowed_models names the deprecated way (see services/model_access.py),
     # [] = no tool, a list = tool names, '*' for every search tool.
     allowed_tools: Mapped[list[str] | None] = mapped_column(JSON)
+    # The endpoint groups this key may reach (``types/key_scope.py``), stored
+    # normalized. The column defaults to no scope at all, so a row written
+    # without naming any authenticates and reaches only the open catalog reads.
+    scopes: Mapped[KeyScopeSet] = mapped_column(KeyScopeColumn, nullable=False, server_default="[]")
     # A service key may name end users in a request's ``user`` field. Each one is
     # a ``users`` row owned by this key's user (``users.parent_user_id``), created
     # on first use, so a key can only ever bill end users in its owner's scope.
@@ -113,6 +162,14 @@ class APIKey(Base):
     user = relationship("User", back_populates="api_keys")
     usage_logs = relationship("UsageLog", back_populates="api_key", passive_deletes=True)
 
+    def is_organization_service_key(self) -> bool:
+        """Whether an organization made this service key for itself, so its end users go on that organization's budgets.
+
+        Such a key is minted on the member surface (``self_service``) under an owner of its own, and only an
+        operator's service key starts end users on the deployment's budgets.
+        """
+        return bool(self.is_service_key and self.self_service)
+
     def assignable_end_user_budgets(self) -> list[str]:
         """The budgets this key may start an end user on: its list, or else its default alone."""
         if self.end_user_budget_ids is not None:
@@ -136,6 +193,7 @@ class APIKey(Base):
             "capture_agent_telemetry": self.capture_agent_telemetry,
             "allowed_models": self.allowed_models,
             "allowed_tools": self.allowed_tools,
+            "scopes": list(self.scopes),
             "is_service_key": self.is_service_key,
             "end_user_budget_id": self.end_user_budget_id,
             "end_user_budget_ids": self.assignable_end_user_budgets(),

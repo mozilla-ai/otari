@@ -42,6 +42,12 @@ REMOVED_MID_SWEEP = (
 )
 
 
+def _added_only(dialed: list[HostedCatalogProviderRefreshPublic]) -> HostedCatalogRefreshPublic:
+    return HostedCatalogRefreshPublic(
+        providers=dialed, removed=[], removed_count=0, removed_price_rows=0, removed_override_rows=0, kept=[]
+    )
+
+
 def _prefix(model_key: str) -> str | None:
     split = split_selector(model_key)
     return None if split is None else split[0]
@@ -77,13 +83,14 @@ class HostedCatalogSweep:
         self.dial = dial
         self.live_byo_pairs = live_byo_pairs
 
-    async def run(self, *, apply: bool) -> HostedCatalogRefreshPublic:
+    async def run(self, *, apply: bool, remove: bool = True) -> HostedCatalogRefreshPublic:
         """Dial every enabled provider, offer what is new, then classify and remove.
 
         ``apply=False`` runs the same dials and the same classification and
         writes nothing, so the preview cannot disagree with the apply. It dials
         rather than reading the roster alone, because a model the provider
-        still lists would be offered by the apply and kept.
+        still lists would be offered by the apply and kept. ``remove=False``
+        stops after the offer: nothing is classified and nothing is removed.
 
         Raises:
             HostedCatalogEmptyError: no provider offers a model, so there is no
@@ -137,6 +144,8 @@ class HostedCatalogSweep:
                     await self.offers.offer(
                         answer.provider, answer.added, defaults[answer.provider], serves_unlisted=serves_unlisted
                     )
+            if not remove:
+                return _added_only(dialed)
             offered_keys = await self.models.offered_keys(defined)
             if not apply:
                 # What an apply would offer, folded in without writing it.

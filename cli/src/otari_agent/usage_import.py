@@ -5,6 +5,7 @@ from pathlib import Path
 import click
 
 from otari_agent.claude_code_import import parse_since, scan_transcripts
+from otari_agent.claude_code_paths import claude_transcripts_dir
 
 # Mirrors gateway.core.config.API_ROOT. A literal rather than an import: this
 # command talks to a gateway over HTTP that may be a different build.
@@ -38,7 +39,7 @@ def import_group() -> None:
 @click.option(
     "--projects-dir",
     type=click.Path(file_okay=False, path_type=Path),
-    default=Path.home() / ".claude" / "projects",
+    default=claude_transcripts_dir,
     show_default=True,
     help="Where Claude Code keeps its transcripts.",
 )
@@ -79,7 +80,7 @@ def import_claude_code(
 ) -> None:
     """Backfill historical Claude Code usage from this machine's transcripts.
 
-    The OTLP exporter documented in docs/use-with-claude-code.md only carries
+    The OTLP exporter documented in docs/claude-code.md only carries
     sessions that run after it is configured. This reads the transcripts Claude
     Code has already written and posts them to /api/v1/usage/external-events, which
     is idempotent on (source, source_event_id): re-running imports only what is
@@ -132,7 +133,8 @@ def import_claude_code(
 
     if not api_key:
         raise click.UsageError(
-            "A credential is required to send events: a budget-exempt API key, or the master key. "
+            "A credential is required to send events: a budget-exempt API key with the usage:write scope, "
+            "or the master key. "
             "Pass --api-key, or set OTARI_API_KEY or OTARI_MASTER_KEY. "
             "Re-run with --dry-run to preview a scan without one."
         )

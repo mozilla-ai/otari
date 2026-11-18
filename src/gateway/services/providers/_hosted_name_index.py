@@ -9,7 +9,10 @@ every other worker within ``HOSTED_NAME_INDEX_TTL_SECONDS``. A name that is its
 implementation's own needs no entry: any-llm already reads it.
 
 Only the names live here, never a credential: the credential is resolved per
-request through ``ModelProviderPort``, as for any hosted provider.
+request through ``ModelProviderPort``, as for any hosted provider. Beside them,
+the names declared zero data retention, which a workspace requiring it is held
+to at dispatch; a change to that declaration reaches every worker on the next
+refresh.
 """
 
 import asyncio
@@ -24,6 +27,8 @@ HOSTED_NAME_INDEX_TTL_SECONDS = 30.0
 
 # name -> any-llm implementation, for each hosted provider named otherwise than its implementation
 _names: dict[str, str] = {}
+# Every hosted provider name, own or not, whose upstream is declared to keep no data.
+_zero_retention: frozenset[str] = frozenset()
 # Writes this worker made, numbered, so a refresh whose read began before one
 # replays it rather than overwriting it with an older snapshot. name ->
 # (write number, implementation, or None for a name removed).
@@ -34,6 +39,18 @@ _recent_writes: dict[str, tuple[int, str | None]] = {}
 def hosted_implementation(name: str) -> str | None:
     """The implementation serving the hosted provider ``name``, or None when ``name`` is no such provider."""
     return _names.get(name)
+
+
+def hosted_zero_data_retention(name: str) -> bool:
+    """Whether the hosted provider ``name`` is declared zero data retention."""
+    return name in _zero_retention
+
+
+def remember_hosted_zero_data_retention(name: str, declared: bool) -> None:
+    """Record what this worker just stored as ``name``'s declaration, ahead of the next refresh."""
+    global _zero_retention  # noqa: PLW0603
+
+    _zero_retention = _zero_retention | {name} if declared else _zero_retention - {name}
 
 
 def _record_write(name: str, implementation: str | None) -> None:
@@ -64,13 +81,19 @@ async def refresh_hosted_name_index(uow: UnitOfWork, config: GatewayConfig) -> N
     this worker made while the read was in flight is newer than what the read
     saw, so it is replayed over the snapshot rather than lost.
     """
-    global _names, _recent_writes  # noqa: PLW0603
+    global _names, _recent_writes, _zero_retention  # noqa: PLW0603
 
     read_from = _write_count
     async with uow:
         rows = await HostedProviderRepository(uow).list_all()
     names = {name: entry.provider for name, entry in config.hosted_provider_entries().items()}
     names.update({row.name: row.provider for row in rows})
+    declared = {name for name, entry in config.hosted_provider_entries().items() if entry.zero_data_retention}
+    for row in rows:
+        if row.zero_data_retention:
+            declared.add(row.name)
+        else:
+            declared.discard(row.name)
     fresh = {name: implementation for name, implementation in names.items() if name != implementation}
     newer = {name: write for name, write in _recent_writes.items() if write[0] > read_from}
     for name, (_, implementation) in newer.items():
@@ -78,14 +101,14 @@ async def refresh_hosted_name_index(uow: UnitOfWork, config: GatewayConfig) -> N
             fresh.pop(name, None)
         else:
             fresh[name] = implementation
-    _names, _recent_writes = fresh, newer
+    _names, _recent_writes, _zero_retention = fresh, newer, frozenset(declared)
 
 
 def reset_hosted_name_index() -> None:
     """Drop the map so the next load starts clean (startup and tests)."""
-    global _names, _recent_writes  # noqa: PLW0603
+    global _names, _recent_writes, _zero_retention  # noqa: PLW0603
 
-    _names, _recent_writes = {}, {}
+    _names, _recent_writes, _zero_retention = {}, {}, frozenset()
 
 
 async def _refresh_on_a_session_of_its_own(config: GatewayConfig) -> None:

@@ -24,7 +24,7 @@ to the browser (otari-ai#1598). This does not, and that is the one deliberate
 departure from what otari#663 wrote down: a credential in JavaScript is strictly
 worse than no credential in JavaScript, and the constraint the issue was
 protecting, that the browser never holds a durable key, is honored more strongly
-by holding none at all. `docs/access-control.md` already says sessions are the
+by holding none at all. `docs/sign-in.md` already says sessions are the
 dashboard's credential.
 
 **Everything else here is the page's memory, and it is per identity.** Consent,
@@ -44,7 +44,6 @@ from typing import Annotated, Any
 from fastapi import (
     APIRouter,
     Depends,
-    File,
     HTTPException,
     Query,
     Request,
@@ -52,12 +51,13 @@ from fastapi import (
     UploadFile,
     status,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     CurrentIdentity,
     FileServiceDep,
+    McpSignedInServersDep,
     PlaygroundToolOfferDep,
     RequestSessionBillingPortDep,
     RequestSessionModelProviderPortDep,
@@ -69,6 +69,8 @@ from gateway.api.deps import (
     get_unit_of_work,
     verify_master_key,
 )
+from gateway.api.routes._helpers import bounded_body
+from gateway.api.routes._request_body import MULTIPART_OVERHEAD_BYTES, form_field
 from gateway.api.routes.chat import ChatCompletionRequest, run_chat_completion
 from gateway.core.config import GatewayConfig
 from gateway.core.database import release_session
@@ -88,9 +90,13 @@ from gateway.models.playground import (
     PlaygroundFavoriteModelsUpdate,
     PlaygroundMessagesPublic,
 )
-from gateway.schemas.files import OpenAIFileDeleted, OpenAIFileList, OpenAIFileObject
+from gateway.schemas.files import (
+    OpenAIFileDeleted,
+    OpenAIFileList,
+    OpenAIFileObject,
+)
 from gateway.services import playground_service
-from gateway.services.files import DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT, FileDialect, FileListing, FileScope, NewFile
+from gateway.services.files import FileDialect, FileListing, FileScope, NewFile
 from gateway.services.log_writer import LogWriter
 
 router = APIRouter(
@@ -152,6 +158,11 @@ class PlaygroundMcpServer(BaseModel):
     name: str
     purpose_hint: str | None = None
     enabled: bool
+    sign_in_required: bool = Field(
+        default=False,
+        description="The server sends each user's own credential and the caller has not signed in to it, "
+        "so a message that attaches it is refused with mcp_sign_in_required until they do",
+    )
 
 
 class PlaygroundToolsResponse(BaseModel):
@@ -229,6 +240,7 @@ async def read_playground_tools(
     config: Annotated[GatewayConfig, Depends(get_config)],
     offer: PlaygroundToolOfferDep,
     code_execution_policies: WorkspaceCodeExecutionPoliciesDep,
+    signed_in: McpSignedInServersDep,
     workspace_id: Annotated[uuid.UUID | None, _WORKSPACE_QUERY] = None,
 ) -> PlaygroundToolsResponse:
     """The gateway-run tools the caller's workspace may attach to a message.
@@ -246,7 +258,9 @@ async def read_playground_tools(
         config=config,
         offer=offer,
         code_execution_policies=code_execution_policies,
+        signed_in=signed_in,
         workspace_id=resolved,
+        user_id=str(identity.id),
     )
     return PlaygroundToolsResponse(
         web_search=_tool_status(availability.web_search),
@@ -258,6 +272,7 @@ async def read_playground_tools(
                 name=server.name,
                 purpose_hint=server.purpose_hint,
                 enabled=server.enabled,
+                sign_in_required=server.sign_in_required,
             )
             for server in availability.mcp_servers
         ],
@@ -276,6 +291,14 @@ async def _require_playground_files(offer: PlaygroundToolOfferDep) -> None:
 
 
 _PLAYGROUND_FILES = [Depends(_require_playground_files)]
+_UPLOAD_FILE_ADAPTER: TypeAdapter[UploadFile] = TypeAdapter(UploadFile)
+
+_PLAYGROUND_FILE_UPLOAD_SCHEMA = {
+    "title": "Body_playground-upload_playground_file",
+    "type": "object",
+    "properties": {"file": {"contentMediaType": "application/octet-stream", "title": "File", "type": "string"}},
+    "required": ["file"],
+}
 
 
 async def _upload_chunks(file: UploadFile) -> AsyncIterator[bytes]:
@@ -283,12 +306,29 @@ async def _upload_chunks(file: UploadFile) -> AsyncIterator[bytes]:
         yield chunk
 
 
-@router.post("/files", dependencies=_PLAYGROUND_FILES)
+@router.post(
+    "/files",
+    dependencies=_PLAYGROUND_FILES,
+    responses={
+        413: {"description": "The upload exceeds the configured maximum size."},
+        422: {
+            "description": "Validation Error",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}},
+        },
+    },
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {"multipart/form-data": {"schema": _PLAYGROUND_FILE_UPLOAD_SCHEMA}},
+        }
+    },
+)
 async def upload_playground_file(
     identity: CurrentIdentity,
     db: Annotated[AsyncSession, Depends(get_db)],
     files: FileServiceDep,
-    file: Annotated[UploadFile, File()],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    raw_request: Request,
     workspace_id: Annotated[uuid.UUID | None, _WORKSPACE_QUERY] = None,
 ) -> OpenAIFileObject:
     """Upload a file for the caller, in a workspace they belong to.
@@ -302,17 +342,23 @@ async def upload_playground_file(
     # Commits the spend row the principal may have staged, which the file row's
     # foreign key needs, and frees the connection while the bytes stream in.
     await release_session(db)
-    record = await files.store(
-        NewFile(
-            user_id=principal.user_id,
-            workspace_id=principal.workspace_id,
-            filename=file.filename,
-            content_type=file.content_type,
-            purpose=_FILE_PURPOSE,
-            chunks=_upload_chunks(file),
+    async with bounded_body(
+        raw_request,
+        config.files_max_bytes + MULTIPART_OVERHEAD_BYTES,
+        "File upload request exceeds the configured maximum size.",
+    ).form() as form:
+        file = form_field(form, "file", _UPLOAD_FILE_ADAPTER, required=True)
+        record = await files.store(
+            NewFile(
+                user_id=principal.user_id,
+                workspace_id=principal.workspace_id,
+                filename=file.filename,
+                content_type=file.content_type,
+                purpose=_FILE_PURPOSE,
+                chunks=_upload_chunks(file),
+            )
         )
-    )
-    return OpenAIFileObject.of(record)
+        return OpenAIFileObject.of(record)
 
 
 @router.get("/files", dependencies=_PLAYGROUND_FILES)
@@ -321,7 +367,7 @@ async def list_playground_files(
     db: Annotated[AsyncSession, Depends(get_db)],
     files: FileServiceDep,
     workspace_id: Annotated[uuid.UUID | None, _WORKSPACE_QUERY] = None,
-    limit: Annotated[int, Query(ge=1, le=MAX_LIST_LIMIT)] = DEFAULT_LIST_LIMIT,
+    limit: Annotated[int, Query(ge=1, le=FileListing.MAX_LIMIT)] = FileListing.DEFAULT_LIMIT,
     after: str | None = None,
 ) -> OpenAIFileList:
     """The caller's own files in one workspace, newest first, in OpenAI's list shape.

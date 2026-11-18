@@ -7,7 +7,7 @@ message's own values and the wording it produces.
 
 from gateway.services.tenancy.verification_email import render_verification_email
 
-VERIFY_LINK = "https://gw.example.com/#/verify-email?token=abc"
+VERIFY_LINK = "https://gw.example.com/verify-email#token=abc"
 
 
 def _render(**overrides: object) -> tuple[str, str, str]:

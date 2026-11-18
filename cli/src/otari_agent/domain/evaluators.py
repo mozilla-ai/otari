@@ -67,6 +67,9 @@ _NO_REDIRECTION_OPENERS = (("$((", "))"), ("((", "))"), ("$[", "]"), ("${", "}")
 # Every character that can open or close one of those pairs, so most characters skip the pair check.
 _PAIR_CHARACTERS = frozenset("$(=[)]}")
 
+# Every character that can open or close a command or process substitution, or a subshell inside one.
+_SUBSTITUTION_CHARACTERS = frozenset("$<>()")
+
 # The characters a backslash escapes inside double quotes, where it is otherwise literal.
 _ESCAPED_IN_DOUBLE_QUOTES = frozenset('$`"\\\n')
 
@@ -170,6 +173,11 @@ def _matches_any(path: str, patterns: tuple[str, ...]) -> str | None:
     return None
 
 
+def any_path_matches(patterns: tuple[str, ...], paths: tuple[str, ...]) -> bool:
+    """Whether any of `paths` matches any of `patterns`, without collecting or sorting the matches."""
+    return any(_matches_any(path, patterns) is not None for path in paths)
+
+
 def matched_changed_paths(patterns: tuple[str, ...], changed_paths: tuple[str, ...]) -> tuple[str, ...]:
     """Every one of `changed_paths` that matches any of `patterns`, sorted.
 
@@ -226,6 +234,38 @@ class _NoRedirectionPairs:
             self._closers.append(")")
             return 1
         return 0
+
+
+class _Substitutions:
+    """The command and process substitutions open at a point in a command, and the subshells open inside them.
+
+    Bash reads `$(...)`, `<(...)` and `>(...)` as part of the word around them, so the `)` that closes one does not end
+    that word, and a `#` right after it is ordinary text. The `)` that closes a subshell does end a word, so a subshell
+    inside a substitution is tracked too, to tell the two apart.
+    A substitution holds a whole command, so unlike the pairs `_NoRedirectionPairs` tracks, it allows a heredoc.
+    """
+
+    def __init__(self) -> None:
+        # True for a substitution, False for a subshell inside one.
+        self._open: list[bool] = []
+
+    def advance(self, command: str, index: int) -> tuple[int, bool]:
+        """Open or close a substitution, or a subshell inside one, at the unquoted `index`.
+
+        Return how many characters that took, or 0, and whether a word starts after them.
+        """
+        char = command[index]
+        if char in "$<>" and command.startswith("(", index + 1):
+            self._open.append(True)
+            return 2, True
+        if not self._open:
+            return 0, False
+        if char == "(":
+            self._open.append(False)
+            return 1, True
+        if char == ")":
+            return 1, not self._open.pop()
+        return 0, False
 
 
 def _read_heredoc_operator(command: str, index: int) -> tuple[_Heredoc, int] | None:
@@ -331,6 +371,7 @@ def _strip_comments_and_heredoc_bodies(command: str) -> str:
     """Remove the text Bash does not read as command words: comments and heredoc bodies.
 
     A `#` starts a comment only where it begins an unquoted word, after whitespace or one of `_METACHARACTERS`.
+    The `)` that closes a command or process substitution does not end its word, so `$(ls)#x` is one word, as in Bash.
     A comment ends with its own line.
     A heredoc body is the data its command reads, so it is removed with its terminator line.
     A heredoc with no certain terminator line is kept as command text.
@@ -346,6 +387,7 @@ def _strip_comments_and_heredoc_bodies(command: str) -> str:
     pending_heredocs: list[_Heredoc] = []
     terminators: _HeredocTerminators | None = None
     pairs = _NoRedirectionPairs()
+    substitutions = _Substitutions()
     result: list[str] = []
     index = 0
     length = len(command)
@@ -421,6 +463,13 @@ def _strip_comments_and_heredoc_bodies(command: str) -> str:
             # Only an opening parenthesis ends a word, so `$((1))#x` stays one word, as in Bash.
             at_word_start = command[index - 1] == "("
             continue
+        if char in _SUBSTITUTION_CHARACTERS and not pairs.any_open:
+            substitution_length, at_word_start_after = substitutions.advance(command, index)
+            if substitution_length:
+                result.append(command[index : index + substitution_length])
+                index += substitution_length
+                at_word_start = at_word_start_after
+                continue
         if char == "<" and command.startswith("<<", index):
             is_here_string = command.startswith("<<<", index)
             opened = None if is_here_string or pairs.any_open else _read_heredoc_operator(command, index)
@@ -665,6 +714,64 @@ def _cached_segments(command: str, segment_cache: dict[str, list[list[str]]]) ->
     return segments if segments is not None else _command_segments(command)
 
 
+# git's global options, which sit between `git` and its subcommand. Those in the
+# first set take the next word as their value, and an option written with its
+# value after `=` is read by its prefix.
+_GIT_OPTIONS_WITH_VALUE = frozenset(
+    {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--attr-source"}
+)
+_GIT_OPTION_VALUE_PREFIXES = (
+    "--git-dir=",
+    "--work-tree=",
+    "--namespace=",
+    "--config-env=",
+    "--attr-source=",
+    "--exec-path=",
+)
+_GIT_FLAGS = frozenset(
+    {
+        "-p",
+        "--paginate",
+        "-P",
+        "--no-pager",
+        "--bare",
+        "--no-replace-objects",
+        "--no-lazy-fetch",
+        "--no-optional-locks",
+        "--no-advice",
+        "--literal-pathspecs",
+        "--glob-pathspecs",
+        "--noglob-pathspecs",
+        "--icase-pathspecs",
+    }
+)
+
+
+def _without_git_global_options(segment: list[str]) -> list[str] | None:
+    """`segment` with git's global options removed, when it runs `git` with any before its subcommand.
+
+    `git -C repo reset --hard` runs `git reset --hard` in another directory, so it is
+    the same command to a phrase. None when the segment is not git, or names no
+    option before the subcommand. Also None when git would stop before reaching a
+    subcommand: an option that ends it (`--version`, a bare `--exec-path`), or one
+    it does not know, which it refuses.
+    """
+    if _basename(segment[0]) != "git":
+        return None
+    position = 1
+    while position < len(segment):
+        token = segment[position]
+        if token in _GIT_OPTIONS_WITH_VALUE:
+            position += 2
+        elif token in _GIT_FLAGS or token.startswith(_GIT_OPTION_VALUE_PREFIXES):
+            position += 1
+        else:
+            break
+    if position == 1 or position >= len(segment) or segment[position].startswith("-"):
+        return None
+    return [segment[0], *segment[position:]]
+
+
 def _contains_subsequence(segment: list[str], phrase: list[str]) -> bool:
     """Whether `phrase`'s tokens appear, in order and unbroken, inside `segment`.
 
@@ -691,7 +798,18 @@ def _contains_subsequence(segment: list[str], phrase: list[str]) -> bool:
     executable sits at `segment[1]`, not `segment[0]`, for that segment; and
     `npm install ./local-package` does not match a phrase naming just
     `local-package`, since an argument's path is not a command position.
+
+    A `git` segment is also tried with git's global options removed, so
+    `git reset --hard` matches `git -C repo reset --hard`.
     """
+    if _contains_run(segment, phrase):
+        return True
+    without_options = _without_git_global_options(segment) if segment else None
+    return without_options is not None and _contains_run(without_options, phrase)
+
+
+def _contains_run(segment: list[str], phrase: list[str]) -> bool:
+    """The window search behind `_contains_subsequence`, on one spelling of a segment."""
     if not phrase or len(phrase) > len(segment):
         return False
     for start in range(len(segment) - len(phrase) + 1):
@@ -747,7 +865,7 @@ def evaluate_command(
     if not evidence.commands:
         # Call-scoped and empty: a PreToolUse call for an edit tool rather
         # than Bash, which never collects command evidence at all (see
-        # docs/agent-guardrails.md). Reporting PASS would read as a check that ran
+        # cli/docs/agent-guardrails.md). Reporting PASS would read as a check that ran
         # and found nothing, when this gate never had anything to check.
         return GateResult(
             gate_id=gate.id,
@@ -814,7 +932,7 @@ def evaluate_command_if_changed(
     forever, the edit being the very thing blocked. ``call`` scope
     therefore resolves ``not_applicable``, deferring the gate to the
     ``Stop`` event where `otari hook` submits the session's real command
-    history (see docs/agent-guardrails.md).
+    history (see cli/docs/agent-guardrails.md).
 
     Under ``session`` scope an empty command list is a real answer rather
     than a missing one, and resolves ``fail``: a session that changed a
@@ -1084,7 +1202,7 @@ def evaluate_verifier(
     ``evidence is None`` (this event never runs verifier gates, resolves
     ``not_applicable``) vs. "ran verifier gates but is missing this
     one's verdict" (resolves ``unknown``) distinction; see that function's
-    own docstring and docs/agent-guardrails.md for why both matter here too.
+    own docstring and cli/docs/agent-guardrails.md for why both matter here too.
 
     Unlike a judge gate, this gate's outcome can genuinely block a required
     gate: a verifier's exit code is reproducible, not a model's opinion, so

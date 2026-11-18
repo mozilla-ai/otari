@@ -1,13 +1,36 @@
-import type { ReactNode, RefObject } from "react"
-import type { IconType } from "react-icons"
+import { Dropdown, Tooltip as HeroTooltip } from "@heroui/react"
 import {
+  Children,
+  createContext,
+  Fragment,
+  isValidElement,
+  type ReactNode,
+  type RefObject,
+  use,
+  useRef,
+  useState,
+} from "react"
+import type { IconType } from "react-icons"
+import { FiMoreHorizontal } from "react-icons/fi"
+import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
+import {
+  TOOLTIP_OPEN_DELAY_MS,
   Tooltip,
   type TooltipTriggerProps,
 } from "@/design-system/overlays/Tooltip"
+import { withRefusals } from "./RowMenu"
+import { RowMenuItemContent } from "./RowMenuItemContent"
 
 export type RowActionProps = {
   onPress: () => void
+  /** The armed half of a confirm, alone on a row. Never at rest. */
   isDanger?: boolean
+  /**
+   * In a row's menu, an action that is hard to undo (delete, remove, revoke):
+   * its item wears the danger ink and is listed after a rule. The menu is
+   * closed until somebody opens it, so this is never ink on the row at rest.
+   */
+  isDestructive?: boolean
   isDisabled?: boolean
   /**
    * Forwarded to the button so a caller can move focus onto it. The two-step
@@ -73,7 +96,7 @@ export type RowActionProps = {
  * Shared once two pages had spelled it. Pair with `RowActionRow`, which sets the
  * 16px between them.
  */
-export function RowAction({
+function InlineRowAction({
   onPress,
   icon: Icon,
   label,
@@ -143,7 +166,154 @@ export function RowAction({
   return <Tooltip content={label}>{render}</Tooltip>
 }
 
-/** The lane those sit in: right-aligned, 16px apart. */
+/** A confirmation a menu item asks for, shown once the menu has closed. */
+export interface RowConfirmation {
+  heading: string
+  confirmLabel: string
+  /** A confirm that is hard to undo, on the danger button. */
+  isDestructive?: boolean
+  onConfirm: () => void
+}
+
+/**
+ * Set inside a `RowActionRow`, where its actions are menu items rather than
+ * buttons. `ConfirmRowAction` asks through it.
+ */
+export const RowMenuContext = createContext<
+  ((confirmation: RowConfirmation) => void) | null
+>(null)
+
+type ItemProps = Pick<
+  RowActionProps,
+  "label" | "children" | "ariaLabel" | "isDisabled"
+>
+
+function itemText({ label, children, ariaLabel }: ItemProps): string {
+  return (
+    label ?? (typeof children === "string" ? children : (ariaLabel ?? "Action"))
+  )
+}
+
+// Why an item is refused. A standalone glyph says it in its accessible name;
+// a menu item says it under its label.
+function refusal(props: ItemProps): string | null {
+  const { isDisabled, ariaLabel } = props
+  return isDisabled && ariaLabel && ariaLabel !== itemText(props)
+    ? ariaLabel
+    : null
+}
+
+/**
+ * Each refused item in a lane, as it reads: its label, then why. A disabled
+ * item takes no focus, so the trigger's name is where a keyboard reaches the
+ * reason.
+ */
+function refusals(children: ReactNode): string[] {
+  return Children.toArray(children).flatMap((part) => {
+    if (!isValidElement<ItemProps>(part)) return []
+    if (part.type === Fragment) return refusals(part.props.children)
+    if (part.type !== RowAction) return []
+    const reason = refusal(part.props)
+    return reason ? [`${itemText(part.props)} ${reason}`] : []
+  })
+}
+
+/**
+ * A row's action. Inside a `RowActionRow`, which is where a table's actions
+ * go, it is an item of that row's three-dot menu, spelled out with its glyph
+ * and its label; write the label as the menu should show it, with the ellipsis
+ * when the action asks for more before anything happens (`Delete…`). Alone, it
+ * is a glyph or a word on the row.
+ */
+export function RowAction(props: RowActionProps) {
+  const menu = use(RowMenuContext)
+  if (!menu) return <InlineRowAction {...props} />
+  const {
+    icon: Icon,
+    label,
+    children,
+    ariaLabel,
+    isDisabled,
+    isDestructive,
+  } = props
+  const isRed = !isDisabled && Boolean(isDestructive)
+  return (
+    <Dropdown.Item
+      textValue={itemText(props)}
+      // The name a caller gives the action, which says which row it acts on.
+      aria-label={!isDisabled && ariaLabel ? ariaLabel : undefined}
+      isDisabled={isDisabled}
+      onAction={props.onPress}
+      className={isRed ? "otari-row-menu-danger" : undefined}
+    >
+      <RowMenuItemContent
+        icon={Icon}
+        label={label ?? children}
+        hint={refusal(props)}
+        isRed={isRed}
+      />
+    </Dropdown.Item>
+  )
+}
+
+/**
+ * A row's actions as one three-dot menu, the one shape every table here uses
+ * (`RowMenu` draws the same trigger from data). A note in the lane that is
+ * not an action, a plain element rather than a `RowAction`, stays on the row
+ * beside the trigger.
+ */
 export function RowActionRow({ children }: { children: ReactNode }) {
-  return <div className="flex items-center justify-end gap-4">{children}</div>
+  const trigger = useRef<HTMLButtonElement>(null)
+  const [confirming, setConfirming] = useState<RowConfirmation | null>(null)
+  const parts = Children.toArray(children)
+  const notes = parts.filter(
+    (part) => isValidElement(part) && typeof part.type === "string",
+  )
+  const actions = parts.filter((part) => !notes.includes(part))
+  return (
+    <div className="flex items-center justify-end gap-3">
+      {notes}
+      {actions.length > 0 ? (
+        <Dropdown>
+          <HeroTooltip.Root delay={TOOLTIP_OPEN_DELAY_MS}>
+            <Dropdown.Trigger
+              ref={trigger}
+              aria-label={withRefusals("Row actions", refusals(actions))}
+              className="otari-row-menu-trigger"
+            >
+              <FiMoreHorizontal aria-hidden className="size-4 shrink-0" />
+            </Dropdown.Trigger>
+            <HeroTooltip.Content>Actions</HeroTooltip.Content>
+          </HeroTooltip.Root>
+          <Dropdown.Popover placement="bottom end" className="otari-row-menu">
+            <RowMenuContext value={setConfirming}>
+              <Dropdown.Menu
+                aria-label="Row actions"
+                onAction={() => trigger.current?.focus()}
+              >
+                {actions}
+              </Dropdown.Menu>
+            </RowMenuContext>
+          </Dropdown.Popover>
+        </Dropdown>
+      ) : null}
+      {confirming ? (
+        <ConfirmDialog
+          isOpen
+          onOpenChange={(open) => {
+            if (!open) setConfirming(null)
+          }}
+          heading={`${confirming.heading}?`}
+          body="This takes effect as soon as you confirm."
+          confirmLabel={confirming.confirmLabel}
+          confirmVariant={confirming.isDestructive ? "danger" : "primary"}
+          isPending={false}
+          onConfirm={() => {
+            confirming.onConfirm()
+            setConfirming(null)
+          }}
+        />
+      ) : null}
+    </div>
+  )
 }

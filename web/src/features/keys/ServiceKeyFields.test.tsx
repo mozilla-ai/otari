@@ -5,14 +5,21 @@ import { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
+  maxEndUsersError,
   NO_SERVICE_KEY,
   type ServiceKeyChoice,
   ServiceKeyFields,
+  type ServiceKeyScope,
   serviceKeyBody,
 } from "@/features/keys/ServiceKeyFields"
 import { API_ROOT } from "@/shared/api/client"
 import { budget } from "@/tests/fixtures"
 import { pickOption } from "@/tests/select"
+
+type ServiceKeyFieldsScope = {
+  scope: ServiceKeyScope
+  isLocked: boolean
+}
 
 const BUDGETS = [
   budget({ budget_id: "eu-ai", name: "AI" }),
@@ -20,9 +27,22 @@ const BUDGETS = [
   budget({ budget_id: "tenant", name: "Tenant's", organization_id: "org-1" }),
 ]
 
+const ORGANIZATION_BUDGETS = [
+  {
+    ...budget({ budget_id: "org-free", name: "Free tier" }),
+    organization_id: "org-1",
+    ceiling_count: 0,
+  },
+]
+
 function stubBudgets() {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-    const rows = String(input).startsWith(`${API_ROOT}/budgets`) ? BUDGETS : []
+    const url = String(input)
+    const rows = url.startsWith(`${API_ROOT}/budgets`)
+      ? BUDGETS
+      : url.startsWith(`${API_ROOT}/organizations/me/budgets`)
+        ? { data: ORGANIZATION_BUDGETS, count: ORGANIZATION_BUDGETS.length }
+        : []
     return new Response(JSON.stringify(rows), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -30,7 +50,13 @@ function stubBudgets() {
   })
 }
 
-function renderFields(initial: ServiceKeyChoice = NO_SERVICE_KEY) {
+function renderFields(
+  initial: ServiceKeyChoice = NO_SERVICE_KEY,
+  {
+    scope = "deployment",
+    isLocked = false,
+  }: Partial<ServiceKeyFieldsScope> = {},
+) {
   const seen: ServiceKeyChoice[] = []
   function Harness() {
     const [value, setValue] = useState(initial)
@@ -41,6 +67,8 @@ function renderFields(initial: ServiceKeyChoice = NO_SERVICE_KEY) {
           seen.push(next)
           setValue(next)
         }}
+        scope={scope}
+        isLocked={isLocked}
       />
     )
   }
@@ -66,12 +94,41 @@ describe("ServiceKeyFields", () => {
     const user = userEvent.setup()
     renderFields()
 
-    expect(screen.queryByText("End-user budgets")).not.toBeInTheDocument()
+    expect(
+      screen.queryByText("Budget for each end user"),
+    ).not.toBeInTheDocument()
     await user.click(screen.getByLabelText("Service key"))
 
-    expect(await screen.findByText("AI")).toBeInTheDocument()
-    expect(screen.getByText("Memories")).toBeInTheDocument()
+    expect(
+      await screen.findByRole("checkbox", { name: "AI eu-ai" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("checkbox", { name: "Memories eu-memories" }),
+    ).toBeInTheDocument()
     expect(screen.queryByText("Tenant's")).not.toBeInTheDocument()
+  })
+
+  it("offers an organization's key only that organization's budgets", async () => {
+    stubBudgets()
+    const user = userEvent.setup()
+    renderFields(NO_SERVICE_KEY, { scope: "organization" })
+
+    await user.click(screen.getByLabelText("Service key"))
+
+    expect(
+      await screen.findByRole("checkbox", { name: "Free tier org-free" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("AI")).not.toBeInTheDocument()
+  })
+
+  it("keeps an organization's key a service key once it is one", () => {
+    stubBudgets()
+    renderFields(
+      { ...NO_SERVICE_KEY, isServiceKey: true, maxEndUsers: "10000" },
+      { scope: "organization", isLocked: true },
+    )
+
+    expect(screen.getByLabelText("Service key")).toBeDisabled()
   })
 
   it("says the budgets failed to load, rather than that there are none, and retries", async () => {
@@ -93,44 +150,134 @@ describe("ServiceKeyFields", () => {
     stubBudgets()
     await user.click(screen.getByRole("button", { name: "Retry" }))
 
-    expect(await screen.findByText("AI")).toBeInTheDocument()
+    expect(
+      await screen.findByRole("checkbox", { name: "AI eu-ai" }),
+    ).toBeInTheDocument()
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
   })
 
-  it("picks the list and a default from it", async () => {
+  it("puts the budget for each end user on the list and offers the rest beside it", async () => {
     stubBudgets()
     const user = userEvent.setup()
     const { latest } = renderFields({ ...NO_SERVICE_KEY, isServiceKey: true })
 
-    await user.click(await screen.findByRole("checkbox", { name: "AI eu-ai" }))
+    await pickOption(user, "Budget for each end user", "AI")
+    expect(
+      screen.queryByRole("checkbox", { name: "AI eu-ai" }),
+    ).not.toBeInTheDocument()
     await user.click(
       screen.getByRole("checkbox", { name: "Memories eu-memories" }),
     )
-    await pickOption(user, "Default end-user budget", "AI")
 
     expect(latest()).toEqual({
       isServiceKey: true,
       budgetIds: ["eu-ai", "eu-memories"],
       defaultBudgetId: "eu-ai",
+      maxEndUsers: "",
     })
   })
 
-  it("clears the default when its budget leaves the list", async () => {
+  it("swaps the previous budget for each end user off the list", async () => {
+    stubBudgets()
+    const user = userEvent.setup()
+    const { latest } = renderFields({
+      isServiceKey: true,
+      budgetIds: ["eu-ai"],
+      defaultBudgetId: "eu-ai",
+      maxEndUsers: "",
+    })
+
+    await pickOption(user, "Budget for each end user", "Memories")
+
+    expect(latest()).toEqual({
+      isServiceKey: true,
+      budgetIds: ["eu-memories"],
+      defaultBudgetId: "eu-memories",
+      maxEndUsers: "",
+    })
+  })
+
+  it("says end users are uncapped when no budget is picked for them", async () => {
     stubBudgets()
     const user = userEvent.setup()
     const { latest } = renderFields({
       isServiceKey: true,
       budgetIds: ["eu-ai", "eu-memories"],
       defaultBudgetId: "eu-ai",
+      maxEndUsers: "",
     })
 
-    await user.click(await screen.findByRole("checkbox", { name: "AI eu-ai" }))
+    await pickOption(user, "Budget for each end user", /^None: end users/)
 
     expect(latest()).toEqual({
       isServiceKey: true,
       budgetIds: ["eu-memories"],
       defaultBudgetId: "",
+      maxEndUsers: "",
     })
+    expect(
+      screen.getByRole("button", { name: /Budget for each end user/ }),
+    ).toHaveTextContent("None: end users are uncapped")
+    expect(
+      screen.getByText(
+        "New end users have no limit of their own, only the key's.",
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it("starts an organization's key at the default cap and refuses it empty", async () => {
+    stubBudgets()
+    const user = userEvent.setup()
+    const { latest } = renderFields(NO_SERVICE_KEY, { scope: "organization" })
+
+    await user.click(screen.getByLabelText("Service key"))
+    const cap = await screen.findByRole("textbox", { name: /Max end users/ })
+    expect(cap).toHaveValue("10000")
+
+    await user.clear(cap)
+    expect(latest()?.maxEndUsers).toBe("")
+    expect(await screen.findByText("Required")).toBeInTheDocument()
+  })
+
+  it("leaves an operator's key uncapped when the cap is empty", async () => {
+    stubBudgets()
+    const user = userEvent.setup()
+    const { latest } = renderFields()
+
+    await user.click(screen.getByLabelText("Service key"))
+    const cap = await screen.findByRole("textbox", { name: /Max end users/ })
+    expect(cap).toHaveValue("")
+    await user.type(cap, "2.5")
+
+    expect(latest()?.maxEndUsers).toBe("2.5")
+    expect(
+      await screen.findByText("A whole number, 0 or more"),
+    ).toBeInTheDocument()
+  })
+})
+
+describe("maxEndUsersError", () => {
+  const choice = { ...NO_SERVICE_KEY, isServiceKey: true }
+
+  it("takes no cap only on an operator's key", () => {
+    expect(maxEndUsersError(choice, "deployment")).toBeUndefined()
+    expect(maxEndUsersError(choice, "organization")).toBe("Required")
+  })
+
+  it("takes a whole number, zero included", () => {
+    expect(
+      maxEndUsersError({ ...choice, maxEndUsers: "0" }, "organization"),
+    ).toBeUndefined()
+    expect(
+      maxEndUsersError({ ...choice, maxEndUsers: "-1" }, "deployment"),
+    ).toBe("A whole number, 0 or more")
+    // Past the safe range it would round, or serialize as null and clear the cap.
+    expect(
+      maxEndUsersError(
+        { ...choice, maxEndUsers: "9".repeat(400) },
+        "deployment",
+      ),
+    ).toBe("At most 9,007,199,254,740,991")
   })
 })
 
@@ -141,12 +288,24 @@ describe("serviceKeyBody", () => {
         isServiceKey: true,
         budgetIds: ["eu-ai"],
         defaultBudgetId: "",
+        maxEndUsers: "",
       }),
     ).toEqual({
       is_service_key: true,
       end_user_budget_ids: ["eu-ai"],
       end_user_budget_id: null,
+      max_end_users: null,
     })
+  })
+
+  it("sends the cap as a number", () => {
+    expect(
+      serviceKeyBody({
+        ...NO_SERVICE_KEY,
+        isServiceKey: true,
+        maxEndUsers: " 500 ",
+      }),
+    ).toMatchObject({ max_end_users: 500 })
   })
 
   it("sends only the flag for a key that is not one, so its budgets survive", () => {
@@ -155,6 +314,7 @@ describe("serviceKeyBody", () => {
         isServiceKey: false,
         budgetIds: ["eu-ai"],
         defaultBudgetId: "eu-ai",
+        maxEndUsers: "",
       }),
     ).toEqual({ is_service_key: false })
   })

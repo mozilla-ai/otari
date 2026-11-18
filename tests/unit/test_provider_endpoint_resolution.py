@@ -5,16 +5,24 @@ import uuid
 from collections.abc import AsyncIterator, Iterator
 
 import httpx
+import httpx2
 import pytest
+from anthropic import AsyncAnthropic
 from any_llm import LLMProvider
 from any_llm.exceptions import AnyLLMError
 
 from gateway.core.config import GatewayConfig
 from gateway.services.provider_kwargs import ResolvedProvider, apply_endpoint_defaults, resolve_provider_selector
-from gateway.services.providers import OwnedEndpoint, _provider_endpoint_cache, owned_endpoint_http_client
+from gateway.services.providers import (
+    OwnedEndpoint,
+    _provider_endpoint_cache,
+    owned_endpoint_http_client,
+    owned_endpoint_sdk_client,
+)
 from gateway.services.providers._owned_endpoint_network import (
     OwnedEndpointAddressError,
     OwnedEndpointTransport,
+    _Httpx2Bridge,
     check_owned_endpoint_api_base,
 )
 from gateway.services.web_retrieval_network import PinnedTransportError
@@ -147,6 +155,18 @@ def test_a_non_public_base_url_is_refused_when_saved(api_base: str) -> None:
         asyncio.run(check_owned_endpoint_api_base(api_base))
 
 
+@pytest.mark.parametrize(
+    ("api_base", "points_at_hosted"),
+    [("http://127.0.0.1:8000/v1", True), ("http://10.0.0.1/v1", True), ("ftp://1.1.1.1/", False)],
+)
+def test_only_an_address_refusal_points_at_hosted_providers(api_base: str, points_at_hosted: bool) -> None:
+    with pytest.raises(OwnedEndpointAddressError) as refused:
+        asyncio.run(check_owned_endpoint_api_base(api_base))
+    message = str(refused.value)
+    assert message.startswith("endpoint api_base refused: ")
+    assert ("added as a hosted provider instead" in message) is points_at_hosted
+
+
 def test_a_public_ip_literal_is_accepted_without_dns() -> None:
     asyncio.run(check_owned_endpoint_api_base("https://1.1.1.1/v1"))
 
@@ -215,3 +235,102 @@ def test_a_stream_closed_early_gives_its_connection_back() -> None:
         assert _active_leases(transport) == 0
 
     asyncio.run(go())
+
+
+def test_the_anthropic_sdk_gets_an_httpx2_client_under_the_same_rules() -> None:
+    async def go() -> None:
+        client = owned_endpoint_sdk_client(LLMProvider.ANTHROPIC)
+        assert isinstance(client, httpx2.AsyncClient)
+        assert client.follow_redirects is False
+        assert isinstance(client._transport, _Httpx2Bridge)  # noqa: SLF001
+        assert owned_endpoint_sdk_client(LLMProvider.ANTHROPIC) is client
+        assert owned_endpoint_sdk_client(LLMProvider.OPENAI) is owned_endpoint_http_client()
+
+    asyncio.run(go())
+
+
+def test_the_httpx2_bridge_refuses_a_private_destination_before_connecting() -> None:
+    async def go() -> None:
+        async with httpx2.AsyncClient(transport=_Httpx2Bridge(OwnedEndpointTransport())) as client:
+            with pytest.raises(httpx2.TransportError, match="endpoint refused"):
+                await client.post("http://10.0.0.5/v1/messages")
+
+    asyncio.run(go())
+
+
+def test_a_streamed_post_crosses_the_httpx2_bridge_whole_and_gives_its_connection_back() -> None:
+    chunks = [b"event: ping\n\n", b"event: message_stop\n\n"]
+
+    async def go() -> None:
+        seen: list[httpx.Request] = []
+        transport = _streaming_transport(chunks, seen)
+        async with httpx2.AsyncClient(transport=_Httpx2Bridge(transport)) as client:
+            async with client.stream("POST", "https://1.1.1.1/v1/messages", json={"stream": True}) as response:
+                assert _active_leases(transport) == 1
+                received = [chunk async for chunk in response.aiter_raw()]
+        assert b"".join(received) == b"".join(chunks)
+        assert [request.content for request in seen] == [b'{"stream":true}']
+        assert _active_leases(transport) == 0
+
+    asyncio.run(go())
+
+
+@pytest.mark.parametrize(
+    ("raised", "expected"),
+    [
+        (httpx.ConnectTimeout, httpx2.ConnectTimeout),
+        (httpx.ConnectError, httpx2.ConnectError),
+        (httpx.ReadTimeout, httpx2.ReadTimeout),
+        (PinnedTransportError, httpx2.TransportError),
+    ],
+)
+def test_a_transport_error_crosses_the_httpx2_bridge_as_its_own_kind(
+    raised: type[httpx.TransportError], expected: type[httpx2.TransportError]
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise raised("failed", request=request)
+
+    async def go() -> None:
+        transport = OwnedEndpointTransport(transport_factory=lambda: httpx.MockTransport(handler))
+        async with httpx2.AsyncClient(transport=_Httpx2Bridge(transport)) as client:
+            with pytest.raises(expected):
+                await client.post("https://1.1.1.1/v1/messages")
+
+    asyncio.run(go())
+
+
+def test_a_stream_cut_short_crosses_the_httpx2_bridge_as_a_protocol_error() -> None:
+    async def body() -> AsyncIterator[bytes]:
+        yield b"event: ping\n\n"
+        raise httpx.RemoteProtocolError("peer closed connection")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=body())
+
+    async def go() -> None:
+        transport = OwnedEndpointTransport(transport_factory=lambda: httpx.MockTransport(handler))
+        async with httpx2.AsyncClient(transport=_Httpx2Bridge(transport)) as client:
+            async with client.stream("POST", "https://1.1.1.1/v1/messages") as response:
+                with pytest.raises(httpx2.RemoteProtocolError):
+                    async for _ in response.aiter_raw():
+                        pass
+        assert _active_leases(transport) == 0
+
+    asyncio.run(go())
+
+
+def test_the_anthropic_sdk_reaches_an_owned_endpoint_through_the_pinned_transport() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"data": [], "has_more": False, "first_id": None, "last_id": None})
+
+    async def go() -> None:
+        transport = OwnedEndpointTransport(transport_factory=lambda: httpx.MockTransport(handler))
+        async with httpx2.AsyncClient(transport=_Httpx2Bridge(transport), follow_redirects=False) as http_client:
+            sdk = AsyncAnthropic(api_key="sk-own", base_url="https://1.1.1.1", http_client=http_client, max_retries=0)
+            await sdk.models.list()
+
+    asyncio.run(go())
+    assert [(request.method, str(request.url)) for request in seen] == [("GET", "https://1.1.1.1/v1/models")]

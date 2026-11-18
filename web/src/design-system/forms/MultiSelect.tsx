@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { FiCheck, FiChevronDown } from "react-icons/fi"
-
+import { allowsFieldAutoFocus } from "@/design-system/helpers/autoFocus"
 import { DismissChip } from "../indicators/DismissChip"
 import { FieldMessages } from "./FieldMessages"
 import { INPUT_CLASS } from "./inputClass"
@@ -259,7 +259,7 @@ export function MultiSelect({
             value={query}
             autoComplete="off"
             // biome-ignore lint/a11y/noAutofocus: a form's first field takes it; see feedback.md
-            autoFocus={autoFocus}
+            autoFocus={autoFocus && allowsFieldAutoFocus()}
             onChange={(event) => {
               setQuery(event.target.value)
               setActiveIndex(0)
@@ -395,7 +395,7 @@ export function MultiSelect({
           // pushes down rather than moving the control it grew from.
           <ul
             aria-label={`${label}, selected`}
-            className="flex list-none flex-wrap gap-x-2 gap-y-1.5 pt-0.5"
+            className="flex list-none flex-wrap gap-x-2 gap-y-1.5 pt-0.5 pointer-coarse:gap-y-5 pointer-coarse:pt-1"
           >
             {value.map((id) => (
               <li key={id}>

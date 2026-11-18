@@ -349,6 +349,34 @@ def fake_httpx(monkeypatch: pytest.MonkeyPatch) -> type[_FakeClient]:
     return _FakeClient
 
 
+def test_the_default_transcripts_directory_follows_claude_config_dir(
+    tmp_path: Path, fake_httpx: type[_FakeClient], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CLAUDE_CONFIG_DIR moves where Claude Code keeps its session history, transcripts included."""
+    config_dir = tmp_path / "elsewhere"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+    _write_transcript(config_dir / "projects", "-Users-alice-Projects-otari", "session-a", [_assistant_line("msg_01")])
+
+    result = CliRunner().invoke(cli, ["import", "claude-code", "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    assert "1 event(s)" in result.output
+
+
+def test_the_default_transcripts_directory_is_read_when_the_command_runs(
+    tmp_path: Path, fake_httpx: type[_FakeClient], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The default is resolved per invocation, so a home or variable set after import still counts."""
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "first"))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "second"))
+    _write_transcript(tmp_path / "second" / "projects", "-Users-alice-p", "session-a", [_assistant_line("msg_01")])
+
+    result = CliRunner().invoke(cli, ["import", "claude-code", "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    assert "1 event(s)" in result.output
+
+
 def test_dry_run_reports_totals_and_sends_nothing(tmp_path: Path, fake_httpx: type[_FakeClient]) -> None:
     _write_transcript(tmp_path, "-Users-alice-Projects-otari", "session-a", [_assistant_line("msg_01")])
 

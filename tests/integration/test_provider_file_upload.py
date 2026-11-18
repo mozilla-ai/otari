@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
-import httpx
+import httpx2
 import pytest
 from any_llm.types.messages import MessageResponse, TextBlock
 from fastapi.testclient import TestClient
@@ -30,6 +30,8 @@ from gateway.exceptions.files_exceptions import ProviderCopyNotRecordedError
 from gateway.models.files import FileObject, FileProviderCopy
 from gateway.models.users import User
 from gateway.repositories.files import FileProviderCopyRepository
+
+from .conftest import ALL_KEY_SCOPES
 
 _CODE_TOOL = {"type": "code_execution_20250825", "name": "code_execution"}
 _MODEL = "anthropic:claude-sonnet-4-5"
@@ -49,20 +51,20 @@ class _StubAnthropicFiles:
         self.accepting = True
         self.dropped: set[str] = set()
 
-    def handle(self, request: httpx.Request) -> httpx.Response:
+    def handle(self, request: httpx2.Request) -> httpx2.Response:
         if request.method == "GET" and "/v1/files/" in request.url.path:
             file_id = request.url.path.rsplit("/", 1)[-1]
             if file_id in self.dropped:
-                return httpx.Response(
+                return httpx2.Response(
                     404, json={"type": "error", "error": {"type": "not_found_error", "message": "File not found"}}
                 )
-            return httpx.Response(200, json=self._metadata(file_id))
+            return httpx2.Response(200, json=self._metadata(file_id))
         if request.method != "POST" or not request.url.path.endswith("/v1/files"):
-            return httpx.Response(404)
+            return httpx2.Response(404)
         if not self.accepting:
-            return httpx.Response(500, json={"type": "error", "error": {"type": "api_error", "message": "nope"}})
+            return httpx2.Response(500, json={"type": "error", "error": {"type": "api_error", "message": "nope"}})
         self.uploads.append(request.content)
-        return httpx.Response(200, json=self._metadata(_PROVIDER_FILE_ID))
+        return httpx2.Response(200, json=self._metadata(_PROVIDER_FILE_ID))
 
     @staticmethod
     def _metadata(file_id: str) -> dict[str, Any]:
@@ -84,13 +86,13 @@ def anthropic_files(monkeypatch: pytest.MonkeyPatch) -> _StubAnthropicFiles:
     """A deployment credentialed for Anthropic by the SDK's own variable, whose Files API is stubbed."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     stub = _StubAnthropicFiles()
-    original_init = httpx.AsyncClient.__init__
+    original_init = httpx2.AsyncClient.__init__
 
-    def patched_init(self: httpx.AsyncClient, *args: Any, **kwargs: Any) -> None:
-        kwargs["transport"] = httpx.MockTransport(stub.handle)
+    def patched_init(self: httpx2.AsyncClient, *args: Any, **kwargs: Any) -> None:
+        kwargs["transport"] = httpx2.MockTransport(stub.handle)
         original_init(self, *args, **kwargs)
 
-    monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
+    monkeypatch.setattr(httpx2.AsyncClient, "__init__", patched_init)
     return stub
 
 
@@ -251,39 +253,6 @@ def test_a_provider_that_will_not_take_the_copy_refuses(
     assert forwarded == []
 
 
-def test_file_understanding_off_refuses_rather_than_forwarding_the_block(
-    client: TestClient,
-    api_key_header: dict[str, str],
-    tmp_file_store: None,
-    anthropic_files: _StubAnthropicFiles,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """With normalization off nothing reads the block, so it must not reach the provider."""
-    file_id = _upload_file(client, api_key_header)
-    monkeypatch.setattr(cast(Any, client.app).state.config, "file_understanding_enabled", False, raising=True)
-
-    response, forwarded = _run(client, api_key_header, file_id)
-
-    assert response.status_code == 400, response.text
-    assert forwarded == []
-    assert anthropic_files.uploads == []
-
-
-def test_file_understanding_off_still_runs_code_that_attaches_nothing(
-    client: TestClient,
-    api_key_header: dict[str, str],
-    anthropic_files: _StubAnthropicFiles,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(cast(Any, client.app).state.config, "file_understanding_enabled", False, raising=True)
-
-    response, forwarded = _run(client, api_key_header, None)
-
-    assert response.status_code == 200, response.text
-    assert forwarded[0][0]["content"] == "Compute 2 + 2."
-    assert anthropic_files.uploads == []
-
-
 @pytest.fixture
 def priced_model(client: TestClient, master_key_header: dict[str, str]) -> None:
     """A price for the model, so a request reserves a nonzero estimate against the budget."""
@@ -309,7 +278,9 @@ def budgeted_key_header(client: TestClient, master_key_header: dict[str, str]) -
     )
     assert user.status_code == 200, user.text
     key = client.post(
-        f"{API_ROOT}/keys", json={"key_name": "budgeted", "user_id": "budgeted-user"}, headers=master_key_header
+        f"{API_ROOT}/keys",
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "budgeted", "user_id": "budgeted-user"},
+        headers=master_key_header,
     )
     assert key.status_code == 200, key.text
     return {API_KEY_HEADER: f"Bearer {key.json()['key']}"}

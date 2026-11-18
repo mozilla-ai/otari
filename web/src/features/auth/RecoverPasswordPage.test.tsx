@@ -37,12 +37,12 @@ function renderPage() {
 beforeEach(() => {
   vi.clearAllMocks()
   window.sessionStorage.clear()
-  window.location.hash = ""
+  window.history.replaceState(null, "", "/")
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
-  window.location.hash = ""
+  window.history.replaceState(null, "", "/")
 })
 
 vi.mock("@/features/auth/overlayPublicAuthFields", () => ({

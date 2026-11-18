@@ -24,6 +24,13 @@ from gateway.services.traces._collector import call_id_digest, client_tool_span_
 
 _WORKSPACE = uuid.uuid4()
 _CLAUDE_CODE = {"user-agent": "claude-cli/2.1.291 (external, sdk-cli)", "x-claude-code-session-id": "b57732d4"}
+_OPENCODE_SESSION = "ses_e17323cf5ffesvwVHeHZmSK26l"
+_OPENCODE = {
+    "user-agent": "opencode/1.19.5 ai-sdk/provider-utils/4.0.23 runtime/bun/1.4.4",
+    "x-opencode-session-id": _OPENCODE_SESSION,
+    "x-session-id": _OPENCODE_SESSION,
+    "x-session-affinity": _OPENCODE_SESSION,
+}
 _CODEX_THREAD = "0199e5a1-7c2b-7d4e-9f10-2a3b4c5d6e7f"
 _CODEX_SUBAGENT_THREAD = "0199e5a1-8d3c-7e5f-a021-3b4c5d6e7f80"
 _CODEX = {
@@ -31,6 +38,26 @@ _CODEX = {
     "user-agent": "codex_exec/0.154.0 (Linux 6.8.0; x86_64) unknown (codex_exec; 0.154.0)",
     "session-id": _CODEX_THREAD,
     "thread-id": _CODEX_THREAD,
+}
+# Harnesses that send their session id under a generic name, each with the mark that
+# makes the name count, and the header the id rides in.
+_KILO_CODE = {"user-agent": "Kilo-Code/7.2.4", "x-title": "Kilo Code", "x-session-id": "ses_4f1a"}
+_CRUSH = {"user-agent": "Charm-Crush/0.31.0 (https://charm.land/crush)", "x-session-id": "9c1e0f2ab47d3e55"}
+_PI = {"user-agent": "pi/0.112.0 (darwin; node/24.11.0; arm64)", "session-id": "019a7c1e-3b2d-7f44"}
+_ROO_CODE = {
+    "originator": "roo-code",
+    "user-agent": "roo-code/3.36.0 (darwin 25.1.0; arm64) node/22",
+    "session_id": "t-1",
+}
+_MISTRAL_VIBE = {"user-agent": "Mistral-Vibe/2.14.0", "x-affinity": "a8f3c2d1-5e6b-4c7d"}
+_OPENCLAW = {"user-agent": "openclaw/2026.11.3", "session_id": "7d2e9b10", "x-session-affinity": "7d2e9b10"}
+_MARKED = {
+    "kilo-code": (_KILO_CODE, "x-session-id"),
+    "crush": (_CRUSH, "x-session-id"),
+    "pi": (_PI, "session-id"),
+    "roo-code": (_ROO_CODE, "session_id"),
+    "mistral-vibe": (_MISTRAL_VIBE, "x-affinity"),
+    "openclaw": (_OPENCLAW, "session_id"),
 }
 
 
@@ -41,6 +68,16 @@ _CODEX = {
 
 def test_claude_codes_own_session_header_names_the_session() -> None:
     assert resolve(_CLAUDE_CODE, session_label=None, tags=None) == SessionRef(source="harness", key="b57732d4")
+
+
+def test_opencodes_own_session_header_names_the_session() -> None:
+    assert resolve(_OPENCODE, session_label=None, tags=None) == SessionRef(source="harness", key=_OPENCODE_SESSION)
+
+
+def test_the_generic_session_headers_opencode_also_sends_name_no_session() -> None:
+    headers = {key: value for key, value in _OPENCODE.items() if key != "x-opencode-session-id"}
+
+    assert resolve(headers, session_label=None, tags=None) is None
 
 
 def test_codexs_own_session_header_names_the_session() -> None:
@@ -72,6 +109,72 @@ def test_a_session_id_header_from_another_client_names_no_session() -> None:
 
     assert resolve(headers, session_label=None, tags=None) is None
     assert harness_of(headers) == "python-httpx"
+
+
+@pytest.mark.parametrize(("header", "harness"), [("x-amp-thread-id", "amp"), ("agent-session-id", "goose")])
+def test_a_harnesss_own_session_header_names_the_session_from_any_client(header: str, harness: str) -> None:
+    headers = {header: "T-7f3e"}
+
+    assert resolve(headers, session_label=None, tags=None) == SessionRef(source="harness", key="T-7f3e")
+    assert harness_of(headers) == harness
+
+
+@pytest.mark.parametrize("harness", list(_MARKED))
+def test_a_generic_session_header_names_the_session_beside_its_harnesss_mark(harness: str) -> None:
+    headers, header = _MARKED[harness]
+
+    assert resolve(headers, session_label=None, tags=None) == SessionRef(source="harness", key=headers[header])
+    assert harness_of(headers) == harness
+
+
+@pytest.mark.parametrize("harness", list(_MARKED))
+def test_a_generic_session_header_without_its_harnesss_mark_names_no_session(harness: str) -> None:
+    headers, header = _MARKED[harness]
+    unmarked = {"user-agent": "python-httpx/0.28", header: headers[header]}
+
+    assert resolve(unmarked, session_label=None, tags=None) is None
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"user-agent": "kilo/stable/7.2.4/cli", "x-session-id": "ses_4f1a"},
+        {"user-agent": "pi/0.112.0", "session_id": "ses_4f1a"},
+        {"user-agent": "pi/0.112.0", "x-session-affinity": "ses_4f1a"},
+        {"user-agent": "roo-code/3.36.0", "session_id": "ses_4f1a"},
+        {"user-agent": "mistral-client-python/Mistral-Vibe/2.14.0", "x-affinity": "ses_4f1a"},
+        {"user-agent": "openclaw/2026.11.3", "x-session-affinity": "ses_4f1a"},
+    ],
+)
+def test_each_header_and_mark_a_harness_sends_its_session_with_is_enough(headers: dict[str, str]) -> None:
+    assert resolve(headers, session_label=None, tags=None) == SessionRef(source="harness", key="ses_4f1a")
+
+
+def test_a_kilo_code_subagent_is_a_session_of_its_own() -> None:
+    subagent = _KILO_CODE | {"x-session-id": "ses_77b0", "x-parent-session-id": _KILO_CODE["x-session-id"]}
+
+    assert resolve(subagent, session_label=None, tags=None) == SessionRef(source="harness", key="ses_77b0")
+    assert not is_subagent(subagent)
+
+
+def test_litellms_session_header_names_the_session_and_leaves_the_harness_to_the_user_agent() -> None:
+    headers = {"user-agent": "litellm/1.80.0", "x-litellm-session-id": "conv-81d2"}
+
+    assert resolve(headers, session_label=None, tags=None) == SessionRef(source="harness", key="conv-81d2")
+    assert harness_of(headers) == "litellm"
+
+
+def test_oh_my_pi_is_named_by_its_mark_while_claude_codes_header_names_its_session() -> None:
+    headers = {"user-agent": "omp/17.2.12", "x-claude-code-session-id": "019a7c1e-3b2d"}
+
+    assert resolve(headers, session_label=None, tags=None) == SessionRef(source="harness", key="019a7c1e-3b2d")
+    assert harness_of(headers) == "oh-my-pi"
+
+
+def test_a_harnesss_own_session_header_wins_over_a_generic_one() -> None:
+    headers = _CRUSH | {"x-amp-thread-id": "T-7f3e", "x-litellm-session-id": "conv-81d2"}
+
+    assert resolve(headers, session_label=None, tags=None) == SessionRef(source="harness", key="T-7f3e")
 
 
 @pytest.mark.parametrize(
@@ -131,7 +234,19 @@ def test_only_an_identifier_shaped_key_the_client_chose_names_the_session(ref: S
         (_CLAUDE_CODE, "claude-code"),
         ({"user-agent": "claude-cli/2.1.291"}, "claude-code"),
         (_CODEX, "codex"),
+        (_OPENCODE, "opencode"),
+        ({"user-agent": "my-proxy/2.0", "x-opencode-session-id": _OPENCODE_SESSION}, "opencode"),
+        ({"user-agent": "Charm-Crush/0.31.0 (https://charm.land/crush)"}, "crush"),
+        ({"user-agent": "kilo/stable/7.2.4/cli"}, "kilo-code"),
         ({"user-agent": "opencode/0.15 ai-sdk"}, "opencode"),
+        ({"user-agent": "omp/17.2.12"}, "oh-my-pi"),
+        ({"user-agent": "mistral-client-python/Mistral-Vibe/2.14.0"}, "mistral-vibe"),
+        ({"user-agent": "HermesAgent/1.0"}, "hermes-agent"),
+        ({"user-agent": "kimi-code-cli/1.4.0"}, "kimi-code"),
+        ({"user-agent": "QwenCode/0.9.1 (darwin; arm64)"}, "qwen-code"),
+        ({"user-agent": "GitHubCopilotChat/0.40.0"}, "github-copilot"),
+        ({"user-agent": "Zed/0.215.3 (macos; aarch64)"}, "zed"),
+        ({"user-agent": "curl/8.7.1"}, "curl"),
         ({"user-agent": "OpenAI/Python 1.99"}, "openai"),
         ({}, None),
     ],

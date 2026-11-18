@@ -5,7 +5,12 @@ Also covers which cached-token convention a *stored* row is repriced under
 pricing wrote when it does not.
 """
 
+from decimal import Decimal
+from types import SimpleNamespace
+
+import pytest
 from any_llm.types.completion import (
+    CacheCreationTokenDetails,
     ChatCompletion,
     ChatCompletionChunk,
     CompletionUsage,
@@ -15,6 +20,7 @@ from any_llm.types.completion import (
 from gateway.api.routes.chat import _ChatAdapter
 from gateway.api.routes.messages import _messages_stream_usage, _MessagesAdapter, _requested_cache_write_ttl
 from gateway.api.routes.responses import _usage_to_completion_usage
+from gateway.core.metered_pricing import calculate_metered_cost
 from gateway.core.usage import GatewayUsage, cache_read_tokens_of, cache_write_1h_tokens_of, cache_write_tokens_of
 from gateway.models.usage import UsageLog
 from gateway.services.usage_admin_service import _row_cache_tokens_included
@@ -135,6 +141,64 @@ def test_chat_captures_a_cache_write_reported_on_prompt_tokens_details() -> None
         assert isinstance(captured, GatewayUsage)
         assert captured.cache_write_tokens == 4096
         assert captured.cache_tokens_in_prompt is True
+
+
+def _anthropic_chat_usage(five_minute: int, one_hour: int) -> CompletionUsage:
+    """Usage as any-llm's Anthropic Chat Completions conversion reports a cache write."""
+    details = PromptTokensDetails(
+        cached_tokens=0,
+        cache_write_tokens=five_minute + one_hour,
+        cache_creation_token_details=CacheCreationTokenDetails(
+            ephemeral_5m_input_tokens=five_minute,
+            ephemeral_1h_input_tokens=one_hour,
+        ),
+    )
+    prompt_tokens = 1_000 + five_minute + one_hour
+    return CompletionUsage(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=0,
+        total_tokens=prompt_tokens,
+        prompt_tokens_details=details,
+    )
+
+
+def test_cache_write_1h_helper_reads_the_ttl_breakdown_on_a_plain_usage() -> None:
+    assert cache_write_1h_tokens_of(_anthropic_chat_usage(1_000, 3_000)) == 3_000
+    assert cache_write_1h_tokens_of(_anthropic_chat_usage(4_000, 0)) == 0
+    assert cache_write_1h_tokens_of(CompletionUsage(prompt_tokens=1, completion_tokens=0, total_tokens=1)) == 0
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize(
+    ("five_minute", "one_hour", "expected_lines"),
+    [
+        (1_000, 3_000, [("input", 1_000), ("cache_write", 1_000), ("cache_write_1h", 3_000)]),
+        (4_000, 0, [("input", 1_000), ("cache_write", 4_000)]),
+    ],
+)
+def test_chat_prices_a_1h_cache_write_at_its_own_rate(
+    stream: bool, five_minute: int, one_hour: int, expected_lines: list[tuple[str, int]]
+) -> None:
+    usage = _anthropic_chat_usage(five_minute, one_hour)
+    adapter = _ChatAdapter()
+    captured = (
+        adapter.extract_stream_usage(ChatCompletionChunk.model_construct(usage=usage))
+        if stream
+        else adapter.extract_usage(ChatCompletion.model_construct(usage=usage))
+    )
+    pricing = SimpleNamespace(
+        model_key="anthropic:claude-haiku-5-5",
+        input_price_per_million=Decimal("0.10"),
+        output_price_per_million=Decimal("0.50"),
+        cache_read_price_per_million=None,
+        cache_write_price_per_million=Decimal("0.125"),
+        pricing_tiers=[],
+    )
+
+    assert isinstance(captured, GatewayUsage)
+    assert captured.cache_write_1h_tokens == one_hour
+    _, _, lines = calculate_metered_cost(pricing, captured)
+    assert [(line["meter"], line["units"]) for line in lines if line["units"]] == expected_lines
 
 
 def test_chat_stream_captures_cached_tokens() -> None:

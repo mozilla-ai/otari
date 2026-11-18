@@ -221,7 +221,25 @@ def test_a_budget_off_the_list_is_refused_with_a_code(client: TestClient, master
         assert refused.status_code == 403, user
         assert refused.headers["Otari-Error-Code"] == "end_user_budget_not_allowed"
         assert refused.json()["code"] == "end_user_budget_not_allowed"
+        assert "GET /api/v1/end-user-budgets" in refused.json()["detail"]
     assert _end_user(client, master_key_header, key_id, "new-user").status_code == 404
+
+
+def test_a_budget_on_a_request_naming_no_end_user_is_refused(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """A budget that would apply to no one is refused rather than ignored, so a mistake cannot turn it off."""
+    _, service = _mlpa(client, master_key_header)
+    plain = client.post(f"{API_ROOT}/keys", json={"key_name": "plain", "user_id": "plain"}, headers=master_key_header)
+    assert plain.status_code == 200, plain.text
+    plain_headers = {API_KEY_HEADER: f"Bearer {plain.json()['key']}"}
+
+    for headers, user in ((plain_headers, "someone"), (service, "mlpa")):
+        refused = _chat(client, headers, user, budget="eu-ai")
+        assert refused.status_code == 400, refused.text
+        assert refused.headers["Otari-Error-Code"] == "end_user_budget_without_end_user"
+        assert refused.json()["code"] == "end_user_budget_without_end_user"
+    assert _chat(client, plain_headers, "plain").status_code == 200
 
 
 def test_a_replay_repeats_the_budget_and_a_retry_naming_another_is_refused(
@@ -428,6 +446,21 @@ def test_the_operator_lists_a_keys_end_users(client: TestClient, master_key_head
     assert nobody.json() == []
     assert missing.status_code == 404
     assert unnamed.status_code == 422
+
+
+def test_the_operator_reads_a_keys_end_users_against_its_cap(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    key_id, headers = _mlpa(client, master_key_header)
+    assert _chat(client, headers, "a").status_code == 200
+    plain = client.post(f"{API_ROOT}/keys", json={"user_id": "plain"}, headers=master_key_header).json()
+
+    counted = client.get(f"{API_ROOT}/keys/{key_id}/end-user-count", headers=master_key_header)
+
+    assert counted.status_code == 200, counted.text
+    assert counted.json() == {"count": 1, "max_end_users": None}
+    assert client.get(f"{API_ROOT}/keys/{plain['id']}/end-user-count", headers=master_key_header).status_code == 400
+    assert client.get(f"{API_ROOT}/keys/no-such-key/end-user-count", headers=master_key_header).status_code == 404
 
 
 def test_a_dot_segment_is_refused_only_in_a_path(client: TestClient, master_key_header: dict[str, str]) -> None:

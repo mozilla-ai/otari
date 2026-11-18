@@ -5,6 +5,7 @@ from gateway.repositories.budgets.reservation_repository import HeldAmounts, Res
 from gateway.repositories.budgets.scoped_budget_repository import (
     ApplicableCeiling,
     CeilingUsage,
+    LimitUsage,
     ScopedBudgetRepository,
     ScopeIdSets,
 )
@@ -17,6 +18,7 @@ __all__ = [
     "CeilingUsage",
     "EndUserRepository",
     "HeldAmounts",
+    "LimitUsage",
     "ReservationLine",
     "ReservationRepository",
     "ScopeIdSets",

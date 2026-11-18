@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 TimeRange = Literal["day", "week", "month", "year"]
 """The shared recency filter every adapter maps onto its provider's own."""
@@ -33,6 +33,18 @@ class OptionSpec(BaseModel):
     # Only the deployment's operator may set it, never a tenant or a request.
     # The library accepts it from anyone; enforcing that is the host's job.
     operator_only: bool = False
+    # The option's values are the provider's cost tiers: a call made with one
+    # value is billed at that tier's own price per call, as the provider's
+    # pricing lists. It records no amount; the adapter's pricing note has those.
+    # ``enum`` lists the tiers and ``default`` is the one the provider uses when
+    # the option is not sent.
+    cost_tier: bool = False
+
+    @model_validator(mode="after")
+    def _a_cost_tier_lists_its_tiers(self) -> "OptionSpec":
+        if self.cost_tier and not (self.enum and self.default in self.enum):
+            raise ValueError(f"cost tier option {self.name!r} needs an enum and a default from it")
+        return self
 
 
 class SearchError(BaseModel):
@@ -86,3 +98,13 @@ class ProviderMetadata(BaseModel):
     query_in_url: bool
     key_in_url: bool
     options: list[OptionSpec]
+    # The provider's answer says what each call cost, which the adapter returns
+    # as the result's cost.
+    reports_cost: bool = False
+
+    @model_validator(mode="after")
+    def _one_cost_tier_at_most(self) -> "ProviderMetadata":
+        tiers = [option.name for option in self.options if option.cost_tier]
+        if len(tiers) > 1:
+            raise ValueError(f"provider {self.name!r} has more than one cost tier option: {', '.join(tiers)}")
+        return self

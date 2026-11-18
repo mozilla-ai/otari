@@ -28,7 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from gateway.api.deps import get_api_key_service
+from gateway.api.deps import get_api_key_service, get_user_access
 from gateway.core.config import API_ROOT
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions import TenancyValidationError
@@ -555,6 +555,7 @@ def _service(async_db: AsyncSession) -> BudgetService:
             async_db,
             OrganizationService(async_db, membership_listener=None),
         ),
+        users=get_user_access(uow),
     )
 
 

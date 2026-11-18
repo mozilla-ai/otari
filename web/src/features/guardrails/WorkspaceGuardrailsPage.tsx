@@ -1,5 +1,3 @@
-import { Link } from "@tanstack/react-router"
-
 import type { OrganizationGuardrail } from "@/client"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
@@ -9,6 +7,7 @@ import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { mandateConsequence } from "@/features/guardrails/buildState"
 import { MandateConsequenceMark } from "@/features/guardrails/GuardrailStatus"
 import {
+  checksLabel,
   ifItCantRunLabel,
   mandatesFor,
   runsOnLabel,
@@ -66,6 +65,11 @@ export function WorkspaceGuardrailsPage() {
       ),
     },
     {
+      id: "checks",
+      header: "Checks",
+      cell: (row) => <span className="text-muted">{checksLabel(row)}</span>,
+    },
+    {
       id: "mode",
       header: "Mode",
       cell: (row) => (
@@ -85,18 +89,7 @@ export function WorkspaceGuardrailsPage() {
 
   return (
     <div className="flex flex-col">
-      <PageIntro title="Guardrails">
-        The guardrails your organization runs on what users in{" "}
-        {selected?.name ?? "this workspace"} send to a model. An owner or admin
-        changes them on the organization&rsquo;s{" "}
-        <Link
-          to="/organization/guardrails"
-          className="font-medium text-link hover:text-link-hover"
-        >
-          Guardrails
-        </Link>{" "}
-        page.
-      </PageIntro>
+      <PageIntro title="Guardrails" />
 
       <ErrorBanner
         error={context.error ?? definitions.error ?? mandates.error}
@@ -112,6 +105,7 @@ export function WorkspaceGuardrailsPage() {
         <TableScrollFrame className="otari-guardrail-mandates-table">
           <DataTable
             ariaLabel="Guardrails running in this workspace"
+            mobileLayout="cards"
             columns={columns}
             rows={running}
             getRowKey={(row) => row.id}

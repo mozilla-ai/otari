@@ -34,6 +34,10 @@ Five call sites with overlapping but not identical threat models:
   its discovery document. https only, and private hosts are blocked unless
   the ``federation_allow_private_hosts`` setting is on.
 
+Each check validates a URL's shape before its address: a host no HTTP client can
+dial is refused as invalid, so an address check only ever reports on the host
+the caller wrote.
+
 These checks are intentionally conservative: DNS rebinding can defeat host-based
 allowlists. Production deployments should also enforce egress policy at the
 network layer.
@@ -44,10 +48,11 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import socket
-from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlsplit, urlunsplit
+from urllib.parse import ParseResult, parse_qsl, quote, urlencode, urlparse, urlsplit, urlunsplit
 
 from gateway.core.config import parse_bool_env
 from gateway.core.env import otari_env
+from gateway.core.settings.providers import https_or_loopback_problem
 
 
 def redact_url_secrets(value: str) -> str:
@@ -76,10 +81,9 @@ def redact_url_secrets(value: str) -> str:
         # Everything after the last "@" is host[:port], taken as written rather
         # than rebuilt from `hostname` and `port`. Deliberately not
         # `SplitResult.port`, which parses lazily and raises ValueError on a
-        # malformed port ("host:bad"): nothing rejects such a URL on the way in
-        # (`validate_mcp_url` reads `hostname` and never the port), so rebuilding
-        # would turn a redaction into a 500 on the read. Taking the text also
-        # keeps an IPv6 literal's brackets without a special case.
+        # malformed port ("host:bad"): this runs on a URL that is already stored,
+        # so it must not raise. Taking the text also keeps an IPv6 literal's
+        # brackets without a special case.
         host_and_port = parts.netloc.rpartition("@")[2]
         if parts.password is not None:
             netloc = f"{parts.username or ''}:***@{host_and_port}"
@@ -99,6 +103,42 @@ def redact_url_secrets(value: str) -> str:
 
 class UnsafeURLError(ValueError):
     """Raised when an MCP server URL is rejected by the safety checks."""
+
+
+def _authority_detail(label: str) -> str:
+    return (
+        f"{label} URL is not valid: write the host as a name, an IPv4 address, or an IPv6 "
+        "address in brackets, for example https://[2400:8901::1]:8787/"
+    )
+
+
+def _parse_safe_url(url: str, *, label: str) -> ParseResult:
+    """Parse ``url``, refusing an authority no HTTP client can dial.
+
+    Validates the shape before the address checks read the host.
+    An unbracketed IPv6 host ends at its first colon,
+    which leaves a hostname the caller never wrote for a resolver to answer.
+
+    ``label`` names the surface the URL was written for, as in :func:`validate_mcp_url`.
+    Raises :class:`UnsafeURLError` on rejection.
+    """
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        raise UnsafeURLError(_authority_detail(label)) from None
+
+    try:
+        # NOTE: The port is validated only when it is read.
+        _ = parsed.port
+    except ValueError:
+        host_and_port = parsed.netloc.rpartition("@")[2]
+        # A well-formed unbracketed authority holds one colon at most, so
+        # anything beyond that is an IPv6 address written without brackets.
+        if "[" not in host_and_port and host_and_port.count(":") > 1:
+            raise UnsafeURLError(_authority_detail(label)) from None
+        raise UnsafeURLError(f"{label} URL port must be a number from 0 to 65535") from None
+
+    return parsed
 
 
 def _allow_loopback() -> bool:
@@ -126,7 +166,7 @@ async def validate_mcp_url(url: str, *, has_authorization_token: bool, label: st
 
     Raises :class:`UnsafeURLError` on rejection. Returns ``None`` on accept.
     """
-    parsed = urlparse(url)
+    parsed = _parse_safe_url(url, label=label)
     scheme = parsed.scheme.lower()
     if scheme not in {"http", "https"}:
         raise UnsafeURLError(f"{label} URL must use http or https, got {scheme!r}")
@@ -186,6 +226,10 @@ def _blocked_reason(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> str 
         return "in a private range (RFC 1918 / ULA)"
     if addr.is_reserved:
         return "in a reserved range"
+    # Catches what the tests above miss, such as RFC 6598 shared space (100.64.0.0/10),
+    # which CGNAT, Tailscale and some cluster networks use.
+    if not addr.is_global:
+        return "outside the public address space"
     return None
 
 
@@ -224,7 +268,7 @@ async def validate_outbound_fetch_url(url: str) -> None:
     Async to keep the event loop unblocked under fan-out — see
     :func:`_resolve_all_async`. Raises :class:`UnsafeURLError` on rejection.
     """
-    parsed = urlparse(url)
+    parsed = _parse_safe_url(url, label="fetch")
     scheme = parsed.scheme.lower()
     if scheme not in {"http", "https"}:
         raise UnsafeURLError(f"fetch URL must use http or https, got {scheme!r}")
@@ -308,7 +352,7 @@ async def validate_provider_api_base(url: str) -> None:
     if _allow_provider_private_hosts():
         return
 
-    parsed = urlparse(url)
+    parsed = _parse_safe_url(url, label="provider api_base")
     scheme = parsed.scheme.lower()
     if scheme not in {"http", "https"}:
         raise UnsafeURLError(f"provider api_base must use http or https, got {scheme!r}")
@@ -328,7 +372,7 @@ async def validate_federation_url(url: str, *, allow_private_hosts: bool = False
     the ``federation_allow_private_hosts`` setting, is on for an issuer on the
     deployment's own network. Raises :class:`UnsafeURLError` on rejection.
     """
-    parsed = urlparse(url)
+    parsed = _parse_safe_url(url, label="federation")
     if parsed.scheme.lower() != "https":
         raise UnsafeURLError("federation URL must use https")
     host = parsed.hostname
@@ -337,3 +381,47 @@ async def validate_federation_url(url: str, *, allow_private_hosts: bool = False
     if allow_private_hosts:
         return
     await _reject_internal_host(host, host_label="federation", override_var="OTARI_FEDERATION_ALLOW_PRIVATE_HOSTS")
+
+
+def validate_public_https_url_shape(url: str, *, label: str) -> None:
+    """Refuse a URL whose text alone shows the gateway should not offer it, without resolving its host.
+
+    For a URL read in bulk from a public listing, where a lookup per entry is
+    not affordable: it must be https, carry no credentials, and name a host
+    that is neither an internal address literal nor a local name. It is a
+    screen, not the SSRF check: whoever dials the URL still runs
+    :func:`validate_mcp_url`, which resolves the host.
+
+    Raises :class:`UnsafeURLError` on rejection.
+    """
+    parsed = _parse_safe_url(url, label=label)
+    if parsed.scheme.lower() != "https":
+        raise UnsafeURLError(f"{label} URL must use https")
+    if parsed.username is not None or parsed.password is not None:
+        raise UnsafeURLError(f"{label} URL must not carry credentials")
+    host = (parsed.hostname or "").rstrip(".").lower()
+    if not host:
+        raise UnsafeURLError(f"{label} URL must include a hostname")
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        if "." not in host or host.endswith((".localhost", ".local", ".internal")):
+            raise UnsafeURLError(f"{label} host {host!r} is a local name") from None
+        # No top-level domain is a number, so this is an address in a short or non-decimal form (127.1, 0x7f.1).
+        if host.rpartition(".")[2].isdigit() or host.rpartition(".")[2].startswith("0x"):
+            raise UnsafeURLError(f"{label} host {host!r} is an address written as a name") from None
+        return
+    reason = _blocked_reason(literal)
+    if reason is not None:
+        raise UnsafeURLError(f"{label} host {host!r} is {reason}")
+
+
+def validate_credential_address(url: str, *, label: str) -> None:
+    """Refuse an address a credential travels to or a browser opens unless it is https, or http on this machine.
+
+    Raises :class:`UnsafeURLError` on rejection.
+    """
+    _parse_safe_url(url, label=label)
+    problem = https_or_loopback_problem(url)
+    if problem is not None:
+        raise UnsafeURLError(f"{label} URL {problem}")

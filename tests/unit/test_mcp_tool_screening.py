@@ -26,7 +26,7 @@ def _tool(**overrides: object) -> MCPTool:
     fields: dict[str, object] = {
         "name": "create_issue",
         "description": "Create an issue",
-        "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}}},
+        "input_schema": {"type": "object", "properties": {"title": {"type": "string"}}},
     }
     fields.update(overrides)
     return MCPTool(**fields)  # type: ignore[arg-type]
@@ -40,8 +40,24 @@ def test_a_tool_name_at_the_execution_limit_is_admitted() -> None:
     assert screen_tool(_tool(name="x" * TOOL_NAME_MAX_LENGTH)) is None
 
 
-@pytest.mark.parametrize("name", ["", "x" * (TOOL_NAME_MAX_LENGTH + 1)])
-def test_a_tool_name_execution_cannot_accept_is_omitted(name: str) -> None:
+@pytest.mark.parametrize(
+    "name",
+    [
+        "",
+        "x" * (TOOL_NAME_MAX_LENGTH + 1),
+        "*",
+        "search*",
+        "@read",
+        " @read",
+        "list_issues ",
+        ",",
+        "get_issue,delete_issue",
+        "\u0085@read",
+        "list issues",
+        "list\u200bissues",
+    ],
+)
+def test_a_tool_name_execution_or_an_access_rule_cannot_take_is_omitted(name: str) -> None:
     assert screen_tool(_tool(name=name)) == "mcp_tool_name_unsupported"
 
 
@@ -53,10 +69,10 @@ def test_an_unknown_dialect_or_keyword_is_admitted_unchanged() -> None:
         "properties": {"title": {"type": "string", "x-vendor-widget": "textarea"}},
         "x-vendor-policy": {"retries": 3},
     }
-    tool = _tool(inputSchema=schema)
+    tool = _tool(input_schema=schema)
 
     assert screen_tool(tool) is None
-    assert tool.inputSchema == schema
+    assert tool.input_schema == schema
 
 
 def test_a_local_reference_is_admitted() -> None:
@@ -66,7 +82,7 @@ def test_a_local_reference_is_admitted() -> None:
         "$defs": {"label": {"type": "string"}},
     }
 
-    assert screen_tool(_tool(inputSchema=schema)) is None
+    assert screen_tool(_tool(input_schema=schema)) is None
 
 
 @pytest.mark.parametrize(
@@ -81,14 +97,14 @@ def test_a_local_reference_is_admitted() -> None:
 def test_an_external_reference_is_refused_without_network_access(ref: str) -> None:
     schema = {"type": "object", "properties": {"labels": {"$ref": ref}}}
 
-    assert screen_tool(_tool(inputSchema=schema)) == "mcp_tool_schema_unsupported"
+    assert screen_tool(_tool(input_schema=schema)) == "mcp_tool_schema_unsupported"
 
 
 def test_a_non_object_schema_is_refused() -> None:
     tool = _tool()
     # MCP's own model types ``inputSchema`` as an object, so a server sending
     # something else can only reach this through the loosely typed wire form.
-    object.__setattr__(tool, "inputSchema", ["not", "an", "object"])
+    object.__setattr__(tool, "input_schema", ["not", "an", "object"])
 
     assert screen_tool(tool) == "mcp_tool_schema_unsupported"
 
@@ -96,7 +112,7 @@ def test_a_non_object_schema_is_refused() -> None:
 def test_an_oversized_schema_is_refused() -> None:
     schema = {"type": "object", "properties": {"title": {"description": "x" * (SCHEMA_MAX_BYTES + 1)}}}
 
-    assert screen_tool(_tool(inputSchema=schema)) == "mcp_tool_schema_unsupported"
+    assert screen_tool(_tool(input_schema=schema)) == "mcp_tool_schema_unsupported"
 
 
 def test_a_too_deeply_nested_schema_is_refused() -> None:
@@ -104,7 +120,7 @@ def test_a_too_deeply_nested_schema_is_refused() -> None:
     for _ in range(SCHEMA_MAX_DEPTH + 2):
         nested = {"properties": nested}
 
-    assert screen_tool(_tool(inputSchema=nested)) == "mcp_tool_schema_unsupported"
+    assert screen_tool(_tool(input_schema=nested)) == "mcp_tool_schema_unsupported"
 
 
 def test_an_oversized_description_is_refused() -> None:

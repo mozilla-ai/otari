@@ -1,16 +1,18 @@
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from decimal import Decimal
 from typing import NamedTuple, Never
 
-from sqlalchemy import String, and_, cast, func, or_, select
+from sqlalchemy import String, and_, cast, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col
 
-from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.api_keys import APIKey
+from gateway.core.unit_of_work import UnitOfWork, session_for
+from gateway.models.api_keys import SERVICE_KEY_OWNER_ID_PREFIX, APIKey
 from gateway.models.tenancy import OrganizationMember, Workspace
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
@@ -66,6 +68,22 @@ async def get_or_create_default_user(db: AsyncSession) -> User:
         return await _revive(winner)
 
 
+def add_service_key_owner(db: AsyncSession, *, alias: str, creator: User) -> User:
+    """Stage the user an organization's service key is owned by, and return it.
+
+    A user of the key's own, so its end users are reachable from no other key or organization. It starts with the
+    creator's model and tool access, so the key grants nothing its creator lacks. The caller owns the commit.
+    """
+    owner = User(
+        user_id=f"{SERVICE_KEY_OWNER_ID_PREFIX}{uuid.uuid4().hex}",
+        alias=alias,
+        allowed_models=creator.allowed_models,
+        allowed_tools=creator.allowed_tools,
+    )
+    db.add(owner)
+    return owner
+
+
 async def get_or_create_attribution_user(db: AsyncSession, *, user_id: str, alias: str | None) -> User:
     """Return the request-plane owner a tenancy identity bills through.
 
@@ -112,6 +130,49 @@ async def live_attribution_user_ids(db: AsyncSession, user_ids: Sequence[str]) -
         return set()
     rows = await db.execute(select(User.user_id).where(User.user_id.in_(list(user_ids)), User.deleted_at.is_(None)))
     return set(rows.scalars().all())
+
+
+async def lock_live_users(db: AsyncSession | UnitOfWork, user_ids: Sequence[str]) -> set[str]:
+    """Lock the request-plane rows of ``user_ids`` until the caller commits, and return which are not deleted.
+
+    What serializes a user's deletion against anything granting that user access: each takes this lock first, so
+    whichever commits second sees the other's write. Rows are locked in id order, so two callers cannot deadlock.
+    """
+    if not user_ids:
+        return set()
+    session = session_for(db) if isinstance(db, UnitOfWork) else db
+    rows = await session.execute(
+        select(User.user_id, User.deleted_at)
+        .where(User.user_id.in_(list(user_ids)))
+        .order_by(User.user_id)
+        .with_for_update()
+    )
+    return {user_id for user_id, deleted in rows.tuples().all() if deleted is None}
+
+
+async def provision_attribution_users(db: AsyncSession, user_ids: Sequence[str]) -> set[str]:
+    """Mint a request-plane row for each of ``user_ids`` that has none, and return the ids whose row is live.
+
+    For a member who has neither a key nor a Playground request yet, so something can name them before they
+    first act. Unlike :func:`get_or_create_attribution_user`, nothing here revives a row: an insert that finds one
+    already there, including one created and deleted by another transaction since, leaves it as it is, because
+    deleting a user is an operator's revocation.
+
+    Nothing existing is locked here, and rows are inserted in id order, the order :func:`lock_live_users` takes:
+    a caller that then locks its users takes every lock in one order, so two such callers cannot deadlock. What
+    is returned is a plain read; a caller that relies on it until commit locks the rows itself.
+    """
+    if not user_ids:
+        return set()
+    existing = set((await db.execute(select(User.user_id).where(User.user_id.in_(list(user_ids))))).scalars().all())
+    for user_id in sorted(set(user_ids) - existing):
+        try:
+            async with db.begin_nested():
+                db.add(User(user_id=user_id, alias=None))
+                await db.flush()
+        except IntegrityError:
+            continue
+    return await live_attribution_user_ids(db, user_ids)
 
 
 async def attribution_spend(db: AsyncSession, user_ids: Sequence[str]) -> dict[str, User]:
@@ -263,6 +324,20 @@ async def count_users(db: AsyncSession, organization_id: uuid.UUID, filters: Use
     return int(total or 0)
 
 
+@dataclass(frozen=True)
+class BudgetUse:
+    """The budget a user is on and the user's use of it on every axis, with when its window ends."""
+
+    budget_id: str
+    spend: Decimal
+    reserved: Decimal
+    current_tokens: int
+    reserved_tokens: int
+    current_requests: int
+    reserved_requests: int
+    next_budget_reset_at: datetime | None
+
+
 class AccessLists(NamedTuple):
     """A user's or a key's ``allowed_models`` and ``allowed_tools``."""
 
@@ -271,10 +346,52 @@ class AccessLists(NamedTuple):
 
 
 class UserAccessRepository(BaseRepository[User, Never, Never]):
-    """Read users' model and search tool access lists."""
+    """Read users' model and search tool access lists and display names, and erase users."""
 
     def __init__(self, uow: UnitOfWork) -> None:
         super().__init__(uow, User)
+
+    async def ensure_app_key_owner(self, user_id: str, alias: str) -> bool:
+        """Provision without revival and hold the owner through key issuance.
+
+        Deletion locks the same row before sweeping its keys. A competing creator
+        may win the insert, so read and lock its current state after the savepoint.
+        """
+        statement = (
+            select(User).where(User.user_id == user_id).with_for_update().execution_options(populate_existing=True)
+        )
+        owner = (await self.db.execute(statement)).scalar_one_or_none()
+        if owner is None:
+            try:
+                async with self.db.begin_nested():
+                    self.db.add(User(user_id=user_id, alias=alias))
+            except IntegrityError:
+                pass
+            owner = (await self.db.execute(statement)).scalar_one()
+        return owner.deleted_at is None and not owner.blocked
+
+    async def lock_with_end_users(self, user_id: str) -> list[str]:
+        """Lock ``user_id``'s row and its end users' rows, and return the ids of those that exist."""
+        statement = (
+            select(User.user_id)
+            .where(or_(User.user_id == user_id, User.parent_user_id == user_id))
+            .order_by(User.user_id)
+            .with_for_update()
+        )
+        return list((await self.db.execute(statement)).scalars().all())
+
+    async def add_tombstone(self) -> str:
+        """Stage a new deleted user with no name, for rows kept after the users they belonged to are gone."""
+        tombstone = User(user_id=str(uuid.uuid4()), alias=None, deleted_at=datetime.now(UTC))
+        self.db.add(tombstone)
+        await self.db.flush()
+        return tombstone.user_id
+
+    async def remove_all(self, user_ids: Collection[str]) -> None:
+        """Stage the deletion of these users, which takes their keys and the other rows that cascade with them."""
+        if not user_ids:
+            return
+        await self.db.execute(delete(User).where(User.user_id.in_(list(user_ids))))
 
     async def access_lists(self, user_id: str) -> AccessLists | None:
         """A user's access lists, or ``None`` when there is no such user."""
@@ -291,3 +408,28 @@ class UserAccessRepository(BaseRepository[User, Never, Never]):
             )
         ).all()
         return {user_id: AccessLists(models, tools) for user_id, models, tools in rows}
+
+    async def budget_use(self, user_id: str) -> BudgetUse | None:
+        """The budget a live user is on and the user's use of it, or None when it is on none."""
+        row = (
+            await self.db.execute(
+                select(
+                    User.budget_id,
+                    User.spend,
+                    User.reserved,
+                    User.current_tokens,
+                    User.reserved_tokens,
+                    User.current_requests,
+                    User.reserved_requests,
+                    User.next_budget_reset_at,
+                ).where(User.user_id == user_id, User.deleted_at.is_(None), User.budget_id.is_not(None))
+            )
+        ).first()
+        return None if row is None else BudgetUse(**row._asdict())
+
+    async def aliases(self, user_ids: Collection[str]) -> dict[str, str | None]:
+        """Each of these users that has a row, deleted or not, to its alias."""
+        if not user_ids:
+            return {}
+        rows = (await self.db.execute(select(User.user_id, User.alias).where(User.user_id.in_(sorted(user_ids))))).all()
+        return {user_id: alias for user_id, alias in rows}

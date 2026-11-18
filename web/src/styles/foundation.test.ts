@@ -724,6 +724,7 @@ describe("a table is a region, not a card", () => {
   const PLACES = [
     "otari-accounts-table",
     "otari-activity-table",
+    "otari-blocked-emails-table",
     "otari-breakdown",
     "otari-budgets-table",
     "otari-domains-table",
@@ -732,7 +733,6 @@ describe("a table is a region, not a card", () => {
     "otari-members-table",
     "otari-models-table",
     "otari-offered-models-table",
-    "otari-overview-activity",
     "otari-provider-keys-table",
     "otari-providers-table",
     "otari-routing-table",
@@ -897,15 +897,13 @@ describe("semantic tokens only", () => {
   // Every source file that styles anything, which is the whole of `src`: there
   // is no bridge tree left to be exempt, so the rule is the repo's.
   const SRC = join(WEB, "src")
-  // The one deliberate exception, and it says why at the top of the file: the
-  // share card is rasterized through an <img>-loaded SVG document, where a
-  // custom property does not resolve, so its palette has to be literal.
-  const EXCEPTIONS = new Set(["features/usage/ShareCard.tsx"])
+  // The vendored wave engine is left out: an upstream library kept
+  // comparable with its source, painting to its own canvas.
   const sources = walk(SRC).filter(
     (name) =>
       /\.tsx?$/.test(name) &&
       !/\.test\.tsx?$/.test(name) &&
-      !EXCEPTIONS.has(name),
+      !name.startsWith("features/onboarding/vendor/"),
   )
 
   it("covers the source tree", () => {
@@ -1165,10 +1163,6 @@ describe("content text wears a type role", () => {
     [
       "features/models/AccessListControl.tsx",
       "the blocked-from-every-model (or search tool) state banner, ruled in ModelScopeControl before it moved here",
-    ],
-    [
-      "features/overview/OverviewPage.tsx",
-      "an error-count figure and a chart's figcaption",
     ],
     [
       "design-system/metrics/KpiCell.tsx",
@@ -1432,6 +1426,20 @@ describe("no font size is written at a call site", () => {
 // call sites that do not meet it, so it is enforced as one floor in the
 // stylesheet rather than as a className each of them has to remember.
 describe("the phone viewport's touch-target floor", () => {
+  it("raises every form field to 44px below the shell's mobile boundary", () => {
+    // The places carry their own phone height; this is the one for a field in
+    // no place, so a dialog's fields match the 44px buttons under them.
+    expect(CSS).toMatch(
+      /@media \(max-width: 767px\) \{\s*:root \{\s*--field-height: 2\.75rem;/,
+    )
+  })
+
+  it("keeps a text field at 16px on a touch screen, so iOS does not zoom into it", () => {
+    expect(CSS).toMatch(
+      /@media \(pointer: coarse\) \{[^}]*textarea,\s*select \{\s*font-size: max\(1rem, 16px\);/,
+    )
+  })
+
   it("raises every HeroUI button to 44px below the shell's mobile boundary", () => {
     // `[data-slot="button"]` is HeroUI's Button and nothing else, and 767px is
     // AppShell's own MOBILE_QUERY, so the rule turns on exactly where the
@@ -1741,10 +1749,9 @@ describe("buttons come in three variants", () => {
     ).toEqual([])
   })
 
-  // The two shapes the first version of this scan reported green on. Six
-  // retired `outline` Buttons survived in `features/usage/ShareDialog.tsx`
-  // behind the first of them, so these are regression tests and not
-  // hypotheticals.
+  // The two shapes the first version of this scan reported green on, which
+  // let six retired `outline` Buttons survive, so these are regression tests
+  // and not hypotheticals.
   it("reads a retired variant inside a conditional expression", () => {
     expect(
       offenders('<Button variant={on ? "primary" : "outline"}>Go</Button>'),
@@ -1854,6 +1861,8 @@ describe("the catalog shows every prop", () => {
   const CANNOT_BE_SHOWN: Record<string, string> = {
     "actions/CopyButton.selectOnFailure":
       "the fallback for a refused clipboard write, which a story cannot provoke without breaking the clipboard",
+    "feedback/Dialog.faceRef":
+      "a handle on the element around the frame's face for a caller's own transition, which renders nothing of its own",
     "feedback/FormDialog.returnFocusRef":
       "where focus lands after the frame is gone, which needs the trigger to unmount with it: a story could pass the prop and would demonstrate nothing",
     "feedback/FormDialog.target":

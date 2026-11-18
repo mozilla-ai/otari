@@ -10,13 +10,15 @@ import {
 } from "react-icons/fi"
 
 import { IconButton } from "@/design-system/actions/IconButton"
+import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
 import { SearchField } from "@/design-system/forms/SearchField"
 import { copyToClipboard } from "@/design-system/helpers/clipboard"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
 
-import { formatDuration, formatRelativeTime } from "./format"
+import { formatDuration, formatRelativeTime, plural } from "./format"
 import { type Format, IOBlock } from "./IOBlock"
 import { LevelChip } from "./LevelChip"
+import { NoInputNote } from "./NoInputNote"
 import { TypeMark } from "./observationTypes"
 import { matchesSearch } from "./search"
 import { buildTree, flattenTreeOrder } from "./tree"
@@ -101,8 +103,8 @@ export function LogView({ trace, format }: { trace: Trace; format: Format }) {
     <div className="flex min-w-0 flex-1 flex-col">
       <div className="otari-toolbar flex h-11 shrink-0 items-center gap-1 border-b border-border px-2">
         <SearchField
-          label="Search observations"
-          placeholder="Search observations..."
+          label="Search spans"
+          placeholder="Search spans"
           value={query}
           onChange={setQuery}
           className="min-w-0 flex-1"
@@ -153,11 +155,14 @@ export function LogView({ trace, format }: { trace: Trace; format: Format }) {
           className={`${gridClass(showMs)} sticky top-0 z-10 min-h-6 border-b border-border bg-surface py-0.5 text-overline`}
         >
           <span />
-          <span>Observation</span>
+          <span>Span</span>
           <span className="text-right">Depth</span>
           <span className="text-right">Start</span>
           <span className="text-right">Duration</span>
         </div>
+        {visible.length === 0 ? (
+          <EmptyMessage>No spans match this search.</EmptyMessage>
+        ) : null}
         {visible.map(({ node }) => {
           const { obs } = node
           const isOpen = expanded.has(obs.id)
@@ -178,7 +183,7 @@ export function LogView({ trace, format }: { trace: Trace; format: Format }) {
                   className="flex min-w-0 items-center gap-2"
                   style={{ paddingLeft: indent ? node.depth * INDENT_PX : 0 }}
                 >
-                  <TypeMark type={obs.type} />
+                  <TypeMark type={obs.type} className="size-4 shrink-0" />
                   <span className="truncate text-body">
                     {obs.name} ({obs.id.slice(0, 8)})
                   </span>
@@ -188,7 +193,7 @@ export function LogView({ trace, format }: { trace: Trace; format: Format }) {
                   />
                   {childCount > 0 ? (
                     <span className="shrink-0 text-caption text-subtle">
-                      {childCount} {childCount === 1 ? "item" : "items"}
+                      {plural(childCount, "span")}
                     </span>
                   ) : null}
                 </span>
@@ -204,8 +209,15 @@ export function LogView({ trace, format }: { trace: Trace; format: Format }) {
               </button>
               {isOpen ? (
                 <div className="flex flex-col gap-4 border-t border-border bg-surface-alt px-4 py-3">
-                  {obs.input == null && obs.output == null ? (
-                    <span className="text-caption">No input or output</span>
+                  {obs.input == null && obs.noInput ? (
+                    <NoInputNote noInput={obs.noInput} />
+                  ) : null}
+                  {obs.input == null && obs.gate?.evidence ? (
+                    <IOBlock
+                      label="What it checked"
+                      value={obs.gate.evidence}
+                      format={format}
+                    />
                   ) : null}
                   {obs.input != null ? (
                     <IOBlock label="Input" value={obs.input} format={format} />

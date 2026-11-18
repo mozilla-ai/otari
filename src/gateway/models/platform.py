@@ -7,6 +7,11 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base
 
+# The ``RuntimeSetting.key`` naming the deployment's bootstrap operator. Deliberately not a
+# SETTABLE_KEY, so runtime_settings_service ignores it as it ignores the master-key hash and the
+# dashboard-session marker.
+BOOTSTRAP_IDENTITY_KEY = "tenancy_bootstrap_user_id"
+
 
 class RuntimeSetting(Base):
     """A persisted override for a runtime-toggleable config flag.

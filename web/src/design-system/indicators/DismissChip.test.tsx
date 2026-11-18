@@ -7,9 +7,9 @@ import { DismissChip } from "@/design-system/indicators/DismissChip"
  * A value somebody chose, with the way to unchoose it, and two claims worth
  * holding to.
  *
- * The first is a target-size claim: the docstring says the dismiss is "a real
- * 24px target holding a 12px glyph", the point being that the control reads
- * small and is not. That is the third such claim in this component and the
+ * The first is a target-size claim: the docstring says the dismiss is drawn as
+ * a 24px square holding a 12px glyph and takes a 44px hit area on touch, the
+ * point being that the control reads small and is not. That is the third such claim in this component and the
  * first two shipped untested, which is how a quiet control ends up quietly
  * unpressable.
  *
@@ -39,6 +39,15 @@ describe("DismissChip", () => {
     const glyph = dismiss().querySelector("svg") as SVGElement
     expect([...glyph.classList]).toContain("h-3")
     expect([...glyph.classList]).toContain("w-3")
+  })
+
+  it("grows the hit area to 44px on a coarse pointer without growing the button", () => {
+    render(<DismissChip value="gpt-5.6" onDismiss={() => undefined} />)
+    // 24px drawn plus a 10px bleed each side. A guard on the classes, not a
+    // measurement: the browser measurement is in the PR that added them.
+    const classes = [...dismiss().classList]
+    expect(classes).toContain("pointer-coarse:before:absolute")
+    expect(classes).toContain("pointer-coarse:before:-inset-2.5")
   })
 
   it("hides the mark from assistive tech, which reads the button instead", () => {

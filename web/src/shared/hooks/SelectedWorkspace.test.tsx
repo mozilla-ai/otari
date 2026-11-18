@@ -21,10 +21,11 @@ function mockContext(
 }
 
 function Probe() {
-  const { selected, memberships, select } = useSelectedWorkspace()
+  const { selected, memberships, select, isSettled } = useSelectedWorkspace()
   return (
     <div>
       <span data-testid="selected">{selected?.name ?? "none"}</span>
+      <span data-testid="settled">{isSettled ? "settled" : "pending"}</span>
       <span data-testid="count">{memberships.length}</span>
       {memberships.map((m) => (
         <button
@@ -102,6 +103,41 @@ describe("SelectedWorkspace", () => {
     renderProbe()
 
     expect(await screen.findByTestId("count")).toHaveTextContent("0")
+    expect(screen.getByTestId("selected")).toHaveTextContent("none")
+  })
+
+  it("settles in the same render that selects the workspace", async () => {
+    let answer: (response: Response) => void = () => undefined
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      () =>
+        new Promise<Response>((resolve) => {
+          answer = resolve
+        }),
+    )
+    renderProbe()
+    expect(screen.getByTestId("settled")).toHaveTextContent("pending")
+
+    answer(
+      Response.json(
+        organizationContext({
+          workspace_memberships: [
+            { workspace_id: ALPHA, name: "Alpha", role: "member" },
+          ],
+        }),
+      ),
+    )
+
+    expect(await screen.findByText("settled")).toBeInTheDocument()
+    expect(screen.getByTestId("selected")).toHaveTextContent("Alpha")
+  })
+
+  it("settles when the context read fails, with no workspace selected", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json({ detail: "down" }, { status: 503 }),
+    )
+    renderProbe()
+
+    expect(await screen.findByText("settled")).toBeInTheDocument()
     expect(screen.getByTestId("selected")).toHaveTextContent("none")
   })
 })

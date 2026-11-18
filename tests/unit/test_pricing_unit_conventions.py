@@ -1,7 +1,7 @@
 """How a rate in a unit other than tokens reads ``input_price_per_million``, and what it holds before dispatch.
 
-A per-request rate is USD per million requests and an image rate is raw USD per
-image. Which meter a rate prices is ``price_usage``'s rule, pinned in
+A per-request rate is USD per million requests and an image rate is USD per
+million images. Which meter a rate prices is ``price_usage``'s rule, pinned in
 ``test_usage_pricing.py``; this file pins the readings the estimates and the
 search units rest on.
 """
@@ -12,8 +12,8 @@ import pytest
 
 from gateway.core.metered_pricing import price_request
 from gateway.models.pricing import ModelPricing
-from gateway.services.budgets import count_estimate, estimate_cost, rerank_estimate
-from gateway.services.pricing import billed_search_units, price_usage
+from gateway.services.budgets import count_estimate, estimate_cost, report_estimate, rerank_estimate
+from gateway.services.pricing import Quantities, Slot, billed_search_units, price_usage
 from gateway.services.pricing_service import (
     flat_request_cost,
     metered_search_units,
@@ -21,7 +21,7 @@ from gateway.services.pricing_service import (
 )
 
 
-def _pricing(rate: object, *, unit: str = "tokens") -> ModelPricing:
+def _pricing(rate: object, *, unit: str = "token") -> ModelPricing:
     return ModelPricing(
         model_key="openai:whatever",
         input_price_per_million=rate,
@@ -45,7 +45,7 @@ def test_the_per_request_reading_treats_an_absent_or_unusable_rate_as_free() -> 
 
 def test_a_per_request_endpoint_and_a_per_request_model_write_the_same_charge_line() -> None:
     """Audio and moderations settle through the same line the cost core writes for a completion."""
-    pricing = _pricing(Decimal(5000), unit="requests")
+    pricing = _pricing(Decimal(5000), unit="request")
 
     cost, meters, lines = price_request(pricing)
     charge = price_usage(pricing, tokens=None, units={"requests": 1})
@@ -56,7 +56,7 @@ def test_a_per_request_endpoint_and_a_per_request_model_write_the_same_charge_li
 
 
 def test_the_budget_estimate_for_a_per_request_model_is_its_flat_price() -> None:
-    pricing = _pricing(Decimal(5000), unit="requests")
+    pricing = _pricing(Decimal(5000), unit="request")
 
     estimate = estimate_cost(pricing, prompt_chars=40_000, max_output_tokens=None, default_output_tokens=4096)
 
@@ -64,7 +64,7 @@ def test_the_budget_estimate_for_a_per_request_model_is_its_flat_price() -> None
 
 
 def _per_request_pricing(rate: object = Decimal(2000)) -> ModelPricing:
-    return _pricing(rate, unit="requests")
+    return _pricing(rate, unit="request")
 
 
 def _per_token_pricing() -> ModelPricing:
@@ -127,24 +127,50 @@ def test_rerank_on_a_token_rate_holds_its_input_tokens() -> None:
 
 
 def test_a_count_holds_exactly_what_it_settles_at() -> None:
-    images_rate = _pricing(Decimal(40000), unit="images")
+    images_rate = _pricing(Decimal(40000), unit="image")
 
     assert count_estimate(images_rate, meter="images", count=3) == Decimal("0.12")
     assert count_estimate(_per_request_pricing(), meter="images", count=3) == Decimal("0.002")
     assert count_estimate(_per_request_pricing(), meter="requests", count=1) == Decimal("0.002")
-    # A token rate keeps the legacy reading on these endpoints, so it holds what it settles at.
-    assert count_estimate(_pricing(Decimal("0.04")), meter="images", count=3) == Decimal("0.12")
+    # A token rate prices tokens, which a count does not report, so it holds nothing.
+    assert count_estimate(_pricing(Decimal("0.04")), meter="images", count=3) == Decimal(0)
+
+
+def test_a_report_holds_exactly_what_it_settles_at() -> None:
+    """The slot the endpoint bills under prices the quantity the request says it will report."""
+    per_megapixel = ModelPricing(
+        model_key="openai:whatever",
+        input_price_per_million=Decimal(0),
+        output_price_per_million=Decimal(0),
+        unit="megapixel",
+        rates={"image": {"output": {"price": 0.05, "unit": "megapixel"}}},
+    )
+    slot: Slot = ("image", "output")
+    quantities: Quantities = {"image": 3, "megapixel": Decimal("3.145728")}
+
+    assert report_estimate(per_megapixel, slot=slot, quantities=quantities, units={"images": 3}) == Decimal("0.157286")
+    assert report_estimate(
+        _pricing(Decimal(40000), unit="image"), slot=slot, quantities=quantities, units={"images": 3}
+    ) == Decimal("0.12")
+    assert report_estimate(_per_request_pricing(), slot=slot, quantities=quantities, units={"images": 3}) == Decimal(
+        "0.002"
+    )
+    # A quantity the request cannot measure holds nothing at a rate in that unit.
+    assert report_estimate(per_megapixel, slot=slot, quantities={"image": 3}, units={"images": 3}) == Decimal(0)
+    # A hostile quantity cannot hold a credit.
+    assert report_estimate(per_megapixel, slot=slot, quantities={"megapixel": Decimal(-4)}, units={}) == Decimal(0)
+    assert report_estimate(None, slot=slot, quantities=quantities, units={"images": 3}) == Decimal(0)
 
 
 @pytest.mark.parametrize("count", [-5, 10**12])
 def test_a_count_estimate_is_held_within_the_reportable_range(count: int) -> None:
     """A caller's ``n`` cannot make the hold raise or go negative; the provider refuses what it cannot serve."""
-    assert count_estimate(_pricing(Decimal(40000), unit="images"), meter="images", count=count) >= 0
+    assert count_estimate(_pricing(Decimal(40000), unit="image"), meter="images", count=count) >= 0
 
 
 def test_an_unpriced_count_holds_nothing() -> None:
     assert count_estimate(None, meter="images", count=2) == Decimal(0)
-    assert count_estimate(_pricing(Decimal("0.04"), unit="images"), meter="requests", count=1) == Decimal(0)
+    assert count_estimate(_pricing(Decimal("0.04"), unit="image"), meter="requests", count=1) == Decimal(0)
 
 
 def test_billed_search_units_round_up_and_floor_at_one() -> None:

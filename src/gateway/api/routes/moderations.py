@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
+from gateway.api.key_scopes import key_scope
 from gateway.api.routes._passthrough import run_passthrough
 from gateway.core.config import GatewayConfig
 from gateway.models.api_keys import APIKey
@@ -17,6 +18,7 @@ from gateway.services.budgets import count_estimate
 from gateway.services.inference import MODERATION_BILLING
 from gateway.services.log_writer import LogWriter
 from gateway.services.provider_kwargs import ResolvedProvider
+from gateway.types.key_scope import KeyScope
 from gateway.types.moderation import ModerationResponse
 
 # Locked phrasing — cross-SDK error contract. Do not reword.
@@ -48,7 +50,7 @@ def _map_unsupported_moderation(e: Exception) -> HTTPException | None:
     return None
 
 
-@router.post("/moderations", response_model=ModerationResponse)
+@router.post("/moderations", response_model=ModerationResponse, openapi_extra=key_scope(KeyScope.INFERENCE_RUN))
 async def create_moderation(
     raw_request: Request,
     response: Response,
@@ -67,13 +69,9 @@ async def create_moderation(
     - API key without user field: Use the shared "default" user
     """
 
-    # Moderations is exempt from require_pricing: it is free at most providers
-    # and is intentionally treated as $0 when unpriced (no "No pricing
-    # configured" warning). Pricing, when present, is a flat per-request rate
-    # (see ``price_usage``); moderation has no token usage. Only an explicitly
-    # configured rate counts (pricing_use_defaults=False below): models.dev
-    # quotes per million tokens, so a moderation model whose name matches a chat
-    # model in that dataset would otherwise bill a token rate per request.
+    # Moderations is exempt from require_pricing: most providers run it free,
+    # and a free rate settles it at $0. A per-request rate bills one request; a
+    # token rate prices nothing, because a moderation reports no tokens.
     def estimate(pricing: ModelPricing | None) -> Decimal:
         return count_estimate(pricing, meter="requests", count=1)
 
@@ -99,7 +97,6 @@ async def create_moderation(
         user=request.user,
         call_provider=call_provider,
         request_params=request.model_fields_set,
-        pricing_use_defaults=False,
         estimate=estimate,
         billing=MODERATION_BILLING,
         map_provider_error=_map_unsupported_moderation,

@@ -87,20 +87,6 @@ describe("summarizeTrace", () => {
     expect(summary.totalCost).toBe(0.75)
   })
 
-  it("takes the worst level any span reached", () => {
-    const levels = (...each: Observation["level"][]) =>
-      summarizeTrace(
-        trace(
-          each.map((level, index) => observation({ id: `${index}`, level })),
-        ),
-      ).level
-
-    expect(levels("DEFAULT", "DEFAULT")).toBe("DEFAULT")
-    expect(levels("DEFAULT", "WARNING")).toBe("WARNING")
-    expect(levels("WARNING", "ERROR", "DEFAULT")).toBe("ERROR")
-    expect(levels("ERROR", "WARNING")).toBe("ERROR")
-  })
-
   it("lists each model once", () => {
     const summary = summarizeTrace(
       trace([
@@ -113,7 +99,7 @@ describe("summarizeTrace", () => {
     expect(summary.models).toEqual(["gpt-5", "claude-opus"])
   })
 
-  it("reads an empty session as nothing spent at the default level", () => {
+  it("reads an empty session as nothing spent", () => {
     expect(summarizeTrace(trace([]))).toEqual({
       latencyMs: 0,
       promptTokens: 0,
@@ -123,7 +109,6 @@ describe("summarizeTrace", () => {
       totalTokens: 0,
       totalCost: 0,
       models: [],
-      level: "DEFAULT",
     })
   })
 })

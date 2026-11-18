@@ -18,22 +18,40 @@ wrappers the routes call.
 
 from __future__ import annotations
 
-import json
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import aclosing
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
-from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice, PromptTokensDetails
+from any_llm.types.completion import (
+    CacheCreationTokenDetails,
+    ChatCompletionChunk,
+    ChoiceDelta,
+    ChunkChoice,
+    CompletionTokensDetails,
+    PromptTokensDetails,
+    ServerToolUsage,
+)
 
 from gateway.core.env import otari_env
+from gateway.core.usage import (
+    cache_read_tokens_of,
+    cache_write_1h_tokens_of,
+    cache_write_tokens_of,
+    provider_web_searches_of,
+    reasoning_tokens_of,
+)
 from gateway.log_config import logger
 from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT
 from gateway.services._tool_loop import (
+    INVALID_ARGUMENTS_ERROR,
+    AnsweredRounds,
     MaxToolIterationsExceeded,
+    RoundGate,
     StreamAction,
     ToolBackend,
     log_tool_failure,
+    parse_tool_arguments,
     run_tool_loop,
     run_tool_loop_stream,
     tool_failure_detail,
@@ -47,8 +65,10 @@ from gateway.services.tools import (
     OTARI_TOOL_CALLS_FIELD,
     Dialect,
     NativeCall,
+    Refusal,
     ToolUseBudget,
     is_capped_call,
+    mcp_entry,
     native_rendering,
     owning_backend,
 )
@@ -64,7 +84,9 @@ __all__ = [
     "MAX_TOOL_ITERATIONS_CAP",
     "PURPOSE_HINT_HEADER",
     "TOOL_ACTIVITY_FIELD",
+    "AnsweredRounds",
     "MaxToolIterationsExceeded",
+    "RoundGate",
     "ToolBackend",
     "inject_purpose_hints",
     "mcp_tool_loop",
@@ -231,31 +253,37 @@ async def _run_owned_calls(
     That's the standard idiom for "treat tool failures as recoverable, let
     cancellation propagate".
 
-    A call past ``budget`` is refused the same way, as a tool error the model reads.
+    A call past ``budget``, or one whose arguments are not a JSON object, is refused
+    the same way, as a tool error the model reads.
 
     For a call to one of ``native_tools``, the request's tools announced in
-    ``otari_tool_calls``, this yields ``(False, entries)`` just before the call runs
-    and ``(True, entries)`` right after it returns, so a stream can send each while
-    the call waits or before the next one starts. A refused call yields only its
-    ended entries, since nothing ran.
+    ``otari_tool_calls``, or to an MCP server's tool, this yields ``(False, entries)``
+    just before the call runs and ``(True, entries)`` right after it returns, so a
+    stream can send each while the call waits or before the next one starts. A
+    refused call yields only its ended entries, since nothing ran.
     """
     for tc in mcp_calls:
         name = tc["function"]["name"]
-        try:
-            args = json.loads(tc["function"]["arguments"] or "{}")
-        except json.JSONDecodeError:
-            args = {}
+        args = parse_tool_arguments(name, tc["function"]["arguments"])
         rendering = native_rendering(name, Dialect.CHAT) if name in native_tools else None
-        call = NativeCall(name, tc["id"] or "", args if isinstance(args, dict) else {})
+        call = NativeCall(name, tc["id"] or "", args or {})
+        if args is None:
+            results.append({"role": "tool", "tool_call_id": tc["id"] or "", "content": INVALID_ARGUMENTS_ERROR})
+            if rendering is not None:
+                yield True, rendering.refused(call, Refusal.INVALID_INPUT)
+            continue
         capped = is_capped_call(budget, pool, name)
         if capped and budget is not None and budget.exhausted(name):
             results.append({"role": "tool", "tool_call_id": tc["id"] or "", "content": MAX_USES_EXCEEDED_ERROR})
             if rendering is not None:
-                yield True, rendering.refused(call)
+                yield True, rendering.refused(call, Refusal.CALL_LIMIT)
             continue
+        owner = owning_backend(pool, name)
+        server = _mcp_server(owner, name) if rendering is None else None
         if rendering is not None:
             yield False, rendering.started(call)
-        owner = owning_backend(pool, name)
+        elif server is not None:
+            yield False, [mcp_entry(call, server, "in_progress")]
         try:
             text = await owner.call_tool(name, args)
         except MaxToolIterationsExceeded:
@@ -263,7 +291,7 @@ async def _run_owned_calls(
             # backend, after its started entry went out, so the entry ends before the
             # request fails. On the libraries, a call past the limit returns a tool error.
             if rendering is not None:
-                yield True, rendering.refused(call)
+                yield True, rendering.refused(call, Refusal.CALL_LIMIT)
             raise
         except Exception as exc:  # noqa: BLE001 — see docstring
             detail = tool_failure_detail(owner, name)
@@ -275,6 +303,14 @@ async def _run_owned_calls(
         results.append({"role": "tool", "tool_call_id": tc["id"] or "", "content": text})
         if rendering is not None:
             yield True, rendering.ran(replace(call, failed=is_tool_error(text)), owner)
+        elif server is not None:
+            yield True, [mcp_entry(call, server, "failed" if is_tool_error(text) else "completed", text)]
+
+
+def _mcp_server(backend: ToolBackend, name: str) -> str | None:
+    """The MCP server ``backend`` calls ``name`` on, or ``None`` for a tool no MCP server supplied."""
+    server_name_for_tool = getattr(backend, "server_name_for_tool", None)
+    return server_name_for_tool(name) if callable(server_name_for_tool) else None
 
 
 async def _execute_mcp_calls(
@@ -324,13 +360,20 @@ class _ChatTotals:
 
     ``tool_calls`` holds the ended ``otari_tool_calls`` entries a response that is not
     streamed carries. A stream sends each entry as its call starts and ends instead,
-    so it stays empty there.
+    so it stays empty there. ``stream_id`` is the id of a stream's first chunk, which
+    every later round's chunks are sent under.
     """
 
     prompt: int = 0
     completion: int = 0
     cache_read: int = 0
+    cache_write: int = 0
+    cache_write_5m: int = 0
+    cache_write_1h: int = 0
+    reasoning: int = 0
+    web_searches: int = 0
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    stream_id: str | None = None
 
 
 def _add_usage(acc: _ChatTotals, usage: CompletionUsage | None) -> None:
@@ -339,33 +382,44 @@ def _add_usage(acc: _ChatTotals, usage: CompletionUsage | None) -> None:
         return
     acc.prompt += usage.prompt_tokens or 0
     acc.completion += usage.completion_tokens or 0
-    details = usage.prompt_tokens_details
-    if details is not None:
-        acc.cache_read += details.cached_tokens or 0
+    acc.cache_read += cache_read_tokens_of(usage)
+    acc.cache_write += cache_write_tokens_of(usage)
+    ttl = getattr(usage.prompt_tokens_details, "cache_creation_token_details", None)
+    acc.cache_write_5m += getattr(ttl, "ephemeral_5m_input_tokens", None) or 0
+    acc.cache_write_1h += cache_write_1h_tokens_of(usage)
+    acc.reasoning += reasoning_tokens_of(usage)
+    acc.web_searches += provider_web_searches_of(usage)
 
 
-def _fold_usage(
-    completion: ChatCompletion | ChatCompletionChunk,
-    prompt_total: int,
-    completion_total: int,
-    cache_read_total: int = 0,
-) -> None:
-    if completion.usage is None:
+def _fold_usage(completion: ChatCompletion | ChatCompletionChunk, totals: _ChatTotals) -> None:
+    """Report the loop's totals on ``completion.usage``, the one usage the request is billed on."""
+    usage = completion.usage
+    if usage is None:
         return
-    completion.usage.prompt_tokens = prompt_total
-    completion.usage.completion_tokens = completion_total
-    completion.usage.total_tokens = prompt_total + completion_total
-    # OpenAI chat reports cached tokens as a subset of prompt_tokens. Fold the
-    # accumulated read count back into prompt_tokens_details so the downstream
-    # GatewayUsage wrapper forwards the loop-wide total, not just the last
-    # iteration's slice. (Chat has no cache-write concept.)
-    details = completion.usage.prompt_tokens_details
+    usage.prompt_tokens = totals.prompt
+    usage.completion_tokens = totals.completion
+    usage.total_tokens = totals.prompt + totals.completion
+    # Chat counts cache reads and writes inside prompt_tokens and breaks them out in
+    # the details, which are created here when only an earlier round reported them.
+    details = usage.prompt_tokens_details
+    if details is None and (totals.cache_read or totals.cache_write):
+        details = usage.prompt_tokens_details = PromptTokensDetails()
     if details is not None:
-        details.cached_tokens = cache_read_total
-    elif cache_read_total > 0:
-        # The final iteration carried no prompt_tokens_details, but an earlier
-        # one did; create the sub-object so the accumulated count is not lost.
-        completion.usage.prompt_tokens_details = PromptTokensDetails(cached_tokens=cache_read_total)
+        details.cached_tokens = totals.cache_read
+        if totals.cache_write or details.cache_write_tokens is not None:
+            details.cache_write_tokens = totals.cache_write
+        if totals.cache_write_5m or totals.cache_write_1h or details.cache_creation_token_details is not None:
+            details.cache_creation_token_details = CacheCreationTokenDetails(
+                ephemeral_5m_input_tokens=totals.cache_write_5m,
+                ephemeral_1h_input_tokens=totals.cache_write_1h,
+            )
+    reasoning = usage.completion_tokens_details
+    if reasoning is None and totals.reasoning:
+        reasoning = usage.completion_tokens_details = CompletionTokensDetails()
+    if reasoning is not None:
+        reasoning.reasoning_tokens = totals.reasoning
+    if totals.web_searches:
+        usage.server_tool_use = ServerToolUsage(web_search_requests=totals.web_searches)
 
 
 # The field a tool activity chunk carries. The Chat wire has no vocabulary for a
@@ -429,8 +483,9 @@ class _ChatStreamState:
         # official OpenAI client raise IndexError.
         self.visible_tool_index: dict[int, int] = {}
         self.next_visible_tool_index = 0
-        # The round's first upstream chunk: activity chunks copy its id, model and
-        # timestamp so they read as part of the same stream.
+        # The round's first upstream chunk with choices (its first chunk until one
+        # arrives): activity chunks copy its id, model and timestamp so they read as
+        # part of the same stream, and a choiceless preamble names no response.
         self.template: ChatCompletionChunk | None = None
 
     def deferred_terminal(self) -> list[ChatCompletionChunk]:
@@ -485,8 +540,11 @@ class _ChatToolLoopStrategy:
     def accumulate_usage(self, acc: _ChatTotals, result: ChatCompletion) -> None:
         _add_usage(acc, result.usage)
 
+    def output_tokens(self, acc: _ChatTotals) -> int:
+        return acc.completion
+
     def fold_usage(self, result: ChatCompletion, acc: _ChatTotals) -> None:
-        _fold_usage(result, acc.prompt, acc.completion, acc.cache_read)
+        _fold_usage(result, acc)
         # Every return path folds, so this is where the answer gains the report of
         # the calls the loop ran and the client never saw.
         if acc.tool_calls:
@@ -496,16 +554,18 @@ class _ChatToolLoopStrategy:
         return not result.choices or result.choices[0].finish_reason != "tool_calls"
 
     def split_owned(self, result: ChatCompletion, pool: ToolBackend) -> tuple[list[Any], bool]:
+        """The gateway's calls in the first choice, and whether the caller's own calls sit beside them."""
+        if not result.choices:
+            return [], False
         sdk_calls = result.choices[0].message.tool_calls or []
         # Duck-type the SDK tool-call: any object with a `.function` attribute is a
         # function tool-call. We avoid `isinstance` here because `acompletion`'s
         # return type uses the OpenAI SDK's class, while any_llm exposes a
         # same-named but distinct class alias.
         tool_calls = [_tool_call_dict(tc) for tc in sdk_calls if hasattr(tc, "function")]
-        return _execute_split(tool_calls, pool)
-
-    def exit_after_split(self, result: ChatCompletion) -> bool:
-        return False
+        owned, has_foreign = _execute_split(tool_calls, pool)
+        # A custom tool call is always the caller's: the gateway's tools are functions.
+        return owned, has_foreign or len(tool_calls) < len(sdk_calls)
 
     async def _run_into(self, pool: ToolBackend, owned: list[Any], acc: _ChatTotals | None) -> list[dict[str, Any]]:
         """Run ``owned``, adding each ended ``otari_tool_calls`` entry to ``acc`` for the answer to carry."""
@@ -519,15 +579,12 @@ class _ChatToolLoopStrategy:
         return await self._run_into(pool, owned, acc)
 
     def filter_owned(self, result: ChatCompletion, owned: list[Any], pool: ToolBackend) -> None:
-        # Mixed batch: the MCP-owned subset was executed internally so its
-        # work isn't wasted; filter those calls out of the returned completion
-        # so the caller only sees tool_calls it can itself dispatch. The
-        # conversation continues client-side; if the caller wants to keep
-        # using the gateway's MCP tools they'll send the foreign-tool results
-        # back on the next request.
+        """Drop the gateway's calls from the answer, so the caller only sees calls it can dispatch."""
         choice = result.choices[0]
         sdk_calls = choice.message.tool_calls or []
-        foreign_sdk_calls = [tc for tc in sdk_calls if hasattr(tc, "function") and not pool.owns_tool(tc.function.name)]
+        foreign_sdk_calls = [
+            tc for tc in sdk_calls if not (hasattr(tc, "function") and pool.owns_tool(tc.function.name))
+        ]
         try:
             choice.message.tool_calls = foreign_sdk_calls or None
         except (AttributeError, TypeError):
@@ -537,6 +594,12 @@ class _ChatToolLoopStrategy:
                 "MCP-mixed: could not filter tool_calls on response; client will see MCP calls "
                 "the gateway already executed (no-op on the client side).",
             )
+
+    def end_answer(self, result: ChatCompletion) -> None:
+        """End the round as an answer once the gateway's calls are dropped and none of the caller's remain."""
+        choice = result.choices[0]
+        if not choice.message.tool_calls:
+            choice.finish_reason = "stop"
 
     async def advance_transcript(
         self,
@@ -570,7 +633,15 @@ class _ChatToolLoopStrategy:
         pool: ToolBackend,
         acc: _ChatTotals,
     ) -> tuple[StreamAction, ChatCompletionChunk]:
-        if state.template is None:
+        # Each round is its own provider call with its own id, but the client reads
+        # the stream as one completion, so every chunk carries the first id. A
+        # preamble chunk with no choices names no response, so it does not set it.
+        if acc.stream_id is None:
+            if event.choices and event.id:
+                acc.stream_id = event.id
+        elif event.id != acc.stream_id:
+            event = event.model_copy(update={"id": acc.stream_id})
+        if state.template is None or (event.choices and not state.template.choices):
             state.template = event
         if state.first is None and event.choices:
             state.first = event
@@ -680,13 +751,24 @@ class _ChatToolLoopStrategy:
         async for chunk in self._run_reported(state, pool, []):
             yield chunk
 
+    def end_stream_answer(self, state: _ChatStreamState) -> None:
+        # Only the gateway's calls reach here, and they were never forwarded.
+        state.finish_reason = "stop"
+        if state.pending_terminal is not None:
+            for choice in state.pending_terminal.choices:
+                if choice.finish_reason == "tool_calls":
+                    choice.finish_reason = "stop"
+
     def terminal_events(self, state: _ChatStreamState, acc: _ChatTotals) -> list[ChatCompletionChunk]:
         carrier = state.usage_carrier()
         if carrier is not None:
             totals = replace(acc, tool_calls=[])
             _add_usage(totals, carrier.usage)
-            _fold_usage(carrier, totals.prompt, totals.completion, totals.cache_read)
+            _fold_usage(carrier, totals)
         return state.deferred_terminal()
+
+    def stream_output_tokens(self, acc: _ChatTotals) -> int:
+        return acc.completion
 
     def accumulate_stream_usage(self, acc: _ChatTotals, state: _ChatStreamState) -> None:
         carrier = state.usage_carrier()
@@ -771,6 +853,8 @@ async def mcp_tool_loop_stream(
     use_budget: ToolUseBudget | None = None,
     native_tools: frozenset[str] = frozenset(),
     emit_activity: bool = False,
+    on_first_response: Callable[[], None] | None = None,
+    round_gate: RoundGate | None = None,
 ) -> AsyncGenerator[ChatCompletionChunk, None]:
     """Yield chunks across multiple `acompletion(stream=True)` calls, with MCP execution between rounds.
 
@@ -782,8 +866,8 @@ async def mcp_tool_loop_stream(
     is the final answer", and most SDKs stop reading at that point; subsequent
     iterations' content would be silently truncated.
 
-    A call to one of ``native_tools`` is reported in an ``otari_tool_calls`` chunk
-    when it starts and another when it ends.
+    A call to one of ``native_tools`` or to an MCP server's tool is reported in an
+    ``otari_tool_calls`` chunk when it starts and another when it ends.
 
     The terminal chunk is forwarded in three cases:
       * the iteration ended with a non-``tool_calls`` finish_reason (e.g. ``stop``),
@@ -803,6 +887,8 @@ async def mcp_tool_loop_stream(
             completion_kwargs=completion_kwargs,
             pool=pool,
             max_iterations=max_iterations,
+            on_first_response=on_first_response,
+            round_gate=round_gate,
         )
     ) as inner:
         async for chunk in inner:
@@ -817,11 +903,12 @@ async def mcp_tool_loop(
     on_first_response: Callable[[], None] | None = None,
     use_budget: ToolUseBudget | None = None,
     native_tools: frozenset[str] = frozenset(),
+    round_gate: RoundGate | None = None,
 ) -> ChatCompletion:
     """Non-streaming variant. Accumulates usage across iterations into the returned completion.
 
     The completion carries the ended ``otari_tool_calls`` entry of each call to one of
-    ``native_tools``, across every round.
+    ``native_tools`` or to an MCP server's tool, across every round.
 
     ``on_first_response`` follows the provider lock-in contract documented on
     :func:`gateway.services._tool_loop.run_tool_loop`.
@@ -836,4 +923,5 @@ async def mcp_tool_loop(
         max_iterations=max_iterations,
         on_first_response=on_first_response,
         check_first_response=require_choices,
+        round_gate=round_gate,
     )

@@ -1,7 +1,8 @@
 import { Link } from "@tanstack/react-router"
 
 import { CodeBlock } from "@/design-system/content/CodeBlock"
-
+import { checksLabel } from "@/features/guardrails/guardrailRows"
+import { useIsOrganizationManager } from "@/features/organization/access"
 import { routerLabelOf, selectorText } from "./PolicyCells"
 import { PolicyGroup } from "./PolicyGroup"
 import {
@@ -25,6 +26,9 @@ function NoneSet() {
  * is the whole of it.
  */
 export function PolicyReadOnly({ row }: { row: RoutingRow }) {
+  // The Guardrails page is an organization owner's or admin's, so nobody else
+  // is pointed at it.
+  const isManager = useIsOrganizationManager()
   const { spec } = row
   const pool = buildInitialPool(spec)
   const target = findFallthroughTarget(spec)
@@ -94,19 +98,22 @@ export function PolicyReadOnly({ row }: { row: RoutingRow }) {
           <ul className="flex flex-col gap-1 text-sm text-foreground">
             {guardrails.map((guardrail) => (
               <li key={guardrail.profile}>
-                {guardrail.profile} ({guardrail.mode}, if the service is down:{" "}
+                {guardrail.profile} ({guardrail.mode}, checks{" "}
+                {checksLabel(guardrail).toLowerCase()}, if the service is down:{" "}
                 {guardrail.on_unavailable ?? "block"})
               </li>
             ))}
           </ul>
         )}
-        <p className="text-caption">
-          Profiles and the service are managed on the{" "}
-          <Link to="/tools/guardrails" className="text-link hover:underline">
-            Guardrails page
-          </Link>
-          .
-        </p>
+        {isManager ? (
+          <p className="text-caption">
+            Profiles and the service are managed on the{" "}
+            <Link to="/tools/guardrails" className="text-link hover:underline">
+              Guardrails page
+            </Link>
+            .
+          </p>
+        ) : null}
       </PolicyGroup>
       <PolicyGroup title="Stored spec" isReadOnly>
         <CodeBlock label="json" value={JSON.stringify(spec, null, 2)} />

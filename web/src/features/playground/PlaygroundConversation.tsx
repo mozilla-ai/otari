@@ -15,6 +15,7 @@ export function PlaygroundConversation({
   pinnedKeys,
   onTogglePin,
   onRegenerate,
+  stopPanel,
 }: {
   isComparing: boolean
   panelA: PanelState
@@ -28,6 +29,7 @@ export function PlaygroundConversation({
     panel: PanelState,
     setPanel: Dispatch<SetStateAction<PanelState>>,
   ) => void
+  stopPanel: (setPanel: Dispatch<SetStateAction<PanelState>>) => void
 }) {
   if (!isComparing)
     return (
@@ -74,18 +76,30 @@ export function PlaygroundConversation({
                 onTogglePin={onTogglePin}
                 unavailableKeys={other.model ? [other.model] : undefined}
                 // A panel's turns belong to the model that produced them, so
-                // changing either model drops that column's transcript. B is
-                // cleared as well when A takes its model, or its answers would
-                // sit under an unchosen picker and be sent to whatever is
-                // chosen next.
+                // changing either model drops that column's transcript and
+                // trace session. B is cleared as well when A takes its model,
+                // or its answers would sit under an unchosen picker and be
+                // sent to whatever is chosen next. A reply still streaming
+                // would land in the cleared column, so that column's is stopped
+                // first; the other column's keeps streaming.
                 onChange={(key) => {
-                  setPanel((prev) =>
-                    prev.model === key
-                      ? prev
-                      : { ...prev, model: key, turns: [] },
-                  )
-                  if (name === "A" && key === panelB.model)
-                    setPanelB((prev) => ({ ...prev, model: "", turns: [] }))
+                  if (key === panel.model) return
+                  stopPanel(setPanel)
+                  setPanel((prev) => ({
+                    ...prev,
+                    model: key,
+                    turns: [],
+                    sessionId: undefined,
+                  }))
+                  if (name === "A" && key === panelB.model) {
+                    stopPanel(setPanelB)
+                    setPanelB((prev) => ({
+                      ...prev,
+                      model: "",
+                      turns: [],
+                      sessionId: undefined,
+                    }))
+                  }
                 }}
                 className="min-w-0 flex-1"
               />

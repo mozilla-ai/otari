@@ -424,11 +424,10 @@ is `CodeExecutionPort` (see [ARCHITECTURE.md](../ARCHITECTURE.md)); a provider
 Otari does not ship is an adapter, and `scripts/check_code_execution_conformance.py`
 certifies a backend rather than an adapter.
 
-One setting does not carry over: `sandbox_session_image` (and the
-`sandbox_allowed_session_images` that curates it) names a container image,
-which is this contract's vocabulary. A hosted provider names workspaces its own
-way, so the `e2b` adapter ignores a pinned image and logs that it did. Pick the
-sandbox a run gets in the provider's own account instead.
+`sandbox_session_image` and `sandbox_allowed_session_images` name what the
+provider calls the sandbox a run gets: on `e2b`, a template's name or id, built
+in the provider's own account. The `e2b` adapter creates each sandbox from the
+session image as its template, and from E2B's default template when none is set.
 
 The isolation a run gets is the provider's too, and it is worth knowing what
 you traded for not running a container. What the reference backend confines,

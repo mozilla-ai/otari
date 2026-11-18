@@ -1,89 +1,93 @@
 import { expect, test } from "@playwright/test"
 
-import { login, table, tableRows, tileValue } from "./helpers"
-import { COUNTS, PARITY } from "./parity-data"
+import { login, nav, pickOption, table, tableRows } from "./helpers"
+import { PARITY } from "./parity-data"
 
 // The seeded fixture is shared, and nothing here mutates it, but the suite runs
 // one worker against one gateway either way (see web/playwright.config.ts).
 test.describe.configure({ mode: "serial" })
 
-const SEEDED = COUNTS.priced + COUNTS.unpriced + COUNTS.errors
-
-test.describe("overview", () => {
-  test("reports the gateway's own totals once it has traffic", async ({
+test.describe("Home and Sessions", () => {
+  test("opens on Home, with no getting-started screen on a working gateway", async ({
     page,
   }) => {
     await login(page)
-    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible()
-
-    // Onboarding is an empty-gateway state. With providers configured and usage
-    // recorded it has to be gone, or a working gateway keeps being told to set
-    // itself up. This is the assertion that broke once already: the panel used to
-    // gate on "no providers" alone, so a gateway serving imported usage through no
-    // local provider config still opened on a getting-started screen.
-    await expect(page.getByText("Get started with Otari")).toBeHidden()
-
-    const requests = tileValue(page, "Requests, last 30 days")
-    await expect(requests).not.toHaveText("—")
-    // At least the fixture: the gateway also carries whatever the onboarding
-    // flows left behind, so this is a floor rather than an equality.
-    const counted = Number((await requests.innerText()).replaceAll(",", ""))
-    expect(counted).toBeGreaterThanOrEqual(SEEDED)
-
-    // The priced half of the fixture is the only costed traffic on this gateway,
-    // so a dash (or a zero) here means pricing never reached the tiles.
-    const spend = tileValue(page, "Spend, last 30 days")
-    await expect(spend).toHaveText(/^\$/)
-    await expect(spend).not.toHaveText("$0.00")
-
-    // Errors are seeded, so the rate is a real percentage rather than the
-    // "unknown" dash a failed summary would leave. Not anchored at the end: a
-    // non-neutral rate also carries a status word ("Elevated"), which is there so
-    // the tile never reports its health through color alone.
-    await expect(tileValue(page, "Error rate, last 30 days")).toHaveText(
-      /^\d+(\.\d+)?%/,
-    )
-  })
-
-  test("previews the newest requests and opens the full log", async ({
-    page,
-  }) => {
-    await login(page)
-
-    const rows = tableRows(page, "Recent activity")
-    // The preview is capped at five rows (useUsageLogs({}, 0, 5)).
-    await expect(rows).toHaveCount(5)
-
-    // Newest first, unfiltered. The fixture's priced rows are the most recent
-    // traffic on the gateway (the parity seed runs last, and spreads its densest
-    // set over the shortest step), so the top row naming that model is what
-    // "newest first" means here. An ordering regression would put an older row,
-    // or a row from an earlier flow, at the top instead.
-    await expect(rows.first()).toContainText(PARITY.models.priced.model)
-
-    await page.getByRole("link", { name: "View all" }).click()
-    await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible()
-    await expect(table(page, "Activity log")).toBeVisible()
-  })
-
-  test("a budget near its limit is a way into budgets, not just a number", async ({
-    page,
-  }) => {
-    await login(page)
-    // Deliberately not the tile. A KPI cell is a read-only figure: the counts
-    // that are navigation were moved out of the strip on purpose, and the
-    // cells' stray tab stops were removed as keyboard noise, so making the
-    // number clickable would reverse both decisions. Do not "fix" this back.
-    //
-    // Two paths carry the intent instead. General navigation is the rail, which
-    // is what this asserts because it is here on every load. The acted-on path
-    // is the attention strip, which renders "N budgets near limit" as a link
-    // beside the dot that flagged it, and appears only when a budget actually
-    // needs acting on: the parity fixture creates no budget, so that one is
-    // covered where it can be made to happen, in OverviewPage.test.tsx.
-    await page.getByRole("link", { name: "Budgets", exact: true }).click()
     await expect(
-      page.getByRole("heading", { name: "Budgets", exact: true }),
+      page.getByRole("main").getByRole("heading", { name: "Home" }),
     ).toBeVisible()
+    // Onboarding is an empty-gateway state. With providers configured and
+    // usage recorded it has to be gone, or a working gateway keeps being told
+    // to set itself up.
+    await expect(page.getByText("Get started with Otari")).toBeHidden()
+  })
+
+  test("reports the window's spend, tokens and failures, and where it went", async ({
+    page,
+  }) => {
+    await login(page)
+    // The value beside each figure's label. The labels name the window, so
+    // they are matched by shape rather than by a day count.
+    const figure = (label: RegExp) =>
+      page
+        .getByRole("main")
+        .getByText(label)
+        .locator("xpath=following-sibling::span[1]")
+
+    const spent = figure(/^Spent(, \d+ days| this month)$/)
+    await expect(spent).toHaveText(/^\$/)
+    await expect(spent).not.toHaveText("$0.00")
+    // Tokens and failures come from different parts of the summary payload, so
+    // a dash in either is a regression of its own.
+    await expect(figure(/^Tokens(, \d+ days| this month)$/)).not.toHaveText("—")
+    await expect(figure(/^Failures$/)).not.toHaveText("—")
+
+    const where = page.getByRole("region", { name: "Where it went" })
+    // The radio itself is visually hidden behind its label, which is what a
+    // person presses.
+    await where
+      .getByRole("radiogroup", { name: "Break down by" })
+      .getByText("Models", { exact: true })
+      .click()
+    await expect(
+      where.getByRole("radio", { name: "Models", exact: true }),
+    ).toBeChecked()
+    await expect(tableRows(page, "Spend by models").first()).toBeVisible()
+    await expect(where).toContainText(PARITY.models.priced.model)
+  })
+
+  test("a window picked on one view carries to the other", async ({ page }) => {
+    await login(page)
+    await nav(page).getByRole("link", { name: "Sessions" }).click()
+    const views = page.getByRole("navigation", { name: "Sessions views" })
+    await views.getByRole("link", { name: "Requests" }).click()
+    await expect(page).toHaveURL(/\/requests/)
+
+    await pickOption(page, "Time range", "7d")
+    await expect(page).toHaveURL(/\/requests\?.*range=7d/)
+
+    await views.getByRole("link", { name: "Sessions" }).click()
+    await expect(page).toHaveURL(/\/sessions\?.*range=7d/)
+  })
+
+  test("the Requests view lists the newest requests first", async ({
+    page,
+  }) => {
+    await login(page)
+    await nav(page).getByRole("link", { name: "Sessions" }).click()
+    await page
+      .getByRole("navigation", { name: "Sessions views" })
+      .getByRole("link", { name: "Requests" })
+      .click()
+    await expect(page).toHaveURL(/\/requests/)
+    await expect(table(page, "Activity log")).toBeVisible()
+
+    // The fixture's priced rows are the most recent traffic on the gateway (the
+    // parity seed runs last, and spreads its densest set over the shortest
+    // step), so the top row naming that model is what "newest first" means
+    // here. An ordering regression would put an older row, or a row from an
+    // earlier flow, at the top instead.
+    await expect(tableRows(page, "Activity log").first()).toContainText(
+      PARITY.models.priced.model,
+    )
   })
 })

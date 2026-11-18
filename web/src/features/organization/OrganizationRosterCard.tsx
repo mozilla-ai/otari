@@ -2,12 +2,9 @@ import { Card } from "@heroui/react"
 
 import type { OrganizationMember } from "@/client"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { MemberIdentityCell } from "@/features/organization/MemberIdentityCell"
 import { MembershipStatusChip } from "@/features/organization/MembershipStatusChip"
-import {
-  memberLabel,
-  memberRowKey,
-  membershipLabel,
-} from "@/features/organization/roles"
+import { memberRowKey, membershipLabel } from "@/features/organization/roles"
 
 // Who belongs to the caller's organization, read-only, for a caller who is not
 // offered Organization > Members & roles: the roles matrix has the members list
@@ -32,14 +29,7 @@ export function OrganizationRosterCard({
       id: "member",
       header: "Member",
       isRowHeader: true,
-      cell: (member) => (
-        <div className="flex flex-col gap-0.5">
-          <span className="text-body">{memberLabel(member)}</span>
-          {member.email && member.full_name ? (
-            <span className="text-caption">{member.email}</span>
-          ) : null}
-        </div>
-      ),
+      cell: (member) => <MemberIdentityCell member={member} />,
     },
     {
       id: "role",
@@ -67,6 +57,7 @@ export function OrganizationRosterCard({
         <Card.Content className="p-0">
           <DataTable
             ariaLabel="Organization members"
+            mobileLayout="cards"
             columns={columns}
             rows={members}
             getRowKey={memberRowKey}

@@ -35,8 +35,8 @@ async def test_a_link_is_found_by_its_provider_identity_and_by_its_account(async
 
     assert by_identity is not None
     assert by_identity.user_id == member.id
-    assert by_identity.email_at_link == "ada@example.com"
-    assert by_identity.email_assertion_at_link is EmailAssertion.UNASSERTED
+    assert by_identity.asserted_email == "ada@example.com"
+    assert by_identity.email_assertion is EmailAssertion.UNASSERTED
     assert by_identity.linked_at.tzinfo is not None
     assert by_account is by_identity
     assert elsewhere is None

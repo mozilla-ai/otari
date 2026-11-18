@@ -9,13 +9,11 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     CurrentIdentity,
-    MembershipListenerDep,
-    UnitOfWorkDep,
-    get_db,
+    TraceServiceDep,
+    WorkspaceServiceDep,
     verify_master_key,
 )
 from gateway.api.routes.organizations import Message
@@ -30,7 +28,6 @@ from gateway.models.tenancy import (
     WorkspaceUpdate,
 )
 from gateway.schemas.organizations import OrganizationRefusal
-from gateway.services.tenancy import WorkspaceService
 
 # Auth is declared on the router, not left to arrive through `CurrentIdentity`:
 # every handler here happens to take one today, and a future handler that did
@@ -44,18 +41,6 @@ router = APIRouter(
 SURFACE = Surface("workspaces")
 
 WORKSPACE_ROLE_DESCRIPTION = "Role to assign in this workspace."
-
-
-def get_workspace_service(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    uow: UnitOfWorkDep,
-    membership_listener: MembershipListenerDep,
-) -> WorkspaceService:
-    """Build the workspace service on the request's session."""
-    return WorkspaceService(db, uow=uow, membership_listener=membership_listener)
-
-
-WorkspaceServiceDep = Annotated[WorkspaceService, Depends(get_workspace_service)]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -92,16 +77,32 @@ async def get_workspace(
 @router.patch("/{workspace_id}")
 async def update_workspace(
     service: WorkspaceServiceDep,
+    traces: TraceServiceDep,
     current_identity: CurrentIdentity,
     workspace_id: uuid.UUID,
     body: WorkspaceUpdate,
 ) -> WorkspacePublic:
-    """Rename a workspace or change its description."""
+    """Rename a workspace, change its description, or turn keeping its agent sessions' content or tool output on or off.
+
+    Turning either off keeps nothing new of it from the next export on; what is already
+    stored stays until it ages out, or until ``DELETE .../trace-content`` deletes it.
+    """
     return await service.update_workspace(
-        user=current_identity,
-        workspace_id=workspace_id,
-        workspace_update=body,
+        user=current_identity, workspace_id=workspace_id, workspace_update=body, stop_content=traces.stop_content
     )
+
+
+@router.delete("/{workspace_id}/trace-content")
+async def delete_workspace_trace_content(
+    service: WorkspaceServiceDep,
+    traces: TraceServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+) -> Message:
+    """Delete what this workspace's agent sessions were about, keeping the sessions. Its managers only."""
+    await service.require_management_access(user=current_identity, workspace_id=workspace_id)
+    await traces.forget_content(workspace_id)
+    return Message(message="Session content deleted")
 
 
 @router.delete("/{workspace_id}")

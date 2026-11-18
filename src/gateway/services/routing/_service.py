@@ -7,7 +7,13 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from gateway.core.config import GatewayConfig
-from gateway.services.catalog import catalog_models
+from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.organizations_exceptions import WorkspaceNotFoundError
+from gateway.repositories.routing import RoutingPolicyRepository
+from gateway.services.api_keys import ApiKeyService
+from gateway.services.catalog import catalog_models, offering_input_rate
+from gateway.services.model_access import workspace_serves_target
+from gateway.services.tenancy import OrganizationService
 from gateway.services.tools import provider_tools
 from gateway.services.usage_and_telemetry import ServedTraffic, UsageService
 
@@ -23,6 +29,8 @@ class FallbackOffering:
     provider: str
     """The instance the selector names."""
     provider_type: str
+    input_price: float | None
+    """Per million input tokens at this organization's rates, None where unpriced."""
     own_tools: tuple[str, ...]
     """Built-in tools the provider runs itself."""
     otari_tools: tuple[str, ...]
@@ -30,8 +38,19 @@ class FallbackOffering:
 
 
 @dataclass(frozen=True)
+class PinnedTraffic:
+    """The requests one API key sent naming a provider or a policy rather than the catalog ID, by provider reached."""
+
+    api_key_id: str | None
+    """None for requests made without a key or whose key was deleted."""
+    key_name: str | None
+    provider: str
+    requests: int
+
+
+@dataclass(frozen=True)
 class AutomaticFallback:
-    """One model callers used in the window, its offerings in the order a catalog ID tries them, and its traffic."""
+    """One model callers used in the window, its offerings in baseline order, and its traffic."""
 
     id: str
     name: str
@@ -43,6 +62,8 @@ class AutomaticFallback:
     """Of ``requests``, those that did not send the catalog ID and so had no automatic fallback."""
     pinned_provider: str | None
     """The instance most of the pinned requests reached."""
+    pinned_keys: tuple[PinnedTraffic, ...]
+    """The pinned requests by key and provider, most first."""
 
 
 @dataclass
@@ -50,6 +71,7 @@ class _Tally:
     requests: int = 0
     fell_back: int = 0
     pinned: Counter[str] = field(default_factory=Counter)
+    pinned_keys: Counter[tuple[str | None, str]] = field(default_factory=Counter)
 
 
 def _served_selectors(row: ServedTraffic) -> tuple[str, ...]:
@@ -60,24 +82,54 @@ def _served_selectors(row: ServedTraffic) -> tuple[str, ...]:
 class RoutingService:
     """What routing gives an organization's callers."""
 
-    def __init__(self, config: GatewayConfig, usage: UsageService) -> None:
+    def __init__(
+        self,
+        config: GatewayConfig,
+        usage: UsageService,
+        keys: ApiKeyService,
+        *,
+        uow: UnitOfWork,
+        organizations: OrganizationService,
+    ) -> None:
         self._config = config
         self._usage = usage
+        self._keys = keys
+        self._uow = uow
+        self._organizations = organizations
+
+    async def is_first_policy_in_organization(self, organization_id: uuid.UUID) -> bool:
+        """Whether the policy just stored is the only one in any of the organization's workspaces."""
+        workspace_ids = await self._organizations.get_workspace_ids_in_organization(organization_id)
+        async with self._uow:
+            return await RoutingPolicyRepository(self._uow).count_in_workspaces(workspace_ids) == 1
 
     async def automatic_fallbacks(
-        self, *, organization_id: uuid.UUID, workspace_ids: Collection[uuid.UUID]
+        self,
+        *,
+        organization_id: uuid.UUID,
+        workspace_ids: Collection[uuid.UUID],
+        serving_workspace_id: uuid.UUID | None = None,
     ) -> list[AutomaticFallback]:
         """Every model these workspaces sent requests to in the window, most requested first.
 
-        A request that sent the model's catalog ID tried its offerings in the
-        catalog's order for this organization (``resolve_catalog_offerings``),
-        moving to the next when one failed; one that named an offering itself
+        The catalog order is a baseline; automatic selection can reorder it
+        per request. A catalog request moves to the next offering when one fails;
+        one that named an offering itself
         (``bedrock:…``) or a routing policy is counted as pinned. A row is
         matched to a model by the catalog ID it sent, else by the offering it
         reached, so traffic on an offering the catalog no longer serves is left
         out. The order is the catalog's, before a key's allow-list or a missing
-        credential drops an offering from a request's plan.
+        credential drops an offering, or automatic selection reorders it.
+
+        ``serving_workspace_id`` keeps only the offerings a request billed to
+        that workspace may call, and the models left with one.
+
+        Raises:
+            WorkspaceNotFoundError: ``serving_workspace_id`` is not one of
+                ``workspace_ids``, the workspaces the caller may see.
         """
+        if serving_workspace_id is not None and serving_workspace_id not in workspace_ids:
+            raise WorkspaceNotFoundError(serving_workspace_id)
         traffic = await self._usage.served_traffic(
             workspace_ids=workspace_ids, since=datetime.now(UTC) - FALLBACK_WINDOW
         )
@@ -94,7 +146,12 @@ class RoutingService:
             tally.requests += row.requests
             tally.fell_back += row.fell_back
             if sent != model_id:
-                tally.pinned[row.provider or (reached or row.model).partition(":")[0]] += row.requests
+                provider = row.provider or (reached or row.model).partition(":")[0]
+                tally.pinned[provider] += row.requests
+                tally.pinned_keys[(row.api_key_id, provider)] += row.requests
+
+        key_ids = {key_id for tally in tallies.values() for key_id, _provider in tally.pinned_keys if key_id}
+        key_names = await self._keys.key_names(key_ids, workspace_ids=workspace_ids)
 
         tools: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {}
 
@@ -106,20 +163,41 @@ class RoutingService:
                 tools[provider_type] = (tuple(sorted(answer.native)), tuple(sorted(answer.claimed)))
             own, otari = tools[provider_type]
             return FallbackOffering(
-                selector=selector, provider=instance, provider_type=provider_type, own_tools=own, otari_tools=otari
+                selector=selector,
+                provider=instance,
+                provider_type=provider_type,
+                input_price=offering_input_rate(selector, organization_id=organization_id),
+                own_tools=own,
+                otari_tools=otari,
             )
 
+        def pinned_keys(tally: _Tally) -> tuple[PinnedTraffic, ...]:
+            entries = [
+                PinnedTraffic(api_key_id=key_id, key_name=key_names.get(key_id or ""), provider=provider, requests=n)
+                for (key_id, provider), n in tally.pinned_keys.items()
+            ]
+            return tuple(sorted(entries, key=lambda entry: (-entry.requests, entry.key_name or "", entry.provider)))
+
+        served = {
+            model_id: [
+                selector
+                for selector in models[model_id].offerings
+                if serving_workspace_id is None or workspace_serves_target(self._config, serving_workspace_id, selector)
+            ]
+            for model_id in tallies
+        }
         fallbacks = [
             AutomaticFallback(
                 id=model_id,
                 name=models[model_id].name,
-                offerings=tuple(offering(selector) for selector in models[model_id].offerings),
+                offerings=tuple(offering(selector) for selector in served[model_id]),
                 requests=tally.requests,
                 fell_back=tally.fell_back,
                 pinned=sum(tally.pinned.values()),
                 pinned_provider=tally.pinned.most_common(1)[0][0] if tally.pinned else None,
+                pinned_keys=pinned_keys(tally),
             )
             for model_id, tally in tallies.items()
-            if tally.requests > 0
+            if tally.requests > 0 and served[model_id]
         ]
         return sorted(fallbacks, key=lambda fallback: (-fallback.requests, fallback.id))

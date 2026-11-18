@@ -150,7 +150,8 @@ def test_run_migrations_accepts_a_database_url_containing_a_percent_character(tm
     """
     db_path = tmp_path / "prod%2Bcopy.db"
 
-    _run_migrations(f"sqlite:///{db_path}")
+    # SQLAlchemy URL-decodes the database path, so the "%" is itself encoded.
+    _run_migrations(f"sqlite:///{str(db_path).replace('%', '%25')}")
 
     head = ScriptDirectory.from_config(_alembic_config("sqlite://")).get_current_head()
     assert _version_rows(db_path) == [(head,)]

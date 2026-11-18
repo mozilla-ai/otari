@@ -174,3 +174,24 @@ class TestMiddleware:
         await InFlightMiddleware(app, registry)({"type": "lifespan"}, _receive, _send)
 
         assert seen == ["lifespan"]
+
+
+@pytest.mark.asyncio
+async def test_request_cleanup_runs_when_stream_never_starts() -> None:
+    """ASGI cancellation runs registered cleanup even before the stream starts."""
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from gateway.inflight import on_request_finished
+
+    released: list[bool] = []
+
+    async def app(scope: Scope, receive: Receive, send: Send) -> None:
+        """Register request cleanup, then cancel before response streaming can begin."""
+        on_request_finished(Request(scope), lambda: released.append(True))
+        raise asyncio.CancelledError
+
+    middleware = InFlightMiddleware(app, InFlightRegistry())
+    with pytest.raises(asyncio.CancelledError):
+        await middleware({"type": "http"}, AsyncMock(), AsyncMock())
+    assert released == [True]

@@ -23,7 +23,7 @@ const webRoot = fileURLToPath(new URL("./", import.meta.url))
 // fetches "/api/v1/..." as same-origin paths. `pnpm run dev` serves
 // only the SPA, so proxy those to a running gateway. Override the target to
 // develop against a deployed gateway instead of a local one:
-//   OTARI_DEV_API=https://your-app.up.railway.app pnpm run dev
+//   OTARI_DEV_API=https://otari.example.com pnpm run dev
 const apiTarget = process.env.OTARI_DEV_API ?? "http://localhost:8000"
 const apiProxy = { target: apiTarget, changeOrigin: true }
 

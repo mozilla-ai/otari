@@ -1,58 +1,58 @@
-import { Link } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 import { type ReactNode, useState } from "react"
-import {
-  FiActivity,
-  FiEdit2,
-  FiList,
-  FiRefreshCw,
-  FiTrash2,
-} from "react-icons/fi"
+import { FiRefreshCw, FiTrash2 } from "react-icons/fi"
 
 import type {
   HostedCatalogRefresh,
   HostedProvider,
+  HostedProviderModelSummary,
   ProviderHealth,
   ProviderInfo,
 } from "@/client"
 import { Button } from "@/design-system/actions/Button"
-import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
+import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Toggle } from "@/design-system/forms/Toggle"
 import { Badge } from "@/design-system/indicators/Badge"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
-import { ConnectionTestRowResult } from "@/features/providers/ConnectionTest"
 import { HealthPill } from "@/features/providers/HealthPill"
 import { HealthSummary } from "@/features/providers/HealthSummary"
 import { OnboardingPanel } from "@/features/providers/OnboardingPanel"
+import {
+  PLATFORM_KEYS_URL,
+  PLATFORM_PROVIDER_NAME,
+  PlatformConnect,
+} from "@/features/providers/PlatformConnect"
 import { SecretKeyMissingBanner } from "@/features/providers/SecretKeyMissingBanner"
 import { ApiError } from "@/shared/api/client"
 import { useDeploymentAdminAccess } from "@/shared/api/deployment"
 import {
   useDeleteHostedProvider,
-  useHostedCatalogRefresh,
-  useHostedCatalogRefreshPreview,
+  useHostedCatalogUpdate,
+  useHostedCatalogUpdatePreview,
   useHostedProviders,
-  useTestHostedProvider,
+  usePlatformConnectStatus,
   useUpdateHostedProvider,
 } from "@/shared/api/hostedProviders"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { useProviderHealth, useProviders } from "@/shared/api/providers"
 import { useSettings, useUpdateSettings } from "@/shared/api/settings"
+import { useDeployment } from "@/shared/hooks/useDeployment"
 
 import { AddHostedProviderForm } from "./AddHostedProviderForm"
 import { DeploymentProviderMigration } from "./DeploymentProviderMigration"
-import { EditHostedProviderForm } from "./EditHostedProviderForm"
-import { HostedProviderModelsPanel } from "./HostedProviderModelsPanel"
 import {
   catalogPreviewOutcome,
   catalogRefreshFailures,
   catalogRefreshOutcome,
+  modelsPreviewOutcome,
+  pricePreviewOutcome,
 } from "./refreshOutcome"
 
 // The providers this deployment serves inference on with its own keys, for a
@@ -65,15 +65,16 @@ import {
 // the surface at all is the shell's question, answered from the bootstrap; the
 // page reads the same answer, so it says so itself wherever it is rendered.
 //
-// A provider kept to one organization shows which; the restriction is set and
-// lifted through the API, since this build has no deployment-wide list of
-// organizations to pick one from.
+// The list says which providers there are, whether each is healthy and how
+// much of its catalog it serves; a provider's name opens its own page
+// (`HostedProviderPage`), where its key, endpoint, scope and models are.
 //
 // A provider defined in the configuration's `hosted_providers:` block is listed
 // with a `config.yml` badge and changed only there: its key, endpoint and switch
-// are read-only here, while its models are administered as any other's. A
-// `providers:` instance is listed beside them, wholly read-only: it serves
-// every model a request names on it, ahead of every hosted provider.
+// are read-only, while its models are administered as any other's. A
+// `providers:` instance is listed beside them, wholly read-only and opening no
+// page: it serves every model a request names on it, ahead of every hosted
+// provider.
 
 /** A row of the table: a hosted provider, or a `providers:` instance from config.yml. */
 type ProviderRow =
@@ -81,23 +82,29 @@ type ProviderRow =
   | { kind: "instance"; name: string; instance: ProviderInfo }
 
 /**
- * What the last sweep did, stated rather than implied by the table redrawing.
+ * What the last catalog update did, stated rather than implied by the table
+ * redrawing.
  *
- * The kept groups are worth the space: a sweep that leaves priced models under
+ * The kept groups are worth the space: a cleanup that leaves priced models under
  * a provider this page does not offer looks like it failed, when something else
  * on the deployment serves them.
  */
-function CatalogSweepReport({
+function CatalogUpdateReport({
   result,
+  pricesApplied,
   onRemoveProvider,
 }: {
   result: HostedCatalogRefresh
+  pricesApplied: boolean
   onRemoveProvider: (provider: string) => void
 }) {
   const failures = catalogRefreshFailures(result)
   return (
     <InfoBanner tone={failures.length > 0 ? "warning" : "info"}>
-      <p role="status">{catalogRefreshOutcome(result)}</p>
+      <p role="status">
+        {pricesApplied ? "Applied the latest models.dev prices. " : ""}
+        {catalogRefreshOutcome(result)}
+      </p>
       {result.removed_count > 0 ? (
         <p className="mt-1 text-caption">
           {result.removed_price_rows} stored{" "}
@@ -140,122 +147,109 @@ function CatalogSweepReport({
   )
 }
 
-/** The models a sweep is about to remove, named before anything is removed. */
-function CatalogSweepPreview({
+/**
+ * What a catalog update is about to do: the price changes, the models each
+ * provider newly lists, and, when the cleanup is ticked, the models it removes,
+ * named before anything is removed.
+ */
+function CatalogUpdatePreview({
   preview,
+  cleanup,
+  onCleanupChange,
 }: {
-  preview: ReturnType<typeof useHostedCatalogRefreshPreview>
+  preview: ReturnType<typeof useHostedCatalogUpdatePreview>
+  cleanup: boolean
+  onCleanupChange: (cleanup: boolean) => void
 }) {
-  if (preview.error) {
-    // The confirm refuses to fire in this state, so the banner is the answer.
-    return <ErrorBanner error={preview.error} />
+  const body = () => {
+    if (preview.error) {
+      // The confirm refuses to fire in this state, so the banner is the answer.
+      return <ErrorBanner error={preview.error} />
+    }
+    if (preview.isPending || preview.isFetching) {
+      return <p>Asking models.dev and every provider what changed…</p>
+    }
+    const { catalog, prices } = preview.data
+    const failures = catalogRefreshFailures(catalog)
+    return (
+      <>
+        <p>{pricePreviewOutcome(preview.data)}</p>
+        {prices?.needs_review ? (
+          <p className="text-caption text-warning">
+            Unusual: {prices.review_reason}. A scheduled update would wait for a
+            person.
+          </p>
+        ) : null}
+        <p>{modelsPreviewOutcome(catalog)}</p>
+        {failures.map((failure) => (
+          <p key={failure.provider} className="text-caption">
+            {failure.message}
+          </p>
+        ))}
+        {cleanup ? (
+          <>
+            <p>{catalogPreviewOutcome(catalog)}</p>
+            {catalog.removed.length > 0 ? (
+              <ul className="max-h-48 overflow-y-auto font-mono text-caption">
+                {catalog.removed.map((modelKey) => (
+                  <li key={modelKey}>{modelKey}</li>
+                ))}
+              </ul>
+            ) : null}
+            {catalog.removed_count > catalog.removed.length ? (
+              <p className="text-caption">
+                … and {catalog.removed_count - catalog.removed.length} more.
+              </p>
+            ) : null}
+            {catalog.kept.map((group) => (
+              <p key={group.reason} className="text-caption">
+                Keeping {group.count} {group.count === 1 ? "model" : "models"}:{" "}
+                {group.reason}.
+              </p>
+            ))}
+          </>
+        ) : null}
+      </>
+    )
   }
-  if (preview.isPending || preview.isFetching) {
-    return <p>Working out what would be removed…</p>
-  }
-  const result = preview.data
-  const failures = catalogRefreshFailures(result)
   return (
     <div className="flex flex-col gap-3">
-      <p>{catalogPreviewOutcome(result)}</p>
-      {result.removed.length > 0 ? (
-        <ul className="max-h-48 overflow-y-auto font-mono text-caption">
-          {result.removed.map((modelKey) => (
-            <li key={modelKey}>{modelKey}</li>
-          ))}
-        </ul>
-      ) : null}
-      {result.removed_count > result.removed.length ? (
+      {body()}
+      <Checkbox isSelected={cleanup} onChange={onCleanupChange}>
+        Also remove the prices of models no provider serves
+      </Checkbox>
+      {cleanup ? (
         <p className="text-caption">
-          … and {result.removed_count - result.removed.length} more.
+          Removing a model takes its rate history and the overrides of
+          organizations with no key of their own for the provider. Requests
+          already billed keep the cost they were billed at.
         </p>
       ) : null}
-      {result.kept.map((group) => (
-        <p key={group.reason} className="text-caption">
-          Keeping {group.count} {group.count === 1 ? "model" : "models"}:{" "}
-          {group.reason}.
-        </p>
-      ))}
-      {failures.map((failure) => (
-        <p key={failure.provider} className="text-caption">
-          {failure.message}
-        </p>
-      ))}
-      <p className="text-caption">
-        Removing a model takes its rate history and the overrides of
-        organizations with no key of their own for the provider. Requests
-        already billed keep the cost they were billed at.
-      </p>
     </div>
   )
 }
 
-/**
- * A row's actions, with the stored provider's test verdict beneath them.
- *
- * A component of its own so each row holds its own test: one mutation shared
- * by every row would drop a row's answer the moment another row is tested.
- */
-function HostedProviderRowActions({
-  provider,
-  onModels,
-  onEdit,
-  onRemove,
+/** "12 of 18 serving", with what holds back the rest when anything does. */
+function ModelsSummaryCell({
+  summary,
 }: {
-  provider: HostedProvider
-  onModels: () => void
-  onEdit: () => void
-  onRemove: () => void
+  summary: HostedProviderModelSummary
 }) {
-  const test = useTestHostedProvider()
+  if (summary.total === 0) return <span className="text-muted">None yet</span>
   return (
-    <div className="flex flex-col items-end gap-1.5">
-      <RowActionRow>
-        <RowAction
-          icon={FiList}
-          label="Models"
-          ariaLabel={`Models on ${provider.name}`}
-          onPress={onModels}
-        />
-        {provider.source === "config" ? null : (
-          <>
-            <RowAction
-              icon={FiActivity}
-              label="Test"
-              ariaLabel={`Test ${provider.name}`}
-              // A key no secret reads cannot be tested; Edit replaces it.
-              isDisabled={test.isPending || !provider.decryptable}
-              // The name alone stands for what is stored: the test route falls
-              // back to the stored key, endpoint and options for each field
-              // left out.
-              onPress={() =>
-                test.mutate({
-                  provider: provider.provider,
-                  name: provider.name,
-                })
-              }
-            />
-            <RowAction
-              icon={FiEdit2}
-              label="Edit"
-              ariaLabel={`Edit ${provider.name}`}
-              onPress={onEdit}
-            />
-            <RowAction
-              icon={FiTrash2}
-              label="Remove"
-              ariaLabel={`Remove ${provider.name}`}
-              onPress={onRemove}
-            />
-          </>
-        )}
-      </RowActionRow>
-      <ConnectionTestRowResult
-        isPending={test.isPending}
-        data={test.data}
-        error={test.error}
-      />
-    </div>
+    <span className="flex flex-wrap items-center gap-2">
+      <span className="tabular-nums">
+        {summary.serving} of {summary.total} serving
+      </span>
+      {summary.vendors_off > 0 ? (
+        <Badge tone="warn">
+          {`${summary.vendors_off} ${summary.vendors_off === 1 ? "vendor off" : "vendors off"}`}
+        </Badge>
+      ) : null}
+      {summary.unpriced > 0 ? (
+        <Badge tone="warn">{`${summary.unpriced} unpriced`}</Badge>
+      ) : null}
+    </span>
   )
 }
 
@@ -274,31 +268,36 @@ export function HostedProvidersPage() {
     context.data?.provider_key_encryption_available === false
   const settings = useSettings(isGranted)
   const updateSettings = useUpdateSettings()
+  const navigate = useNavigate()
+  const { platform_connect: isConnectOffered } = useDeployment()
+  // Read here as well as in the card, so a code still waiting for approval is
+  // shown on a page that was reloaded, without the operator asking for it.
+  const connectStatus = usePlatformConnectStatus(isGranted && isConnectOffered)
+  const [isConnectOpen, setIsConnectOpen] = useState(false)
   const update = useUpdateHostedProvider()
   const remove = useDeleteHostedProvider()
-  const sweep = useHostedCatalogRefresh()
-  const [isSweepOpen, setIsSweepOpen] = useState(false)
-  const [sweepOpenCount, setSweepOpenCount] = useState(0)
+  const catalogUpdate = useHostedCatalogUpdate()
+  const [isUpdateOpen, setIsUpdateOpen] = useState(false)
+  const [updateOpenCount, setUpdateOpenCount] = useState(0)
+  const [cleanup, setCleanup] = useState(false)
   // Asked only while the dialog is open, because answering dials every
   // configured provider, and asked afresh on every opening.
-  const preview = useHostedCatalogRefreshPreview(
-    isSweepOpen ? sweepOpenCount : 0,
+  const preview = useHostedCatalogUpdatePreview(
+    isUpdateOpen ? updateOpenCount : 0,
+    cleanup,
   )
-  // The sweep takes no list, so the confirm waits for one this opening read
-  // successfully and shows: never a previous opening's, a failed or an
-  // in-flight one.
+  // The confirm waits for a preview this opening read successfully and shows:
+  // never a previous opening's, a failed or an in-flight one, because the
+  // update applies the prices that preview named.
   const isPreviewShown = preview.isSuccess && !preview.isFetching
 
   const [isAdding, setIsAdding] = useState(false)
   const [addOpenCount, setAddOpenCount] = useState(0)
-  const [editingProvider, setEditingProvider] = useState("")
-  const [modelsFor, setModelsFor] = useState("")
-  // A name rather than a row: the sweep report's own remove offer can name a
+  // A name rather than a row: the update report's own remove offer can name a
   // provider this page has not loaded.
   const [pendingDelete, setPendingDelete] = useState("")
 
   const openAdd = () => {
-    setEditingProvider("")
     setAddOpenCount((n) => n + 1)
     setIsAdding(true)
   }
@@ -335,8 +334,6 @@ export function HostedProvidersPage() {
 
   const rows = providers.data?.data ?? []
   const deleting = rows.find((row) => row.name === pendingDelete)
-  const editing = rows.find((row) => row.name === editingProvider)
-  const expanded = rows.find((row) => row.name === modelsFor)
   // Health is keyed by name, and a configured instance of the same name is the
   // one dialed under it, so its status would read as this row's. Such a row,
   // and every row while the configured names are unknown, shows none.
@@ -375,8 +372,8 @@ export function HostedProvidersPage() {
       cell: (row) => (
         <span className="flex flex-wrap items-center gap-2">
           <Link
-            to="/models"
-            search={{ provider: row.name }}
+            to="/admin/hosted-providers/$name"
+            params={{ name: row.name }}
             className="font-medium text-foreground hover:text-link hover:underline"
           >
             {row.name}
@@ -390,22 +387,12 @@ export function HostedProvidersPage() {
           {row.shadows_config ? (
             <Badge tone="muted">Overrides config.yml</Badge>
           ) : null}
+          {row.zero_data_retention ? (
+            <Badge tone="muted">Zero data retention</Badge>
+          ) : null}
+          {row.decryptable ? null : <Badge tone="warn">Key unreadable</Badge>}
         </span>
       ),
-    },
-    {
-      id: "key",
-      header: "API key",
-      cell: (row) =>
-        !row.decryptable ? (
-          <Badge tone="warn">Key unreadable</Badge>
-        ) : row.api_key_last4 ? (
-          <code className="text-muted">••••{row.api_key_last4}</code>
-        ) : row.has_api_key ? (
-          <code className="text-muted">••••</code>
-        ) : (
-          <span className="text-muted">None needed</span>
-        ),
     },
     {
       id: "health",
@@ -418,28 +405,13 @@ export function HostedProvidersPage() {
         ),
     },
     {
-      id: "api_base",
-      header: "Endpoint",
-      cell: (row) => (
-        <span className="text-muted">{row.api_base ?? "provider default"}</span>
-      ),
-    },
-    {
-      id: "scope",
-      header: "Serves",
+      id: "models",
+      header: "Models",
       cell: (row) =>
-        row.restricted_to_organization_id ? (
-          <span
-            className="flex flex-col gap-0.5"
-            title={row.restricted_to_organization_id}
-          >
-            <span className="text-body">One organization</span>
-            <code className="truncate text-caption">
-              {row.restricted_to_organization_id}
-            </code>
-          </span>
+        row.models ? (
+          <ModelsSummaryCell summary={row.models} />
         ) : (
-          <span className="text-muted">Every organization</span>
+          <span className="text-muted">—</span>
         ),
     },
     {
@@ -460,55 +432,22 @@ export function HostedProvidersPage() {
         />
       ),
     },
-    {
-      id: "actions",
-      header: "Actions",
-      align: "end",
-      cell: (row) => (
-        <HostedProviderRowActions
-          // Remounted when the provider changes, so a verdict on what it
-          // stored before does not outlive the edit.
-          key={row.updated_at ?? ""}
-          provider={row}
-          onModels={() =>
-            setModelsFor((current) => (current === row.name ? "" : row.name))
-          }
-          onEdit={() => {
-            setIsAdding(false)
-            setEditingProvider(row.name)
-          }}
-          onRemove={() => setPendingDelete(row.name)}
-        />
-      ),
-    },
   ]
   const instanceCells: Record<string, (row: ProviderInfo) => ReactNode> = {
     provider: (row) => (
       <span className="flex flex-wrap items-center gap-2">
-        <Link
-          to="/models"
-          search={{ provider: row.instance }}
-          className="font-medium text-foreground hover:text-link hover:underline"
-        >
-          {row.instance}
-        </Link>
+        <span className="font-medium text-foreground">{row.instance}</span>
         {row.instance === row.provider_type ? null : (
           <span className="text-caption">{row.provider_type}</span>
         )}
         <Badge tone="muted">config.yml</Badge>
       </span>
     ),
-    key: (row) =>
-      row.env_key ? (
-        <span className="text-muted">From config.yml</span>
-      ) : (
-        <span className="text-muted">None needed</span>
-      ),
     health: (row) => <HealthPill health={healthByName.get(row.instance)} />,
-    api_base: () => <span className="text-muted">Set in config.yml</span>,
-    scope: () => <span className="text-muted">Every organization</span>,
+    models: () => (
+      <span className="text-muted">Every model a request names</span>
+    ),
     enabled: () => <span className="text-caption">Always</span>,
-    actions: () => <span className="text-caption">Edit in config.yml</span>,
   }
   const columns: DataTableColumn<ProviderRow>[] = hostedColumns.map(
     (column) => ({
@@ -528,15 +467,25 @@ export function HostedProvidersPage() {
           <div className="flex flex-wrap items-center gap-2">
             <Button
               className="min-h-11 md:min-h-9"
-              isPending={sweep.isPending}
+              isPending={catalogUpdate.isPending}
               onPress={() => {
-                setSweepOpenCount((n) => n + 1)
-                setIsSweepOpen(true)
+                setCleanup(false)
+                setUpdateOpenCount((n) => n + 1)
+                setIsUpdateOpen(true)
               }}
             >
               <FiRefreshCw aria-hidden className="size-4" />
-              Refresh and purge
+              Update catalog
             </Button>
+            {isConnectOffered && tableRows.length > 0 ? (
+              <Button
+                className="min-h-11 md:min-h-9"
+                isDisabled={isKeyEncryptionMissing}
+                onPress={() => setIsConnectOpen((open) => !open)}
+              >
+                Connect otari.ai
+              </Button>
+            ) : null}
             <Button
               variant="primary"
               className="min-h-11 md:min-h-9"
@@ -548,28 +497,23 @@ export function HostedProvidersPage() {
             </Button>
           </div>
         }
-      >
-        The providers this deployment serves inference on, and the keys it
-        serves them with. Those marked config.yml are declared in the
-        configuration and changed there; a <code>providers:</code> instance
-        serves first, and the others only requests that bring no credential of
-        their own, after an organization's own keys.
-      </PageIntro>
+      />
 
       <ErrorBanner
         error={
           providers.error ??
           update.error ??
           remove.error ??
-          sweep.error ??
+          catalogUpdate.error ??
           updateSettings.error
         }
       />
       {isKeyEncryptionMissing ? <SecretKeyMissingBanner /> : null}
       <DeploymentProviderMigration />
-      {sweep.data ? (
-        <CatalogSweepReport
-          result={sweep.data}
+      {catalogUpdate.data ? (
+        <CatalogUpdateReport
+          result={catalogUpdate.data.catalog}
+          pricesApplied={catalogUpdate.data.prices_applied}
           onRemoveProvider={setPendingDelete}
         />
       ) : null}
@@ -588,9 +532,23 @@ export function HostedProvidersPage() {
           }
           isEnabling={updateSettings.isPending}
           secretKeyConfigured={!isKeyEncryptionMissing}
+          // On to the Overview, whose setup guide hands out a key and the
+          // first request to send now that a provider can serve it.
+          onConnected={() => void navigate({ to: "/" })}
         />
       ) : (
         <>
+          {isConnectOffered &&
+          tableRows.length > 0 &&
+          !isKeyEncryptionMissing &&
+          (isConnectOpen || connectStatus.data?.status === "pending") ? (
+            <section
+              aria-label="Connect otari.ai"
+              className="mb-4 border border-border p-4"
+            >
+              <PlatformConnect />
+            </section>
+          ) : null}
           {tableRows.length > 0 && health.data && health.data.total > 0 ? (
             <HealthSummary
               healthy={health.data.healthy}
@@ -602,6 +560,7 @@ export function HostedProvidersPage() {
           <TableScrollFrame className="otari-hosted-providers-table">
             <DataTable
               ariaLabel="Hosted providers"
+              mobileLayout="cards"
               columns={columns}
               rows={tableRows}
               // The kind and the name, not the id: a configured provider has no
@@ -613,55 +572,50 @@ export function HostedProvidersPage() {
         </>
       )}
 
-      {/* Below the table rather than a detail row inside it, as on the
-          organization Providers page: the provider table scrolls sideways on a
-          narrow screen, and a row inside it would scroll and clip with it. */}
-      {expanded ? (
-        <section
-          key={expanded.name}
-          aria-label={`Models on ${expanded.name}`}
-          className="mt-4 rounded-lg border border-border bg-surface"
-        >
-          <HostedProviderModelsPanel provider={expanded} />
-        </section>
-      ) : null}
-
       <AddHostedProviderForm
         key={addOpenCount}
         // Retracted too if the context reports the key unset after it opened.
         isOpen={isAdding && !isKeyEncryptionMissing}
         onClose={() => setIsAdding(false)}
+        // On to the new provider's page, where its models are the next step.
+        onCreated={(created) =>
+          void navigate({
+            to: "/admin/hosted-providers/$name",
+            params: { name: created.name },
+          })
+        }
         configuredProviders={rows
           .filter((row) => row.source === "config")
           .map((row) => row.name)}
       />
-      {editing ? (
-        <EditHostedProviderForm
-          key={editing.name}
-          provider={editing}
-          isOpen
-          onClose={() => setEditingProvider("")}
-        />
-      ) : null}
-
       <ConfirmDialog
-        isOpen={isSweepOpen}
+        isOpen={isUpdateOpen}
         onOpenChange={(open) => {
-          if (!open) setIsSweepOpen(false)
+          if (!open) setIsUpdateOpen(false)
         }}
-        heading="Refresh and purge the catalog?"
-        body={<CatalogSweepPreview preview={preview} />}
-        confirmLabel="Refresh and purge"
-        confirmVariant="danger"
-        // The sweep's own pending state only: the preview dials every provider,
+        heading="Update the catalog?"
+        body={
+          <CatalogUpdatePreview
+            preview={preview}
+            cleanup={cleanup}
+            onCleanupChange={setCleanup}
+          />
+        }
+        confirmLabel={cleanup ? "Update and remove" : "Update catalog"}
+        // Danger only once it deletes: without the cleanup it only adds and reprices.
+        confirmVariant={cleanup ? "danger" : "primary"}
+        // The update's own pending state only: the preview dials every provider,
         // and folding it in would leave Cancel dead for that whole fan-out.
-        isPending={sweep.isPending}
+        isPending={catalogUpdate.isPending}
         isConfirmDisabled={!isPreviewShown}
-        error={sweep.error}
+        error={catalogUpdate.error}
         onConfirm={() => {
-          // Nothing is confirmed against a list nobody has seen.
+          // Nothing is confirmed against a preview nobody has seen.
           if (!isPreviewShown) return
-          sweep.mutate(undefined, { onSuccess: () => setIsSweepOpen(false) })
+          catalogUpdate.mutate(
+            { digest: preview.data.prices?.digest ?? null, cleanup },
+            { onSuccess: () => setIsUpdateOpen(false) },
+          )
         }}
       />
       <ConfirmDialog
@@ -671,9 +625,26 @@ export function HostedProvidersPage() {
         }}
         heading="Remove this hosted provider?"
         body={
-          deleting?.shadows_config
-            ? `The stored key for ${pendingDelete} is deleted, and the provider defined in config.yml serves again, on the same models.`
-            : `${pendingDelete} will stop being served, and its stored key is deleted. There is no way to recover the key; adding the provider again means entering it fresh.`
+          <>
+            {deleting?.shadows_config
+              ? `The stored key for ${pendingDelete} is deleted, and the provider defined in config.yml serves again, on the same models.`
+              : `${pendingDelete} will stop being served, and its stored key is deleted. There is no way to recover the key; adding the provider again means entering it fresh.`}
+            {isConnectOffered && pendingDelete === PLATFORM_PROVIDER_NAME ? (
+              <>
+                {" "}
+                The key stays valid on otari.ai until you revoke it on its{" "}
+                <a
+                  href={PLATFORM_KEYS_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-link hover:text-link-hover"
+                >
+                  API keys page
+                </a>
+                .
+              </>
+            ) : null}
+          </>
         }
         confirmLabel="Remove provider"
         isPending={remove.isPending}
@@ -681,11 +652,10 @@ export function HostedProvidersPage() {
         onConfirm={() => {
           remove.mutate(pendingDelete, {
             onSuccess: () => {
-              if (modelsFor === pendingDelete) setModelsFor("")
               setPendingDelete("")
               // Its counts and remove offers described a deployment that has
               // since changed.
-              sweep.reset()
+              catalogUpdate.reset()
             },
           })
         }}

@@ -28,13 +28,18 @@ from gateway.api.routes._helpers import with_retry_hint
 from gateway.core.error_codes import (
     ALL_CANDIDATES_REJECTED,
     CONTEXT_LENGTH_EXCEEDED,
+    INSUFFICIENT_FUNDS,
     PROVIDER_CREDENTIAL_REJECTED,
+    REQUEST_TOO_LARGE,
+    STRUCTURED_OUTPUT_FAILED,
     UNSUPPORTED_CONTENT,
+    UNSUPPORTED_PARAMETER,
     error_code_of,
     error_headers,
 )
 from gateway.log_config import logger
 from gateway.services.inference import (
+    UpstreamFailure,
     is_empty_completion,
     is_provider_billing_error,
     is_provider_credential_rejection,
@@ -71,20 +76,17 @@ def provider_failure_http_exc(
     upstream, or is ``fallback_detail`` when the failure has no signal we can
     safely surface.
     """
-    # Deferred import: _pipeline imports this module, so importing it at module
-    # scope would be circular.
-    from gateway.api.routes._pipeline import classify_provider_error, provider_error_headers, provider_failure_detail
-
-    mapping = classify_provider_error(exc)
+    failure = UpstreamFailure(exc)
+    mapping = failure.mapping
     if mapping is not None:
         return HTTPException(
             status_code=mapping.status_code,
             detail=mapping.detail,
-            headers=with_retry_hint(exc, mapping.status_code, provider_error_headers(exc, mapping.status_code)),
+            headers=with_retry_hint(exc, mapping.status_code, failure.headers),
         )
     return HTTPException(
         status_code=status.HTTP_502_BAD_GATEWAY,
-        detail=provider_failure_detail(exc, fallback_detail),
+        detail=failure.unclassified_detail(fallback_detail),
         headers=with_retry_hint(exc, status.HTTP_502_BAD_GATEWAY, None),
     )
 
@@ -99,9 +101,24 @@ def prompt_too_long_for_every_attempt_detail(tried: int) -> str:
     return f"The prompt is too long for every model tried ({tried} attempts)."
 
 
+def request_too_large_for_every_attempt_detail(tried: int) -> str:
+    """413 detail for a request every attempt refused as too large."""
+    return f"The request is too large for every model tried ({tried} attempts)."
+
+
 def no_attempt_accepts_images_detail(tried: int) -> str:
     """400 detail for a request carrying an image that no attempt's model accepts."""
     return f"None of the models tried accepts image content ({tried} attempts)."
+
+
+def structured_output_failed_for_every_attempt_detail(tried: int) -> str:
+    """400 detail for a request whose schema no attempt's model produced matching output for."""
+    return f"None of the models tried produced output matching the requested schema ({tried} attempts)."
+
+
+def no_attempt_accepts_parameters_detail(parameters: Sequence[str], tried: int) -> str:
+    """400 detail for a request carrying a parameter that no attempt's provider can express."""
+    return f"None of the models tried accepts {', '.join(parameters)} ({tried} attempts)."
 
 
 def no_attempt_served_detail(tried: int) -> str:
@@ -139,6 +156,12 @@ def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | Non
     statuses = {answer.status_code for answer in answers}
     if statuses == {status.HTTP_404_NOT_FOUND}:
         return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=no_attempt_served_detail(len(errors)))
+    if statuses == {status.HTTP_413_CONTENT_TOO_LARGE}:
+        return HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=request_too_large_for_every_attempt_detail(len(errors)),
+            headers=error_headers(REQUEST_TOO_LARGE),
+        )
     if statuses != {status.HTTP_400_BAD_REQUEST}:
         return None
     if {error_code_of(answer.headers) for answer in answers} == {CONTEXT_LENGTH_EXCEEDED}:
@@ -152,6 +175,20 @@ def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | Non
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=no_attempt_accepts_images_detail(len(errors)),
             headers=error_headers(UNSUPPORTED_CONTENT),
+        )
+    if {error_code_of(answer.headers) for answer in answers} == {STRUCTURED_OUTPUT_FAILED}:
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=structured_output_failed_for_every_attempt_detail(len(errors)),
+            headers=error_headers(STRUCTURED_OUTPUT_FAILED),
+        )
+    if {error_code_of(answer.headers) for answer in answers} == {UNSUPPORTED_PARAMETER}:
+        parameters = (UpstreamFailure(error).unsupported_parameter_name for error in errors)
+        named = {name for name in parameters if name is not None}
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=no_attempt_accepts_parameters_detail(sorted(named), len(errors)),
+            headers=error_headers(UNSUPPORTED_PARAMETER),
         )
     # NOTE: Some 400s are the gateway's fault, such as a provider rejecting a model ID it does not serve.
     # The status cannot tell them apart, so such a plan blames the request.
@@ -232,6 +269,17 @@ def _soonest_refusal(refusals: Sequence[tuple[Attempt, HTTPException]]) -> tuple
     return min(reversed(refusals), key=_retry_after)
 
 
+def _refusal_to_answer(refusals: Sequence[tuple[Attempt, HTTPException]]) -> tuple[Attempt, HTTPException]:
+    """The candidate and refusal a walk that served nothing answers with.
+
+    Insufficient funds refuses the organization rather than a candidate, so
+    when it refused every one the first is named, which is the model asked for.
+    """
+    if all(error_code_of(refusal.headers) == INSUFFICIENT_FUNDS for _, refusal in refusals):
+        return refusals[0]
+    return _soonest_refusal(refusals)
+
+
 async def walk_attempts(
     *,
     attempts: Sequence[Attempt],
@@ -286,7 +334,8 @@ async def walk_attempts(
     It may raise :class:`CandidateCannotServe`, which skips the candidate without
     counting it as a provider failure and without reordering the plan. When no
     candidate is left, the request is answered with the refusal whose
-    ``Retry-After`` is soonest, or the last one's when none sets it.
+    ``Retry-After`` is soonest, or the last one's when none sets it; a walk
+    refused insufficient funds at every candidate answers with the first's.
 
     ``admit_attempt`` admits the candidate before ``prepare_kwargs`` runs, so a
     full model is not prepared for (a ``per: model`` rate limit with no room
@@ -449,7 +498,7 @@ async def walk_attempts(
         return attempt, result
 
     if cannot_serve is not None and not failures:
-        refused_on, refusal = _soonest_refusal(refusals)
+        refused_on, refusal = _refusal_to_answer(refusals)
         if on_terminal is not None:
             on_terminal(refused_on)
         raise refusal

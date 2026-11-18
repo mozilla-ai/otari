@@ -20,17 +20,21 @@ changes nothing about how a request is checked.
 import uuid
 from typing import Annotated, cast
 
-from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 
-from gateway.api.deps import CurrentIdentity, get_config, get_db, verify_master_key
+from gateway.api.deps import (
+    CurrentIdentity,
+    OrganizationGuardrailServiceDep,
+    PersonGrowthSignalPortDep,
+    get_config,
+    verify_master_key,
+)
 from gateway.api.routes.organizations import Message
 from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
 from gateway.services.tenancy.organization_guardrail_service import (
     OrganizationGuardrailCreate,
     OrganizationGuardrailPublic,
-    OrganizationGuardrailService,
     OrganizationGuardrailsPublic,
     OrganizationGuardrailTest,
     OrganizationGuardrailTestResult,
@@ -56,14 +60,6 @@ router = APIRouter(
 SURFACE = Surface("organization_guardrails")
 
 
-def get_organization_guardrail_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OrganizationGuardrailService:
-    """Build the service on the request's session."""
-    return OrganizationGuardrailService(db)
-
-
-OrganizationGuardrailServiceDep = Annotated[OrganizationGuardrailService, Depends(get_organization_guardrail_service)]
-
-
 @router.get("")
 async def list_organization_guardrails(
     service: OrganizationGuardrailServiceDep,
@@ -86,6 +82,8 @@ async def create_organization_guardrail(
     service: OrganizationGuardrailServiceDep,
     current_identity: CurrentIdentity,
     body: OrganizationGuardrailCreate,
+    growth: PersonGrowthSignalPortDep,
+    background_tasks: BackgroundTasks,
 ) -> OrganizationGuardrailPublic:
     """Mandate a guardrail across the organization. Organization owners and admins only.
 
@@ -96,7 +94,9 @@ async def create_organization_guardrail(
     otherwise a new workspace inherits nothing and the entry runs only in the
     workspaces ``workspace_ids`` lists.
     """
-    return await service.create_guardrail(user=current_identity, request=body)
+    return await service.create_guardrail(
+        user=current_identity, request=body, growth=growth, background_tasks=background_tasks
+    )
 
 
 @router.patch("/{guardrail_id}")

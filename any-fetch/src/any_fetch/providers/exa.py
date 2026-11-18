@@ -69,6 +69,7 @@ class ExaProvider(AnyFetch):
         # Exa answers with the URL as asked, even after a redirect (checked 2026-10-19).
         reports_final_url=False,
         formats=["markdown"],
+        reports_cost=True,
         options=[
             OptionSpec(
                 name="text",

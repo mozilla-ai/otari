@@ -44,10 +44,11 @@ from openai.types.responses import (
     ResponseTextDeltaEvent,
     ResponseTextDoneEvent,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
 from gateway.log_config import logger
 from gateway.services.inference._upstream_user import chat_user_fields
+from gateway.streaming import IncompleteStreamError
 
 # Same name and meaning on both APIs.
 _SHARED_FIELDS = frozenset(
@@ -211,7 +212,10 @@ async def call_responses(native: Callable[..., Awaitable[Any]], kwargs: dict[str
     if uses_chat_completions_bridge(kwargs.get("provider")):
         return await aresponses_via_chat_completions(**kwargs)
     try:
-        return await native(**kwargs)
+        result = await native(**kwargs)
+        if kwargs.get("stream") and _is_otari_provider(kwargs.get("provider")):
+            return _typed_stream_events(result)
+        return result
     except AnyLLMError as exc:
         if not _lacks_responses_route(kwargs, exc):
             raise
@@ -225,6 +229,32 @@ async def call_responses(native: Callable[..., Awaitable[Any]], kwargs: dict[str
             exc.status_code,
         )
         return await _run_chat_completion(*plan)
+
+
+def _is_otari_provider(provider: Any) -> bool:
+    try:
+        return LLMProvider(provider) is LLMProvider.OTARI
+    except ValueError:
+        return False
+
+
+_STREAM_EVENT_ADAPTER: TypeAdapter[ResponseStreamEvent] = TypeAdapter(ResponseStreamEvent)
+
+
+async def _typed_stream_events(stream: AsyncIterator[Any]) -> AsyncIterator[ResponseStreamEvent]:
+    """``stream`` with each raw event dict validated into its typed event.
+
+    Stopgap: any-llm's Otari provider streams Responses events as the plain dicts
+    its client parses, where every other provider yields typed events. Remove once
+    any-llm converts them, as it already does for that provider's Messages stream.
+    """
+    try:
+        async for event in stream:
+            yield _STREAM_EVENT_ADAPTER.validate_python(event) if isinstance(event, dict) else event
+    finally:
+        close = getattr(stream, "aclose", None)
+        if close is not None:
+            await close()
 
 
 def _plan_chat_completion(kwargs: dict[str, Any]) -> tuple[dict[str, Any], _ResponseEcho]:
@@ -862,14 +892,23 @@ async def _stream_events(
         # that fails on its first read fails the attempt before anything reached
         # the client, as a native Responses stream does.
         first = await anext(chunks, None)
+        if first is None:
+            # A provider that sent nothing gets no response announced on its behalf, so the stream
+            # fails as an empty /chat/completions stream or native Responses stream does.
+            return
         for event in translator.start():
             yield event
-        if first is not None:
-            for event in translator.feed(first):
-                yield event
+        received = 1
+        for event in translator.feed(first):
+            yield event
         async for chunk in chunks:
+            received += 1
             for event in translator.feed(chunk):
                 yield event
+        # The chunk that ends a chat completion carries its finish_reason, as /chat/completions already
+        # requires of every provider. Chunks that stop short of it are a cut stream, not a finished one.
+        if translator.finish_reason is None:
+            raise IncompleteStreamError(received)
         for event in translator.finish():
             yield event
     finally:

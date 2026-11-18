@@ -1,11 +1,14 @@
 """Request and response shapes for the caller's grouped model catalog."""
 
+import uuid
 from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from gateway.models.pricing import PriceSource
+from gateway.types.model_type import ModelType
+from gateway.types.price_unit import PriceUnit
 
 
 class CatalogCapabilities(BaseModel):
@@ -38,6 +41,13 @@ class CatalogModelSummary(BaseModel):
     vendor: str | None
     description: str | None = Field(default=None, description="models.dev's, from the offering that named the model.")
     family: str | None = None
+    type: ModelType | None = Field(
+        default=None,
+        description=(
+            "What kind of model it is: the kind most of its offerings give, from the provider's listing or "
+            "models.dev. A tie goes to the vendor's own provider. Null where no offering gives one."
+        ),
+    )
     capabilities: CatalogCapabilities
     input_modalities: list[str]
     output_modalities: list[str]
@@ -50,15 +60,30 @@ class CatalogModelSummary(BaseModel):
     offering_count: int
     provider_count: int
     providers: list[str] = Field(description="The provider instances offering it, sorted.")
+    zero_data_retention_providers: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The provider instances offering it that are declared to keep no prompt or completion data, sorted."
+        ),
+    )
     selectors: list[str] = Field(description="Every offering's selector, so the list can be searched by one.")
     price_sources: list[PriceSource] = Field(
         description="Which price lists the priced offerings came from, distinct and sorted."
     )
     unpriced_count: int = Field(description="How many offerings carry no price for this caller.")
     discovered: bool = Field(description="Whether any offering was discovered from its provider.")
+    price_unit: PriceUnit | None = Field(
+        default=None,
+        description=(
+            "What the cheapest prices are per: the unit every priced offering is priced in. Null where no "
+            "offering is priced, or where offerings are priced in different units, which leaves both null."
+        ),
+    )
     min_input_price_per_million: float | None = Field(
         default=None,
-        description="The cheapest offering's, at the comparison context where one was asked for.",
+        description=(
+            "The cheapest offering's, per million of `price_unit`, at the comparison context where one was asked for."
+        ),
     )
     min_output_price_per_million: float | None = None
 
@@ -85,7 +110,19 @@ class CatalogQuery(BaseModel):
     search: str | None = Field(
         default=None,
         max_length=200,
-        description="Case-insensitive text in a model's name, vendor, id, selectors, or provider instances.",
+        description=(
+            "Case-insensitive words, each in a model's name, vendor, id, or a selector's last path segment; "
+            "a pasted selector, or part of one with a colon or slash, matches too. "
+            "Provider instances are the `provider` filter's."
+        ),
+    )
+    workspace_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "For a signed-in caller, list only what a request billed to this workspace may call, with its "
+            "own disabled keys and model lists applied. A workspace the caller cannot see answers 404. "
+            "Ignored for an API key, which already names its workspace."
+        ),
     )
     skip: int = Field(default=0, ge=0, description="Number of matching models to skip.")
     limit: int = Field(default=100, ge=1, le=1000, description="Maximum number of models to return.")
@@ -100,15 +137,25 @@ class CatalogQuery(BaseModel):
     capability: list[CatalogCapability] = Field(
         default_factory=list, max_length=100, description="Require every capability."
     )
+    type: list[ModelType] = Field(
+        default_factory=list, max_length=100, description="Match any kind; a model of unknown kind does not match."
+    )
     min_context: int = Field(default=0, ge=0, description="Minimum context window; unknown windows do not match.")
     max_input: float | None = Field(
         default=None,
         ge=0,
         allow_inf_nan=False,
-        description="Maximum cheapest input price per million tokens; unpriced models do not match.",
+        description=(
+            "Maximum cheapest input price per million tokens; unpriced models, and models priced in another "
+            "unit, do not match."
+        ),
     )
     pricing: Literal["all", "custom", "default", "priced", "unpriced"] = "all"
     source: Literal["all", "discovered", "custom"] = "all"
+    zero_data_retention: bool = Field(
+        default=False,
+        description="Only models at least one provider declared to keep no prompt or completion data offers.",
+    )
     released_within_days: int = Field(
         default=0,
         ge=0,
@@ -134,9 +181,87 @@ class CatalogFacets(BaseModel):
     total_count: int = Field(ge=0, description="Authorized models before any of the request's filters.")
     providers: list[str] = Field(description="Every provider instance offering an authorized model, sorted.")
     vendors: list[CatalogVendorFacet]
+    types: list[ModelType] = Field(description="Every kind an authorized model has, sorted.")
 
 
 class CatalogPage(BaseModel):
     count: int
     models: list[CatalogModelSummary]
     facets: CatalogFacets | None = None
+
+
+ModelInputModality = Literal["text", "image", "audio", "video", "pdf"]
+
+_MAX_TOKENS = 2**31 - 1
+
+
+class ModelMetadataOverrideRequest(BaseModel):
+    """What to say about a model in place of its server and models.dev. A null field is not overridden."""
+
+    context_window: int | None = Field(default=None, gt=0, le=_MAX_TOKENS)
+    max_output_tokens: int | None = Field(default=None, gt=0, le=_MAX_TOKENS)
+    tool_call: bool | None = Field(default=None, description="Whether the model calls tools: `tools`, `tool_choice`.")
+    reasoning: bool | None = Field(default=None, description="Whether the model reasons: `reasoning`.")
+    structured_output: bool | None = Field(
+        default=None,
+        description="Whether the model takes `response_format`. Never offered where Otari cannot send it.",
+    )
+    input_modalities: list[ModelInputModality] | None = Field(
+        default=None, min_length=1, max_length=5, description="What the model reads; `text` unless it says otherwise."
+    )
+
+
+class ModelMetadataOverridePublic(ModelMetadataOverrideRequest):
+    """An override as stored, under the selector it describes."""
+
+    selector: str = Field(description="The `provider:model` the override describes.")
+
+
+class CatalogProviderSummary(BaseModel):
+    """One provider instance offering at least one model the caller may see."""
+
+    name: str = Field(description="The instance name a selector starts with, such as `fireworks` or `openai-eu`.")
+    provider: str = Field(description="The any-llm implementation behind the instance.")
+    display_name: str = Field(
+        description=(
+            "models.dev's name for the implementation, with the instance name after it where the two differ; "
+            "the instance name where models.dev does not know it."
+        )
+    )
+    model_count: int = Field(description="Catalog models the caller may see that this instance offers.")
+    terms_url: str | None = Field(default=None, description="The provider's terms of service; null where none is set.")
+    privacy_url: str | None = Field(default=None, description="The provider's privacy policy; null where none is set.")
+
+
+class CatalogProvidersResponse(BaseModel):
+    count: int = Field(description="Providers the caller may see, before paging.")
+    providers: list[CatalogProviderSummary] = Field(description="The requested page, sorted by display name.")
+
+
+class CatalogProviderModel(BaseModel):
+    """One catalog model as one provider instance offers it."""
+
+    id: str = Field(description="The catalog id, the one `GET /catalog/models/{id}` takes.")
+    name: str
+    vendor: str | None
+    price_unit: PriceUnit | None = Field(
+        default=None,
+        description="What the prices are per. Null where nothing on this instance prices the model.",
+    )
+    input_price: float | None = Field(
+        default=None,
+        description=(
+            "This instance's input rate for the caller, in USD per million of `price_unit`, as the catalog's "
+            "`min_input_price_per_million` is. The cheapest where the instance offers the model more than once."
+        ),
+    )
+    output_price: float | None = Field(
+        default=None, description="This instance's output rate for the caller, in the same unit as `input_price`."
+    )
+    context_length: int | None = Field(default=None, description="The largest context window this instance serves.")
+
+
+class CatalogProviderDetail(CatalogProviderSummary):
+    """One provider instance and a page of the models it offers the caller, sorted by name."""
+
+    models: list[CatalogProviderModel] = Field(description="The requested page; `model_count` is the total.")

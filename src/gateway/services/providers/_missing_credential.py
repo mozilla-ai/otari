@@ -57,6 +57,7 @@ async def unpriced_model_refusal(
     plan: CompiledPlan | None,
     hosted: ModelProviderPort | None,
     organization_id: uuid.UUID | None,
+    unit: str | None = None,
 ) -> ModelRefusal:
     """Why a request that ``require_pricing`` refuses is turned away.
 
@@ -64,11 +65,12 @@ async def unpriced_model_refusal(
     pricing the model would not make it servable. A plan with several
     candidates keeps the pricing refusal: only a single candidate is offered
     to the hosted port at dispatch, so only its credential can be judged here.
-    ``selector`` is what the caller wrote and is what a pricing refusal names.
+    ``selector`` is what the caller wrote and is what a pricing refusal names,
+    with ``unit`` where the model has a rate that no completion meter reads.
     """
     single_candidate = plan is None or len(plan.attempts) == 1
     if resolved is not None and single_candidate:
         missing = await missing_provider_credential(config, resolved, hosted=hosted, organization_id=organization_id)
         if missing is not None:
             return ModelRefusal(code=missing.code, status_code=missing.status_code, detail=missing.detail)
-    return ModelRefusal(code=PRICING_REQUIRED, status_code=402, detail=no_pricing_error_detail(selector))
+    return ModelRefusal(code=PRICING_REQUIRED, status_code=402, detail=no_pricing_error_detail(selector, unit=unit))

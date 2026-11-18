@@ -2,13 +2,14 @@ import logging
 import os
 from functools import cache
 from logging.config import fileConfig
+from typing import Any
 
 from alembic import context
 from alembic.runtime.environment import NameFilterType
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from alembic.util import CommandError
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, event, pool
 from sqlalchemy.engine import Engine
 from sqlalchemy.sql.schema import SchemaItem
 
@@ -86,6 +87,27 @@ def _is_stamp_command() -> bool:
     """
     cmd = getattr(getattr(config, "cmd_opts", None), "cmd", None)
     return bool(cmd) and getattr(cmd[0], "__name__", "") == "stamp"
+
+
+def _disable_sqlite_foreign_keys(engine: Engine) -> None:
+    """Stop SQLite enforcing foreign keys for this engine's migrations.
+
+    A batch migration rebuilds the table it alters by copying it, dropping the
+    original and renaming the copy. A build that enforces foreign keys turns
+    that drop into a cascade over every child row, and the upgrade still
+    reports success, so the loss is silent. Enforcement is off by default and
+    this says so outright, because the default is a compile-time option.
+
+    Set on connect, since the pragma does nothing inside a transaction.
+    """
+    if engine.dialect.name != "sqlite":
+        return
+
+    @event.listens_for(engine, "connect")
+    def _off(dbapi_connection: Any, _: Any) -> None:  # noqa: ANN401
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=OFF")
+        cursor.close()
 
 
 def _reject_foreign_history(engine: Engine) -> None:
@@ -203,6 +225,7 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
 
+    _disable_sqlite_foreign_keys(connectable)
     _reject_foreign_history(connectable)
 
     with connectable.connect() as connection:

@@ -13,6 +13,9 @@ from gateway.core.config import API_ROOT
 
 DENIED = "gemini:gemini-2.5-flash"
 ALLOWED = "openai:gpt-4o"
+# The catalog ids GET /models lists the two under.
+ALLOWED_ID = "openai/gpt-4o"
+DENIED_ID = "google/gemini-2.5-flash"
 
 
 def _make_user(client: TestClient, headers: dict[str, str], user_id: str, allowed_models: Any) -> None:
@@ -94,8 +97,8 @@ def test_key_inherits_user_default_in_catalog(client: TestClient, master_key_hea
     inheriting = _key_for_user(client, master_key_header, "u-cat", allowed_models=None)
 
     ids = {m["id"] for m in client.get(f"{API_ROOT}/models", headers=inheriting).json()["data"]}
-    assert ALLOWED in ids
-    assert DENIED not in ids
+    assert ALLOWED_ID in ids
+    assert DENIED_ID not in ids
 
 
 def test_key_inherits_user_default_at_inference(client: TestClient, master_key_header: dict[str, str]) -> None:
@@ -118,7 +121,7 @@ def test_unrestricted_user_leaves_inheriting_key_open(client: TestClient, master
     inheriting = _key_for_user(client, master_key_header, "u-open", allowed_models=None)
 
     ids = {m["id"] for m in client.get(f"{API_ROOT}/models", headers=inheriting).json()["data"]}
-    assert {ALLOWED, DENIED} <= ids
+    assert {ALLOWED_ID, DENIED_ID} <= ids
 
 
 # --- narrow-only: subset-on-write for keys ---------------------------------

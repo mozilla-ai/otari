@@ -10,8 +10,10 @@ from unittest.mock import patch
 
 import pytest
 from any_llm.exceptions import ModelNotFoundError
+from any_llm.types.model import Model
 from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from gateway.api.deps import build_hosted_provider_service
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
@@ -24,16 +26,20 @@ from gateway.repositories.health_checks import (
     HealthCheckSettingsRepository,
 )
 from gateway.schemas.health_checks import HealthCheckSettingsUpdate
-from gateway.services.health_checks import HealthCheckOffering, HealthCheckService, list_hosted_offerings
+from gateway.services.health_checks import HealthCheckOffering, HealthCheckService
+from gateway.services.health_checks._offerings import list_hosted_offerings
 from gateway.services.health_checks._service import HostedRoster
 from gateway.services.mail import MailDelivery, Mailer, MailMessage
+from gateway.services.model_discovery_service import get_model_cache
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
+from gateway.types.models_dev import parse_catalog_v2
 
-from .conftest import build_test_client
+from .conftest import _to_async_url, build_test_client
 
 _MASTER = {API_KEY_HEADER: "Bearer test-master-key"}
 _CHECKS = f"{API_ROOT}/health-checks"
 _PROBE = "gateway.services.health_checks._probe"
+_OFFERINGS_MODULE = "gateway.services.health_checks._offerings"
 
 _OFFERINGS = [
     HealthCheckOffering(
@@ -106,6 +112,9 @@ class _Roster:
 
     async def serveable_models(self, *, organization_id: uuid.UUID | None) -> dict[str, frozenset[str]]:
         return {name: frozenset(models) for name, models in self.served.items() if models}
+
+    async def switch_off_unavailable(self, provider: str, model: str) -> bool:
+        return await self.switch_off_models({provider: [model]}) == 1
 
     async def switch_off_models(self, models: Mapping[str, Collection[str]]) -> int:
         self.switched_off.append({name: set(names) for name, names in models.items()})
@@ -320,7 +329,7 @@ async def test_the_alert_list_hears_when_a_provider_fails_and_when_it_is_back(
     # The second run found bedrock still down, which the list already knew.
     assert outbox.subjects[2] == "Otari health on otari.example.com: bedrock is answering again"
     assert "  bedrock:claude  failed for 10 minutes, 2 runs in a row" in outbox.sent[2][1].text
-    assert "https://otari.example.com/#/health-checks" in outbox.sent[0][1].text
+    assert "https://otari.example.com/health-checks" in outbox.sent[0][1].text
 
 
 @pytest.mark.asyncio
@@ -507,9 +516,7 @@ async def test_a_run_checks_what_the_hosted_providers_serve_on_their_own_keys(
     )
     await async_db.flush()
 
-    offerings = await list_hosted_offerings(
-        build_hosted_provider_service(UnitOfWork(async_db), config=test_config), test_config
-    )
+    offerings = await list_hosted_offerings(build_hosted_provider_service(UnitOfWork(async_db), config=test_config))
 
     assert [(o.selector, o.provider, o.implementation, o.model) for o in offerings] == [
         ("openai-eu:gpt-test", "openai-eu", "openai", "gpt-test")
@@ -534,6 +541,67 @@ async def test_a_run_checks_what_the_hosted_providers_serve_on_their_own_keys(
     ]
 
 
+@pytest.mark.asyncio
+async def test_a_run_asks_the_models_kind_rather_than_its_id(
+    async_db: AsyncSession, test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The kind decides, not the id: an id that names an embedding model is no reason to skip a chat model.
+
+    The provider's listing outranks models.dev, so a model it lists as an
+    embedding model is skipped although models.dev calls it a chat model.
+    """
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    async_db.add_all(
+        [
+            HostedProvider(
+                name="openai-eu",
+                provider="openai",
+                encrypted_api_key=encrypt_secret("sk-hosted-1234"),
+                api_key_last4="1234",
+            ),
+            HostedProviderModel(provider="openai-eu", model="embed-chat"),
+            HostedProviderModel(provider="openai-eu", model="vectors"),
+            HostedProviderModel(provider="openai-eu", model="unlisted"),
+            HostedProviderModel(provider="openai-eu", model="listed-vectors"),
+        ]
+    )
+    await async_db.flush()
+    catalog = parse_catalog_v2(
+        {
+            "openai": {
+                "models": {
+                    "embed-chat": {"type": "chat"},
+                    "vectors": {"type": "embedding"},
+                    "listed-vectors": {"type": "chat"},
+                }
+            }
+        }
+    )
+    get_model_cache().set(
+        "openai-eu",
+        [
+            Model.model_validate(
+                {"id": "listed-vectors", "object": "model", "created": 0, "owned_by": "openai-eu", "type": "embedding"}
+            )
+        ],
+    )
+
+    try:
+        with patch(f"{_OFFERINGS_MODULE}.cached_models_dev_catalog", return_value=catalog):
+            offerings = await list_hosted_offerings(
+                build_hosted_provider_service(UnitOfWork(async_db), config=test_config)
+            )
+    finally:
+        get_model_cache().clear("openai-eu")
+
+    assert {o.model: o.chat for o in offerings} == {
+        "embed-chat": True,
+        "vectors": False,
+        "unlisted": True,
+        "listed-vectors": False,
+    }
+
+
 async def _listed(offerings: Sequence[HealthCheckOffering]) -> Sequence[HealthCheckOffering]:
     return offerings
 
@@ -555,6 +623,67 @@ async def test_disable_all_switches_off_the_failing_models_and_they_leave_the_li
     assert [r.selector for r in status.results if r.status == "fail"] == []
     assert "bedrock" not in {p.provider for p in status.providers}
     assert await service.disable_failing() == 0
+
+
+class _StatusError(Exception):
+    def __init__(self, message: str, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+@pytest.mark.asyncio
+async def test_a_model_its_provider_refuses_is_switched_off_by_the_run(
+    async_db: AsyncSession, test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _mail_on(test_config, monkeypatch)
+    roster = _Roster()
+    service = _service(async_db, test_config, _Clock(), roster)
+    await service.update_settings(HealthCheckSettingsUpdate(alert_emails=["ops@example.com"]))
+    outbox = _Outbox()
+
+    async def llama_refused(*, model: str, **_kwargs: Any) -> object:
+        if model == "llama":
+            msg = f"Unable to access non-serverless model {model}. Please visit the console to create an endpoint."
+            raise _StatusError(msg, 400)
+        return object()
+
+    await _run_with(service, llama_refused, outbox)
+
+    assert roster.switched_off == [{"deepinfra": {"llama"}}]
+    # Told once that it was switched off, and not again as a model that is down.
+    assert outbox.subjects == ["Otari on otari.example.com: deepinfra:llama switched off"]
+    assert "non-serverless model llama" in outbox.sent[0][1].text
+    status = await service.get_status()
+    assert "deepinfra:llama" not in {result.selector for result in status.results}
+
+
+@pytest.mark.asyncio
+async def test_a_switch_off_that_fails_leaves_the_model_in_the_runs_alert(
+    async_db: AsyncSession, test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _mail_on(test_config, monkeypatch)
+
+    class _Unwritable(_Roster):
+        async def switch_off_unavailable(self, provider: str, model: str) -> bool:
+            msg = "database went away"
+            raise SQLAlchemyError(msg)
+
+    service = _service(async_db, test_config, _Clock(), _Unwritable())
+    await service.update_settings(HealthCheckSettingsUpdate(alert_emails=["ops@example.com"]))
+    outbox = _Outbox()
+
+    async def llama_refused(*, model: str, **_kwargs: Any) -> object:
+        if model == "llama":
+            msg = f"Unable to access non-serverless model {model}. Please visit the console to create an endpoint."
+            raise _StatusError(msg, 400)
+        return object()
+
+    await _run_with(service, llama_refused, outbox)
+
+    assert outbox.subjects == ["Otari health on otari.example.com: 1 model on deepinfra stopped answering"]
+    status = await service.get_status()
+    assert status.last_run is not None
+    assert "deepinfra:llama" in {result.selector for result in status.results if result.status == "fail"}
 
 
 @pytest.mark.asyncio
@@ -613,7 +742,7 @@ async def test_disable_all_switches_the_hosted_rows_off(
 
     await service.request_run()
     with patch(f"{_PROBE}.acompletion", new=broken_only):
-        await service.run_if_due(lambda: list_hosted_offerings(hosted, test_config))
+        await service.run_if_due(lambda: list_hosted_offerings(hosted))
 
     assert await service.disable_failing() == 1
     assert await hosted.serveable_models(organization_id=None) == {"openai": frozenset({"gpt-fine"})}
@@ -676,3 +805,26 @@ async def test_the_settings_row_survives_a_lost_insert_race(async_db: AsyncSessi
 
     assert row.id == 1
     assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_a_first_read_of_the_settings_waits_for_a_concurrent_one_and_returns_its_row(postgres_url: str) -> None:
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def first_read(session: AsyncSession) -> datetime:
+        return (await HealthCheckSettingsRepository(session).get_or_create()).updated_at
+
+    try:
+        async with sessions() as first, sessions() as second:
+            first_updated_at = await first_read(first)
+            waiting = asyncio.create_task(first_read(second))
+            # The first read has not committed, so the second cannot finish.
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(asyncio.shield(waiting), timeout=0.5)
+            await first.commit()
+            second_updated_at = await waiting
+    finally:
+        await engine.dispose()
+
+    assert second_updated_at == first_updated_at

@@ -37,6 +37,19 @@ import {
 } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
+// The error-action seam, replaced the way a superset build's alias replaces it,
+// so what a failed turn hands it is observable. It answers only a refusal that
+// carries a code, so the failures elsewhere in this file render as the base does.
+vi.mock("@/features/playground/overlayErrorAction", () => ({
+  PlaygroundErrorAction: ({
+    status,
+    code,
+  }: {
+    status: number | null
+    code: string | null
+  }) => (code ? <p>{`action for ${status} ${code}`}</p> : null),
+}))
+
 /** Mirrors `RATING_ACKNOWLEDGEMENT_MS` in `hooks/usePlayground.ts`. */
 const RATING_ACKNOWLEDGEMENT_MS = 3000
 
@@ -157,6 +170,8 @@ interface ApiState {
   upload?: (file: File) => PlaygroundFile
   /** One listing, or one per request so a test can page by `after`. */
   files?: PlaygroundFiles | ((path: string) => PlaygroundFiles)
+  /** Whether the deployment can keep trace content, which offers prompt capture. */
+  contentAvailable?: boolean
 }
 
 /**
@@ -231,6 +246,15 @@ function mockApi(state: ApiState = {}) {
       }
       if (path.startsWith("/playground/favorite-models")) {
         return (state.favorites ?? { model_keys: [] }) as never
+      }
+      if (path.startsWith("/trace-content/policy")) {
+        return {
+          content_available: state.contentAvailable ?? false,
+          tool_output: false,
+          platform_break_glass: false,
+          retention_days: 30,
+          session_max_age_days: 90,
+        } as never
       }
       throw new Error(`unexpected read: ${path}`)
     })
@@ -467,6 +491,24 @@ describe("the Playground before the first question", () => {
       await screen.findByRole("link", { name: "Providers" }),
     ).toHaveAttribute("href", "/organization/provider-keys")
   })
+
+  it("tells a viewer the Playground is not theirs to run", async () => {
+    mockApi({
+      context: organizationContext({
+        role: "viewer",
+        deployment_operator: false,
+        workspace_memberships: [
+          { workspace_id: WORKSPACE_ID, name: "Default", role: "member" },
+        ],
+      }) as OrganizationContext,
+    })
+    renderPage()
+
+    expect(
+      await screen.findByText("The Playground is not open to viewers"),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
+  })
 })
 
 describe("sending a question", () => {
@@ -507,6 +549,182 @@ describe("sending a question", () => {
       stream: true,
       messages: [{ role: "user", content: "hi" }],
     })
+  })
+
+  it("asks to keep the prompt only once capture is switched on", async () => {
+    mockApi({ contentAvailable: true })
+    const stream = mockStream([delta("ok"), "[DONE]"])
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("Try a prompt.")
+
+    await user.type(await screen.findByLabelText("Message"), "hi")
+    await user.click(screen.getByRole("button", { name: "Send message" }))
+    await screen.findByText("ok")
+    expect(
+      new Headers(stream.mock.calls[0]?.[1]?.headers).get(
+        "Otari-Trace-Content",
+      ),
+    ).toBeNull()
+
+    stream.mockImplementationOnce(async (_path, init) =>
+      sseResponse([delta("again"), "[DONE]"], init?.signal),
+    )
+    await user.click(screen.getByRole("switch", { name: "Capture prompts" }))
+    await user.type(screen.getByLabelText("Message"), "hi again")
+    await user.click(screen.getByRole("button", { name: "Send message" }))
+    await screen.findByText("again")
+    expect(
+      new Headers(stream.mock.calls[1]?.[1]?.headers).get(
+        "Otari-Trace-Content",
+      ),
+    ).toBe("keep")
+  })
+
+  it("sends one conversation id per chat, and a new one after New chat", async () => {
+    mockApi()
+    const stream = mockStream([delta("ok"), "[DONE]"])
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("Try a prompt.")
+    const conversationId = (call: number) =>
+      new Headers(stream.mock.calls[call]?.[1]?.headers).get(
+        "Otari-Conversation-Id",
+      )
+    const send = async (text: string, replies: number) => {
+      await user.type(screen.getByLabelText("Message"), text)
+      await user.click(screen.getByRole("button", { name: "Send message" }))
+      await waitFor(() =>
+        expect(screen.getAllByText("ok")).toHaveLength(replies),
+      )
+    }
+
+    await screen.findByLabelText("Message")
+    await send("hi", 1)
+    await send("and again", 2)
+    expect(conversationId(0)).toMatch(/^playground-/)
+    expect(conversationId(1)).toBe(conversationId(0))
+
+    await user.click(screen.getByRole("button", { name: "New chat" }))
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "New chat",
+      }),
+    )
+    await send("fresh", 1)
+    expect(stream).toHaveBeenCalledTimes(3)
+    expect(conversationId(2)).toMatch(/^playground-/)
+    expect(conversationId(2)).not.toBe(conversationId(0))
+  })
+
+  it("starts a new conversation id in a compared column whose model changes", async () => {
+    mockApi({
+      catalog: catalogResponse([
+        ...CATALOG.models,
+        catalogModelSummary({
+          id: "gemini-2.5-pro",
+          vendor: "Google",
+          selector: "gemini-2.5-pro",
+          selectors: ["gemini:gemini-2.5-pro"],
+        }),
+      ]),
+    })
+    const stream = mockStream([delta("ok"), "[DONE]"])
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("Try a prompt.")
+    // Each request's conversation id, by the model it was sent to.
+    const conversationIds = (from: number) =>
+      Object.fromEntries(
+        stream.mock.calls
+          .slice(from)
+          .map((call) => [
+            JSON.parse(String(call[1]?.body)).model,
+            new Headers(call[1]?.headers).get("Otari-Conversation-Id"),
+          ]),
+      )
+    const pickB = async (model: string) => {
+      await user.click(screen.getByRole("button", { name: "Model B" }))
+      await user.click(
+        await screen.findByRole("button", { name: new RegExp(`^${model}`) }),
+      )
+    }
+    const send = async (text: string) => {
+      await user.type(screen.getByLabelText("Message"), text)
+      await user.click(screen.getByRole("button", { name: "Send message" }))
+    }
+
+    await user.click(screen.getByRole("radio", { name: "Compare" }))
+    await pickB("claude-sonnet-4")
+    await send("first")
+    await waitFor(() => expect(stream).toHaveBeenCalledTimes(2))
+    const before = conversationIds(0)
+
+    await pickB("gemini-2.5-pro")
+    await send("second")
+    await waitFor(() => expect(stream).toHaveBeenCalledTimes(4))
+    const after = conversationIds(2)
+
+    expect(before["gpt-4o"]).toMatch(/^playground-/)
+    expect(after["gpt-4o"]).toBe(before["gpt-4o"])
+    expect(after["gemini-2.5-pro"]).toMatch(/^playground-/)
+    expect(after["gemini-2.5-pro"]).not.toBe(before["claude-sonnet-4"])
+  })
+
+  it("stops only the changed column's reply in flight when its model changes", async () => {
+    mockApi({
+      catalog: catalogResponse([
+        ...CATALOG.models,
+        catalogModelSummary({
+          id: "gemini-2.5-pro",
+          vendor: "Google",
+          selector: "gemini-2.5-pro",
+          selectors: ["gemini:gemini-2.5-pro"],
+        }),
+      ]),
+    })
+    const stream = openStream()
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("Try a prompt.")
+
+    await user.click(screen.getByRole("radio", { name: "Compare" }))
+    await user.click(screen.getByRole("button", { name: "Model B" }))
+    await user.click(
+      await screen.findByRole("button", { name: /^claude-sonnet-4/ }),
+    )
+    await user.type(screen.getByLabelText("Message"), "hi")
+    await user.click(screen.getByRole("button", { name: "Send message" }))
+    await stream.push(delta("mid-flight"))
+    await screen.findByText("mid-flight")
+
+    await user.click(screen.getByRole("button", { name: "Model B" }))
+    await user.click(
+      await screen.findByRole("button", { name: /^gemini-2.5-pro/ }),
+    )
+    // Delivered after the change: a live stream would fold it into a column.
+    await stream.push(delta("late"))
+    await stream.close()
+
+    const columnB = screen.getByRole("region", { name: "Model B response" })
+    expect(within(columnB).queryByText(/late/)).not.toBeInTheDocument()
+    expect(within(columnB).queryByText(/mid-flight/)).not.toBeInTheDocument()
+    // Column A's stream is still open, so the frame after the change reaches it.
+    expect(
+      await within(
+        screen.getByRole("region", { name: "Model A response" }),
+      ).findByText(/late/),
+    ).toBeInTheDocument()
+  })
+
+  it("offers no prompt capture where the deployment keeps no content", async () => {
+    mockApi()
+    renderPage()
+    await screen.findByText("Try a prompt.")
+
+    expect(
+      screen.queryByRole("switch", { name: "Capture prompts" }),
+    ).not.toBeInTheDocument()
   })
 
   it("shows the per-turn stats the final frame reported", async () => {
@@ -577,7 +795,13 @@ describe("sending a question", () => {
         web_search: { configured: true, enabled: true, reason: null },
         code_execution: { configured: true, enabled: true, reason: null },
         mcp_servers: [
-          { id: "srv-1", name: "Docs", purpose_hint: null, enabled: true },
+          {
+            id: "srv-1",
+            name: "Docs",
+            purpose_hint: null,
+            enabled: true,
+            sign_in_required: false,
+          },
         ],
       },
     })
@@ -605,6 +829,45 @@ describe("sending a question", () => {
       tools: [{ type: "otari_web_search" }, { type: "otari_code_execution" }],
       mcp_server_ids: ["srv-1"],
     })
+  })
+
+  it("shows a server the caller has not signed in to as unavailable, and never attaches it", async () => {
+    mockApi({
+      tools: {
+        ...NO_TOOLS,
+        mcp_servers: [
+          {
+            id: "srv-1",
+            name: "Drive",
+            purpose_hint: null,
+            enabled: true,
+            sign_in_required: true,
+          },
+        ],
+      },
+    })
+    const stream = mockStream([delta("ok"), "[DONE]"])
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("Try a prompt.")
+
+    await user.click(await screen.findByRole("button", { name: "Add tools" }))
+    expect(
+      await screen.findByRole("checkbox", { name: "Drive" }),
+    ).toBeDisabled()
+    expect(
+      screen.getByText(
+        "Connect your account under Tools, MCP servers, to use it.",
+      ),
+    ).toBeVisible()
+    await user.keyboard("{Escape}")
+
+    await user.type(await screen.findByLabelText("Message"), "hi")
+    await user.click(screen.getByRole("button", { name: "Send message" }))
+    await screen.findByText("ok")
+
+    const [, init] = stream.mock.calls[0] ?? []
+    expect(JSON.parse(String(init?.body))).not.toHaveProperty("mcp_server_ids")
   })
 
   it("stops on request, keeping what had arrived and reporting no failure", async () => {
@@ -652,6 +915,33 @@ describe("sending a question", () => {
     expect(
       screen.queryByRole("button", { name: "Copy response" }),
     ).not.toBeInTheDocument()
+  })
+
+  it("hands a refusal's status and code to the error action", async () => {
+    mockApi()
+    vi.spyOn(apiClient, "apiStream").mockRejectedValue(
+      new apiClient.ApiError(
+        402,
+        "Insufficient funds ($0.00) to serve this request.",
+        "insufficient_funds",
+      ),
+    )
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("Try a prompt.")
+
+    await user.type(await screen.findByLabelText("Message"), "hi")
+    await user.click(screen.getByRole("button", { name: "Send message" }))
+
+    // The base text stays as it was; the action is beneath it.
+    expect(
+      await screen.findByText(
+        "Insufficient funds ($0.00) to serve this request.",
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText("action for 402 insufficient_funds"),
+    ).toBeInTheDocument()
   })
 
   it("reports a mid-stream failure on the conversation", async () => {

@@ -15,40 +15,66 @@ ends or the loop exits:
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import re
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from functools import partial
 from typing import TYPE_CHECKING, Any
 
 import anyio
 import anyio.lowlevel
-import httpx
+import httpx2
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
+from mcp.types import ListToolsResult
 
-from gateway.exceptions.tools_exceptions import McpSessionsInterruptedError
+from gateway.exceptions.tools_exceptions import McpSessionsInterruptedError, McpSignInRequiredError
 from gateway.log_config import logger
-from gateway.services.mcp_stateless import failure_class
-from gateway.services.tool_usage import ToolUsageTally
-from gateway.services.traces import RequestTrace
+from gateway.models.mcp import AttachedTimeBudget
+from gateway.services.mcp_stateless import (
+    CODE_TOOL_NOT_ALLOWED,
+    catalog_of,
+    closed_with,
+    failure_class,
+    refuse_rejected_token,
+    refused_token,
+)
+from gateway.services.model_access import is_mcp_tool_allowed
+from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, TOOL_ERROR_SENTINEL, ToolUsageTally
+from gateway.services.traces import RequestTrace, ToolSpans
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from types import TracebackType
 
     from mcp.types import CallToolResult
     from mcp.types import Tool as MCPTool
 
     from gateway.models.mcp import McpServerConfig
+    from gateway.services.mcp_stateless import ContactObserver
 
 
-def _effective_port(url: httpx.URL) -> int | None:
+# How long an attached server may take to answer its first two requests before a request goes on without it,
+# and how long all of a request's attached servers may take between them, in every phase from renewing a token
+# to connecting (``AttachedTimeBudget``).
+ATTACHED_CONNECT_DEADLINE_S = 10.0
+ATTACHED_CONNECT_BUDGET_S = 15.0
+
+
+def _cancelling() -> bool:
+    """Whether the running task has a cancellation pending from outside it."""
+    task = asyncio.current_task()
+    return task is not None and task.cancelling() > 0
+
+
+def _effective_port(url: httpx2.URL) -> int | None:
     if url.port is not None:
         return url.port
     return {"http": 80, "https": 443}.get(url.scheme)
 
 
-def _is_allowed_mcp_redirect(base: httpx.URL, target: httpx.URL) -> bool:
+def _is_allowed_mcp_redirect(base: httpx2.URL, target: httpx2.URL) -> bool:
     same_host = base.host == target.host
     same_origin = same_host and base.scheme == target.scheme and _effective_port(base) == _effective_port(target)
     https_upgrade = (
@@ -64,27 +90,33 @@ def _is_allowed_mcp_redirect(base: httpx.URL, target: httpx.URL) -> bool:
 def _origin_bound_http_client(
     base_url: str,
     headers: dict[str, str] | None = None,
-    timeout: httpx.Timeout | None = None,
-    auth: httpx.Auth | None = None,
-) -> httpx.AsyncClient:
+    timeout: httpx2.Timeout | None = None,
+    auth: httpx2.Auth | None = None,
+) -> httpx2.AsyncClient:
     """Create an MCP HTTP client that refuses redirects outside the vetted origin."""
-    base = httpx.URL(base_url)
+    base = httpx2.URL(base_url)
 
-    async def enforce_origin(request: httpx.Request) -> None:
+    async def enforce_origin(request: httpx2.Request) -> None:
         if not _is_allowed_mcp_redirect(base, request.url):
-            raise httpx.RequestError("MCP redirect target is outside the validated origin", request=request)
+            raise httpx2.RequestError("MCP redirect target is outside the validated origin", request=request)
 
-    return httpx.AsyncClient(
+    return httpx2.AsyncClient(
         headers=headers,
-        timeout=timeout if timeout is not None else httpx.Timeout(30.0),
+        timeout=timeout if timeout is not None else httpx2.Timeout(30.0, read=300.0),
         auth=auth,
-        follow_redirects=True,
-        event_hooks={"request": [enforce_origin]},
+        event_hooks={"request": [enforce_origin], "response": [refuse_rejected_token]},
     )
 
 
 CLOSE_TIMEOUT_SECONDS = 10.0
+# How many withheld tool names a server's access note spells out before it counts the rest.
+_ACCESS_NOTE_MAX_NAMES = 20
+# The note is system text, so a tool name enters it only if it cannot carry instructions; a server lists any string.
+_NOTE_SAFE_TOOL_NAME = re.compile(r"[A-Za-z0-9_.-]{1,128}")
 _CANCEL_GRACE_SECONDS = 1.0
+# The most of one tool result the model reads; a server can return any amount, and the rest would
+# crowd out the conversation or overflow the model's context window.
+MCP_RESULT_MAX_CHARS = 100_000
 
 
 def mcp_tool_to_openai(tool: MCPTool) -> dict[str, Any]:
@@ -94,7 +126,7 @@ def mcp_tool_to_openai(tool: MCPTool) -> dict[str, Any]:
         "function": {
             "name": tool.name,
             "description": tool.description or "",
-            "parameters": tool.inputSchema or {"type": "object", "properties": {}},
+            "parameters": tool.input_schema or {"type": "object", "properties": {}},
         },
     }
 
@@ -115,6 +147,16 @@ class _ConnectedServer:
     session: ClientSession
     tools: list[dict[str, Any]] = field(default_factory=list)
     purpose_hint: str | None = None
+    stored_server_id: str | None = None
+    # Tools the server lists that the caller's rule does not grant, named in the model's access note.
+    not_granted: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class _DeniedTool:
+    server: str
+    decided_by: str
+    server_id: str | None = None
 
 
 class MCPClientPool:
@@ -131,16 +173,28 @@ class MCPClientPool:
         *,
         tally: ToolUsageTally | None = None,
         trace: RequestTrace | None = None,
+        ceded_tool_names: Iterable[str] = (),
+        contacts: ContactObserver | None = None,
     ):
         self._configs = configs
         self._stack = AsyncExitStack()
         self._servers: dict[str, _ConnectedServer] = {}
         self._tool_owner: dict[str, str] = {}
+        # A server's tools the caller may not use. The pool claims a call to one and refuses it,
+        # so it is never handed to the client as a call of its own, unless the request declares
+        # a tool of that name itself (``ceded_tool_names``).
+        self._denied: dict[str, _DeniedTool] = {}
+        self._ceded = frozenset(ceded_tool_names)
         # Per-request accounting, owned by the route and passed in. None when the
         # pool runs outside a billed request (tests, direct use).
         self._tally = tally
         # The request's trace, which records each connection and call. None outside a request.
         self._trace = trace
+        self._spans = ToolSpans(trace, "mcp")
+        # Hears what each stored server answered at connect time. None outside a request.
+        self._contacts = contacts
+        # Per-user servers that refused the user's token at connect time and whose sign-in is over.
+        self.signed_out: list[tuple[McpServerConfig, McpSignInRequiredError]] = []
         self._owner: asyncio.Task[None] | None = None
         self._release = asyncio.Event()
 
@@ -206,17 +260,50 @@ class MCPClientPool:
         owner.result()
 
     async def _hold_sessions(self, opened: asyncio.Future[None]) -> None:
+        loop = asyncio.get_running_loop()
+        # For attached servers admission handed no budget: their connections alone draw on this one.
+        fallback = AttachedTimeBudget(ATTACHED_CONNECT_BUDGET_S)
         async with self._stack:
             for cfg in self._configs:
                 if cfg.name in self._servers:
                     raise ValueError(f"Duplicate MCP server name {cfg.name!r}")
                 started = datetime.now(UTC)
+                # When an attached server must be up by, on the loop's clock; ``None`` for a named one.
+                expires_at: float | None = None
+                budget = cfg.attached_budget or fallback
+                # Whether the shared budget, rather than the server's own deadline, decides when it gives up.
+                cut_short = False
+                if cfg.attached:
+                    cut_short = budget.left() < ATTACHED_CONNECT_DEADLINE_S
+                    expires_at = loop.time() + min(ATTACHED_CONNECT_DEADLINE_S, budget.left())
+                connecting = loop.time()
                 try:
-                    server = await self._connect(cfg)
-                except Exception:
+                    server = await self._connect(cfg, expires_at)
+                except BaseException as exc:
+                    if cfg.attached:
+                        budget.charge(loop.time() - connecting)
                     if self._trace is not None:
                         self._trace.record_mcp_connect(server=cfg.name, tool_count=None, started=started, ok=False)
-                    raise
+                    self._report_failure(cfg, exc, cut_short=cut_short)
+                    if isinstance(exc, McpSignInRequiredError):
+                        # The server refused the user's token and their sign-in turned out to be over:
+                        # the request goes on, and the model is told to offer a new sign-in.
+                        self.signed_out.append((cfg, exc))
+                        continue
+                    if not cfg.attached or not isinstance(exc, Exception | asyncio.CancelledError):
+                        raise
+                    # An attached server that cannot be reached is left out. A cancellation aimed at the
+                    # request itself is passed on; ``_connect`` has already closed the server's own stack.
+                    if isinstance(exc, asyncio.CancelledError) and (self._release.is_set() or _cancelling()):
+                        raise
+                    logger.warning(
+                        "Attached MCP server left out of the request server_id=%s reason=%s",
+                        cfg.stored_server_id,
+                        failure_class(exc),
+                    )
+                    continue
+                if cfg.attached:
+                    budget.charge(loop.time() - connecting)
                 if self._trace is not None:
                     self._trace.record_mcp_connect(
                         server=cfg.name, tool_count=len(server.tools), started=started, ok=True
@@ -225,27 +312,86 @@ class MCPClientPool:
             opened.set_result(None)
             await self._release.wait()
 
-    async def _connect(self, cfg: McpServerConfig) -> _ConnectedServer:
+    async def _connect(self, cfg: McpServerConfig, expires_at: float | None = None) -> _ConnectedServer:
+        """Open one server's session; a per-user server that refuses its token with a 401 is tried once more.
+
+        The session is opened on a stack of its own, joined to the pool's once it is up, so an
+        attempt the server refused leaves nothing behind to close. ``expires_at``, on the event
+        loop's clock, bounds the whole of it: both attempts and the renewal between them.
+
+        Raises:
+            McpSignInRequiredError: the refused token's sign-in ended and the connection was removed.
+            McpConnectionUnavailableError: the refused token could not be renewed right now.
+            TimeoutError: ``expires_at`` passed first.
+        """
+        loop = asyncio.get_running_loop()
+        retried = False
+        while True:
+            stack = AsyncExitStack()
+            try:
+                left = None if expires_at is None else expires_at - loop.time()
+                if left is not None and left <= 0:
+                    raise TimeoutError
+                session, listed = await self._open(stack, cfg, left)
+            except BaseException as exc:
+                failure = await closed_with(stack, exc)
+                if retried or cfg.renew_token is None or not refused_token(failure):
+                    raise failure from None
+                # The renewal is shielded and stores its answer even when this wait gives up on it.
+                async with asyncio.timeout_at(expires_at):
+                    token = await cfg.renew_token(cfg.authorization_token or "")
+                cfg = cfg.model_copy(update={"authorization_token": token})
+                retried = True
+                continue
+            await self._stack.enter_async_context(stack)
+            return self._connected(cfg, session, listed)
+
+    async def _open(
+        self, stack: AsyncExitStack, cfg: McpServerConfig, deadline: float | None = None
+    ) -> tuple[ClientSession, ListToolsResult]:
+        """Connect, initialize and list one server's tools into ``stack``; a test stands in for the network here."""
         headers: dict[str, str] | None = None
         if cfg.authorization_token:
             headers = {"Authorization": f"Bearer {cfg.authorization_token}"}
+        client = await stack.enter_async_context(_origin_bound_http_client(cfg.url, headers))
+        read, write = await stack.enter_async_context(streamable_http_client(cfg.url, http_client=client))
+        session = await stack.enter_async_context(ClientSession(read, write))
+        # An attached server joins every request of its workspace, so one that accepts the connection and
+        # never answers is given up on quickly rather than holding each request for the read timeout.
+        with anyio.fail_after(deadline) if deadline is not None else contextlib.nullcontext():
+            await session.initialize()
+            return session, await session.list_tools()
 
-        transport = await self._stack.enter_async_context(
-            streamablehttp_client(
-                cfg.url,
-                headers=headers,
-                httpx_client_factory=partial(_origin_bound_http_client, cfg.url),
-            )
-        )
-        read, write, _ = transport
-        session = await self._stack.enter_async_context(ClientSession(read, write))
-        await session.initialize()
+    def _report_failure(self, cfg: McpServerConfig, exc: BaseException, *, cut_short: bool = False) -> None:
+        """Tell the observer a stored server could not be opened, unless the failure says nothing about the server.
 
-        listed = await session.list_tools()
+        A request that was itself cancelled says nothing, and neither does an attached server
+        that timed out on what the others left of the budget (``cut_short``). One that timed out
+        on its own deadline is recorded, so its health says so and later requests leave it out.
+        """
+        if self._contacts is None or cfg.stored_server_id is None:
+            return
+        if isinstance(exc, asyncio.CancelledError) and (self._release.is_set() or _cancelling()):
+            return
+        if cut_short and isinstance(exc, TimeoutError):
+            return
+        self._contacts.failed(cfg.stored_server_id, cfg.url, exc)
+
+    def _connected(self, cfg: McpServerConfig, session: ClientSession, listed: ListToolsResult) -> _ConnectedServer:
+        if self._contacts is not None and cfg.stored_server_id is not None:
+            # One page is the whole catalog only when the server offered no more.
+            whole = getattr(listed, "next_cursor", None) is None
+            self._contacts.reached(cfg.stored_server_id, cfg.url, catalog_of(listed.tools) if whole else None)
         allowed = set(cfg.allowed_tools) if cfg.allowed_tools is not None else None
         openai_tools: list[dict[str, Any]] = []
+        not_granted: list[str] = []
         for tool in listed.tools:
             if allowed is not None and tool.name not in allowed:
+                self._deny(tool.name, cfg.name, "mcp_server", cfg.stored_server_id)
+                continue
+            if cfg.caller_tool_patterns is not None and not is_mcp_tool_allowed(cfg.caller_tool_patterns, tool.name):
+                self._deny(tool.name, cfg.name, cfg.caller_access_source or "mcp_everyone", cfg.stored_server_id)
+                not_granted.append(tool.name)
                 continue
             if tool.name in self._tool_owner:
                 # Tool-name collision policy: **first server wins**. Subsequent servers'
@@ -264,21 +410,81 @@ class MCPClientPool:
             openai_tools.append(mcp_tool_to_openai(tool))
             self._tool_owner[tool.name] = cfg.name
 
-        return _ConnectedServer(name=cfg.name, session=session, tools=openai_tools, purpose_hint=cfg.purpose_hint)
+        return _ConnectedServer(
+            name=cfg.name,
+            session=session,
+            tools=openai_tools,
+            purpose_hint=cfg.purpose_hint,
+            stored_server_id=cfg.stored_server_id,
+            not_granted=not_granted,
+        )
+
+    def _deny(self, name: str, server: str, decided_by: str, server_id: str | None) -> None:
+        if name not in self._ceded and name not in self._denied:
+            self._denied[name] = _DeniedTool(server=server, decided_by=decided_by, server_id=server_id)
 
     @property
     def openai_tools(self) -> list[dict[str, Any]]:
         return [t for s in self._servers.values() for t in s.tools]
 
     def owns_tool(self, name: str) -> bool:
-        return name in self._tool_owner
+        """Whether the pool answers a call to ``name``: by running it, or by refusing one the caller may not use."""
+        return name in self._tool_owner or name in self._denied
 
     def purpose_hints(self) -> list[tuple[str, str]]:
-        return [(s.name, s.purpose_hint) for s in self._servers.values() if s.purpose_hint]
+        hints: list[tuple[str, str]] = []
+        for server in self._servers.values():
+            parts = [server.purpose_hint] if server.purpose_hint else []
+            if note := self._access_note(server):
+                parts.append(note)
+            if parts:
+                hints.append((server.name, " ".join(parts)))
+        return hints
+
+    def _access_note(self, server: _ConnectedServer) -> str | None:
+        """Which of the server's tools the caller holds and which it does not, by name, so the model can say so."""
+        withheld = [
+            name
+            for name in server.not_granted
+            if name not in self._tool_owner and name not in self._ceded and _NOTE_SAFE_TOOL_NAME.fullmatch(name)
+        ]
+        if not withheld:
+            return None
+        named = ", ".join(withheld[:_ACCESS_NOTE_MAX_NAMES])
+        if len(withheld) > _ACCESS_NOTE_MAX_NAMES:
+            named += f" and {len(withheld) - _ACCESS_NOTE_MAX_NAMES} more"
+        granted = (
+            ", ".join(name for t in server.tools if _NOTE_SAFE_TOOL_NAME.fullmatch(name := t["function"]["name"]))
+            or "none of its tools"
+        )
+        return (
+            f"The user may use {granted} here. {named} {'exists' if len(withheld) == 1 else 'exist'} "
+            f"but {'is' if len(withheld) == 1 else 'are'} not granted to the user: "
+            "if asked for what only those do, say the user lacks access and a workspace admin can grant it, "
+            "instead of trying."
+        )
 
     def server_name_for_tool(self, name: str) -> str | None:
-        """Return the configured server that owns ``name``, if connected."""
-        return self._tool_owner.get(name)
+        """Return the configured server that owns ``name``, or that refuses it, if connected."""
+        denied = self._denied.get(name)
+        return self._tool_owner.get(name) or (denied.server if denied is not None else None)
+
+    def _refuse(self, name: str, denied: _DeniedTool, arguments: dict[str, Any]) -> MCPToolCallOutcome:
+        """Answer a call to a tool the caller may not use, which never reaches its server."""
+        if self._trace is not None:
+            self._trace.record_tool_call(
+                tool_name=name,
+                tool_type="mcp",
+                started=datetime.now(UTC),
+                ok=False,
+                arguments=arguments,
+                mcp_server=denied.server,
+                mcp_server_id=denied.server_id,
+                decided_by=denied.decided_by,
+                refused=True,
+            )
+        detail = f"{CODE_TOOL_NOT_ALLOWED}: {name} on {denied.server} is not granted to you; ask a workspace admin"
+        return MCPToolCallOutcome(content=f"{TOOL_ERROR_SENTINEL} {detail}", activity_content=detail, is_error=True)
 
     async def _call_tool_result(self, name: str, arguments: dict[str, Any]) -> CallToolResult:
         """Execute an MCP call and return the server's native typed result."""
@@ -291,11 +497,24 @@ class MCPClientPool:
         except Exception:
             if self._tally is not None:
                 self._tally.record_failure(name)
-            if self._trace is not None:
-                self._trace.record_tool_call(tool_name=name, tool_type="mcp", started=started, ok=False)
+            self._spans.record(
+                started,
+                ok=False,
+                arguments=arguments,
+                tool_name=name,
+                mcp_server=owner,
+                mcp_server_id=self._servers[owner].stored_server_id,
+            )
             raise
-        if self._trace is not None:
-            self._trace.record_tool_call(tool_name=name, tool_type="mcp", started=started, ok=not result.isError)
+        self._spans.record(
+            started,
+            ok=not result.is_error,
+            arguments=arguments,
+            result=_result_text(result),
+            tool_name=name,
+            mcp_server=owner,
+            mcp_server_id=self._servers[owner].stored_server_id,
+        )
         return result
 
     async def call_tool_outcome(self, name: str, arguments: dict[str, Any]) -> MCPToolCallOutcome:
@@ -308,7 +527,16 @@ class MCPClientPool:
         API format.
         """
         if name not in self._tool_owner:
+            if (denied := self._denied.get(name)) is not None:
+                return self._refuse(name, denied, arguments)
             raise KeyError(f"No MCP server owns tool {name!r}")
+        if self._tally is not None and not await self._tally.admit(name):
+            self._tally.record_failure(name)
+            return MCPToolCallOutcome(
+                content=TOOL_BUDGET_EXCEEDED_TEXT,
+                activity_content=TOOL_BUDGET_EXCEEDED_TEXT.removeprefix(f"{TOOL_ERROR_SENTINEL} "),
+                is_error=True,
+            )
         try:
             result = await self._call_tool_result(name, arguments)
         except Exception as exc:
@@ -319,26 +547,24 @@ class MCPClientPool:
                 is_error=True,
                 transport_error=True,
             )
-        parts = [_render_content_block(block) for block in result.content]
-        flattened = "\n".join(p for p in parts if p)
-        rendered = f"[tool error] {flattened}" if result.isError else flattened
+        flattened = _bounded(_result_text(result))
+        rendered = f"[tool error] {flattened}" if result.is_error else flattened
         if self._tally is not None:
             self._tally.record_result(name, rendered)
         return MCPToolCallOutcome(
             content=rendered,
             activity_content=flattened,
-            is_error=bool(result.isError),
+            is_error=bool(result.is_error),
         )
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
         """Execute a tool call against its owning MCP server and flatten the result to text.
 
         MCP supports rich content blocks (image, embedded resource, structured data). This
-        flattener concatenates text blocks verbatim and renders non-text blocks as a brief
-        ``[type=…]`` placeholder so the model can at least see that *something* came back.
-        For tools that return images or large embedded resources, this is intentionally
-        lossy — fine for the current text-tool use case, but a future improvement is to
-        pass image content through as multimodal message blocks when the model supports it.
+        flattener concatenates text blocks and embedded text resources, renders other
+        blocks as a brief placeholder, and cuts the whole to :data:`MCP_RESULT_MAX_CHARS`.
+        Images are lossy; a future improvement is to pass them through as multimodal
+        message blocks when the model supports it.
 
         The call is recorded on the request's tally (see
         :class:`gateway.services.tool_usage.ToolUsageTally`); an ``isError`` result
@@ -414,5 +640,31 @@ def _render_content_block(block: Any) -> str:
     if btype in ("resource", "embedded_resource", "embeddedresource"):
         resource = getattr(block, "resource", None)
         uri = getattr(resource, "uri", None) if resource else None
+        resource_text = getattr(resource, "text", None)
+        if isinstance(resource_text, str):
+            return f"[resource uri={uri or '?'}]\n{resource_text}"
+        blob = getattr(resource, "blob", None)
+        if isinstance(blob, str):
+            mime = (
+                getattr(resource, "mimeType", None)
+                or getattr(resource, "mime_type", None)
+                or "application/octet-stream"
+            )
+            return f"[resource uri={uri or '?'} type={mime} bytes_b64={len(blob)}]"
         return f"[resource uri={uri or '?'}]"
     return f"[content type={btype}]"
+
+
+def _result_text(result: CallToolResult) -> str:
+    """An MCP result as the text the model reads, without the error marker the loop adds."""
+    return "\n".join(part for part in (_render_content_block(block) for block in result.content) if part)
+
+
+def _bounded(text: str) -> str:
+    """``text`` cut to :data:`MCP_RESULT_MAX_CHARS`, with a note saying how much the model is not shown."""
+    if len(text) <= MCP_RESULT_MAX_CHARS:
+        return text
+    return (
+        f"{text[:MCP_RESULT_MAX_CHARS]}\n[truncated: the tool returned {len(text)} characters; "
+        f"only the first {MCP_RESULT_MAX_CHARS} are shown]"
+    )

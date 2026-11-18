@@ -1,9 +1,10 @@
 """An uploaded file handed to a code-execution sandbox, and the name it takes inside one."""
 
 from collections.abc import Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import PurePosixPath
+from typing import Self
 
 # The purpose stamped on a file the code-execution sandbox produced, so a
 # listing can tell a run's artifact from a user's upload.
@@ -20,7 +21,7 @@ class StagedFile:
 
     file_id: str
     # The name the file has inside the session's working directory, which is
-    # also what the model is told; see ``sandbox_path_for``.
+    # also what the model is told; see ``named_for_sandbox``.
     filename: str
     mime_type: str
     storage_ref: str
@@ -29,8 +30,12 @@ class StagedFile:
     # no longer than the one Otari gives the file itself.
     expires_at: datetime | None = None
 
+    def named_for_sandbox(self, taken: Collection[str]) -> Self:
+        """This file under the name it takes in the session's working directory, unique among ``taken``."""
+        return replace(self, filename=_unique_name(self.filename, taken))
 
-def sandbox_path_for(filename: str, taken: Collection[str]) -> str:
+
+def _unique_name(filename: str, taken: Collection[str]) -> str:
     """The name a staged upload gets inside the session's working directory.
 
     The upload's own name reduced to its last path segment, so a name carrying

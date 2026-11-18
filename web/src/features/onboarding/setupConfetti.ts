@@ -1,3 +1,5 @@
+import { celebrationColors } from "@/features/onboarding/celebrationPalette"
+
 /** A restrained burst from the center of the settled success dialog. */
 // Fourteen pieces read as a celebration without crowding the success message.
 const CONFIG = {
@@ -11,30 +13,6 @@ const CONFIG = {
   decay: 0.9,
   /** Lifetime in frames. */
   ticks: 260,
-}
-
-/**
- * The palette, read off the running theme rather than written here.
- *
- * A hex at a call site cannot follow a theme and there are two of them, which
- * is the design system's layer rule and is enforced over this file. Reading the
- * tokens has the same shape as every other color in the product and gets the
- * dark theme's brighter teals for free. The two brand steps and the one green,
- * and nothing else: a celebration in six hues is not this product.
- */
-const TOKENS = [
-  "--color-primary",
-  "--color-primary-hover",
-  "--color-success",
-  "--color-chart-ramp-4",
-]
-
-function paletteFromTheme(): string[] {
-  if (typeof document === "undefined") return []
-  const styles = getComputedStyle(document.documentElement)
-  return TOKENS.map((token) => styles.getPropertyValue(token).trim()).filter(
-    (value) => value !== "",
-  )
 }
 
 /** Viewport-relative center of an element, the way canvas-confetti wants it. */
@@ -88,7 +66,7 @@ export async function fireSetupConfetti(
   ])
   if (hasFired || signal.aborted || !element.isConnected) return
   hasFired = true
-  const colors = paletteFromTheme()
+  const colors = celebrationColors()
   await confetti({
     ...CONFIG,
     origin: confettiOriginOf(element),

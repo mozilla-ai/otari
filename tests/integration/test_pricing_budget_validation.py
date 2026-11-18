@@ -1,10 +1,13 @@
 """Tests for pricing and budget value validation."""
 
+from decimal import Decimal
+
 import pytest
 from fastapi.testclient import TestClient
 
 from gateway.core.config import API_ROOT
 from gateway.core.settings.pricing import PricingConfig
+from gateway.models.pricing import ModelPricing
 from gateway.services.pricing_service import pricing_required_but_missing
 
 
@@ -221,6 +224,8 @@ def test_pricing_required_but_missing_false_when_not_required() -> None:
 
 
 def test_pricing_required_but_missing_false_when_priced() -> None:
-    """A model that has pricing is never rejected, regardless of require_pricing."""
-    pricing = object()  # any non-None pricing row
-    assert pricing_required_but_missing(pricing, require_pricing=True) is False  # type: ignore[arg-type]
+    """A model with a rate a completion meter reads is never rejected, regardless of require_pricing."""
+    pricing = ModelPricing(
+        model_key="openai:gpt-4o", input_price_per_million=Decimal(1), output_price_per_million=Decimal(1)
+    )
+    assert pricing_required_but_missing(pricing, require_pricing=True) is False

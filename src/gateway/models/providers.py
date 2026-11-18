@@ -4,10 +4,22 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, false, text
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    Uuid,
+    false,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
-from gateway.models.base import Base
+from gateway.models.base import Base, UtcDateTime
 from gateway.models.secret_fields import redact_secret_like_values
 
 
@@ -215,6 +227,9 @@ class HostedProvider(Base):
     # Serve a model the roster does not list, as a ``config.yml`` instance does.
     # A model the roster switches off is still refused.
     serves_unlisted_models: Mapped[bool] = mapped_column(default=False, server_default=false())
+    # The operator's declaration that the upstream keeps no prompt or completion
+    # data. Shown in the catalog; nothing is enforced on it.
+    zero_data_retention: Mapped[bool] = mapped_column(default=False, server_default=false())
     # The one organization served on this provider, or None for every one. Any
     # other organization is answered as if the provider were not configured.
     # RESTRICT: SET NULL would open the provider to every organization, and
@@ -223,15 +238,22 @@ class HostedProvider(Base):
     restricted_to_organization_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("organization.id", ondelete="RESTRICT"), index=True, default=None
     )
+    # The ISO country codes whose requests this provider serves, or None for
+    # every country. Checked as well as ``provider_supported_countries``.
+    supported_countries: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    # The upstream's own policies, linked from the public Providers pages.
+    terms_url: Mapped[str | None] = mapped_column(String(1024), default=None)
+    privacy_url: Mapped[str | None] = mapped_column(String(1024), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)
     )
 
 
-HostedModelDisabledReason = Literal["unpriced", "operator"]
+HostedModelDisabledReason = Literal["unpriced", "operator", "unavailable"]
 DISABLED_UNPRICED: HostedModelDisabledReason = "unpriced"
 DISABLED_BY_OPERATOR: HostedModelDisabledReason = "operator"
+DISABLED_UNAVAILABLE: HostedModelDisabledReason = "unavailable"
 
 
 class HostedProviderModel(Base):
@@ -249,7 +271,8 @@ class HostedProviderModel(Base):
 
     ``disabled_reason`` says why a row is off, and is null exactly when it is
     on: ``unpriced`` while it waits for a rate, ``operator`` while an operator
-    has switched it off. ``serves_unpriced`` marks a row switched on without a
+    has switched it off, ``unavailable`` since its provider refused to serve it
+    on the deployment's credential. ``serves_unpriced`` marks a row switched on without a
     rate on purpose, so a refresh does not hold it for one.
     """
 
@@ -268,6 +291,28 @@ class HostedProviderModel(Base):
     )
 
 
+class HostedProviderDisabledVendor(Base):
+    """A vendor whose models one hosted provider does not serve.
+
+    A row is the switch turned off: dispatch refuses every model of that
+    vendor on that provider, including models a later refresh offers, while
+    each model's own switch is kept for when the row is deleted. ``provider``
+    holds the hosted provider's name rather than a foreign key, as
+    ``hosted_provider_models`` does, because a provider declared in
+    configuration has no row of its own.
+    """
+
+    __tablename__ = "hosted_provider_disabled_vendors"
+    __table_args__ = (
+        UniqueConstraint("provider", "vendor", name="uq_hosted_provider_disabled_vendors_provider_vendor"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    provider: Mapped[str] = mapped_column(String(64))
+    vendor: Mapped[str] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
 class ConfiguredProviderImport(Base):
     """A ``providers:`` entry of config.yml already copied onto a hosted provider of its name.
 
@@ -280,3 +325,102 @@ class ConfiguredProviderImport(Base):
 
     name: Mapped[str] = mapped_column(String(64), primary_key=True)
     imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
+class WorkspaceHostedProviderAccess(Base):
+    """One workspace's narrowing of a hosted provider its organization may use.
+
+    No row means the workspace inherits the provider whole, which is every
+    workspace's state until an admin changes it. A row either switches the
+    provider off for the workspace (``enabled`` false) or narrows it to
+    ``models``; ``models`` is null for every model the deployment serves on it.
+    A row in the inherited state is never stored: the service deletes it.
+
+    ``provider`` is the hosted provider's name, not a foreign key, for the same
+    reason as ``HostedProviderModel.provider``: a hosted provider declared in
+    configuration has no row of its own.
+    """
+
+    __tablename__ = "workspace_hosted_provider_access"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "provider", name="uq_workspace_hosted_provider_access_workspace_provider"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(64))
+    enabled: Mapped[bool] = mapped_column(default=True)
+    models: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)
+    )
+
+
+class WorkspaceProviderPolicy(Base):
+    """What one workspace requires of every provider that serves it.
+
+    No row requires nothing. ``require_zero_data_retention`` refuses every source
+    not declared zero data retention: an organization key or a hosted provider
+    whose operator did not declare it, and every configured instance, which
+    cannot be declared at all.
+    """
+
+    __tablename__ = "workspace_provider_policies"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True
+    )
+    require_zero_data_retention: Mapped[bool] = mapped_column(default=False, server_default=false())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)
+    )
+
+
+PLATFORM_CONNECT_ROW_ID = 1
+
+PlatformConnectState = Literal["pending", "connected", "expired", "denied"]
+PLATFORM_CONNECT_PENDING: PlatformConnectState = "pending"
+PLATFORM_CONNECT_CONNECTED: PlatformConnectState = "connected"
+PLATFORM_CONNECT_EXPIRED: PlatformConnectState = "expired"
+PLATFORM_CONNECT_DENIED: PlatformConnectState = "denied"
+
+
+class PlatformConnectAttempt(Base):
+    """The deployment's one attempt to connect to otari.ai, pending or as it ended.
+
+    One row, so every replica reads the same attempt. ``attempt_id`` changes
+    with each start, and every write names it, so an answer for an attempt that
+    was canceled or replaced lands nowhere. ``next_poll_at`` is also the claim:
+    a status read asks otari.ai only where its conditional update moved it
+    forward. The device code is stored encrypted and cleared when the attempt
+    ends.
+    """
+
+    __tablename__ = "platform_connect_attempts"
+    __table_args__ = (
+        CheckConstraint(f"id = {PLATFORM_CONNECT_ROW_ID}", name="ck_platform_connect_attempts_one_row"),
+        CheckConstraint(
+            "status IN ('pending', 'connected', 'expired', 'denied')", name="ck_platform_connect_attempts_status"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=PLATFORM_CONNECT_ROW_ID)
+    attempt_id: Mapped[uuid.UUID] = mapped_column(Uuid, default=uuid.uuid4)
+    status: Mapped[str] = mapped_column(String(16))
+    encrypted_device_code: Mapped[str | None] = mapped_column(default=None)
+    user_code: Mapped[str] = mapped_column(String(64))
+    verification_uri_complete: Mapped[str] = mapped_column(String(2048))
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime())
+    interval_seconds: Mapped[int] = mapped_column(Integer)
+    next_poll_at: Mapped[datetime] = mapped_column(UtcDateTime())
+    # The organization of the operator who started the attempt, which the provider is kept to.
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("organization.id", ondelete="CASCADE"), index=True, default=None
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+    )

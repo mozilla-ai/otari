@@ -6,10 +6,10 @@ import type { SortDescriptor } from "react-aria-components"
 import { FiCheck, FiMinus } from "react-icons/fi"
 
 import type { CatalogOffering } from "@/client"
+import { Button as ActionButton } from "@/design-system/actions/Button"
 import { CopyableValue } from "@/design-system/actions/CopyField"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
-import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { Badge } from "@/design-system/indicators/Badge"
 import { Dot } from "@/design-system/indicators/Dot"
@@ -22,9 +22,13 @@ import {
   MODALITY_LABELS,
   priceSourceLabel,
 } from "@/features/models/catalog"
+import { ModelDetailsDialog } from "@/features/models/ModelDetailsDialog"
+import { OfferingPriceRules } from "@/features/models/OfferingPriceRules"
 import {
   formatPricedRate,
+  hasOutputRate,
   type PricingUnit,
+  pricesMadeMedia,
   pricingUnitOf,
 } from "@/features/models/pricingUnit"
 import {
@@ -33,19 +37,23 @@ import {
 } from "@/features/models/publicCatalog"
 import { UseModelDrawer } from "@/features/models/UseModelDrawer"
 import { canManage } from "@/features/organization/roles"
-import { useCatalogModel } from "@/shared/api/models"
+import { useCatalogModel, useSetModelOverride } from "@/shared/api/models"
 import {
   useDeploymentOperator,
   useOrganizationContext,
 } from "@/shared/api/organizations"
 import { ProviderMark } from "@/shared/components/marks/BrandMark"
+import { followInAppLink, routeHref } from "@/shared/helpers/appLocation"
 import {
   formatContext,
   formatRate,
   formatReleaseDate,
 } from "@/shared/helpers/format"
 import { providerDisplayName } from "@/shared/helpers/providers"
+import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
+import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
+import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 import { providerModelId } from "./modelKey"
 
 // One model, on a page of its own: the header with its facts, then every
@@ -103,48 +111,18 @@ function rate(value: number | null | undefined): string {
   return value == null ? "—" : formatRate(value)
 }
 
-// How far the metered rate may sit from the provider's published list price
-// before the row says so. The listed price is the live models.dev catalog's and
-// the default is billed from the accepted snapshot, so a hair's width of
-// disagreement is rounding; a real gap is a stale stored price, a deliberate
-// markup or a snapshot update awaiting review, and each is worth a glance.
-const LIST_PRICE_TOLERANCE = 0.02
-
-/** The provider's list price, where it disagrees with what is metered. */
-export function listPriceNote(
-  metered: number | null | undefined,
-  listed: number | null | undefined,
-): string | null {
-  if (metered == null || listed == null || listed <= 0) return null
-  if (Math.abs(metered - listed) / listed <= LIST_PRICE_TOLERANCE) return null
-  return `list ${formatRate(listed)}`
-}
-
 function RateCell({
   metered,
-  listed,
   unit,
-  tokenOnly = false,
 }: {
   metered: number | null | undefined
-  listed: number | null | undefined
   /** What the offering's price is per; a non-token rate names its unit. */
   unit: PricingUnit
-  /** A rate only a token price has (output), shown as a dash on any other unit. */
-  tokenOnly?: boolean
 }) {
-  if (unit !== "tokens") {
-    return (
-      <span className="text-mono-caption">
-        {tokenOnly || metered == null ? "—" : formatPricedRate(metered, unit)}
-      </span>
-    )
-  }
-  const note = listPriceNote(metered, listed)
   return (
-    <span className="flex flex-col items-end">
-      <span className="text-mono-caption">{rate(metered)}</span>
-      {note ? <span className="text-caption text-subtle">{note}</span> : null}
+    // One line, so a rate and its unit ("$5.00 / 1M") never part.
+    <span className="text-mono-caption whitespace-nowrap">
+      {metered == null ? "—" : formatPricedRate(metered, unit)}
     </span>
   )
 }
@@ -163,6 +141,24 @@ interface OfferingRow {
   offering: CatalogOffering
   input: number | null
   output: number | null
+}
+
+/**
+ * Each base rate on the side it bills, as the provider tables show it: media the
+ * model makes under Output, a minute of audio's two rates on their own sides,
+ * and every other non-token price, which is one rate, under Input.
+ */
+function offeringRow(
+  offering: CatalogOffering,
+  type: string | null | undefined,
+): OfferingRow {
+  const unit = pricingUnitOf(offering.pricing?.unit)
+  const input = offering.pricing?.input_price_per_million ?? null
+  const output = offering.pricing?.output_price_per_million ?? null
+  if (unit === "token") return { offering, input, output }
+  if (pricesMadeMedia(unit, type))
+    return { offering, input: null, output: input }
+  return { offering, input, output: hasOutputRate(unit) ? output : null }
 }
 
 type OfferingSortColumn =
@@ -206,12 +202,16 @@ function compareOfferings(
 
 function offeringColumns({
   canOverride,
+  isOperator,
   withUsage,
   withSource,
+  onEditDetails,
 }: {
   canOverride: boolean
+  isOperator: boolean
   withUsage: boolean
   withSource: boolean
+  onEditDetails: (offering: CatalogOffering) => void
 }): DataTableColumn<OfferingRow>[] {
   // Lane order is what a laptop sees without scrolling: the provider and its
   // selector, then the prices the page exists to compare, then where each came
@@ -226,7 +226,9 @@ function offeringColumns({
       cell: ({ offering: row }) => (
         // The provider's own model ID sits on a second line, so two offerings on
         // one provider (Bedrock's regional profiles) read apart at a glance.
-        <span className="text-body flex items-center gap-2 whitespace-nowrap">
+        // On a phone the held lane wraps, so it does not take most of the
+        // screen from the prices scrolling beside it.
+        <span className="text-body flex items-center gap-2 whitespace-nowrap max-md:whitespace-normal">
           {/* Keyed on the type rather than the instance, which is what the
               instance is named after until an operator renames it. The name
               stays the instance either way, and the type is still spelled out
@@ -244,10 +246,11 @@ function offeringColumns({
                   ? `${providerDisplayName(row.provider_type)} · `
                   : ""}
                 {credentialLabel(row.credential)}
+                {row.zero_data_retention ? " · Zero data retention" : ""}
                 {row.quantization ? ` · ${row.quantization}` : ""}
               </span>
             </span>
-            <code className="text-caption font-mono">
+            <code className="text-caption font-mono max-md:[overflow-wrap:anywhere]">
               {providerModelId(row.selector)}
             </code>
           </span>
@@ -256,28 +259,25 @@ function offeringColumns({
     },
     {
       id: "input",
-      header: "Input / 1M",
+      header: "Input",
       align: "end",
       allowsSorting: true,
       cell: (row) => (
         <RateCell
           metered={row.input}
-          listed={row.offering.metadata_input_price_per_million}
           unit={pricingUnitOf(row.offering.pricing?.unit)}
         />
       ),
     },
     {
       id: "outputPrice",
-      header: "Output / 1M",
+      header: "Output",
       align: "end",
       allowsSorting: true,
       cell: (row) => (
         <RateCell
           metered={row.output}
-          listed={row.offering.metadata_output_price_per_million}
           unit={pricingUnitOf(row.offering.pricing?.unit)}
-          tokenOnly
         />
       ),
     },
@@ -308,12 +308,26 @@ function offeringColumns({
       header: "Context / max out",
       align: "end",
       allowsSorting: true,
-      cell: ({ offering: row }) => (
-        <span className="text-mono-caption whitespace-nowrap">
-          {formatContext(row.context_window)} /{" "}
-          {formatContext(row.max_output_tokens)}
-        </span>
-      ),
+      cell: ({ offering: row }) => {
+        const set =
+          row.metadata_override?.context_window != null ||
+          row.metadata_override?.max_output_tokens != null
+        return (
+          <span className="flex flex-col items-end">
+            <span className="text-mono-caption whitespace-nowrap">
+              {formatContext(row.context_window)} /{" "}
+              {formatContext(row.max_output_tokens)}
+            </span>
+            {set ? (
+              <span className="whitespace-nowrap text-caption text-subtle">
+                {row.credential === "organization"
+                  ? "Set by your organization"
+                  : "Set by the operator"}
+              </span>
+            ) : null}
+          </span>
+        )
+      },
     },
   ]
   if (withUsage) {
@@ -327,11 +341,22 @@ function offeringColumns({
       cell: ({ offering: row }) =>
         row.usage_30d ? (
           <span className="flex flex-col items-end">
-            <span className="text-mono-caption">
-              {rate(row.usage_30d.effective_price_per_million)}
-            </span>
+            <Tooltip
+              content={
+                <span className="break-normal">
+                  Blended input and output price you paid over 30 days.
+                </span>
+              }
+            >
+              <span className="text-mono-caption whitespace-nowrap underline decoration-dotted decoration-control-border underline-offset-4">
+                {row.usage_30d.effective_price_per_million == null
+                  ? "—"
+                  : `${formatPricedRate(row.usage_30d.effective_price_per_million, "token")} effective`}
+              </span>
+            </Tooltip>
             <span className="whitespace-nowrap text-caption text-subtle">
-              {row.usage_30d.requests} req · cache{" "}
+              {row.usage_30d.requests}{" "}
+              {row.usage_30d.requests === 1 ? "request" : "requests"} · cache{" "}
               {percent(row.usage_30d.cache_hit_rate)}
             </span>
           </span>
@@ -340,28 +365,44 @@ function offeringColumns({
         ),
     })
   }
-  if (canOverride) {
+  if (canOverride || isOperator) {
     // An organization admin cannot touch the deployment's price, but may set
     // what their own organization is billed for a model it supplies the key
     // for. An offering on one of the deployment's own instances is not one of
     // those: the deployment settles that upstream bill, and the gateway refuses
     // an override for it (otari#1164), so no link is offered rather than one
-    // that ends in a disabled dialog.
+    // that ends in a disabled dialog. The details follow the same line: the
+    // organization's for its own keys, the operator's for everything else.
     columns.push({
       id: "actions",
       header: "Actions",
-      cell: ({ offering: row }) =>
-        row.credential === "organization" ? (
-          <Link
-            to="/organization/provider-keys"
-            search={{ override: row.selector }}
-            className="text-link hover:text-link-hover"
-          >
-            Set your rate
-          </Link>
-        ) : (
-          <span className="text-caption text-subtle">Deployment priced</span>
-        ),
+      cell: ({ offering: row }) => {
+        const own = row.credential === "organization"
+        const editDetails = own ? canOverride : isOperator
+        return (
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            {own && canOverride ? (
+              <Link
+                to="/organization/provider-keys"
+                search={{ override: row.selector }}
+                className="text-link hover:text-link-hover"
+              >
+                Set your rate
+              </Link>
+            ) : null}
+            {!own && canOverride ? (
+              <span className="text-caption text-subtle">
+                Deployment priced
+              </span>
+            ) : null}
+            {editDetails ? (
+              <ActionButton size="sm" onPress={() => onEditDetails(row)}>
+                Edit details
+              </ActionButton>
+            ) : null}
+          </span>
+        )
+      },
     })
   }
   return columns
@@ -393,6 +434,7 @@ export function ModelDetailView({
 }) {
   const organization = useOrganizationContext(!publicView)
   const { open_signup } = useDeployment()
+  const { recordEvent } = useTelemetry()
   // Not a pricing authority here: rates are set per model on Providers, which
   // answers to the organization role. It decides the two hints below that point
   // at deployment-wide pages.
@@ -402,15 +444,28 @@ export function ModelDetailView({
   // organization's owner, and excluding them would leave the one caller who can
   // set a rate without the link to set it.
   const canOverride = !publicView && canManage(organization.data)
-  const selected = useCatalogModel(modelId)
+  // The offerings the selected workspace may call, as the list beside it shows.
+  const workspace = useSelectedWorkspace()
+  const selected = useCatalogModel(
+    modelId,
+    workspace.selected?.workspace_id ?? "",
+    workspace.isSettled,
+  )
   const [quantization, setQuantization] = useState("all")
   const [useModel, setUseModel] = useState(false)
+  const [editing, setEditing] = useState<CatalogOffering | undefined>(undefined)
+  const setOverride = useSetModelOverride()
   const [sort, setSort] = useState<{
     column: OfferingSortColumn
     direction: "asc" | "desc"
   }>({ column: "input", direction: "asc" })
 
   const model = selected.data
+  const recordUseModel = (id: string) =>
+    recordEvent(TELEMETRY_EVENTS.USE_MODEL_CLICKED, {
+      model: id,
+      signed_in: !publicView,
+    })
   // Only a failure with nothing to show replaces the page. A background
   // refetch that fails (every pricing, provider, alias and settings write
   // invalidates this key) keeps the rendered model and says so above it.
@@ -431,11 +486,7 @@ export function ModelDetailView({
       (offering) =>
         quantization === "all" || offering.quantization === quantization,
     )
-    .map((offering) => ({
-      offering,
-      input: offering.pricing?.input_price_per_million ?? null,
-      output: offering.pricing?.output_price_per_million ?? null,
-    }))
+    .map((offering) => offeringRow(offering, model.type))
     .sort(compareOfferings(sort.column, sort.direction))
   const withUsage = !publicView && hasUsage(model.offerings)
   const unpriced = model.offerings.filter(
@@ -446,17 +497,6 @@ export function ModelDetailView({
   // reads as unknown rather than as five refusals.
   const hasCapabilities = CAPABILITY_LABELS.some(
     ({ key }) => model.capabilities[key],
-  )
-  const listPriceDiffers = model.offerings.some(
-    (model) =>
-      listPriceNote(
-        model.pricing?.input_price_per_million,
-        model.metadata_input_price_per_million,
-      ) !== null ||
-      listPriceNote(
-        model.pricing?.output_price_per_million,
-        model.metadata_output_price_per_million,
-      ) !== null,
   )
   const modalities = (list: string[]) =>
     list.length === 0
@@ -474,6 +514,7 @@ export function ModelDetailView({
         {publicView ? (
           <a
             href={publicCatalogHref()}
+            onClick={followInAppLink}
             className="text-link hover:text-link-hover"
           >
             ← Models
@@ -512,14 +553,24 @@ export function ModelDetailView({
               // Signup where the deployment offers it, sign-in otherwise; the
               // model is reopened once the new session starts.
               <a
-                href={open_signup ? "#/signup" : "#/"}
-                onClick={() => rememberModel(model.id)}
+                href={routeHref(open_signup ? "/signup" : "/")}
+                onClick={(event) => {
+                  recordUseModel(model.id)
+                  rememberModel(model.id)
+                  followInAppLink(event)
+                }}
                 className={buttonVariants({ variant: "primary" })}
               >
                 Use this model
               </a>
             ) : (
-              <Button variant="primary" onPress={() => setUseModel(true)}>
+              <Button
+                variant="primary"
+                onPress={() => {
+                  recordUseModel(model.id)
+                  setUseModel(true)
+                }}
+              >
                 Use this model
               </Button>
             )}
@@ -623,6 +674,9 @@ export function ModelDetailView({
               {model.offering_count} on {model.provider_count}{" "}
               {model.provider_count === 1 ? "provider" : "providers"}, cheapest
               first.
+              {withUsage
+                ? " Yours, 30d is the blended input and output price you paid over 30 days."
+                : null}
             </p>
           </div>
           <div className="flex flex-col gap-3 border border-border bg-surface p-3">
@@ -647,8 +701,10 @@ export function ModelDetailView({
                 ariaLabel={`Offerings of ${model.name}`}
                 columns={offeringColumns({
                   canOverride,
+                  isOperator,
                   withUsage,
                   withSource: !publicView,
+                  onEditDetails: setEditing,
                 })}
                 rows={rows}
                 getRowKey={(row) => row.offering.selector}
@@ -671,16 +727,37 @@ export function ModelDetailView({
               {isOperator ? " Both switches live on Settings." : ""}
             </p>
           ) : null}
-          {listPriceDiffers ? (
-            <InfoBanner>
-              Where a rate differs from the price the provider publishes, that
-              price is shown beside it marked <em>list</em>. What is metered
-              here is the rate shown; the list price is what the provider would
-              charge you directly.
-            </InfoBanner>
-          ) : null}
         </section>
+        <OfferingPriceRules offerings={model.offerings} />
       </div>
+      {editing === undefined ? null : (
+        <ModelDetailsDialog
+          key={editing.selector}
+          isOpen
+          onOpenChange={(open) => {
+            if (!open) setEditing(undefined)
+          }}
+          current={editing.metadata_override ?? undefined}
+          limits={editing}
+          scope={
+            editing.credential === "organization"
+              ? `Applies to everyone in ${organization.data?.organization.name ?? "your organization"} who uses ${editing.selector}.`
+              : `Applies to everyone who uses ${editing.selector}.`
+          }
+          onSubmit={(body) =>
+            setOverride
+              .mutateAsync({
+                owner:
+                  editing.credential === "organization"
+                    ? "organization"
+                    : "deployment",
+                selector: editing.selector,
+                body,
+              })
+              .then(() => setEditing(undefined))
+          }
+        />
+      )}
       {publicView ? null : (
         <UseModelDrawer
           model={model}

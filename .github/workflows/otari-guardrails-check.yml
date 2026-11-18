@@ -3,7 +3,7 @@ name: Otari Guardrails Check
 # Runs the repository's path and verifier gates (.otari/) against every pull
 # request, so a change made without `otari hook` registered still meets them.
 # otari-guardrails-judges.yml runs the judge gates. See
-# docs/agent-guardrails.md, "Checking a pull request in CI".
+# cli/docs/agent-guardrails.md, "Checking a pull request in CI".
 #
 # The CLI, the gates and the verifier scripts come from the base commit, so a
 # pull request's edits to them do not change what checks it. This file is not
@@ -54,7 +54,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: git reset --soft "$(git merge-base "$BASE_SHA" HEAD)"
 
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           python-version: 3.14
           enable-cache: false

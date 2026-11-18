@@ -25,15 +25,12 @@ afterEach(() => {
 })
 
 /**
- * The page's own create action, scoped to the heading's header: once the
- * dialog is open its submit says "Create policy" too.
+ * The page's own create action, the first of its name: it leads the view,
+ * above the empty state's, and once the dialog is open its submit says
+ * "Create policy" too.
  */
-const createTrigger = async () => {
-  const heading = await screen.findByRole("heading", { name: "Routing" })
-  const header = heading.closest("header")
-  if (!header) throw new Error("PageIntro's header is gone")
-  return within(header).findByRole("button", { name: "Create policy" })
-}
+const createTrigger = async () =>
+  (await screen.findAllByRole("button", { name: "Create policy" }))[0]
 
 type TestUser = ReturnType<typeof userEvent.setup>
 
@@ -108,11 +105,10 @@ describe("Creating a routing policy", () => {
 
     await user.click(await createTrigger())
     expect(screen.getByRole("dialog")).toHaveAccessibleName("New policy")
-    expect(dialog().getAllByRole("radio")).toHaveLength(5)
+    expect(dialog().getAllByRole("radio")).toHaveLength(4)
     for (const choice of [
       "Fallback",
       "Split traffic",
-      "Smart router",
       "Spill over at rate limits",
       "Tier down on budget",
     ]) {
@@ -160,10 +156,10 @@ describe("Creating a routing policy", () => {
     await startCreate(user)
     await user.type(screen.getByRole("textbox", { name: /^name$/i }), "cheap")
     await user.click(dialog().getByRole("button", { name: "Back" }))
-    await user.click(dialog().getByRole("radio", { name: "Smart router" }))
+    await user.click(dialog().getByRole("radio", { name: "Split traffic" }))
     await user.click(dialog().getByRole("button", { name: "Continue" }))
 
-    expect(screen.getByRole("dialog")).toHaveAccessibleName("New smart router")
+    expect(screen.getByRole("dialog")).toHaveAccessibleName("New traffic split")
     expect(screen.getByRole("textbox", { name: /^name$/i })).toHaveValue(
       "cheap",
     )
@@ -472,34 +468,12 @@ describe("Creating a routing policy", () => {
     })
   })
 
-  it("creates a smart router with the marked model as its default", async () => {
-    const { calls } = mockApi([])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    await startCreate(user, "Smart router")
-    await user.type(screen.getByRole("textbox", { name: /^name$/i }), "smart")
-    await typeModel(user, /model 1/i, "openai:gpt-5-nano")
-    await typeModel(user, /model 2/i, "openai:gpt-5")
-    await user.click(
-      screen.getAllByRole("radio", { name: /serves when unsure/i })[1],
-    )
-    await submitDialog(user)
-
-    expect(lastSpec(calls)).toEqual({
-      select: [
-        { router: "knn", candidates: ["openai:gpt-5-nano", "openai:gpt-5"] },
-        { default: "openai:gpt-5" },
-      ],
-    })
-  })
-
   it("will not save a pool of one, which is not a routing decision", async () => {
     const { calls } = mockApi([])
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    await startCreate(user, "Smart router")
+    await startCreate(user, "Split traffic")
     await user.type(screen.getByRole("textbox", { name: /^name$/i }), "smart")
     await typeModel(user, /model 1/i, "openai:gpt-5")
     await user.click(screen.getByRole("button", { name: "Remove model 2" }))
@@ -514,7 +488,7 @@ describe("Creating a routing policy", () => {
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
-    await startCreate(user, "Smart router")
+    await startCreate(user, "Split traffic")
     // Seeded with two; three more reach the cap of 5.
     for (let i = 0; i < 3; i += 1) {
       await user.click(screen.getByRole("button", { name: "Add a model" }))
@@ -662,6 +636,38 @@ describe("Creating in a workspace", () => {
       name: "scoped",
       workspace_id: ADMIN_WORKSPACE,
     })
+  })
+
+  it("offers only what the selected workspace may call", async () => {
+    // A workspace can refuse a provider (zero data retention, a switched-off
+    // hosted provider), so the pickers and the fallbacks ask for its view.
+    const { calls } = mockApi([], null, [], { context: operatorInWorkspace() })
+    const user = userEvent.setup()
+    renderInWorkspace(<RoutingPage />)
+
+    await startCreate(user)
+    await user.type(
+      screen.getByRole("combobox", { name: /^main model$/i }),
+      "gpt",
+    )
+
+    const scoped = (path: string) =>
+      calls.filter(
+        (call) =>
+          call.url.includes(`${API_ROOT}${path}`) &&
+          new URL(call.url, "http://localhost").searchParams.get(
+            "workspace_id",
+          ) === ADMIN_WORKSPACE,
+      )
+    await waitFor(() => expect(scoped("/catalog/models")).not.toHaveLength(0))
+    expect(
+      calls.filter(
+        (call) =>
+          call.url.includes(`${API_ROOT}/catalog/models`) &&
+          !call.url.includes("workspace_id="),
+      ),
+    ).toHaveLength(0)
+    expect(scoped("/organizations/me/automatic-fallbacks")).not.toHaveLength(0)
   })
 
   it("writes an admin's policy through the tenant-scoped router", async () => {

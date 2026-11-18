@@ -25,38 +25,36 @@ from gateway.api.deps import (
     get_log_writer,
     get_unit_of_work,
 )
-from gateway.api.routes._helpers import latest_user_text, routing_signal_from_text, text_from_content, with_retry_hint
+from gateway.api.key_scopes import key_scope, may_read_files
+from gateway.api.routes._guardrail_targets import responses_targets
+from gateway.api.routes._helpers import routing_signal, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
     DeclaredTools,
-    ErrorKind,
     ToolBackends,
     ToolContext,
-    classify_provider_error,
     prepare_gateway_tools,
-    provider_error_headers,
-    provider_failure_detail,
     release_reservation,
     resolve_dispatch_provider,
     resolve_request_context,
     run_non_stream,
     run_single_attempt_stream,
     scope_prompt_cache_key,
-    stream_error_code,
-    stream_error_message,
 )
 from gateway.api.routes._request_tags import RequestMetadata, RequestTagsHeader, forwarded_metadata, resolved_tags
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
+from gateway.core.error_codes import ErrorKind
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
-from gateway.models.guardrails import GuardrailConfig
+from gateway.models.guardrails import RequestedGuardrails
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.schemas.inference import SettledCost
 from gateway.services.files import StagedFile
 from gateway.services.inference import (
+    UpstreamFailure,
     bind_upstream_user,
     call_responses,
     provider_failure,
@@ -66,12 +64,13 @@ from gateway.services.inference import (
     with_upstream_user,
 )
 from gateway.services.log_writer import LogWriter
-from gateway.services.mcp_loop import ToolBackend
+from gateway.services.mcp_loop import RoundGate, ToolBackend
 from gateway.services.mcp_loop_responses import (
     MAX_TOOL_ITERATIONS_CAP,
     responses_tool_loop,
     responses_tool_loop_stream,
 )
+from gateway.services.pricing import PriceFacts
 from gateway.services.provider_kwargs import apply_endpoint_defaults
 from gateway.services.providers import aresponses
 from gateway.services.tool_format import inject_purpose_hints_responses, openai_to_responses_tools
@@ -81,10 +80,12 @@ from gateway.services.tools import (
     WEB_SEARCH_HEADER,
     Dialect,
     ToolUseBudget,
+    provider_web_searches,
 )
-from gateway.services.traces import read_turn
+from gateway.services.traces import read_context, read_turn
 from gateway.streaming import RESPONSES_STREAM_FORMAT, RESPONSES_TERMINAL_EVENTS, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt
+from gateway.types.key_scope import KeyScope
 from gateway.types.normalization_target import NormalizationTarget
 
 router = APIRouter(tags=["responses"])
@@ -128,43 +129,11 @@ class ResponsesRequest(derive_request_base(ResponsesParams)):  # type: ignore[mi
     # Bounded on the list arm, not the union, so the ceiling caps the number of
     # ids rather than the length of any one value (see `core/sql.MAX_FILTER_VALUES`).
     mcp_server_ids: Annotated[list[uuid.UUID], Field(max_length=MAX_MCP_SERVER_IDS)] | None = None
-    guardrails: list[GuardrailConfig] | None = Field(default=None, max_length=8)
+    guardrails: RequestedGuardrails | None = None
     tools_header: str | None = None
     max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
     session_label: str | None = Field(default=None, max_length=SESSION_LABEL_MAX_LENGTH, description=SESSION_LABEL_DESC)
     metadata: RequestMetadata = None
-
-
-def _responses_input_text(value: Any) -> str:
-    """Flatten the Responses ``input`` field to plain text for guardrail checks.
-
-    ``input`` may be a bare string or a list of input items sharing the
-    ``role``/``content`` shape used by chat/messages (text parts look like
-    ``{"type": "input_text", "text": "..."}``).
-    """
-    if isinstance(value, str):
-        return value
-    if isinstance(value, list):
-        return latest_user_text(value)
-    return text_from_content(value)
-
-
-def _routing_text(body: Any) -> str:
-    """The task signal a policy's router reads for a Responses request.
-
-    ``instructions`` is part of the task, not decoration: the same ``input`` under
-    "answer in one word" and "write a proof" are different jobs with different
-    quality bars. Embedding only ``input`` gave both the same routing decision and,
-    under trace-sticky granularity, the same conversation identity. Guardrails read
-    ``input`` alone because they screen what the user sent; routing has to read what
-    the model was actually asked to do.
-    """
-    instructions = getattr(body, "instructions", None)
-    parts = [
-        instructions if isinstance(instructions, str) else "",
-        _responses_input_text(body.input),
-    ]
-    return "\n".join(part for part in parts if part)
 
 
 def _split_codex_input_metadata(value: Any) -> tuple[Any, bool]:
@@ -224,7 +193,7 @@ def _with_codex_extra_body(fields: dict[str, Any], provider: LLMProvider) -> dic
 
 
 def _usage_to_completion_usage(
-    usage: ResponseUsage | OpenResponsesUsage | None,
+    usage: ResponseUsage | OpenResponsesUsage | None, *, service_tier: str | None = None, provider_searches: int = 0
 ) -> CompletionUsage | None:
     if usage is None:
         return None
@@ -237,7 +206,24 @@ def _usage_to_completion_usage(
         total_tokens=getattr(usage, "total_tokens", 0) or 0,
         cache_read_tokens=cache_read_tokens,
         reasoning_tokens=getattr(output_details, "reasoning_tokens", 0) or 0,
+        provider_web_searches=provider_searches,
+        service_tier=service_tier,
     )
+
+
+def _response_usage(response: Any) -> CompletionUsage | None:
+    """The usage row of a whole response, the searches its provider ran included."""
+    return _usage_to_completion_usage(
+        getattr(response, "usage", None),
+        service_tier=_served_tier(response),
+        provider_searches=provider_web_searches(response),
+    )
+
+
+def _served_tier(response: Any) -> str | None:
+    """The tier a response says it was served at, or ``None`` where it says none."""
+    tier = getattr(response, "service_tier", None)
+    return tier if isinstance(tier, str) else None
 
 
 def _ends_a_response(chunk: Any) -> bool:
@@ -281,44 +267,48 @@ class _ResponsesAdapter:
         return HTTPException(status_code=status_code, detail=message, headers=headers)
 
     def provider_error(self, exc: BaseException, model: str | None = None) -> HTTPException:
-        mapping = classify_provider_error(exc, model=model)
+        failure = UpstreamFailure(exc, model=model)
+        mapping = failure.mapping
         if mapping is not None:
             return HTTPException(
                 status_code=mapping.status_code,
                 detail=mapping.detail,
-                headers=with_retry_hint(exc, mapping.status_code, provider_error_headers(exc, mapping.status_code)),
+                headers=with_retry_hint(exc, mapping.status_code, failure.headers),
             )
         return HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=provider_failure_detail(exc),
+            detail=failure.unclassified_detail(),
             headers=with_retry_hint(exc, status.HTTP_502_BAD_GATEWAY, None),
         )
 
     def stream_completion(self) -> Callable[[Any], bool] | None:
-        # The chat-completions bridge emits a terminal event whatever its upstream
-        # sent, so this catches a cut native stream and not a cut bridged one.
+        # A cut native stream ends without a terminal event. The chat-completions
+        # bridge raises on a stream that never reported a finish_reason, so a cut
+        # bridged one reaches the error path too.
         return _ends_a_response
 
     def stream_error_payload(self, exc: BaseException, provider: str | None = None) -> str:
         failure = provider_failure(exc, provider)
+        upstream = UpstreamFailure(exc)
         return openai_error_event(
             self.stream_format,
-            stream_error_code(exc),
-            stream_error_message(exc),
+            upstream.stream_code,
+            upstream.stream_message,
             failure.as_dict() if failure is not None else None,
         )
 
     def format_chunk(self, chunk: ResponseStreamEvent) -> str:
-        return f"event: {chunk.type}\ndata: {chunk.model_dump_json(exclude_none=True)}\n\n"
+        # By alias, so a JSON schema format's ``schema`` keeps its wire name rather than its field name, ``schema_``.
+        return f"event: {chunk.type}\ndata: {chunk.model_dump_json(exclude_none=True, by_alias=True)}\n\n"
 
     def extract_stream_usage(self, chunk: ResponseStreamEvent) -> CompletionUsage | None:
         response_obj = getattr(chunk, "response", None)
         if response_obj and getattr(response_obj, "usage", None):
-            return _usage_to_completion_usage(response_obj.usage)
+            return _response_usage(response_obj)
         return None
 
     def extract_usage(self, result: ResponsesResponse) -> CompletionUsage | None:
-        return _usage_to_completion_usage(getattr(result, "usage", None))
+        return _response_usage(result)
 
     def attach_cost(
         self,
@@ -330,12 +320,7 @@ class _ResponsesAdapter:
         usage = getattr(target, "usage", None)
         if usage is None:
             return False
-        target.usage = usage.model_copy(
-            update={
-                "cost_usd": settlement.cost_usd,
-                "pricing_source": settlement.pricing_source,
-            }
-        )
+        target.usage = usage.model_copy(update=settlement.usage_fields())
         return True
 
     def is_stream_cost_carrier(self, chunk: ResponseStreamEvent) -> bool:
@@ -365,6 +350,7 @@ class _ResponsesAdapter:
         *,
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
+        round_gate: RoundGate | None = None,
     ) -> ResponsesResponse:
         # Only pass the lock-in callback when given, so test fakes can mirror each call shape.
         extra: dict[str, Any] = {}
@@ -372,6 +358,8 @@ class _ResponsesAdapter:
             extra["on_first_response"] = on_first_response
         if use_budget is not None:
             extra["use_budget"] = use_budget
+        if round_gate is not None:
+            extra["round_gate"] = round_gate
         if native_tools:
             extra["native_tools"] = native_tools
         return await responses_tool_loop(
@@ -389,10 +377,16 @@ class _ResponsesAdapter:
         *,
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
+        round_gate: RoundGate | None = None,
+        on_first_response: Callable[[], None] | None = None,
     ) -> AsyncIterator[ResponseStreamEvent]:
         extra: dict[str, Any] = {}
+        if on_first_response is not None:
+            extra["on_first_response"] = on_first_response
         if use_budget is not None:
             extra["use_budget"] = use_budget
+        if round_gate is not None:
+            extra["round_gate"] = round_gate
         if native_tools:
             extra["native_tools"] = native_tools
         return responses_tool_loop_stream(
@@ -435,7 +429,7 @@ def _with_upstream_user(kwargs: dict[str, Any]) -> dict[str, Any]:
 _ADAPTER = _ResponsesAdapter()
 
 
-@router.post("/responses", response_model=None)
+@router.post("/responses", response_model=None, openapi_extra=key_scope(KeyScope.INFERENCE_RUN))
 async def create_response(
     raw_request: Request,
     response: FastAPIResponse,
@@ -467,8 +461,7 @@ async def create_response(
 
     async def _normalize(target: NormalizationTarget) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the Responses input payload
-        # before the cost estimate. A no-op when the files feature is off or the
-        # request has no attachments.
+        # before the cost estimate. A no-op when the request has no attachments.
         request_body.input, stats = await normalize_request_messages(
             request_body.input,
             fmt="responses",
@@ -476,10 +469,12 @@ async def create_response(
             provider=target.provider,
             model=target.model,
             files=files,
-            user_id=target.user_id,
+            user_id=target.file_user_id,
+            may_read_files=target.may_read_files,
             instance=target.instance,
             workspace_id=target.file_workspace_id,
             upstream_user=target.upstream_user,
+            client_country=target.client_country,
             sandbox_requested=sandbox_requested(
                 request_body.tools,
                 config=config,
@@ -493,6 +488,19 @@ async def create_response(
         chars = len(str(request_body.input)) + len(str(getattr(request_body, "instructions", "") or ""))
         return chars, stats.vision_usage()
 
+    declared = DeclaredTools(
+        guardrails=request_body.guardrails,
+        guardrail_targets=lambda: responses_targets(request_body),
+        tools=request_body.tools,
+        mcp_servers=request_body.mcp_servers,
+        mcp_server_ids=request_body.mcp_server_ids,
+        max_tool_iterations=request_body.max_tool_iterations,
+        tools_header=request_body.tools_header,
+        code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
+        web_fetch_header=raw_request.headers.get(WEB_FETCH_HEADER),
+        web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
+    )
+
     try:
         ctx = await resolve_request_context(
             adapter=_ADAPTER,
@@ -505,21 +513,27 @@ async def create_response(
             model=request_body.model,
             user_id_from_request=request_body.user,
             safety_identifier=request_body.safety_identifier,
+            price_facts=PriceFacts(service_tier=request_body.service_tier),
             estimate_prompt_chars=len(str(request_body.input))
             + len(str(getattr(request_body, "instructions", "") or "")),
             estimate_max_output_tokens=max_output_tokens,
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
             user_forbidden_detail=_USER_FORBIDDEN,
-            routing_signal=lambda: routing_signal_from_text(
-                _routing_text(request_body), raw_request, has_tools=bool(request_body.tools)
-            ),
+            streaming=bool(request_body.stream),
+            routing_signal=lambda: routing_signal(raw_request),
             normalize_messages=_normalize,
-            tools=request_body.tools,
+            declared=declared,
             code_execution_policies=tool_ports.code_execution_policy,
             model_provider=model_provider,
             idempotency=None if bool(request_body.stream) else idempotency,
             tags=resolved_tags(tags_header, request_body.metadata),
             turn=read_turn("responses", request_body.input),
+            context=lambda: read_context(
+                "responses",
+                request_body.input,
+                tools=request_body.tools,
+                system=getattr(request_body, "instructions", None),
+            ),
             session_label=request_body.session_label,
         )
     except IdempotentReplay as replay:
@@ -547,18 +561,7 @@ async def create_response(
         adapter=_ADAPTER,
         ctx=ctx,
         response=response,
-        declared=DeclaredTools(
-            guardrails=request_body.guardrails,
-            guardrail_text=_responses_input_text(request_body.input),
-            tools=request_body.tools,
-            mcp_servers=request_body.mcp_servers,
-            mcp_server_ids=request_body.mcp_server_ids,
-            max_tool_iterations=request_body.max_tool_iterations,
-            tools_header=request_body.tools_header,
-            code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
-            web_fetch_header=raw_request.headers.get(WEB_FETCH_HEADER),
-            web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
-        ),
+        declared=declared,
         backends=ToolBackends(
             ports=tool_ports,
             sandbox_containers=build_sandbox_container_registry(
@@ -567,6 +570,7 @@ async def create_response(
                 user_id=ctx.user_id,
                 workspace_id=ctx.workspace_id,
                 port=tool_ports.code_execution,
+                may_read_stored_files=may_read_files(ctx.api_key),
             ),
             sandbox_files=build_sandbox_file_bridge(
                 raw_request=raw_request,
@@ -576,6 +580,7 @@ async def create_response(
                 workspace_id=ctx.workspace_id,
                 inputs=sandbox_inputs,
             ),
+            billing=billing,
         ),
     )
 
@@ -631,6 +636,7 @@ async def create_response(
             model=model,
             display_model=resolved.alias,
             base_request_fields=base_request_fields,
+            response=response,
         )
 
     # ------------------------------------------------------------------
@@ -651,6 +657,25 @@ async def create_response(
         base_request_fields=base_request_fields,
     )
 
-    body = result.model_dump(exclude_none=True)
+    body = response_body(result)
     await idempotency.complete(body, response)
+    return body
+
+
+_INLINE_COST_FIELDS = ("cost_usd", "pricing_source", "tool_cost_usd")
+
+
+def response_body(result: Any) -> dict[str, Any]:
+    """A whole response as the JSON it is answered with, by alias as each streamed event is (see ``format_chunk``).
+
+    A native Responses provider's usage type drops the fields it does not declare,
+    so the cost ``attach_cost`` put on it is copied across here.
+    """
+    body: dict[str, Any] = result.model_dump(exclude_none=True, by_alias=True)
+    usage = getattr(result, "usage", None)
+    if isinstance(body.get("usage"), dict) and isinstance(usage, OpenResponsesUsage):
+        for name in _INLINE_COST_FIELDS:
+            value = getattr(usage, name, None)
+            if value is not None:
+                body["usage"].setdefault(name, value)
     return body

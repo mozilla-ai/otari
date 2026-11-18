@@ -45,11 +45,10 @@ from gateway.services.providers import hosted_implementation
 from gateway.services.routing import (
     BudgetState,
     NoEligibleCandidatesError,
-    backend_requires_pricing,
     compile_policy,
     explain_router_ordering,
-    unpriced_router_candidates,
 )
+from gateway.services.tenancy import OrgProviderKeyService
 
 router = APIRouter(
     prefix="/routing/policies",
@@ -189,12 +188,11 @@ class ExplainResponse(BaseModel):
     candidates: list[CandidateResponse]
     dropped: list[DroppedResponse]
     guardrails: list[dict[str, Any]]
-    # Set when the policy hands its ordering to a router. For a router that needs
-    # request state (kNN needs a prompt to embed and stored examples to compare it
-    # against) the plan above is the *decline* path, because explain deliberately
-    # dispatches nothing. Surfaced so the dashboard can say so rather than showing a
-    # one-candidate plan that looks like the router was ignored. A weighted policy
-    # is the exception: see `router_weights`.
+    # Set when the policy hands its ordering to a router. For a backend this build
+    # does not have, the plan above is the *decline* path, because explain deliberately dispatches nothing.
+    # Surfaced so the dashboard can say so rather than showing a one-candidate plan
+    # that looks like the router was ignored. A weighted policy is the exception:
+    # see `router_weights`.
     router_backend: str | None = None
     router_candidates: list[str] = Field(default_factory=list)
     router_weights: dict[str, float] = Field(
@@ -204,8 +202,7 @@ class ExplainResponse(BaseModel):
             "the candidates this caller may use. Empty for every other policy, and for a weighted policy "
             "whose whole split this caller may not use: a split over no candidate is not a split, and each "
             "filtered candidate is named in `dropped` instead. A weighted split needs no request state, so "
-            "unlike a learned router's ranking it is knowable here: the plan above is the real ordering by "
-            "share, not the decline path."
+            "it is knowable here: the plan above is the real ordering by share, not the decline path."
         ),
     )
 
@@ -236,7 +233,9 @@ def validated_spec(name: str, spec: dict[str, Any]) -> PolicySpec:
         ) from exc
 
 
-def _validate_write(config: GatewayConfig, name: str, spec: PolicySpec, user_id: str | None) -> None:
+def _validate_write(
+    config: GatewayConfig, name: str, spec: PolicySpec, user_id: str | None, own_prefixes: frozenset[str]
+) -> None:
     """Apply the startup policy rules to a runtime write, as a 400.
 
     A configured policy wins over a *workspace-wide* stored one during resolution,
@@ -269,7 +268,13 @@ def _validate_write(config: GatewayConfig, name: str, spec: PolicySpec, user_id:
     indirections = all_policy_names(config) | all_alias_names(config) | {name}
     for selector in spec.static_selectors():
         try:
-            config.validate_alias(name, selector, alias_names=indirections, hosted_implementation=hosted_implementation)
+            config.validate_alias(
+                name,
+                selector,
+                alias_names=indirections,
+                hosted_implementation=hosted_implementation,
+                own_prefixes=own_prefixes,
+            )
         except ValueError as exc:
             # `validate_alias` phrases both its target errors and its *name* errors
             # in alias terms, so both are rewritten; otherwise a policy named "a:b"
@@ -286,39 +291,6 @@ def _validate_write(config: GatewayConfig, name: str, spec: PolicySpec, user_id:
             detail=(
                 f"'{spec.default_target}' is both the default target and an on_failure entry. Retrying the "
                 "candidate that just failed cannot help; remove it from on_failure."
-            ),
-        )
-
-
-async def _validate_router_pricing(
-    config: GatewayConfig, db: AsyncSession, spec: PolicySpec, workspace_id: uuid.UUID
-) -> None:
-    """Refuse a learned policy whose candidates are not all priced.
-
-    The *learned* router scores by cost, so one unpriced candidate makes it decline
-    every request and the policy silently serves its default target forever. That is
-    indistinguishable from a broken router, and the fix (add pricing) is nothing
-    the operator would think to look for. Startup only *warns* about the same
-    problem in a config policy, because refusing there would take a running
-    gateway down over an optimization; refusing a write costs one corrected
-    request while the operator is looking at the policy.
-
-    Scoped to the backends that actually read a price: the weighted router balances
-    on operator-declared capacity, so requiring pricing there would refuse a policy
-    that works. Candidates resolve in the workspace the policy is being stored
-    into, so one naming an alias is validated as it will resolve for the requests
-    this policy will actually serve.
-    """
-    if not backend_requires_pricing(spec.router_backend):
-        return
-    missing = await unpriced_router_candidates(config, db, spec.router_candidates, workspace_id=workspace_id)
-    if missing:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Router candidate(s) {', '.join(missing)} have no pricing. A router scores candidates by "
-                "cost, so it would decline every request and this policy would always serve "
-                f"'{spec.default_target}'. Add pricing for those models (POST /api/v1/pricing) first."
             ),
         )
 
@@ -441,8 +413,8 @@ async def upsert_policy_in_workspace(
     config: GatewayConfig,
     *,
     workspace_id: uuid.UUID,
-) -> PolicyResponse:
-    """Create or update a stored policy in an already-resolved workspace.
+) -> tuple[PolicyResponse, bool]:
+    """Create or update a stored policy in an already-resolved workspace, and say whether it created one.
 
     ``workspace_id`` is a parameter rather than read off ``request`` because the
     two routers that reach this resolve it differently and must keep doing so:
@@ -461,13 +433,17 @@ async def upsert_policy_in_workspace(
     the new spec. The new name is validated exactly as a fresh one is, because a
     rename can walk a policy into every collision a create can. Sending the field
     asserts the named policy is stored, so it never falls back to creating one.
+
+    The second value is true when this write inserted the row rather than editing
+    one, which is what the commit settled: a concurrent create of the same name
+    is refused with 409 here rather than reported as an edit.
     """
     if request.user_id is not None:
         await _require_user(db, request.user_id)
     spec = validated_spec(request.name, request.spec)
     await refresh_policy_cache(db)
-    _validate_write(config, request.name, spec, request.user_id)
-    await _validate_router_pricing(config, db, spec, workspace_id)
+    own_prefixes = await OrgProviderKeyService(db, config).get_workspace_byo_providers(workspace_id=workspace_id)
+    _validate_write(config, request.name, spec, request.user_id, own_prefixes)
 
     # Both scopes are part of the identity: the upsert must not turn one
     # workspace's policy into another's, nor a workspace-wide policy into a
@@ -504,6 +480,7 @@ async def upsert_policy_in_workspace(
     # filled, key order stable) rather than whatever shape the client happened to
     # send. Otherwise two equivalent writes would produce different rows.
     stored_spec = spec.model_dump(mode="json", exclude_none=True)
+    created = policy is None
     if policy:
         policy.spec = stored_spec
     else:
@@ -547,7 +524,7 @@ async def upsert_policy_in_workspace(
         spec.router_backend or "none",
     )
     await _refresh_quietly(db, policy.name)
-    return PolicyResponse.from_model(policy, is_dynamic=spec.is_dynamic)
+    return PolicyResponse.from_model(policy, is_dynamic=spec.is_dynamic), created
 
 
 @router.post("")
@@ -561,12 +538,13 @@ async def set_policy(
     Omitting ``workspace_id`` means the deployment's default workspace, which is
     where an operator acting deployment-wide writes.
     """
-    return await upsert_policy_in_workspace(
+    policy, _ = await upsert_policy_in_workspace(
         request,
         db,
         config,
         workspace_id=await resolve_managed_workspace_id(db, request.workspace_id),
     )
+    return policy
 
 
 async def delete_policy_in_workspace(
@@ -650,6 +628,17 @@ async def explain_policy(
     with reasons, which is the part that catches a "failover" policy that has
     quietly compiled down to a single attempt.
     """
+    return explain_in_workspace(request, config, workspace_id=request.workspace_id)
+
+
+def explain_in_workspace(
+    request: ExplainRequest, config: GatewayConfig, *, workspace_id: uuid.UUID | None
+) -> ExplainResponse:
+    """The body of ``explain_policy``, with ``name`` and the candidates resolved in ``workspace_id``.
+
+    Public so the tenant-scoped router can compile in a workspace it resolved
+    itself, rather than one the request names.
+    """
     if request.name is None and request.spec is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -665,20 +654,20 @@ async def explain_policy(
     else:
         assert request.name is not None
         name = request.name
-        resolved = resolve_effective_policy(config, name, request.user_id, workspace_id=request.workspace_id)
+        resolved = resolve_effective_policy(config, name, request.user_id, workspace_id=workspace_id)
         if resolved is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Routing policy '{name}' not found")
         spec = resolved
 
-    # A weighted policy's ordering is computable here: it needs no prompt, no
-    # stored examples and no provider call, only the weights the policy declares.
+    # A weighted policy's ordering is computable here: it needs no request, only
+    # the weights the policy declares.
     # Passing it in makes explain show the split rather than the decline path.
     weighted_ordering, weighted_shares = explain_router_ordering(
         config,
         spec,
         user_id=request.user_id,
         allowlist=request.allowed_models,
-        workspace_id=request.workspace_id,
+        workspace_id=workspace_id,
     )
     try:
         plan = compile_policy(
@@ -690,7 +679,7 @@ async def explain_policy(
             allowlist=request.allowed_models,
             budget=BudgetState(used_pct=request.budget_used_pct, remaining_usd=request.budget_remaining_usd),
             router_ordering=weighted_ordering,
-            workspace_id=request.workspace_id,
+            workspace_id=workspace_id,
         )
     except NoEligibleCandidatesError as exc:
         return ExplainResponse(

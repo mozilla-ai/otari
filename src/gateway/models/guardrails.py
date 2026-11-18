@@ -8,8 +8,8 @@ it. So it lives in its own top-level ``guardrails`` field — modelled like
 ``mcp_servers`` (see :mod:`gateway.models.mcp`) — rather than inside ``tools``.
 
 The gateway extracts this field, runs the configured checks against the
-operator-controlled guardrails service (``otari-anyguardrails-container``,
-which exposes ``POST /validate``), and strips the field before forwarding the
+operator-controlled guardrails service (which exposes ``POST /validate``),
+and strips the field before forwarding the
 request upstream. Omit the field entirely → no guardrail runs.
 
 Also holds the organization guardrail tables.
@@ -19,26 +19,37 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import AfterValidator, BaseModel, Field, SecretStr, model_validator
 from sqlalchemy import JSON, CheckConstraint, ForeignKey, ForeignKeyConstraint, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base, UtcDateTime
 
-GuardrailDirection = Literal["input", "output"]
+GuardrailDirection = Literal["input", "tool_results", "tool_calls", "output"]
+"""What a guardrail reads: the caller's input, tool results, the tool calls the model makes, or its answer."""
+
+GuardrailMode = Literal["block", "monitor"]
+"""What a guardrail does when it fires: record it, or refuse or withhold the content."""
+
+DEFAULT_DIRECTIONS: tuple[GuardrailDirection, ...] = ("input",)
 
 
 def _default_directions() -> list[GuardrailDirection]:
-    return ["input"]
+    return list(DEFAULT_DIRECTIONS)
+
+
+def distinct_directions(value: list[GuardrailDirection]) -> list[GuardrailDirection]:
+    """``value`` with each direction once, in the order first named."""
+    return list(dict.fromkeys(value))
 
 
 class GuardrailConfig(BaseModel):
     """A single guardrail check the caller wants the gateway to enforce.
 
     URL safety: when ``url`` is supplied it is validated by
-    :func:`gateway.services.guardrails.run_input_guardrails` (not here at parse
+    :func:`gateway.services.guardrails.check_guardrail_urls` (not here at parse
     time — the check does a DNS lookup that must be awaited) with the same
     SSRF guard used for MCP server URLs (loopback allowed by default for
     same-host sidecars; gated by ``OTARI_MCP_ALLOW_LOOPBACK`` /
@@ -52,19 +63,24 @@ class GuardrailConfig(BaseModel):
     url: str | None = Field(default=None, min_length=1)
     """Optional per-request override of the operator-set ``OTARI_GUARDRAILS_URL``."""
 
-    on: list[GuardrailDirection] = Field(default_factory=_default_directions)
-    """Which directions to check. v1 enforces ``input`` only; ``output`` is
-    accepted but not yet enforced (the response-direction check is a planned
-    follow-up that needs streaming handling)."""
+    on: Annotated[list[GuardrailDirection], AfterValidator(distinct_directions)] = Field(
+        default_factory=_default_directions, min_length=1
+    )
+    """What the guardrail reads. ``input`` is the caller's input, ``tool_results``
+    every tool result whoever ran the tool, ``tool_calls`` each call the model
+    makes before it runs or reaches the client, and ``output`` the model's
+    answer. Defaults to ``input`` alone."""
 
-    mode: Literal["block", "monitor"] = "monitor"
+    mode: GuardrailMode = "monitor"
     """``monitor`` (default) → forward the request anyway and annotate the
     response with the verdict (shadow mode); good for observing without
-    disrupting workflows on false positives. ``block`` → reject the request
-    with a 403 and never call the provider when the guardrail flags it."""
+    disrupting workflows on false positives. ``block`` → refuse flagged input or
+    a flagged answer with a 403, and withhold a flagged tool result or tool call
+    so the agent can recover."""
 
     on_unavailable: Literal["block", "monitor"] = "block"
-    """What to do when the guardrails service cannot be reached at all, as
+    """What to do when the check cannot be evaluated: the guardrails service
+    cannot be reached, or it answers with no verdict (``valid: null``), as
     opposed to reachable-and-flagging. Only meaningful with ``mode="block"``,
     since a ``monitor`` guardrail already fails open.
 
@@ -74,13 +90,53 @@ class GuardrailConfig(BaseModel):
     fallback chain, so an operator mandating one on a routing policy is choosing
     to make that service a hard dependency. ``monitor`` is the escape hatch: the
     request is served and the skipped check is recorded, trading enforcement for
-    availability."""
+    availability. A tool result that a failing-closed check cannot evaluate is
+    withheld rather than refused, as a flagged one is."""
 
     validate_kwargs: dict[str, Any] = Field(default_factory=dict)
     """Extra kwargs for the check itself. Forwarded to the guardrails service
     ``/validate`` call, where they merge on top of the profile's own
     ``validate_kwargs`` server-side, or handed to a guardrail this gateway holds
     when an organization's definition serves the profile."""
+
+    # The caller's own. Mandates reuse this model and never set it: theirs travels
+    # beside the config (``ResolvedOrganizationGuardrail``), and the merge drops a
+    # caller's credential for any profile a mandate claims.
+    credential: SecretStr | None = Field(default=None, min_length=1, exclude=True)
+    """Sent to ``url`` as ``Authorization: Bearer``. Requires ``url``, which must
+    then be ``https``, so it never reaches the deployment's guardrails service."""
+
+    @model_validator(mode="after")
+    def _credential_needs_url(self) -> GuardrailConfig:
+        if self.credential is not None and self.url is None:
+            msg = "guardrail 'credential' requires 'url': it is sent only to an endpoint the entry names"
+            raise ValueError(msg)
+        return self
+
+
+def _one_entry_per_credentialed_profile(guardrails: list[GuardrailConfig]) -> list[GuardrailConfig]:
+    """Refuse a profile named twice when either entry carries a credential.
+
+    Credentials reach the runner keyed by profile, so with two entries of one
+    profile a token would go to both entries' endpoints, including one that
+    falls back to the deployment's service.
+    """
+    seen: set[str] = set()
+    credentialed: set[str] = set()
+    for guardrail in guardrails:
+        if guardrail.profile in seen and (guardrail.credential is not None or guardrail.profile in credentialed):
+            msg = f"guardrail profile {guardrail.profile!r} appears more than once alongside a 'credential'"
+            raise ValueError(msg)
+        seen.add(guardrail.profile)
+        if guardrail.credential is not None:
+            credentialed.add(guardrail.profile)
+    return guardrails
+
+
+RequestedGuardrails = Annotated[
+    list[GuardrailConfig], Field(max_length=8), AfterValidator(_one_entry_per_credentialed_profile)
+]
+"""The ``guardrails`` field of a completion request body."""
 
 
 class OrganizationGuardrailDefinition(Base):
@@ -234,6 +290,11 @@ class OrganizationGuardrail(Base):
     definition_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, default=None)
     mode: Mapped[str] = mapped_column(default="monitor", nullable=False)
     on_unavailable: Mapped[str] = mapped_column(default="block", nullable=False)
+    # What the mandate reads, as `GuardrailConfig.on` names it. The column is not
+    # called `on`, which SQL reserves.
+    on: Mapped[list[str]] = mapped_column(
+        "directions", JSON, default=_default_directions, server_default='["input"]', nullable=False
+    )
     validate_kwargs: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     # The organization's own kill switch. A disabled entry runs nowhere,
     # whatever its scope says, so an organization can stop a guardrail without

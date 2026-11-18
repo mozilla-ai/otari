@@ -1,9 +1,8 @@
 """Which workspace a request-plane row belongs to.
 
 Every row in ``api_keys``, ``usage_logs``, ``model_aliases``,
-``routing_policies``, ``routing_memory``, ``router_preferences`` and
-``file_objects`` carries a workspace, so every writer needs one. There are
-only two sources:
+``routing_policies`` and ``file_objects`` carries a workspace, so every writer
+needs one. There are only two sources:
 
 - **An API key request.** The workspace comes off the key that authenticated it,
   never off a header. A caller controls its headers and not which key it holds,

@@ -18,7 +18,7 @@ from typing import Any
 import pytest
 from fastapi import HTTPException, Request
 from fastapi.testclient import TestClient
-from mcp.types import ListToolsResult, ToolAnnotations
+from mcp.types import ListToolsResult, PaginatedRequestParams, ToolAnnotations
 from mcp.types import Tool as MCPTool
 
 from gateway.api.deps import get_workspace_mcp_servers, reset_config
@@ -62,14 +62,14 @@ class _FakeSession:
             MCPTool(
                 name="create_issue",
                 description="Create an issue",
-                inputSchema={"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]},
-                annotations=ToolAnnotations(readOnlyHint=False),
+                input_schema={"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]},
+                annotations=ToolAnnotations(read_only_hint=False),
             )
         ]
         self.pages = 0
         self.delay_s = 0.0
 
-    async def list_tools(self, cursor: str | None = None) -> ListToolsResult:
+    async def list_tools(self, *, params: PaginatedRequestParams | None = None) -> ListToolsResult:
         self.pages += 1
         await asyncio.sleep(self.delay_s)
         return ListToolsResult(tools=self.tools)
@@ -98,7 +98,9 @@ class _Servers:
     async def resolve_many(self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID]) -> Any:
         raise AssertionError("the stateless routes resolve one server")
 
-    async def resolve_one(self, workspace_id: uuid.UUID, server_id: uuid.UUID) -> ResolvedMcpServer | None:
+    async def resolve_one(
+        self, workspace_id: uuid.UUID, server_id: uuid.UUID, access: object = None
+    ) -> ResolvedMcpServer | None:
         self.asked.append((workspace_id, server_id))
         await asyncio.sleep(self.delay_s)
         return self.server
@@ -186,7 +188,7 @@ def test_a_tool_the_allowlist_excludes_is_not_exposed(
     session: _FakeSession,
 ) -> None:
     """A server-added tool is not exposed just because it was listed."""
-    session.tools.append(MCPTool(name="delete_repo", description="danger", inputSchema={"type": "object"}))
+    session.tools.append(MCPTool(name="delete_repo", description="danger", input_schema={"type": "object"}))
     servers.server = _stored(allowed_tools=["create_issue"])
 
     response = client.get(TOOLS_PATH, headers=USER_AUTH)
@@ -257,7 +259,8 @@ def test_the_total_deadline_includes_mcp_discovery(
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(mcp_stateless, "DISCOVERY_TOTAL_TIMEOUT_S", 0.01)
+    # Room for authentication and the access lookup, so the deadline expires in discovery, not before it.
+    monkeypatch.setattr(mcp_stateless, "DISCOVERY_TOTAL_TIMEOUT_S", 0.5)
     session.delay_s = 10
 
     response = client.get(TOOLS_PATH, headers=USER_AUTH)
@@ -277,7 +280,7 @@ def test_an_unusable_descriptor_is_omitted_and_labeled(
         MCPTool(
             name="broken",
             description="an external reference",
-            inputSchema={"type": "object", "properties": {"x": {"$ref": "https://attacker.example.com/s.json"}}},
+            input_schema={"type": "object", "properties": {"x": {"$ref": "https://attacker.example.com/s.json"}}},
         )
     )
 
@@ -298,7 +301,7 @@ def test_an_unexecutable_tool_name_is_omitted_and_labeled(
         MCPTool(
             name="x" * (mcp_stateless.TOOL_NAME_MAX_LENGTH + 1),
             description="too long to execute",
-            inputSchema={"type": "object"},
+            input_schema={"type": "object"},
         )
     )
 
@@ -346,7 +349,7 @@ def test_an_unknown_schema_keyword_survives_the_round_trip(
         "properties": {"title": {"type": "string", "x-vendor-widget": "textarea"}},
         "x-vendor-policy": {"retries": 3},
     }
-    session.tools = [MCPTool(name="create_issue", description="d", inputSchema=schema)]
+    session.tools = [MCPTool(name="create_issue", description="d", input_schema=schema)]
 
     response = client.get(TOOLS_PATH, headers=USER_AUTH)
 
@@ -361,9 +364,9 @@ def test_a_pagination_failure_returns_no_partial_catalog(
 ) -> None:
     cursors = ["loop", "loop"]
 
-    async def looping(cursor: str | None = None) -> ListToolsResult:
+    async def looping(*, params: PaginatedRequestParams | None = None) -> ListToolsResult:
         session.pages += 1
-        return ListToolsResult(tools=session.tools, nextCursor=cursors[min(session.pages - 1, 1)])
+        return ListToolsResult(tools=session.tools, next_cursor=cursors[min(session.pages - 1, 1)])
 
     monkeypatch.setattr(session, "list_tools", looping)
 

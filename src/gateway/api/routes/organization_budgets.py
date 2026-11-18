@@ -8,9 +8,9 @@ A budget with no ``organization_id`` belongs to the deployment, and no route her
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 
-from gateway.api.deps import BudgetServiceDep, CurrentIdentity, verify_master_key
+from gateway.api.deps import BudgetServiceDep, CurrentIdentity, PersonGrowthSignalPortDep, verify_master_key
 from gateway.api.routes.organizations import Message
 from gateway.schemas.budgets import (
     OrganizationBudgetCreate,
@@ -56,9 +56,13 @@ async def create_organization_budget(
     service: BudgetServiceDep,
     current_identity: CurrentIdentity,
     body: OrganizationBudgetCreate,
+    growth: PersonGrowthSignalPortDep,
+    background_tasks: BackgroundTasks,
 ) -> OrganizationBudgetPublic:
     """Define a budget owned by this organization. Owners and admins only."""
-    return await service.create_organization_budget(user=current_identity, request=body)
+    return await service.create_organization_budget(
+        user=current_identity, request=body, growth=growth, background_tasks=background_tasks
+    )
 
 
 @budgets_router.patch("/{budget_id}")

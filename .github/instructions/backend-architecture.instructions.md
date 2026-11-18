@@ -33,7 +33,7 @@ the old shape.
 | --- | --- | --- | --- |
 | Routes | `api/routes/<domain>.py` | Parses the request, calls one service method, returns a schema | Imports `sqlalchemy` or `sqlmodel`, builds a query, holds a business rule, defines a Pydantic model, imports a repository, or commits |
 | Schemas | `schemas/<domain>.py` | Holds Pydantic request and response models, and their mapping from ORM rows | Holds anything else |
-| Services | `services/<domain>/` | Runs use cases: business rules and orchestration | Imports `sqlalchemy` or `sqlmodel`, builds a query, takes or holds a session in a class or in a module-level function, touches HTTP, or imports another domain's repository |
+| Services | `services/<domain>/` | Runs use cases: business rules and orchestration | Imports `sqlalchemy` or `sqlmodel`, builds a query, takes or holds a session in a class or in a module-level function, reads a request or writes a response, or imports another domain's repository |
 | Repositories | `repositories/<domain>/`, modules ending in `_repository.py` | Runs every query, over `BaseRepository`, and flushes | Commits, or holds a business rule |
 | Exceptions | `exceptions/<domain>_exceptions.py` | Declares error classes, each with its own `status_code` | Handles an error |
 | Models | `models/<domain>.py` | Declares ORM tables, and the closed vocabulary of each string column that has one | Holds logic |
@@ -48,11 +48,23 @@ the old shape.
 - The service receives its own domain's repositories, the Unit of Work, config,
   ports and other domains' services through its constructor. Flag a service
   that receives the session or another domain's repository.
-- A builder in `api/deps.py` builds the service. Flag a new service builder
+- A builder in `api/deps/` builds the service. Flag a new service builder
   defined anywhere else.
+- A builder in `api/deps/` builds things and holds no implementation. Flag a
+  class with a method added under `api/deps/`, including one nested in a
+  builder, which belongs to the domain whose work it does. A class that carries
+  data and no methods is fine.
+- A service package that is not a domain `DOMAINS.md` gives a section carries a
+  capped count of imports reaching below its root. Flag a new import below the
+  root of `services/tenancy/` or another such package: it has to come down, not
+  up, so a new one needs the count lowered elsewhere or the import routed
+  through the package root.
 - Flag a new module-level function under `services/` that takes an
   `AsyncSession`, including one added to a module already on
   `SERVICE_DATABASE_IMPORT_BASELINE`. The check does not catch that case.
+- A service names the status and the headers one of its own errors means, as
+  an exceptions module does. Flag a service that reads a request or writes a
+  response.
 
 ## Commits
 
@@ -62,6 +74,9 @@ the old shape.
   `core/unit_of_work.py`, except in a module on
   `TRANSACTION_CONTROL_BASELINE`. Flag such a call added to a module already
   on that baseline. The check does not catch that case.
+- A repository may open a savepoint (`begin_nested()`) only to diagnose a
+  refusal of its own write, and the check refuses one in a repository off
+  `SAVEPOINT_BASELINE`. Flag a savepoint opened so that a step can continue.
 - A repository reaches the session only through `session_for(uow)`. The check
   refuses that import anywhere else. Flag other code that reaches
   `session_for` without importing it by name.
@@ -118,7 +133,7 @@ model, except a module on the model's baseline.
   `gateway.services.<domain>`. The check refuses an import below the root
   from outside the package, for each domain `DOMAINS.md` gives a section.
   Flag such an import into a service package that is not a domain yet.
-- Only the domain's own service and repository packages and `api/deps.py`
+- Only the domain's own service and repository packages and `api/deps/`
   import `gateway.repositories.<domain>`. The check refuses any other import of
   one, for each domain `DOMAINS.md` gives a section, except from service
   code outside every domain package, whose domain its path does not give.
@@ -129,13 +144,16 @@ model, except a module on the model's baseline.
   on it receives a listener interface by constructor injection, defined by the
   domain where the change happens.
 - Flag a listener implementation that commits or rolls back. The caller owns
-  the transaction.
+  the transaction. A listener told of something no transaction records, such
+  as a request that failed, is run in a background task by the domain that tells it, and does its
+  work on a Unit of Work of its own. Flag such a listener that starts a task
+  itself.
 - The check refuses a default on a parameter or a class field whose type name
   contains `Listener`. Flag a default on a listener whose type does not name
   it, such as a bare `Callable`.
 
-The boundary check does not enforce the cycle rule yet, so review is the only
-gate for it.
+The boundary check enforces the cycle rule, so a diff that adds one fails
+before review sees it.
 
 ## Errors
 

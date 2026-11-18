@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { errorMessage } from "@/design-system/feedback/errorMessage"
 import { useAuth } from "@/features/auth/AuthContext"
 import { ApiError, completeOAuthSignIn } from "@/shared/api/client"
+import { routeSearchParams } from "@/shared/helpers/appLocation"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import {
   analyticsErrorCode,
@@ -9,10 +10,9 @@ import {
 } from "@/shared/telemetry/errorCode"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
-
 import { OAuthTermsStep } from "./OAuthTermsStep"
 import { oauthProviderLabel } from "./oauthProviders"
-import { takeOAuthReturnHash, takeOAuthState } from "./oauthRoundTrip"
+import { takeOAuthReturnRoute, takeOAuthState } from "./oauthRoundTrip"
 import {
   PublicAuthLayout,
   PublicAuthLink,
@@ -22,10 +22,10 @@ import {
 /**
  * The page a provider's redirect lands on, which finishes an OAuth sign-in.
  *
- * Reached from `/auth/{provider}/callback`, an ordinary path the gateway
- * redirects into this hash route: a redirect URI may not carry a fragment, so
- * the provider cannot be pointed at a hash path directly. The query the
- * provider appended rides along and is read here, once, at mount.
+ * Reached from `/auth/{provider}/callback`, the redirect URI the gateway
+ * answers itself and redirects to this page, which may be served from another
+ * origin or under another base. The query the provider appended rides along
+ * and is read here, once, at mount.
  *
  * Four outcomes, and only the last one talks to the gateway:
  *
@@ -53,19 +53,19 @@ import {
  * leaving somebody who did nothing wrong at a dead end.
  *
  * Both endings leave this page, and both have to: `DeploymentRoot` picks a
- * public auth path off the hash ahead of the auth gate, so this page keeps
- * rendering until the hash changes, whether or not a session was minted. The
- * failure ending offers a link; the success ending changes the hash itself,
+ * public auth path off the route ahead of the auth gate, so this page keeps
+ * rendering until the route changes, whether or not a session was minted. The
+ * failure ending offers a link; the success ending changes the route itself,
  * since there is nothing left for the person to read. The one exception is a
  * sign-in that removed the account's earlier password, which the person is told
  * about before they go on, with links rather than a redirect.
  */
 export function OAuthCallbackPage({
   provider,
-  hash,
+  route,
 }: {
   provider: string
-  hash: string
+  route: string
 }) {
   const { isAuthenticated, login } = useAuth()
   const { recordEvent } = useTelemetry()
@@ -74,13 +74,13 @@ export function OAuthCallbackPage({
   // the sign-in screen still ends there.
   const [failure, setFailure] = useState<{
     message: string
-    returnHash: string
+    returnRoute: string
   }>()
   const [needsTerms, setNeedsTerms] = useState(false)
   // Set when the sign-in removed the account's earlier password, holding the
   // page the notice continues to.
   const [passwordRemoved, setPasswordRemoved] = useState<{
-    returnHash: string
+    returnRoute: string
   }>()
   // The effect below signs somebody in, so it must run once and not once per
   // render. React's development StrictMode mounts an effect twice on purpose,
@@ -95,14 +95,14 @@ export function OAuthCallbackPage({
     startedRef.current = true
 
     const label = oauthProviderLabel(provider)
-    const params = new URLSearchParams(hash.split("?")[1] ?? "")
+    const params = routeSearchParams(route)
     const remembered = takeOAuthState()
-    const returnHash = takeOAuthReturnHash()
+    const returnRoute = takeOAuthReturnRoute()
     const providerError = params.get("error")
     const state = params.get("state")
     const code = params.get("code")
 
-    const fail = (message: string) => setFailure({ message, returnHash })
+    const fail = (message: string) => setFailure({ message, returnRoute })
     const refuse = (message: string, errorCode: string) => {
       recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {
         authentication_method: provider,
@@ -129,7 +129,7 @@ export function OAuthCallbackPage({
       // already taken. Nothing is spent, and the session this tab holds is the
       // one that callback started, so the dashboard is where it belongs.
       if (isAuthenticated) {
-        replacePublicAuthPage("#/")
+        replacePublicAuthPage("/")
         return
       }
       refuse(
@@ -155,21 +155,29 @@ export function OAuthCallbackPage({
           remembered.termsAccepted,
         )
         if (result.isOk) {
+          // A sign-in that made the account is that account's signup as well,
+          // which is the funnel step a provider signup would otherwise skip.
+          // It is still a sign-in, so the login is recorded either way.
+          if (result.newAccount) {
+            recordEvent(TELEMETRY_EVENTS.SIGNUP_SUCCESS, {
+              authentication_method: provider,
+            })
+          }
           recordEvent(TELEMETRY_EVENTS.LOGIN_SUCCESS, {
             authentication_method: provider,
           })
           login()
           if (result.passwordRemoved) {
-            setPasswordRemoved({ returnHash })
+            setPasswordRemoved({ returnRoute })
             return
           }
           // Signing in is not enough to stop this page rendering, and leaving
-          // the hash alone strands the person here. `DeploymentRoot` matches a
-          // public auth path *before* the auth gate, so an unchanged hash keeps
+          // the route alone strands the person here. `DeploymentRoot` matches a
+          // public auth path *before* the auth gate, so an unchanged route keeps
           // re-selecting this page, whose effect has already run. So this hands
           // the tab on to the page the sign-in started from, replacing this
           // entry so Back from there skips this page.
-          replacePublicAuthPage(returnHash)
+          replacePublicAuthPage(returnRoute)
           return
         }
         recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {
@@ -189,7 +197,7 @@ export function OAuthCallbackPage({
         fail(errorMessage(caught))
       }
     })()
-  }, [provider, hash, isAuthenticated, login, recordEvent])
+  }, [provider, route, isAuthenticated, login, recordEvent])
 
   if (passwordRemoved) {
     return (
@@ -197,8 +205,8 @@ export function OAuthCallbackPage({
         title="You're signed in"
         footer={
           <>
-            <PublicAuthLink to="#/account">Set a new password</PublicAuthLink>
-            <PublicAuthLink to={passwordRemoved.returnHash}>
+            <PublicAuthLink to="/account">Set a new password</PublicAuthLink>
+            <PublicAuthLink to={passwordRemoved.returnRoute}>
               Continue
             </PublicAuthLink>
           </>
@@ -236,7 +244,7 @@ export function OAuthCallbackPage({
       <OAuthTermsStep
         provider={provider}
         termsUrl={terms_url}
-        returnHash={failure.returnHash}
+        returnRoute={failure.returnRoute}
       />
     )
   }
@@ -245,7 +253,9 @@ export function OAuthCallbackPage({
     <PublicAuthLayout
       title="That sign-in did not complete"
       footer={
-        <PublicAuthLink to={failure.returnHash}>Back to sign in</PublicAuthLink>
+        <PublicAuthLink to={failure.returnRoute}>
+          Back to sign in
+        </PublicAuthLink>
       }
     >
       <p className="text-center text-body">{failure.message}</p>

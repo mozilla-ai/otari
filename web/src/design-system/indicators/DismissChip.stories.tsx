@@ -6,12 +6,10 @@ import { DismissChip } from "./DismissChip"
 /**
  * An applied filter, with the control that removes it.
  *
- * Its remove button is **the one control in this product knowingly under the
- * 44px floor**, at 24px, and motion-and-access.md carries the argument: the
- * chips wrap at an 8px gap, so a `before:` bleed would overlap the row above
- * and a press near the seam would dismiss the neighboring filter, while a real
- * 44px target grows the filter area on three pages. #947 holds the decision. It
- * is the shape of an exception, not a licence for another one.
+ * Its remove button is drawn 24px and takes a 44px hit area on a touch screen,
+ * through a `before:` bleed. Wrapped rows must be 44px apart there
+ * (`pointer-coarse:gap-y-5` on the row), or two bleeds overlap and a press near
+ * the seam dismisses the neighboring filter. See motion-and-access.md.
  */
 const meta = {
   title: "Design system/Indicators/DismissChip",

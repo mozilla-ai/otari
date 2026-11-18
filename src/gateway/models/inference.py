@@ -1,13 +1,27 @@
-"""ORM tables for asynchronous batch jobs and idempotent completion requests."""
+"""ORM tables for asynchronous batch and video jobs, idempotent completion requests and the stored country file."""
 
 import uuid
 from datetime import UTC, datetime
+from decimal import Decimal
 from enum import StrEnum
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, Uuid
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+    Uuid,
+    true,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
-from gateway.models.base import Base
+from gateway.models.base import Base, UtcDateTime
+from gateway.models.money import UsdCost
 
 
 class BatchRecord(Base):
@@ -57,6 +71,57 @@ class BatchRecord(Base):
     results_accounted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+VIDEO_JOBS_TABLE = "video_jobs"
+
+
+class VideoJobRecord(Base):
+    """One video generation job a caller started here, and whether it has been billed.
+
+    Written when the provider accepts the job. The row anchors ownership (a
+    caller reads only their own jobs) and names the provider instance to ask
+    about the job, which the provider's id alone cannot. ``accounted_at`` is
+    NULL until the first retrieval that finds the job completed bills it; that
+    atomic transition is what bills a job once.
+    """
+
+    __tablename__ = VIDEO_JOBS_TABLE
+
+    # The provider's job id, which every later call on the job carries.
+    id: Mapped[str] = mapped_column(primary_key=True)
+    # The instance the job was created on, so later calls ask the same provider.
+    provider: Mapped[str] = mapped_column()
+    model: Mapped[str] = mapped_column()
+    # CASCADE: the record means nothing without its owner; the usage rows stay as the billing history.
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
+    # SET NULL: a key may be revoked while its job is still running.
+    api_key_id: Mapped[str | None] = mapped_column(ForeignKey("api_keys.id", ondelete="SET NULL"), index=True)
+    # The workspace the job was created in, whose organization's credentials and rates every later call uses.
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="SET NULL"), index=True
+    )
+    # The length the request asked for, which prices the job when the provider reports none.
+    seconds: Mapped[int | None] = mapped_column(Integer)
+    # What the request asked for that a price's rules may name; the job is billed
+    # when it completes, after the request is gone. ``None`` where it did not say.
+    resolution: Mapped[str | None] = mapped_column(String(64))
+    aspect_ratio: Mapped[str | None] = mapped_column(String(64))
+    input_video: Mapped[bool | None] = mapped_column(Boolean)
+    generate_audio: Mapped[bool | None] = mapped_column(Boolean)
+    # Whether the job's cost folds into the owner's spend: false for a key exempt
+    # from budgets, decided when the job starts, so a key revoked since cannot change it.
+    counts_toward_budget: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    accounted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # What a completed job reported, kept because a provider that renders inside
+    # the start call has no job to look up later: its length, what the provider
+    # charged for it, and where its video is.
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_seconds: Mapped[int | None] = mapped_column(Integer)
+    completed_cost: Mapped[Decimal | None] = mapped_column(UsdCost())
+    output_url: Mapped[str | None] = mapped_column(Text)
+    output_mime_type: Mapped[str | None] = mapped_column(String(255))
+
+
 IDEMPOTENCY_TABLE = "idempotency_keys"
 
 
@@ -99,3 +164,27 @@ class IdempotencyRecord(Base):
     # Past this, an ``in_progress`` claim is presumed abandoned and a retry may take it over.
     locked_until: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+COUNTRY_DATABASE_TABLE = "country_database"
+
+
+class StoredCountryDatabase(Base):
+    """The MaxMind DB country file an operator uploaded, which every replica reads.
+
+    One row at most, held to ``id = 1``. A table of its own keeps the file's
+    bytes out of every other query.
+    """
+
+    __tablename__ = COUNTRY_DATABASE_TABLE
+    __table_args__ = (CheckConstraint("id = 1", name="ck_country_database_one_row"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False, default=1)
+    content: Mapped[bytes] = mapped_column(LargeBinary)
+    # The file's own metadata: GeoLite2-Country, DBIP-Country-Lite and so on.
+    database_type: Mapped[str] = mapped_column(String(255))
+    built_at: Mapped[datetime] = mapped_column(UtcDateTime())
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    # What a replica compares with the file it has open, so it reads the bytes only when they change.
+    sha256: Mapped[str] = mapped_column(String(64))
+    uploaded_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))

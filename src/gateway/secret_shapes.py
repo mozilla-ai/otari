@@ -11,8 +11,10 @@ import re
 REDACTION_PLACEHOLDER = "[redacted]"
 
 CREDENTIAL_SHAPES: tuple[re.Pattern[str], ...] = (
-    # Authorization-header credentials, whatever scheme.
-    re.compile(r"(?:Bearer|Basic|Token)\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE),
+    # Authorization-header credentials, whatever scheme. The scheme is a word of
+    # its own (not the tail of ``api_token``), and an access log's ``HTTP/1.1``
+    # after a query value is not a credential.
+    re.compile(r"\b(?:Bearer|Basic|Token)\s+(?!HTTP/)[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE),
     # Provider key formats: a known prefix plus the key body. Covers OpenAI
     # (sk-, sk-proj-), Anthropic (sk-ant-), Groq (gsk_), xAI (xai-), and
     # otari's own keys (tk-, tk_, legacy gw-).

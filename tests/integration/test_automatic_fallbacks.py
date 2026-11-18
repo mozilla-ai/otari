@@ -17,11 +17,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.usage import UsageLog
+from gateway.repositories.api_keys import api_key_repository
 from gateway.services import catalog as selectors
 from gateway.services import selector_index_service
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
+from gateway.services.providers import _workspace_hosted_access as workspace_hosted_access
 
 from .conftest import build_test_client
 
@@ -85,6 +88,7 @@ def _row(
     selector: str,
     *,
     sent: str | None,
+    key: str | None = None,
     status_: str = "success",
     attempt: int | None = None,
     source: str = "gateway",
@@ -100,6 +104,7 @@ def _row(
         source=source,
         status=status_,
         policy_name=sent,
+        api_key_id=key,
         attempt_position=attempt,
         timestamp=datetime.now(UTC) - age,
     )
@@ -137,6 +142,14 @@ def world(
         beta_one = Workspace(name="Beta one", organization_id=beta.id)
         session.add_all([alpha_one, alpha_two, beta_one])
         session.commit()
+        session.add_all(
+            [
+                APIKey(id="key-zed", key_hash="hash-zed", key_name="Zed", workspace_id=alpha_one.id),
+                APIKey(id="key-unnamed", key_hash="hash-unnamed", workspace_id=alpha_one.id),
+                APIKey(id="key-beta", key_hash="hash-beta", key_name="Beta's key", workspace_id=beta_one.id),
+            ]
+        )
+        session.commit()
 
         session.add_all(
             [
@@ -146,8 +159,14 @@ def world(
                 # One that fell back: the absorbed attempt is not a request of its own.
                 _row(alpha_one.id, _FIREWORKS, sent=_CLAUDE, status_="absorbed", attempt=1),
                 _row(alpha_one.id, _BEDROCK, sent=_CLAUDE, attempt=2),
-                # One that named Bedrock and so had no fallback.
+                # Requests that named a provider and so had no fallback: two from Zed and one with no key
+                # on Bedrock, one from an unnamed key on Anthropic.
+                _row(alpha_one.id, _BEDROCK, sent=None, key="key-zed"),
+                _row(alpha_one.id, _BEDROCK, sent=None, key="key-zed"),
                 _row(alpha_one.id, _BEDROCK, sent=None),
+                _row(alpha_one.id, _ANTHROPIC, sent=None, key="key-unnamed"),
+                # A row naming another organization's key: its name stays with that organization.
+                _row(alpha_one.id, _FIREWORKS, sent=None, key="key-beta"),
                 # Outside the window, and imported usage: neither counts.
                 _row(alpha_one.id, _ANTHROPIC, sent=_CLAUDE, age=timedelta(days=40)),
                 _row(alpha_one.id, _ANTHROPIC, sent=None, source="claude_code"),
@@ -198,8 +217,10 @@ def _read(client: TestClient, world: _World, who: str) -> dict[str, dict[str, An
 
 
 def test_an_owner_reads_their_organizations_fallbacks_in_its_own_order(
-    fallbacks_client: TestClient, world: _World
+    fallbacks_client: TestClient, world: _World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # One key per read, so the names come back across batches.
+    monkeypatch.setattr(api_key_repository, "_NAMES_BATCH", 1)
     models = _read(fallbacks_client, world, "alpha_owner")
 
     assert list(models) == [_CLAUDE, _GEMINI]
@@ -208,8 +229,17 @@ def test_an_owner_reads_their_organizations_fallbacks_in_its_own_order(
     # Alpha's own key comes first for its callers, then the vendor's own provider, then the cheapest.
     assert [offering["selector"] for offering in claude["offerings"]] == [_FIREWORKS, _ANTHROPIC, _BEDROCK]
     assert [offering["provider"] for offering in claude["offerings"]] == ["fireworks", "anthropic", "bedrock"]
-    assert (claude["requests"], claude["fell_back"], claude["pinned"]) == (4, 1, 1)
+    # Each at the rate the order ranked by: Alpha's own key at its own price.
+    assert [offering["input_price"] for offering in claude["offerings"]] == [4.0, 3.0, 2.0]
+    assert (claude["requests"], claude["fell_back"], claude["pinned"]) == (8, 1, 5)
     assert claude["pinned_provider"] == "bedrock"
+    assert [(entry["key_name"], entry["provider"], entry["requests"]) for entry in claude["pinned_keys"]] == [
+        ("Zed", "bedrock", 2),
+        (None, "anthropic", 1),
+        (None, "bedrock", 1),
+        (None, "fireworks", 1),
+    ]
+    assert [entry["api_key_id"] for entry in claude["pinned_keys"]] == ["key-zed", "key-unnamed", None, "key-beta"]
     tools = {offering["provider"]: offering["own_tools"] for offering in claude["offerings"]}
     assert "web_search" in tools["anthropic"]
     assert tools["bedrock"] == []
@@ -217,6 +247,7 @@ def test_an_owner_reads_their_organizations_fallbacks_in_its_own_order(
     gemini = models[_GEMINI]
     assert [offering["selector"] for offering in gemini["offerings"]] == [_GEMINI_OFFERING]
     assert (gemini["requests"], gemini["fell_back"], gemini["pinned"]) == (1, 0, 0)
+    assert gemini["pinned_keys"] == []
 
 
 def test_a_member_reads_only_the_workspaces_they_belong_to(fallbacks_client: TestClient, world: _World) -> None:
@@ -230,9 +261,37 @@ def test_another_organization_sees_its_own_traffic_and_order(fallbacks_client: T
     assert list(models) == [_CLAUDE]
     claude = models[_CLAUDE]
     assert (claude["requests"], claude["fell_back"], claude["pinned"]) == (5, 0, 0)
-    # The deployment's order: Alpha's key is nowhere in it.
+    assert claude["pinned_keys"] == []
+    # The deployment's order and rates: Alpha's key is nowhere in it.
     assert [offering["selector"] for offering in claude["offerings"]] == [_ANTHROPIC, _BEDROCK]
+    assert [offering["input_price"] for offering in claude["offerings"]] == [3.0, 2.0]
 
 
 def test_the_read_needs_a_signed_in_caller(fallbacks_client: TestClient, world: _World) -> None:
     assert fallbacks_client.get(_PATH).status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
+
+
+def test_naming_a_workspace_keeps_only_the_offerings_it_may_call(
+    fallbacks_client: TestClient, world: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A workspace requiring zero data retention is refused every configured instance, so none is a backup."""
+    monkeypatch.setattr(
+        workspace_hosted_access, "_zero_retention_workspaces", frozenset({world.workspaces["alpha_one"]})
+    )
+
+    def read(workspace: str) -> tuple[int, dict[str, dict[str, Any]]]:
+        response = fallbacks_client.get(
+            _PATH,
+            params={"workspace_id": str(world.workspaces[workspace])},
+            cookies={SESSION_COOKIE_NAME: world.sessions["alpha_owner"]},
+        )
+        models = response.json().get("models", []) if response.status_code == status.HTTP_200_OK else []
+        return response.status_code, {model["id"]: model for model in models}
+
+    _, required = read("alpha_one")
+    _, other = read("alpha_two")
+    hidden, _ = read("beta_one")
+
+    assert required == {}
+    assert [offering["selector"] for offering in other[_CLAUDE]["offerings"]] == [_FIREWORKS, _ANTHROPIC, _BEDROCK]
+    assert hidden == status.HTTP_404_NOT_FOUND

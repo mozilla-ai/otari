@@ -3,14 +3,20 @@ from gateway.repositories.providers.hosted_provider_repository import (
     HostedProviderConflict,
     HostedProviderModelRepository,
     HostedProviderRepository,
+    HostedProviderVendorRepository,
 )
 from gateway.repositories.providers.org_provider_key_model_repository import (
     OfferedModelConflict,
     OrgProviderKeyModelRepository,
 )
+from gateway.repositories.providers.platform_connect_repository import PlatformConnectRepository
 from gateway.repositories.providers.provider_endpoint_repository import (
     EndpointNameConflict,
     ProviderEndpointRepository,
+)
+from gateway.repositories.providers.workspace_hosted_access_repository import (
+    WorkspaceHostedAccessRepository,
+    WorkspaceProviderPolicyRepository,
 )
 
 __all__ = [
@@ -19,7 +25,11 @@ __all__ = [
     "HostedProviderConflict",
     "HostedProviderModelRepository",
     "HostedProviderRepository",
+    "HostedProviderVendorRepository",
     "OfferedModelConflict",
     "OrgProviderKeyModelRepository",
+    "PlatformConnectRepository",
     "ProviderEndpointRepository",
+    "WorkspaceHostedAccessRepository",
+    "WorkspaceProviderPolicyRepository",
 ]

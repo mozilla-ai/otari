@@ -14,12 +14,13 @@ import ipaddress
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
+from pydantic import TypeAdapter, ValidationError
 
-from gateway.models.guardrails import GuardrailConfig
+from gateway.models.guardrails import GuardrailConfig, RequestedGuardrails
 from gateway.services.guardrails import GuardrailsNotReachableError, run_input_guardrails
 from gateway.services.url_safety import UnsafeURLError
 
@@ -89,32 +90,8 @@ async def test_list_result_is_unwrapped(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 @pytest.mark.asyncio
-async def test_output_only_guardrail_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
-    """v1 enforces only input-direction guardrails; an output-only entry makes
-    no service call and never blocks."""
-    called = False
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal called
-        called = True
-        return httpx.Response(200, json={"profile": "prompt-injection", "result": {"valid": False}})
-
-    _patch_transport(monkeypatch, handler)
-    verdict = await run_input_guardrails(
-        [GuardrailConfig(profile="prompt-injection", on=["output"])], "x", default_url=_URL
-    )
-    assert verdict.results == []
-    assert verdict.blocked is False
-    assert called is False
-
-
-@pytest.mark.asyncio
 async def test_output_only_guardrail_url_is_still_ssrf_checked() -> None:
-    """An output-only guardrail is never *evaluated* (see the sibling test
-    above), but its `url` override must still be SSRF-checked: the check
-    covers every configured guardrail regardless of `on` direction, not just
-    the ones this function currently enforces. Otherwise output enforcement
-    landing later would silently need to remember to add the check itself."""
+    """A guardrail's `url` override is SSRF-checked whatever its `on` direction."""
     with pytest.raises(UnsafeURLError, match="link-local"):
         await run_input_guardrails(
             [GuardrailConfig(profile="prompt-injection", on=["output"], url="http://169.254.169.254/x")],
@@ -170,6 +147,59 @@ async def test_monitor_mode_fails_open_when_no_url(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.asyncio
+async def test_a_check_that_ran_is_evaluated(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_transport(monkeypatch, _result_handler({"valid": True, "score": 0.02}))
+    verdict = await run_input_guardrails([GuardrailConfig(profile="prompt-injection")], "hello", default_url=_URL)
+    assert verdict.results[0].status == "evaluated"
+    assert verdict.results[0].unavailable is None
+
+
+@pytest.mark.asyncio
+async def test_a_service_that_answers_no_verdict_is_inconclusive(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_transport(monkeypatch, _result_handler({"valid": None, "explanation": "no label", "score": None}))
+    verdict = await run_input_guardrails(
+        [GuardrailConfig(profile="prompt-injection", mode="monitor")], "x", default_url=_URL
+    )
+    assert verdict.results[0].status == "inconclusive"
+    assert verdict.results[0].unavailable is None
+
+
+@pytest.mark.asyncio
+async def test_a_check_with_no_service_configured_says_so() -> None:
+    """Otari#2690: an unconfigured service and a failed one must not look alike."""
+    verdict = await run_input_guardrails(
+        [GuardrailConfig(profile="prompt-injection", mode="monitor")], "x", default_url=None
+    )
+    assert verdict.results[0].status == "unavailable"
+    assert verdict.results[0].unavailable == "not_configured"
+
+
+@pytest.mark.asyncio
+async def test_a_check_the_service_failed_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_transport(monkeypatch, lambda _request: httpx.Response(404, json={"detail": "unknown profile"}))
+    verdict = await run_input_guardrails(
+        [GuardrailConfig(profile="prompt-injection", mode="block", on_unavailable="monitor")], "x", default_url=_URL
+    )
+    assert verdict.results[0].status == "unavailable"
+    assert verdict.results[0].unavailable == "evaluation_failed"
+
+
+@pytest.mark.asyncio
+async def test_a_definition_this_worker_does_not_hold_is_a_failed_evaluation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Not ``not_configured``: the organization configured it, and it did not run."""
+    verdict = await run_input_guardrails(
+        [GuardrailConfig(profile="pi", mode="monitor")],
+        "x",
+        default_url=None,
+        mandated={"pi"},
+        in_process={"pi": None},
+    )
+    assert verdict.results[0].unavailable == "evaluation_failed"
+
+
+@pytest.mark.asyncio
 async def test_malformed_result_block_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     """A result with no usable 'valid' must not silently pass a block guardrail."""
     _patch_transport(monkeypatch, _result_handler({}))  # no 'valid' field
@@ -197,14 +227,22 @@ async def test_non_boolean_valid_is_rejected(monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.mark.asyncio
+async def test_explicit_null_valid_fails_a_block_guardrail_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Otari#2788: no verdict means the input was not checked, the same as a malformed result."""
+    _patch_transport(monkeypatch, _result_handler({"valid": None}))
+    with pytest.raises(GuardrailsNotReachableError):
+        await run_input_guardrails([GuardrailConfig(profile="prompt-injection", mode="block")], "x", default_url=_URL)
+
+
+@pytest.mark.asyncio
 async def test_explicit_null_valid_is_inconclusive_not_flagged(monkeypatch: pytest.MonkeyPatch) -> None:
     """An explicit ``valid: null`` is a legitimate inconclusive verdict, not malformed."""
     _patch_transport(monkeypatch, _result_handler({"valid": None, "score": 0.5}))
     verdict = await run_input_guardrails(
-        [GuardrailConfig(profile="prompt-injection", mode="block")], "x", default_url=_URL
+        [GuardrailConfig(profile="prompt-injection", mode="block", on_unavailable="monitor")], "x", default_url=_URL
     )
     assert verdict.blocked is False
-    assert verdict.results[0].valid is None
+    assert verdict.results[0].status == "inconclusive"
 
 
 @pytest.mark.asyncio
@@ -269,12 +307,12 @@ async def test_safe_url_override_is_used_instead_of_default(monkeypatch: pytest.
 async def test_a_credential_is_sent_as_a_bearer_header_for_its_own_profile_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An organization guardrail's credential authenticates its own check and no other.
+    """A credential authenticates its own check and no other.
 
-    The credential arrives keyed by profile rather than on `GuardrailConfig`
-    (otari#654): that model is parsed from the request body, so a field there
-    would be one a caller could set. This asserts the routing that keying is
-    for, since the two checks in one request go out on one client.
+    The credential arrives keyed by profile rather than read off
+    `GuardrailConfig`, because the merge decides which one belongs to the URL
+    that survived it. This asserts the routing that keying is for, since the two
+    checks in one request go out on one client.
     """
     seen: dict[str, str | None] = {}
 
@@ -293,6 +331,56 @@ async def test_a_credential_is_sent_as_a_bearer_header_for_its_own_profile_only(
 
     assert verdict.blocked is False
     assert seen == {"prompt-injection": "Bearer s3cret", "pii": None}
+
+
+def test_a_request_body_credential_needs_a_url_of_its_own() -> None:
+    """Without one it would go to the deployment's service, which may be a plain-http sidecar."""
+    with pytest.raises(ValueError, match="requires 'url'"):
+        GuardrailConfig.model_validate({"profile": "probe", "credential": "tok"})
+
+
+def test_a_request_body_credential_is_never_dumped() -> None:
+    cfg = GuardrailConfig.model_validate({"profile": "probe", "url": "https://caller.example", "credential": "tok"})
+
+    assert "credential" not in cfg.model_dump()
+    assert "tok" not in repr(cfg)
+
+
+_REQUESTED = TypeAdapter(RequestedGuardrails)
+_WITH_TOKEN = {"profile": "probe", "url": "https://a.example", "credential": "tok"}
+
+
+@pytest.mark.parametrize(
+    "entries",
+    [
+        [_WITH_TOKEN, {"profile": "probe", "url": "https://b.example"}],
+        [{"profile": "probe", "url": "https://b.example"}, _WITH_TOKEN],
+        [{"profile": "probe"}, _WITH_TOKEN],
+        [_WITH_TOKEN, {"profile": "probe"}],
+    ],
+    ids=["token-first", "token-last", "default-url-first", "default-url-last"],
+)
+def test_a_credentialed_profile_named_twice_is_refused(entries: list[dict[str, str]]) -> None:
+    """Credentials are keyed by profile, so a token would reach the other entry's endpoint too."""
+    with pytest.raises(ValidationError, match="appears more than once"):
+        _REQUESTED.validate_python(entries)
+
+
+def test_a_profile_named_twice_without_a_credential_is_still_accepted() -> None:
+    entries = [{"profile": "probe"}, {"profile": "probe", "url": "https://b.example"}, _WITH_TOKEN | {"profile": "x"}]
+
+    assert len(_REQUESTED.validate_python(entries)) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_credential_never_travels_over_plain_http() -> None:
+    with pytest.raises(UnsafeURLError, match="https"):
+        await run_input_guardrails(
+            [GuardrailConfig(profile="probe", url="http://caller.example/guard")],
+            "x",
+            default_url=None,
+            credentials={"probe": "tok"},
+        )
 
 
 @pytest.mark.asyncio
@@ -612,3 +700,59 @@ async def test_one_request_can_mix_a_held_guardrail_and_a_remote_one(monkeypatch
     assert sent == ["pii"]
     assert verdict.blocked is True
     assert [result.profile for result in verdict.results] == ["prompt-injection", "pii"]
+
+
+# -- kept verdicts -----------------------------------------------------------
+
+
+def test_a_kept_verdict_answers_only_the_check_that_gave_it() -> None:
+    from gateway.services.guardrails import GuardrailResult, cached_result, check_identity, remember_result
+
+    cfg = GuardrailConfig(profile="prompt-injection", mode="block")
+    ours = check_identity(cfg, base_url="https://a.example", credential="one", in_process={})
+    assert ours is not None
+    remember_result(ours, "text", GuardrailResult(profile=cfg.profile, mode="monitor", valid=False, score=0.9))
+
+    hit = cached_result(ours, "text", cfg)
+    assert hit is not None
+    assert (hit.valid, hit.score, hit.mode) == (False, 0.9, "block")
+    assert cached_result(ours, "other text", cfg) is None
+    for other in (
+        check_identity(cfg, base_url="https://a.example", credential="two", in_process={}),
+        check_identity(cfg, base_url="https://b.example", credential="one", in_process={}),
+        check_identity(
+            GuardrailConfig(profile="prompt-injection", validate_kwargs={"threshold": 0.1}),
+            base_url="https://a.example",
+            credential="one",
+            in_process={},
+        ),
+    ):
+        assert other is not None
+        assert other != ours
+        assert cached_result(other, "text", cfg) is None
+
+
+def test_a_check_without_a_verdict_or_an_identity_is_not_kept() -> None:
+    from gateway.services.guardrails import GuardrailResult, cached_result, check_identity, remember_result
+
+    cfg = GuardrailConfig(profile="pi")
+    identity = check_identity(cfg, base_url="https://a.example", credential=None, in_process={})
+    assert identity is not None
+    remember_result(identity, "text", GuardrailResult(profile="pi", mode="monitor", valid=None))
+    assert cached_result(identity, "text", cfg) is None
+
+    class _Unnamed:
+        async def check(self, prompt: str, **validate_kwargs: object) -> object: ...
+
+    unnamed = cast(Any, _Unnamed())
+    assert check_identity(cfg, base_url="", credential=None, in_process={"pi": unnamed}) is None
+
+    class _Named(_Unnamed):
+        identity = "pi@1"
+
+    named = cast(Any, _Named())
+    stricter = GuardrailConfig(profile="pi", validate_kwargs={"threshold": 0.1})
+    assert check_identity(cfg, base_url="", credential=None, in_process={"pi": named}) != check_identity(
+        stricter, base_url="", credential=None, in_process={"pi": named}
+    )
+    assert check_identity(cfg, base_url="", credential=None, in_process={}) is None

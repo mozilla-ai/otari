@@ -1,0 +1,12 @@
+{
+  "status": 200,
+  "body": {
+    "query": "zzqxqzzv nonexistent qwertyuiop",
+    "results": [],
+    "answers": [],
+    "corrections": [],
+    "infoboxes": [],
+    "suggestions": [],
+    "unresponsive_engines": []
+  }
+}

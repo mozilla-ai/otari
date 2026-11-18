@@ -5,11 +5,12 @@ start from whatever organization, workspace and membership shape it needs
 without first satisfying authorization rules it is not exercising.
 """
 
+from collections.abc import Collection
 from typing import Any, TypedDict
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_api_key_service
+from gateway.api.deps import get_api_key_service, get_user_access
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.budgets import Budget
 from gateway.models.tenancy import Organization, User, Workspace
@@ -35,13 +36,19 @@ class MembershipWrites(TypedDict):
     membership_listener: MembershipListener
 
 
+def membership_listener_on(uow: UnitOfWork) -> MembershipListener:
+    """Build the budget listener on ``uow``.
+
+    The budget half alone, not the whole composition the request path builds, so a test using this
+    exercises members' ceilings and not their keys, traces or MCP grants.
+    """
+    return BudgetMembershipListener(BudgetRepositories.on(uow))
+
+
 def membership_writes(db: AsyncSession) -> MembershipWrites:
-    """Build a Unit of Work over ``db`` and the listener on it, as a standalone deployment's request path does."""
+    """Build a Unit of Work over ``db`` and the budget listener on it, for a service that writes membership."""
     uow = UnitOfWork(db)
-    return {
-        "uow": uow,
-        "membership_listener": BudgetMembershipListener(BudgetRepositories.on(uow)),
-    }
+    return {"uow": uow, "membership_listener": membership_listener_on(uow)}
 
 
 # A deployment that publishes no terms, for an accept that does not exercise them.
@@ -49,6 +56,37 @@ NO_TERMS = InvitationClaimSettings(terms_url=None)
 
 # No invitation mail limit, for a test that is not about it.
 NO_MAIL_LIMIT = InvitationMailLimit(None, per_organization=None, per_address=None)
+
+
+class _NoBlockedAddresses:
+    """A blocklist that blocks nothing, for a test that is not about it."""
+
+    async def blocked_among(self, emails: Collection[str]) -> set[str]:
+        return set()
+
+
+NO_BLOCKED_ADDRESSES = _NoBlockedAddresses()
+
+
+async def no_sso_enforcement(_organization: Organization) -> bool:
+    """A ``blocked`` predicate that refuses nothing, for a test that is not about SSO enforcement."""
+    return False
+
+
+class _NoSsoEnforcement:
+    """An ``SsoEnforcement`` that refuses no membership, for a test that is not about it."""
+
+    async def refuses_every_membership(self, *, user: User) -> bool:
+        return False
+
+    async def blocks_membership(self, *, user: User, organization: Organization) -> bool:
+        return False
+
+    async def revoke_refused_sessions(self, *, organization: Organization) -> None:
+        return None
+
+
+NO_SSO_ENFORCEMENT = _NoSsoEnforcement()
 
 
 def claim_writes(db: AsyncSession) -> dict[str, Any]:
@@ -67,6 +105,7 @@ def budget_service(db: AsyncSession) -> BudgetService:
         organizations,
         get_api_key_service(uow),
         WorkspaceAccess(db, organizations),
+        users=get_user_access(uow),
     )
 
 

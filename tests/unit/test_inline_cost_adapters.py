@@ -24,11 +24,12 @@ from any_llm.types.messages import (
 from any_llm.types.responses import Response
 from openai.types.responses import ResponseCompletedEvent, ResponseUsage
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
+from openresponses_types import ResponseResource
 
 from gateway.api.routes import chat, messages, responses
 from gateway.schemas.inference import SettledCost
 
-_SETTLEMENT = SettledCost(cost_usd="0.012345", pricing_source="managed")
+_SETTLEMENT = SettledCost(cost_usd="0.012345", pricing_source="managed", tool_cost_usd="0.010000")
 
 
 def _chat_response(*, usage: CompletionUsage | None = None) -> ChatCompletion:
@@ -164,6 +165,7 @@ def test_adapter_attaches_inline_cost(adapter: Any, value: Any, usage_getter: An
     usage = usage_getter(value)
     assert usage.cost_usd == "0.012345"
     assert usage.pricing_source == "managed"
+    assert usage.tool_cost_usd == "0.010000"
 
 
 @pytest.mark.parametrize(
@@ -181,6 +183,14 @@ def test_terminal_events_serialize_inline_cost(adapter: Any, event: Any) -> None
 
     assert '"cost_usd":"0.012345"' in chunk
     assert '"pricing_source":"managed"' in chunk
+    assert '"tool_cost_usd":"0.010000"' in chunk
+
+
+def test_a_tool_cost_that_was_not_settled_is_left_off_the_usage() -> None:
+    chunk = _chat_usage_chunk()
+    chat._ADAPTER.attach_cost(chunk, SettledCost(cost_usd="0.012345", pricing_source="managed"))
+
+    assert "tool_cost_usd" not in chat._ADAPTER.format_chunk(chunk)
 
 
 def test_format_chunk_unchanged_without_inline_cost() -> None:
@@ -255,3 +265,59 @@ def test_response_completed_with_usage_is_carrier() -> None:
 def test_adapter_does_not_synthesize_usage(adapter: Any, value: Any) -> None:
     assert adapter.attach_cost(value, _SETTLEMENT) is False
     assert value.usage is None
+
+
+def test_a_native_responses_providers_response_is_answered_with_its_cost() -> None:
+    """A provider with its own Responses API answers with any-llm's ResponseResource,
+    whose usage drops undeclared fields, so the cost has to survive serialization too.
+    """
+    result = ResponseResource.model_validate(
+        {
+            "id": "resp-native",
+            "object": "response",
+            "created_at": 1,
+            "completed_at": 1,
+            "status": "completed",
+            "incomplete_details": None,
+            "model": "deepseek-flash",
+            "previous_response_id": None,
+            "instructions": None,
+            "output": [],
+            "error": None,
+            "tools": [],
+            "tool_choice": "auto",
+            "truncation": "disabled",
+            "parallel_tool_calls": True,
+            "text": {"format": {"type": "text"}},
+            "top_p": 1.0,
+            "presence_penalty": 0.0,
+            "frequency_penalty": 0.0,
+            "top_logprobs": 0,
+            "temperature": 1.0,
+            "reasoning": {"effort": None, "summary": None},
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 7,
+                "total_tokens": 17,
+                "input_tokens_details": {"cached_tokens": 0},
+                "output_tokens_details": {"reasoning_tokens": 0},
+            },
+            "max_output_tokens": None,
+            "max_tool_calls": None,
+            "store": False,
+            "background": False,
+            "service_tier": "default",
+            "metadata": {},
+            "safety_identifier": None,
+            "prompt_cache_key": None,
+        }
+    )
+
+    # The adapter is typed for OpenAI's Response, but a native provider hands it this.
+    assert responses._ADAPTER.attach_cost(cast(Any, result), _SETTLEMENT) is True
+    usage = responses.response_body(result)["usage"]
+
+    assert usage["cost_usd"] == _SETTLEMENT.cost_usd
+    assert usage["pricing_source"] == _SETTLEMENT.pricing_source
+    assert usage["tool_cost_usd"] == _SETTLEMENT.tool_cost_usd
+    assert (usage["input_tokens"], usage["output_tokens"]) == (10, 7)

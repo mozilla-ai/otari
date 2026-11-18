@@ -31,7 +31,6 @@ from gateway.core.config import (
     PROVIDER_HEADER,
     REQUEST_ID_HEADER,
     ROUTER_HEADER,
-    ROUTER_TASK_HEADER,
     TAGS_HEADER,
     GatewayConfig,
 )
@@ -71,7 +70,6 @@ _REQUEST_SHAPING_HEADERS = (
     WEB_FETCH_HEADER,
     ROUTER_HEADER,
     "anthropic-beta",
-    ROUTER_TASK_HEADER,
     CONVERSATION_HEADER,
     END_USER_BUDGET_HEADER,
 )

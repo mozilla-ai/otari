@@ -1,13 +1,12 @@
-import { formatCost, formatNumber, formatPct } from "@/shared/helpers/format"
+import { formatCost, formatPct } from "@/shared/helpers/format"
 
+import { plural } from "./format"
 import type { ToolCostBreakdown, ToolCostRow } from "./toolCostBreakdown"
 
+// Dense on a desk; on a phone a row a finger opens takes the 44px floor.
 const ROW =
   "grid w-full grid-cols-[1fr_auto_3rem] items-baseline gap-3 px-2 py-1.5 text-left"
-
-function calls(count: number): string {
-  return `${formatNumber(count)} call${count === 1 ? "" : "s"}`
-}
+const PRESSABLE = "max-md:min-h-11 max-md:items-center"
 
 function Row({
   row,
@@ -22,14 +21,16 @@ function Row({
     <button
       type="button"
       onClick={() => onSelect(row.spanId)}
-      aria-label={`${row.tool}, ${calls(row.calls)}, about ${formatCost(row.cost)}${
+      aria-label={`${row.tool}, ${plural(row.calls, "call")}, about ${formatCost(row.cost)}${
         total > 0 ? `, ${formatPct(row.cost / total)} of the session` : ""
       }`}
-      className={`${ROW} outline-none hover:bg-surface-alt focus-visible:otari-focus-ring`}
+      className={`${ROW} ${PRESSABLE} outline-none hover:bg-surface-alt focus-visible:otari-focus-ring`}
     >
       <span className="min-w-0 break-words text-body">
         {row.tool}{" "}
-        <span className="text-caption text-subtle">{calls(row.calls)}</span>
+        <span className="text-caption text-subtle">
+          {plural(row.calls, "call")}
+        </span>
       </span>
       <span className="text-mono-caption">≈ {formatCost(row.cost)}</span>
       <span className="text-right text-mono-caption text-subtle">
@@ -119,7 +120,7 @@ export function CostByTool({
           <li className="border-b border-border">
             <Plain
               label="Judge gates"
-              hint="their model calls"
+              hint="their model requests"
               cost={breakdown.judges}
               total={total}
             />

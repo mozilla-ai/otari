@@ -6,13 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { DeploymentBootstrap, WorkspaceActivation } from "@/client"
 import { SetupGuide } from "@/features/onboarding/SetupGuide"
-import { resetSetupConfetti } from "@/features/onboarding/setupConfetti"
 import { API_ROOT } from "@/shared/api/client"
 import {
   SelectedWorkspaceProvider,
   useSelectedWorkspace,
 } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import {
   activationAttempt,
   bootstrap,
@@ -20,6 +20,22 @@ import {
   workspaceActivation,
 } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
+import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
+
+// The wave between the sheet and its payoff has tests of its own
+// (setupTransition.test.ts). Here the faces swap at once, which is what the
+// flow decides; how they are carried is not this file's subject.
+vi.mock("@/features/onboarding/setupTransition", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/features/onboarding/setupTransition")
+  >()),
+  useLandingTransition: (_face: unknown, landed: boolean) => landed,
+}))
+
+vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
+  const { telemetrySpy } = await import("@/tests/telemetry")
+  return { useTelemetry: vi.fn(() => telemetrySpy) }
+})
 
 const WORKSPACE = "44444444-4444-4444-4444-444444444444"
 const KEY = "gw-setup-guide-key"
@@ -134,10 +150,18 @@ function renderGuide(
   canServeRequests = true,
   deployment: DeploymentBootstrap = bootstrap(),
 ) {
+  return renderGuideWithClient(canServeRequests, deployment)
+}
+
+/** The guide, with the query client a test can refetch through. */
+async function renderGuideWithClient(
+  canServeRequests = true,
+  deployment: DeploymentBootstrap = bootstrap(),
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return renderWithRouter(
+  const rendered = await renderWithRouter(
     <QueryClientProvider client={client}>
       <DeploymentProvider value={deployment}>
         <SelectedWorkspaceProvider>
@@ -147,6 +171,7 @@ function renderGuide(
       </DeploymentProvider>
     </QueryClientProvider>,
   )
+  return Object.assign(rendered, { queryClient: client })
 }
 
 /** The snippet on screen, which is a code block rather than a form field. */
@@ -154,9 +179,31 @@ function snippet(tab: string): HTMLElement {
   return screen.getByRole("region", { name: `${tab} code` })
 }
 
+/** Asks the sheet for its key, which it never mints on its own. */
+async function createKey(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(
+    await screen.findByRole("button", { name: "Create API key" }),
+  )
+}
+
+function mintCalls(fetchMock: ReturnType<typeof mockApi>) {
+  return fetchMock.mock.calls.filter(([input]) =>
+    String(input).includes("/activation/key"),
+  )
+}
+
+/** The guide events recorded so far, in order, with their properties. */
+function guideEvents() {
+  return recordEvent.mock.calls.filter(
+    ([event]) =>
+      event === TELEMETRY_EVENTS.ACTIVATION_GUIDE_SHOWN ||
+      event === TELEMETRY_EVENTS.ACTIVATION_GUIDE_DISMISSED,
+  )
+}
+
 describe("SetupGuide", () => {
   beforeEach(() => {
-    resetSetupConfetti()
+    resetTelemetrySpy()
   })
 
   afterEach(() => {
@@ -201,17 +248,13 @@ describe("SetupGuide", () => {
     })
   })
 
-  it("hands over the key under StrictMode's double-invoked effects", async () => {
-    // The bug this pins shipped and was found by hand: the mint fires once
-    // across both invocations, so an "ignore a late result" flag scoped to the
-    // first invocation discarded the only request in flight and the second
-    // declined to replace it. The key minted, arrived, and was dropped, leaving
-    // the sheet on "Creating your API key…" forever.
-    //
-    // Only StrictMode double-invokes, so a production build never showed it and
-    // neither did this suite, which renders without one. This is the one test
-    // that does.
+  it("mints nothing until somebody asks, then once", async () => {
+    // Opening the sheet is not a request for a credential: a workspace whose
+    // guide was skipped before the press keeps no key nobody asked for (#3000).
+    // StrictMode, because its double-invoked effects are what would turn an
+    // effect-driven mint into two.
     const fetchMock = mockApi()
+    const user = userEvent.setup()
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     })
@@ -227,38 +270,16 @@ describe("SetupGuide", () => {
       </StrictMode>,
     )
 
+    await screen.findByRole("button", { name: "Create API key" })
+    expect(screen.queryByLabelText("Your API key")).toBeNull()
+    expect(mintCalls(fetchMock)).toHaveLength(0)
+
+    await createKey(user)
     expect(await screen.findByLabelText("Your API key")).toBeInTheDocument()
-    await waitFor(() => {
-      expect(screen.queryByText("Creating your API key…")).toBeNull()
-    })
-    // And exactly one key was minted, not one per invocation.
-    const mints = fetchMock.mock.calls.filter(([input]) =>
-      String(input).includes("/activation/key"),
-    )
-    expect(mints).toHaveLength(1)
+    expect(mintCalls(fetchMock)).toHaveLength(1)
   })
 
-  it("mints the key as the sheet opens, and only once", async () => {
-    // The sheet is the press: it takes the whole screen and exists to hand a
-    // key over, so asking for one more click before showing it is a step with
-    // nothing behind it. Once, though: a re-render must not rotate the key an
-    // operator is in the middle of copying.
-    const fetchMock = mockApi()
-    await renderGuide()
-
-    await screen.findByRole("heading", { name: "Send your first request" })
-    await waitFor(() => {
-      expect(screen.getByLabelText("Your API key")).toBeInTheDocument()
-    })
-    await waitFor(() => {
-      const mints = fetchMock.mock.calls.filter(([input]) =>
-        String(input).includes("/activation/key"),
-      )
-      expect(mints).toHaveLength(1)
-    })
-  })
-
-  it("says the key is being made rather than showing an empty concealed field", async () => {
+  it("holds the control pending rather than showing an empty concealed field", async () => {
     // Every credential field here conceals, so an empty one would show the same
     // run of bullets a real key does and invite a copy that yields nothing.
     let release: (() => void) | undefined
@@ -271,9 +292,13 @@ describe("SetupGuide", () => {
       if (String(input).includes("/activation/key")) await held
       return real?.(input, init) as Promise<Response>
     })
+    const user = userEvent.setup()
     await renderGuide()
 
-    expect(await screen.findByText("Creating your API key…")).toBeVisible()
+    await createKey(user)
+    expect(
+      screen.getByRole("button", { name: "Create API key" }),
+    ).toHaveAttribute("data-pending", "true")
     expect(screen.queryByLabelText("Your API key")).toBeNull()
 
     release?.()
@@ -292,9 +317,10 @@ describe("SetupGuide", () => {
       }
       return real?.(input, init) as Promise<Response>
     })
+    const user = userEvent.setup()
     await renderGuide()
 
-    await screen.findByRole("heading", { name: "Send your first request" })
+    await createKey(user)
     await waitFor(() => {
       expect(screen.queryByText(/Copy this key now/)).toBeNull()
     })
@@ -306,6 +332,7 @@ describe("SetupGuide", () => {
     mockApi()
     const user = userEvent.setup()
     await renderGuide()
+    await createKey(user)
 
     expect(await screen.findByLabelText("Your API key")).toHaveValue(
       CONCEALED_KEY,
@@ -316,7 +343,7 @@ describe("SetupGuide", () => {
 
     await user.click(screen.getByRole("button", { name: "Show Your API key" }))
     expect(screen.getByDisplayValue(KEY)).toBeInTheDocument()
-    expect(snippet("curl")).toHaveTextContent(`Otari-Key: ${KEY}`)
+    expect(snippet("curl")).toHaveTextContent(`export OTARI_API_KEY=${KEY}`)
 
     await user.click(screen.getByRole("button", { name: "Hide Your API key" }))
     expect(screen.getByLabelText("Your API key")).toHaveValue(CONCEALED_KEY)
@@ -329,18 +356,22 @@ describe("SetupGuide", () => {
     mockApi({ hasFingerprint: false })
     const user = userEvent.setup()
     await renderGuide()
+    await createKey(user)
 
     expect(await screen.findByLabelText("Your API key")).toHaveValue(
       "••••••••••••••••",
     )
     await user.click(screen.getByRole("button", { name: "cURL" }))
-    expect(snippet("curl")).toHaveTextContent("Otari-Key: ••••••••••••••••")
+    expect(snippet("curl")).toHaveTextContent(
+      "export OTARI_API_KEY='••••••••••••••••'",
+    )
   })
 
   it("copies the full activation key while keeping its fingerprint on screen", async () => {
     mockApi()
     const user = userEvent.setup()
     await renderGuide()
+    await createKey(user)
 
     await user.click(
       await screen.findByRole("button", { name: "Copy Your API key" }),
@@ -355,6 +386,7 @@ describe("SetupGuide", () => {
     mockApi()
     const user = userEvent.setup()
     await renderGuide()
+    await createKey(user)
     await screen.findByLabelText("Your API key")
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {
@@ -381,16 +413,18 @@ describe("SetupGuide", () => {
     mockApi()
     const user = userEvent.setup()
     await renderGuide()
+    await createKey(user)
     await screen.findByLabelText("Your API key")
     for (const label of ["Agent", "cURL", "Python", "TypeScript"]) {
       await user.click(screen.getByRole("button", { name: label }))
       const hint =
         label === "Agent"
           ? screen.getByText(/Works with Claude Code/)
-          : screen.getByText(/Hidden keys use a stand-in/)
+          : label === "cURL"
+            ? screen.getByText(/Hidden keys use a stand-in/)
+            : screen.getByText(/Reads your key from OTARI_API_KEY/)
       const original = hint.textContent
-      if (label !== "Agent") {
-        expect(hint).toHaveTextContent("Hidden keys use a stand-in")
+      if (label === "cURL") {
         expect(hint).toHaveTextContent("copies include your real key")
       }
       await user.click(
@@ -408,6 +442,7 @@ describe("SetupGuide", () => {
     mockApi()
     const user = userEvent.setup()
     await renderGuide()
+    await createKey(user)
 
     // The agent prompt is the default, and names the environment variable
     // rather than carrying the key.
@@ -518,7 +553,9 @@ describe("SetupGuide", () => {
     const user = userEvent.setup()
     await renderGuide()
 
-    await screen.findByRole("heading", { name: "Send your first request" })
+    const sheet = await screen.findByRole("dialog", {
+      name: "Send your first request",
+    })
     // The request lands while the sheet is open. The poll interval is longer
     // than a test should sleep for, and "Check now" is the same refetch an
     // operator can trigger.
@@ -537,6 +574,11 @@ describe("SetupGuide", () => {
       }),
     ).toBeInTheDocument()
     expect(screen.getByText(/412 ms/)).toBeInTheDocument()
+    // The payoff is the sheet's second face: the same frame, never closed
+    // and reopened, which is what lets the wave carry one into the other.
+    expect(
+      screen.getByRole("dialog", { name: "Your first call went through" }),
+    ).toBe(sheet)
   })
 
   it("does not congratulate a workspace that had already activated on arrival", async () => {
@@ -565,6 +607,7 @@ describe("SetupGuide", () => {
     const api = mockApi()
     const user = userEvent.setup()
     await renderGuide()
+    await createKey(user)
 
     await user.click(
       await screen.findByRole("button", { name: "Show Your API key" }),
@@ -579,6 +622,7 @@ describe("SetupGuide", () => {
     await user.click(
       await screen.findByRole("button", { name: "switch to Research" }),
     )
+    await createKey(user)
 
     // The other workspace's sheet, with the other workspace's key: concealed
     // again, because the reveal belonged to the key that is gone.
@@ -587,6 +631,83 @@ describe("SetupGuide", () => {
     )
     expect(await screen.findByDisplayValue(OTHER_KEY)).toBeInTheDocument()
     expect(screen.queryByDisplayValue(KEY)).not.toBeInTheDocument()
+  })
+
+  describe("return after step 2", () => {
+    const issued = {
+      key_id: "88888888-8888-8888-8888-888888888888",
+      key_prefix: "gw-setup-g",
+      key_suffix: "JYnT",
+    }
+
+    it("offers the key already issued and keeps it without minting", async () => {
+      const fetchMock = mockApi({
+        activation: workspaceActivation({ issued_key: issued }),
+      })
+      const user = userEvent.setup()
+      await renderGuide()
+
+      expect(
+        await screen.findByText(/You already have a setup key/),
+      ).toHaveTextContent("You already have a setup key ending ••JYnT.")
+      expect(
+        screen.queryByRole("button", { name: "Create API key" }),
+      ).not.toBeInTheDocument()
+      expect(screen.getByText("The old key stops working.")).toBeVisible()
+      expect(screen.queryByText(/The examples read it from/)).toBeNull()
+
+      await user.click(screen.getByRole("button", { name: "Use it" }))
+
+      expect(await screen.findByText(/Using your setup key/)).toHaveTextContent(
+        "Using your setup key ending ••JYnT.",
+      )
+      expect(screen.getByText("Listening for your first request")).toBeVisible()
+      await user.click(screen.getByRole("button", { name: "cURL" }))
+      expect(snippet("curl")).toHaveTextContent("Bearer $OTARI_API_KEY")
+      expect(snippet("curl")).not.toHaveTextContent("export OTARI_API_KEY")
+      expect(mintCalls(fetchMock)).toHaveLength(0)
+    })
+
+    it("withdraws the choice once the key is rotated elsewhere", async () => {
+      const api = mockApi({
+        activation: workspaceActivation({ issued_key: issued }),
+      })
+      const user = userEvent.setup()
+      const { queryClient } = await renderGuideWithClient()
+
+      await user.click(await screen.findByRole("button", { name: "Use it" }))
+      await screen.findByText(/Using your setup key/)
+
+      api.setActivation(
+        workspaceActivation({ issued_key: { ...issued, key_suffix: "Q9zX" } }),
+      )
+      await act(() => queryClient.refetchQueries())
+
+      expect(
+        await screen.findByText(/You already have a setup key/),
+      ).toHaveTextContent("You already have a setup key ending ••Q9zX.")
+      expect(screen.getByRole("button", { name: "Use it" })).toBeVisible()
+    })
+
+    it("replaces the key only when asked, and shows the new one", async () => {
+      const fetchMock = mockApi({
+        activation: workspaceActivation({ issued_key: issued }),
+      })
+      const user = userEvent.setup()
+      await renderGuide()
+
+      await user.click(
+        await screen.findByRole("button", { name: "Replace it" }),
+      )
+
+      expect(await screen.findByLabelText("Your API key")).toHaveValue(
+        CONCEALED_KEY,
+      )
+      expect(mintCalls(fetchMock)).toHaveLength(1)
+      expect(
+        screen.queryByText(/You already have a setup key/),
+      ).not.toBeInTheDocument()
+    })
   })
 
   it("skipping retires the guide for the workspace and takes the sheet away", async () => {
@@ -606,6 +727,37 @@ describe("SetupGuide", () => {
     )
     expect(dismissed).toBeDefined()
     expect(dismissed?.[1]?.method).toBe("POST")
+    // Skipped before asking, so no key was left behind.
+    expect(mintCalls(fetchMock)).toHaveLength(0)
+  })
+
+  it("retires the guide on the way to a page a guidance link names", async () => {
+    // Offered once: leaving for another page is not a pause, or the sheet would
+    // come back on the next workspace switch or page load.
+    const fetchMock = mockApi({
+      activation: workspaceActivation({
+        status: "failed",
+        latest_attempt: activationAttempt({
+          status: "failed",
+          error_category: "policy",
+        }),
+      }),
+    })
+    const user = userEvent.setup()
+    await renderGuide()
+
+    await user.click(await screen.findByRole("link", { name: "Open budgets" }))
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(([input]) =>
+          String(input).includes("/activation/dismiss"),
+        ),
+      ).toBe(true)
+    })
+    expect(
+      screen.queryByRole("heading", { name: "Send your first request" }),
+    ).not.toBeInTheDocument()
   })
 
   it("offers Skip without a temporary close control", async () => {
@@ -627,5 +779,179 @@ describe("SetupGuide", () => {
         String(input).includes("/activation/dismiss"),
       ),
     ).toBe(false)
+  })
+
+  describe("telemetry", () => {
+    it("records the sheet shown once, with its workspace, under StrictMode's doubled effects", async () => {
+      mockApi()
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      })
+      await renderWithRouter(
+        <StrictMode>
+          <QueryClientProvider client={client}>
+            <DeploymentProvider value={bootstrap()}>
+              <SelectedWorkspaceProvider>
+                <SetupGuide canServeRequests />
+              </SelectedWorkspaceProvider>
+            </DeploymentProvider>
+          </QueryClientProvider>
+        </StrictMode>,
+      )
+
+      await screen.findByRole("heading", { name: "Send your first request" })
+
+      expect(guideEvents()).toEqual([
+        [TELEMETRY_EVENTS.ACTIVATION_GUIDE_SHOWN, { workspace_id: WORKSPACE }],
+      ])
+    })
+
+    it("records Skip once the guide is retired, so a failed Skip and its retry are one dismissal", async () => {
+      const fetchMock = mockApi()
+      const answer = fetchMock.getMockImplementation() as typeof fetch
+      let refusals = 1
+      fetchMock.mockImplementation(async (input, init) => {
+        if (String(input).includes("/activation/dismiss") && refusals > 0) {
+          refusals -= 1
+          return Response.json({ detail: "try again" }, { status: 500 })
+        }
+        return answer(input, init)
+      })
+      const user = userEvent.setup()
+      await renderGuide()
+
+      await user.click(await screen.findByRole("button", { name: "Skip" }))
+      await screen.findByText(/try again/)
+      expect(guideEvents()).toEqual([
+        [TELEMETRY_EVENTS.ACTIVATION_GUIDE_SHOWN, { workspace_id: WORKSPACE }],
+      ])
+      await user.click(screen.getByRole("button", { name: "Skip" }))
+
+      await waitFor(() =>
+        expect(guideEvents()).toEqual([
+          [
+            TELEMETRY_EVENTS.ACTIVATION_GUIDE_SHOWN,
+            { workspace_id: WORKSPACE },
+          ],
+          [
+            TELEMETRY_EVENTS.ACTIVATION_GUIDE_DISMISSED,
+            { workspace_id: WORKSPACE, reason: "skipped" },
+          ],
+        ]),
+      )
+    })
+
+    it("records one dismissal for a showing the first request retires while Skip is in flight", async () => {
+      const fetchMock = mockApi()
+      const answer = fetchMock.getMockImplementation() as typeof fetch
+      let release = () => {}
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      fetchMock.mockImplementation(async (input, init) => {
+        if (String(input).includes("/activation/dismiss")) await held
+        return answer(input, init)
+      })
+      const user = userEvent.setup()
+      await renderGuide()
+
+      await user.click(await screen.findByRole("button", { name: "Skip" }))
+      fetchMock.setActivation(
+        workspaceActivation({
+          status: "activated",
+          experience_eligible: false,
+          activation_attempt: activationAttempt(),
+        }),
+      )
+      await user.click(screen.getByRole("button", { name: "Check now" }))
+      await screen.findByRole("heading", {
+        name: "Your first call went through",
+      })
+      await act(async () => {
+        release()
+        await held
+      })
+
+      expect(guideEvents()).toEqual([
+        [TELEMETRY_EVENTS.ACTIVATION_GUIDE_SHOWN, { workspace_id: WORKSPACE }],
+        [
+          TELEMETRY_EVENTS.ACTIVATION_GUIDE_DISMISSED,
+          { workspace_id: WORKSPACE, reason: "activated" },
+        ],
+      ])
+    })
+
+    it("records leaving for a guidance link as a dismissal", async () => {
+      mockApi({
+        activation: workspaceActivation({
+          status: "failed",
+          latest_attempt: activationAttempt({
+            status: "failed",
+            error_category: "policy",
+          }),
+        }),
+      })
+      const user = userEvent.setup()
+      await renderGuide()
+
+      await user.click(
+        await screen.findByRole("link", { name: "Open budgets" }),
+      )
+
+      expect(recordEvent).toHaveBeenCalledWith(
+        TELEMETRY_EVENTS.ACTIVATION_GUIDE_DISMISSED,
+        { workspace_id: WORKSPACE, reason: "left" },
+      )
+    })
+
+    it("records the first request landing as a dismissal by activation", async () => {
+      const fetchMock = mockApi()
+      const user = userEvent.setup()
+      await renderGuide()
+
+      await screen.findByRole("heading", { name: "Send your first request" })
+      fetchMock.setActivation(
+        workspaceActivation({
+          status: "activated",
+          experience_eligible: false,
+          activation_attempt: activationAttempt(),
+        }),
+      )
+      await user.click(await screen.findByRole("button", { name: "Check now" }))
+      await screen.findByRole("heading", {
+        name: "Your first call went through",
+      })
+
+      expect(guideEvents()).toEqual([
+        [TELEMETRY_EVENTS.ACTIVATION_GUIDE_SHOWN, { workspace_id: WORKSPACE }],
+        [
+          TELEMETRY_EVENTS.ACTIVATION_GUIDE_DISMISSED,
+          { workspace_id: WORKSPACE, reason: "activated" },
+        ],
+      ])
+    })
+
+    it("records nothing for a workspace that had already activated on arrival", async () => {
+      const fetchMock = mockApi({
+        activation: workspaceActivation({
+          status: "activated",
+          experience_eligible: false,
+          activation_attempt: activationAttempt(),
+        }),
+      })
+      await renderGuide()
+
+      await waitFor(() =>
+        expect(
+          fetchMock.mock.calls.some(([input]) =>
+            String(input).includes("/activation"),
+          ),
+        ).toBe(true),
+      )
+      // Let the read settle and its render commit, so silence is an answer
+      // rather than a look taken before the guide knew anything.
+      await act(() => new Promise((resolve) => setTimeout(resolve, 50)))
+      expect(guideEvents()).toEqual([])
+    })
   })
 })

@@ -1,23 +1,20 @@
-"""The core ``ProviderFilePort``: a provider's files API reached through any-llm.
-
-OpenAI's container files are the one read any-llm has no call for, so that read
-goes over this adapter's own connection.
-"""
+"""The core ``ProviderFilePort``: a provider's files API reached through any-llm."""
 
 from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncGenerator, AsyncIterator
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from collections.abc import AsyncGenerator
+from contextlib import AbstractAsyncContextManager
 from functools import cached_property
-from urllib.parse import quote
 
 import httpx
+import httpx2
 from anthropic import AnthropicError
 from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import AnyLLMError
 from any_llm.types.files import AsyncFileDownload
+from openai import OpenAIError
 from pydantic import ValidationError
 
 from gateway.exceptions.files_exceptions import (
@@ -32,17 +29,17 @@ from gateway.types.provider_file import ProviderCopyReceipt, ProviderFile
 
 __all__ = ["AnyLlmProviderFiles"]
 
-OPENAI_BASE = "https://api.openai.com/v1"
-
 # How long to wait on the provider for a connection or for the next chunk.
 _TIMEOUT = httpx.Timeout(30.0)
+# Anthropic's SDK accepts only an httpx2 client, OpenAI's only an httpx one.
+_HTTPX2_TIMEOUT = httpx2.Timeout(30.0)
 
 # The providers whose files this adapter reads and writes.
 _FILE_PROVIDERS = frozenset({LLMProvider.ANTHROPIC, LLMProvider.OPENAI})
 
 # How a file call fails. any-llm raises its own error, or re-raises the provider
-# SDK's while unified exceptions are off, and the OpenAI container read is httpx.
-_FILE_CALL_ERRORS = (AnyLLMError, AnthropicError, httpx.HTTPError, ValidationError)
+# SDK's while unified exceptions are off.
+_FILE_CALL_ERRORS = (AnyLLMError, AnthropicError, OpenAIError, httpx.HTTPError, httpx2.HTTPError, ValidationError)
 
 _NOT_FOUND = 404
 
@@ -121,21 +118,6 @@ def _declared_size(download: AsyncFileDownload) -> int:
     return 0
 
 
-def _container_file_request(file: ProviderFile, credential: ResolvedCredential) -> tuple[str, dict[str, str]]:
-    """The URL and headers that read ``file``'s bytes out of its OpenAI container.
-
-    Raises :class:`ProviderFileUnavailableError` for a file that names no container.
-    """
-    # OpenAI keys a container file on its container as well as its ID.
-    if not file.container_id:
-        raise ProviderFileUnavailableError(f"openai file {file.file_id} names no container to read it from")
-    base = (credential.api_base or OPENAI_BASE).rstrip("/")
-    return (
-        f"{base}/containers/{quote(file.container_id, safe='')}/files/{quote(file.file_id, safe='')}/content",
-        {"Authorization": f"Bearer {credential.api_key}"},
-    )
-
-
 class _AnyLlmFileSession(ProviderFileSession):
     """Reads and writes one provider account's files through any-llm, with the credential that reaches it.
 
@@ -151,7 +133,14 @@ class _AnyLlmFileSession(ProviderFileSession):
         self._credential = credential
         # Handing this client to the provider SDK replaces the one it would have
         # built, whose own default is to follow the redirect a download can answer with.
-        self._connection = httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True)
+        self._timeout: httpx.Timeout | httpx2.Timeout
+        self._connection: httpx.AsyncClient | httpx2.AsyncClient
+        if provider is LLMProvider.ANTHROPIC:
+            self._timeout = _HTTPX2_TIMEOUT
+            self._connection = httpx2.AsyncClient(timeout=_HTTPX2_TIMEOUT, follow_redirects=True)
+        else:
+            self._timeout = _TIMEOUT
+            self._connection = httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True)
 
     @property
     def provider(self) -> str:
@@ -176,7 +165,7 @@ class _AnyLlmFileSession(ProviderFileSession):
                 # so a retry or a longer wait here spends the time the files
                 # after this one need.
                 "http_client": self._connection,
-                "timeout": _TIMEOUT,
+                "timeout": self._timeout,
                 "max_retries": 0,
             },
         )
@@ -189,7 +178,7 @@ class _AnyLlmFileSession(ProviderFileSession):
         """
         try:
             await self._connection.aclose()
-        except (httpx.HTTPError, RuntimeError):
+        except (httpx.HTTPError, httpx2.HTTPError, RuntimeError):
             logger.exception("Could not release the %s connection", self.provider)
 
     async def upload(self, data: bytes, *, filename: str, mime_type: str, expires_in: int) -> ProviderCopyReceipt:
@@ -279,18 +268,8 @@ class _AnyLlmFileSession(ProviderFileSession):
     def _open(self, file: ProviderFile) -> AbstractAsyncContextManager[AsyncFileDownload]:
         if self._provider is LLMProvider.ANTHROPIC:
             return self._llm.adownload_file(file.file_id)
-        return self._open_container_file(file)
-
-    @asynccontextmanager
-    async def _open_container_file(self, file: ProviderFile) -> AsyncIterator[AsyncFileDownload]:
-        """Open an OpenAI container file's download, which any-llm has no call for.
-
-        Stopgap: read it through any-llm once that can reach a container's files
-        (mozilla-ai/any-llm#1419, tracked in #1480).
-        """
-        url, headers = _container_file_request(file, self._credential)
-        async with self._connection.stream("GET", url, headers=headers) as response:
-            response.raise_for_status()
-            yield AsyncFileDownload(
-                status_code=response.status_code, headers=response.headers, chunks=response.aiter_bytes()
-            )
+        # OpenAI keys a container file on its container as well as its ID, and
+        # without one any-llm would read the unrelated Files API instead.
+        if not file.container_id:
+            raise ProviderFileUnavailableError(f"openai file {file.file_id} names no container to read it from")
+        return self._llm.adownload_file(file.file_id, container_id=file.container_id)

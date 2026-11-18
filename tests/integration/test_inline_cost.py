@@ -32,7 +32,7 @@ from conftest import seed_workspace_id
 from gateway.core.config import API_ROOT, REQUEST_ID_HEADER
 from gateway.models.usage import UsageLog
 
-from .conftest import MODEL_NAME
+from .conftest import ALL_KEY_SCOPES, MODEL_NAME
 
 # $1.00 per million tokens each way, so 100k in plus 200k out settles at $0.30.
 _USAGE = CompletionUsage(prompt_tokens=100_000, completion_tokens=200_000, total_tokens=300_000)
@@ -78,8 +78,17 @@ def _chunks() -> list[ChatCompletionChunk]:
     ]
 
 
-def _chat(client: TestClient, headers: dict[str, str], *, stream: bool = False) -> Any:
-    async def _acompletion(**_kwargs: Any) -> Any:
+def _chat(
+    client: TestClient,
+    headers: dict[str, str],
+    *,
+    stream: bool = False,
+    stream_options: dict[str, Any] | None = None,
+    sent: list[dict[str, Any]] | None = None,
+) -> Any:
+    async def _acompletion(**kwargs: Any) -> Any:
+        if sent is not None:
+            sent.append(kwargs)
         if not stream:
             return _completion()
 
@@ -98,6 +107,7 @@ def _chat(client: TestClient, headers: dict[str, str], *, stream: bool = False) 
                 "messages": [{"role": "user", "content": "hi"}],
                 "user": "inline-cost-user",
                 "stream": stream,
+                **({} if stream_options is None else {"stream_options": stream_options}),
             },
             headers=headers,
         )
@@ -135,6 +145,8 @@ def test_non_streaming_response_carries_its_request_id_and_settled_cost(
     usage = response.json()["usage"]
     assert usage["cost_usd"] == "0.300000"
     assert usage["pricing_source"] == "deployment"
+    # No tool ran, so none of the cost is tool charges.
+    assert usage["tool_cost_usd"] == "0.000000"
     assert _logged_cost(db_session_factory) == Decimal(usage["cost_usd"])
 
 
@@ -156,6 +168,26 @@ def test_streaming_response_carries_cost_on_its_terminal_usage_chunk(
     assert len(usages) == 1
     assert usages[0]["cost_usd"] == "0.300000"
     assert usages[0]["pricing_source"] == "deployment"
+    assert usages[0]["tool_cost_usd"] == "0.000000"
+    assert _logged_cost(db_session_factory) == Decimal("0.300000")
+
+
+def test_a_stream_that_turned_usage_off_is_billed_on_the_usage_it_does_not_receive(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    _price_model(client, master_key_header)
+    _create_user(client, master_key_header)
+    sent: list[dict[str, Any]] = []
+
+    response = _chat(client, master_key_header, stream=True, stream_options={"include_usage": False}, sent=sent)
+
+    assert response.status_code == 200, response.text
+    assert sent[0]["stream_options"]["include_usage"] is True
+    frames = [line.removeprefix("data: ") for line in response.text.splitlines() if line.startswith("data: ")]
+    assert frames[-1] == "[DONE]"
+    assert not [frame for frame in frames[:-1] if json.loads(frame).get("usage")]
     assert _logged_cost(db_session_factory) == Decimal("0.300000")
 
 
@@ -172,6 +204,7 @@ def test_unpriced_model_response_has_a_request_id_and_no_cost(
     usage = response.json()["usage"]
     assert "cost_usd" not in usage
     assert "pricing_source" not in usage
+    assert "tool_cost_usd" not in usage
 
 
 def test_each_request_gets_its_own_request_id(
@@ -251,6 +284,7 @@ def test_a_successful_request_settles_to_the_cost_its_response_carried(
         "request_id": request_id,
         "status": "success",
         "cost_usd": response.json()["usage"]["cost_usd"],
+        "tool_cost_usd": "0.000000",
         "prompt_tokens": 100_000,
         "completion_tokens": 200_000,
         "total_tokens": 300_000,
@@ -269,6 +303,7 @@ def test_an_unpriced_request_settles_with_no_cost(
     settled = _settlement(client, response.headers[REQUEST_ID_HEADER], master_key_header)
     assert settled.status_code == 200, settled.text
     assert settled.json()["cost_usd"] is None
+    assert settled.json()["tool_cost_usd"] is None
 
 
 def test_an_api_key_sees_its_own_requests_and_no_other_keys(
@@ -277,7 +312,9 @@ def test_an_api_key_sees_its_own_requests_and_no_other_keys(
     api_key_header: dict[str, str],
 ) -> None:
     _price_model(client, master_key_header)
-    other = client.post(f"{API_ROOT}/keys", json={"key_name": "other-key"}, headers=master_key_header)
+    other = client.post(
+        f"{API_ROOT}/keys", json={"scopes": ALL_KEY_SCOPES, "key_name": "other-key"}, headers=master_key_header
+    )
     assert other.status_code == 200, other.text
     other_header = {name: f"Bearer {other.json()['key']}" for name in api_key_header}
 
@@ -366,3 +403,33 @@ def test_a_side_call_alone_is_not_a_settled_request(
     response = client.get(f"{API_ROOT}/usage/requests/{request_id}", headers=master_key_header)
 
     assert response.status_code == 404
+
+
+def test_a_stream_the_client_abandoned_settles_as_incomplete(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """Its only row is the ``incomplete`` one billed on an estimate, and that row settles it."""
+    request_id = str(uuid.uuid4())
+    with db_session_factory() as db:
+        db.add(
+            UsageLog(
+                id=str(uuid.uuid4()),
+                workspace_id=seed_workspace_id(db),
+                timestamp=datetime.now(UTC),
+                model=MODEL_NAME,
+                provider="openai",
+                endpoint="/v1/chat/completions",
+                status="incomplete",
+                cost=Decimal("0.000009"),
+                request_group_id=request_id,
+            )
+        )
+        db.commit()
+
+    settled = client.get(f"{API_ROOT}/usage/requests/{request_id}", headers=master_key_header)
+
+    assert settled.status_code == 200, settled.text
+    assert settled.json()["status"] == "incomplete"
+    assert settled.json()["cost_usd"] == "0.000009"

@@ -1,6 +1,12 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  type QueryClient,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import type {
   CallerIdentity,
+  DeleteAccountRequest,
   MailedLinkStatusResponse,
   OrganizationContext,
   Passkey,
@@ -14,11 +20,16 @@ import type {
   SetPasswordRequest,
   SignupRequest,
   SignupResponse,
+  UpdateAvatarRequest,
   UpdateProfileRequest,
   VerifyEmailRequest,
   VerifyEmailResponse,
 } from "@/client"
 import { apiFetch, retryUnlessNotFound } from "@/shared/api/client"
+import {
+  isNoOrganizationError,
+  useOrganizationContext,
+} from "@/shared/api/organizations"
 import {
   MAILED_LINK_STATUS,
   NO_RETRY,
@@ -118,6 +129,17 @@ export function useProfile(enabled = true) {
 }
 
 /**
+ * The signed-in identity, as the gateway sees the session: the organization
+ * context's `caller`, which every page already reads, or the profile for a
+ * caller with no organization, which costs that caller alone a second request.
+ */
+export function useSessionCaller(): CallerIdentity | undefined {
+  const organization = useOrganizationContext()
+  const profile = useProfile(isNoOrganizationError(organization.error))
+  return organization.data?.caller ?? profile.data
+}
+
+/**
  * Change the name the signed-in identity goes by (`PATCH /v1/auth/profile`).
  *
  * Always the caller's own identity: the endpoint takes no id. `null` clears the
@@ -142,17 +164,65 @@ export function useUpdateProfile() {
         method: "PATCH",
         body: JSON.stringify(body),
       }),
-    onSuccess: (caller) => {
-      queryClient.setQueryData<OrganizationContext>(
-        [ORGANIZATIONS, "context"],
-        (previous) => (previous ? { ...previous, caller } : previous),
+    onSuccess: (caller) => seatCaller(queryClient, caller),
+  })
+}
+
+function seatCaller(queryClient: QueryClient, caller: CallerIdentity) {
+  queryClient.setQueryData<OrganizationContext>(
+    [ORGANIZATIONS, "context"],
+    (previous) => (previous ? { ...previous, caller } : previous),
+  )
+  queryClient.setQueryData<CallerIdentity>([PROFILE], caller)
+  void queryClient.invalidateQueries({
+    queryKey: [ORGANIZATIONS, "context"],
+  })
+  void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
+}
+
+/**
+ * Change the face the signed-in identity is drawn with
+ * (`PUT /v1/auth/profile/avatar`), which every member list in the organization
+ * then shows. `null` goes back to the face the user id gives.
+ *
+ * Optimistic, because the picker closes on Save and the account control should
+ * change on that tick rather than a round trip later: both caches that carry
+ * the caller take the new face at once and are put back if the write fails.
+ * The answer then seats exactly as a name change does.
+ */
+export function useUpdateAvatar() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (face: UpdateAvatarRequest["face"]) =>
+      apiFetch<CallerIdentity>("/auth/profile/avatar", {
+        method: "PUT",
+        body: JSON.stringify({ face } satisfies UpdateAvatarRequest),
+      }),
+    onMutate: async (face) => {
+      const contextKey = [ORGANIZATIONS, "context"]
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: contextKey, exact: true }),
+        queryClient.cancelQueries({ queryKey: [PROFILE], exact: true }),
+      ])
+      const previous = {
+        context: queryClient.getQueryData<OrganizationContext>(contextKey),
+        profile: queryClient.getQueryData<CallerIdentity>([PROFILE]),
+      }
+      queryClient.setQueryData<OrganizationContext>(contextKey, (current) =>
+        current?.caller
+          ? { ...current, caller: { ...current.caller, avatar_face: face } }
+          : current,
       )
-      queryClient.setQueryData<CallerIdentity>([PROFILE], caller)
-      void queryClient.invalidateQueries({
-        queryKey: [ORGANIZATIONS, "context"],
-      })
-      void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
+      queryClient.setQueryData<CallerIdentity>([PROFILE], (current) =>
+        current ? { ...current, avatar_face: face } : current,
+      )
+      return previous
     },
+    onError: (_error, _face, previous) => {
+      queryClient.setQueryData([ORGANIZATIONS, "context"], previous?.context)
+      queryClient.setQueryData([PROFILE], previous?.profile)
+    },
+    onSuccess: (caller) => seatCaller(queryClient, caller),
   })
 }
 
@@ -338,5 +408,16 @@ export function useResetPassword() {
   })
 }
 
-// `enabled` lets a page that only sometimes offers a workspace control (the
-// organization-wide Usage page's filter) skip the read everywhere else.
+/**
+ * Delete the signed-in account (`DELETE /v1/auth/account`). The server ends
+ * every session it held, so the caller signs out locally once this succeeds.
+ */
+export function useDeleteAccount() {
+  return useMutation({
+    mutationFn: (body: DeleteAccountRequest) =>
+      apiFetch<void>("/auth/account", {
+        method: "DELETE",
+        body: JSON.stringify(body),
+      }),
+  })
+}

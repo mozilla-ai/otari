@@ -5,7 +5,12 @@ A surface error that carries none is mapped to a status by the API layer.
 The repository errors are internal: a service translates each into a surface error and never renders it.
 """
 
-from gateway.core.error_codes import END_USER_BUDGET_NOT_ALLOWED, END_USER_LIMIT_REACHED
+from gateway.core.config import API_ROOT
+from gateway.core.error_codes import (
+    END_USER_BUDGET_NOT_ALLOWED,
+    END_USER_BUDGET_WITHOUT_END_USER,
+    END_USER_LIMIT_REACHED,
+)
 from gateway.exceptions import (
     TenancyConflictError,
     TenancyForbiddenError,
@@ -71,16 +76,16 @@ class OrganizationBudgetInUseError(TenancyConflictError):
 
 
 class OrganizationBudgetHeldElsewhereError(TenancyConflictError):
-    """Something outside this organization's own surface still names the budget.
+    """A user is still on the budget, so the delete is refused without naming them.
 
-    ``users.budget_id``, which is not a tenant's to see, so the refusal does not
-    name the rows holding it.
+    ``users.budget_id``: an end user of one of the organization's service keys,
+    or a gateway user an operator assigned, which is not a tenant's to see.
     """
 
     def __init__(self, budget_id: object):
         super().__init__(
-            f"Budget {budget_id} is still in use outside this organization and cannot be deleted. "
-            "Ask a deployment operator to release it."
+            f"Budget {budget_id} still caps users and cannot be deleted. Move your service keys' end users "
+            "to another budget first; if none are on it, ask a deployment operator to release it."
         )
 
 
@@ -121,6 +126,17 @@ class DeploymentBudgetIsEndUserDefaultError(TenancyConflictError):
 
     Deleting it would leave every end user those keys create from then on uncapped.
     """
+
+    def __init__(self, keys: list[str]):
+        shown = ", ".join(keys[:5]) + (f" and {len(keys) - 5} more" if len(keys) > 5 else "")
+        super().__init__(
+            f"This budget is the default end-user budget of {shown}. Change that default on the key "
+            "(Keys > Edit > Service key) before deleting it."
+        )
+
+
+class OrganizationBudgetIsEndUserDefaultError(TenancyConflictError):
+    """An organization service key starts its end users on the budget, so the delete is refused by key name."""
 
     def __init__(self, keys: list[str]):
         shown = ", ".join(keys[:5]) + (f" and {len(keys) - 5} more" if len(keys) > 5 else "")
@@ -175,7 +191,7 @@ class OrganizationScopedBudgetAlreadyExistsError(TenancyConflictError):
     not.
     """
 
-    def __init__(self, scope_type: object, scope_id: object):
+    def __init__(self, scope_type: object):
         super().__init__(
             f"A spend ceiling already exists for this {scope_type} and provider. Edit that ceiling instead."
         )
@@ -236,7 +252,26 @@ class EndUserBudgetNotAllowedError(TenancyForbiddenError):
     error_code = END_USER_BUDGET_NOT_ALLOWED
 
     def __init__(self, budget_id: str):
-        super().__init__(f"This key may not assign budget '{budget_id}' to its end users")
+        super().__init__(
+            f"This key may not assign budget '{budget_id}' to its end users: no budget on its list has that id. "
+            f"Pass a budget_id from GET {API_ROOT}/end-user-budgets"
+        )
+
+
+class EndUserBudgetWithoutEndUserError(TenancyValidationError):
+    """A request names an end-user budget but no end user of a service key, so the budget would apply to no one.
+
+    Refused rather than ignored: a budget is a spend control, and one that a typo or the wrong key quietly turns off
+    goes unnoticed until the bill.
+    """
+
+    error_code = END_USER_BUDGET_WITHOUT_END_USER
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Otari-End-User-Budget applies only to a service key's request whose user field names one of its end "
+            "users; this request names none, so the budget would not be applied"
+        )
 
 
 class EndUserLimitReachedError(TenancyForbiddenError):

@@ -1,4 +1,4 @@
-"""An immutable price index over a models.dev ``api.json`` document.
+"""An immutable price index over a typed models.dev catalog.
 
 Pure and synchronous: no database, no network. The index answers what a model
 costs, its context window and its display metadata, matching a provider and a
@@ -8,15 +8,29 @@ spelling.
 """
 
 import re
+import sys
 from bisect import bisect_right
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
+from functools import lru_cache
 from typing import Any
 
 from gateway.core.metered_pricing import TIER_THRESHOLD_FIELD
-from gateway.services.model_catalog_service import models_dev_provider_id
+from gateway.types.models_dev import (
+    RATE_FIELDS,
+    ModelsDevCatalog,
+    ModelsDevCost,
+    ModelsDevModel,
+    ModelsDevPricing,
+    ModelsDevProvider,
+    ModelsDevRates,
+    models_dev_provider_id,
+    models_dev_provider_ids,
+    parse_catalog,
+)
+from gateway.types.price_rates import RateColumns, columns_from_pricing
 
 REFERENCE_PREFIX = "models.dev:"
 
@@ -31,6 +45,10 @@ _HF_BACKEND_PROVIDER_IDS: Mapping[str, tuple[str, ...]] = {
 }
 
 _BEDROCK_PROVIDER_ID = "amazon-bedrock"
+# The any-llm implementation that reaches another Otari, whose model ids are ``vendor:model``.
+_OTARI_PROVIDER = "otari"
+# Another Otari lists a model as ``vendor/model``; ``vendor:model`` is the selector spelling of the same.
+_OTARI_MODEL_ID = re.compile(r"([^/:]+)[/:](.+)")
 _BEDROCK_GEO_PREFIXES = ("us", "eu", "global", "apac", "jp", "au")
 _BEDROCK_VERSION_SUFFIX = re.compile(r"(?:-v\d+(?::\d+)?|:\d+)$")
 
@@ -38,8 +56,10 @@ _BEDROCK_VERSION_SUFFIX = re.compile(r"(?:-v\d+(?::\d+)?|:\d+)$")
 # negative or not finite is treated as a data error, not a price.
 MAX_RATE_PER_MILLION = Decimal(1_000_000)
 _RATE_PLACES = Decimal("0.00000001")
+# A catalog holds about two thousand distinct rates; the bound is for a fetched
+# document that holds far more. An evicted rate only stops being shared.
+_RATE_CACHE_SIZE = 1 << 14
 
-_RATE_FIELDS = ("input", "output", "cache_read", "cache_write")
 _TIER_FIELD_NAMES = {
     "input": "input_price_per_million",
     "output": "output_price_per_million",
@@ -75,6 +95,16 @@ class ModelsDevPrice:
     provider_name: str | None
     provider_doc: str | None
     canonical_model_id: str | None
+    pricing: ModelsDevPricing | None = None
+    """Every price the document gives the model, in its unit; ``None`` for a v1 entry."""
+    slot_columns: RateColumns | None = None
+    """The columns of the one slot the block prices, for a model with no text price; ``None`` otherwise.
+
+    A transcription model priced per minute of audio and a speech model priced
+    per character of text have no text token price, so the rate columns read
+    the slot the block does price, in its unit. A block whose text price is
+    half given is never read this way: a missing text rate is not free.
+    """
 
     @property
     def reference(self) -> str:
@@ -83,7 +113,7 @@ class ModelsDevPrice:
 
     @property
     def priced(self) -> bool:
-        return self.input is not None or self.output is not None
+        return self.input is not None or self.output is not None or self.slot_columns is not None
 
     def pricing_tiers(self) -> list[dict[str, float | int]]:
         """The tiers in the ``pricing_tiers`` column shape, rates as JSON numbers."""
@@ -92,7 +122,7 @@ class ModelsDevPrice:
                 TIER_THRESHOLD_FIELD: tier.min_input_tokens,
                 **{
                     _TIER_FIELD_NAMES[name]: float(rate)
-                    for name in _RATE_FIELDS
+                    for name in RATE_FIELDS
                     if (rate := getattr(tier, name)) is not None
                 },
             }
@@ -100,7 +130,9 @@ class ModelsDevPrice:
         ]
 
     def price_signature(self) -> tuple[object, ...]:
-        return (self.input, self.output, self.cache_read, self.cache_write, self.tiers)
+        slot = self.slot_columns
+        in_slot = None if slot is None else (slot.unit, slot.input_price_per_million, slot.output_price_per_million)
+        return (self.input, self.output, self.cache_read, self.cache_write, self.tiers, in_slot)
 
 
 def parse_rate(value: object) -> Decimal | None:
@@ -109,10 +141,16 @@ def parse_rate(value: object) -> Decimal | None:
     Rejects booleans, negatives, non-finite numbers, anything above
     ``MAX_RATE_PER_MILLION`` and anything that does not fit ``Numeric(18, 8)``.
     """
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
         return None
+    return _rate_from_text(str(value))
+
+
+@lru_cache(maxsize=_RATE_CACHE_SIZE)
+def _rate_from_text(text: str) -> Decimal | None:
+    """The rate a number's spelling gives. Cached by spelling so equal rates share one ``Decimal`` across catalogs."""
     try:
-        rate = Decimal(str(value))
+        rate = Decimal(text)
         if not rate.is_finite() or rate < 0 or rate > MAX_RATE_PER_MILLION:
             return None
         rate.quantize(_RATE_PLACES)
@@ -121,82 +159,66 @@ def parse_rate(value: object) -> Decimal | None:
     return rate
 
 
-def invalid_rate_count(catalog: Mapping[str, Any]) -> int:
-    """How many rates in a parsed ``api.json`` are present but not believable prices."""
+def invalid_rate_count(catalog: ModelsDevCatalog) -> int:
+    """How many rates in a catalog are present but not believable prices."""
 
-    def bad(raw: object) -> int:
-        if not isinstance(raw, dict):
+    def bad(rates: ModelsDevRates | None) -> int:
+        if rates is None:
             return 0
-        return sum(1 for name in _RATE_FIELDS if raw.get(name) is not None and parse_rate(raw[name]) is None)
+        values = (getattr(rates, name) for name in RATE_FIELDS)
+        return len(rates.malformed) + sum(1 for value in values if value is not None and parse_rate(value) is None)
 
-    count = 0
-    for provider in catalog.values():
-        models = provider.get("models") if isinstance(provider, dict) else None
-        for model in models.values() if isinstance(models, dict) else ():
-            cost = model.get("cost") if isinstance(model, dict) else None
-            if not isinstance(cost, dict):
-                continue
-            count += bad(cost) + bad(cost.get("context_over_200k"))
-            tiers = cost.get("tiers")
-            count += sum(bad(tier) for tier in tiers) if isinstance(tiers, list) else 0
-    return count
+    return sum(
+        bad(model.cost.rates) + bad(model.cost.context_over_200k) + sum(bad(tier.rates) for tier in model.cost.tiers)
+        for _provider, model in catalog.models()
+        if model.cost is not None
+    )
 
 
-def _rates(raw: object) -> dict[str, Decimal]:
-    if not isinstance(raw, dict):
-        return {}
-    return {name: rate for name in _RATE_FIELDS if (rate := parse_rate(raw.get(name))) is not None}
+def _rates(rates: ModelsDevRates) -> dict[str, Decimal]:
+    return {name: rate for name in RATE_FIELDS if (rate := parse_rate(getattr(rates, name))) is not None}
 
 
-def _tiers(cost: Mapping[str, Any]) -> tuple[PriceTier, ...]:
+def _tiers(cost: ModelsDevCost) -> tuple[PriceTier, ...]:
     """``tiers`` of the context type, else ``context_over_200k`` as one tier."""
     by_threshold: dict[int, PriceTier] = {}
-    raw_tiers = cost.get("tiers")
-    for raw in raw_tiers if isinstance(raw_tiers, list) else ():
-        if not isinstance(raw, dict):
-            continue
-        kind = raw.get("tier")
-        if not isinstance(kind, dict) or kind.get("type") != "context":
-            continue
-        size = kind.get("size")
-        if isinstance(size, bool) or not isinstance(size, (int, float)) or size <= 0 or int(size) != size:
-            continue
-        if rates := _rates(raw):
-            by_threshold[int(size)] = PriceTier(min_input_tokens=int(size), **rates)
-    if not by_threshold and (rates := _rates(cost.get("context_over_200k"))):
+    for tier in cost.tiers:
+        if tier.kind == "context" and tier.size is not None and (rates := _rates(tier.rates)):
+            by_threshold[tier.size] = PriceTier(min_input_tokens=tier.size, **rates)
+    if not by_threshold and cost.context_over_200k is not None and (rates := _rates(cost.context_over_200k)):
         by_threshold[_OVER_200K_THRESHOLD] = PriceTier(min_input_tokens=_OVER_200K_THRESHOLD, **rates)
     return tuple(by_threshold[threshold] for threshold in sorted(by_threshold))
 
 
-def _str(value: object) -> str | None:
-    return value if isinstance(value, str) and value else None
-
-
-def _context_window(model: Mapping[str, Any]) -> int | None:
-    limit = model.get("limit")
-    value = limit.get("context") if isinstance(limit, dict) else None
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+def _slot_columns(pricing: ModelsDevPricing | None, rates: Mapping[str, Decimal]) -> RateColumns | None:
+    """The columns of the one measured slot ``pricing`` prices, for a block with no text price."""
+    if pricing is None or (rates.get("input") is not None and rates.get("output") is not None):
         return None
-    return value
+    try:
+        columns = columns_from_pricing(pricing)
+    except ValueError:
+        return None
+    return columns if columns.unit not in ("token", "request") else None
 
 
-def _entry(provider: Mapping[str, Any], provider_id: str, model_id: str, model: Mapping[str, Any]) -> ModelsDevPrice:
-    cost = model.get("cost")
-    cost = cost if isinstance(cost, dict) else {}
-    rates = _rates(cost)
+def _entry(provider: ModelsDevProvider, model: ModelsDevModel) -> ModelsDevPrice:
+    cost = model.cost or ModelsDevCost(rates=ModelsDevRates())
+    rates = _rates(cost.rates)
     return ModelsDevPrice(
-        provider_id=provider_id,
-        model_id=model_id,
+        provider_id=provider.id,
+        model_id=model.id,
         input=rates.get("input"),
         output=rates.get("output"),
         cache_read=rates.get("cache_read"),
         cache_write=rates.get("cache_write"),
         tiers=_tiers(cost),
-        context_window=_context_window(model),
-        model_name=_str(model.get("name")),
-        provider_name=_str(provider.get("name")),
-        provider_doc=_str(provider.get("doc")),
-        canonical_model_id=_str(model.get("canonical_model_id")),
+        context_window=model.context_window,
+        model_name=model.name,
+        provider_name=provider.name,
+        provider_doc=provider.doc,
+        canonical_model_id=model.canonical_model_id,
+        pricing=model.pricing,
+        slot_columns=_slot_columns(model.pricing, rates),
     )
 
 
@@ -237,10 +259,32 @@ def _vendor_prefixed(model: str) -> list[tuple[str, str]]:
     return attempts
 
 
+def _scoped_attempts(provider: str | None, model: str, implementation: str | None) -> list[tuple[str, str]]:
+    """The ``(provider_id, model_id)`` pairs a request names, most specific first.
+
+    A HuggingFace pinned-backend selector against the backend's own provider;
+    the provider and the implementation behind it; for an ``otari`` provider,
+    the vendor its ``vendor/model`` or ``vendor:model`` id names.
+    """
+    scoped = [p for p in (provider, implementation) if p]
+    attempts: list[tuple[str, str]] = []
+    if "huggingface" in scoped and ":" in model:
+        base, backend = model.rsplit(":", 1)
+        attempts += [(provider_id, base) for provider_id in _HF_BACKEND_PROVIDER_IDS.get(backend, (backend,))]
+    for name in scoped:
+        attempts += [(provider_id, model) for provider_id in dict.fromkeys((*models_dev_provider_ids(name), name))]
+    if _OTARI_PROVIDER in scoped and (split := _OTARI_MODEL_ID.match(model)) is not None:
+        vendor, vendor_model = split.groups()
+        attempts += [
+            (provider_id, vendor_model) for provider_id in dict.fromkeys((*models_dev_provider_ids(vendor), vendor))
+        ]
+    return attempts
+
+
 class ModelsDevPriceIndex:
     """Immutable lookup over one models.dev catalog."""
 
-    __slots__ = ("_by_canonical", "_by_model_id", "_by_provider")
+    __slots__ = ("_by_canonical", "_by_model_id", "_by_provider", "_by_provider_folded")
 
     def __init__(self, entries: Iterable[ModelsDevPrice]) -> None:
         by_provider: dict[str, dict[str, ModelsDevPrice]] = {}
@@ -248,28 +292,37 @@ class ModelsDevPriceIndex:
         by_canonical: dict[str, list[ModelsDevPrice]] = {}
         for entry in entries:
             by_provider.setdefault(entry.provider_id, {})[entry.model_id] = entry
-            by_model_id.setdefault(entry.model_id.casefold(), []).append(entry)
+            by_model_id.setdefault(sys.intern(entry.model_id.casefold()), []).append(entry)
             if entry.canonical_model_id:
-                by_canonical.setdefault(entry.canonical_model_id.casefold(), []).append(entry)
-                tail = entry.canonical_model_id.rpartition("/")[2].casefold()
-                if tail != entry.canonical_model_id.casefold():
+                canonical = sys.intern(entry.canonical_model_id.casefold())
+                by_canonical.setdefault(canonical, []).append(entry)
+                tail = sys.intern(entry.canonical_model_id.rpartition("/")[2].casefold())
+                if tail != canonical:
                     by_canonical.setdefault(tail, []).append(entry)
         self._by_provider = by_provider
-        self._by_model_id = by_model_id
-        self._by_canonical = by_canonical
+        by_provider_folded: dict[str, dict[str, ModelsDevPrice]] = {}
+        for provider_id, models in by_provider.items():
+            folded = by_provider_folded[provider_id] = {}
+            for model_id, entry in models.items():
+                folded.setdefault(sys.intern(model_id.casefold()), entry)
+        self._by_provider_folded = by_provider_folded
+        self._by_model_id = {key: tuple(found) for key, found in by_model_id.items()}
+        self._by_canonical = {key: tuple(found) for key, found in by_canonical.items()}
 
     @classmethod
-    def from_catalog(cls, raw: Mapping[str, Any]) -> "ModelsDevPriceIndex":
-        """Build an index from a parsed ``api.json``, skipping malformed entries."""
-        entries: list[ModelsDevPrice] = []
-        for key, provider in raw.items():
-            if not isinstance(provider, dict) or not isinstance(provider.get("models"), dict):
-                continue
-            provider_id = _str(provider.get("id")) or str(key)
-            for model_key, model in provider["models"].items():
-                if isinstance(model, dict):
-                    entries.append(_entry(provider, provider_id, _str(model.get("id")) or str(model_key), model))
-        return cls(entries)
+    def from_catalog(
+        cls, catalog: ModelsDevCatalog, *, reuse: "ModelsDevPriceIndex | None" = None
+    ) -> "ModelsDevPriceIndex":
+        """Build an index over every model of a typed catalog, keeping each entry ``reuse`` already holds."""
+        entries = (_entry(provider, model) for provider, model in catalog.models())
+        return cls(entries if reuse is None else map(reuse._reused, entries))
+
+    @classmethod
+    def from_document(
+        cls, raw: Mapping[str, Any], *, reuse: "ModelsDevPriceIndex | None" = None
+    ) -> "ModelsDevPriceIndex":
+        """Build an index from a parsed ``api.json`` or a stored snapshot, through the one catalog parser."""
+        return cls.from_catalog(parse_catalog(raw), reuse=reuse)
 
     def __len__(self) -> int:
         return sum(len(models) for models in self._by_provider.values())
@@ -285,7 +338,7 @@ class ModelsDevPriceIndex:
 
     def provider_entry(self, provider_id: str) -> ModelsDevPrice | None:
         """Any one entry of ``provider_id``, which carries the provider's name and doc link."""
-        for candidate in dict.fromkeys((models_dev_provider_id(provider_id), provider_id)):
+        for candidate in dict.fromkeys((*models_dev_provider_ids(provider_id), provider_id)):
             if models := self._by_provider.get(candidate):
                 return next(iter(models.values()))
         return None
@@ -295,30 +348,42 @@ class ModelsDevPriceIndex:
 
         Tried in order: a HuggingFace pinned-backend selector against the
         backend's own provider; the provider's own entry; the any-llm
-        implementation behind the instance; a model id that is unambiguous in
+        implementation behind the instance; for an ``otari`` provider, whose
+        ids read ``vendor/model`` or ``vendor:model``, the vendor's own entry, an estimate of what
+        the Otari behind it charges; a model id that is unambiguous in
         price across every provider; then the vendor-prefixed spellings of the
         id. Serving providers differ in rate, so the scoped lookups precede the
-        agnostic one.
+        agnostic one. Every scoped lookup is tried by its exact id before any
+        is tried by an id that differs only in case, because models.dev
+        lowercases some providers' ids (OVHcloud's) that the provider itself
+        lists in mixed case.
         """
-        scoped = [p for p in (provider, implementation) if p]
-        if "huggingface" in scoped and ":" in model:
-            base, backend = model.rsplit(":", 1)
-            for provider_id in _HF_BACKEND_PROVIDER_IDS.get(backend, (backend,)):
-                if (found := self.get(provider_id, base)) is not None:
-                    return found
-        for name in scoped:
-            for provider_id in dict.fromkeys((models_dev_provider_id(name), name)):
-                if (found := self._scoped(provider_id, model)) is not None:
+        attempts = _scoped_attempts(provider, model, implementation)
+        for folded in (False, True):
+            for provider_id, name in attempts:
+                if (found := self._scoped(provider_id, name, folded=folded)) is not None:
                     return found
         if (found := self._agnostic(model)) is not None:
             return found
         for head, rest in _vendor_prefixed(model):
             provider_id = models_dev_provider_id(head)
             if provider_id in self._by_provider:
-                return self._scoped(provider_id, rest) or self._agnostic(rest) or self._agnostic(_strip_suffix(rest))
+                return (
+                    self._scoped(provider_id, rest)
+                    or self._scoped(provider_id, rest, folded=True)
+                    or self._agnostic(rest)
+                    or self._agnostic(_strip_suffix(rest))
+                )
         return None
 
-    def _scoped(self, provider_id: str, model: str) -> ModelsDevPrice | None:
+    def _reused(self, entry: ModelsDevPrice) -> ModelsDevPrice:
+        """This index's own entry where it equals ``entry``, so generations share what did not change."""
+        held = self.get(entry.provider_id, entry.model_id)
+        return held if held == entry else entry
+
+    def _scoped(self, provider_id: str, model: str, *, folded: bool = False) -> ModelsDevPrice | None:
+        if folded:
+            return self._by_provider_folded.get(provider_id, {}).get(model.casefold())
         if (found := self.get(provider_id, model)) is not None:
             return found
         if provider_id == _BEDROCK_PROVIDER_ID:
@@ -369,7 +434,14 @@ class ModelsDevPriceIndex:
         if len({c.price_signature() for c in candidates}) != 1:
             return None
         vendor = (candidates[0].canonical_model_id or "").partition("/")[0]
-        return min(candidates, key=lambda c: (c.provider_id != vendor, c.provider_id, c.model_id))
+        agreed = min(candidates, key=lambda c: (c.provider_id != vendor, c.provider_id, c.model_id))
+        # The prices agree; the rest of a block (a web search price, an image
+        # price) is one host's, so it is given only where every host's is the
+        # same. An entry priced in a slot alone has no price without its block.
+        same_block = all(c.pricing == agreed.pricing for c in candidates)
+        if same_block:
+            return agreed
+        return None if agreed.slot_columns is not None else replace(agreed, pricing=None)
 
 
 def _utc(moment: datetime) -> datetime:

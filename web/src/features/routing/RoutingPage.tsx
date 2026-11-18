@@ -1,7 +1,7 @@
 import { Button } from "@heroui/react"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { useCallback, useMemo, useRef, useState } from "react"
-import { FiEdit2, FiEye, FiList, FiTrash2 } from "react-icons/fi"
+import { FiEdit2, FiEye, FiTrash2 } from "react-icons/fi"
 
 import { CopyableValue } from "@/design-system/actions/CopyField"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
@@ -9,10 +9,9 @@ import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
-import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { DocsLink } from "@/design-system/navigation/DocsLink"
-import { RouterReadiness } from "@/features/routing/RouterReadiness"
+import { RulesFrame } from "@/features/rules/RulesFrame"
 import {
   useAutomaticFallbacks,
   useDeleteAlias,
@@ -22,20 +21,12 @@ import {
 } from "@/shared/api/routing"
 import { docsSourceHref } from "@/shared/helpers/docs"
 import { useUrlValue } from "@/shared/helpers/urlState"
-
+import { useNarrowingWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { AutomaticFallbacks } from "./AutomaticFallbacks"
 import { CreatePolicyDialog } from "./CreatePolicyDialog"
 import { BackupsCell, MainModelCell } from "./PolicyCells"
 import type { Intent } from "./policyDraft"
-import {
-  findCandidates,
-  findFallthroughTarget,
-  findRouterBackend,
-  isEditableInForm,
-  KNN_BACKEND,
-  type RoutingRow,
-  rowKeyOf,
-} from "./policyModel"
+import { isEditableInForm, type RoutingRow, rowKeyOf } from "./policyModel"
 import { useRoutingRows } from "./useRoutingRows"
 
 export function RoutingPage() {
@@ -70,8 +61,6 @@ export function RoutingPage() {
   }
   const closeCreate = () => setAdding(false)
   const [pendingDelete, setPendingDelete] = useState<RoutingRow>()
-  // Readiness opens inline under its own row, next to the control that opened it.
-  const [expanded, setExpanded] = useState<string>()
   // `adding` is seeded from ?target= before the membership context settles, so
   // the role is applied here: a member on that link gets the read-only page.
   const isAdding = adding && canEdit
@@ -85,21 +74,6 @@ export function RoutingPage() {
         search: row.user_id ? { user: row.user_id } : {},
       }),
     [navigate],
-  )
-
-  // Stable so DataTable's row cache holds; see its docstring.
-  const renderDetail = useCallback(
-    (row: RoutingRow) => (
-      <RouterReadiness
-        policyName={row.name}
-        candidates={findCandidates(row.spec)}
-        defaultTarget={findFallthroughTarget(row.spec)}
-        backend={findRouterBackend(row.spec) ?? KNN_BACKEND}
-        scopedUserId={row.user_id ?? null}
-        onClose={() => setExpanded(undefined)}
-      />
-    ),
-    [],
   )
 
   const columns = useMemo<DataTableColumn<RoutingRow>[]>(() => {
@@ -133,60 +107,31 @@ export function RoutingPage() {
           ),
       },
     ]
-    // No actions column for a caller who cannot act: every affordance in it is
-    // either a write or the Examples panel, whose read is operator-only.
     if (!canEdit) return base
     base.push({
       id: "actions",
       header: "",
       cell: (policy) => {
-        // Teaching is data, not configuration, so it is offered even for a policy
-        // defined in config.yml: an operator can score examples for a policy they
-        // cannot edit here, and without this that policy could never route.
-        // "Examples" rather than "Router": on a Routing page full of routing
-        // policies, "Router" names the thing rather than what opens, and the count
-        // of scored examples is the one number in there that changes.
-        //
-        // Three outcomes, not two. Operator-only within an actions column an
-        // admin now also gets, because the panel reads `/routing/status`,
-        // which is deployment-wide: an admin sees no readiness at all. Then an
-        // em dash where a policy has no readiness to report, rather than an
-        // empty cell, since a fallback chain has nothing to learn and that
-        // absence is worth stating and is not the same as zero examples. Then
-        // the control, for a backend that learns.
-        const readiness = !isOperator ? null : findRouterBackend(
-            policy.spec,
-          ) !== KNN_BACKEND ? (
-          <span className="text-muted">—</span>
-        ) : (
-          <RowAction
-            icon={FiList}
-            label={expanded === rowKeyOf(policy) ? "Hide examples" : "Examples"}
-            onPress={() =>
-              setExpanded((current) =>
-                current === rowKeyOf(policy) ? undefined : rowKeyOf(policy),
-              )
-            }
-          />
-        )
         const isConfig = policy.source === "config"
         // A policy this dashboard cannot edit without loss opens read-only.
         const canOpenToEdit = !isConfig && isEditableInForm(policy.spec)
         return (
           <RowActionRow>
-            {readiness}
             {isConfig ? (
               <span className="text-xs text-subtle">set in config.yml</span>
             ) : null}
             <RowAction
               icon={canOpenToEdit ? FiEdit2 : FiEye}
-              label={canOpenToEdit ? "Edit" : "View"}
+              label={canOpenToEdit ? "Edit…" : "View"}
+              ariaLabel={`${canOpenToEdit ? "Edit" : "View"} ${policy.name}`}
               onPress={() => openPolicy(policy)}
             />
             {isConfig ? null : (
               <RowAction
                 icon={FiTrash2}
-                label="Delete"
+                label="Delete…"
+                isDestructive
+                ariaLabel={`Delete ${policy.name}`}
                 onPress={() => setPendingDelete(policy)}
               />
             )}
@@ -195,7 +140,7 @@ export function RoutingPage() {
       },
     })
     return base
-  }, [canEdit, expanded, isOperator, openPolicy])
+  }, [canEdit, openPolicy])
 
   // Which of the four delete surfaces a row goes to. Both name the workspace the
   // row lives in; only the deployment-wide pair carries the user scope, which
@@ -217,12 +162,13 @@ export function RoutingPage() {
     ? deleteMutationFor(pendingDelete)
     : undefined
 
+  // A tab of Rules: the frame carries the title and the tab row, so this view
+  // opens with its own action alone.
   return (
-    <div className="flex flex-col gap-6">
-      <PageIntro
-        title="Routing"
-        action={
-          canEdit ? (
+    <RulesFrame current="routing">
+      <div className="flex flex-col gap-6">
+        {canEdit ? (
+          <div className="flex justify-end">
             <Button
               ref={createButtonRef}
               // Visible while the dialog is open: the dialog is over the page,
@@ -232,158 +178,143 @@ export function RoutingPage() {
             >
               Create policy
             </Button>
-          ) : undefined
-        }
-      >
-        {/* Three readings of the same page, because what a caller may do here
-            differs: an operator sees the deployment-wide capabilities, an
-            admin sees what their own workspace writes reach, and a member is
-            told who manages these rather than offered a control they would
-            be refused. */}
-        Model names your callers send as{" "}
-        <code className="font-mono text-caption">model</code>. Each policy picks
-        the model that serves a request and the backups tried, in order, when it
-        fails.{" "}
-        {isOperator
-          ? null
-          : canEdit
-            ? "What you create here applies in the selected workspace, and can name any model your organization has a provider key for."
-            : "These are the ones in force in your workspaces; your organization's admins manage them."}
-      </PageIntro>
+          </div>
+        ) : null}
 
-      {/* The reads only. Every delete on this page reports inside its own
+        {/* The reads only. Every delete on this page reports inside its own
           confirm dialog, which is where the operator is looking. */}
-      <ErrorBanner error={error} />
+        <ErrorBanner error={error} />
 
-      {/* Mounted while closed so the frame plays its exit with the content
+        {/* Mounted while closed so the frame plays its exit with the content
           intact, and keyed on the open counter so the draft is fresh on the way
           in rather than cleared on the way out. See feedback.md. */}
-      <CreatePolicyDialog
-        key={createCount}
-        isOpen={isAdding}
-        startAt={startAt}
-        initialTarget={initialTarget}
-        // The empty state's buttons are gone by the time this closes, since
-        // creating one is what makes the page non-empty. The heading's action
-        // survives.
-        returnFocusRef={createButtonRef}
-        isDeploymentWide={isOperator}
-        workspaceId={writeWorkspaceId}
-        onClose={closeCreate}
-      />
+        <CreatePolicyDialog
+          key={createCount}
+          isOpen={isAdding}
+          startAt={startAt}
+          initialTarget={initialTarget}
+          // The empty state's buttons are gone by the time this closes, since
+          // creating one is what makes the page non-empty. The heading's action
+          // survives.
+          returnFocusRef={createButtonRef}
+          isDeploymentWide={isOperator}
+          workspaceId={writeWorkspaceId}
+          onClose={closeCreate}
+        />
 
-      {rows.length === 0 && !isListLoading ? (
-        canEdit ? (
-          <EmptyState
-            title="No routing policies yet"
-            description="A policy gives callers one model name with backups behind it, so a provider outage does not become a failed request."
-            actionLabel="Create fallback"
-            onAction={() => openCreate("fallback")}
-            secondaryActionLabel="Other policy types"
-            onSecondaryAction={() => openCreate()}
-          >
-            <p className="max-w-prose text-caption">
-              Tip: the same model on several providers already falls back
-              automatically when callers send its catalog ID.{" "}
-              <Link to="/models" className="text-link hover:underline">
-                Browse models
-              </Link>{" "}
-              or{" "}
-              <DocsLink href={docsSourceHref("models.md", "catalog-spellings")}>
-                read how
-              </DocsLink>
-              .
-            </p>
-          </EmptyState>
+        {rows.length === 0 && !isListLoading ? (
+          canEdit ? (
+            <EmptyState
+              title="No routing policies yet"
+              description="A policy gives callers one model name with backups behind it, so a provider outage does not become a failed request."
+              actionLabel="Create fallback"
+              onAction={() => openCreate("fallback")}
+              secondaryActionLabel="Other policy types"
+              onSecondaryAction={() => openCreate()}
+            >
+              <p className="max-w-prose text-caption">
+                Tip: the same model on several providers already falls back
+                automatically when callers send its catalog ID.{" "}
+                <Link to="/models" className="text-link hover:underline">
+                  Browse models
+                </Link>{" "}
+                or{" "}
+                <DocsLink
+                  href={docsSourceHref("models.md", "catalog-spellings")}
+                >
+                  read how
+                </DocsLink>
+                .
+              </p>
+            </EmptyState>
+          ) : (
+            <EmptyState title="No routing policies yet">
+              <p className="text-sm text-muted">
+                Policies that apply in your workspaces will be listed here once
+                your organization's admins define them.
+              </p>
+            </EmptyState>
+          )
         ) : (
-          <EmptyState title="No routing policies yet">
-            <p className="text-sm text-muted">
-              Policies that apply in your workspaces will be listed here once
-              your organization's admins define them.
-            </p>
-          </EmptyState>
-        )
-      ) : (
-        <TableScrollFrame className="otari-routing-table">
-          <DataTable
-            ariaLabel="Routing policies"
-            columns={columns}
-            rows={rows}
-            getRowKey={rowKeyOf}
-            detailKey={expanded}
-            renderDetail={renderDetail}
-            isLoading={isListLoading}
-            emptyContent="No routing policies yet."
-          />
-        </TableScrollFrame>
-      )}
+          <TableScrollFrame className="otari-routing-table">
+            <DataTable
+              ariaLabel="Routing policies"
+              mobileLayout="cards"
+              columns={columns}
+              rows={rows}
+              getRowKey={rowKeyOf}
+              isLoading={isListLoading}
+              emptyContent="No routing policies yet."
+            />
+          </TableScrollFrame>
+        )}
 
-      <AutomaticFallbacksSection />
+        <AutomaticFallbacksSection />
 
-      <ConfirmDialog
-        isOpen={pendingDelete !== undefined}
-        // Cleared on the way out: a refusal otherwise sits on the mutation and
-        // greets the next row's confirm as if that row had failed.
-        onOpenChange={(open) => {
-          if (open) return
-          setPendingDelete(undefined)
-          deletePolicy.reset()
-          deleteAlias.reset()
-          deleteOrgPolicy.reset()
-          deleteOrgAlias.reset()
-        }}
-        heading={
-          pendingDelete?.kind === "alias" ? "Delete alias" : "Delete policy"
-        }
-        body={
-          pendingDelete
-            ? `${pendingDelete.name} stops resolving. A request that still sends it as its model is refused, so update the callers that name it.`
-            : null
-        }
-        confirmLabel={
-          pendingDelete?.kind === "alias" ? "Delete alias" : "Delete policy"
-        }
-        isPending={pendingDeleteMutation?.isPending ?? false}
-        error={pendingDeleteMutation?.error}
-        onConfirm={() => {
-          if (!pendingDelete) return
-          const onSuccess = () => setPendingDelete(undefined)
-          const rowWorkspace = deleteWorkspaceFor(pendingDelete)
-          if (isOperator) {
-            const deployment = {
+        <ConfirmDialog
+          isOpen={pendingDelete !== undefined}
+          // Cleared on the way out: a refusal otherwise sits on the mutation and
+          // greets the next row's confirm as if that row had failed.
+          onOpenChange={(open) => {
+            if (open) return
+            setPendingDelete(undefined)
+            deletePolicy.reset()
+            deleteAlias.reset()
+            deleteOrgPolicy.reset()
+            deleteOrgAlias.reset()
+          }}
+          heading={
+            pendingDelete?.kind === "alias" ? "Delete alias" : "Delete policy"
+          }
+          body={
+            pendingDelete
+              ? `${pendingDelete.name} stops resolving. A request that still sends it as its model is refused, so update the callers that name it.`
+              : null
+          }
+          confirmLabel={
+            pendingDelete?.kind === "alias" ? "Delete alias" : "Delete policy"
+          }
+          isPending={pendingDeleteMutation?.isPending ?? false}
+          error={pendingDeleteMutation?.error}
+          onConfirm={() => {
+            if (!pendingDelete) return
+            const onSuccess = () => setPendingDelete(undefined)
+            const rowWorkspace = deleteWorkspaceFor(pendingDelete)
+            if (isOperator) {
+              const deployment = {
+                name: pendingDelete.name,
+                userId: pendingDelete.user_id,
+                workspaceId: rowWorkspace,
+              }
+              if (pendingDelete.kind === "alias")
+                deleteAlias.mutate(deployment, { onSuccess })
+              else deletePolicy.mutate(deployment, { onSuccess })
+              return
+            }
+            // Unreachable: Delete is rendered behind `canEdit`, which for a
+            // tenant admin already requires a selected workspace, and a stored row
+            // always carries its own.
+            if (rowWorkspace === null) return
+            const scoped = {
               name: pendingDelete.name,
-              userId: pendingDelete.user_id,
               workspaceId: rowWorkspace,
             }
             if (pendingDelete.kind === "alias")
-              deleteAlias.mutate(deployment, { onSuccess })
-            else deletePolicy.mutate(deployment, { onSuccess })
-            return
-          }
-          // Unreachable: Delete is rendered behind `canEdit`, which for a
-          // tenant admin already requires a selected workspace, and a stored row
-          // always carries its own.
-          if (rowWorkspace === null) return
-          const scoped = { name: pendingDelete.name, workspaceId: rowWorkspace }
-          if (pendingDelete.kind === "alias")
-            deleteOrgAlias.mutate(scoped, { onSuccess })
-          else deleteOrgPolicy.mutate(scoped, { onSuccess })
-        }}
-      />
-    </div>
+              deleteOrgAlias.mutate(scoped, { onSuccess })
+            else deleteOrgPolicy.mutate(scoped, { onSuccess })
+          }}
+        />
+      </div>
+    </RulesFrame>
   )
 }
 
-/**
- * The models callers used in the last 30 days, with the offerings their catalog
- * ID tries and who runs the built-in tools on each, as the gateway reports them.
- */
+/** The models callers used in the last 30 days, as the gateway reports them. */
 function AutomaticFallbacksSection() {
-  const fallbacks = useAutomaticFallbacks()
+  const fallbacks = useAutomaticFallbacks(useNarrowingWorkspace())
   return (
     <AutomaticFallbacks
       fallbacks={fallbacks.data?.models ?? []}
-      toolsNote="Tools shown for callers that declare them in the provider's own words and leave the choice to Otari: a provider's own where it runs them, Otari's where it does not."
       isLoading={fallbacks.isLoading}
       error={fallbacks.error}
     />

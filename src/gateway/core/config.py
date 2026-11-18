@@ -3,6 +3,7 @@ import binascii
 import json
 import os
 import re
+import secrets
 import types
 import typing
 from collections.abc import Callable, Container
@@ -20,20 +21,26 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from gateway.core.addresses import normalized_address
 from gateway.core.env import otari_env
+from gateway.core.link_urls import normalize_link_url
 from gateway.core.settings.api_keys import ApiKeySettings
 from gateway.core.settings.budgets import BudgetSettings
 from gateway.core.settings.feedback import FeedbackSettings
 from gateway.core.settings.health_checks import HealthCheckFeatureSettings
+from gateway.core.settings.identity import IdentitySettings
 from gateway.core.settings.inference import InferenceSettings
+from gateway.core.settings.mcp_catalog import McpCatalogSettings
 from gateway.core.settings.organizations import OrganizationSettings
 from gateway.core.settings.pricing import PricingSettings
 from gateway.core.settings.providers import ProviderSettings
+from gateway.core.settings.routing import RoutingSettings
 from gateway.core.settings.tools import ToolSettings
 from gateway.core.settings.traces import TraceSettings
+from gateway.core.settings.update_check import UpdateCheckSettings
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 from gateway.log_config import logger
 from gateway.models.routing import RoutingConfig
 from gateway.models.tools import CodeExecutor, SandboxProvider
+from gateway.types.models_dev import MODELS_DEV_BASE_URL, normalize_models_dev_base_url
 
 API_KEY_HEADER = "Otari-Key"
 # What may run a code-execution tool call. ``protocol`` is a backend of the
@@ -61,20 +68,18 @@ X_API_KEY_HEADER = "x-api-key"  # Anthropic-native clients send credentials here
 # ``IdentityProviderPort`` can record a connection this tuple never named, and
 # a closed enum here would make that value unrepresentable.
 OAUTH_PROVIDERS: tuple[str, ...] = ("github", "google")
-# Per-request opt-out for a policy's learned router: "off" serves the policy's
-# default target and skips the router entirely. There is no "force on": the
-# router is enabled by the policy, not by the caller.
+# Per-request opt-out for a policy's router: "off" serves the policy's default
+# target and skips the router entirely. There is no "force on": the router is
+# enabled by the policy, not by the caller.
 ROUTER_HEADER = "Otari-Router"
-# Stable per-conversation id for trace-sticky routing. When set, it is the trace
-# identity (namespaced per user); absent, the router falls back to hashing the
-# conversation's opening messages, which cannot tell apart two conversations that
-# open identically. See docs/routing.md#per-request-control.
+# Stable per-conversation id: the trace session a request belongs to, and what
+# automatic routing keeps a conversation on.
 CONVERSATION_HEADER = "Otari-Conversation-Id"
-# Routing-memory partition (use case / category) for this request. When set, the
-# router votes only over records carrying the same task label and stays in
-# pass-through until that partition alone is warm; records from other tasks never
-# influence it. Submit the matching label via the /rank task_id.
-ROUTER_TASK_HEADER = "Otari-Router-Task"
+# Request header a client sends as ``keep`` to have the content of a request it
+# routes kept on its session's trace, where the deployment and the workspace keep
+# content. The client answers for its users' consent. See docs/sessions.md.
+TRACE_CONTENT_HEADER = "Otari-Trace-Content"
+TRACE_CONTENT_KEEP = "keep"
 # Response header naming one inference request, minted by the gateway. Clients use
 # it to correlate a response with its usage record.
 REQUEST_ID_HEADER = "Otari-Request-ID"
@@ -90,6 +95,14 @@ FALLBACK_HEADER = "Otari-Fallback"
 RESPONSE_DURATION_HEADER = "Otari-Response-Duration-Ms"
 # The same duration split into the gateway's own time and the provider's (W3C Server Timing).
 SERVER_TIMING_HEADER = "Server-Timing"
+# Response headers carrying the settled cost of a response whose body cannot
+# (speech returns audio bytes): what the request cost and which rate priced it,
+# the ``cost_usd`` and ``pricing_source`` a usage object carries, and the meter
+# it was billed on with the quantity billed. See docs/api-reference.md#request-id-and-inline-cost.
+COST_USD_HEADER = "Otari-Cost-USD"
+PRICING_SOURCE_HEADER = "Otari-Pricing-Source"
+USAGE_UNIT_HEADER = "Otari-Usage-Unit"
+USAGE_UNITS_HEADER = "Otari-Usage-Units"
 # Request header naming the budget a service key's new end user starts on, and
 # response header naming the budget that end user is on.
 END_USER_BUDGET_HEADER = "Otari-End-User-Budget"
@@ -108,7 +121,7 @@ OTLP_ROOT = "/otlp"
 # OTARI_PORT), which is also the native pydantic prefix below.
 OTARI_ENV_PREFIX = "OTARI_"
 # Full structured config supplied through the environment, for PaaS platforms
-# (Railway, Render, Fly.io, Kubernetes) where mounting a config.yml is awkward.
+# (Render, Fly.io, Kubernetes) where mounting a config.yml is awkward.
 # These carry the entire YAML schema (providers, pricing, etc.), not just the
 # scalar fields reachable via OTARI_<FIELD>. Raw YAML wins when both are set.
 # Instance names a ``providers:`` entry may not take. ``otari`` is the reserved
@@ -128,7 +141,7 @@ OTARI_CONFIG_B64_ENV = "OTARI_CONFIG_B64"
 # Mapping fields an OTARI_<FIELD> variable sets as a JSON object. The variable
 # replaces the file's block whole, as a top-level key of OTARI_CONFIG_YAML does,
 # rather than merging into it per entry.
-JSON_ENV_FIELDS = ("hosted_providers",)
+JSON_ENV_FIELDS = ("hosted_providers", "provider_supported_countries", "automatic_routing")
 # GatewayConfig fields promoted from ad hoc otari_env() reads in route/service
 # code. The read sites still consult otari_env() (they have no config object in
 # scope), so load_config bridges values set in the YAML config into the process
@@ -161,19 +174,19 @@ ENV_BRIDGED_FIELDS = (
 
 
 VISION_STRATEGIES = ("describe", "ocr", "off")
-ROUTER_GRANULARITIES = ("trace_sticky", "step")
 # Selectable mail transports, plus the two states that are not a transport:
 # "auto" derives one from whether SMTP is configured, "none" turns mail off
 # even when it is. See GatewayConfig.mail_transport.
 MAIL_TRANSPORT_SETTINGS = ("auto", "smtp", "console", "none")
 
-# Upstreams POST /api/v1/decisions can dispatch to. All take TypeSafe's
+# Upstreams POST /api/v1/decisions can dispatch to. All answer TypeSafe's
 # question-and-answer shape, which OpenRouter's alpha Decisions API and
-# llama-server's /v1/systemone adopted, and none is an any-llm provider, so they
+# llama-server's /v1/systemone adopted and Gemini's Decisions API is translated
+# to and from, and none is an any-llm provider, so they
 # are declared under ``decision_providers`` rather than ``providers``. Declared
 # here, as the search providers are in ``core/settings/tools.py``, so startup
 # validation needs no service module.
-DECISION_PROVIDERS = ("typesafe", "openrouter", "llamacpp")
+DECISION_PROVIDERS = ("typesafe", "openrouter", "gemini", "llamacpp")
 # Self-hosted servers: no endpoint of their own to default to, and normally no key.
 DECISION_PROVIDERS_SELF_HOSTED = ("llamacpp",)
 
@@ -201,16 +214,8 @@ MAX_AGENT_MODEL_CANDIDATES = 255
 """The most options a choice question takes, so a longer list fails at startup, not per request."""
 
 
-def validate_agent_recommender(model: str, candidates: dict[str, str | None]) -> None:
-    """Validate the agent recommender's settings, raising ``ValueError`` on any problem.
-
-    The decision provider itself is resolved per request, so a deployment that
-    never asks for a recommendation need not configure one.
-    """
-    provider, _, bare_model = model.partition(":")
-    if not provider.strip() or not bare_model.strip():
-        msg = "agent_recommender_model must name a decision model as '<provider>:<model>'."
-        raise ValueError(msg)
+def validate_agent_recommender_candidates(candidates: dict[str, str | None]) -> None:
+    """Validate ``agent_recommender_candidates``, raising ``ValueError`` on any problem."""
     if len(candidates) < 2:
         msg = "agent_recommender_candidates needs at least two models to choose between."
         raise ValueError(msg)
@@ -288,12 +293,15 @@ def _is_keyless(provider_type: str) -> bool:
 def hosted_provider_name_problem(name: str, provider: str) -> str | None:
     """Why ``name`` cannot name a hosted provider served by ``provider``, or None when it can.
 
-    The implementation's own name always may. Any other is the prefix of a
+    A reserved name never may, even an implementation's own (``otari``). The
+    implementation's own name otherwise always may. Any other is the prefix of a
     ``name:model`` selector, so it cannot hold the separators a selector splits
     on, and it follows the instance-name rules. Another implementation's name
     is refused, because a request for ``anthropic:...`` must not reach an
     OpenAI endpoint.
     """
+    if name in RESERVED_PROVIDER_INSTANCE_NAMES:
+        return "is reserved; give the provider a name of its own"
     if name == provider:
         return None
     if not name or name != name.strip():
@@ -302,8 +310,6 @@ def hosted_provider_name_problem(name: str, provider: str) -> str | None:
         return "must be at most 64 characters"
     if ":" in name or "/" in name:
         return "must not contain ':' or '/'"
-    if name in RESERVED_PROVIDER_INSTANCE_NAMES:
-        return "is reserved"
     if name in {member.value for member in LLMProvider} or name in PROVIDER_TYPE_ALIASES:
         return "names another provider"
     return None
@@ -470,6 +476,17 @@ def _canonical_model(rule_name: str, entry: str) -> str:
     return f"{instance}:{model}"
 
 
+class SandboxEnvironmentConfig(BaseModel):
+    """How the environment listing describes one sandbox image: what it contains and how big it is."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str | None = Field(default=None, max_length=100, description="Display name, such as 'Python data'.")
+    description: str | None = Field(
+        default=None, max_length=500, description="What the image contains and its size, in a sentence."
+    )
+
+
 class ModelCapabilityConfig(BaseModel):
     """Per-model multimodal capability override.
 
@@ -561,7 +578,49 @@ def _validate_bedrock_client_config(instance: str, client_args: Any, *, block: s
         raise ValueError(msg) from exc
 
 
+def _default_database_url() -> str:
+    """The database a deployment that names none gets.
+
+    ``OTARI_DEFAULT_DATABASE_URL`` is how the container image points this at its
+    data volume. It ranks below the config file, unlike ``OTARI_DATABASE_URL``,
+    so an image that sets it does not override a mounted ``database_url``.
+    """
+    return otari_env("DEFAULT_DATABASE_URL") or "sqlite:///./otari.db"
+
+
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _is_origin(value: str) -> bool:
+    """Whether ``value`` is an http(s) origin as a browser sends it in ``Origin``.
+
+    That is a scheme and a lowercase ASCII host, a port only when it is not the
+    scheme's default, and nothing else: a browser never sends any other spelling,
+    so an entry written another way could never match. Origins are compared
+    whole, so a ``*`` inside a host is a literal that no page has.
+    """
+    try:
+        parts = urlsplit(value)
+        port = parts.port
+    except ValueError:
+        return False
+    host = parts.hostname
+    if not host or parts.scheme not in _DEFAULT_PORTS:
+        return False
+    if ":" in host:
+        host = f"[{host}]"
+    return (
+        value.isascii()
+        and "*" not in host
+        and port != _DEFAULT_PORTS[parts.scheme]
+        # urlsplit lowercases the host and drops userinfo and an empty port, so any of those leaves a difference.
+        and parts.netloc == (host if port is None else f"{host}:{port}")
+        and value == f"{parts.scheme}://{parts.netloc}"
+    )
+
+
 class GatewayConfig(
+    RoutingSettings,
     InferenceSettings,
     BudgetSettings,
     ApiKeySettings,
@@ -569,9 +628,12 @@ class GatewayConfig(
     ProviderSettings,
     FeedbackSettings,
     HealthCheckFeatureSettings,
+    McpCatalogSettings,
+    IdentitySettings,
     OrganizationSettings,
     ToolSettings,
     TraceSettings,
+    UpdateCheckSettings,
     BaseSettings,
 ):
     """Gateway configuration with support for YAML files and environment variables."""
@@ -598,13 +660,13 @@ class GatewayConfig(
             "X-Forwarded-Proto headers `otari serve` trusts, or '*' for any peer. The per-IP sign-in "
             "and public-catalog limits key on the address these headers resolve to, so behind a "
             "proxy that is not listed every visitor shares the proxy's address. Use '*' only where "
-            "the proxy is the sole path to the server, as on Railway. Unset leaves it to uvicorn: "
+            "the proxy is the sole path to the server. Unset leaves it to uvicorn: "
             "FORWARDED_ALLOW_IPS if set, otherwise 127.0.0.1."
         ),
     )
 
     database_url: Annotated[str, Shown(SettingsGroup.SERVER)] = Field(
-        default="sqlite:///./otari.db",
+        default_factory=_default_database_url,
         description="Database connection URL (SQLite default for local use; PostgreSQL recommended for production)",
     )
     auto_migrate: Annotated[bool, Shown(SettingsGroup.SERVER)] = Field(
@@ -742,6 +804,14 @@ class GatewayConfig(
     )
     cors_allow_origins: Annotated[list[str], Shown(SettingsGroup.RATE_LIMITING)] = Field(
         default_factory=list, description="Allowed CORS origins (empty list disables CORS)"
+    )
+    cors_inference_origins: Annotated[list[str], Shown(SettingsGroup.RATE_LIMITING)] = Field(
+        default_factory=list,
+        description=(
+            "Origins whose pages may call the model and web tool endpoints from a browser with an API key, "
+            "and exchange or revoke an OAuth app token, or '*' for any. "
+            "Never with credentials, and no other route: the dashboard's origin belongs in cors_allow_origins."
+        ),
     )
     enable_metrics: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
         default=False,
@@ -990,85 +1060,14 @@ class GatewayConfig(
             "so 'aliases:' remains its shorthand."
         ),
     )
-    # Tuning for the learned (kNN) router a policy can name via `select: [{router: knn}]`.
-    # There is no on/off switch here on purpose: a policy naming the router is the
-    # switch, so the router cannot be enabled globally behind an operator's back,
-    # and two policies can never disagree about whether routing is on.
-    router_alpha: Annotated[float, OMITTED] = Field(
-        default=0.3,
-        ge=0.0,
-        description=(
-            "Learned router's cost-vs-quality dial: score(model) = predicted_quality - alpha * "
-            "normalized_cost. 0 ignores cost (always the best-predicted model); higher prefers "
-            "cheaper candidates more aggressively."
-        ),
-    )
-    router_k: Annotated[int, OMITTED] = Field(
-        default=5,
-        ge=1,
-        description=(
-            "Neighbor count for the learned router's vote. A request whose partition holds fewer "
-            "than k comparable examples stays on the policy's default target."
-        ),
-    )
-    router_embedding_model: Annotated[str, OMITTED] = Field(
-        default="openai:text-embedding-3-small",
-        description=(
-            "provider:model used to embed the task signal. Changing it invalidates existing "
-            "routing-memory records rather than mixing incomparable vector spaces, so the router "
-            "returns to pass-through until the new space is re-taught."
-        ),
-    )
-    router_confidence_floor: Annotated[float, OMITTED] = Field(
-        default=0.0,
-        ge=0.0,
-        le=1.0,
-        description=(
-            "Minimum share of the k neighbors that must agree on the winning candidate. Below it, "
-            "the policy's default target leads and the router's order becomes the failover chain."
-        ),
-    )
-    router_seed_count: Annotated[int, OMITTED] = Field(
-        default=20,
-        ge=0,
-        description=(
-            "Routing-memory records a pool needs before the router routes at all. Under it, every "
-            "request through the policy serves the default target."
-        ),
-    )
-    router_granularity: Annotated[str, OMITTED] = Field(
-        default="trace_sticky",
-        description=(
-            "'trace_sticky' (default) decides once per conversation and reuses that decision on "
-            "later turns; 'step' re-decides on every call."
-        ),
-    )
-    router_max_records_per_user: Annotated[int, OMITTED] = Field(
-        default=5000,
-        ge=0,
-        description=(
-            "Cap on stored routing-memory records per user; the oldest are evicted past it. The "
-            "store is scanned linearly, so this also bounds per-request routing latency. 0 disables "
-            "eviction rather than storing nothing, and the per-request read falls back to the default "
-            "bound, so the store grows without limit while each decision stays bounded."
-        ),
-    )
     decision_providers: Annotated[dict[str, dict[str, Any]], OMITTED] = Field(
         default_factory=dict,
         description=(
             "Upstreams served by POST /api/v1/decisions, keyed by the selector prefix callers "
             "write ('typesafe:jev-latest'). Each entry may declare a 'provider' (one of: typesafe, "
-            "openrouter, llamacpp; defaults to the key), an 'api_key' (required except for llamacpp), "
+            "openrouter, gemini, llamacpp; defaults to the key), an 'api_key' (required except for llamacpp), "
             "an 'api_base' (required for llamacpp; https whenever a key is set), and a 'timeout' "
             "in seconds."
-        ),
-    )
-    agent_recommender_model: Annotated[str, OMITTED] = Field(
-        default="typesafe:jev-latest",
-        description=(
-            "The decision model that recommends a subagent's model through POST /api/v1/routing/recommend, "
-            "as a decision_providers selector ('<provider>:<model>'). Resolved per request, so a deployment "
-            "that never asks need not configure the provider."
         ),
     )
     agent_recommender_candidates: Annotated[dict[str, str | None], OMITTED] = Field(
@@ -1081,7 +1080,10 @@ class GatewayConfig(
     )
     bootstrap_api_key: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
         default=True,
-        description="Create a first-use API key on startup when no API keys exist",
+        description=(
+            "Create a first-use API key on startup when no API keys exist. Left unset, a deployment that "
+            "generated its own master key creates none, since its operator starts from the setup link."
+        ),
     )
     bootstrap: Annotated[str | None, OMITTED] = Field(
         default=None,
@@ -1154,22 +1156,29 @@ class GatewayConfig(
     models_dev_metadata: Annotated[bool, Shown(SettingsGroup.MODELS)] = Field(
         default=True,
         description=(
-            "Enrich the model listing and the dashboard's model detail with metadata "
-            "(token limits, modalities, capabilities, knowledge cutoff) fetched from "
-            "the public models.dev catalog. Set false to disable the outbound call; "
-            "the gateway then reads the context window from the bundled or accepted "
-            "models.dev snapshot and lists no output limit. Pricing does not depend on it."
+            "Fetch the public models.dev catalog for the metadata the model listing and the "
+            "dashboard's model detail show (token limits, modalities, capabilities, knowledge "
+            "cutoff). Set false to disable the outbound call; the gateway then shows the "
+            "metadata of the models.dev catalog bundled with it. Pricing does not depend on it."
+        ),
+    )
+    models_dev_base_url: Annotated[str, Shown(SettingsGroup.MODELS)] = Field(
+        default=MODELS_DEV_BASE_URL,
+        description=(
+            "Where the models.dev catalog is fetched from. The default is Mozilla.ai's fork, which "
+            "publishes models.dev's catalog plus the models it does not list yet. Set "
+            "https://models.dev to read models.dev itself, or a mirror that serves the same paths."
         ),
     )
     models_dev_cache_ttl_seconds: Annotated[int, Shown(SettingsGroup.MODELS)] = Field(
         default=86400,
         ge=0,
         description=(
-            "TTL in seconds for the cached models.dev catalog, and the interval at which a "
-            "background task refetches it (floored at 5 minutes). Above 0, the model listing, the "
-            "catalog and GET /api/v1/models/metadata answer from the cache instead of waiting on the "
-            "fetch; a failed fetch is held for one minute rather than the refresh interval. 0 "
-            "disables caching, so every read fetches."
+            "How often, in seconds, one worker downloads the models.dev catalog and stores it for "
+            "every worker to serve (floored at 5 minutes). Above 0, the model listing, the catalog "
+            "and GET /api/v1/models/metadata answer from the stored catalog instead of waiting on "
+            "the download; a failed download is tried again after one minute. 0 disables caching, "
+            "so every read fetches."
         ),
     )
     public_catalog: Annotated[bool, Shown(SettingsGroup.MODELS)] = Field(
@@ -1310,9 +1319,9 @@ class GatewayConfig(
         min_length=32,
         description=(
             "Key for the keyed digest that names the provider account a copy of an attached file "
-            "is in. Required while files_provider_upload_enabled is on, and must differ from "
-            "OTARI_SECRET_KEY and the master key. Rotating it only makes the next request copy "
-            "each file again."
+            "is in. Without it, provider copies are off whatever files_provider_upload_enabled "
+            "says. It must differ from OTARI_SECRET_KEY and the master key. Rotating it only "
+            "makes the next request copy each file again."
         ),
     )
     files_provider_upload_ttl_hours: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
@@ -1324,14 +1333,6 @@ class GatewayConfig(
             "expires it. The ceiling is the 90 days Anthropic's Files API accepts, and a copy "
             "never outlives the file it was made from. Otari reuses a copy that still has time "
             "left rather than uploading the same file again."
-        ),
-    )
-    file_understanding_enabled: Annotated[bool, Shown(SettingsGroup.VISION)] = Field(
-        default=True,
-        description=(
-            "Normalize file/image content blocks before the provider call: pass through for "
-            "natively-capable models, extract to text for text-only models. When False, content "
-            "blocks are forwarded unchanged (legacy pass-through)."
         ),
     )
     vision_strategy: Annotated[str, Shown(SettingsGroup.VISION)] = Field(
@@ -1377,8 +1378,7 @@ class GatewayConfig(
     guardrails_url: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
         default=None,
         description=(
-            "Default URL of the input-guardrails service used when a request does not pass its "
-            "own guardrail `url`. docker-compose sets this to the bundled guardrails container."
+            "Default URL of the input-guardrails service used when a request does not pass its own guardrail `url`."
         ),
     )
     guardrail_thread_pool_size: Annotated[int | None, Shown(SettingsGroup.TOOLS)] = Field(
@@ -1420,20 +1420,28 @@ class GatewayConfig(
         max_length=255,
         description=(
             "Sandbox image this deployment asks the code-execution backend to run "
-            "(e.g. 'mzdotai/otari-sandbox-container:latest'). When unset, nothing is asked for and "
-            "the backend runs whatever it runs by default. A workspace policy may name a different "
-            "image only if sandbox_allowed_session_images lists it."
+            "(e.g. 'mzdotai/otari-sandbox-container:latest'), or with sandbox_provider 'e2b' the E2B "
+            "template's name or id. When unset, nothing is asked for and the backend runs whatever it "
+            "runs by default. A workspace policy or a direct run may name a different image only if "
+            "sandbox_allowed_session_images lists it."
         ),
     )
     sandbox_allowed_session_images: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
         default=None,
         description=(
-            "Comma-separated sandbox images a workspace's code-execution policy may pin "
-            "(e.g. 'mzdotai/otari-sandbox-container:latest,ghcr.io/acme/sandbox:2'). Deliberately "
-            "not editable from the dashboard: it is the operator's supply-chain allow-list, and "
-            "sandbox_session_image is always pinnable whether or not it appears here. When unset, a "
-            "workspace may not pin an image at all. Applies to the 'protocol' sandbox provider: a hosted "
-            "provider names its workspaces its own way and ignores this."
+            "Comma-separated sandbox images a workspace's code-execution policy may pin and a direct run "
+            "may name as its environment (e.g. 'mzdotai/otari-sandbox-container:latest,ghcr.io/acme/sandbox:2', "
+            "or E2B template names with sandbox_provider 'e2b'). Deliberately not editable from the "
+            "dashboard: it is the operator's supply-chain allow-list, and sandbox_session_image is always "
+            "pinnable whether or not it appears here. When unset, a workspace may not pin an image at all."
+        ),
+    )
+    sandbox_environments: Annotated[dict[str, SandboxEnvironmentConfig], OMITTED] = Field(
+        default_factory=dict,
+        description=(
+            "How GET /api/v1/code/environments describes each image sandbox_session_image and "
+            "sandbox_allowed_session_images offer (image -> {label, description}). An image with no entry "
+            "is listed under its own name; an entry for an image neither setting offers lists nothing."
         ),
     )
     sandbox_provider: Annotated[SandboxProvider, Shown(SettingsGroup.TOOLS)] = Field(
@@ -1536,6 +1544,13 @@ class GatewayConfig(
     # without the plaintext ever living in config.
     _master_key_hash: str | None = PrivateAttr(default=None)
 
+    def is_master_key(self, token: str) -> bool:
+        """Whether ``token`` is the configured master key, in constant time.
+
+        Compared as UTF-8 bytes: ``compare_digest`` raises on a non-ASCII str, and a pasted key can hold one.
+        """
+        return self.master_key is not None and secrets.compare_digest(token.encode(), self.master_key.encode())
+
     @property
     def effective_ui_base_url(self) -> str:
         """Where a browser reaches this deployment's interface, with no trailing slash on its path.
@@ -1549,11 +1564,10 @@ class GatewayConfig(
     def ui_link(self, path: str) -> str:
         """An absolute link into the interface, or ``path`` itself when the address is unknown.
 
-        A query on ``ui_base_url`` travels with every link, placed before the hash
-        route: ``https://app.example.com/ui/?edge=a`` and ``/#/verify-email?token=t``
-        give ``https://app.example.com/ui/?edge=a#/verify-email?token=t``, which is
-        the one order a browser keeps the query in the page's own location rather
-        than in the route's.
+        A query on ``ui_base_url`` travels with every link, joined to the page's
+        own query and placed before its fragment: ``https://app.example.com/ui/?edge=a``
+        and ``/verify-email#token=t`` give
+        ``https://app.example.com/ui/verify-email?edge=a#token=t``.
         """
         base = self.effective_ui_base_url
         if not base:
@@ -1696,7 +1710,7 @@ class GatewayConfig(
         nature, and an ID that moves silently orphans every passkey registered
         under the previous one. So it is configured (``webauthn_rp_id``) or
         derived once from a configured address (``public_base_url``), and
-        `docs/access-control.md` documents which.
+        `docs/sign-in.md` documents which.
 
         The derivation drops the port along with the scheme: a relying-party ID
         is a bare domain, so 'https://localhost:8000' yields 'localhost', which
@@ -1792,6 +1806,7 @@ class GatewayConfig(
         *,
         alias_names: Container[str] | None = None,
         hosted_implementation: Callable[[str], str | None] | None = None,
+        own_prefixes: Container[str] = frozenset(),
     ) -> None:
         """Validate a single alias, raising ``ValueError`` with the reason.
 
@@ -1809,7 +1824,9 @@ class GatewayConfig(
         store aliases elsewhere (the runtime ``model_aliases`` table) pass the
         union, so chaining is rejected no matter which side each alias came from.
         ``hosted_implementation`` names the implementation behind a hosted
-        provider's name, so a target may name one.
+        provider's name, so a target may name one. ``own_prefixes`` are the
+        selector prefixes the writing workspace reaches on its organization's own
+        keys, so a target may name a key by its request prefix.
         """
         known_aliases: Container[str] = self.aliases if alias_names is None else alias_names
 
@@ -1831,10 +1848,11 @@ class GatewayConfig(
             msg = f"aliases.{name} target '{target}' must be of the form 'instance:model' or 'provider:model'."
             raise ValueError(msg)
         prefix = target[:cut]
-        if prefix in known_aliases:
+        # Alias names span every workspace, so another workspace's alias may share a key's prefix here.
+        if prefix in known_aliases and prefix not in own_prefixes:
             msg = f"aliases.{name} target '{target}' points at another alias; alias chaining is not supported."
             raise ValueError(msg)
-        if prefix in self.providers:
+        if prefix in self.providers or prefix in own_prefixes:
             return
         # A hosted provider's own name, which the caller passes in where the
         # deployment's database is read: configuration is validated before it is.
@@ -1855,13 +1873,22 @@ class GatewayConfig(
             raise ValueError(msg) from exc
 
     def validate_declared_access(self) -> None:
-        """Refuse federation without ``OTARI_SECRET_KEY``."""
-        if self.federation_enabled and not (otari_env("SECRET_KEY") or "").replace(",", " ").strip():
-            setting = "federation_issuers" if self.federation_issuers else "federation_member_rules"
+        """Refuse federation without ``OTARI_SECRET_KEY`` or without an audience of this deployment's own."""
+        if not self.federation_enabled:
+            return
+        setting = "federation_issuers" if self.federation_issuers else "federation_member_rules"
+        if not (otari_env("SECRET_KEY") or "").replace(",", " ").strip():
             msg = (
                 f"{setting} is set, but OTARI_SECRET_KEY is not; it signs the access tokens "
                 "POST /api/v1/oauth/token issues. Set OTARI_SECRET_KEY (generate one with "
                 f"`otari gen-secret-key`) or clear {setting}"
+            )
+            raise ValueError(msg)
+        if not self.federation_audiences:
+            msg = (
+                f"{setting} is set, but federation_audiences names no audience; an identity token must name "
+                "an audience this deployment answers to, or a token minted for another service at the same "
+                f"issuer would authenticate here. Set federation_audiences or clear {setting}"
             )
             raise ValueError(msg)
 
@@ -2104,6 +2131,39 @@ class GatewayConfig(
             return providers
         return {instance: ({} if entry is None else entry) for instance, entry in providers.items()}
 
+    @field_validator("providers", mode="after")
+    @classmethod
+    def _check_request_fields(cls, providers: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        """Refuse a ``request_fields`` entry that names anything the gateway sets itself.
+
+        ``request_fields`` lists the extra chat request fields a caller may send this
+        instance's provider. One that shapes the request (``model``, ``messages``,
+        ``stream``) or that the gateway resolves (a credential, the base URL) would
+        land in the provider body over the gateway's own value, and one the request
+        already declares (a completion parameter, ``safety_identifier``) never
+        reaches the extras at all, so either is refused at load.
+        """
+        from any_llm.types.completion import CompletionParams
+
+        from gateway.core.provider_params import CHAT_GATEWAY_FIELDS, FORBIDDEN_ENDPOINT_DEFAULTS
+
+        reserved = FORBIDDEN_ENDPOINT_DEFAULTS | CHAT_GATEWAY_FIELDS | set(CompletionParams.model_fields)
+        for instance, entry in providers.items():
+            fields = entry.get("request_fields")
+            if fields is None:
+                continue
+            if not isinstance(fields, list) or not all(isinstance(name, str) and name for name in fields):
+                msg = f"providers.{instance}.request_fields must be a list of field names"
+                raise ValueError(msg)
+            clashing = sorted(set(fields) & reserved)
+            if clashing:
+                msg = (
+                    f"providers.{instance}.request_fields names {', '.join(clashing)}, which the gateway "
+                    "sets itself or a request already carries"
+                )
+                raise ValueError(msg)
+        return providers
+
     def effective_code_executor(self) -> CodeExecutor:
         """The deployment's answer to who runs a provider-named code-execution tool.
 
@@ -2166,7 +2226,7 @@ class GatewayConfig(
         """Validate the ``decision_providers`` map at startup so misconfig fails fast."""
         for name, entry in self.decision_providers.items():
             validate_decision_provider_entry(name, entry)
-        validate_agent_recommender(self.agent_recommender_model, self.agent_recommender_candidates)
+        validate_agent_recommender_candidates(self.agent_recommender_candidates)
 
     @model_validator(mode="after")
     def _validate_database_timeout_ordering(self) -> "GatewayConfig":
@@ -2203,6 +2263,20 @@ class GatewayConfig(
             return None
         return value
 
+    @field_validator("cors_inference_origins")
+    @classmethod
+    def _validate_inference_origins(cls, origins: list[str]) -> list[str]:
+        """Accept ``*`` or an origin as a browser sends it, so an entry that could never match is refused at load."""
+        for origin in origins:
+            if origin != "*" and not _is_origin(origin):
+                msg = (
+                    f"cors_inference_origins entry {origin!r} is not an origin: give scheme and host, "
+                    "in lowercase, with a port only when it is not the scheme's default and nothing after it, "
+                    "such as https://app.example.com, or '*' alone, since an origin is matched whole"
+                )
+                raise ValueError(msg)
+        return origins
+
     @field_validator("rate_limits")
     @classmethod
     def _validate_rate_limit_names(cls, rules: list[RateLimitRule]) -> list[RateLimitRule]:
@@ -2227,18 +2301,17 @@ class GatewayConfig(
         so a credential written into any of these would reach every browser that
         asked, which no redaction in the operator-gated config viewer would cover.
         """
-        normalized = (value or "").strip()
-        if not normalized:
-            return None
-        parsed = urlsplit(normalized)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            msg = f"{info.field_name} must be an absolute http(s) URL, got '{value}'"
-            raise ValueError(msg)
-        if parsed.username is not None or parsed.password is not None:
-            # The value is left out of the message: the offending part of it is the credential.
-            msg = f"{info.field_name} must carry no username or password"
-            raise ValueError(msg)
-        return normalized
+        return normalize_link_url(value, info.field_name or "link")
+
+    @field_validator("models_dev_base_url")
+    @classmethod
+    def _validate_models_dev_base_url(cls, value: str) -> str:
+        """An absolute http(s) origin, with or without a path, that the document paths append to."""
+        try:
+            return normalize_models_dev_base_url(value)
+        except ValueError as exc:
+            msg = f"models_dev_base_url {exc}"
+            raise ValueError(msg) from None
 
     @field_validator("ui_base_url")
     @classmethod
@@ -2250,7 +2323,7 @@ class GatewayConfig(
         in the second. A path-prefixed interface writes the whole URL, the way
         ``public_base_url`` already does. A query string is kept, since an edge
         that serves one interface for several deployments may need each link to
-        say which one built it; ``ui_link`` places it ahead of the hash route.
+        say which one built it; ``ui_link`` joins it to each link's own query.
         """
         stripped = (value or "").strip()
         if not stripped:
@@ -2318,15 +2391,6 @@ class GatewayConfig(
             raise ValueError(msg)
         return normalized
 
-    @field_validator("router_granularity")
-    @classmethod
-    def _validate_router_granularity(cls, value: str) -> str:
-        normalized = value.strip().lower()
-        if normalized not in ROUTER_GRANULARITIES:
-            msg = f"router_granularity must be one of {sorted(ROUTER_GRANULARITIES)}, got '{value}'"
-            raise ValueError(msg)
-        return normalized
-
     def validate_mail_transport(self) -> None:
         """Refuse a mail transport the deployment cannot actually run.
 
@@ -2362,19 +2426,12 @@ class GatewayConfig(
                 "Set them, or leave mail_transport at its 'auto' default to run without mail."
             )
             raise ValueError(msg)
-        # Shape-checked here for the same reason the transport is: a typo in the
-        # from-address is a misconfiguration, and letting it through means the
-        # first anyone hears of it is a recipient's server rejecting the
-        # envelope, which is the send-time failure this design exists to avoid.
-        # Every recipient address already goes through the same check.
-        #
-        # Only under an explicit 'smtp', never under 'auto'. That asymmetry is
-        # deliberate and costs nothing: mail_transport is new here, so no
-        # existing deployment can be holding the value this refuses, while a
-        # deployment that has had a working odd-looking address under the
-        # implicit path keeps booting.
+        # NOTE: Checked only under an explicit 'smtp'. Under 'auto', a from-address that is not plain still starts.
         if self.mail_from_email and normalized_address(self.mail_from_email) is None:
-            msg = f"mail_from_email is not a valid email address: {self.mail_from_email!r}"
+            msg = (
+                f"mail_from_email is not a plain email address: {self.mail_from_email!r}. "
+                "Set the address alone, such as otari@example.com, and put the display name in mail_from_name."
+            )
             raise ValueError(msg)
 
     def warn_about_half_configured_oauth(self) -> None:
@@ -2553,6 +2610,7 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     if structured_env_config:
         config_dict.update(structured_env_config)
     _apply_json_env_overrides(config_dict)
+    _warn_about_unknown_keys(config_dict)
 
     # Snapshot which bridged fields the YAML config set, before the env
     # overrides below inject OTARI_ values into the same dict: only YAML-set
@@ -2577,6 +2635,18 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     config.warn_about_half_configured_web_search()
     _bridge_yaml_fields_to_env(config, yaml_bridged_fields)
     return config
+
+
+def _warn_about_unknown_keys(config: dict[str, Any]) -> None:
+    """Warn about top-level config keys no setting reads.
+
+    ``GatewayConfig`` ignores extra input so an unrelated ``OTARI_*`` variable
+    cannot fail startup, which also lets a misspelled or misplaced key pass in
+    silence. Not fatal, so a key a newer version reads does not stop an older one.
+    """
+    unknown = sorted(str(key) for key in config if key not in GatewayConfig.model_fields)
+    if unknown:
+        logger.warning("Ignoring unknown config keys (no setting reads them): %s", ", ".join(unknown))
 
 
 def parse_bool_env(value: str) -> bool:
@@ -2636,6 +2706,10 @@ def _bridge_yaml_fields_to_env(config: GatewayConfig, yaml_set_fields: set[str])
         os.environ.setdefault(f"{OTARI_ENV_PREFIX}{field_name.upper()}", serialized)
 
 
+# Fields an empty ``OTARI_<FIELD>`` switches off, where every other field reads an empty variable as unset.
+_EMPTY_ENV_SWITCHES_OFF = frozenset({"platform_url"})
+
+
 def _apply_otari_env_overrides(config: dict[str, Any]) -> None:
     """Layer OTARI_<FIELD> env vars over the config dict for every scalar field.
 
@@ -2645,6 +2719,9 @@ def _apply_otari_env_overrides(config: dict[str, Any]) -> None:
     """
     for field_name in GatewayConfig.model_fields:
         value = os.getenv(f"{OTARI_ENV_PREFIX}{field_name.upper()}")
+        if value == "" and field_name in _EMPTY_ENV_SWITCHES_OFF:
+            config[field_name] = ""
+            continue
         if value is None or value == "":
             continue
         try:

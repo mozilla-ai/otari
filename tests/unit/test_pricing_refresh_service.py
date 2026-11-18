@@ -16,7 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 import gateway.services.pricing.generations as generations
 import gateway.services.pricing_refresh_service as refresh
+from gateway.core.config import GatewayConfig
 from gateway.models.pricing import PricingSnapshot, PricingSnapshotHistory
+from gateway.services.model_catalog_service import ModelsDevRefusedError
 from gateway.services.pricing import (
     active_generations,
     active_timeline,
@@ -24,6 +26,7 @@ from gateway.services.pricing import (
     current_index,
     resolve_as_of,
 )
+from gateway.types.models_dev import ModelsDevCatalog, parse_catalog
 
 
 def _catalog(input_rate: float = 1, *, extra: bool = False) -> dict[str, Any]:
@@ -55,10 +58,9 @@ def upstream(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """The catalog the fetch returns, and the arguments it was called with."""
     state: dict[str, Any] = {"catalog": _catalog(), "calls": []}
 
-    async def fetch(**kwargs: Any) -> dict[str, Any]:
+    async def fetch(**kwargs: Any) -> ModelsDevCatalog:
         state["calls"].append(kwargs)
-        catalog: dict[str, Any] = state["catalog"]
-        return catalog
+        return parse_catalog(state["catalog"])
 
     monkeypatch.setattr(refresh, "fetch_models_dev_document", fetch)
     return state
@@ -133,6 +135,90 @@ async def test_the_preview_reports_changed_rates_against_the_active_snapshot(
     assert await refresh.preview_pending_refresh(session) is None
 
 
+def _clip(price: float) -> dict[str, Any]:
+    """A video model priced per second of output, which only the v2 price block can state."""
+    return {"id": "clip", "pricing": {"modalities": {"video": {"output": {"price": price, "unit": "second"}}}}}
+
+
+def _painter(image_price: float) -> dict[str, Any]:
+    """A chat model with full text rates that also prices an image, per image, in its block."""
+    image = {"output": {"price": image_price, "unit": "image"}}
+    return {"id": "painter", "cost": {"input": 1, "output": 2}, "pricing": {"modalities": {"image": image}}}
+
+
+@pytest.mark.asyncio
+async def test_the_preview_sees_a_changed_image_rate_beside_unchanged_text_rates(
+    session: AsyncSession, upstream: dict[str, Any]
+) -> None:
+    """The rate columns are the same, so only the block tells the two prices apart."""
+    upstream["catalog"]["test"]["models"]["painter"] = _painter(0.04)
+    await refresh.prepare_price_refresh(session)
+    await refresh.confirm_price_refresh(session)
+    entry = current_index().resolve("test", "painter")
+    assert entry is not None and entry.priced and entry.slot_columns is None
+
+    upstream["catalog"]["test"]["models"]["painter"] = _painter(0.05)
+    preview = await refresh.prepare_price_refresh(session)
+
+    assert (preview.added_count, preview.changed_count, preview.removed_count) == (0, 1, 0)
+    assert [(c.model_key, c.change) for c in preview.changes] == [("test:painter", "changed")]
+    assert not preview.changes_nothing
+
+
+@pytest.mark.asyncio
+async def test_the_preview_sees_a_changed_per_unit_price(session: AsyncSession, upstream: dict[str, Any]) -> None:
+    """A per-second rate has no v1 field; the stored snapshot must still carry it and compare it."""
+    upstream["catalog"]["test"]["models"]["clip"] = _clip(0.02)
+    await refresh.prepare_price_refresh(session)
+    await refresh.confirm_price_refresh(session)
+    entry = current_index().resolve("test", "clip")
+    assert entry is not None and entry.priced and entry.slot_columns is not None
+    assert entry.slot_columns.unit == "second"
+
+    upstream["catalog"]["test"]["models"]["clip"] = _clip(0.03)
+    preview = await refresh.prepare_price_refresh(session)
+
+    assert (preview.added_count, preview.changed_count, preview.removed_count) == (0, 1, 0)
+    assert [(c.model_key, c.change) for c in preview.changes] == [("test:clip", "changed")]
+
+
+@pytest.mark.asyncio
+async def test_the_preview_stores_the_catalog_of_facts_it_downloaded(
+    session: AsyncSession, upstream: dict[str, Any]
+) -> None:
+    """The kinds and details the dashboard shows come from the stored catalog, so a preview refreshes it too."""
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_CATALOG_SOURCE) is None
+    await refresh.prepare_price_refresh(session, GatewayConfig(models_dev_metadata=True))
+
+    row = await session.get(PricingSnapshot, refresh.MODELS_DEV_CATALOG_SOURCE)
+    assert row is not None
+    assert set(json.loads(row.snapshot)["providers"]["test"]["models"]) == {"model"}
+
+
+@pytest.mark.asyncio
+async def test_a_preview_without_metadata_stores_no_catalog(session: AsyncSession, upstream: dict[str, Any]) -> None:
+    await refresh.prepare_price_refresh(session, GatewayConfig(models_dev_metadata=False))
+
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_CATALOG_SOURCE) is None
+
+
+@pytest.mark.asyncio
+async def test_a_database_error_storing_the_catalog_is_logged_without_it_and_the_preview_goes_on(
+    session: AsyncSession, upstream: dict[str, Any], monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    async def fail(_session: AsyncSession, _catalog: ModelsDevCatalog) -> bool:
+        raise TimeoutError("the-catalog-payload")
+
+    monkeypatch.setattr(refresh, "store_models_dev_catalog", fail)
+    preview = await refresh.prepare_price_refresh(session, GatewayConfig(models_dev_metadata=True))
+
+    assert preview.added_count == 1
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE) is not None
+    assert "Unable to store the models.dev catalog" in caplog.text
+    assert "the-catalog-payload" not in caplog.text
+    assert "Traceback" not in caplog.text
+
+
 @pytest.mark.asyncio
 async def test_a_fetch_failure_is_a_refresh_error(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
     async def fail(**_: Any) -> dict[str, Any]:
@@ -141,6 +227,19 @@ async def test_a_fetch_failure_is_a_refresh_error(session: AsyncSession, monkeyp
     monkeypatch.setattr(refresh, "fetch_models_dev_document", fail)
     with pytest.raises(refresh.PricingRefreshError):
         await refresh.prepare_price_refresh(session)
+
+
+@pytest.mark.asyncio
+async def test_a_refused_download_is_a_refresh_error_and_stores_nothing(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def refused(**_: Any) -> ModelsDevCatalog:
+        raise ModelsDevRefusedError("models.dev catalog refused: the document lists no models")
+
+    monkeypatch.setattr(refresh, "fetch_models_dev_document", refused)
+    with pytest.raises(refresh.PricingRefreshError, match="cannot read"):
+        await refresh.prepare_price_refresh(session)
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE) is None
 
 
 @pytest.mark.asyncio
@@ -160,9 +259,9 @@ async def test_a_catalog_pricing_no_model_is_not_stored(session: AsyncSession, u
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("rate", [-1, 2_000_000])
+@pytest.mark.parametrize("rate", [-1, 2_000_000, "0.5", True])
 async def test_an_implausible_rate_rejects_the_whole_catalog(
-    session: AsyncSession, upstream: dict[str, Any], rate: float
+    session: AsyncSession, upstream: dict[str, Any], rate: object
 ) -> None:
     upstream["catalog"]["test"]["models"]["other"] = {"id": "other", "cost": {"input": 1, "output": rate}}
     with pytest.raises(refresh.PricingRefreshError, match="implausible"):
@@ -421,3 +520,27 @@ async def test_history_longer_than_the_resident_window_fails_closed_before_it(
     assert resolve_as_of(timeline, before, "openai", "gpt-4o") is None
     latest = resolve_as_of(timeline, datetime.now(UTC), "test", "model")
     assert latest is not None and latest.input == Decimal(3)
+
+
+def test_stored_generations_share_the_entries_that_did_not_change() -> None:
+    earlier = datetime(2026, 1, 1, tzinfo=UTC)
+    later = earlier + timedelta(days=1)
+
+    built = refresh._build_generations([(later, _raw(extra=True)), (earlier, _raw(5, extra=True))], None)
+
+    newest, older = built[0].index, built[1].index
+    assert older.get("test", "other") is newest.get("test", "other")
+    assert older.get("test", "model") is not newest.get("test", "model")
+    assert [entry.input for entry in (newest.get("test", "model"), older.get("test", "model")) if entry] == [
+        Decimal("1"),
+        Decimal("5"),
+    ]
+
+
+def test_a_snapshot_that_no_longer_parses_does_not_stop_the_sharing() -> None:
+    day = datetime(2026, 1, 1, tzinfo=UTC)
+
+    built = refresh._build_generations([(day, _raw()), (day + timedelta(days=1), "{"), (day, _raw())], None)
+
+    assert len(built) == 2
+    assert built[0].index.get("test", "model") is built[1].index.get("test", "model")

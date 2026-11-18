@@ -7,9 +7,9 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import HTTPException
 
-from gateway.api.routes._helpers import resolve_user_id
 from gateway.api.routes.pricing import PricingResponse
 from gateway.schemas.budgets import BudgetResponse, OrganizationBudgetPublic
+from gateway.services.api_keys import names_end_user, resolve_user_id
 
 
 def _make_error(detail: str, status_code: int = 400) -> HTTPException:
@@ -193,6 +193,33 @@ def test_resolve_user_id_empty_string_treated_as_missing() -> None:
     assert exc_info.value.detail == "master key requires user"
 
 
+def _make_service_key(user_id: str | None, *, is_service_key: bool = True) -> MagicMock:
+    api_key = _make_key(user_id)
+    api_key.is_service_key = is_service_key
+    return api_key
+
+
+def test_names_end_user_when_a_service_key_names_someone_else() -> None:
+    assert names_end_user(_make_service_key("key-user"), "end-user-1") is True
+
+
+@pytest.mark.parametrize(
+    ("api_key", "user_id_from_request"),
+    [
+        pytest.param(None, "end-user-1", id="master key"),
+        pytest.param(_make_service_key("key-user", is_service_key=False), "end-user-1", id="not a service key"),
+        pytest.param(_make_service_key(None), "end-user-1", id="service key without a user"),
+        pytest.param(_make_service_key("key-user"), None, id="no user named"),
+        pytest.param(_make_service_key("key-user"), "", id="empty user named"),
+        pytest.param(_make_service_key("key-user"), "key-user", id="the key's own user"),
+    ],
+)
+def test_names_end_user_only_for_a_service_key_naming_another_user(
+    api_key: MagicMock | None, user_id_from_request: str | None
+) -> None:
+    assert names_end_user(api_key, user_id_from_request) is False
+
+
 def test_budget_response_from_model() -> None:
     budget = MagicMock()
     budget.budget_id = "budget-1"
@@ -265,12 +292,14 @@ def test_pricing_response_from_model() -> None:
     pricing.output_price_per_million = 60.0
     pricing.cache_read_price_per_million = 5.0
     pricing.cache_write_price_per_million = 15.0
-    pricing.unit = "tokens"
+    pricing.unit = "token"
+    pricing.rates = {"text": {"input": {"price": 30, "unit": "token"}, "output": {"price": 60, "unit": "token"}}}
     pricing.origin = "api"
     pricing.created_at = datetime(2025, 3, 1, tzinfo=UTC)
     pricing.updated_at = datetime(2025, 3, 2, tzinfo=UTC)
 
     resp = PricingResponse.from_model(pricing)
+    assert resp.rates.document() == pricing.rates
     assert resp.model_key == "openai:gpt-4"
     assert resp.effective_at == "2025-02-01T00:00:00+00:00"
     assert resp.input_price_per_million == 30.0

@@ -2,9 +2,15 @@
 
 A routing policy is a caller-facing model name that resolves to one or more real
 models. Use a policy for failover, conditional selection, traffic splitting,
-spill-over past a rate limit, learned selection, or guardrails the caller cannot
-remove. Use an
+spill-over past a rate limit, or guardrails the caller cannot remove. Use an
 [alias](models.md#model-aliases) when one name always maps to one target.
+
+![Your application sends one request to Otari, which routes it to OpenAI, Anthropic, or another provider.](assets/routing-overview.webp)
+
+For provider selection within one model, an unpinned catalog ID already uses
+[automatic routing](models.md#automatic-provider-selection), which keeps an
+organization's own provider key first and otherwise considers estimated cost, load,
+region and latency, with sticky sessions for conversation continuity.
 
 ## Failover
 
@@ -19,38 +25,44 @@ routing:
 ```
 
 Callers send `model: fast`. If the first provider fails before any response is
-sent, Otari tries the fallback. The response keeps the policy name; Activity and
-usage record the models that were attempted.
+sent, Otari tries the fallback. The response keeps the policy name; the Requests
+view of Sessions records the models that were attempted.
 
-In the dashboard, choose Create policy on Routing, then Fallback: name it, pick
-the main model, and list at least one backup under "If unavailable, use", each a
-model other than the main one and the other backups. The backups are
-`on_failure`, in the order shown. Create policy offers one kind at a time
-(Fallback, Split traffic, Smart router, Spill over at rate limits, Tier down on
-budget), each with only its own fields. To combine them, open the policy from
-the list once it exists: its page has a section each for the main selection,
-the fallback chain, a budget tier-down and guardrails, and each section saves on
-its own, writing the rest of the policy back unchanged. A policy from
-`config.yml`, or one using options the page cannot show, opens read-only with
-its spec in full.
+![Otari tries OpenAI first and moves to Anthropic when OpenAI returns a retryable error.](assets/routing-fallback-flow.webp)
 
 ## Selection and failure are separate
 
 `select` chooses where a request starts. `on_failure` lists what to try when a
-candidate fails before its answer starts, whatever the provider's error: an
-outage, a rate limit, or a request it refuses as invalid (400) all move on.
-A candidate whose provider has no credential configured fails that way too, so
-the policy moves on to the next; a provider nothing declares has none, keyless
-local backends included, and an entry that names no key has none, whatever the
-provider's own environment variable holds. A candidate nothing declares that one of the
-deployment's hosted providers serves is sent on the deployment's own credential, as a single model is
-([modes](hosted-providers.md#deployment-paid-credentials)). When no candidate has a credential, the request is
-refused with `424 provider_not_configured`. A candidate whose provider rejects
-the configured credential (401, or a 403 that does not reject the request itself) moves on too; when every candidate
-either lacks a credential or had it rejected, and at least one was rejected, the
-request is refused with `424 provider_credential_rejected`.
-A Chat Completions candidate that answers with no choices has failed too, so the
-policy moves on to the next.
+candidate fails before its answer starts. The policy moves on to the next
+candidate when:
+
+- the provider returns any error: an outage, a rate limit, or a refusal as
+  invalid (400);
+- the provider has no credential configured. A provider nothing declares has
+  none (keyless local backends included), and so does an entry that names no
+  key, whatever the provider's own environment variable holds;
+- the provider rejects the configured credential (401, or a 403 that does not
+  reject the request itself);
+- a Chat Completions candidate answers with no choices.
+
+A candidate nothing declares that one of the deployment's hosted providers
+serves is sent on the deployment's own credential, as a single model is
+([hosted providers](hosted-providers.md#deployment-paid-credentials)). On
+otari.ai, such an entry is billed to the organization's balance at the same rate
+as a direct request, and is skipped when the balance cannot cover it. When the
+balance covers no candidate, the request is refused once with
+`402 insufficient_funds`, recorded against the plan's first model. A provider's
+own `402` is a provider failure like any other, and the plan moves on.
+
+When no candidate is left:
+
+| Situation | Response |
+| --- | --- |
+| No candidate has a credential | `424 provider_not_configured` |
+| Every candidate lacks a credential or had it rejected, and at least one was rejected | `424 provider_credential_rejected` |
+
+Other all-candidates-failed outcomes are listed under
+[Failure behavior](#failure-behavior).
 
 ```yaml
 routing:
@@ -74,8 +86,20 @@ conditions are:
 - `key_id`
 
 All conditions in one `when` block must match. Numeric comparisons use exactly
-one of `gt`, `gte`, `lt`, or `lte`. A budget condition does not match a
-caller with no finite budget.
+one of `gt`, `gte`, `lt`, or `lte`. A budget condition reads the tightest
+budget gating the request: the user's own budget, or a spend ceiling on the
+calling API key, its workspace, its member or its organization that caps every
+provider. A ceiling narrowed to one provider is not read, because which provider
+serves the request is what the policy decides. A $0 budget reads as fully used.
+A budget condition does not match a caller with no finite budget, a key excluded
+from budget enforcement, or any request while `budget_strategy` is `disabled`.
+
+A budget condition picks the target for a request the budget admits; it cannot
+admit one the budget refuses. A request whose estimated hold is larger than what
+remains is refused with `403 budget_exceeded` before the policy runs, even at a
+low `budget_used_pct`. For a tier-down rule to act, size the budget well above
+one request's hold, or send a lower `max_tokens`. See
+[Holds and settlement](budget-enforcement.md#holds-and-settlement).
 
 In a policy that can fall over, each candidate gets one upstream call unless a
 retry count is configured, so a throttled provider hands over to the next
@@ -141,76 +165,27 @@ routing:
         - mistral:mistral-small
 ```
 
-A full candidate is skipped without being called, and Activity shows it in the
-request's routing plan as skipped, naming the limit that was full. Prometheus
-counts each one in `gateway_rate_limit_model_full{rule, model}`. The limit lives on the model,
-not on the policy, so it is skipped the same way in `on_failure`, in a weighted
-pool, and in any other policy that names it; with Redis as `rate_limit_store`,
-the count holds across replicas. A candidate with room that fails before
-responding falls through to the next one, as in any policy. The per-model limits
-refuse a request with a 429 only when every candidate is full, naming the limit
-that frees up soonest (and its `Retry-After`) but not the model, since a
-policy's targets are not the caller's to see. A per-key, per-user or deployment
-rule is checked before routing, so it can still refuse a request while every
-candidate has room.
+- A full candidate is skipped without being called. The Requests view of Sessions
+  shows it in the request's routing plan as skipped, naming the limit that was
+  full, and Prometheus counts it in `gateway_rate_limit_model_full{rule, model}`.
+- The limit lives on the model, not on the policy, so the model is skipped the
+  same way in `on_failure`, in a weighted pool, and in any other policy that
+  names it. With Redis as `rate_limit_store`, the count holds across replicas.
+- A candidate with room that fails before responding falls through to the next
+  one, as in any policy: `candidates` handles "full", `on_failure` handles
+  "broke".
+- The per-model limits refuse with `429` only when every candidate is full,
+  naming the limit that frees up soonest (and its `Retry-After`) but not the
+  model.
+- A per-key, per-user or deployment rule is checked before routing, so it can
+  still refuse a request while every candidate has room.
+- `Otari-Router: off` skips the order and starts from the default.
 
-The policy says which is which: `candidates` handles "full", `on_failure`
-handles "broke". `Otari-Router: off` skips the order and starts from the
-default.
+## Per-request control
 
-In the dashboard, choose Create policy on Routing, then "Spill over at rate
-limits", order the models with the arrows, and add the limit under Settings,
-Rate limit rules, counted for "Each model". On an existing policy, pick "Spill
-over" in its Main selection section.
-
-
-The `knn` router uses scored examples to rank candidates for each user's
-traffic:
-
-```yaml
-routing:
-  policies:
-    smart:
-      select:
-        - router: knn
-          candidates:
-            - openai:gpt-5-nano
-            - openai:gpt-5
-        - default: openai:gpt-5
-      on_failure:
-        - anthropic:claude-haiku-4-5
-```
-
-It embeds the request, finds similar scored prompts, and balances predicted
-quality against configured model cost. Every candidate therefore needs pricing.
-Until a user's pool is warm, or when the router cannot decide confidently, the
-default target serves.
-
-Teach the router through `POST /api/v1/routing/preferences/rank`. Each example
-contains a prompt and a score from 0 to 1 for each candidate. Read pool status
-through `GET /api/v1/routing/status`. `scripts/seed_routing_demo.py` provides a
-runnable example.
-
-Learned memory is scoped by user and workspace. Optional task IDs create separate
-pools. It is not learned automatically from live traffic.
-
-### Per-request control
-
-| Header | Effect |
-| --- | --- |
-| `Otari-Router: off` | Skip learned, weighted or priority selection and use the policy default. |
-| `Otari-Conversation-Id` | Reuse a learned decision for a conversation when granularity is `trace_sticky`. |
-| `Otari-Router-Task` | Use examples from one task partition. |
-
-The default learned-routing settings are `k=5`, a 20-example warm-up, and
-`trace_sticky` granularity. They are deployment settings named
-`router_k`, `router_seed_count`, `router_alpha`,
-`router_confidence_floor`, `router_embedding_model`, `router_granularity`, and
-`router_max_records_per_user`.
-
-Trace stickiness is process-local. A restart or request routed to another replica
-may choose again. The result is still valid, but prompt-cache locality is not
-guaranteed across replicas.
+Send `Otari-Router: off` to skip weighted or priority selection for one request
+and use the policy default. There is no header that forces a router on: the
+policy decides that.
 
 ## Mandatory guardrails
 
@@ -228,12 +203,15 @@ routing:
           on_unavailable: block
 ```
 
-`mode` is required. `on_unavailable: block` fails closed when the guardrail
-service cannot run; `monitor` lets the request continue and records the skipped
-check. Only input checks can be mandated by a policy.
+`mode` is required: `monitor` or `block`. `on` says what the guardrail
+reads, and defaults to `[input]`; see
+[What a guardrail reads](guardrails-reference.md#what-a-guardrail-reads).
+`on_unavailable: block` fails closed when the guardrail service cannot run or
+gives no verdict; `monitor` lets the request continue and records the skipped
+check.
 
 Organization-mandated and request-provided guardrails compose with policy
-guardrails. See [Guardrails](guardrails.md).
+guardrails. See [How the layers compose](guardrails-reference.md#how-the-layers-compose).
 
 ## Explain a policy
 
@@ -246,23 +224,71 @@ otari routing explain balanced --allowed-model "anthropic:*"
 ```
 
 The command shows ordered candidates, filtered candidates and their reasons,
-effective weighted shares, and mandatory guardrails. The API equivalent is
-`POST /api/v1/routing/policies/explain`; it can also validate an unsaved draft.
+effective weighted shares, and mandatory guardrails. It reads `config.yml`
+only, so it does not see policies created in the dashboard or through the API.
+
+For those, open the policy in the dashboard: its **Test** section shows the
+same plan, and for a policy with a budget tier-down, a budget-used field to
+try it with. On a deployment you run, the API equivalent is
+`POST /api/v1/routing/policies/explain`, which needs the operator; it can also
+validate an unsaved draft. Members of an organization use
+`POST /api/v1/organizations/me/routing-policies/explain` instead, from a
+dashboard session, naming one of their workspaces in `workspace_id`. There, a
+model the organization cannot reach is listed as left out, whether it comes from
+a draft or a saved policy.
 
 ## Agent model recommendations
 
 A policy decides the model of a request that reaches Otari. A coding agent that
 talks to its provider directly can still ask Otari which model a new subagent
-should run on, through `POST /api/v1/routing/recommend`. A self-run
-deployment puts one choice question to the decision model it configured and
-recommends the candidate it picks; on otari.ai a managed recommender answers
-instead. The harness that asks picks the candidates: Claude Code chooses among
-its own `haiku`, `sonnet` and `opus` aliases, and pi, through
-[pi-otari](https://github.com/mozilla-ai/pi-otari), among the Otari model ids
-it sends with the request.
-Either way the recommendation is billed to the caller, and nothing
-else is dispatched. See
-[Use with Claude Code](use-with-claude-code.md#let-otari-choose-a-subagents-model).
+should run on, through `POST /api/v1/routing/recommend`, at the moment it spawns
+the subagent, before the subagent has a prompt cache to lose.
+
+Otari asks the decision model of the [subagent router](#subagent-routers) that
+is switched on which candidate is the cheapest that would complete the task well
+on the first attempt, given the harness, the subagent type, the parent's model,
+the task description and the task. The candidate it picks is the
+recommendation. The model the caller asked for is left out of the question, and
+only the task's first 32,000 characters are sent. The call is charged at the
+router's own rates.
+
+The harness that asks picks the candidates: Claude Code chooses among
+`agent_recommender_candidates`, its own `haiku`, `sonnet` and `opus` aliases by
+default, and pi, through [pi-otari](https://github.com/mozilla-ai/pi-otari),
+among the Otari model ids it sends with the request. Either way the
+recommendation is billed to the caller, and nothing else is dispatched: the
+harness runs the subagent with its own provider credentials.
+
+The fields and errors are in the
+[API reference](api-reference.md#routing-recommendations), and the Claude Code
+plugin that asks is in the
+[Claude Code guide](claude-code.md#let-otari-choose-a-subagents-model).
+
+### Subagent routers
+
+Which decision model answers is set on the **Subagent router** page of the
+deployment view (`/api/v1/routing/recommenders`, operator-only), and nowhere
+else: `config.yml` has no setting for it. A router is a
+decision provider (TypeSafe, OpenRouter or a llama.cpp server), a model, an
+optional API base, a key stored encrypted under `OTARI_SECRET_KEY`, and the
+price per million input and output tokens the caller is charged. Several may
+be stored and one is switched on at a time: the first one added is on, and
+switching a later one on switches the rest off.
+
+Billing and limits:
+
+- Before the call Otari holds the most one recommendation can cost (65,536
+  input and 1,024 output tokens at the router's rates). After it, Otari charges
+  the tokens the decision model reported, or the hold when it reported none.
+- The usage row names `otari:subagent-router`, never the router's own provider
+  or model, and that label is what an API key's allow-list has to admit.
+- A router that does not answer within 2.5 seconds fails the call, uncharged.
+- To add a margin, put it in the rates; for free recommendations (from a local
+  model, for example), set both rates to 0.
+
+With no router stored, or every one switched off, nothing answers and the
+route refuses with 400. A write reaches its own gateway worker at once and
+every other worker or replica within 30 seconds.
 
 ## Managing policies at runtime
 
@@ -282,11 +308,9 @@ refuse a target the organization holds no provider access for. Both reads take a
 server-capped `limit`, which bounds the response rather than paginating it. A
 member of the organization reads the same two lists and writes neither.
 
-Those routes are workspace-wide entries only, on the reads as much as the
-writes. A stored policy or alias can also be scoped to one user, and `user_id`
-names an API-key user rather than a dashboard identity, so it is neither a
-tenant's to set nor a tenant's to interpret. Managing a user-scoped entry stays
-on the deployment-wide routes.
+Those routes read and write workspace-wide entries only. A user-scoped entry
+(`user_id` names an API-key user, not a dashboard identity) is managed only on
+the deployment-wide routes.
 
 The authenticating API key determines which workspace resolves a policy.
 User-scoped entries take precedence over wider entries. A config-file policy
@@ -302,8 +326,10 @@ request schemas.
 
 - A plan may contain at most five candidates, including router pools and
   `on_failure`.
-- Targets must be concrete provider or instance selectors. Policies and aliases
-  cannot chain.
+- Targets must be concrete provider or instance selectors, or name one of the
+  workspace's [provider keys by its request prefix](model-providers.md#add-a-key-for-your-own-endpoint),
+  so a policy can fall over between two keys on the same endpoint. Policies and
+  aliases cannot chain.
 - Policy names cannot contain `:` or `/` or collide with an alias or provider
   instance.
 - `routing.enabled: false` disables policy resolution but still validates the
@@ -323,8 +349,7 @@ Absorbed rows have no settled model cost and do not increase request or error
 totals; the final row represents the caller-visible request.
 
 Every successful Chat Completions, Messages, and Responses response, routed or
-not, also says how it was served, so a caller's own metrics can see a fallback
-without reading the usage log:
+not, carries these headers:
 
 | Header | Value |
 | --- | --- |
@@ -333,16 +358,32 @@ without reading the usage log:
 | `Otari-Attempt-Count` | How many candidates the request was sent to, including the one that served. A candidate skipped without being called, such as a model a rate limit had no room on, is not counted. |
 | `Otari-Fallback` | `true` when a candidate other than the plan's first served the request, whether the first failed or was skipped; otherwise `false`. |
 | `Otari-Response-Duration-Ms` | Whole milliseconds from the start of the handler preamble to the provider answering the request, failed candidates included. For a streamed response, to the stream opening or its first chunk, since the headers go out then. |
-| `Server-Timing` | The same duration split into Otari's time and the provider's, in [W3C Server Timing](https://www.w3.org/TR/server-timing/) form: `otari;dur=4.2;desc="Otari before the provider", upstream;dur=812.5;desc="Provider until its answer or first chunk", total;dur=816.7;desc="Otari and the provider"`. `otari` runs until the first candidate is sent: the budget hold, routing, rate limits and preparing the call. `upstream` runs from there to the answer, failed candidates included, or for a stream to its first chunk, or to the end of the first-chunk hold when the provider is slower. Gateway tools that run between provider calls, such as web search or code execution, count toward `upstream`. A stream that uses gateway tools opens before its first provider call answers, so for one of those `upstream` and `total` end when the stream opens, as `Otari-Response-Duration-Ms` does. Durations are milliseconds to a tenth. |
+| `Server-Timing` | The same duration split into Otari's time and the provider's, in [W3C Server Timing](https://www.w3.org/TR/server-timing/) form: `otari;dur=4.2;desc="Otari before the provider", upstream;dur=812.5;desc="Provider until its answer or first chunk", total;dur=816.7;desc="Otari and the provider"`. `otari` runs until the first candidate is sent: the budget hold, routing, rate limits and preparing the call. `upstream` runs from there to the answer, failed candidates included, or for a stream to its first chunk, or to the end of the first-chunk hold when the provider is slower. Gateway tools that run between provider calls, such as web search or code execution, count toward `upstream`. Durations are milliseconds to a tenth. |
 
 A request naming a model or an alias reports `1` and `false`. Streaming responses
 carry the same values: failover happens before the stream opens, so the serving
 candidate and the attempt count are already known when the headers are sent. A
 failure later in the stream is reported in the stream and changes neither. The
-request's cost is `usage.cost_usd` in the body, as described in the
+request's cost is `usage.cost_usd` in the body, and the part of it that is
+tool charges `usage.tool_cost_usd`, as described in the
 [API reference](api-reference.md#request-id-and-inline-cost).
 
-Built-in tool charges settle on the final row. Candidate price and remaining budget, including a budget narrowed to that candidate's provider, are checked before each attempt, so a fallback cannot silently bypass pricing or spend limits. A fallback is skipped when a budget narrowed to its provider has no room, and the next candidate is tried. A budget on every provider that cannot cover a pricier fallback stops the chain instead. What a fallback spends counts against its own provider's budgets.
+Built-in tool charges settle on the final row. Before each attempt, Otari checks
+the candidate's price and the remaining budget, including a budget narrowed to
+that candidate's provider:
+
+- A fallback whose provider-narrowed budget has no room is skipped, and the
+  next candidate is tried.
+- A budget on every provider that cannot cover a pricier fallback stops the
+  chain.
+- What a fallback spends counts against its own provider's budgets.
+
+In a plan with more than one candidate, a chat completion's `reasoning_effort`
+is left off each candidate that [models.dev](https://models.dev) says does not
+reason. A candidate models.dev does not describe gets it as asked.
+`response_format` is never left off; check each candidate's
+`supported_parameters` on `GET /api/v1/models` when building a policy that
+sends it.
 
 ## Failure behavior
 
@@ -359,4 +400,39 @@ web searches or fetches in `otari_tool_calls` has sent response bytes, so it is
 committed from that report on. Shared service failures, such as an unavailable mandatory
 guardrail or sandbox, also do not improve by changing candidates.
 
-If every candidate of a plan with more than one candidate fails, Otari returns a gateway error in its own words, never a provider's message. A plan with one candidate answers as naming that model directly would. When every candidate rejected the request as invalid (400), Otari returns 400 with the code `all_candidates_rejected`, because the request is at fault. When every candidate found the prompt too long, the code is `context_length_exceeded`. When no candidate knew the model (404), Otari returns 502, because Otari chose the candidates. If caller restrictions remove every candidate, Otari returns 403 without revealing the hidden targets.
+If every candidate of a plan with more than one candidate fails, Otari returns a
+gateway error in its own words, never a provider's message. A plan with one
+candidate answers as naming that model directly would.
+
+| Every candidate... | Response |
+| --- | --- |
+| rejected the request as invalid (400) | `400 all_candidates_rejected` |
+| found the prompt too long | `context_length_exceeded` |
+| refused image content the request carries, in wording Otari recognizes | `unsupported_content` |
+| failed to produce output matching the requested JSON schema (Groq's `json_validate_failed`) | `structured_output_failed`. Sending the request again may succeed. |
+| refused the request as too large (413) | `413 request_too_large`. Shrink the request; sending it again unchanged does not help. |
+| refused a parameter the request carries (such as `response_format` on a model with no JSON mode), as named by Otari's provider library | `unsupported_parameter`, with `detail` naming the parameters. A parameter a provider refuses with its own 400 counts as an ordinary rejection. |
+| did not know the model (404) | `502` |
+| was removed by caller restrictions | `403`, without revealing the hidden targets |
+
+## In the dashboard
+
+The Routing page manages stored policies.
+
+- **Create policy** offers one kind at a time (Fallback, Split traffic, Spill
+  over at rate limits, Tier down on budget), each with only its own fields.
+- **Fallback** ([Failover](#failover)): name the policy, pick the main model,
+  and list at least one backup under "If unavailable, use", each a model other
+  than the main one and the other backups. The backups are `on_failure`, in the
+  order shown.
+- **Spill over at rate limits**
+  ([priority routing](#spill-over-when-a-model-is-full-priority-routing)): order
+  the models with the arrows, and add the limit under Settings, Rate limit
+  rules, counted for "Each model". On an existing policy, pick "Spill over" in
+  its Main selection section.
+- **Combining kinds**: open the policy from the list once it exists. Its page
+  has a section each for the main selection, the fallback chain, a budget
+  tier-down and guardrails, and each section saves on its own, writing the rest
+  of the policy back unchanged.
+- A policy from `config.yml`, or one using options the page cannot show, opens
+  read-only with its spec in full.

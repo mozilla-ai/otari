@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import httpx
+import httpx2
 import pytest
 from any_llm import LLMProvider
 from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice
@@ -19,10 +20,10 @@ from any_llm.types.files import AsyncFileDownload
 from any_llm.utils.messages_compat import chat_completion_to_message_response
 
 from gateway.adapters.provider_file_adapter import (
+    _HTTPX2_TIMEOUT,
     _TIMEOUT,
     AnyLlmProviderFiles,
     _AnyLlmFileSession,
-    _container_file_request,
     _declared_size,
 )
 from gateway.exceptions.files_exceptions import FileOverBudgetError, ProviderFileUnavailableError
@@ -113,22 +114,6 @@ def test_only_providers_otari_can_read_back_are_recorded() -> None:
     assert not AnyLlmProviderFiles().serves(LLMProvider.NEBIUS)
 
 
-def test_openai_download_is_keyed_on_the_container() -> None:
-    url, headers = _container_file_request(
-        ProviderFile(file_id="cfile_1", container_id="cntr_1"), ResolvedCredential(api_key="sk-test")
-    )
-
-    assert url == "https://api.openai.com/v1/containers/cntr_1/files/cfile_1/content"
-    assert headers == {"Authorization": "Bearer sk-test"}
-
-
-def test_an_openai_file_with_no_container_cannot_be_read() -> None:
-    # The download is keyed on the container, so a row without one has no URL
-    # to build; refusing here is what keeps ``containers/None/...`` off the wire.
-    with pytest.raises(ProviderFileUnavailableError, match="names no container"):
-        _container_file_request(ProviderFile(file_id="cfile_1"), ResolvedCredential(api_key="sk-test"))
-
-
 def test_a_streamed_messages_result_block_names_its_files() -> None:
     reply = _anthropic_reply([{"file_id": "file_01abc"}])
     event = SimpleNamespace(type="content_block_start", index=0, content_block=reply.content[0])
@@ -175,12 +160,19 @@ def test_a_citation_field_that_is_not_text_is_dropped() -> None:
     assert produced_files_for("responses", event) == [ProviderFile(file_id="cfile_1")]
 
 
-def test_an_id_stays_one_path_segment() -> None:
-    url, _ = _container_file_request(
-        ProviderFile(file_id="../cfile_1", container_id="cntr/1"), ResolvedCredential(api_key="sk-test")
-    )
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("file_id", "container_id"), [("../cfile_1", "cntr_1"), ("cfile_1", "cntr/1")])
+async def test_an_openai_id_that_could_escape_its_path_reaches_no_provider(
+    monkeypatch: pytest.MonkeyPatch, file_id: str, container_id: str
+) -> None:
+    # any-llm rejects these rather than Otari, as on the Anthropic path below.
+    seen = _serving(monkeypatch, lambda request, http: http.Response(200, content=b"chart"))
 
-    assert url == "https://api.openai.com/v1/containers/cntr%2F1/files/..%2Fcfile_1/content"
+    with pytest.raises(ProviderFileUnavailableError):
+        await _read_all(
+            _client("openai").read(ProviderFile(file_id=file_id, container_id=container_id), budget_bytes=5)
+        )
+    assert seen == []
 
 
 @pytest.mark.asyncio
@@ -190,7 +182,7 @@ async def test_an_anthropic_id_that_could_escape_its_path_reaches_no_provider(
 ) -> None:
     # any-llm rejects these rather than Otari, so this pins the behavior the
     # Anthropic path relies on instead of validating the ID itself.
-    seen = _serving(monkeypatch, lambda request: httpx.Response(200, content=b"chart"))
+    seen = _serving(monkeypatch, lambda request, http: http.Response(200, content=b"chart"))
 
     with pytest.raises(ProviderFileUnavailableError):
         await _read_all(_client().read(ProviderFile(file_id=file_id), budget_bytes=5))
@@ -198,8 +190,7 @@ async def test_an_anthropic_id_that_could_escape_its_path_reaches_no_provider(
 
 
 def test_a_provider_whose_files_otari_cannot_read_is_refused() -> None:
-    # The adapter names the set it serves; refusing here is what stops a third provider's
-    # credential reaching OpenAI's container endpoint.
+    # The adapter names the set it serves, and reads back from no other provider.
     with pytest.raises(LookupError, match="nebius"):
         _AnyLlmFileSession(
             provider=LLMProvider.NEBIUS, provider_instance="nebius", credential=ResolvedCredential(api_key="sk-test")
@@ -208,20 +199,20 @@ def test_a_provider_whose_files_otari_cannot_read_is_refused() -> None:
 
 @pytest.mark.asyncio
 async def test_both_providers_read_under_one_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    _serving(monkeypatch, lambda request: httpx.Response(200, content=b"chart"))
+    _serving(monkeypatch, lambda request, http: http.Response(200, content=b"chart"))
     anthropic, openai = _client(), _client("openai")
 
-    # Without this the Anthropic path would inherit the SDK's own 600s read timeout.
-    assert cast("Any", anthropic._llm).client.timeout == _TIMEOUT
-    assert anthropic._connection.timeout == _TIMEOUT
-    assert openai._connection.timeout == _TIMEOUT
+    # Without this each path would inherit its SDK's own 600s read timeout.
+    for client, timeout in ((anthropic, _HTTPX2_TIMEOUT), (openai, _TIMEOUT)):
+        assert cast("Any", client._llm).client.timeout == timeout
+        assert client._connection.timeout == timeout
 
 
 @pytest.mark.asyncio
 async def test_a_failed_read_is_tried_once(monkeypatch: pytest.MonkeyPatch) -> None:
     # The copy shares one deadline across every file of a request, so retrying
-    # here spends the time the remaining files need. The OpenAI path never retries.
-    seen = _serving(monkeypatch, lambda request: httpx.Response(500))
+    # here spends the time the remaining files need.
+    seen = _serving(monkeypatch, lambda request, http: http.Response(500))
 
     with pytest.raises(ProviderFileUnavailableError):
         await _read_all(_client().read(ProviderFile(file_id="file_01abc"), budget_bytes=5))
@@ -243,7 +234,7 @@ async def test_a_connection_that_will_not_close_does_not_reach_the_caller(monkey
 
 @pytest.mark.asyncio
 async def test_aclose_releases_the_connection(monkeypatch: pytest.MonkeyPatch) -> None:
-    _serving(monkeypatch, lambda request: httpx.Response(200, content=b"chart"))
+    _serving(monkeypatch, lambda request, http: http.Response(200, content=b"chart"))
     client = _client()
 
     await _read_all(client.read(ProviderFile(file_id="file_01abc"), budget_bytes=5))
@@ -260,26 +251,32 @@ async def test_a_declared_size_is_read_whatever_case_the_header_arrives_in() -> 
     assert _declared_size(download) == 9
 
 
-def _serving(monkeypatch: pytest.MonkeyPatch, handler: Any) -> list[httpx.Request]:
-    """Route every ``httpx.AsyncClient`` the client opens to ``handler``, returning the requests it saw.
+def _serving(monkeypatch: pytest.MonkeyPatch, handler: Any) -> list[Any]:
+    """Route every httpx and httpx2 ``AsyncClient`` the client opens to ``handler``, returning the requests it saw.
 
-    Patches the constructor rather than passing a transport, because the
-    provider SDK builds clients of its own that a caller cannot reach.
+    ``handler`` is called with the request and the module it came from
+    (Anthropic's SDK runs on httpx2, OpenAI's on httpx), and answers with that
+    module's ``Response``. Patches the constructors rather than passing a
+    transport, because the provider SDK builds clients of its own that a caller
+    cannot reach.
     """
-    seen: list[httpx.Request] = []
+    seen: list[Any] = []
 
-    def _recording(request: httpx.Request) -> httpx.Response:
-        seen.append(request)
-        response: httpx.Response = handler(request)
-        return response
+    def _patch(http: Any) -> None:
+        def _recording(request: Any) -> Any:
+            seen.append(request)
+            return handler(request, http)
 
-    original_init = httpx.AsyncClient.__init__
+        original_init = http.AsyncClient.__init__
 
-    def patched_init(self: httpx.AsyncClient, *args: Any, **kwargs: Any) -> None:
-        kwargs["transport"] = httpx.MockTransport(_recording)
-        original_init(self, *args, **kwargs)
+        def patched_init(self: Any, *args: Any, **kwargs: Any) -> None:
+            kwargs["transport"] = http.MockTransport(_recording)
+            original_init(self, *args, **kwargs)
 
-    monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
+        monkeypatch.setattr(http.AsyncClient, "__init__", patched_init)
+
+    _patch(httpx)
+    _patch(httpx2)
     return seen
 
 
@@ -315,7 +312,7 @@ async def _read_all(chunks: AsyncGenerator[bytes, None]) -> bytes:
 
 @pytest.mark.asyncio
 async def test_read_streams_the_file(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen = _serving(monkeypatch, lambda request: httpx.Response(200, content=b"chart"))
+    seen = _serving(monkeypatch, lambda request, http: http.Response(200, content=b"chart"))
 
     data = await _read_all(_client().read(ProviderFile(file_id="file_01abc"), budget_bytes=5))
 
@@ -328,7 +325,7 @@ async def test_read_streams_the_file(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_an_instances_own_client_args_reach_the_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     # A proxy an instance is configured to dispatch through has to serve its
     # file reads too, so the settings that reach it are the same ones.
-    seen = _serving(monkeypatch, lambda request: httpx.Response(200, content=b"chart"))
+    seen = _serving(monkeypatch, lambda request, http: http.Response(200, content=b"chart"))
 
     client = _client(client_args={"default_headers": {"x-proxy-token": "let-me-in"}})
     await _read_all(client.read(ProviderFile(file_id="file_01abc"), budget_bytes=5))
@@ -339,24 +336,24 @@ async def test_an_instances_own_client_args_reach_the_provider(monkeypatch: pyte
 @pytest.mark.asyncio
 async def test_an_instance_cannot_widen_the_budget_a_read_runs_under(monkeypatch: pytest.MonkeyPatch) -> None:
     # The copy shares one deadline across every file, so these three stay Otari's.
-    seen = _serving(monkeypatch, lambda request: httpx.Response(500))
+    seen = _serving(monkeypatch, lambda request, http: http.Response(500))
     client = _client(client_args={"timeout": httpx.Timeout(600.0), "max_retries": 5})
 
     with pytest.raises(ProviderFileUnavailableError):
         await _read_all(client.read(ProviderFile(file_id="file_01abc"), budget_bytes=5))
 
     assert len(seen) == 1
-    assert cast("Any", client._llm).client.timeout == _TIMEOUT
+    assert cast("Any", client._llm).client.timeout == _HTTPX2_TIMEOUT
 
 
 @pytest.mark.asyncio
 async def test_a_download_that_redirects_is_followed(monkeypatch: pytest.MonkeyPatch) -> None:
     # The connection is handed to the provider SDK, which would otherwise have
     # built one of its own that follows a redirect.
-    def _redirects(request: httpx.Request) -> httpx.Response:
+    def _redirects(request: Any, http: Any) -> Any:
         if request.url.host == "cdn.example":
-            return httpx.Response(200, content=b"chart")
-        return httpx.Response(302, headers={"location": "https://cdn.example/blob"})
+            return http.Response(200, content=b"chart")
+        return http.Response(302, headers={"location": "https://cdn.example/blob"})
 
     _serving(monkeypatch, _redirects)
 
@@ -368,7 +365,7 @@ async def test_a_download_that_redirects_is_followed(monkeypatch: pytest.MonkeyP
 @pytest.mark.asyncio
 async def test_a_configured_api_base_is_where_the_download_goes(monkeypatch: pytest.MonkeyPatch) -> None:
     # An instance's api_base names the server, not a versioned prefix.
-    seen = _serving(monkeypatch, lambda request: httpx.Response(200, content=b"chart"))
+    seen = _serving(monkeypatch, lambda request, http: http.Response(200, content=b"chart"))
 
     client = _client(api_base="https://anthropic.internal")
     await _read_all(client.read(ProviderFile(file_id="file_01abc"), budget_bytes=5))
@@ -378,7 +375,7 @@ async def test_a_configured_api_base_is_where_the_download_goes(monkeypatch: pyt
 
 @pytest.mark.asyncio
 async def test_read_refuses_a_declared_size_past_the_budget_before_reading(monkeypatch: pytest.MonkeyPatch) -> None:
-    _serving(monkeypatch, lambda request: httpx.Response(200, content=b"chart"))
+    _serving(monkeypatch, lambda request, http: http.Response(200, content=b"chart"))
 
     with pytest.raises(FileOverBudgetError):
         await _read_all(_client().read(ProviderFile(file_id="file_01abc"), budget_bytes=4))
@@ -390,7 +387,7 @@ async def test_read_stops_an_undeclared_size_past_the_budget(monkeypatch: pytest
         yield b"cha"
         yield b"rt"
 
-    _serving(monkeypatch, lambda request: httpx.Response(200, content=_body()))
+    _serving(monkeypatch, lambda request, http: http.Response(200, content=_body()))
 
     with pytest.raises(FileOverBudgetError):
         await _read_all(_client().read(ProviderFile(file_id="file_01abc"), budget_bytes=4))
@@ -398,7 +395,7 @@ async def test_read_stops_an_undeclared_size_past_the_budget(monkeypatch: pytest
 
 @pytest.mark.asyncio
 async def test_read_raises_when_the_provider_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
-    _serving(monkeypatch, lambda request: httpx.Response(404))
+    _serving(monkeypatch, lambda request, http: http.Response(404))
 
     with pytest.raises(ProviderFileUnavailableError):
         await _read_all(_client().read(ProviderFile(file_id="file_01abc"), budget_bytes=5))
@@ -406,13 +403,46 @@ async def test_read_raises_when_the_provider_refuses(monkeypatch: pytest.MonkeyP
 
 @pytest.mark.asyncio
 async def test_read_raises_when_the_connection_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _drop(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("connection refused", request=request)
+    def _drop(request: Any, http: Any) -> Any:
+        raise http.ConnectError("connection refused", request=request)
 
     _serving(monkeypatch, _drop)
 
     with pytest.raises(ProviderFileUnavailableError):
         await _read_all(_client().read(ProviderFile(file_id="file_01abc"), budget_bytes=5))
+
+
+@pytest.mark.asyncio
+async def test_an_openai_download_is_keyed_on_the_container(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _serving(monkeypatch, lambda request, http: http.Response(200, content=b"chart"))
+
+    data = await _read_all(
+        _client("openai").read(ProviderFile(file_id="cfile_1", container_id="cntr_1"), budget_bytes=5)
+    )
+
+    assert data == b"chart"
+    assert str(seen[0].url) == "https://api.openai.com/v1/containers/cntr_1/files/cfile_1/content"
+    assert seen[0].headers["authorization"] == "Bearer sk-test"
+
+
+@pytest.mark.asyncio
+async def test_an_openai_api_base_is_where_the_container_download_goes(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _serving(monkeypatch, lambda request, http: http.Response(200, content=b"chart"))
+
+    client = _client("openai", api_base="https://openai.internal/v1")
+    await _read_all(client.read(ProviderFile(file_id="cfile_1", container_id="cntr_1"), budget_bytes=5))
+
+    assert str(seen[0].url) == "https://openai.internal/v1/containers/cntr_1/files/cfile_1/content"
+
+
+@pytest.mark.asyncio
+async def test_an_openai_refusal_is_unavailable_and_tried_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    # With unified exceptions off any-llm re-raises the OpenAI SDK's own error.
+    seen = _serving(monkeypatch, lambda request, http: http.Response(404, json={"error": {"message": "gone"}}))
+
+    with pytest.raises(ProviderFileUnavailableError):
+        await _read_all(_client("openai").read(ProviderFile(file_id="cfile_1", container_id="cntr_1"), budget_bytes=5))
+    assert len(seen) == 1
 
 
 @pytest.mark.asyncio
@@ -424,7 +454,7 @@ async def test_read_refuses_an_openai_file_with_no_container() -> None:
 
 @pytest.mark.asyncio
 async def test_filename_of_reads_anthropic_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen = _serving(monkeypatch, lambda request: httpx.Response(200, json=_metadata()))
+    seen = _serving(monkeypatch, lambda request, http: http.Response(200, json=_metadata()))
 
     assert await _client().filename_of("file_01abc") == "bar_plot.png"
     assert seen[0].url.path == "/v1/files/file_01abc"
@@ -432,7 +462,7 @@ async def test_filename_of_reads_anthropic_metadata(monkeypatch: pytest.MonkeyPa
 
 @pytest.mark.asyncio
 async def test_filename_of_is_none_when_the_lookup_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    _serving(monkeypatch, lambda request: httpx.Response(404))
+    _serving(monkeypatch, lambda request, http: http.Response(404))
 
     assert await _client().filename_of("file_01abc") is None
 
@@ -440,7 +470,7 @@ async def test_filename_of_is_none_when_the_lookup_fails(monkeypatch: pytest.Mon
 @pytest.mark.asyncio
 async def test_filename_of_is_none_when_the_metadata_is_not_an_object(monkeypatch: pytest.MonkeyPatch) -> None:
     # A body no reader expects costs the caller the name, never the file it holds.
-    _serving(monkeypatch, lambda request: httpx.Response(200, json=["bar_plot.png"]))
+    _serving(monkeypatch, lambda request, http: http.Response(200, json=["bar_plot.png"]))
 
     assert await _client().filename_of("file_01abc") is None
 
@@ -448,7 +478,7 @@ async def test_filename_of_is_none_when_the_metadata_is_not_an_object(monkeypatc
 @pytest.mark.asyncio
 async def test_filename_of_asks_nothing_of_openai(monkeypatch: pytest.MonkeyPatch) -> None:
     # OpenAI's citation already names the file, so there is no metadata call to make.
-    seen = _serving(monkeypatch, lambda request: httpx.Response(200, json=_metadata()))
+    seen = _serving(monkeypatch, lambda request, http: http.Response(200, json=_metadata()))
 
     assert await _client("openai").filename_of("cfile_1") is None
     assert seen == []
@@ -456,7 +486,7 @@ async def test_filename_of_asks_nothing_of_openai(monkeypatch: pytest.MonkeyPatc
 
 @pytest.mark.asyncio
 async def test_a_file_the_provider_returns_is_held(monkeypatch: pytest.MonkeyPatch) -> None:
-    _serving(monkeypatch, lambda request: httpx.Response(200, json=_metadata()))
+    _serving(monkeypatch, lambda request, http: http.Response(200, json=_metadata()))
 
     assert await _client().holds("file_01abc") is True
 
@@ -464,7 +494,7 @@ async def test_a_file_the_provider_returns_is_held(monkeypatch: pytest.MonkeyPat
 @pytest.mark.asyncio
 async def test_a_file_the_provider_does_not_find_is_not_held(monkeypatch: pytest.MonkeyPatch) -> None:
     error = {"type": "error", "error": {"type": "not_found_error", "message": "File not found"}}
-    _serving(monkeypatch, lambda request: httpx.Response(404, json=error))
+    _serving(monkeypatch, lambda request, http: http.Response(404, json=error))
 
     assert await _client().holds("file_01gone") is False
 
@@ -472,7 +502,7 @@ async def test_a_file_the_provider_does_not_find_is_not_held(monkeypatch: pytest
 @pytest.mark.asyncio
 async def test_a_lookup_that_fails_otherwise_keeps_the_file_held(monkeypatch: pytest.MonkeyPatch) -> None:
     error = {"type": "error", "error": {"type": "api_error", "message": "unavailable"}}
-    _serving(monkeypatch, lambda request: httpx.Response(500, json=error))
+    _serving(monkeypatch, lambda request, http: http.Response(500, json=error))
 
     assert await _client().holds("file_01abc") is True
 

@@ -6,7 +6,8 @@ from typing import Any
 
 import pytest
 
-from gateway.api.routes._helpers import apply_input_guardrails
+from gateway.api.routes._guardrail_targets import chat_targets
+from gateway.api.routes._guardrails import RequestGuardrails
 from gateway.api.routes._tools import (
     _build_web_retrieval_backend,
     _resolve_sandbox_purpose_hint,
@@ -90,7 +91,7 @@ def test_sandbox_image_falls_back_to_env_when_the_override_is_cleared(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_apply_input_guardrails_uses_config_url(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_request_guardrails_use_config_url(monkeypatch: pytest.MonkeyPatch) -> None:
     from fastapi import Response
 
     seen: dict[str, Any] = {}
@@ -103,6 +104,7 @@ async def test_apply_input_guardrails_uses_config_url(monkeypatch: pytest.Monkey
         credentials: Any = None,
         mandated: Any = None,
         in_process: Any = None,
+        unsafe: Any = None,
     ) -> Any:
         seen["default_url"] = default_url
 
@@ -113,12 +115,9 @@ async def test_apply_input_guardrails_uses_config_url(monkeypatch: pytest.Monkey
 
         return _V()
 
-    monkeypatch.setattr("gateway.api.routes._helpers.run_input_guardrails", fake_run)
+    monkeypatch.setattr("gateway.api.routes._guardrails.run_input_guardrails", fake_run)
     config = GatewayConfig(guardrails_url="http://guardrails:8000")
-    await apply_input_guardrails(
-        [GuardrailConfig(profile="prompt-injection", mode="monitor")],
-        "hello",
-        response=Response(),
-        config=config,
-    )
+    await RequestGuardrails(
+        [GuardrailConfig(profile="prompt-injection", mode="monitor")], response=Response(), config=config
+    ).admit(chat_targets([{"role": "user", "content": "hello"}]))
     assert seen["default_url"] == "http://guardrails:8000"

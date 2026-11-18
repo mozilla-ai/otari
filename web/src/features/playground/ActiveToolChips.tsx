@@ -34,7 +34,7 @@ export function ActiveToolChips({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2 pointer-coarse:gap-y-5">
       {isWebSearchOn ? (
         <AttachedTool
           name="Web search"

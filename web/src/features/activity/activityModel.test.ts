@@ -8,6 +8,7 @@ import {
   describeAttempt,
   describeAttemptOutcome,
   findGroupsMissingEarlierAttempts,
+  findRequestOutcome,
   formatElapsed,
   formatLatencyCell,
   formatTokenLane,
@@ -324,6 +325,37 @@ describe("findGroupsMissingEarlierAttempts", () => {
   it("asks nothing of a request served on its first attempt", () => {
     const page = [attempt({ id: "a", status: "success", attempt_position: 1 })]
     expect(findGroupsMissingEarlierAttempts(page)).toEqual([])
+  })
+})
+
+describe("findRequestOutcome", () => {
+  it("picks the attempt that served over the ones it fell over from", () => {
+    const rows = [
+      attempt({ id: "a", status: "absorbed", attempt_position: 1 }),
+      attempt({ id: "b", status: "success", attempt_position: 2 }),
+    ]
+    expect(findRequestOutcome(rows, "grp-1")?.id).toBe("b")
+  })
+
+  it("picks the terminal failure when no candidate served", () => {
+    const rows = [
+      attempt({ id: "a", status: "absorbed", attempt_position: 1 }),
+      attempt({ id: "b", status: "error", attempt_position: 2 }),
+    ]
+    expect(findRequestOutcome(rows, "grp-1")?.id).toBe("b")
+  })
+
+  it("falls back to the latest attempt while the request has no outcome row", () => {
+    const rows = [
+      attempt({ id: "b", status: "absorbed", attempt_position: 2 }),
+      attempt({ id: "a", status: "absorbed", attempt_position: 1 }),
+    ]
+    expect(findRequestOutcome(rows, "grp-1")?.id).toBe("b")
+  })
+
+  it("ignores rows of another request and finds nothing for an unknown id", () => {
+    const rows = [attempt({ id: "a", request_group_id: "grp-2" })]
+    expect(findRequestOutcome(rows, "grp-1")).toBeUndefined()
   })
 })
 

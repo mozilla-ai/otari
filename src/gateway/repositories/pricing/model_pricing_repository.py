@@ -6,12 +6,12 @@ PostgreSQL: a newest-version read is a ``MAX`` subquery rather than
 ``DISTINCT ON``.
 """
 
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Never, cast
 
-from sqlalchemy import ColumnElement, CursorResult, and_, delete, func, select
+from sqlalchemy import ColumnElement, CursorResult, and_, delete, func, inspect, select
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.pricing import MODEL_KIND, ModelPricing
@@ -20,6 +20,12 @@ from gateway.repositories.base_repository import BaseRepository
 # A key list long enough to exceed SQLite's default limit on bind parameters in
 # one statement is a realistic page of one provider's models.
 _KEY_CHUNK = 500
+
+
+def transient_pricing(row: ModelPricing, **changed: Any) -> ModelPricing:
+    """``row`` as an object no session holds, with the columns ``changed`` names replaced."""
+    columns = {attribute.key: getattr(row, attribute.key) for attribute in inspect(ModelPricing).column_attrs}
+    return ModelPricing(**{**columns, **changed})
 
 
 class ModelPricingRepository(BaseRepository[ModelPricing, Never, Never]):
@@ -86,6 +92,32 @@ class ModelPricingRepository(BaseRepository[ModelPricing, Never, Never]):
                 latest[row.model_key] = row
         return latest
 
+    @staticmethod
+    def transient_version(
+        model_key: str,
+        effective_at: datetime,
+        *,
+        input_price_per_million: Decimal,
+        output_price_per_million: Decimal,
+        cache_read_price_per_million: Decimal | None,
+        cache_write_price_per_million: Decimal | None,
+        pricing_tiers: Sequence[dict[str, Any]],
+        unit: str,
+        origin: str,
+    ) -> ModelPricing:
+        """One version that is a lookup result and not a stored price: never added to a session."""
+        return ModelPricing(
+            model_key=model_key,
+            effective_at=effective_at,
+            input_price_per_million=input_price_per_million,
+            output_price_per_million=output_price_per_million,
+            cache_read_price_per_million=cache_read_price_per_million,
+            cache_write_price_per_million=cache_write_price_per_million,
+            pricing_tiers=list(pricing_tiers),
+            unit=unit,
+            origin=origin,
+        )
+
     def add_version(
         self,
         model_key: str,
@@ -98,8 +130,9 @@ class ModelPricingRepository(BaseRepository[ModelPricing, Never, Never]):
         pricing_tiers: Sequence[dict[str, Any]],
         unit: str,
         origin: str,
+        rates: Mapping[str, Any] | None = None,
     ) -> ModelPricing:
-        """Stage one new version."""
+        """Stage one new version, with the cost block it came from where the caller has one."""
         version = ModelPricing(
             model_key=model_key,
             effective_at=effective_at,
@@ -110,6 +143,7 @@ class ModelPricingRepository(BaseRepository[ModelPricing, Never, Never]):
             pricing_tiers=list(pricing_tiers),
             unit=unit,
             origin=origin,
+            rates=None if rates is None else dict(rates),
         )
         self.db.add(version)
         return version

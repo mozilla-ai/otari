@@ -9,7 +9,10 @@ import {
 } from "react"
 
 import type { CallerWorkspaceMembership } from "@/client"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import {
+  isNoOrganizationError,
+  useOrganizationContext,
+} from "@/shared/api/organizations"
 
 const STORAGE_KEY = "otari.dashboard.selectedWorkspace"
 
@@ -20,6 +23,21 @@ interface SelectedWorkspace {
   selected: CallerWorkspaceMembership | null
   select: (workspaceId: string) => void
   isLoading: boolean
+  /**
+   * The context has answered, or its first read failed, so `selected` is final
+   * until the caller picks another workspace. Read from this provider rather than
+   * from the context query directly: a component subscribed to that query can
+   * render a beat before this provider does, and see the workspace still missing.
+   * Settled on a failure as `deploymentOperatorAnswer` is, so an outage does not
+   * hold a page through the query's retries.
+   */
+  isSettled: boolean
+  /**
+   * The context read failed with no answer to fall back on, so `selected` is
+   * null because nothing is known, not because the caller belongs to no
+   * workspace. A 404 is the answer that there is no organization, not a failure.
+   */
+  isUnknown: boolean
 }
 
 const Context = createContext<SelectedWorkspace | null>(null)
@@ -81,14 +99,21 @@ export function SelectedWorkspaceProvider({
     setChosen(workspaceId)
   }, [])
 
+  const isSettled = context.data !== undefined || context.isFetched
+  const isUnknown =
+    context.data === undefined &&
+    context.isError &&
+    !isNoOrganizationError(context.error)
   const value = useMemo(
     () => ({
       memberships,
       selected,
       select,
       isLoading: context.isLoading,
+      isSettled,
+      isUnknown,
     }),
-    [memberships, selected, select, context.isLoading],
+    [memberships, selected, select, context.isLoading, isSettled, isUnknown],
   )
 
   return <Context.Provider value={value}>{children}</Context.Provider>
@@ -104,8 +129,22 @@ const NO_WORKSPACE: SelectedWorkspace = {
   selected: null,
   select: () => {},
   isLoading: false,
+  isSettled: true,
+  isUnknown: false,
 }
 
 export function useSelectedWorkspace(): SelectedWorkspace {
   return useContext(Context) ?? NO_WORKSPACE
+}
+
+/**
+ * The workspace a read narrows to: the selected one's id, `""` for a caller
+ * with no workspace (the whole reach), or `null` while the selection is not
+ * final or could not be read, so a workspace-bound read waits rather than
+ * answering unscoped.
+ */
+export function useNarrowingWorkspace(): string | null {
+  const { selected, isSettled, isUnknown } = useSelectedWorkspace()
+  if (selected) return selected.workspace_id
+  return isSettled && !isUnknown ? "" : null
 }

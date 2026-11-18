@@ -4,12 +4,22 @@ import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { DeploymentUser, PasswordLink } from "@/client"
+import type { BlockedEmail, DeploymentUser, PasswordLink } from "@/client"
 import { DeploymentAccountsPage } from "@/features/admin/DeploymentAccountsPage"
 import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
-import { bootstrap, deploymentUser } from "@/tests/fixtures"
+import {
+  bootstrap,
+  deploymentUser,
+  organizationContext,
+} from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
+import {
+  findRowMenuItem,
+  getRowMenuItem,
+  pressRowAction,
+  rowMenuTriggers,
+} from "@/tests/rowMenu"
 
 interface Request {
   url: string
@@ -26,13 +36,20 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function mockApi(opts: {
   granted?: boolean
+  isBootstrapOperator?: boolean
+  hasPassword?: boolean
+  profileFails?: boolean
   accounts?: DeploymentUser[]
   count?: number
   passwordLink?: PasswordLink
+  blocked?: BlockedEmail[]
+  blockedCount?: number
+  blockedAccountCount?: number
 }) {
   const granted = opts.granted ?? true
   const accounts = opts.accounts ?? [deploymentUser()]
   const requests: Request[] = []
+  let blockedCount = opts.blockedCount ?? (opts.blocked ?? []).length
 
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
@@ -44,7 +61,39 @@ function mockApi(opts: {
     })
 
     if (url.includes(`${API_ROOT}/admin/access`)) {
-      return jsonResponse({ granted })
+      return jsonResponse({
+        granted,
+        is_bootstrap_operator: opts.isBootstrapOperator ?? false,
+      })
+    }
+    if (url.includes(`${API_ROOT}/admin/blocked-emails`)) {
+      const blocked = opts.blocked ?? []
+      if (method === "GET") {
+        return jsonResponse({ data: blocked, count: blockedCount })
+      }
+      if (method === "DELETE") {
+        blockedCount -= 1
+        return new Response(null, { status: 204 })
+      }
+      return jsonResponse(
+        {
+          ...BLOCKED_DOMAIN,
+          blocked_account_count: opts.blockedAccountCount ?? 0,
+        },
+        201,
+      )
+    }
+    if (url.endsWith("/bootstrap-operator")) {
+      return new Response(null, { status: 204 })
+    }
+    if (url.endsWith(`${API_ROOT}/auth/profile`)) {
+      if (opts.profileFails) {
+        return jsonResponse({ detail: "The profile could not be read" }, 500)
+      }
+      return jsonResponse({
+        ...organizationContext().caller,
+        has_password: opts.hasPassword ?? false,
+      })
     }
     if (url.endsWith("/password-link")) {
       return jsonResponse(opts.passwordLink, 201)
@@ -99,6 +148,15 @@ const OPERATOR = deploymentUser({
   last_sign_in_at: "2026-01-01T00:00:00+00:00",
 })
 
+const BLOCKED_DOMAIN: BlockedEmail = {
+  id: "cccccccc-0000-0000-0000-000000000000",
+  pattern: "spam.example",
+  kind: "domain",
+  reason: "throwaway signups",
+  created_by_user_id: null,
+  created_at: "2026-01-01T00:00:00+00:00",
+}
+
 const realMatchMedia = window.matchMedia
 
 function stubPhone() {
@@ -146,7 +204,7 @@ describe("DeploymentAccountsPage", () => {
     expect(await screen.findByText("Analyst")).toBeInTheDocument()
     expect(screen.queryByRole("grid")).not.toBeInTheDocument()
     const card = screen.getByText("Analyst").closest("li") as HTMLElement
-    expect(within(card).getAllByRole("button").length).toBeGreaterThan(0)
+    expect(rowMenuTriggers(card).length).toBeGreaterThan(0)
   })
 
   it("marks a membership the organization roster would have dropped", async () => {
@@ -175,11 +233,14 @@ describe("DeploymentAccountsPage", () => {
 
   it("deactivates an account after a confirmation", async () => {
     const requests = mockApi({ accounts: [ANALYST] })
+    const user = userEvent.setup()
     await renderPage(<DeploymentAccountsPage />)
-
-    await userEvent.click(await screen.findByLabelText("Deactivate Analyst"))
-    await userEvent.click(
-      screen.getByRole("button", { name: "Deactivate account" }),
+    await screen.findByText("Analyst")
+    await pressRowAction(user, "Deactivate Analyst")
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Deactivate account",
+      }),
     )
 
     const patch = requests.find((request) => request.method === "PATCH")
@@ -198,12 +259,10 @@ describe("DeploymentAccountsPage", () => {
     })
     await renderPage(<DeploymentAccountsPage />)
 
-    await userEvent.click(
-      await screen.findByLabelText("Send Analyst a password link"),
-    )
-    await userEvent.click(
-      screen.getByRole("button", { name: "Create the link" }),
-    )
+    const user = userEvent.setup()
+    await screen.findByText("Analyst")
+    await pressRowAction(user, "Send Analyst a password link")
+    await user.click(screen.getByRole("button", { name: "Create the link" }))
 
     const post = requests.find((request) => request.method === "POST")
     expect(post?.url).toContain(
@@ -230,12 +289,10 @@ describe("DeploymentAccountsPage", () => {
     })
     await renderPage(<DeploymentAccountsPage />)
 
-    await userEvent.click(
-      await screen.findByLabelText("Send Analyst a password link"),
-    )
-    await userEvent.click(
-      screen.getByRole("button", { name: "Create the link" }),
-    )
+    const user = userEvent.setup()
+    await screen.findByText("Analyst")
+    await pressRowAction(user, "Send Analyst a password link")
+    await user.click(screen.getByRole("button", { name: "Create the link" }))
 
     expect(
       await screen.findByText(/link to set a new password was sent to/),
@@ -249,11 +306,20 @@ describe("DeploymentAccountsPage", () => {
     })
     await renderPage(<DeploymentAccountsPage />)
 
+    const user = userEvent.setup()
+    await screen.findByText("Analyst")
+    // A refused item is named by its label, with the reason under it and on the
+    // trigger's own name.
+    expect(await getRowMenuItem(user, /^Password link…/)).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    )
+    await user.keyboard("{Escape}")
     expect(
-      await screen.findByLabelText(
-        "Send Analyst a password link (Reactivate this account first)",
-      ),
-    ).toBeDisabled()
+      screen.getByRole("button", {
+        name: /^Row actions.*Reactivate this account first/,
+      }),
+    ).toBeInTheDocument()
   })
 
   it("reactivates a deactivated account with no confirmation", async () => {
@@ -262,7 +328,9 @@ describe("DeploymentAccountsPage", () => {
     })
     await renderPage(<DeploymentAccountsPage />)
 
-    await userEvent.click(await screen.findByLabelText("Reactivate Analyst"))
+    const user = userEvent.setup()
+    await screen.findByText("Analyst")
+    await pressRowAction(user, "Reactivate Analyst")
 
     const patch = requests.find((request) => request.method === "PATCH")
     expect(patch?.body).toEqual({ is_active: true })
@@ -272,9 +340,9 @@ describe("DeploymentAccountsPage", () => {
     const requests = mockApi({ accounts: [ANALYST] })
     await renderPage(<DeploymentAccountsPage />)
 
-    await userEvent.click(
-      await screen.findByLabelText("Grant operator access to Analyst"),
-    )
+    const user = userEvent.setup()
+    await screen.findByText("Analyst")
+    await pressRowAction(user, "Grant operator access to Analyst")
 
     const patch = requests.find((request) => request.method === "PATCH")
     expect(patch?.body).toEqual({ is_superuser: true })
@@ -295,18 +363,29 @@ describe("DeploymentAccountsPage", () => {
     mockApi({ accounts: [SELF, ANALYST] })
     await renderPage(<DeploymentAccountsPage />)
 
-    const own = await screen.findByLabelText(
-      /^Deactivate Reader \(This is your own account/,
+    const user = userEvent.setup()
+    await screen.findByText("Reader")
+    const own = rowFor("Reader")
+    expect(await getRowMenuItem(user, /^Deactivate…/, own)).toHaveAttribute(
+      "aria-disabled",
+      "true",
     )
-    expect(own).toBeDisabled()
+    await user.keyboard("{Escape}")
+    expect(await getRowMenuItem(user, /^Remove operator/, own)).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    )
+    await user.keyboard("{Escape}")
     expect(
-      screen.getByLabelText(
-        /^Remove operator access from Reader \(This is your own account/,
-      ),
-    ).toBeDisabled()
+      within(own).getByRole("button", {
+        name: /^Row actions.*This is your own account/,
+      }),
+    ).toBeInTheDocument()
     // The other row keeps both, so the guard is about who the row is and not
     // about the page being read-only.
-    expect(screen.getByLabelText("Deactivate Analyst")).toBeEnabled()
+    expect(
+      await getRowMenuItem(user, "Deactivate Analyst", rowFor("Analyst")),
+    ).not.toHaveAttribute("aria-disabled", "true")
   })
 
   it("disables them on the caller's own row when it is also the bootstrap one", async () => {
@@ -316,16 +395,24 @@ describe("DeploymentAccountsPage", () => {
     mockApi({ accounts: [OPERATOR, ANALYST] })
     await renderPage(<DeploymentAccountsPage />)
 
+    const user = userEvent.setup()
+    await screen.findByText("Operator")
+    const own = rowFor("Operator")
+    expect(await getRowMenuItem(user, /^Deactivate…/, own)).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    )
+    await user.keyboard("{Escape}")
+    expect(await getRowMenuItem(user, /^Remove operator/, own)).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    )
+    await user.keyboard("{Escape}")
     expect(
-      await screen.findByLabelText(
-        /^Deactivate Operator \(The bootstrap operator/,
-      ),
-    ).toBeDisabled()
-    expect(
-      screen.getByLabelText(
-        /^Remove operator access from Operator \(The bootstrap operator/,
-      ),
-    ).toBeDisabled()
+      within(own).getByRole("button", {
+        name: /^Row actions.*The bootstrap operator/,
+      }),
+    ).toBeInTheDocument()
   })
 
   it("disables them on the bootstrap operator seen by another operator", async () => {
@@ -340,11 +427,137 @@ describe("DeploymentAccountsPage", () => {
     })
     await renderPage(<DeploymentAccountsPage />)
 
+    const user = userEvent.setup()
+    await screen.findByText("Anchor")
+    expect(await getRowMenuItem(user, /^Deactivate…/)).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    )
+    await user.keyboard("{Escape}")
     expect(
-      await screen.findByLabelText(
-        /^Deactivate Anchor \(The bootstrap operator/,
-      ),
+      screen.getByRole("button", {
+        name: /^Row actions.*The bootstrap operator/,
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it("hands the bootstrap operator role on with the caller's password", async () => {
+    const successor = deploymentUser({ ...ANALYST, is_superuser: true })
+    const requests = mockApi({
+      accounts: [successor, OPERATOR],
+      isBootstrapOperator: true,
+      hasPassword: true,
+    })
+    await renderPage(<DeploymentAccountsPage />)
+
+    const user = userEvent.setup()
+    await screen.findByText("Analyst")
+    await pressRowAction(user, "Make Analyst the bootstrap operator")
+    await userEvent.type(
+      await screen.findByLabelText(/Your current password/),
+      "hunter2-hunter2",
+    )
+    await userEvent.click(
+      screen.getByRole("button", { name: "Make bootstrap operator" }),
+    )
+
+    await waitFor(() => {
+      const posted = requests.find((request) =>
+        request.url.endsWith("/bootstrap-operator"),
+      )
+      expect(posted?.url).toContain(
+        `${API_ROOT}/admin/users/${successor.id}/bootstrap-operator`,
+      )
+      expect(posted?.body).toEqual({ current_password: "hunter2-hunter2" })
+    })
+  })
+
+  it("tells an account with no password to set one or use the master key", async () => {
+    const successor = deploymentUser({ ...ANALYST, is_superuser: true })
+    const requests = mockApi({
+      accounts: [successor],
+      isBootstrapOperator: true,
+    })
+    await renderPage(<DeploymentAccountsPage />)
+
+    const user = userEvent.setup()
+    await screen.findByText("Analyst")
+    await pressRowAction(user, "Make Analyst the bootstrap operator")
+
+    expect(
+      await screen.findByText(/Your account has no password/),
+    ).toBeInTheDocument()
+    expect(screen.queryByLabelText(/Your current password/)).toBeNull()
+    expect(
+      screen.getByRole("button", { name: "Make bootstrap operator" }),
     ).toBeDisabled()
+    expect(
+      requests.some((request) => request.url.endsWith("/bootstrap-operator")),
+    ).toBe(false)
+  })
+
+  it("reports a profile that could not be read, with a way to try again", async () => {
+    mockApi({
+      accounts: [deploymentUser({ ...ANALYST, is_superuser: true })],
+      isBootstrapOperator: true,
+      profileFails: true,
+    })
+    await renderPage(<DeploymentAccountsPage />)
+
+    const user = userEvent.setup()
+    await screen.findByText("Analyst")
+    await pressRowAction(user, "Make Analyst the bootstrap operator")
+
+    expect(
+      await screen.findByRole("button", { name: "Try again" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Make bootstrap operator" }),
+    ).toBeDisabled()
+  })
+
+  it("shows the handover disabled on the bootstrap operator's own row", async () => {
+    mockApi({ accounts: [OPERATOR], isBootstrapOperator: true })
+    await renderPage(<DeploymentAccountsPage />)
+
+    const user = userEvent.setup()
+    await screen.findByText("Operator")
+    expect(
+      await getRowMenuItem(user, /^Make bootstrap operator/),
+    ).toHaveAttribute("aria-disabled", "true")
+    await user.keyboard("{Escape}")
+    expect(
+      screen.getByRole("button", {
+        name: /^Row actions.*This is already the bootstrap operator/,
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it("offers the handover only to the bootstrap operator", async () => {
+    mockApi({ accounts: [deploymentUser({ ...ANALYST, is_superuser: true })] })
+    await renderPage(<DeploymentAccountsPage />)
+
+    const user = userEvent.setup()
+    await screen.findByText("Analyst")
+    expect(await findRowMenuItem(user, /the bootstrap operator$/)).toBeNull()
+    expect(await findRowMenuItem(user, "Deactivate Analyst")).not.toBeNull()
+  })
+
+  it("disables the handover to an account that is not an operator, with the reason", async () => {
+    mockApi({ accounts: [ANALYST], isBootstrapOperator: true })
+    await renderPage(<DeploymentAccountsPage />)
+
+    const user = userEvent.setup()
+    await screen.findByText("Analyst")
+    expect(
+      await getRowMenuItem(user, /^Make bootstrap operator/),
+    ).toHaveAttribute("aria-disabled", "true")
+    await user.keyboard("{Escape}")
+    expect(
+      screen.getByRole("button", {
+        name: /^Row actions.*Make this account an operator first/,
+      }),
+    ).toBeInTheDocument()
   })
 
   it("asks the server for the search term, not the page on screen", async () => {
@@ -433,5 +646,140 @@ describe("DeploymentAccountsPage", () => {
         request.url.includes(`${API_ROOT}/admin/users`),
       ),
     ).toBe(false)
+  })
+})
+
+describe("Blocked emails", () => {
+  it("lists each entry with what it covers and why", async () => {
+    mockApi({ blocked: [BLOCKED_DOMAIN] })
+    await renderPage(<DeploymentAccountsPage />)
+
+    const table = await screen.findByRole("grid", { name: "Blocked emails" })
+    expect(await within(table).findByText("spam.example")).toBeInTheDocument()
+    expect(within(table).getByText("DOMAIN AND SUBDOMAINS")).toBeInTheDocument()
+    expect(within(table).getByText("throwaway signups")).toBeInTheDocument()
+  })
+
+  it("pages the list rather than stopping at the first page", async () => {
+    const user = userEvent.setup()
+    const requests = mockApi({ blocked: [BLOCKED_DOMAIN], blockedCount: 30 })
+    await renderPage(<DeploymentAccountsPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Next page, entries" }),
+    )
+
+    await waitFor(() =>
+      expect(
+        requests.some((request) =>
+          request.url.includes("/admin/blocked-emails?skip=25&limit=25"),
+        ),
+      ).toBe(true),
+    )
+  })
+
+  it("returns to the last page with rows once an unblock empties its page", async () => {
+    const user = userEvent.setup()
+    const requests = mockApi({ blocked: [BLOCKED_DOMAIN], blockedCount: 26 })
+    await renderPage(<DeploymentAccountsPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Next page, entries" }),
+    )
+    await waitFor(() =>
+      expect(
+        requests.some((request) =>
+          request.url.includes("/admin/blocked-emails?skip=25&limit=25"),
+        ),
+      ).toBe(true),
+    )
+    await pressRowAction(user, "Unblock spam.example…")
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Unblock",
+      }),
+    )
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("textbox", { name: "Page number, entries" }),
+      ).toHaveValue("1"),
+    )
+  })
+
+  it("drops the block banner once its entry is unblocked", async () => {
+    const user = userEvent.setup()
+    mockApi({ blocked: [BLOCKED_DOMAIN], blockedAccountCount: 1 })
+    await renderPage(<DeploymentAccountsPage />)
+
+    await user.type(
+      await screen.findByRole("textbox", { name: "Address or domain" }),
+      "spam.example",
+    )
+    await user.click(screen.getByRole("button", { name: "Block" }))
+    const banner = await screen.findByText(/^Blocked spam\.example\./)
+
+    await pressRowAction(user, "Unblock spam.example…")
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Unblock",
+      }),
+    )
+
+    await waitFor(() => expect(banner).not.toBeInTheDocument())
+  })
+
+  it("blocks what was typed and says how many accounts it caught", async () => {
+    const user = userEvent.setup()
+    const requests = mockApi({ blockedAccountCount: 2 })
+    await renderPage(<DeploymentAccountsPage />)
+
+    await user.type(
+      await screen.findByRole("textbox", { name: "Address or domain" }),
+      " @spam.example ",
+    )
+    await user.type(
+      screen.getByRole("textbox", { name: "Reason (optional)" }),
+      "throwaway signups",
+    )
+    await user.click(screen.getByRole("button", { name: "Block" }))
+
+    expect(
+      await screen.findByText(
+        "Blocked spam.example. 2 existing accounts can no longer sign in, and their sessions were ended.",
+      ),
+    ).toBeInTheDocument()
+    const posted = requests.find(
+      (request) =>
+        request.method === "POST" &&
+        request.url.endsWith("/admin/blocked-emails"),
+    )
+    expect(posted?.body).toEqual({
+      value: "@spam.example",
+      reason: "throwaway signups",
+    })
+  })
+
+  it("unblocks an entry after asking", async () => {
+    const user = userEvent.setup()
+    const requests = mockApi({ blocked: [BLOCKED_DOMAIN] })
+    await renderPage(<DeploymentAccountsPage />)
+
+    await pressRowAction(user, "Unblock spam.example…")
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Unblock",
+      }),
+    )
+
+    await waitFor(() =>
+      expect(
+        requests.some(
+          (request) =>
+            request.method === "DELETE" &&
+            request.url.endsWith(`/admin/blocked-emails/${BLOCKED_DOMAIN.id}`),
+        ),
+      ).toBe(true),
+    )
   })
 })

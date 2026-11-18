@@ -14,8 +14,8 @@
  *
  * Keys are any-llm's own provider ids, read off `AnyLLM.get_supported_providers()`
  * rather than recalled, because a key that is not a real id is a row that never
- * gets its name and nothing fails. The four ids with no widely-used brand
- * spelling of their own are deliberately absent and fall through unchanged.
+ * gets its name and nothing fails. An id with no widely-used brand
+ * spelling of its own is deliberately absent and falls through unchanged.
  *
  * `mzai` and `otari` are in it for the same reason every vendor is. A deployment
  * serving its own models would otherwise have shown them lowercase while every
@@ -35,6 +35,7 @@ const PROVIDER_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   azureanthropic: "Azure Anthropic",
   azureopenai: "Azure OpenAI",
   bedrock: "Amazon Bedrock",
+  cascadia: "Cascadia",
   cerebras: "Cerebras",
   cohere: "Cohere",
   dashscope: "DashScope",
@@ -48,6 +49,7 @@ const PROVIDER_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   groq: "Groq",
   huggingface: "Hugging Face",
   inception: "Inception",
+  liner: "Liner",
   llama: "Llama API",
   llamacpp: "llama.cpp",
   llamafile: "llamafile",
@@ -58,6 +60,7 @@ const PROVIDER_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   moonshot: "Moonshot AI",
   mzai: "Mozilla AI",
   nebius: "Nebius",
+  neosantara: "Neosantara",
   ollama: "Ollama",
   openai: "OpenAI",
   openrouter: "OpenRouter",
@@ -70,7 +73,9 @@ const PROVIDER_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   sagemaker: "Amazon SageMaker",
   sambanova: "SambaNova",
   telnyx: "Telnyx",
+  tokenhub: "TokenHub",
   together: "Together AI",
+  typesafe: "TypeSafe",
   vertexai: "Vertex AI",
   vertexaianthropic: "Vertex AI Anthropic",
   vllm: "vLLM",
@@ -90,4 +95,21 @@ const PROVIDER_DISPLAY_NAMES: Readonly<Record<string, string>> = {
  */
 export function providerDisplayName(providerId: string): string {
   return PROVIDER_DISPLAY_NAMES[providerId.trim().toLowerCase()] ?? providerId
+}
+
+/**
+ * The name a provider picker shows for a catalog row.
+ *
+ * Our own map wins over the backend's name, which is shared across ids (`azure`
+ * and `azureopenai` both arrive as "Azure", `vertexai` and `vertexaianthropic`
+ * as "Vertex") and so makes two options read the same. The backend's name is
+ * the fallback for an id the map does not know, and the id is the last resort,
+ * which is also what the backend sends when it has no name at all.
+ */
+export function providerCatalogName(
+  providerId: string,
+  backendName: string | undefined,
+): string {
+  const known = providerDisplayName(providerId)
+  return known !== providerId ? known : backendName || providerId
 }

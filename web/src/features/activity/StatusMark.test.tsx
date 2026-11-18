@@ -35,4 +35,11 @@ describe("StatusMark", () => {
     const word = screen.getByText("Skipped")
     expect(word).toHaveClass("text-subtle")
   })
+
+  it("shows an abandoned stream as Incomplete, neither a failure nor a success", () => {
+    render(<StatusMark status="incomplete" />)
+    const word = screen.getByText("Incomplete")
+    expect(word).toHaveClass("text-subtle")
+    expect(word).not.toHaveClass("text-danger")
+  })
 })

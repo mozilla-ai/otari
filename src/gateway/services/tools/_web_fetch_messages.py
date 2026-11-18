@@ -15,7 +15,7 @@ from anthropic.types import (
     WebFetchToolResultErrorBlock,
 )
 
-from gateway.services.tools._native import SERVER_TOOL_USE_ID_PREFIX, NativeCall
+from gateway.services.tools._native import SERVER_TOOL_USE_ID_PREFIX, NativeCall, Refusal
 from gateway.services.tools._web_display import fetch_display_url, fetched_display_url
 from gateway.services.tools._web_names import (
     ANTHROPIC_WEB_FETCH_TYPE,
@@ -93,9 +93,9 @@ class MessagesWebFetchRendering:
             ),
         )
 
-    def refused(self, call: NativeCall) -> list[Any]:
-        """The pair for a fetch the use cap refused, in the vocabulary's own error shape."""
-        return _pair(call, _error("max_uses_exceeded"))
+    def refused(self, call: NativeCall, reason: Refusal) -> list[Any]:
+        """The pair for a fetch refused before it ran, in the vocabulary's own error shape."""
+        return _pair(call, _error("max_uses_exceeded" if reason is Refusal.CALL_LIMIT else "invalid_tool_input"))
 
 
 RENDERING = MessagesWebFetchRendering()

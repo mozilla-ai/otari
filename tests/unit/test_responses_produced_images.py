@@ -82,3 +82,10 @@ def test_a_run_the_backend_never_answered_announces_nothing() -> None:
 
     assert item.outputs is None
     assert item.status == "failed"
+
+
+def test_a_call_with_no_code_is_reported_failed() -> None:
+    item = _code_interpreter_call_item(CodeExecution(code="", result=None, invalid_input=True), "otari_cntr_1", BASE)
+
+    assert item.outputs is None
+    assert item.status == "failed"

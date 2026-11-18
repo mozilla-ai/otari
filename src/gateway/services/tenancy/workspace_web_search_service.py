@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.exceptions.tools_exceptions import WebSearchPolicyResolutionFailedError, WebSearchPolicyResolutionFailure
 from gateway.models.tenancy import User, Workspace
-from gateway.models.tools import ResolvedWebSearchConfig, WebTool, WorkspaceWebSearchConfig
+from gateway.models.tools import CodeExecutor, ResolvedWebSearchConfig, WebTool, WorkspaceWebSearchConfig
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.web_retrieval_policy import read_domain_list
@@ -126,6 +126,33 @@ class WorkspaceWebSearchConfigUpdate(BaseModel):
         default=None,
         description="Search only: provider-specific knobs forwarded to the backend; request keys win",
     )
+    search_executor: CodeExecutor | None = Field(
+        default=None,
+        description=(
+            "Who runs a provider-native web-search declaration (Anthropic's web_search_<date>, OpenAI's "
+            "web_search) for this workspace: 'auto' (the provider when it runs the tool natively for the "
+            "model, else this gateway's search), 'otari' or 'provider'. Pins over the request's "
+            "Otari-Web-Search header; null leaves the header in charge. The deployment's "
+            "web_search_intercept still claims every search"
+        ),
+    )
+    fetch_executor: CodeExecutor | None = Field(
+        default=None,
+        description=(
+            "Who runs a provider-native web-fetch declaration (Anthropic's web_fetch_<date>) for this "
+            "workspace, in search_executor's vocabulary. Pins over the request's Otari-Web-Fetch header; "
+            "null leaves the header in charge"
+        ),
+    )
+
+    @field_validator("search_executor", "fetch_executor", mode="before")
+    @classmethod
+    def _parse_executor(cls, value: object) -> object:
+        """Accept the vocabulary in any case, and a blank string as no pin."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        parsed = CodeExecutor.parse(value)
+        return value if parsed is None else parsed
 
     @field_validator("allowed_domains", "blocked_domains")
     @classmethod
@@ -163,6 +190,8 @@ class WorkspaceWebSearchConfigPublic(BaseModel):
     allowed_domains: list[str] | None
     blocked_domains: list[str] | None
     provider_options: dict[str, Any] | None
+    search_executor: CodeExecutor | None
+    fetch_executor: CodeExecutor | None
     created_at: str | None
     updated_at: str | None
 
@@ -181,6 +210,8 @@ class WorkspaceWebSearchConfigPublic(BaseModel):
             allowed_domains=None,
             blocked_domains=None,
             provider_options=None,
+            search_executor=None,
+            fetch_executor=None,
             created_at=None,
             updated_at=None,
         )
@@ -200,6 +231,8 @@ class WorkspaceWebSearchConfigPublic(BaseModel):
             allowed_domains=config.allowed_domains,
             blocked_domains=config.blocked_domains,
             provider_options=config.provider_options,
+            search_executor=CodeExecutor.parse(config.search_executor),
+            fetch_executor=CodeExecutor.parse(config.fetch_executor),
             created_at=config.created_at.isoformat(),
             updated_at=config.updated_at.isoformat(),
         )
@@ -226,6 +259,9 @@ async def resolve_workspace_web_search_config(
         blocked_domains=_stored_domains(config.blocked_domains),
         provider_options=config.provider_options,
         authorized_tools=None,
+        # A stored value outside the vocabulary reads as no pin, so an old row does not fail every request.
+        search_executor=CodeExecutor.parse(config.search_executor),
+        fetch_executor=CodeExecutor.parse(config.fetch_executor),
     )
 
 
@@ -287,6 +323,33 @@ class WorkspaceWebSearchPolicies:
         if keys.search is None and keys.fetch is None:
             return policy
         return replace(policy or _NO_NARROWING, credential=keys.search, fetch_credential=keys.fetch)
+
+    async def access(self, workspace_id: uuid.UUID) -> tuple[bool, ResolvedWebSearchConfig]:
+        """Whether the workspace's requests may declare the web tools, and the policy they resolve on.
+
+        The policy carries the workspace's search and fetch keys whatever the switch says, so a caller
+        can tell a tool nothing serves from one the workspace refuses. A stored row that is invalid refuses
+        every web declaration, so it reads as not allowed.
+        """
+        try:
+            stored = await resolve_workspace_web_search_config(self._db, workspace_id)
+        except InvalidStoredWebSearchDomainError:
+            stored, allowed = None, False
+        else:
+            allowed = stored.enabled if stored is not None else self._on_without_policy
+        keys = await self._search_keys.keys_for(workspace_id, search=True, fetch=True)
+        return allowed, replace(stored or _NO_NARROWING, credential=keys.search, fetch_credential=keys.fetch)
+
+    async def executors(self, workspace_id: uuid.UUID) -> tuple[CodeExecutor | None, CodeExecutor | None]:
+        """Who the workspace pinned to run a provider's own search and fetch keywords, ``None`` where it did not.
+
+        Reads the pins alone: a stored domain rule governs only a tool Otari runs, so one
+        that is invalid must not refuse a keyword the provider runs.
+        """
+        config = await self._db.get(WorkspaceWebSearchConfig, workspace_id)
+        if config is None:
+            return None, None
+        return CodeExecutor.parse(config.search_executor), CodeExecutor.parse(config.fetch_executor)
 
 
 class WorkspaceWebSearchService:
@@ -395,6 +458,8 @@ class WorkspaceWebSearchService:
         config.allowed_domains = request.allowed_domains
         config.blocked_domains = request.blocked_domains
         config.provider_options = request.provider_options
+        config.search_executor = request.search_executor.value if request.search_executor is not None else None
+        config.fetch_executor = request.fetch_executor.value if request.fetch_executor is not None else None
 
     async def _can_search(self, workspace_id: uuid.UUID) -> bool:
         """Whether the workspace's search declarations have something to run on, its own key counting."""

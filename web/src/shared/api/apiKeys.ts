@@ -5,6 +5,8 @@ import type {
   CreateKeyRequest,
   CreateKeyResponse,
   CreateOwnKeyRequest,
+  EndUser,
+  EndUserCount,
   FederationRule,
   UpdateKeyRequest,
   UpdateOwnKeyRequest,
@@ -12,7 +14,12 @@ import type {
 import { apiFetch } from "@/shared/api/client"
 import { useDeploymentOperator } from "@/shared/api/organizations"
 import { fetchAllRows } from "@/shared/api/paging"
-import { FEDERATION_RULES, KEYS, workspaceMeta } from "@/shared/api/queryKeys"
+import {
+  FEDERATION_RULES,
+  KEY_END_USERS,
+  KEYS,
+  workspaceMeta,
+} from "@/shared/api/queryKeys"
 
 // Which of the two key surfaces this caller may act on.
 //
@@ -123,6 +130,53 @@ export function useDeleteKey() {
         method: "DELETE",
       }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: [KEYS] }),
+  })
+}
+
+// One page of a service key's end users, oldest first, or the one named by
+// `externalId`. A row past the page is asked for so the pager knows whether
+// another page follows without a count of every end user on each read.
+export function useKeyEndUsers(
+  keyId: string,
+  page: number,
+  pageSize: number,
+  externalId: string,
+) {
+  const scope = useKeysScope()
+  return useQuery({
+    queryKey: [KEY_END_USERS, scope.base, keyId, page, pageSize, externalId],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        skip: String(page * pageSize),
+        limit: String(pageSize + 1),
+      })
+      if (externalId) params.set("external_id", externalId)
+      const rows = await apiFetch<EndUser[]>(
+        `${scope.base}/${encodeURIComponent(keyId)}/end-users?${params}`,
+      )
+      return { rows: rows.slice(0, pageSize), hasMore: rows.length > pageSize }
+    },
+    enabled: scope.isReady,
+    // Zero on purpose: requests move spend and counts all the time, and access
+    // to the key can be taken away, so every opening reads the page again.
+    staleTime: 0,
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[2] === keyId ? previous : undefined,
+  })
+}
+
+// How many end users a service key's cap counts, and the cap. Read fresh on
+// every opening for the reason `useKeyEndUsers` gives.
+export function useKeyEndUserCount(keyId: string) {
+  const scope = useKeysScope()
+  return useQuery({
+    queryKey: [KEY_END_USERS, scope.base, keyId, "count"],
+    queryFn: () =>
+      apiFetch<EndUserCount>(
+        `${scope.base}/${encodeURIComponent(keyId)}/end-user-count`,
+      ),
+    enabled: scope.isReady,
+    staleTime: 0,
   })
 }
 

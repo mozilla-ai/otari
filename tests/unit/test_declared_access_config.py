@@ -196,3 +196,54 @@ def test_nothing_declared_is_valid() -> None:
 
 def test_a_different_secret_per_key_is_valid() -> None:
     _check_secrets(_config(api_keys={"one": _key(), "two": _key(OTHER_SECRET)}))
+
+
+def test_a_key_naming_no_scopes_holds_what_keys_held_before_scopes() -> None:
+    plain = ApiKeyConfig(secret=SecretStr(SECRET))
+    service = ApiKeyConfig(secret=SecretStr(SECRET), is_service_key=True)
+
+    assert "end-users:read" not in plain.held_scopes()
+    assert plain.held_scopes().stored == [s for s in service.held_scopes().stored if not s.startswith("end-users:")]
+    assert {"end-users:read", "end-users:write", "end-users:delete"} <= set(service.held_scopes())
+
+
+def test_a_key_holds_the_scopes_it_names() -> None:
+    key = ApiKeyConfig.model_validate({"secret": SECRET, "scopes": ["usage:read", "inference:run", "inference:run"]})
+
+    assert key.held_scopes().stored == ["inference:run", "usage:read"]
+
+
+@pytest.mark.parametrize(
+    ("scopes", "message"),
+    [
+        (["end-users:read"], "Only a service key may hold end-users:read"),
+        (["admin"], "scopes.0"),
+        ([], "at least 1 item"),
+    ],
+)
+def test_scopes_a_key_cannot_hold_fail_the_load(scopes: list[str], message: str) -> None:
+    with pytest.raises(ValidationError, match=message) as refused:
+        ApiKeyConfig.model_validate({"secret": SECRET, "scopes": scopes})
+
+    assert SECRET not in str(refused.value)
+
+
+# What a gateway without key scopes stored for this entry, pinned as a literal so
+# that a field added to ``ApiKeyConfig`` cannot move it unnoticed.
+_DIGEST_BEFORE_SCOPES = "82b757626f60a59729513e2559377fe1b0eb0d9b3d013c7e988d44c3c30c0845"
+_PINNED_ENTRY: dict[str, Any] = {
+    "secret": "otari-declared-secret-for-digest-pin-0001",
+    "user_id": "ci",
+    "key_name": "ci-bot",
+}
+
+
+def test_an_entry_naming_no_scopes_keeps_the_digest_it_had() -> None:
+    """A changed digest rewrites the key on the next start, switching back on one an operator switched off."""
+    assert ApiKeyConfig.model_validate(_PINNED_ENTRY).declaration_digest() == _DIGEST_BEFORE_SCOPES
+
+
+def test_naming_scopes_changes_the_digest() -> None:
+    scoped = ApiKeyConfig.model_validate({**_PINNED_ENTRY, "scopes": ["inference:run"]})
+
+    assert scoped.declaration_digest() != _DIGEST_BEFORE_SCOPES

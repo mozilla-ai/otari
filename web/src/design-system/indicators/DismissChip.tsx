@@ -11,12 +11,12 @@ import { FiX } from "react-icons/fi"
  * No box, because the kinds here are told apart by dot, case and separator; a
  * bordered, filled chip would be the only boxed thing in the product.
  *
- * The dismiss is a 24px target holding a 12px glyph, which is under the 44px
- * floor `design/motion-and-access.md` sets, and knowingly so. The device that
- * doc names (a `before:` bleed, as `Toggle` uses) is not free here: this row
- * wraps at an 8px gap, so stacked bleeds would overlap by about 12px and a
- * press near the seam would dismiss the neighboring filter. Reaching 44px for
- * real instead grows the row on three pages. #947 carries the decision.
+ * The dismiss is drawn as a 24px square holding a 12px glyph, and on a coarse
+ * pointer its hit area grows to 44px through a `before:` bleed, as `Toggle`'s
+ * does, so nothing moves. Two bleeds stacked in a wrapped row would overlap
+ * unless the rows are 44px apart, so every row that holds these chips sets
+ * `pointer-coarse:gap-y-5` (24px + 20px = 44px pitch). A new host does the same.
+ * Under a fine pointer nothing changes.
  */
 export function DismissChip({
   label,
@@ -41,7 +41,7 @@ export function DismissChip({
         aria-label={
           dismissLabel ?? `Remove ${label ? `${label} ` : ""}${value}`
         }
-        className="inline-flex h-6 w-6 items-center justify-center text-muted hover:text-foreground"
+        className="relative inline-flex h-6 w-6 items-center justify-center text-muted hover:text-foreground pointer-coarse:before:absolute pointer-coarse:before:-inset-2.5"
       >
         <FiX aria-hidden="true" className="h-3 w-3" />
       </button>

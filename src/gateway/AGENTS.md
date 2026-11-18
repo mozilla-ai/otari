@@ -38,7 +38,7 @@ does not commit.
 
 Completion requests follow this order:
 
-1. Extract and verify the API key or master key in `api/deps.py`.
+1. Extract and verify the API key or master key in `api/deps/`.
 2. Resolve the billed user, workspace, and organization.
 3. Compile routing into an attempt plan.
 4. Resolve pricing and reserve applicable budgets.
@@ -52,7 +52,8 @@ Completion requests follow this order:
 Chat, Messages, and Responses share the pipeline in
 `api/routes/_pipeline.py`; the attempt walk and its shared refusals live in
 `_attempts.py`, and streaming settlement in `streaming.py`. Pass-through endpoints use
-`run_passthrough`. Direct search has its own dispatch scaffold.
+`run_passthrough`. Direct search and direct code execution each have their own
+dispatch scaffold.
 
 A new provider-calling scaffold must register with `track_request` so
 `/api/v1/usage/in-flight` sees it. Removal belongs to `InFlightMiddleware`,
@@ -92,10 +93,11 @@ dashboard session. It does not prove that the session may act deployment-wide.
   dashboard cookie. The Playground's own completion endpoint
   (`routes/playground.py`) is the one surface that runs a completion from a
   session, and it is a separate route rather than a relaxation of that one: it
-  resolves the caller's attribution user and proves their workspace membership
-  itself, then hands the pipeline a `SessionPrincipal`
-  (`types/session_principal.py`). Adding a second such route means doing all
-  three, not reusing the type.
+  resolves the caller's attribution user, proves their workspace membership
+  and refuses a viewer itself
+  (`OrganizationService.require_workspace_contributor_access`), then hands the
+  pipeline a `SessionPrincipal` (`types/session_principal.py`). Adding a second
+  such route means doing all of that, not reusing the type.
 - Non-billable catalog reads use `verify_catalog_reader`.
 - A service key manages its own end users (`routes/end_users.py`) through
   `verify_service_key`, which takes neither the master key nor a cookie, and
@@ -107,7 +109,8 @@ that needs a deployment-wide route gets a separately scoped endpoint, as
 organization usage does for reads and `/api/v1/organizations/me/keys`
 (`organization_keys.py`) does for writes; do not loosen the original route. A
 member's key surface derives its owner as well as its scope, so it takes no
-`user_id` and mints nothing budget-exempt.
+`user_id`, mints nothing budget-exempt, and refuses a viewer's key writes
+through the same contributor check.
 
 The API key determines the billed workspace. Client `user`, workspace, or
 organization fields cannot move billing or credential resolution.
@@ -222,8 +225,9 @@ tenant's, so it is held to public addresses and dialed through the
 owned-endpoint client (`web_provider_client_for`), whatever
 `provider_allow_private_hosts` says. A search key also serves the
 workspace's explicit `otari_web_search` declarations where the deployment has no
-search of its own; provider-native declarations, `GET /api/v1/tools` and the
-Playground follow the deployment's own search alone.
+search of its own; provider-native declarations, the Playground and `GET /api/v1/tools`
+for a master key or a session follow the deployment's own search alone, while an
+API key's `GET /api/v1/tools` counts its workspace's key and switches.
 MCP servers are workspace resources rather than a refinement of a deployment
 server list.
 
@@ -236,8 +240,9 @@ for example, enforces the workspace search disable switch.
 
 ## Provider and search credential stores
 
-`search_tool_store_service.py` overlays encrypted stored rows on a preserved
-config baseline and refreshes them across workers. Stored values win over config
+`SearchToolService` (`services/tools/`) overlays encrypted stored rows on a
+preserved config baseline and refreshes them across workers; each worker's
+overlay is module state in `_search_tool_overlay.py`. Stored values win over config
 values of the same name; config entries remain read-only through the management
 API. A provider credential the deployment stores is a hosted provider (below);
 the `provider_credentials` rows the Deployment providers page used to store are
@@ -260,6 +265,10 @@ only after local and tenant BYO sources fail. The core adapter answers from the
 deployment's hosted providers (`services/providers`, the `hosted_providers`
 tables, `/api/v1/hosted-providers`), built on the request's Unit of Work. A
 hosted credential must never move ahead of BYO or leave its trusted gateway.
+A vendor switched off on a hosted provider (`hosted_provider_disabled_vendors`,
+vendor read by `_hosted_vendors.vendor_of`) is refused in both
+`HostedProviderRuntime.resolve` and `serveable_models`, so dispatch and the
+catalog agree; change one and change the other.
 
 A provider's own SDK variable (`OPENAI_API_KEY`) is never a credential: a key
 reaches a call only from the kwargs `get_provider_kwargs` builds (an entry's
@@ -277,6 +286,10 @@ tenant.
 Features import `Mailer`, ask `can_send_links` before offering a mail-only
 flow, and inspect the `MailDelivery` returned by `send`. They do not select
 transports or catch transport exceptions.
+
+A send that no person watches, such as a background worker's, asks
+`can_deliver_links` instead. It is false for the console transport, which shows
+an email to the deployment operator and delivers it to nobody.
 
 Mail is optional. A flow with a manual fallback, such as invitations, continues
 and returns the link. A flow with no fallback is hidden or refuses before doing
@@ -373,7 +386,7 @@ scope and not only its filter set. Nothing else narrows it, and
 ## Agent Guardrails
 
 `otari_agent.domain` (in the `otari-agent` workspace member, `cli/`) evaluates
-a caller-submitted `.otari-guardrails.yml` policy against caller-submitted evidence.
+a caller-submitted policy (composed from the files under `.otari/guardrails/`) against caller-submitted evidence.
 Everything under it is pure: no filesystem, network, subprocess, or clock
 access. Otari never reads a caller's repository itself. It lives beside the CLI
 rather than in the gateway so `otari hook` installs without the server;
@@ -384,7 +397,7 @@ process, needing no running gateway and no credential, and the Hook Server
 (`POST /api/v1/hooks/check`, `routes/hooks.py`) calls the same function for a
 caller that wants a gateway to evaluate over HTTP. Otari ships no such caller;
 the route's rework is tracked in #1699. See
-[docs/agent-guardrails.md](../../docs/agent-guardrails.md).
+[cli/docs/agent-guardrails.md](../../cli/docs/agent-guardrails.md).
 
 ## Logging
 

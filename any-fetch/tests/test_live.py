@@ -33,8 +33,6 @@ MISSING_URL = "https://www.python.org/no-such-page-any-fetch-live-test"
 class Expected:
     """What a provider's live answers must hold."""
 
-    # It reports what each fetch cost.
-    reports_cost: bool
     # It returns the page's title.
     titles: bool
     # What it does with a page the site answered with an error: report it as an
@@ -45,9 +43,9 @@ class Expected:
 
 EXPECTED: dict[str, Expected] = {
     # DeepSeek fails the call with a 404 for any page it cannot turn into markdown.
-    "deepseek": Expected(reports_cost=False, titles=True, missing_page="fails"),
-    "exa": Expected(reports_cost=True, titles=True, missing_page="in_body_error"),
-    "tabstack": Expected(reports_cost=False, titles=True, missing_page="site_page"),
+    "deepseek": Expected(titles=True, missing_page="fails"),
+    "exa": Expected(titles=True, missing_page="in_body_error"),
+    "tabstack": Expected(titles=True, missing_page="site_page"),
 }
 
 
@@ -73,7 +71,7 @@ async def test_a_live_fetch_returns_the_page_text(provider: str) -> None:
     assert len(page.text) <= 500
     assert page.final_url.startswith("https://")
     assert (page.cost is None) == (page.cost_source == "none")
-    if EXPECTED[provider].reports_cost:
+    if AnyFetch.get_provider_metadata(provider).reports_cost:
         assert page.cost_source == "reported"
     if EXPECTED[provider].titles:
         assert page.title
@@ -99,5 +97,5 @@ async def test_a_live_fetch_of_a_missing_page_is_an_error_or_the_sites_error_pag
     else:
         assert page.error is None
         assert page.text
-    if EXPECTED[provider].reports_cost:
+    if AnyFetch.get_provider_metadata(provider).reports_cost:
         assert page.cost_source == "reported"

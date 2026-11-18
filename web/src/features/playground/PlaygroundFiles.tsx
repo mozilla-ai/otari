@@ -56,7 +56,8 @@ export function PlaygroundFiles({
         className="min-h-11 shrink-0 md:min-h-9"
         onPress={() => onOpenChange(true)}
       >
-        <FiFolder aria-hidden className="size-4" /> Files
+        <FiFolder aria-hidden className="size-4" />
+        <span className="max-sm:sr-only">Files</span>
       </Button>
       <Dialog
         isOpen={isOpen}

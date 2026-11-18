@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 import { API_ROOT } from "@/shared/api/client"
-import { authHeaders, expectOk, gotoRoute } from "./helpers"
+import { authHeaders, expectOk, gotoRoute, pressRowAction } from "./helpers"
 
 // An organization admin, not the operator: federation_member_rules (on in
 // e2e/otari.yml) is what lets an owner or admin give their own key a rule
@@ -45,7 +45,7 @@ test("an organization admin gives their own key a federation rule and reads its 
   await memberPage.goto("/")
   await memberPage.getByLabel("Email").fill(email)
   await memberPage.getByLabel("Password").fill(password)
-  await memberPage.getByRole("button", { name: "Sign in" }).click()
+  await memberPage.getByRole("button", { name: "Sign in", exact: true }).click()
   await expect(
     memberPage.getByRole("navigation", { name: "Sidebar" }),
   ).toBeVisible()
@@ -57,8 +57,13 @@ test("an organization admin gives their own key a federation rule and reads its 
   )
 
   await gotoRoute(memberPage, "/keys")
-  await memberPage.getByRole("button", { name: "Actions for hackbot" }).click()
-  await memberPage.getByRole("menuitem", { name: /^Workload identity/ }).click()
+  // The key was made through the API after the dashboard loaded its list, so
+  // read the list afresh rather than from the cache.
+  await memberPage.reload()
+  await pressRowAction(
+    memberPage.getByRole("row", { name: /hackbot/ }),
+    /^Workload identity/,
+  )
   const dialog = memberPage.getByRole("dialog", { name: "Workload identity" })
   await expect(dialog.getByText("No rules yet.")).toBeVisible()
 
@@ -74,11 +79,10 @@ test("an organization admin gives their own key a federation rule and reads its 
     `ANTHROPIC_BASE_URL="${new URL(memberPage.url()).origin}/api"`,
   )
 
-  await dialog
-    .getByRole("button", {
-      name: "Delete rule for hackbot@my-project.iam.gserviceaccount.com",
-    })
-    .click()
+  await pressRowAction(
+    dialog,
+    "Delete rule for hackbot@my-project.iam.gserviceaccount.com",
+  )
   await memberPage
     .getByRole("alertdialog")
     .getByRole("button", { name: "Delete rule" })

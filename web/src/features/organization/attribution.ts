@@ -19,15 +19,24 @@ import { memberLabel } from "./roles"
 // one, or it was soft-deleted through `DELETE /v1/users`), and key
 // creation would refuse them. Those are left out rather than mapped, so nothing
 // offers an owner the server will reject.
+/**
+ * The request-plane id a member bills through: their identity's id as a
+ * string, which is what the gateway mints the row under. A member with no row
+ * yet (no key, no Playground request) has none to report, but a rule can still
+ * name them by it, since that is the id the row will take.
+ */
+export function attributionId(member: OrganizationMember): string | null {
+  return member.attribution_user_id ?? member.user_id ?? null
+}
+
 export function memberLabelsByAttributionId(
   members: OrganizationMember[] | undefined,
 ): ReadonlyMap<string, string> {
   return new Map(
-    (members ?? []).flatMap((member): [string, string][] =>
-      member.attribution_user_id
-        ? [[member.attribution_user_id, memberLabel(member)]]
-        : [],
-    ),
+    (members ?? []).flatMap((member): [string, string][] => {
+      const id = attributionId(member)
+      return id ? [[id, memberLabel(member)]] : []
+    }),
   )
 }
 
@@ -65,20 +74,52 @@ export function useMemberAttributionEmails(): ReadonlyMap<string, string> {
 }
 
 /**
- * The owner id the signed-in person bills through. Undefined while the reads
- * are pending or failed, and for a member with no attribution row.
+ * The owner id the signed-in person bills through, with whether it is still
+ * being resolved. `ownerId` is "" while pending, for a member with no
+ * attribution row, and when the roster could not be read (`isFailed`), so a
+ * caller that must tell those apart reads the flags.
+ *
+ * A failed roster read is settled from its first failure rather than after the
+ * query's retries: a caller waiting on the owner id would otherwise hold its
+ * page for those seconds, and it already has an answer, which is "not known".
  */
-export function useCurrentOwnerId(): string | undefined {
+export function useCurrentOwner(enabled = true): {
+  ownerId: string
+  isPending: boolean
+  isFailed: boolean
+} {
   const context = useOrganizationContext()
-  const members = useOrganizationMembers()
+  // The roster is asked once the context has answered: a caller it failed for
+  // has no organization to read it from.
+  const rosterEnabled = enabled && context.data !== undefined
+  const members = useOrganizationMembers(rosterEnabled)
   const callerId = context.data?.caller?.user_id
   const memberId = context.data?.organization_member_id
-  return useMemo(() => {
+  const ownerId = useMemo(() => {
     const me = (members.data ?? []).find(
       (member) =>
         (callerId && member.user_id === callerId) ||
         (memberId && member.organization_member_id === memberId),
     )
-    return me?.attribution_user_id ?? undefined
+    return me?.attribution_user_id ?? ""
   }, [members.data, callerId, memberId])
+  const isFailed =
+    rosterEnabled &&
+    members.data === undefined &&
+    (members.isError || members.failureCount > 0)
+  return {
+    ownerId,
+    isPending:
+      enabled &&
+      (context.isPending || (rosterEnabled && members.isPending && !isFailed)),
+    isFailed,
+  }
+}
+
+/**
+ * The owner id the signed-in person bills through. Undefined while the reads
+ * are pending or failed, and for a member with no attribution row.
+ */
+export function useCurrentOwnerId(): string | undefined {
+  return useCurrentOwner().ownerId || undefined
 }

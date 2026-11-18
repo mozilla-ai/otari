@@ -6,6 +6,7 @@ import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import click
 import pytest
 import uvicorn
 from click.testing import CliRunner
@@ -52,6 +53,60 @@ def serve_stubs(monkeypatch: pytest.MonkeyPatch) -> ServeCapture:
     monkeypatch.setattr("gateway.main.create_app", fake_create_app)
     monkeypatch.setattr(uvicorn, "run", fake_uvicorn_run)
     return captured
+
+
+def test_serve_reports_a_refused_config_value_without_repeating_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pydantic's own rendering prints the input, which here would be the credential being refused."""
+
+    def refuse(config_path: str | None = None) -> GatewayConfig:
+        return GatewayConfig(models_dev_base_url="https://user:password@mirror.example")
+
+    monkeypatch.setattr(gateway_cli, "load_config", refuse)
+    result = CliRunner().invoke(gateway_cli.serve, [])
+
+    assert result.exit_code == 1
+    assert "models_dev_base_url" in result.output
+    assert "must carry no username or password" in result.output
+    assert "password@mirror.example" not in result.output
+
+
+@pytest.mark.parametrize("command", ["serve", "migrate", "init_db"])
+def test_config_path_comes_from_otari_config_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command: str
+) -> None:
+    """Outside Compose nothing passes ``--config``, so the variable alone has to name the file."""
+    config_file = tmp_path / "config.yml"
+    config_file.write_text("{}\n")
+    loaded: list[str | None] = []
+
+    def record(config_path: str | None = None) -> GatewayConfig:
+        loaded.append(config_path)
+        raise click.ClickException("stop after loading the config")
+
+    monkeypatch.setattr(gateway_cli, "load_config", record)
+    monkeypatch.setenv("OTARI_CONFIG_PATH", str(config_file))
+
+    CliRunner().invoke(getattr(gateway_cli, command), [])
+
+    assert loaded == [str(config_file)]
+
+
+def test_config_flag_beats_otari_config_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Compose sets the variable to a host path and passes ``--config`` for the container's own."""
+    flagged = tmp_path / "flagged.yml"
+    flagged.write_text("{}\n")
+    loaded: list[str | None] = []
+
+    def record(config_path: str | None = None) -> GatewayConfig:
+        loaded.append(config_path)
+        raise click.ClickException("stop after loading the config")
+
+    monkeypatch.setattr(gateway_cli, "load_config", record)
+    monkeypatch.setenv("OTARI_CONFIG_PATH", str(tmp_path / "missing.yml"))
+
+    CliRunner().invoke(gateway_cli.serve, ["--config", str(flagged)])
+
+    assert loaded == [str(flagged)]
 
 
 def test_serve_log_level_symbolic_name(serve_stubs: ServeCapture) -> None:

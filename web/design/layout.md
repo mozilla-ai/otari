@@ -35,7 +35,7 @@ constants for these; `Section` is the one place the pair is named.
 | Component | Props | Use for |
 | --- | --- | --- |
 | `Section` | `className`, `contentClassName`, `bleed = true`, children | Any band of a page |
-| `PageIntro` | `title`, `action?`, children | The opening of every page |
+| `PageIntro` | `title`, `leading?`, `action?`, `detail?` | The opening of every page |
 | `Toolbar` | `className?`, children | Above a table or list |
 | `SettingsGroup` | `title?`, `description?`, `docsHref?`, `count?`, `bounded?`, children | A form page |
 | `SettingRow` | `label`, `configKey?`, `help?`, `control`, `nested?`, `error?` | One setting inside a group |
@@ -44,17 +44,22 @@ constants for these; `Section` is the one place the pair is named.
 | `ListDetail` + `ListDetailRow` | `listLabel`, `listAction?`, `list`, `empty?`, `onEmptyPress?`, `detail`, `detailLabel?`, `isDetailShown`, `onShowList`, `backLabel?` | A set of records where reading one is most of the work |
 
 **`PageIntro` renders its own `<h1 className="text-display">`**, so never put a
-heading inside it and never spell `text-display` on a page yourself. The sentence
-under the title is `children`, not a `description` prop:
+heading inside it and never spell `text-display` on a page yourself.
+
+**No sentence under the title explains the page.** A page says what it is by its
+title and its content; a fixed paragraph above every table was read once and
+scrolled past on every visit after, and warnings that never change are fixed
+text too. `detail` is the one line a page keeps, and only for what is not an
+explanation: a record's own facts (a person's role and address, a server's id),
+a warning about this record, or the page's only content (a not-found).
 
 ```tsx
 // Correct
-<PageIntro title="Keys" action={<Button variant="primary">Create key</Button>}>
-  A key authenticates one application to the gateway.
-</PageIntro>
+<PageIntro title="API keys" action={<Button variant="primary">Create API key</Button>} />
+<PageIntro title={person.name} detail={`${roleLabel} · ${person.email}`} />
 
-// Incorrect: there is no `description` prop, and the h1 is already inside
-<PageIntro description="A key authenticates one application.">
+// Incorrect: a sentence about what the page is for, and the h1 is already inside
+<PageIntro title="API keys" detail="A key authenticates one application.">
   <h1 className="text-display">Keys</h1>
 </PageIntro>
 ```
@@ -70,7 +75,7 @@ its last three call sites moved, and the component with them.
 A table page, in order:
 
 ```text
-PageIntro          title, sentence, one primary action
+PageIntro          title, one primary action
 KpiStrip           optional, ruled above and below
 Toolbar            search, filters, refresh. FilterChips goes INSIDE it, and
                    renders the selects and their chips together
@@ -92,7 +97,7 @@ SettingsGroup      one per topic, each with its own Save at its own foot
 An autosaving settings page, which is the other shape:
 
 ```text
-PageIntro          title, sentence, a trailing docsHref
+PageIntro          title
 SettingsGroup      bounded, one per topic
   SettingRow       label + key left, control right
   DisclosureRow    a list or an explanation that belongs to the row
@@ -107,7 +112,7 @@ A list-and-detail page, which is the shape for a set of records where reading
 one is most of the work:
 
 ```text
-PageIntro          title, sentence. No action: the create control goes in the
+PageIntro          title. No action: the create control goes in the
                    list column, because that is the column it lengthens
 ErrorBanner        only if a read failed
 ListDetail         the two columns, at 1:1.75, partitioned by a hairline
@@ -201,7 +206,9 @@ description with a `DocsLink`.
 
 The step is 4px and everything is a multiple. The two values worth knowing by heart:
 a page's column is padded `px-4 md:px-6` with `py-5 md:py-6`, and a KPI cell is
-`px-7 py-[1.125rem]`.
+`px-7 py-[1.125rem]`. On a phone the strip is two lanes: the left one starts
+flush with the page column and the right one 16px off the rule between them, and
+a band that borrows the cell's padding drops it the same way.
 
 Vary spacing deliberately: tighter to group, generous to separate. A uniform gap
 everywhere reads as a wireframe.

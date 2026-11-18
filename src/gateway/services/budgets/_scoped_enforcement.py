@@ -45,7 +45,7 @@ ZERO = Decimal(0)
 # refuses when several are exhausted at once and the reported error is the
 # actionable one. It is also the reservation order, which is why it must be
 # total: see the module docstring.
-_SCOPE_PRECEDENCE: dict[str, int] = {
+SCOPE_PRECEDENCE: dict[str, int] = {
     SCOPE_WORKSPACE_MEMBER: 0,
     SCOPE_ORG_MEMBER: 1,
     SCOPE_API_TOKEN: 2,
@@ -72,11 +72,14 @@ class BudgetScopeRequest:
     master-key caller, which bills to the deployment's default workspace and has
     no API-key ceiling. ``provider_instance`` is the resolved provider the call
     is about to go to (``openai``, or a named instance), which is what a
-    provider-narrowed ceiling matches on.
+    provider-narrowed ceiling matches on. ``workspace_id``, when set, is the
+    workspace the route already resolved, which is how a keyless dashboard
+    session bills to its own workspace rather than the default one.
     """
 
     api_key: APIKey | None
     provider_instance: str | None = None
+    workspace_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -94,17 +97,12 @@ class ApplicableBudget:
     request_limit: int | None = None
 
     @property
-    def caps_counts(self) -> bool:
-        """Whether this ceiling caps tokens or requests as well as dollars."""
-        return self.token_limit is not None or self.request_limit is not None
-
-    @property
     def subject(self) -> str:
         """The scope's name in a refusal message."""
         return _SCOPE_SUBJECT.get(self.scope_type, "Budget")
 
 
-def _identity_uuid(user_id: str) -> uuid.UUID | None:
+def identity_uuid(user_id: str) -> uuid.UUID | None:
     """The tenancy identity behind a billed user, when there is one.
 
     ``users.user_id`` is a free-form string, and the attribution row minted for a
@@ -131,9 +129,9 @@ async def _resolve_identities(
     differ only for a service key billing an end user, and that end user spends
     inside its owner's member ceilings, not around them.
     """
-    workspace_id = await resolve_workspace_id(db, scope.api_key)
+    workspace_id = scope.workspace_id or await resolve_workspace_id(db, scope.api_key)
     owner = scope.api_key.user_id if scope.api_key is not None and scope.api_key.user_id else user_id
-    identity = _identity_uuid(owner)
+    identity = identity_uuid(owner)
     workspace_member_id: uuid.UUID | None = None
     org_member_id: uuid.UUID | None = None
 
@@ -237,7 +235,7 @@ def get_provider_ceilings(
     ]
     bound.sort(
         key=lambda ceiling: (
-            _SCOPE_PRECEDENCE.get(ceiling.scope_type, len(_SCOPE_PRECEDENCE)),
+            SCOPE_PRECEDENCE.get(ceiling.scope_type, len(SCOPE_PRECEDENCE)),
             0 if ceiling.provider_key_id is not None else 1,
             ceiling.scoped_budget_id,
         )
@@ -447,6 +445,7 @@ __all__ = [
     "blocked_axis",
     "get_provider_ceilings",
     "get_scope_ceilings",
+    "identity_uuid",
     "refused_axis",
     "release",
     "reserve",

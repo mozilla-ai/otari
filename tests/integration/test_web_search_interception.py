@@ -10,6 +10,7 @@ provider that may not serve it.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
@@ -29,7 +30,7 @@ from gateway.services.tools import WEB_FETCH_HEADER, WEB_SEARCH_HEADER
 from gateway.services.web_fetch_service import WebFetchResult, WebFetchService
 from gateway.services.web_retrieval_policy import canonicalize_web_url
 
-from .conftest import MODEL_NAME
+from .conftest import MODEL_NAME, admitted_search_spy
 
 
 def _page() -> WebFetchResult:
@@ -85,19 +86,17 @@ def test_intercepted_declaration_runs_the_gateway_search(
     client: TestClient,
     api_key_header: dict[str, str],
     tool_entry: dict[str, Any],
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
     """The search runs and its results reach the model, so the answer comes back."""
-    search = AsyncMock(return_value="search results for otari")
+    serve_search_on_fake(extract=False)
     with (
         patch(
             "gateway.services.mcp_loop.acompletion",
             new=AsyncMock(side_effect=[_completion(tool_call=True), _completion(tool_call=False)]),
         ),
-        patch("gateway.services.web_retrieval_backend.WebSearchBackend._search_tool", new=search),
-        patch.dict(
-            "os.environ",
-            {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid", "OTARI_WEB_SEARCH_INTERCEPT": "true"},
-        ),
+        admitted_search_spy() as search,
+        patch.dict("os.environ", {"OTARI_WEB_SEARCH_INTERCEPT": "true"}),
     ):
         response = client.post(
             f"{API_ROOT}/chat/completions",
@@ -123,7 +122,10 @@ def test_an_intercepted_declaration_searches_on_the_deployments_one_instance(
     """A deployment whose only search configuration is one instance intercepts to it."""
     monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
     monkeypatch.setenv("OTARI_WEB_SEARCH_INTERCEPT", "true")
-    monkeypatch.setattr(test_config, "search_tools", {"only": {"provider": "fake"}})
+    only = {"only": {"provider": "fake"}}
+    monkeypatch.setattr(test_config, "search_tools", only)
+    # As the overlay's baseline too, for the reason ``serve_search_on_fake`` gives.
+    monkeypatch.setattr(test_config, "_search_tool_baseline", only)
     monkeypatch.setattr(test_config, "web_search_extract", False)
     model = AsyncMock(side_effect=[_completion(tool_call=True), _completion(tool_call=False)])
     with patch("gateway.services.mcp_loop.acompletion", new=model):
@@ -147,9 +149,10 @@ def test_declaration_is_forwarded_when_interception_is_off(
     client: TestClient,
     api_key_header: dict[str, str],
     tool_type: str,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
     """Default behavior: the keyword reaches the provider and no gateway search runs."""
-    search = AsyncMock(return_value="never called")
+    serve_search_on_fake(extract=False)
     captured: dict[str, Any] = {}
 
     async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
@@ -158,8 +161,7 @@ def test_declaration_is_forwarded_when_interception_is_off(
 
     with (
         patch("gateway.api.routes.chat.acompletion", new=fake_acompletion),
-        patch("gateway.services.web_retrieval_backend.WebSearchBackend._search_tool", new=search),
-        patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),
+        admitted_search_spy() as search,
     ):
         response = client.post(
             f"{API_ROOT}/chat/completions",
@@ -179,9 +181,10 @@ def test_declaration_is_forwarded_when_interception_is_off(
 def test_a_caller_function_named_web_search_is_never_intercepted(
     client: TestClient,
     api_key_header: dict[str, str],
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
     """It stays in ``tools[]`` so the caller can dispatch it themselves."""
-    search = AsyncMock(return_value="never called")
+    serve_search_on_fake(extract=False)
     captured: dict[str, Any] = {}
 
     async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
@@ -194,11 +197,8 @@ def test_a_caller_function_named_web_search_is_never_intercepted(
     }
     with (
         patch("gateway.api.routes.chat.acompletion", new=fake_acompletion),
-        patch("gateway.services.web_retrieval_backend.WebSearchBackend._search_tool", new=search),
-        patch.dict(
-            "os.environ",
-            {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid", "OTARI_WEB_SEARCH_INTERCEPT": "true"},
-        ),
+        admitted_search_spy() as search,
+        patch.dict("os.environ", {"OTARI_WEB_SEARCH_INTERCEPT": "true"}),
     ):
         response = client.post(
             f"{API_ROOT}/chat/completions",
@@ -218,13 +218,14 @@ def test_a_caller_function_named_web_search_is_never_intercepted(
 def test_max_uses_bounds_the_searches_on_the_openai_shaped_endpoint(
     client: TestClient,
     api_key_header: dict[str, str],
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
     """The cap is billing, not formatting, so it holds where there is no native error shape.
 
     The model asks twice with ``max_uses: 1``; the second call never reaches the
     backend and comes back as a tool error the model can answer around.
     """
-    search = AsyncMock(return_value="search results for otari")
+    serve_search_on_fake(extract=False)
     captured: list[dict[str, Any]] = []
 
     async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
@@ -235,11 +236,8 @@ def test_max_uses_bounds_the_searches_on_the_openai_shaped_endpoint(
 
     with (
         patch("gateway.services.mcp_loop.acompletion", new=fake_acompletion),
-        patch("gateway.services.web_retrieval_backend.WebSearchBackend._search_tool", new=search),
-        patch.dict(
-            "os.environ",
-            {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid", "OTARI_WEB_SEARCH_INTERCEPT": "true"},
-        ),
+        admitted_search_spy() as search,
+        patch.dict("os.environ", {"OTARI_WEB_SEARCH_INTERCEPT": "true"}),
     ):
         response = client.post(
             f"{API_ROOT}/chat/completions",
@@ -263,9 +261,10 @@ def test_max_uses_bounds_the_searches_on_the_openai_shaped_endpoint(
 def test_max_uses_zero_refuses_the_first_search_rather_than_uncapping_it(
     client: TestClient,
     api_key_header: dict[str, str],
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
     """A cap of zero is a cap, so the backend is never reached."""
-    search = AsyncMock(return_value="never called")
+    serve_search_on_fake(extract=False)
     captured: list[dict[str, Any]] = []
 
     async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
@@ -274,11 +273,8 @@ def test_max_uses_zero_refuses_the_first_search_rather_than_uncapping_it(
 
     with (
         patch("gateway.services.mcp_loop.acompletion", new=fake_acompletion),
-        patch("gateway.services.web_retrieval_backend.WebSearchBackend._search_tool", new=search),
-        patch.dict(
-            "os.environ",
-            {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid", "OTARI_WEB_SEARCH_INTERCEPT": "true"},
-        ),
+        admitted_search_spy() as search,
+        patch.dict("os.environ", {"OTARI_WEB_SEARCH_INTERCEPT": "true"}),
     ):
         response = client.post(
             f"{API_ROOT}/chat/completions",
@@ -300,15 +296,13 @@ def test_invalid_max_uses_is_rejected_instead_of_becoming_uncapped(
     client: TestClient,
     api_key_header: dict[str, str],
     invalid_max_uses: Any,
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
-    search = AsyncMock(return_value="never called")
+    serve_search_on_fake(extract=False)
 
     with (
-        patch("gateway.services.web_retrieval_backend.WebSearchBackend._search_tool", new=search),
-        patch.dict(
-            "os.environ",
-            {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid", "OTARI_WEB_SEARCH_INTERCEPT": "true"},
-        ),
+        admitted_search_spy() as search,
+        patch.dict("os.environ", {"OTARI_WEB_SEARCH_INTERCEPT": "true"}),
     ):
         response = client.post(
             f"{API_ROOT}/chat/completions",
@@ -334,17 +328,17 @@ def test_invalid_max_uses_is_rejected_instead_of_becoming_uncapped(
 def test_auto_claims_a_search_keyword_no_provider_runs_without_interception(
     client: TestClient,
     api_key_header: dict[str, str],
+    serve_search_on_fake: Callable[..., None],
 ) -> None:
     """Chat Completions has no native search, so `Otari-Web-Search: auto` runs the
     keyword on the backend rather than sending it to a provider that cannot serve it."""
-    search = AsyncMock(return_value="search results for otari")
+    serve_search_on_fake(extract=False)
     with (
         patch(
             "gateway.services.mcp_loop.acompletion",
             new=AsyncMock(side_effect=[_completion(tool_call=True), _completion(tool_call=False)]),
         ),
-        patch("gateway.services.web_retrieval_backend.WebSearchBackend._search_tool", new=search),
-        patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),
+        admitted_search_spy() as search,
     ):
         response = client.post(
             f"{API_ROOT}/chat/completions",

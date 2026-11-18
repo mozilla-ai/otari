@@ -36,6 +36,7 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
+from gateway.services.api_keys import key_refusal
 from gateway.services.tenancy.workspace_activation_service import (
     ACTIVATION_KEY_NAME,
     WorkspaceActivationService,
@@ -362,6 +363,99 @@ async def test_a_key_deleted_from_the_keys_page_is_replaced_rather_than_resurrec
     state = await async_db.get(WorkspaceActivationState, workspace.id)
     assert state is not None
     assert state.api_key_id == reissued.key_id
+
+
+async def test_a_reopened_guide_is_told_about_the_key_it_already_issued(async_db: AsyncSession) -> None:
+    owner, workspace = await _setup(async_db, slug="acme-issued-key")
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
+
+    before = await service.get_status(user=owner, workspace_id=workspace.id)
+    assert before.issued_key is None
+
+    issued = await service.issue_api_key(user=owner, workspace_id=workspace.id)
+    status = await service.get_status(user=owner, workspace_id=workspace.id)
+
+    assert status.issued_key is not None
+    assert status.issued_key.key_id == issued.key_id
+    assert status.issued_key.key_prefix == issued.key_prefix
+    assert status.issued_key.key_suffix == issued.key_suffix
+    dumped = status.model_dump_json()
+    assert issued.key not in dumped
+    assert hash_key(issued.key) not in dumped
+
+
+async def test_a_revoked_or_expired_setup_key_is_not_offered_back(async_db: AsyncSession) -> None:
+    owner, workspace = await _setup(async_db, slug="acme-issued-revoked")
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
+    issued = await service.issue_api_key(user=owner, workspace_id=workspace.id)
+    key = await async_db.get(APIKey, issued.key_id)
+    assert key is not None
+
+    key.is_active = False
+    await async_db.commit()
+    assert (await service.get_status(user=owner, workspace_id=workspace.id)).issued_key is None
+
+    key.is_active = True
+    key.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+    await async_db.commit()
+    assert (await service.get_status(user=owner, workspace_id=workspace.id)).issued_key is None
+
+    await async_db.delete(key)
+    await async_db.commit()
+    assert (await service.get_status(user=owner, workspace_id=workspace.id)).issued_key is None
+
+
+async def test_the_issued_key_is_only_described_to_whoever_is_offered_the_guide(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db, slug="acme-issued-viewer")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    viewer = await _member(async_db, organization, role="member", full_name="Viewer")
+    workspace = await _workspace(async_db, organization, name="Engineering", owner=owner)
+    await WorkspaceMemberRepository(async_db).create(workspace_id=workspace.id, user_id=viewer.id, role="member")
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
+    await service.issue_api_key(user=owner, workspace_id=workspace.id)
+
+    assert (await service.get_status(user=viewer, workspace_id=workspace.id)).issued_key is None
+
+    await service.dismiss(user=owner, workspace_id=workspace.id)
+    assert (await service.get_status(user=owner, workspace_id=workspace.id)).issued_key is None
+
+
+async def test_the_issued_key_is_offered_back_only_to_the_manager_holding_it(async_db: AsyncSession) -> None:
+    """Another manager never saw that plaintext, so they are offered a key of their own."""
+    organization = await _organization(async_db, slug="acme-issued-holder")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    admin = await _member(async_db, organization, role="admin", full_name="Admin")
+    workspace = await _workspace(async_db, organization, name="Engineering", owner=owner)
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
+
+    issued = await service.issue_api_key(user=owner, workspace_id=workspace.id)
+    owner_view = await service.get_status(user=owner, workspace_id=workspace.id)
+    admin_view = await service.get_status(user=admin, workspace_id=workspace.id)
+    assert owner_view.issued_key is not None and owner_view.issued_key.key_id == issued.key_id
+    assert admin_view.experience_eligible is True
+    assert admin_view.issued_key is None
+
+    rotated = await service.issue_api_key(user=admin, workspace_id=workspace.id)
+    assert (await service.get_status(user=owner, workspace_id=workspace.id)).issued_key is None
+    admin_view = await service.get_status(user=admin, workspace_id=workspace.id)
+    assert admin_view.issued_key is not None and admin_view.issued_key.key_suffix == rotated.key_suffix
+
+
+async def test_replacing_an_expired_setup_key_issues_one_that_authenticates(async_db: AsyncSession) -> None:
+    owner, workspace = await _setup(async_db, slug="acme-expired-rotate")
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
+    issued = await service.issue_api_key(user=owner, workspace_id=workspace.id)
+    record = await async_db.get(APIKey, issued.key_id)
+    assert record is not None
+    record.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+    await async_db.commit()
+
+    reissued = await service.issue_api_key(user=owner, workspace_id=workspace.id)
+
+    assert reissued.key_id == issued.key_id
+    await async_db.refresh(record)
+    assert record.expires_at is None
+    assert key_refusal(record, datetime.now(UTC)) is None
 
 
 # ----------------------------------------------------------------------

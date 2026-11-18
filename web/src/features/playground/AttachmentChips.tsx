@@ -33,7 +33,7 @@ export function PendingAttachmentChips({
   return (
     <ul
       aria-label="Attached files"
-      className="flex flex-wrap items-center gap-2"
+      className="flex flex-wrap items-center gap-2 pointer-coarse:gap-y-5"
     >
       {attachments.map((attachment) => (
         <li key={attachment.key} className="min-w-0">

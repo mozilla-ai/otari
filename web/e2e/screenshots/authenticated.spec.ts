@@ -2,7 +2,13 @@ import { expect, type Page } from "@playwright/test"
 
 import { API_ROOT } from "@/shared/api/client"
 
-import { authHeaders, expectOk, gotoRoute, login } from "../helpers"
+import {
+  authHeaders,
+  expectOk,
+  gotoRoute,
+  login,
+  pressRowAction,
+} from "../helpers"
 import { captureScreenshot, test } from "./fixtures"
 
 /**
@@ -34,6 +40,48 @@ async function ensureOrgProviderKey(page: Page): Promise<void> {
   }
 }
 
+// The models the hosted provider's page draws: three vendors, so the vendor
+// rows show, and one model with no price, so the unpriced badge does too.
+const HOSTED_MODELS: ReadonlyArray<{ model: string; price?: number }> = [
+  { model: "Qwen/Qwen3.5-9B", price: 0.1 },
+  { model: "Qwen/Qwen3-Coder-480B", price: 2 },
+  { model: "deepseek-ai/DeepSeek-V3.2", price: 0.6 },
+  { model: "black-forest-labs/FLUX.1-schnell" },
+]
+
+// A hosted provider for its page to draw. Pointed at the discard port, so the
+// create's model listing fails at once and its models are added by hand.
+async function ensureHostedProvider(page: Page): Promise<void> {
+  const created = await page.request.post(`${API_ROOT}/hosted-providers`, {
+    headers: authHeaders,
+    data: {
+      provider: "openai",
+      name: "screenshot-hosted",
+      api_key: "sk-not-a-real-credential",
+      api_base: "http://127.0.0.1:9/v1",
+    },
+  })
+  if (created.status() === 409) return
+  await expectOk(created, "create hosted provider")
+  for (const { model, price } of HOSTED_MODELS) {
+    const added = await page.request.post(
+      `${API_ROOT}/hosted-providers/screenshot-hosted/models`,
+      {
+        headers: authHeaders,
+        data:
+          price === undefined
+            ? { model }
+            : {
+                model,
+                input_price_per_million: price,
+                output_price_per_million: price,
+              },
+      },
+    )
+    await expectOk(added, `offer ${model}`)
+  }
+}
+
 // One entry per destination the nav registry can reach. The matrix in
 // playwright.config.ts multiplies each of these by three viewports and both
 // themes, so adding a page here is the whole cost of covering it.
@@ -45,6 +93,8 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
   readonly route: string
   readonly name: string
   readonly heading: RegExp
+  /** Creates what the page draws, where the seed holds none of it. */
+  readonly prepare?: (page: Page) => Promise<void>
 }> = [
   { route: "/", name: "overview", heading: /overview/i },
   // The one page in this matrix with no page title, which is why its heading
@@ -88,9 +138,10 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     name: "organization-domains",
     heading: /email domains/i,
   },
-  { route: "/usage", name: "usage", heading: /usage/i },
-  { route: "/activity", name: "activity", heading: /activity/i },
-  { route: "/sessions", name: "sessions", heading: /sessions/i },
+  // The Overview's other two tabs, one baseline each ("overview" above is the
+  // first): they share the heading and the tab row, and differ below it.
+  { route: "/requests", name: "requests", heading: /overview/i },
+  { route: "/sessions", name: "sessions", heading: /overview/i },
   { route: "/tools", name: "tools", heading: /tools/i },
   // A narrowed Tools child is no longer the page above with two services
   // hidden: it heads with the tool's own status row, and its group titles drop
@@ -127,9 +178,21 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     heading: /hosted providers/i,
   },
   {
+    route: "/admin/hosted-providers/screenshot-hosted",
+    name: "admin-hosted-provider-detail",
+    // The provider's own title, so "No hosted provider named" does not pass.
+    heading: /^screenshot-hosted$/i,
+    prepare: ensureHostedProvider,
+  },
+  {
+    route: "/admin/recommender",
+    name: "admin-subagent-router",
+    heading: /subagent router/i,
+  },
+  {
     route: "/admin/web-search",
-    name: "admin-web-search-pricing",
-    heading: /web search pricing/i,
+    name: "admin-web-search",
+    heading: /^web search$/i,
   },
   {
     route: "/admin/code-execution",
@@ -161,9 +224,10 @@ async function open(page: Page, route: string, heading: RegExp): Promise<void> {
 // page whose look changed would then take every page below it out of the run,
 // and a review would see one diff where there are five.
 test.describe("workspace rail", () => {
-  for (const { route, name, heading } of WORKSPACE_ROUTES) {
+  for (const { route, name, heading, prepare } of WORKSPACE_ROUTES) {
     test(name, async ({ page }) => {
       await login(page)
+      await prepare?.(page)
       await open(page, route, heading)
       await captureScreenshot(page, name)
     })
@@ -202,6 +266,23 @@ test.describe("organization rail", () => {
     await captureScreenshot(page, "workspaces")
   })
 
+  test("workspace providers", async ({ page }) => {
+    // A workspace's own page on its Providers tab, reached from the list the
+    // way an admin reaches it, so the capture needs no workspace id up front.
+    await login(page)
+    await gotoRoute(page, "/workspaces")
+    // Scoped to the page body: the rail's own links name workspaces too.
+    await page
+      .getByRole("main")
+      .getByRole("link")
+      .filter({ hasText: /workspace/i })
+      .first()
+      .click()
+    await page.getByRole("button", { name: "Providers" }).click()
+    await expect(page.getByRole("region", { name: "Providers" })).toBeVisible()
+    await captureScreenshot(page, "workspace-providers")
+  })
+
   test("organization providers", async ({ page }) => {
     // An organization's rate is set on the model row under the provider that
     // serves it, so this page is where pricing is captured.
@@ -209,9 +290,46 @@ test.describe("organization rail", () => {
     await ensureOrgProviderKey(page)
     await gotoRoute(page, "/organization/provider-keys")
     await expect(
-      page.getByRole("heading", { name: /^providers$/i }).first(),
+      page.getByRole("heading", { name: /^inference providers$/i }).first(),
     ).toBeVisible()
     await captureScreenshot(page, "organization-providers")
+  })
+
+  test("organization web search providers", async ({ page }) => {
+    // One search key, set as the workspace default, so the capture shows the
+    // table, its mark and the line under it; the fetch table stays empty. The
+    // key is removed afterwards, so the workspace pages every project captures
+    // show no organization key.
+    await login(page)
+    const keys = `${API_ROOT}/organizations/me/web-search-keys`
+    const created = await page.request.post(keys, {
+      headers: authHeaders,
+      data: {
+        kind: "search",
+        provider: "exa",
+        name: "Screenshot key",
+        api_key: "exa-not-a-real-credential",
+      },
+    })
+    await expectOk(created, "create organization web search key")
+    const { id } = (await created.json()) as { id: string }
+    try {
+      await expectOk(
+        await page.request.post(`${keys}/${id}/default`, {
+          headers: authHeaders,
+        }),
+        "set the organization web search key as workspace default",
+      )
+      await gotoRoute(page, "/organization/web-search-keys")
+      await expect(
+        page.getByRole("heading", { name: /^web search providers$/i }).first(),
+      ).toBeVisible()
+      await captureScreenshot(page, "organization-web-search-providers")
+    } finally {
+      // Archiving also unsets the default, and only an archived key deletes.
+      await page.request.post(`${keys}/${id}/archive`, { headers: authHeaders })
+      await page.request.delete(`${keys}/${id}`, { headers: authHeaders })
+    }
   })
 
   test("organization provider models panel", async ({ page }) => {
@@ -221,9 +339,7 @@ test.describe("organization rail", () => {
     await login(page)
     await ensureOrgProviderKey(page)
     await gotoRoute(page, "/organization/provider-keys")
-    const models = page.getByRole("button", { name: /^Models on / }).first()
-    await expect(models).toBeVisible()
-    await models.click()
+    await pressRowAction(page.getByRole("main"), /^Models on /)
     await expect(
       page.getByRole("heading", { name: /^Models on / }),
     ).toBeVisible()
@@ -239,15 +355,6 @@ test.describe("organization rail", () => {
       page.getByRole("heading", { name: /^guardrails$/i }).first(),
     ).toBeVisible()
     await captureScreenshot(page, "organization-guardrails")
-  })
-
-  test("organization usage", async ({ page }) => {
-    await login(page)
-    await gotoRoute(page, "/organization/usage")
-    await expect(
-      page.getByRole("heading", { name: /organization usage/i }).first(),
-    ).toBeVisible()
-    await captureScreenshot(page, "organization-usage")
   })
 })
 
@@ -423,7 +530,11 @@ test.describe("the keys page's one-time secret", () => {
     // The heading's own action, not the empty state's: the seeded database has
     // rows, so there is no empty state, and this is the placement the whole
     // change is about.
-    await page.getByRole("button", { name: "Create key" }).first().click()
+    await page
+      .getByRole("main")
+      .getByRole("button", { name: "Create API key" })
+      .first()
+      .click()
     const dialog = page.getByRole("dialog")
     await expect(dialog).toBeVisible()
     await expect(dialog.getByLabel("Name")).toBeVisible()
@@ -432,16 +543,20 @@ test.describe("the keys page's one-time secret", () => {
 
   // The same dialog with its disclosure open, which is what makes the body
   // scroll: header and footer pinned, content moving between them.
-  test("the create dialog, with Advanced open", async ({ page }) => {
+  test("the create dialog, with More options open", async ({ page }) => {
     await login(page)
     await gotoRoute(page, "/keys")
     await expect(
       page.getByRole("heading", { name: /keys/i }).first(),
     ).toBeVisible()
-    await page.getByRole("button", { name: "Create key" }).first().click()
+    await page
+      .getByRole("main")
+      .getByRole("button", { name: "Create API key" })
+      .first()
+      .click()
     const dialog = page.getByRole("dialog")
-    await dialog.getByRole("button", { name: "Advanced" }).click()
-    await expect(dialog.getByText("Restrict this key's models")).toBeVisible()
+    await dialog.getByRole("button", { name: "More options" }).click()
+    await expect(dialog.getByText("Restrict this key’s models")).toBeVisible()
     await captureScreenshot(page, "keys-create-dialog-advanced")
   })
 })
@@ -617,4 +732,18 @@ test.describe("the domain dialog", () => {
     await expect(dialog.getByLabel(/^Domain/)).toBeVisible()
     await captureScreenshot(page, "organization-domains-claim-dialog")
   })
+})
+
+test("OAuth app consent", async ({ page }) => {
+  await login(page)
+  // An external app's authorization redirect starts a fresh dashboard document.
+  await page.goto("about:blank")
+  await page.goto(
+    "/oauth/authorize?client_id=thunderbolt&redirect_uri=http%3A%2F%2Flocalhost%3A5199%2Foauth%2Fotari",
+  )
+  await expect(
+    page.getByRole("heading", { name: "Connect to Thunderbolt" }),
+  ).toBeVisible()
+  await expect(page.getByRole("button", { name: "Allow access" })).toBeVisible()
+  await captureScreenshot(page, "oauth-app-consent")
 })

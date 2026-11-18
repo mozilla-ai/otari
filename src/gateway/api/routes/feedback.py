@@ -6,10 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import ValidationError
 from starlette.requests import ClientDisconnect
 
-from gateway.api.deps import get_feedback_service, get_session_identity, verify_master_key
+from gateway.api.deps import get_feedback_delivery_port, get_feedback_service, get_session_identity, verify_master_key
 from gateway.core.feature import CoreFeature
-from gateway.exceptions.feedback_exceptions import FeedbackDeliveryError
+from gateway.exceptions.feedback_exceptions import UNSHAREABLE_EMAIL, FeedbackDeliveryError
 from gateway.models.tenancy import User
+from gateway.ports.feedback_delivery_port import FeedbackDeliveryPort
 from gateway.rate_limit import RateLimiter
 from gateway.schemas.feedback import FeedbackSubmission
 from gateway.services.feedback import FeedbackService
@@ -55,10 +56,12 @@ async def _read_submission(request: Request) -> FeedbackSubmission:
 async def submit_feedback(
     request: Request,
     service: Annotated[FeedbackService, Depends(get_feedback_service)],
+    delivery: Annotated[FeedbackDeliveryPort, Depends(get_feedback_delivery_port)],
     session_identity: Annotated[User | None, Depends(get_session_identity)],
 ) -> Response:
     """Send feedback privately to the Otari team."""
     body = await _read_submission(request)
+    reply_to = service.reply_to(body.share_email, session_identity.email if session_identity else None)
     # After validation, so a body that never leaves the gateway costs no send.
     limiter: RateLimiter | None = getattr(request.app.state, "feedback_rate_limiter", None)
     if limiter is not None:
@@ -69,15 +72,23 @@ async def submit_feedback(
                 status.HTTP_429_TOO_MANY_REQUESTS, "Please wait before sending more feedback.", headers=exc.headers
             ) from None
     try:
-        await service.submit(body)
+        await delivery.deliver(
+            message=body.message, reply_to=reply_to, sender_id=session_identity.id if session_identity else None
+        )
     except FeedbackDeliveryError as exc:
-        detail = {
+        details = {
             413: "Feedback is too large.",
-            422: "Check the feedback text.",
+            # This gateway already checked the message by the receiver's rules,
+            # so a refusal of a send with an address is the address, as from a
+            # receiver that does not know the field yet.
+            422: UNSHAREABLE_EMAIL if reply_to is not None else "Check the feedback text.",
             429: "Please wait before sending more feedback.",
-        }.get(exc.status_code, "We could not confirm delivery. Please try again.")
-        headers = {"Retry-After": str(exc.retry_after)} if exc.retry_after is not None else None
-        raise HTTPException(exc.status_code, detail, headers=headers) from None
+        }
+        # Any other status an adapter raises is a delivery it could not confirm.
+        status_code = exc.status_code if exc.status_code in details else status.HTTP_503_SERVICE_UNAVAILABLE
+        detail = details.get(status_code, "We could not confirm delivery. Please try again.")
+        headers = {"Retry-After": str(exc.retry_after)} if status_code == 429 and exc.retry_after is not None else None
+        raise HTTPException(status_code, detail, headers=headers) from None
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

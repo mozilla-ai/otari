@@ -47,13 +47,17 @@ export type SetPasswordRequest = Schemas["SetPasswordRequest"]
 export type PasswordResponse = Schemas["PasswordResponse"]
 
 // ---------------------------------------------------------------------------
-// The one thing about itself an identity may change that is not a credential:
-// the name it goes by. `GET` and `PATCH /v1/auth/profile` answer with the same
-// `CallerIdentity` the membership context carries, so the account page can seat
-// the new name where the shell read the old one, and a caller with no
-// organization can still be named.
+// The two things about itself an identity may change that are not credentials:
+// the name it goes by and its avatar. `GET` and `PATCH /v1/auth/profile`, and
+// `PUT /v1/auth/profile/avatar`, answer with the same `CallerIdentity` the
+// membership context carries, so the account page can seat the change where the
+// shell read the old value, and a caller with no organization can still be named.
 // ---------------------------------------------------------------------------
 export type UpdateProfileRequest = Schemas["UpdateProfileRequest"]
+export type UpdateAvatarRequest = Schemas["UpdateAvatarRequest"]
+// Deleting the signed-in account (`DELETE /v1/auth/account`), confirmed by its
+// address and, where it has one, its password.
+export type DeleteAccountRequest = Schemas["DeleteAccountRequest"]
 
 // ---------------------------------------------------------------------------
 // The public auth flows (otari#650): signup, email verification, and password
@@ -105,6 +109,13 @@ export type TraceList = Schemas["TraceListPublic"]
 export type TraceCount = Schemas["TraceCountPublic"]
 export type TraceSeries = Schemas["TraceSeriesPublic"]
 export type TraceDetail = Schemas["TraceDetailPublic"]
+export type TraceContentPolicy = Schemas["TraceContentPolicyPublic"]
+export type TraceContentShare = Schemas["ContentSharePublic"]
+export type TraceContentShareList = Schemas["ContentShareListPublic"]
+export type TraceContentShareCreate = Schemas["ContentShareCreate"]
+export type TraceContentReadList = Schemas["ContentReadListPublic"]
+export type TraceShareAudience = Schemas["ContentSharePublic"]["audience"]
+export type TraceBreakGlassReadList = Schemas["BreakGlassReadListPublic"]
 export type TraceSpan = Schemas["SpanPublic"]
 export type TraceTurn = Schemas["TurnPublic"]
 export type TraceGateSummary = Schemas["GateSummaryPublic"]
@@ -210,6 +221,8 @@ export type UsageFilterKeysArePinned = Assert<
 export type User = Schemas["UserResponse"]
 export type UpdateUserRequest = Schemas["UpdateUserRequest"]
 export type ApiKey = Schemas["KeyInfo"]
+export type ApiKeyDisabledReason = Schemas["DisabledReason"]
+export type KeyScope = Schemas["KeyScope"]
 export type CreateKeyRequest = Schemas["CreateKeyRequest"]
 export type CreateKeyResponse = Schemas["CreateKeyResponse"]
 export type UpdateKeyRequest = Schemas["UpdateKeyRequest"]
@@ -219,6 +232,8 @@ export type CreateOwnKeyRequest = Schemas["CreateOwnKeyRequest"]
 export type UpdateOwnKeyRequest = Schemas["UpdateOwnKeyRequest"]
 export type FederationRule = Schemas["FederationRulePublic"]
 export type CreateFederationRuleRequest = Schemas["FederationRuleCreate"]
+export type EndUser = Schemas["EndUserPublic"]
+export type EndUserCount = Schemas["KeyEndUsersPublic"]
 export type Budget = Schemas["BudgetResponse"]
 export type CreateBudgetRequest = Schemas["CreateBudgetRequest"]
 export type UpdateBudgetRequest = Schemas["UpdateBudgetRequest"]
@@ -260,9 +275,23 @@ export type CatalogModelSummary = Schemas["CatalogModelSummary"]
 export type CatalogModelDetail = Schemas["CatalogModelDetail"]
 export type CatalogOffering = Schemas["CatalogOffering"]
 export type CatalogCapabilities = Schemas["CatalogCapabilities"]
+// The same catalog folded by provider instance (`/v1/catalog/providers`): the
+// list of providers this deployment serves, and one provider with its models.
+export type CatalogProvidersResponse = Schemas["CatalogProvidersResponse"]
+export type CatalogProviderSummary = Schemas["CatalogProviderSummary"]
+export type CatalogProviderDetail = Schemas["CatalogProviderDetail"]
+export type CatalogProviderModel = Schemas["CatalogProviderModel"]
+export type ModelMetadataOverride = Schemas["ModelMetadataOverrideRequest"]
+export type ModelInputModality = NonNullable<
+  ModelMetadataOverride["input_modalities"]
+>[number]
 // `unit` carries a schema default, so the generator emits it as required; the
 // callers that price a model omit it and the gateway reads tokens.
 export type SetPricingRequest = Defaulted<Schemas["SetPricingRequest"], "unit">
+// Every price of a row as a models.dev cost block, as a write sends it. A read
+// gives it untyped (`ModelPricingInfo.rates`), because the gateway writes the
+// block back as it was given.
+export type RatesDocument = Schemas["RatesDocument-Input"]
 // Per-organization rate overrides, which sit above the deployment price list
 // above. Same DTO names as otari.ai's own endpoint, so the two clients stay
 // recognizable side by side.
@@ -304,6 +333,9 @@ export type UpdateHealthCheckSettings = Schemas["HealthCheckSettingsUpdate"]
 export type HealthCheckProvider = Schemas["ProviderHealthSummary"]
 export type HealthCheckResult = Schemas["HealthCheckResultPublic"]
 export type HealthCheckDisabled = Schemas["HealthCheckDisabled"]
+export type UpdateCheckStatus = Schemas["UpdateCheckStatus"]
+export type UpdateCheckAdvisory = Schemas["UpdateCheckAdvisory"]
+export type UpdateCheckAnswer = Schemas["UpdateCheckAnswer"]
 export type KnownProvider = Schemas["KnownProviderSchema"]
 export type KnownProviderSummary = Schemas["KnownProviderSummarySchema"]
 
@@ -315,6 +347,20 @@ export type OrgProviderKey = Schemas["OrgProviderKeyPublic"]
 // which types the envelope itself, so a name for it would have no consumer.
 export type CreateOrgProviderKeyRequest = Schemas["OrgProviderKeyCreateRequest"]
 export type UpdateOrgProviderKeyRequest = Schemas["OrgProviderKeyUpdateRequest"]
+
+// The organization's own search and fetch keys. A workspace uses the key it
+// pinned, else the organization's default of the kind, else the deployment's
+// own search or fetch tool.
+export type OrgWebSearchKey = Schemas["OrgWebSearchKeyPublic"]
+export type OrgWebSearchKeys = Schemas["OrgWebSearchKeysPublic"]
+export type CreateOrgWebSearchKeyRequest =
+  Schemas["OrgWebSearchKeyCreateRequest"]
+export type UpdateOrgWebSearchKeyRequest =
+  Schemas["OrgWebSearchKeyUpdateRequest"]
+// One workspace's view of those keys: which of each kind it uses, and what its
+// searches and fetches run on.
+export type WorkspaceWebSearchKey = Schemas["WorkspaceWebSearchKeyPublic"]
+export type WorkspaceWebSearchKeys = Schemas["WorkspaceWebSearchKeysPublic"]
 
 // The models an organization offers on one of those keys. `price_source` names
 // the rung of the pricing ladder that answered, in the vocabulary the Models
@@ -340,6 +386,26 @@ export type CreateOrganizationDomainRequest =
 export type UpdateOrganizationDomainRequest =
   Schemas["OrganizationDomainUpdateRequest"]
 
+// An organization's own bring-your-own OIDC sign-in connection. `connection`
+// is null until the organization saves one, while `redirect_uri` is always
+// present: an admin needs it to register at their provider before that.
+// `OidcConnection.domains` carries the same email-domain claims the Email
+// domains page manages, each with the DNS proof expiry that gates sign-in
+// through this connection.
+export type OrganizationSso = Schemas["OrganizationSsoPublic"]
+export type OidcConnection = Schemas["OIDCConnectionPublic"]
+export type OidcConnectionDomain = Schemas["OIDCConnectionDomain"]
+export type OidcConnectionRequest = Schemas["OIDCConnectionRequest"]
+export type OidcConnectionEnabledRequest =
+  Schemas["OIDCConnectionEnabledRequest"]
+export type OrganizationSsoEnforcement =
+  Schemas["OrganizationSsoEnforcementPublic"]
+export type OrganizationSsoEnforcementRequest =
+  Schemas["OrganizationSsoEnforcementRequest"]
+export type OrganizationSsoPreflight = Schemas["OrganizationSsoPreflightPublic"]
+export type OrganizationSsoPreflightMember =
+  Schemas["OrganizationSsoPreflightMemberPublic"]
+
 // The providers this deployment serves on its own keys, for a request that
 // brings no credential of its own. Deployment-wide and operator-only, and keyed
 // on the provider (one row each), so every path names the provider rather than
@@ -353,16 +419,52 @@ export type CreateHostedProviderRequest = Defaulted<
 >
 export type UpdateHostedProviderRequest = Schemas["HostedProviderUpdateRequest"]
 export type HostedModel = Schemas["HostedModelPublic"]
+
+// The decision models that pick a subagent's model when a coding agent asks,
+// and the two token rates a recommendation is charged at. Deployment-wide and
+// operator-only, like the hosted providers above, and keyed on a row id. A
+// stored key is known by its last four characters and nothing else.
+export type AgentRecommender = Schemas["AgentRecommenderPublic"]
+export type AgentRecommenders = Schemas["AgentRecommendersPublic"]
+export type CreateAgentRecommenderRequest = Schemas["AgentRecommenderCreate"]
+export type UpdateAgentRecommenderRequest = Schemas["AgentRecommenderUpdate"]
 export type HostedModels = Schemas["HostedModelsPublic"]
 export type CreateHostedModelRequest = Schemas["HostedModelCreateRequest"]
 export type UpdateHostedModelRequest = Schemas["HostedModelUpdateRequest"]
 export type HostedModelsRefresh = Schemas["HostedModelsRefreshPublic"]
+export type HostedModelRates = Schemas["HostedModelRates"]
+export type HostedProviderModelSummary = Schemas["HostedProviderModelSummary"]
+export type HostedVendor = Schemas["HostedVendorPublic"]
+export type UpdateHostedVendorRequest = Schemas["HostedVendorUpdateRequest"]
+export type SwitchHostedVendorModelsRequest = Defaulted<
+  Schemas["HostedVendorModelsSwitchRequest"],
+  "only_unpriced"
+>
+export type HostedVendorModelsSwitch = Schemas["HostedVendorModelsSwitchPublic"]
+export type HostedPriceResetRequest = Defaulted<
+  Schemas["HostedPriceResetRequest"],
+  "dry_run"
+>
+export type HostedPriceReset = Schemas["HostedPriceResetPublic"]
+export type HostedPriceResetChange = Schemas["HostedPriceResetChangePublic"]
 export type HostedAvailableModels = Schemas["HostedAvailableModelsPublic"]
 export type HostedCatalogRefresh = Schemas["HostedCatalogRefreshPublic"]
 export type HostedCatalogProviderRefresh =
   Schemas["HostedCatalogProviderRefreshPublic"]
+export type HostedCatalogPriceUpdate = Schemas["HostedCatalogPriceUpdatePublic"]
+export type HostedCatalogUpdatePreview =
+  Schemas["HostedCatalogUpdatePreviewPublic"]
+export type HostedCatalogUpdateResult = Schemas["HostedCatalogUpdatePublic"]
+export type HostedCatalogUpdateRequest = Schemas["HostedCatalogUpdateRequest"]
 export type TestHostedProviderRequest = Schemas["HostedProviderTestRequest"]
 export type HostedProviderTestResult = Schemas["HostedProviderTestPublic"]
+
+// ---------------------------------------------------------------------------
+// Connecting the deployment to otari.ai: the code an operator approves there,
+// and where the attempt stands. Neither carries the device code or the key.
+// ---------------------------------------------------------------------------
+export type PlatformConnectStart = Schemas["PlatformConnectStartPublic"]
+export type PlatformConnectStatus = Schemas["PlatformConnectStatusPublic"]
 export type ReencryptHostedProvidersResult =
   Schemas["HostedProvidersReencryptPublic"]
 export type DeploymentProviderMigration =
@@ -391,7 +493,10 @@ export type SetRoutingPolicyRequest = Omit<Schemas["PolicyRequest"], "spec"> & {
 }
 export type AliasResponse = Schemas["AliasResponse"]
 export type CreateAliasRequest = Schemas["AliasRequest"]
-export type RouterStatus = Schemas["RouterStatus"]
+export type ExplainPolicyRequest = Omit<Schemas["ExplainRequest"], "spec"> & {
+  spec?: PolicySpec
+}
+export type ExplainPolicyResponse = Schemas["ExplainResponse"]
 
 // ---------------------------------------------------------------------------
 // Settings, tools and guardrails
@@ -404,6 +509,8 @@ export type MailSettings = Schemas["MailSettings"]
 export type SendTestMailRequest = Schemas["SendTestMailRequest"]
 export type SendTestMailResponse = Schemas["SendTestMailResponse"]
 export type MaintenanceMode = Schemas["MaintenanceMode"]
+export type CountryDatabaseStatus = Schemas["CountryDatabaseStatus"]
+export type StoredCountryDatabasePublic = Schemas["StoredCountryDatabasePublic"]
 export type ManagedTool = Schemas["ManagedTool"]
 export type ToolsResponse = Schemas["ToolsResponse"]
 export type ToolSettingField = Schemas["ToolSettingField"]
@@ -437,8 +544,12 @@ export type UpdateRateLimitRuleRequest = Schemas["RateLimitRuleUpdate"]
 // Search tools
 // ---------------------------------------------------------------------------
 export type SearchProviderInfo = Schemas["SearchProviderSchema"]
+export type SearchProviderOption = Schemas["SearchProviderOptionSchema"]
 export type StoredSearchTool = Schemas["StoredSearchToolSchema"]
-export type ConfigSearchTool = Schemas["ConfigSearchToolSchema"]
+export type CreatedSearchTool = Schemas["CreatedSearchToolSchema"]
+export type SearchToolTestRequest = Schemas["SearchToolTestRequest"]
+export type StoredSearchToolTestRequest = Schemas["StoredSearchToolTestRequest"]
+export type SearchToolTestResponse = Schemas["SearchToolTestResponse"]
 export type SearchToolsResponse = Schemas["SearchToolsResponse"]
 export type CreateSearchToolRequest = Schemas["CreateSearchToolRequest"]
 export type UpdateSearchToolRequest = Schemas["UpdateSearchToolRequest"]
@@ -514,8 +625,15 @@ export type DeploymentUsers = Schemas["DeploymentUsersPublic"]
 export type UpdateDeploymentUserRequest = Schemas["DeploymentUserUpdateRequest"]
 /** A link that sets an account's password: mailed, or returned to pass on. */
 export type PasswordLink = Schemas["PasswordLinkPublic"]
+/** An address or a domain blocked from holding an account on the deployment. */
+export type BlockedEmail = Schemas["BlockedEmailPublic"]
+export type BlockedEmails = Schemas["BlockedEmailsPublic"]
+/** A new entry, with how many existing accounts it now blocks. */
+export type BlockedEmailCreated = Schemas["BlockedEmailCreatedPublic"]
+export type CreateBlockedEmailRequest = Schemas["BlockedEmailCreateRequest"]
 
 export type Workspace = Schemas["WorkspacePublic"]
+export type Workspaces = Schemas["WorkspacesPublic"]
 export type CreateWorkspaceRequest = Schemas["WorkspaceCreate"]
 export type UpdateWorkspaceRequest = Schemas["WorkspaceUpdate"]
 export type WorkspaceMember = Schemas["WorkspaceMemberPublic"]
@@ -570,6 +688,16 @@ export type WorkspaceProviderKeyOverride =
 export type SetWorkspaceProviderKeyOverrideRequest =
   Schemas["WorkspaceProviderKeyOverrideRequest"]
 
+// One hosted provider as one workspace sees it: on or off, and narrowed to
+// `models` or not (`null` is every model the deployment serves on it).
+// `customized` says the workspace stores a departure; `served_models` is null
+// where the deployment advertises no roster for the provider.
+export type WorkspaceHostedProvider = Schemas["WorkspaceHostedProviderPublic"]
+export type SetWorkspaceHostedProviderRequest =
+  Schemas["WorkspaceHostedProviderAccessRequest"]
+// What one workspace requires of every provider serving it.
+export type WorkspaceProviderPolicy = Schemas["WorkspaceProviderPolicyPublic"]
+
 // The first-request setup guide's state, and the API key it issues. The wire
 // names carry the platform's "activation" vocabulary (see
 // `src/gateway/services/tenancy/workspace_activation_service.py`); the
@@ -577,6 +705,7 @@ export type SetWorkspaceProviderKeyOverrideRequest =
 export type WorkspaceActivation = Schemas["WorkspaceActivationPublic"]
 export type ActivationAttempt = Schemas["ActivationAttemptPublic"]
 export type ActivationApiKey = Schemas["ActivationApiKeyPublic"]
+export type ActivationIssuedKey = Schemas["ActivationIssuedKeyPublic"]
 /** The failure classes the guide's copy is written for. */
 export type ActivationErrorCategory = NonNullable<
   ActivationAttempt["error_category"]
@@ -638,8 +767,23 @@ export type GuardrailTestResult =
 // `src/gateway/services/tenancy/workspace_mcp_server_service.py`. The stored
 // bearer token is write-only, so the public shape reports only `has_token`.
 export type WorkspaceMcpServer = Schemas["WorkspaceMcpServerPublic"]
+export type WorkspaceMcpServerLogo = Schemas["WorkspaceMcpServerLogoPublic"]
+export type WorkspaceMcpServerLogos = Schemas["WorkspaceMcpServerLogosPublic"]
 export type WorkspaceMcpServers = Schemas["WorkspaceMcpServersPublic"]
 export type WorkspaceMcpServerHealth = Schemas["WorkspaceMcpServerHealth"]
+// A stored server's access list (`everyone_tools` and the grants that override
+// it per key or per person), one key's verdict for one tool, and what one key
+// reaches on each server.
+export type WorkspaceMcpServerAccess = Schemas["WorkspaceMcpServerAccess"]
+export type WorkspaceMcpServerGrant = Schemas["WorkspaceMcpServerGrantPublic"]
+export type CreateWorkspaceMcpServerGrantsRequest =
+  Schemas["WorkspaceMcpServerGrantsCreate"]
+export type WorkspaceMcpServerAccessCheck =
+  Schemas["WorkspaceMcpServerAccessCheck"]
+export type WorkspaceMcpServerKeyAccess = Schemas["WorkspaceMcpServerKeyAccess"]
+// The tools the caller may use on one server, under their own access rule.
+export type WorkspaceMcpServerMyTools = Schemas["WorkspaceMcpServerMyTools"]
+export type McpToolSummary = Schemas["McpToolSummary"]
 export type McpServerCheckFailure = Schemas["CheckFailure"]
 export type CheckWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerCheckRequest"]
@@ -647,6 +791,29 @@ export type CreateWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerCreate"]
 export type UpdateWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerUpdate"]
+export type McpCredentialMode = Schemas["McpCredentialMode"]
+export type McpConnection = Schemas["McpConnectionPublic"]
+export type McpConnections = Schemas["McpConnectionsPublic"]
+export type McpConnectionStarted = Schemas["McpConnectionStarted"]
+export type McpConnectionCompleted = Schemas["McpConnectionCompleted"]
+export type McpServerConnection = Schemas["McpServerConnectionPublic"]
+export type McpServerConnections = Schemas["McpServerConnectionsPublic"]
+
+// The catalog of remote MCP servers a workspace can add, the logos it knows,
+// and the sync that fills it from the MCP Registry.
+export type McpCatalogServer = Schemas["McpCatalogServerPublic"]
+export type McpCatalogServers = Schemas["McpCatalogServersPublic"]
+export type McpCatalogSyncStatus = Schemas["McpCatalogSyncStatus"]
+
+// A member asking a workspace's admins for a catalog server: the member's own
+// requests, and everyone waiting for one server as an admin sees them.
+export type McpServerRequest = Schemas["McpServerRequestPublic"]
+export type McpServerRequests = Schemas["McpServerRequestsPublic"]
+export type McpServerRequester = Schemas["McpServerRequesterPublic"]
+export type McpServerRequestGroup = Schemas["McpServerRequestGroupPublic"]
+export type McpServerRequestGroups = Schemas["McpServerRequestGroupsPublic"]
+export type CreateMcpServerRequest = Schemas["McpServerRequestCreate"]
+export type DeclineMcpServerRequests = Schemas["McpServerRequestDecline"]
 
 // ---------------------------------------------------------------------------
 // Playground
@@ -690,14 +857,26 @@ export type PlaygroundComparisonPreference =
 
 export type PlaygroundFavoriteModels = Schemas["PlaygroundFavoriteModelsPublic"]
 
-// The OAuth sign-in pair; see `src/gateway/api/routes/auth_oauth.py`. Named
-// here rather than hand-written at the call site so the authorization response
-// and the callback body cannot drift from the spec without a type error.
+// The OAuth sign-in pair. Named here rather than hand-written at the call site
+// so the authorization response and the callback body cannot drift from the
+// spec without a type error.
 export type OAuthAuthorizeResponse = Schemas["AuthorizeResponse"]
 export type OAuthCallbackRequest = Schemas["OAuthCallbackRequest"]
 export type OAuthSessionResponse = Schemas["OAuthSessionResponse"]
+
+// Signing in through an organization's own connection: a lookup by address,
+// an authorization redirect, and the callback that exchanges the code.
+export type SsoLookupRequest = Schemas["SsoLookupRequest"]
+export type SsoLookupResponse = Schemas["SsoLookupResponse"]
+export type SsoAuthorizeResponse = Schemas["SsoAuthorizeResponse"]
+export type SsoCallbackRequest = Schemas["SsoCallbackRequest"]
+export type SsoSessionPublic = Schemas["SsoSessionPublic"]
 
 export type * from "./local"
 
 export type FeedbackSubmission =
   operations["feedback-submit_feedback"]["requestBody"]["content"]["application/json"]
+
+export type AppDetails = components["schemas"]["AppDetails"]
+export type AppAuthorizationResponse =
+  components["schemas"]["AppAuthorizationResponse"]

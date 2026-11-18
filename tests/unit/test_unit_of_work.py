@@ -26,6 +26,7 @@ from gateway.api.deps import (
 from gateway.core.config import GatewayConfig
 from gateway.core.database import create_session, get_db, init_db, reset_db
 from gateway.core.unit_of_work import (
+    InsideUnitOfWorkError,
     OutsideUnitOfWorkError,
     UnitOfWork,
     UnitOfWorkRolledBackError,
@@ -214,6 +215,29 @@ async def test_a_rolled_back_step_names_the_inner_failure_as_its_cause(notes_dat
 
 
 @pytest.mark.asyncio
+async def test_a_failed_savepoint_undoes_only_itself_and_the_step_around_it_commits(notes_database: None) -> None:
+    async with create_unit_of_work() as uow:
+        async with uow:
+            await _write(session_for(uow), "outer")
+            with pytest.raises(ValueError, match="optional read failed"):
+                async with uow.savepoint():
+                    await _write(session_for(uow), "undone")
+                    async with uow:
+                        raise ValueError("optional read failed")
+
+        assert await _committed_bodies() == ["outer"]
+
+
+@pytest.mark.asyncio
+async def test_an_outermost_savepoint_commits_when_it_ends(notes_database: None) -> None:
+    async with create_unit_of_work() as uow:
+        async with uow.savepoint():
+            await _write(session_for(uow), "kept")
+
+        assert await _committed_bodies() == ["kept"]
+
+
+@pytest.mark.asyncio
 async def test_the_session_is_unavailable_outside_a_block(notes_database: None) -> None:
     async with create_unit_of_work() as uow:
         with pytest.raises(OutsideUnitOfWorkError):
@@ -222,6 +246,42 @@ async def test_the_session_is_unavailable_outside_a_block(notes_database: None) 
             pass
         with pytest.raises(OutsideUnitOfWorkError):
             _ = session_for(uow)
+
+
+@pytest.mark.asyncio
+async def test_release_commits_without_an_open_block(notes_database: None) -> None:
+    async with create_session() as session:
+        uow = UnitOfWork(session)
+        await _write(session, "a")
+
+        assert await uow.release() is True
+
+        assert await _committed_bodies() == ["a"]
+
+
+@pytest.mark.asyncio
+async def test_release_answers_false_when_the_commit_fails(
+    notes_database: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The answer is the only way a caller learns that the release rolled its staged work back."""
+
+    async def _failed_release(session: AsyncSession) -> bool:
+        return False
+
+    monkeypatch.setattr("gateway.core.unit_of_work.release_session", _failed_release)
+    async with create_session() as session:
+        uow = UnitOfWork(session)
+
+        assert await uow.release() is False
+
+
+@pytest.mark.asyncio
+async def test_release_refuses_while_a_block_is_open(notes_database: None) -> None:
+    async with create_session() as session:
+        uow = UnitOfWork(session)
+        async with uow:
+            with pytest.raises(InsideUnitOfWorkError):
+                await uow.release()
 
 
 @pytest.mark.asyncio
@@ -310,6 +370,7 @@ def _build_registry(uow: UnitOfWork) -> SandboxContainerRegistry | None:
         user_id="u1",
         workspace_id=uuid.uuid4(),
         port=cast(CodeExecutionPort, _StubCodeExecutionPort()),
+        may_read_stored_files=True,
     )
 
 
@@ -346,3 +407,23 @@ async def test_a_sandbox_collaborator_joins_the_step_the_request_has_open(notes_
 
         assert commits() == 1
         assert await _committed_bodies() == ["request step"]
+
+
+@pytest.mark.asyncio
+async def test_abandoning_a_step_rolls_back_and_keeps_a_rollback_failure_to_the_log() -> None:
+    session = AsyncMock()
+    session.rollback.side_effect = OperationalError("ROLLBACK", None, Exception("gone"))
+    uow = UnitOfWork(cast(AsyncSession, session))
+
+    await uow.abandon()
+
+    session.rollback.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_step_cannot_be_abandoned_inside_a_block() -> None:
+    uow = UnitOfWork(cast(AsyncSession, AsyncMock()))
+
+    async with uow:
+        with pytest.raises(InsideUnitOfWorkError):
+            await uow.abandon()

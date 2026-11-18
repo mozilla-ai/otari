@@ -13,7 +13,7 @@ vi.mock("@/shared/api/client", async (importOriginal) => {
   return { ...actual, apiFetch: vi.fn() }
 })
 
-function renderPage(hash: string, termsUrl: string | null = null) {
+function renderPage(route: string, termsUrl: string | null = null) {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false } },
   })
@@ -21,7 +21,7 @@ function renderPage(hash: string, termsUrl: string | null = null) {
     <DeploymentProvider value={bootstrap({ terms_url: termsUrl })}>
       <ThemeProvider>
         <QueryClientProvider client={client}>
-          <ResetPasswordPage hash={hash} />
+          <ResetPasswordPage route={route} />
         </QueryClientProvider>
       </ThemeProvider>
     </DeploymentProvider>,
@@ -50,7 +50,7 @@ afterEach(() => {
 
 describe("ResetPasswordPage", () => {
   it("only checks the link on arrival, then waits for the new password", async () => {
-    renderPage("#/reset-password?token=abc123")
+    renderPage("/reset-password?token=abc123")
 
     expect(await screen.findByLabelText("New password")).toBeInTheDocument()
     const [path, init] = vi.mocked(apiFetch).mock.calls[0] ?? []
@@ -68,7 +68,7 @@ describe("ResetPasswordPage", () => {
     "says a %s link cannot be used before asking for a password",
     async (status, title) => {
       linkStatus = status
-      renderPage("#/reset-password?token=spent")
+      renderPage("/reset-password?token=spent")
 
       expect(
         await screen.findByRole("heading", { name: title }),
@@ -76,7 +76,7 @@ describe("ResetPasswordPage", () => {
       expect(screen.queryByLabelText("New password")).toBeNull()
       expect(
         screen.getByRole("link", { name: "Request a new reset link" }),
-      ).toHaveAttribute("href", "#/recover-password")
+      ).toHaveAttribute("href", "/recover-password")
       expect(redeem).not.toHaveBeenCalled()
     },
   )
@@ -86,7 +86,7 @@ describe("ResetPasswordPage", () => {
       if (path === VALIDATE_PATH) throw new ApiError(404, "Not Found")
       return redeem(path, init)
     })
-    renderPage("#/reset-password?token=abc123")
+    renderPage("/reset-password?token=abc123")
 
     expect(await screen.findByLabelText("New password")).toBeInTheDocument()
   })
@@ -94,7 +94,7 @@ describe("ResetPasswordPage", () => {
   it("sends the token with the new password and says the other sessions ended", async () => {
     redeem.mockResolvedValue(undefined as never)
     const user = userEvent.setup()
-    renderPage("#/reset-password?token=abc123")
+    renderPage("/reset-password?token=abc123")
 
     await user.type(
       await screen.findByLabelText("New password"),
@@ -122,7 +122,7 @@ describe("ResetPasswordPage", () => {
 
   it("holds the submit until the confirmation matches", async () => {
     const user = userEvent.setup()
-    renderPage("#/reset-password?token=abc123")
+    renderPage("/reset-password?token=abc123")
 
     await user.type(
       await screen.findByLabelText("New password"),
@@ -144,7 +144,7 @@ describe("ResetPasswordPage", () => {
       ),
     )
     const user = userEvent.setup()
-    renderPage("#/reset-password?token=stale")
+    renderPage("/reset-password?token=stale")
 
     await user.type(
       await screen.findByLabelText("New password"),
@@ -163,7 +163,7 @@ describe("ResetPasswordPage", () => {
     ).toBeInTheDocument()
     expect(
       screen.getByRole("link", { name: "Request a new reset link" }),
-    ).toHaveAttribute("href", "#/recover-password")
+    ).toHaveAttribute("href", "/recover-password")
 
     // The refusal describes a call that is no longer the one being made.
     await user.type(screen.getByLabelText("New password", { exact: true }), "x")
@@ -178,7 +178,7 @@ describe("ResetPasswordPage", () => {
   it("sends the terms only when ticked, since only a first password needs them", async () => {
     redeem.mockResolvedValue(undefined as never)
     const user = userEvent.setup()
-    renderPage("#/reset-password?token=abc123", "https://example.com/terms")
+    renderPage("/reset-password?token=abc123", "https://example.com/terms")
 
     await user.type(
       await screen.findByLabelText("New password"),
@@ -207,7 +207,7 @@ describe("ResetPasswordPage", () => {
       )
       .mockResolvedValueOnce(undefined as never)
     const user = userEvent.setup()
-    renderPage("#/reset-password?token=abc123", "https://example.com/terms")
+    renderPage("/reset-password?token=abc123", "https://example.com/terms")
 
     await user.type(
       await screen.findByLabelText("New password"),
@@ -222,7 +222,7 @@ describe("ResetPasswordPage", () => {
     expect(
       await screen.findByText("Accept the terms of service to continue"),
     ).toBeInTheDocument()
-    await user.click(screen.getByLabelText("I accept the terms of service"))
+    await user.click(screen.getByLabelText("I accept the Terms of Service"))
     expect(
       screen.queryByText("Accept the terms of service to continue"),
     ).toBeNull()
@@ -238,7 +238,7 @@ describe("ResetPasswordPage", () => {
   })
 
   it("says there is nothing to set when the link carries no token", () => {
-    renderPage("#/reset-password")
+    renderPage("/reset-password")
 
     expect(screen.getByText(/missing its reset token/)).toBeInTheDocument()
     expect(screen.queryByLabelText("New password")).toBeNull()

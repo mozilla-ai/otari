@@ -37,9 +37,14 @@ def test_welcome_tutorial_page_is_available(tmp_path: Path) -> None:
     assert "Proxy Server" not in response.text
     assert "Otari Quickstart" in response.text
     assert "bootstrap API key" in response.text
-    assert "from otari import OtariClient" in response.text
+    assert "from openai import OpenAI" in response.text
     assert "YOUR_BOOTSTRAP_OTARI_KEY" in response.text
-    assert "https://github.com/mozilla-ai/otari/blob/main/docs/quickstart.md" in response.text
+    assert "through the Otari router" in response.text
+    assert 'model="openai/gpt-4o-mini"' in response.text
+    assert "curl http://localhost:8000/api/v1/models" in response.text
+    assert "falls back to the next when one fails" in response.text
+    assert "openai:gpt-4o" not in response.text
+    assert "https://github.com/mozilla-ai/otari/blob/main/docs/self-hosted-quickstart.md" in response.text
     assert "mozilla-ai.github.io/otari/gateway/quickstart" not in response.text
     assert '<link rel="icon" type="image/svg+xml" href="/favicon.svg" />' in response.text
 
@@ -208,6 +213,84 @@ def test_dashboard_without_pwa_dir_still_starts(tmp_path: Path, monkeypatch: pyt
     # The stale index.html still links a manifest; it 404s rather than taking
     # the gateway down with it, and the page itself keeps working.
     assert manifest.status_code == 404
+
+
+_HTML = {"accept": "text/html,application/xhtml+xml,*/*;q=0.8"}
+
+
+def _fake_bundle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    bundle = tmp_path / "dashboard"
+    (bundle / "assets").mkdir(parents=True)
+    (bundle / "index.html").write_text('<html><div id="root"></div></html>')
+    monkeypatch.setattr(gateway_main, "get_dashboard_dir", lambda: bundle)
+    return TestClient(create_app(_config(tmp_path, "gateway-fallback-test.db")))
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/organization/provider-keys",
+        "/models/openai:gpt-4.1",
+        "/verify-email",
+        "/sign-in/google/callback?code=x&state=s",
+    ],
+)
+def test_a_dashboard_page_opened_by_a_browser_is_the_dashboard(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path: str
+) -> None:
+    """The dashboard routes by path, so a reload or a pasted link reaches the server as one."""
+    with _fake_bundle(tmp_path, monkeypatch) as client:
+        response = client.get(path, headers=_HTML)
+
+    assert response.status_code == 200
+    assert '<div id="root">' in response.text
+    assert response.headers["cache-control"] == "private, no-store, no-cache"
+
+
+@pytest.mark.parametrize(
+    ("path", "headers"),
+    [
+        # A client of the API mistyping a path gets the API's 404, never a page.
+        (f"{API_ROOT}/no-such-resource", _HTML),
+        ("/api/no-such-version", _HTML),
+        ("/otlp/no-such-signal", _HTML),
+        # A request that does not ask for a page is not a browser opening one.
+        ("/organization/provider-keys", {"accept": "application/json"}),
+        ("/organization/provider-keys", {}),
+        # A missing hashed asset stays missing rather than turning into HTML.
+        ("/assets/gone-1234.js", _HTML),
+    ],
+)
+def test_only_a_page_navigation_falls_back_to_the_dashboard(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path: str, headers: dict[str, str]
+) -> None:
+    with _fake_bundle(tmp_path, monkeypatch) as client:
+        response = client.get(path, headers=headers)
+
+    assert response.status_code == 404
+    assert '<div id="root">' not in response.text
+
+
+def test_a_page_path_is_not_the_dashboard_for_another_method(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    with _fake_bundle(tmp_path, monkeypatch) as client:
+        response = client.post("/organization/provider-keys", headers=_HTML)
+
+    assert response.status_code == 404
+
+
+def test_a_route_of_the_gateway_still_wins_over_the_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    with _fake_bundle(tmp_path, monkeypatch) as client:
+        response = client.get("/welcome", headers=_HTML)
+
+    assert "Otari Quickstart" in response.text
+
+
+def test_without_a_bundle_a_page_path_is_a_plain_404(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gateway_main, "get_dashboard_dir", lambda: None)
+    with TestClient(create_app(_config(tmp_path, "gateway-no-bundle-fallback.db"))) as client:
+        response = client.get("/organization/provider-keys", headers=_HTML)
+
+    assert response.status_code == 404
 
 
 def test_create_app_rejects_invalid_secret_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

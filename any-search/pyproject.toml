@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=84.2.0", "setuptools-scm>=10.3.4"]
+requires = ["setuptools>=84.2.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -34,15 +34,9 @@ include = ["any_search*"]
 [tool.setuptools.package-data]
 any_search = ["py.typed"]
 
-# The version comes from the repository's Git tag, as cli/'s does, until the
-# package is published on its own.
-[tool.setuptools_scm]
-root = ".."
-# The Docker image copies the tree without .git.
-fallback_version = "0.0.0"
-
-[tool.setuptools_scm.scm.git]
-# Otari's own `vX.Y.Z` tags only: the packages under integrations/ tag their
-# releases `<package>-vX.Y.Z` in this repository, and describing one of those
-# would version this distribution as that package.
-describe_command = "git describe --dirty --tags --long --match v[0-9]*"
+# The library's own version, a literal in any_search/__init__.py that a change
+# to the library bumps in the same PR, as integrations/ does. It names the
+# library in every request's User-Agent, so it is read from the package rather
+# than from importlib.metadata, which scripts/check_architecture.py bans.
+[tool.setuptools.dynamic]
+version = { attr = "any_search.__version__" }

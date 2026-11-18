@@ -36,6 +36,8 @@ from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 
+from .conftest import ALL_KEY_SCOPES
+
 # One probe per deployment-wide router family, each the cheapest request that
 # reaches its handler. A GET where the router has one, so a member's refusal is
 # never confused with a validation error; a write where every route on the
@@ -50,16 +52,22 @@ _DEPLOYMENT_WIDE_PROBES: list[tuple[str, str]] = [
     ("GET", f"{API_ROOT}/agent-telemetry/summary"),
     ("GET", f"{API_ROOT}/aliases"),
     ("GET", f"{API_ROOT}/routing/policies"),
-    ("GET", f"{API_ROOT}/routing/status"),
     ("GET", f"{API_ROOT}/models/discoverable"),
     ("GET", f"{API_ROOT}/search-tools"),
     ("GET", f"{API_ROOT}/settings"),
     ("GET", f"{API_ROOT}/settings/mail"),
     ("GET", f"{API_ROOT}/settings/maintenance-mode"),
+    ("GET", f"{API_ROOT}/settings/country-database"),
     ("GET", f"{API_ROOT}/health-checks"),
     # A run spends the deployment's provider credit.
     ("POST", f"{API_ROOT}/health-checks/run"),
+    ("GET", f"{API_ROOT}/update-check"),
+    # Turns on a daily request from the deployment to otari.ai.
+    ("PUT", f"{API_ROOT}/update-check"),
     ("POST", f"{API_ROOT}/pricing"),
+    # Changes what every caller is told about a deployment provider's model.
+    ("PUT", f"{API_ROOT}/model-overrides/cairn:qwen"),
+    ("DELETE", f"{API_ROOT}/model-overrides/cairn:qwen"),
 ]
 
 # The subset whose reach is worse than reading somebody else's rows: two that
@@ -92,15 +100,17 @@ _DATA_PLANE_PROBES: list[tuple[str, str]] = [
 
 # The exception, and the reason the data-plane dependency was split rather than
 # just tightened: these describe the deployment instead of acting on it, and the
-# dashboard's Models and Pricing pages are built on them. The built-in guardrail
-# catalog joins them because it describes the installed any-guardrail and dials
-# nothing; the profiles read beside it does dial the deployment's own guardrails
-# service, so that one is not here.
+# dashboard's Models and Pricing pages are built on them. The two guardrail
+# catalogs join them: the built-in one describes the installed any-guardrail, and
+# the profiles read names what any caller may send (otari#2690), answered from a
+# 30 second cache, so a worker sends the guardrails service at most one request
+# in that time.
 _CATALOG_PROBES: list[tuple[str, str]] = [
     ("GET", f"{API_ROOT}/models"),
     ("GET", f"{API_ROOT}/pricing"),
     ("GET", f"{API_ROOT}/tools"),
     ("GET", f"{API_ROOT}/tool-settings/guardrails/catalog"),
+    ("GET", f"{API_ROOT}/tool-settings/guardrails/profiles"),
 ]
 
 # Routers that resolve the caller and check their standing themselves. A plain
@@ -124,6 +134,9 @@ _TENANT_SCOPED_PROBES: list[tuple[str, str]] = [
     ("GET", f"{API_ROOT}/workspaces"),
     ("GET", f"{API_ROOT}/admin/access"),
     ("GET", f"{API_ROOT}/tool-settings"),
+    ("GET", f"{API_ROOT}/mcp-catalog/servers"),
+    ("GET", f"{API_ROOT}/mcp-catalog/popular"),
+    ("GET", f"{API_ROOT}/mcp-catalog/sync"),
 ]
 
 
@@ -397,7 +410,7 @@ def test_the_admin_router_keeps_its_own_404_rather_than_the_gate_403(
 
     assert listed.status_code == 404, listed.text
     assert access.status_code == 200, access.text
-    assert access.json() == {"granted": False}
+    assert access.json() == {"granted": False, "is_bootstrap_operator": False}
 
 
 # =============================================================================
@@ -528,7 +541,9 @@ def test_an_api_key_still_reaches_the_data_plane(
 ) -> None:
     """The control for the refusals above: nothing changed for a real credential."""
     _provision(client, master_key_header)
-    created = client.post(f"{API_ROOT}/keys", json={"key_name": "data-plane"}, headers=master_key_header)
+    created = client.post(
+        f"{API_ROOT}/keys", json={"scopes": ALL_KEY_SCOPES, "key_name": "data-plane"}, headers=master_key_header
+    )
     assert created.status_code == 200, created.text
     secret = created.json()["key"]
 

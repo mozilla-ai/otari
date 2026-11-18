@@ -1,6 +1,6 @@
-import { render } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
-import { ProductMark } from "./ProductMark"
+import { ProductLockup, ProductMark } from "./ProductMark"
 
 /**
  * The mark, and the three claims its docstring makes that are checkable here.
@@ -51,7 +51,7 @@ describe("ProductMark", () => {
   })
 
   it("declares its holes to be holes", () => {
-    // Intent rather than repair: the shape at the top right is a counter, and a
+    // Intent rather than repair: the shape at the top left is a counter, and a
     // compound path can lose one under the default `nonzero` rule. This artwork
     // does not, because the subpath is wound against the shape around it, so the
     // rule is here to say the holes are holes by construction.
@@ -67,5 +67,36 @@ describe("ProductMark", () => {
     const { container: sized } = render(<ProductMark className="h-auto w-7" />)
     expect(mark(sized)).toHaveClass("h-auto")
     expect(mark(sized)).toHaveClass("w-7")
+  })
+})
+
+describe("ProductLockup", () => {
+  const lockup = (container: HTMLElement) =>
+    container.querySelector("svg") as SVGElement
+
+  it("takes its color from the text around it", () => {
+    const { container } = render(<ProductLockup />)
+    const paths = lockup(container).querySelectorAll("path")
+    expect(paths.length).toBeGreaterThan(0)
+    for (const path of paths) {
+      expect(path).toHaveAttribute("fill", "currentColor")
+    }
+  })
+
+  it("is announced by the name it spells", () => {
+    // Unlike the mark, the lockup is the product's name rather than a picture
+    // beside it, so a page that shows only the lockup still says whose it is.
+    render(<ProductLockup />)
+    expect(
+      screen.getByRole("img", { name: "Otari by Mozilla AI" }),
+    ).toBeInTheDocument()
+  })
+
+  it("keeps its own aspect and bakes in no size for a caller to fight", () => {
+    const { container } = render(<ProductLockup className="h-9 w-auto" />)
+    expect(lockup(container)).toHaveAttribute("viewBox", "0 0 1331 423")
+    expect(lockup(container).hasAttribute("width")).toBe(false)
+    expect(lockup(container).hasAttribute("height")).toBe(false)
+    expect(lockup(container)).toHaveClass("h-9")
   })
 })

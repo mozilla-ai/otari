@@ -12,18 +12,19 @@ from typing import Any, cast
 
 import anthropic
 import httpx
+import httpx2
 import pytest
 from botocore.exceptions import ReadTimeoutError as BotocoreReadTimeoutError
 from fastapi import HTTPException, status
 from urllib3.exceptions import ReadTimeoutError as Urllib3ReadTimeoutError
 
-from gateway.api.routes._pipeline import ErrorKind
 from gateway.api.routes.messages import (
     _ADAPTER,
     _ERROR_KIND_TO_ANTHROPIC_TYPE,
     _anthropic_error,
     _ensure_anthropic_error,
 )
+from gateway.core.error_codes import ErrorKind, RefusalException, error_headers
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT
 
 
@@ -44,6 +45,7 @@ def test_every_kind_renders() -> None:
         (status.HTTP_401_UNAUTHORIZED, "authentication_error"),
         (status.HTTP_403_FORBIDDEN, "permission_error"),
         (status.HTTP_404_NOT_FOUND, "not_found_error"),
+        (status.HTTP_413_CONTENT_TOO_LARGE, "request_too_large"),
         (status.HTTP_429_TOO_MANY_REQUESTS, "rate_limit_error"),
         (status.HTTP_500_INTERNAL_SERVER_ERROR, "api_error"),
         (status.HTTP_502_BAD_GATEWAY, "api_error"),
@@ -62,6 +64,7 @@ def test_a_flattened_error_renders_the_type_its_status_has_always_given(status_c
         (ErrorKind.NOT_FOUND, "not_found_error"),
         (ErrorKind.PERMISSION, "permission_error"),
         (ErrorKind.RATE_LIMIT, "rate_limit_error"),
+        (ErrorKind.REQUEST_TOO_LARGE, "request_too_large"),
     ],
 )
 def test_a_declared_kind_renders_its_own_type(kind: ErrorKind, expected: str) -> None:
@@ -135,7 +138,7 @@ def _stream_error(exc: BaseException) -> dict[str, Any]:
 def _mid_stream_error(error_type: str) -> anthropic.APIStatusError:
     """What the Anthropic SDK raises for an SSE ``error`` event: the stream's 200, the event as body."""
     body = {"type": "error", "error": {"type": error_type, "message": "raw provider text"}, "request_id": "req_x"}
-    response = httpx.Response(200, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"))
+    response = httpx2.Response(200, request=httpx2.Request("POST", "https://api.anthropic.com/v1/messages"))
     return anthropic.APIStatusError(str(body), response=response, body=body)
 
 
@@ -201,3 +204,21 @@ def test_an_upstream_timeout_error_event_keeps_its_type() -> None:
 )
 def test_any_other_mid_stream_failure_stays_the_generic_api_error(exc: BaseException) -> None:
     assert _ADAPTER.stream_error_payload(exc) == ANTHROPIC_STREAM_FORMAT.error_payload
+
+
+def test_a_refusals_fields_go_at_the_top_of_the_envelope() -> None:
+    refused = RefusalException(
+        status.HTTP_403_FORBIDDEN,
+        "End user 'alice' is blocked",
+        headers=error_headers("user_blocked"),
+        fields={"end_user": "alice"},
+    )
+
+    rendered = _ensure_anthropic_error(refused)
+
+    assert rendered.body == {
+        "type": "error",
+        "error": {"type": "permission_error", "message": "End user 'alice' is blocked"},
+        "end_user": "alice",
+    }
+    assert rendered.headers == {"Otari-Error-Code": "user_blocked"}

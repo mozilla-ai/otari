@@ -223,8 +223,8 @@ def test_the_catalog_lists_what_the_hosted_provider_advertises(
 
     assert listed.status_code == 200, listed.text
     ids = {model["id"] for model in listed.json()["data"]}
-    assert "openai:gpt-4o" in ids
-    assert "openai:gpt-4o-mini" not in ids
+    assert "openai/gpt-4o" in ids
+    assert "openai/gpt-4o-mini" not in ids
 
 
 def test_a_model_not_switched_on_is_refused_as_not_offered_rather_than_unconfigured(

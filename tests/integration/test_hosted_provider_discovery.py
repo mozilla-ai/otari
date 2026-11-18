@@ -137,8 +137,8 @@ def test_the_catalog_still_lists_the_roster_alone(client: TestClient, master_key
 
     ids = {model["id"] for model in client.get(f"{API_ROOT}/models", headers=master_key_header).json()["data"]}
 
-    assert "openai:gpt-4o" in ids
-    assert "openai:gpt-4o-mini" not in ids
+    assert "openai/gpt-4o" in ids
+    assert "openai/gpt-4o-mini" not in ids
 
 
 def test_the_refresher_reads_the_hosted_providers_in_a_transaction_of_its_own(

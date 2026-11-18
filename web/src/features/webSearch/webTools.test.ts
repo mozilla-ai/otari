@@ -1,0 +1,305 @@
+import { describe, expect, it } from "vitest"
+
+import type {
+  SearchProviderInfo,
+  SearchProviderOption,
+  SearchToolsResponse,
+} from "@/client"
+import type { RateRead } from "@/features/toolPricing/toolRates"
+import { pricingResponse } from "@/tests/fixtures"
+
+import {
+  buildOptions,
+  isNoSearch,
+  listedPrice,
+  listWebTools,
+  nameProblem,
+  oldPriceKey,
+  rateOnly,
+  sameOptions,
+  servesTheModel,
+  splitOptions,
+  suggestName,
+  testOutcome,
+} from "./webTools"
+
+const read = (perMillion?: number, origin = "operator"): RateRead => ({
+  data:
+    perMillion === undefined
+      ? null
+      : pricingResponse({
+          model_key: "tool",
+          input_price_per_million: perMillion,
+          origin,
+        }),
+  isPending: false,
+  isError: false,
+})
+const pending: RateRead = { isPending: true, isError: false }
+const failed: RateRead = { isPending: false, isError: true }
+const unpriced = { price_per_call: null, price_source: "none" } as const
+
+const option = (
+  name: string,
+  type: SearchProviderOption["type"],
+  extra: Partial<SearchProviderOption> = {},
+): SearchProviderOption => ({
+  name,
+  type,
+  description: "",
+  operator_only: false,
+  cost_tier: false,
+  ...extra,
+})
+
+const provider = (
+  overrides: Partial<SearchProviderInfo> = {},
+): SearchProviderInfo => ({
+  id: "exa",
+  kind: "search",
+  requires_api_key: true,
+  requires_api_base: false,
+  reports_cost: false,
+  tier: "production",
+  instances: [],
+  options: [
+    option("type", "string", { enum: ["auto", "fast"] }),
+    option("numResults", "integer"),
+    option("moderation", "boolean"),
+    option("contents", "object"),
+  ],
+  ...overrides,
+})
+
+describe("listWebTools", () => {
+  const tools: SearchToolsResponse = {
+    stored: [
+      {
+        name: "exa",
+        kind: "search",
+        provider: "exa",
+        last4: "a1b2",
+        options: { type: "fast" },
+        decryptable: true,
+        shadows_config: true,
+        price_per_call: 0.004,
+        price_source: "own",
+      },
+    ],
+    config: [
+      {
+        name: "exa",
+        kind: "search",
+        provider: "exa",
+        has_api_key: true,
+        shadowed: true,
+        price_per_call: 0.004,
+        price_source: "own",
+      },
+      {
+        name: "mojeek",
+        kind: "search",
+        provider: "mojeek",
+        has_api_key: true,
+        shadowed: false,
+        ...unpriced,
+      },
+    ],
+  }
+
+  it("lists the config.yml tools a stored one does not shadow, then the stored", () => {
+    const rows = listWebTools("search", tools)
+    expect(rows.map((row) => [row.name, row.source])).toEqual([
+      ["mojeek", "config"],
+      ["exa", "stored"],
+    ])
+    expect(rows[1]).toMatchObject({
+      last4: "a1b2",
+      hasKey: true,
+      overridesConfig: true,
+      options: { type: "fast" },
+      price: { state: "own", perCall: 0.004 },
+    })
+    expect(rows[0].price).toEqual({ state: "unpriced" })
+  })
+
+  it("marks the built-in fetcher apart from the config.yml tools", () => {
+    const rows = listWebTools("fetch", {
+      stored: [],
+      config: [
+        {
+          name: "builtin_fetch",
+          kind: "fetch",
+          provider: "builtin",
+          has_api_key: false,
+          shadowed: false,
+          price_per_call: 0,
+          price_source: "own",
+        },
+      ],
+    })
+    expect(rows[0].source).toBe("builtin")
+  })
+
+  it("lists nothing before the tools are read", () => {
+    expect(listWebTools("search", undefined)).toEqual([])
+  })
+})
+
+describe("listedPrice", () => {
+  it("takes the rate the listing gives, from the tool's own row", () => {
+    expect(listedPrice({ price_per_call: 0.005, price_source: "own" })).toEqual(
+      { state: "own", perCall: 0.005, fromConfig: false, oldKey: false },
+    )
+  })
+
+  it("marks a rate config.yml's price_per_call wrote", () => {
+    expect(
+      listedPrice({ price_per_call: 0.003, price_source: "config" }),
+    ).toEqual({ state: "own", perCall: 0.003, fromConfig: true, oldKey: false })
+  })
+
+  it("marks a rate under the tool's old key", () => {
+    expect(
+      listedPrice({ price_per_call: 0.004, price_source: "old_key" }),
+    ).toEqual({ state: "own", perCall: 0.004, fromConfig: false, oldKey: true })
+    expect(oldPriceKey({ provider: "exa", name: "exa-search" })).toBe(
+      "exa:exa-search",
+    )
+  })
+
+  it("prices a free tool at 0, and leaves a tool with no row unpriced", () => {
+    expect(listedPrice({ price_per_call: 0, price_source: "own" })).toEqual({
+      state: "own",
+      perCall: 0,
+      fromConfig: false,
+      oldKey: false,
+    })
+    expect(listedPrice(unpriced)).toEqual({ state: "unpriced" })
+  })
+})
+
+describe("rateOnly", () => {
+  it("reads an otari: row in dollars per call, never as config.yml's", () => {
+    expect(rateOnly(read(10000, "config"))).toEqual({
+      state: "own",
+      perCall: 0.01,
+      fromConfig: false,
+      oldKey: false,
+    })
+    expect(rateOnly(read())).toEqual({ state: "unpriced" })
+    expect(rateOnly(pending)).toEqual({ state: "pending" })
+    expect(rateOnly(failed)).toEqual({ state: "error" })
+  })
+})
+
+describe("names", () => {
+  it("suggests the provider, or <provider>-fetch beside a search tool of that name", () => {
+    expect(suggestName("search", "exa", [])).toBe("exa")
+    expect(suggestName("fetch", "exa", ["exa"])).toBe("exa-fetch")
+    expect(suggestName("search", "exa", ["exa", "exa-2"])).toBe("exa-3")
+    expect(suggestName("search", "", [])).toBe("")
+  })
+
+  it("refuses what the API refuses", () => {
+    expect(nameProblem("a:b", [])).toMatch(/':' or '\/'/)
+    expect(nameProblem("a/b", [])).toMatch(/':' or '\/'/)
+    expect(nameProblem("Builtin_Fetch", [])).toMatch(/reserved/)
+    expect(nameProblem("NONE", [])).toMatch(/reserved/)
+    expect(nameProblem("*", [])).toMatch(/reserved/)
+    expect(nameProblem("exa", ["exa"])).toMatch(/already has this name/)
+    expect(nameProblem("exa", [])).toBe("")
+  })
+})
+
+describe("options", () => {
+  it("splits stored options into typed fields and the JSON box", () => {
+    expect(
+      splitOptions(provider(), {
+        type: "fast",
+        numResults: 5,
+        moderation: false,
+        contents: { text: true },
+        unknown: "kept",
+      }),
+    ).toEqual({
+      typed: { type: "fast", numResults: "5", moderation: "false" },
+      extraJson: JSON.stringify(
+        { contents: { text: true }, unknown: "kept" },
+        null,
+        2,
+      ),
+    })
+  })
+
+  it("sends filled fields over the JSON box, and leaves blank ones out", () => {
+    expect(
+      buildOptions(
+        provider(),
+        { type: "auto", numResults: "7", moderation: "" },
+        '{"type": "fast", "contents": {"text": true}}',
+      ),
+    ).toEqual({
+      ok: true,
+      options: { type: "auto", numResults: 7, contents: { text: true } },
+    })
+  })
+
+  it("names the field or the JSON that cannot be sent", () => {
+    const built = buildOptions(provider(), { numResults: "seven" }, "[1]")
+    expect(built).toEqual({
+      ok: false,
+      fieldErrors: { numResults: "A whole number." },
+      jsonError: expect.stringMatching(/JSON object/),
+    })
+    expect(buildOptions(provider(), {}, "{nope")).toMatchObject({
+      ok: false,
+      jsonError: "Not valid JSON.",
+    })
+  })
+
+  it("sends a provider with no schema its options as written", () => {
+    expect(
+      buildOptions(provider({ options: null }), {}, '{"engines": "x"}'),
+    ).toEqual({ ok: true, options: { engines: "x" } })
+  })
+})
+
+describe("servesTheModel", () => {
+  it("is false for a provider the search library has no adapter for", () => {
+    expect(servesTheModel(provider({ id: "searxng", tier: null }))).toBe(false)
+    expect(servesTheModel(provider())).toBe(true)
+  })
+})
+
+describe("sameOptions", () => {
+  it("ignores key order and unset values", () => {
+    expect(
+      sameOptions({ a: 1, b: { y: 2, x: 1 } }, { b: { x: 1, y: 2 }, a: 1 }),
+    ).toBe(true)
+    expect(sameOptions({ a: 1, c: null }, { a: 1 })).toBe(true)
+    expect(sameOptions({ a: [1, 2] }, { a: [2, 1] })).toBe(false)
+    expect(sameOptions({ a: 1 }, { a: 2 })).toBe(false)
+  })
+})
+
+describe("isNoSearch", () => {
+  it("matches none in any case, as the gateway does", () => {
+    expect(isNoSearch("None")).toBe(true)
+    expect(isNoSearch(" NONE ")).toBe(true)
+    expect(isNoSearch("exa")).toBe(false)
+    expect(isNoSearch("")).toBe(false)
+  })
+})
+
+describe("testOutcome", () => {
+  it("says what a test answered, counting hits in the singular too", () => {
+    expect(testOutcome("search", { ok: true, hits: 1 })).toBe("Worked: 1 hit.")
+    expect(testOutcome("fetch", { ok: true, characters: 120 })).toBe(
+      "Worked: 120 characters of page text.",
+    )
+    expect(testOutcome("search", { ok: false, error: "http_error" })).toBe(
+      "Failed: http_error.",
+    )
+  })
+})

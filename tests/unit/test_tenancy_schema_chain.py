@@ -36,6 +36,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from _alembic_support import parent_of
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
@@ -71,28 +72,15 @@ _TOKEN_INDEX = "ix_user_email_verification_token"
 _ALIAS_WIDEN_REVISION = "c1e4a7b9d3f6"
 _SURVIVALS_REVISION = "d2f5b8c0e4a7"
 _SURVIVAL_TABLES = ("routing_memory", "router_preferences", "file_objects")
+_ROUTER_TABLES = ("routing_memory", "router_preferences")
+_DROP_ROUTER_TABLES_REVISION = "c4c7c29847fa"
+_BEFORE_DROP_ROUTER_TABLES = "9964faffc86b"
 
 _GUARDRAIL_DEFINITIONS_REVISION = "a9c4e7b2d5f8"
 _DEFINITIONS_TABLE = "organization_guardrail_definitions"
 _MANDATES_TABLE = "organization_guardrails"
 _MANDATES_BACKEND_CHECK = "ck_organization_guardrails_single_backend"
 _MANDATES_DEFINITION_FK = "fk_organization_guardrails_definition"
-
-
-def _parent_of(revision: str) -> str:
-    """The revision immediately below ``revision``, read from the chain itself.
-
-    Deliberately derived rather than written down. This pair of revisions sits at
-    the end of the chain, so every migration that lands on ``main`` while the
-    branch is open re-points the lower one's ``down_revision``, and a hardcoded
-    constant here is a second place to remember. Reading it back means the
-    downgrade targets below follow the re-point on their own, and the test keeps
-    asserting what it means ("roll back to just before this revision") rather
-    than a literal that goes stale.
-    """
-    parent = ScriptDirectory.from_config(_alembic_config("sqlite://")).get_revision(revision).down_revision
-    assert isinstance(parent, str), f"{revision} should have exactly one parent, got {parent!r}"
-    return parent
 
 
 _TOKEN_REVISION = "db8fbf901ee0"
@@ -121,6 +109,19 @@ def sqlite_at_head(tmp_path: Path) -> Iterator[tuple[Config, Engine]]:
     database_url = f"sqlite:///{tmp_path / 'tenancy.db'}"
     config = _alembic_config(database_url)
     command.upgrade(config, "head")
+    engine = create_engine(database_url)
+    try:
+        yield config, engine
+    finally:
+        engine.dispose()
+
+
+@pytest.fixture
+def sqlite_at_survivals(tmp_path: Path) -> Iterator[tuple[Config, Engine]]:
+    """A SQLite database migrated to the revision that scoped the router tables, which head drops."""
+    database_url = f"sqlite:///{tmp_path / 'survivals.db'}"
+    config = _alembic_config(database_url)
+    command.upgrade(config, _SURVIVALS_REVISION)
     engine = create_engine(database_url)
     try:
         yield config, engine
@@ -809,7 +810,7 @@ def test_the_widening_round_trips(sqlite_at_head: tuple[Config, Engine]) -> None
     """
     config, engine = sqlite_at_head
 
-    command.downgrade(config, _parent_of(_ALIAS_WIDEN_REVISION))
+    command.downgrade(config, parent_of(_ALIAS_WIDEN_REVISION, alembic_dir=_ALEMBIC_DIR))
 
     inspector = inspect(engine)
     for table in ("model_aliases", "routing_policies"):
@@ -826,14 +827,14 @@ def test_the_widening_round_trips(sqlite_at_head: tuple[Config, Engine]) -> None
 
 
 def test_the_survivals_carry_a_restricting_workspace_foreign_key(
-    sqlite_at_head: tuple[Config, Engine],
+    sqlite_at_survivals: tuple[Config, Engine],
 ) -> None:
     """NOT NULL and RESTRICT on all three, matching ``api_keys.workspace_id``.
 
     RESTRICT rather than cascade because deleting a workspace must not silently
     take a user's uploads or a router's training data with it.
     """
-    _, engine = sqlite_at_head
+    _, engine = sqlite_at_survivals
     inspector = inspect(engine)
 
     for table in _SURVIVAL_TABLES:
@@ -850,10 +851,10 @@ def test_the_survivals_carry_a_restricting_workspace_foreign_key(
 
 
 def test_the_router_indexes_are_rebuilt_leading_with_the_workspace(
-    sqlite_at_head: tuple[Config, Engine],
+    sqlite_at_survivals: tuple[Config, Engine],
 ) -> None:
     """Every read filters on the workspace, so it leads each composite index."""
-    _, engine = sqlite_at_head
+    _, engine = sqlite_at_survivals
     inspector = inspect(engine)
 
     memory = {index["name"]: index["column_names"] for index in inspector.get_indexes("routing_memory")}
@@ -954,18 +955,64 @@ def test_the_survivals_revision_round_trips(sqlite_at_head: tuple[Config, Engine
     command.upgrade(config, "head")
 
     inspector = inspect(engine)
-    for table in _SURVIVAL_TABLES:
-        assert "workspace_id" in {column["name"] for column in inspector.get_columns(table)}
+    assert "workspace_id" in {column["name"] for column in inspector.get_columns("file_objects")}
+    assert not set(_ROUTER_TABLES) & set(inspector.get_table_names())
 
 
 def test_the_migrated_survival_tables_match_their_models(sqlite_at_head: tuple[Config, Engine]) -> None:
     """Hand-written revisions, so nothing else would notice the two drifting apart."""
     _, engine = sqlite_at_head
 
-    for table in _SURVIVAL_TABLES:
-        declared = SQLModel.metadata.tables[table]
-        migrated = {column["name"] for column in inspect(engine).get_columns(table)}
-        assert migrated == set(declared.columns.keys()), table
+    declared = SQLModel.metadata.tables["file_objects"]
+    migrated = {column["name"] for column in inspect(engine).get_columns("file_objects")}
+    assert migrated == set(declared.columns.keys())
+
+
+def _router_table_shape(engine: Engine) -> dict[str, object]:
+    inspector = inspect(engine)
+    shape: dict[str, object] = {}
+    for table in _ROUTER_TABLES:
+        shape[table] = {
+            "columns": sorted(
+                (column["name"], str(column["type"]), column["nullable"]) for column in inspector.get_columns(table)
+            ),
+            "indexes": sorted((index["name"], tuple(index["column_names"])) for index in inspector.get_indexes(table)),
+            "foreign_keys": sorted(
+                (
+                    fk["name"] or "",
+                    tuple(fk["constrained_columns"]),
+                    fk["referred_table"],
+                    fk["options"].get("ondelete"),
+                )
+                for fk in inspector.get_foreign_keys(table)
+            ),
+        }
+    return shape
+
+
+def test_head_drops_the_router_tables(sqlite_at_head: tuple[Config, Engine]) -> None:
+    _, engine = sqlite_at_head
+    assert not set(_ROUTER_TABLES) & set(inspect(engine).get_table_names())
+    assert not set(_ROUTER_TABLES) & set(SQLModel.metadata.tables)
+
+
+def test_dropping_the_router_tables_round_trips_to_their_last_shape(
+    sqlite_at_head: tuple[Config, Engine], tmp_path: Path
+) -> None:
+    """Down recreates both tables exactly as the revision before left them."""
+    config, engine = sqlite_at_head
+    reference_url = f"sqlite:///{tmp_path / 'reference.db'}"
+    command.upgrade(_alembic_config(reference_url), _BEFORE_DROP_ROUTER_TABLES)
+    reference = create_engine(reference_url)
+
+    command.downgrade(config, _BEFORE_DROP_ROUTER_TABLES)
+
+    try:
+        assert _router_table_shape(engine) == _router_table_shape(reference)
+    finally:
+        reference.dispose()
+    command.upgrade(config, _DROP_ROUTER_TABLES_REVISION)
+    assert not set(_ROUTER_TABLES) & set(inspect(engine).get_table_names())
 
 
 def test_the_guardrail_definitions_table_matches_its_model(sqlite_at_head: tuple[Config, Engine]) -> None:
@@ -1083,7 +1130,7 @@ def test_the_guardrail_definitions_revision_round_trips(sqlite_at_head: tuple[Co
     over to collide with.
     """
     config, engine = sqlite_at_head
-    parent = _parent_of(_GUARDRAIL_DEFINITIONS_REVISION)
+    parent = parent_of(_GUARDRAIL_DEFINITIONS_REVISION, alembic_dir=_ALEMBIC_DIR)
 
     command.downgrade(config, parent)
 

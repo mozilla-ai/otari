@@ -151,22 +151,18 @@ def test_file_storage_refuses_a_container_built_without_config() -> None:
         container.resolve(FileStoragePort, NO_SESSION)
 
 
-def test_the_recommender_asks_the_configured_decision_model_and_is_shared() -> None:
-    """The core answers from the deployment's own decision provider, with one adapter for every request."""
+def test_the_recommender_is_a_fresh_adapter_per_resolve() -> None:
+    """The core answers from the deployment's own subagent router, with a fresh adapter per request.
+
+    Fresh, because the adapter keeps the router it quoted for the call that
+    follows, and one shared instance would let a request reprice another's.
+    """
     container = build_container(config=GatewayConfig())
 
     recommender = container.resolve(AgentModelRecommenderPort, NO_SESSION)
 
     assert isinstance(recommender, DecisionProviderRecommender)
-    assert container.resolve(AgentModelRecommenderPort, NO_SESSION) is recommender
-
-
-def test_the_recommender_refuses_a_container_built_without_config() -> None:
-    """With no config there is no ``agent_recommender_model`` to ask, so resolving says so."""
-    container = build_container()
-
-    with pytest.raises(ContainerError, match="AgentModelRecommenderPort"):
-        container.resolve(AgentModelRecommenderPort, NO_SESSION)
+    assert container.resolve(AgentModelRecommenderPort, NO_SESSION) is not recommender
 
 
 def test_the_model_provider_answers_nothing_without_a_unit_of_work() -> None:
@@ -340,6 +336,50 @@ def register(container):
 
     with pytest.raises(PortShapeError, match="StaleModelProvider, bound to ModelProviderPort, lacks get_hosted_models"):
         build_container("stale_bootstrap:register")
+
+
+def test_a_growth_signal_adapter_written_before_record_action_fails_at_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without the check, every create would commit and then fail as a 500 on the report."""
+    _write_bootstrap(
+        tmp_path,
+        monkeypatch,
+        "stale_growth_bootstrap",
+        """
+from gateway.ports.growth_signal_port import GrowthSignalPort
+
+
+class StaleGrowthSignal:
+    def __init__(self, session):
+        del session
+
+    async def record_signup(self, **kwargs):
+        return None
+
+    async def record_sign_in(self, **kwargs):
+        return None
+
+    async def record_activation(self, **kwargs):
+        return None
+
+    async def record_onboarding_completed(self, **kwargs):
+        return None
+
+    async def record_profile_updated(self, **kwargs):
+        return None
+
+    async def record_account_deleted(self, **kwargs):
+        return None
+
+
+def register(container):
+    container.bind(GrowthSignalPort, StaleGrowthSignal)
+""",
+    )
+
+    with pytest.raises(PortShapeError, match="StaleGrowthSignal, bound to GrowthSignalPort, lacks record_action"):
+        build_container("stale_growth_bootstrap:register")
 
 
 def test_bootstrap_that_rebinds_nothing_leaves_the_core_defaults(

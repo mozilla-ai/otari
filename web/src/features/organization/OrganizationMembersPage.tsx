@@ -1,8 +1,11 @@
 import { Button } from "@heroui/react"
+import { useNavigate } from "@tanstack/react-router"
 import { useMemo, useState } from "react"
 import {
   FiCheckCircle,
+  FiDollarSign,
   FiEdit2,
+  FiLayers,
   FiSend,
   FiSlash,
   FiUserMinus,
@@ -24,7 +27,7 @@ import type {
   WorkspaceMemberRole,
 } from "@/client"
 import { CopyableValue } from "@/design-system/actions/CopyField"
-import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
+import { RowMenu } from "@/design-system/actions/RowMenu"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { TablePagination } from "@/design-system/data/TablePagination"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
@@ -48,8 +51,16 @@ import {
   accessLabel,
   ModelScopeControl,
 } from "@/features/models/ModelScopeControl"
+import { limitDialogCopy } from "@/features/spend/limitCopy"
+import {
+  type LimitTarget,
+  limitLine,
+  limitsOnPerson,
+} from "@/features/spend/limits"
+import { SetLimitDialog } from "@/features/spend/SetLimitDialog"
 import { ToolScopeControl } from "@/features/tools/ToolScopeControl"
 import {
+  useAllSpendCeilings,
   useBudgets,
   useMemberCeilingWriter,
   useOrganizationBudgets,
@@ -78,10 +89,12 @@ import { absoluteDashboardLink } from "@/shared/helpers/dashboardLink"
 import { formatDateTime, formatUsd } from "@/shared/helpers/format"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
-
+import { useHeldDialogTarget } from "@/shared/hooks/useHeldDialogTarget"
+import { MemberIdentityCell } from "./MemberIdentityCell"
 import {
   asMembershipRole,
   canManage,
+  grantableRoleOptions,
   MEMBERSHIP_ROLE_OPTIONS,
   memberLabel,
   memberRowKey,
@@ -184,7 +197,9 @@ function invitationExpired(member: OrganizationMember): boolean {
 }
 
 // After an invite or a reissue: whether it was emailed, and the link to share
-// when it was not. A delivered link goes to the invitee's mailbox alone.
+// when it was not. A delivered link goes to the invitee's mailbox alone. Where
+// signup is open, only an operator gets an unsent link back; anyone else's
+// invitee accepts from their pending invitations once signed in.
 function InvitationLinkDialog({
   result,
   isOpen,
@@ -206,10 +221,9 @@ function InvitationLinkDialog({
         if (!open) onClose()
       }}
       title={title}
-      // Dismissable only once the email carried the link. When it did not,
-      // this is the only place the link is shown, so the acknowledgement is
-      // the way out rather than one of two.
-      isDismissable={result.mail_sent}
+      // Dismissable unless this is the only place the link is shown, in which
+      // case the acknowledgement is the way out rather than one of two.
+      isDismissable={!acceptLink}
       submitLabel="Done"
       hideCancel
       onSubmit={onClose}
@@ -220,6 +234,14 @@ function InvitationLinkDialog({
           <>
             An email with an accept link was sent to{" "}
             <strong>{result.email}</strong>.
+          </>
+        ) : !acceptLink ? (
+          <>
+            {result.mail_limited
+              ? "Otari held the email back: this organization or this address has had its share of invitation emails for today. "
+              : "Otari did not send the email. "}
+            <strong>{result.email}</strong> will find the invitation once they
+            sign in with that address.
           </>
         ) : result.mail_limited ? (
           <>
@@ -259,7 +281,9 @@ function InvitationLinkDialog({
 // link is emailed where mail can be sent, and comes back to share only when
 // the email did not go out: the only way in on a deployment without mail,
 // since claiming an identity through signup needs mail and accepting with a
-// password does not.
+// password does not. Where signup is open the link comes back to an operator
+// alone, which the bootstrap cannot say, so InvitationLinkDialog reads the
+// response rather than this form guessing.
 function InviteMemberForm({
   isOpen,
   onClose,
@@ -275,6 +299,11 @@ function InviteMemberForm({
   const [email, setEmail] = useState("")
   const [role, setRole] = useState<MembershipRole>("member")
   const [workspaceIds, setWorkspaceIds] = useState<string[]>([])
+  // The roles this caller may give, by name alone: the table beside it says
+  // what each one does.
+  const roleOptions = grantableRoleOptions(
+    useOrganizationContext().data?.role,
+  ).map(({ value, label }) => ({ value, label }))
   const [result, setResult] = useState<InviteOrganizationMemberResult>()
   const [outcomes, setOutcomes] =
     useState<BulkInviteOrganizationMembersResult>()
@@ -327,7 +356,8 @@ function InviteMemberForm({
           ? workspaceIds.map(
               (workspace_id): WorkspaceAssignment => ({
                 workspace_id,
-                role: "member",
+                // A viewer of the organization is a viewer of its workspaces.
+                role: role === "viewer" ? "viewer" : "member",
               }),
             )
           : null,
@@ -345,6 +375,9 @@ function InviteMemberForm({
   if (outcomes) {
     const { invited, failed } = outcomes
     const unsent = invited.filter((one) => !one.mail_sent).length
+    const toShare = invited.filter(
+      (one) => !one.mail_sent && one.accept_link,
+    ).length
     const limited = invited.some((one) => one.mail_limited)
     return (
       <FormDialog
@@ -355,7 +388,7 @@ function InviteMemberForm({
         title="Invitations"
         // Same rule as the single result: a link that was not emailed is shown
         // only here, so the acknowledgement is the way out.
-        isDismissable={unsent === 0}
+        isDismissable={toShare === 0}
         submitLabel="Done"
         hideCancel
         onSubmit={onClose}
@@ -364,7 +397,7 @@ function InviteMemberForm({
         <InfoBanner>
           Invited {invited.length} of {invited.length + failed.length}.
           {unsent > 0
-            ? ` Otari did not send ${unsent === 1 ? "one email" : `${unsent} emails`}; share those links yourself.`
+            ? ` Otari did not send ${unsent === 1 ? "one email" : `${unsent} emails`}; ${toShare > 0 ? "share those links yourself." : "those people find the invitation once they sign in."}`
             : null}
           {limited
             ? " Some were held back because this organization or an address has had its share of invitation emails for today."
@@ -380,8 +413,12 @@ function InviteMemberForm({
           {invited.map((one) => (
             <li key={one.invitation_id} className="flex flex-col gap-1">
               <strong className="break-all text-sm">{one.email}</strong>
-              {one.mail_sent || !one.accept_link ? (
+              {one.mail_sent ? (
                 <span className="text-xs text-muted">Email sent.</span>
+              ) : !one.accept_link ? (
+                <span className="text-xs text-muted">
+                  Not emailed. They find the invitation once they sign in.
+                </span>
               ) : (
                 <CopyableValue
                   value={absoluteDashboardLink(one.accept_link)}
@@ -440,14 +477,14 @@ function InviteMemberForm({
           description={
             mail_ready
               ? "One or more, separated by commas or new lines. An email with an accept link is sent here. The membership becomes active once they follow it."
-              : "One or more, separated by commas or new lines. This deployment sends no mail, so you get an accept link to share with them. The membership becomes active once they follow it."
+              : "One or more, separated by commas or new lines. This deployment sends no mail, so the result shows how they join: an accept link to share, or accepting once they sign in with this address."
           }
         />
         <Select
           label="Role"
           value={role}
           onChange={(value) => setRole(asMembershipRole(value) ?? "member")}
-          options={MEMBERSHIP_ROLE_OPTIONS}
+          options={roleOptions}
           shouldReserveMessage={false}
         />
       </div>
@@ -501,6 +538,7 @@ function InviteMemberForm({
  * admins cap their members here with the organization's own budgets.
  */
 function MemberEditor({
+  isOpen,
   member,
   spendRow,
   workspaces,
@@ -510,6 +548,7 @@ function MemberEditor({
   isOperator,
   onClose,
 }: {
+  isOpen: boolean
   member: OrganizationMember
   spendRow: MemberAttribution | undefined
   workspaces: Workspace[]
@@ -719,7 +758,7 @@ function MemberEditor({
 
   return (
     <FormDialog
-      isOpen
+      isOpen={isOpen}
       onOpenChange={(open) => {
         if (!open) onClose()
       }}
@@ -743,8 +782,8 @@ function MemberEditor({
       {!isOperator ? null : spendRow ? (
         <>
           <ModelScopeControl
-            title="Model access (default for this member's keys)"
-            description="The models this member's keys may list and call by default. A key can narrow this, but never exceed it."
+            title="Model access (default for this member’s keys)"
+            description="The models this member’s keys may list and call by default. A key can narrow this, but never exceed it."
             initial={spendRow.allowed_models ?? undefined}
             onChange={(value, isValid) => {
               setAllowedModels(value)
@@ -752,8 +791,8 @@ function MemberEditor({
             }}
           />
           <ToolScopeControl
-            title="Search tool access (default for this member's keys)"
-            description="The search tools this member's keys may run on /v1/search by default. Left on its default, a key follows its own model access, or the member's when it has none: unrestricted runs every tool, restricted only one named there as provider:tool (deprecated). A key can narrow this, but never exceed it."
+            title="Tool access (default for this member’s keys)"
+            description="The search and fetch tools this member’s keys may run on /v1/search and /v1/fetch by default. Left on its default, a key follows its own model access, or the member’s when it has none: unrestricted runs every tool, restricted only a search tool named there as provider:tool (deprecated). A key can narrow this, but never exceed it."
             inheritLabel="Default"
             initial={spendRow.allowed_tools ?? undefined}
             onChange={(value, isValid) => {
@@ -872,6 +911,9 @@ export function OrganizationMembersPage() {
 
   const [editingMember, setEditingMember] = useState<string>()
   const [removing, setRemoving] = useState<OrganizationMember>()
+  // A person's spend limit is set from their row's menu.
+  const [limiting, setLimiting] = useState<LimitTarget>()
+  const navigate = useNavigate()
   const [revoking, setRevoking] = useState<OrganizationMember>()
   const [joining, setJoining] = useState(false)
   const [joinCount, setJoinCount] = useState(0)
@@ -933,8 +975,26 @@ export function OrganizationMembersPage() {
   )
   const activeContext: OrganizationContext | undefined = context.data
   const manages = canManage(activeContext)
-  const editingRow = rows.find((row) => memberRowKey(row) === editingMember)
+  const editing = useHeldDialogTarget(
+    rows.find((row) => memberRowKey(row) === editingMember),
+  )
+  const editingRow = editing.held
 
+  // The limits a row's menu reads and changes, every one rather than a page
+  // of them. Owners and admins only: anyone else is refused the read, so it
+  // is not made.
+  const ceilings = useAllSpendCeilings(manages)
+  const ceilingList = useMemo(
+    () => (manages ? (ceilings.data ?? []) : []),
+    [manages, ceilings.data],
+  )
+  // Until the limits are read, nobody is offered a limit they may already
+  // have.
+  const ceilingsUnread = ceilings.data
+    ? null
+    : ceilings.isError
+      ? "Could not read"
+      : "Loading…"
   const columns = useMemo<DataTableColumn<OrganizationMember>[]>(() => {
     // Annotated here rather than inferred through the filter below, which would
     // otherwise widen every cell callback's parameter to `any`.
@@ -943,64 +1003,21 @@ export function OrganizationMembersPage() {
         id: "member",
         header: "Member",
         isRowHeader: true,
-        // Two lines, which is what sets the 58px row: who they are, and under
-        // it the ceiling every key issued to them inherits. Model access used
-        // to be a lane of its own, and as a lane it was a column of "All
-        // models" repeating down the page; under the name it is read once, with
-        // the person it belongs to. The address keeps its place on that line
-        // where there is one, because it is the handle a sign-in claims and the
-        // only thing distinguishing two people with the same display name.
+        // Model access reads under the member's name rather than in a lane of
+        // its own, so it is read once with the person it belongs to.
         cell: (member) => {
           const spendRow = member.attribution ?? undefined
-          // Gated on `isOperator` here rather than by `DEPLOYMENT_WIDE_COLUMNS`,
-          // which withholds columns by id and so cannot reach a value living
-          // inside the member cell. Without this a caller who does not operate
-          // the deployment would be shown
-          // every member's model-access ceiling under their name.
-          const access =
-            isOperator && spendRow
-              ? accessLabel(spendRow.allowed_models ?? undefined)
-              : undefined
-          const email = member.email && member.full_name ? member.email : null
+          // Gated here rather than by `DEPLOYMENT_WIDE_COLUMNS`, which withholds
+          // whole columns by id and cannot reach a value inside this cell.
           return (
-            <div className="flex flex-col gap-0.5">
-              <span className="text-sm text-foreground">
-                {memberLabel(member)}
-              </span>
-              {email || access ? (
-                // Never wraps, and the address is the only part that gives way.
-                // Seeded with real names the line is three facts in a fixed
-                // lane, and letting it wrap took the row off its 58px pitch and
-                // pushed the name off its baseline. The marker is short and
-                // bounded, so the address truncates and keeps its full value in
-                // the title.
-                <span className="flex items-center gap-1.5 text-nowrap text-xs">
-                  {email ? (
-                    <span className="truncate text-muted" title={email}>
-                      {email}
-                    </span>
-                  ) : null}
-                  {email && access ? (
-                    <span aria-hidden className="text-subtle">
-                      ·
-                    </span>
-                  ) : null}
-                  {access ? (
-                    <span
-                      className={`shrink-0 ${
-                        access.tone === "danger"
-                          ? "text-danger"
-                          : access.tone === "muted"
-                            ? "text-subtle"
-                            : "text-muted"
-                      }`}
-                    >
-                      {access.text}
-                    </span>
-                  ) : null}
-                </span>
-              ) : null}
-            </div>
+            <MemberIdentityCell
+              member={member}
+              access={
+                isOperator && spendRow
+                  ? accessLabel(spendRow.allowed_models ?? undefined)
+                  : undefined
+              }
+            />
           )
         },
       },
@@ -1135,7 +1152,8 @@ export function OrganizationMembersPage() {
       },
       {
         id: "actions",
-        header: "Actions",
+        // The menu names its row, so the header is for screen readers.
+        header: <span className="sr-only">Actions</span>,
         align: "end",
         cell: (member) => {
           const blocked = membershipChangeBlockedReason({
@@ -1150,69 +1168,125 @@ export function OrganizationMembersPage() {
           if (member.status === "invited" && member.invitation_id) {
             const invitationId = member.invitation_id
             return (
-              <RowActionRow>
-                <RowAction
-                  icon={FiSend}
-                  label="Reissue"
-                  ariaLabel={`Reissue the invitation to ${memberLabel(member)}`}
-                  isDisabled={!manages || reissue.isPending}
-                  onPress={() =>
-                    reissue.mutate(invitationId, { onSuccess: setReissued })
-                  }
-                />
-                <RowAction
-                  icon={FiXCircle}
-                  label="Revoke"
-                  isDisabled={!manages}
-                  onPress={() => setRevoking(member)}
-                />
-              </RowActionRow>
+              <RowMenu
+                label={`Actions for ${memberLabel(member)}`}
+                actions={[
+                  {
+                    id: "reissue",
+                    label: "Reissue invitation",
+                    hint: "Sends a new link; the old one stops working",
+                    icon: FiSend,
+                    isDisabled: !manages || reissue.isPending,
+                    run: () =>
+                      reissue.mutate(invitationId, { onSuccess: setReissued }),
+                  },
+                  {
+                    id: "revoke",
+                    label: "Revoke invitation…",
+                    hint: "Withdraws the link before it is used",
+                    icon: FiXCircle,
+                    isDisabled: !manages,
+                    isDestructive: true,
+                    run: () => setRevoking(member),
+                  },
+                ]}
+              />
             )
           }
           // Blocking stops this person's keys from making requests without
           // touching their membership or their spend history, which is a
           // different act from removing them from the organization. It writes
           // the gateway's `users` row, so a member with no attribution row has
-          // nothing to block and the control is absent rather than disabled.
+          // nothing to block and the action is absent rather than disabled.
           const spendRow = member.attribution ?? undefined
+          const sessionsUser = member.attribution_user_id ?? member.user_id
+          const memberId = member.organization_member_id
+          const ownLimit = limitsOnPerson(ceilingList, member).own
           return (
-            <RowActionRow>
-              {manages ? (
-                <RowAction
-                  icon={FiEdit2}
-                  label="Edit"
-                  onPress={() => setEditingMember(memberRowKey(member))}
-                />
-              ) : null}
-              {manages && spendRow ? (
-                <RowAction
-                  icon={spendRow.blocked ? FiCheckCircle : FiSlash}
-                  label={spendRow.blocked ? "Unblock" : "Block"}
-                  isDisabled={updateUser.isPending}
-                  onPress={() =>
-                    updateUser.mutate({
-                      id: member.attribution_user_id ?? "",
-                      body: { blocked: !spendRow.blocked },
-                    })
-                  }
-                />
-              ) : null}
-              <RowAction
-                icon={FiUserMinus}
-                label="Remove"
-                // See the Role cell: the reason has to be in the name, not only
-                // in the tooltip, to reach anything but a pointer. `RowAction`
-                // puts the same name on a `title` while the action is refused,
-                // which is how the pointer gets it without a wrapper here.
-                ariaLabel={
-                  blocked
-                    ? `Remove ${memberLabel(member)} (${blocked})`
-                    : undefined
-                }
-                isDisabled={Boolean(blocked)}
-                onPress={() => setRemoving(member)}
-              />
-            </RowActionRow>
+            <RowMenu
+              label={`Actions for ${memberLabel(member)}`}
+              actions={[
+                ...(manages
+                  ? [
+                      {
+                        id: "edit",
+                        label: "Edit…",
+                        hint: "Their role and the models they may call",
+                        icon: FiEdit2,
+                        run: () => setEditingMember(memberRowKey(member)),
+                      },
+                    ]
+                  : []),
+                ...(manages && memberId
+                  ? [
+                      {
+                        id: "limit",
+                        label: ownLimit
+                          ? "Change spend limit…"
+                          : "Set spend limit…",
+                        hint:
+                          ceilingsUnread ??
+                          (ownLimit
+                            ? limitLine(ownLimit)
+                            : "What they may spend, across every workspace and key"),
+                        isDisabled: ceilingsUnread !== null,
+                        icon: FiDollarSign,
+                        run: () =>
+                          setLimiting({
+                            scope: "org_member",
+                            scopeId: memberId,
+                            name: memberLabel(member),
+                            own: ownLimit,
+                          }),
+                      },
+                    ]
+                  : []),
+                ...(sessionsUser
+                  ? [
+                      {
+                        id: "sessions",
+                        label: "See their sessions",
+                        hint: "Everything their agents ran, in Sessions",
+                        icon: FiLayers,
+                        run: () =>
+                          void navigate({
+                            to: "/sessions",
+                            search: { range: "30d", user_id: sessionsUser },
+                          }),
+                      },
+                    ]
+                  : []),
+                ...(manages && spendRow
+                  ? [
+                      {
+                        id: "block",
+                        label: spendRow.blocked ? "Unblock" : "Block",
+                        hint: spendRow.blocked
+                          ? "Their requests go through again"
+                          : "Their requests are refused until you unblock them",
+                        icon: spendRow.blocked ? FiCheckCircle : FiSlash,
+                        isDisabled: updateUser.isPending,
+                        run: () =>
+                          updateUser.mutate({
+                            id: member.attribution_user_id ?? "",
+                            body: { blocked: !spendRow.blocked },
+                          }),
+                      },
+                    ]
+                  : []),
+                {
+                  id: "remove",
+                  label: "Remove…",
+                  // The reason a removal is refused is the hint, so it reaches
+                  // everyone who opens the menu and not only a pointer.
+                  hint: blocked || "Takes them out of the organization",
+                  icon: FiUserMinus,
+                  isDisabled: Boolean(blocked),
+                  isDestructive: true,
+                  run: () => setRemoving(member),
+                },
+              ]}
+            />
           )
         },
       },
@@ -1232,6 +1306,9 @@ export function OrganizationMembersPage() {
     reissue.isPending,
     reissue.mutate,
     placementsByUser,
+    ceilingList,
+    ceilingsUnread,
+    navigate,
   ])
 
   return (
@@ -1253,15 +1330,7 @@ export function OrganizationMembersPage() {
             </Button>
           ) : null
         }
-      >
-        {/* The trailing sentences are about the model access shown under a
-            member's name and the Spend column, neither of which a caller who
-            does not operate the deployment is shown, so they are only told to
-            one. */}
-        Who belongs to this organization and what each of them may do. Owners
-        and admins manage it; members and viewers read the workspaces they
-        belong to.
-      </PageIntro>
+      />
 
       <div className="-mt-2 mb-4 max-w-[38.75rem]">
         <Disclosure heading="How roles work">
@@ -1333,11 +1402,13 @@ export function OrganizationMembersPage() {
         />
       ) : null}
 
-      {/* Keyed on the row: its fields seed from the member on mount only, so
-          the next Edit has to arrive at a fresh form. */}
+      {/* Keyed on the row and the opening: its fields seed from the member on
+          mount only, so the next Edit has to arrive at a fresh form. Kept
+          mounted through the exit, which `isOpen` plays. */}
       {editingRow ? (
         <MemberEditor
-          key={memberRowKey(editingRow)}
+          key={`${memberRowKey(editingRow)}:${editing.generation}`}
+          isOpen={editing.isOpen}
           member={editingRow}
           spendRow={editingRow.attribution ?? undefined}
           isOperator={isOperator}
@@ -1378,6 +1449,14 @@ export function OrganizationMembersPage() {
         label="members"
       />
 
+      {limiting ? (
+        <SetLimitDialog
+          key={limiting.scopeId}
+          target={limiting}
+          {...limitDialogCopy(limiting)}
+          onClose={() => setLimiting(undefined)}
+        />
+      ) : null}
       <ConfirmDialog
         isOpen={removing !== undefined}
         onOpenChange={(open) => {

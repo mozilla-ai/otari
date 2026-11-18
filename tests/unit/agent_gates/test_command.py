@@ -203,6 +203,45 @@ def test_a_comment_after_a_metacharacter_is_still_a_comment() -> None:
         assert evaluate_command(gate, CommandEvidence(commands=(command,))).outcome is Outcome.PASS
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo $(ls)#; npm install",
+        "echo $(ls)#x; npm install",
+        "echo a$(ls)b#; npm install",
+        "cat <(ls)#; npm install",
+        "tee >(cat)#; npm install",
+        "diff <(ls) <(ls)#; npm install",
+        "echo $( (ls) )#; npm install",
+        "echo $(echo $((1)))#; npm install",
+        "echo $(f() { :; }; f)#; npm install",
+        "echo $(cat <<'EOF'\nx\nEOF\n)#; npm install",
+        "echo $(#c\nls)#; npm install",
+        "echo $(echo $(ls)#)#; npm install",
+    ],
+)
+def test_a_hash_right_after_a_substitution_is_not_a_comment(command: str) -> None:
+    """Bash reads `$(...)`, `<(...)` and `>(...)` as part of the word around them, so `$(ls)#` is one word and
+    the command after it runs. Reading that `#` as a comment hid the command from the gate.
+    """
+    assert evaluate_command(_pnpm_gate(), CommandEvidence(commands=(command,))).outcome is Outcome.FAIL
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo $(ls) # npm install",
+        "cat <(ls) #; npm install",
+        "(ls)#; npm install",
+        "echo $( (ls)#; npm install\n)",
+        "echo ${x:-$(ls)} # npm install",
+    ],
+)
+def test_a_comment_after_a_substitution_or_a_subshell_is_still_a_comment(command: str) -> None:
+    """A `#` after whitespace, or after the `)` that closes a subshell, starts a comment, in a substitution too."""
+    assert evaluate_command(_pnpm_gate(), CommandEvidence(commands=(command,))).outcome is Outcome.PASS
+
+
 # --- _command_segments / _contains_subsequence: direct unit coverage -------
 
 
@@ -361,6 +400,45 @@ def test_sudo_prefixed_path_qualified_command_is_a_documented_gap() -> None:
     gate = _gate(id="use-pnpm", forbidden=("npm install",), message="m")
     result = evaluate_command(gate, CommandEvidence(commands=("sudo /usr/bin/npm install",)))
     assert result.outcome is Outcome.PASS
+
+
+# --- git's global options ---------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git -C /tmp/x reset --hard",
+        "git --no-pager reset --hard",
+        "git -c core.x=y reset --hard",
+        "git --git-dir=/tmp/x/.git reset --hard",
+        "git --work-tree /tmp/x reset --hard",
+        "git --config-env core.pager=HOME reset --hard",
+        "git --exec-path=/tmp reset --hard",
+        "git -C x -c a.b=c --no-pager -P reset --hard",
+        "/usr/bin/git -C x reset --hard",
+    ],
+)
+def test_a_git_command_matches_with_its_global_options_between(command: str) -> None:
+    """Each runs `git reset --hard`, checked against real git: the options only change where and how it runs."""
+    gate = _gate(id="no-hard-reset", forbidden=("git reset --hard",), message="m")
+    assert evaluate_command(gate, CommandEvidence(commands=(command,))).outcome is Outcome.FAIL
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo reset --hard",
+        "git --version reset --hard",
+        "git --exec-path reset --hard",
+        "git --list-cmds=main reset --hard",
+        "git -Cx reset --hard",
+    ],
+)
+def test_a_git_option_that_stops_git_before_its_subcommand_matches_nothing(command: str) -> None:
+    """None of these resets: git prints its version, exec path or command list and exits, or refuses `-Cx`."""
+    gate = _gate(id="no-hard-reset", forbidden=("git reset --hard",), message="m")
+    assert evaluate_command(gate, CommandEvidence(commands=(command,))).outcome is Outcome.PASS
 
 
 # --- Unquoted newlines as command-segment boundaries ------------------------

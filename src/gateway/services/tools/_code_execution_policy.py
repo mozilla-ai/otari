@@ -20,6 +20,7 @@ The request path's read, with no identity and the workspace from the key, is
 from __future__ import annotations
 
 import uuid
+from collections.abc import Collection
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -272,6 +273,18 @@ class WorkspaceCodeExecutionPolicies:
             return _NOT_TURNED_ON
         return policy
 
+    async def allows_sandbox(self, workspace_id: uuid.UUID, *, pinnable_images: Collection[str]) -> bool:
+        """Whether the workspace's requests may run code in the deployment's sandbox, as admission decides it.
+
+        ``pinnable_images`` is the deployment's current list, which a stored pin may have fallen off.
+        """
+        policy = await self.for_request(workspace_id)
+        return policy is None or (
+            policy.enabled
+            and leaves_a_served_tool(policy.tools)
+            and (policy.image is None or policy.image in pinnable_images)
+        )
+
     async def resolve(self, workspace_id: uuid.UUID) -> ResolvedCodeExecutionPolicy | None:
         """The workspace's stored policy, or ``None`` when it has none.
 
@@ -413,6 +426,11 @@ class WorkspaceCodeExecutionPolicyService:
         return workspace
 
 
+def leaves_a_served_tool(tools: Collection[str] | None) -> bool:
+    """Whether a policy's tool list, ``None`` for no list, leaves the sandbox a kind it serves."""
+    return tools is None or bool(set(tools) & set(SERVED_TOOL_NAMES))
+
+
 def _require_runnable_tools(tools: list[str] | None) -> None:
     """Refuse a tool list that leaves this deployment nothing to run.
 
@@ -427,7 +445,7 @@ def _require_runnable_tools(tools: list[str] | None) -> None:
     the image: this asserts what is *storable*, and what a deployment serves can
     change under a row that was valid when it was written.
     """
-    if tools is None or set(tools) & set(SERVED_TOOL_NAMES):
+    if leaves_a_served_tool(tools):
         return
     raise SandboxToolsUnrunnableError(SERVED_TOOL_NAMES)
 

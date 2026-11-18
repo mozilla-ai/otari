@@ -16,7 +16,9 @@ const observation: Observation = {
 describe("matchesSearch", () => {
   it("matches the name, the type or the id, ignoring case", () => {
     expect(matchesSearch(observation, "Completion")).toBe(true)
-    expect(matchesSearch(observation, "generation")).toBe(true)
+    // The type as the row says it, not the constant it is stored under.
+    expect(matchesSearch(observation, "model request")).toBe(true)
+    expect(matchesSearch(observation, "generation")).toBe(false)
     expect(matchesSearch(observation, "7F3A")).toBe(true)
   })
 

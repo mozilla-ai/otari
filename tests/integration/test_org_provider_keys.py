@@ -12,6 +12,7 @@ identities at whatever role a case needs).
 
 import uuid
 from collections.abc import Iterator
+from typing import Any
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -22,7 +23,9 @@ from gateway.exceptions.organizations_exceptions import NotAuthorizedError, Work
 from gateway.exceptions.providers_exceptions import (
     OrgProviderKeyAlreadyExistsError,
     OrgProviderKeyArchivedError,
+    OrgProviderKeyCredentialRequiredError,
     OrgProviderKeyDisabledForWorkspaceError,
+    OrgProviderKeyInvalidSlugError,
     OrgProviderKeyNotArchivedError,
     OrgProviderKeyNotFoundError,
     WorkspaceProviderKeyOverrideConflictError,
@@ -42,6 +45,7 @@ from gateway.repositories.tenancy import (
 )
 from gateway.schemas.providers import (
     OrgProviderKeyCreateRequest,
+    OrgProviderKeyPublic,
     OrgProviderKeyUpdateRequest,
     WorkspaceProviderKeyOverrideRequest,
 )
@@ -115,9 +119,9 @@ async def test_crud_round_trip(async_db: AsyncSession) -> None:
     assert [k.id for k in listed.data] == [created.id]
 
     updated = await service.update_key_for_user(
-        user=owner, key_id=created.id, request=OrgProviderKeyUpdateRequest(api_base="https://proxy/v1")
+        user=owner, key_id=created.id, request=OrgProviderKeyUpdateRequest(name="renamed")
     )
-    assert updated.api_base == "https://proxy/v1"
+    assert updated.name == "renamed"
     assert updated.last4 == "1234", "omitted api_key is left in place"
 
     archived = await service.archive_key_for_user(user=owner, key_id=created.id)
@@ -129,6 +133,84 @@ async def test_crud_round_trip(async_db: AsyncSession) -> None:
     await service.archive_key_for_user(user=owner, key_id=created.id)
     await service.delete_key_for_user(user=owner, key_id=created.id)
     assert (await service.list_keys_for_user(user=owner, include_archived=True)).count == 0
+
+
+async def test_moving_a_key_to_another_host_needs_its_credentials_again(async_db: AsyncSession) -> None:
+    """The next call sends what the key holds to the new base URL, and an admin only ever reads ``last4``."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrgProviderKeyService(async_db)
+    created = await service.create_key_for_user(
+        user=owner,
+        request=OrgProviderKeyCreateRequest(
+            provider="openai",
+            name="primary",
+            api_key="sk-live-1234",
+            api_base="https://proxy/v1",
+            client_args={"extra_token": "hidden-1"},
+        ),
+    )
+
+    async def update(**fields: Any) -> OrgProviderKeyPublic:
+        return await service.update_key_for_user(
+            user=owner, key_id=created.id, request=OrgProviderKeyUpdateRequest(**fields)
+        )
+
+    for refused in (
+        {"api_base": "https://elsewhere/v1"},
+        {"api_base": "https://elsewhere/v1", "api_key": "sk-live-5678"},
+        {"api_base": "https://elsewhere/v1", "api_key": "sk-live-5678", "client_args": {"extra_token": "***"}},
+    ):
+        with pytest.raises(OrgProviderKeyCredentialRequiredError):
+            await update(**refused)
+
+    assert (await update(api_base="https://proxy/v1", name="same host")).api_base == "https://proxy/v1"
+    moved = await update(
+        api_base="https://elsewhere/v1", api_key="sk-live-5678", client_args={"extra_token": "hidden-2"}
+    )
+    assert (moved.api_base, moved.last4) == ("https://elsewhere/v1", "5678")
+    with pytest.raises(OrgProviderKeyInvalidSlugError):
+        # A key named by its own prefix keeps an endpoint for that prefix to name.
+        await update(api_base=None)
+
+
+async def test_a_provider_counts_as_zero_data_retention_only_while_every_key_declares_it(
+    async_db: AsyncSession,
+) -> None:
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrgProviderKeyService(async_db)
+    primary = await service.create_key_for_user(
+        user=owner,
+        request=OrgProviderKeyCreateRequest(
+            provider="openai", name="primary", api_key="sk-live-1234", zero_data_retention=True
+        ),
+    )
+    assert primary.zero_data_retention is True
+
+    async def declared() -> frozenset[str]:
+        return await service.get_zero_data_retention_providers(organization_id=organization.id)
+
+    assert await declared() == frozenset({"openai"})
+    second = await service.create_key_for_user(user=owner, request=_create_request(name="second"))
+    assert second.zero_data_retention is False
+    assert await declared() == frozenset()
+
+    kept = await service.update_key_for_user(
+        user=owner, key_id=second.id, request=OrgProviderKeyUpdateRequest(zero_data_retention=None)
+    )
+    assert kept.zero_data_retention is False, "an explicit null changes nothing"
+    await service.update_key_for_user(
+        user=owner, key_id=second.id, request=OrgProviderKeyUpdateRequest(zero_data_retention=True)
+    )
+    assert await declared() == frozenset({"openai"})
+
+    await service.create_key_for_user(user=owner, request=_create_request(name="keyless", api_key=None))
+    assert await declared() == frozenset({"openai"}), "a key with no credential serves nothing"
+    await service.create_key_for_user(
+        user=owner, request=OrgProviderKeyCreateRequest(provider="openai", name="blank base", api_base="")
+    )
+    assert await declared() == frozenset({"openai"}), "an empty base URL is no credential either"
 
 
 async def test_delete_requires_archived_first(async_db: AsyncSession) -> None:

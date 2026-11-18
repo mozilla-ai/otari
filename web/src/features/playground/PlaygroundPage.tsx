@@ -19,6 +19,7 @@ import { PlaygroundGateNotice } from "./PlaygroundGateNotice"
 import { PlaygroundHistory } from "./PlaygroundHistory"
 import { PlaygroundToolbar } from "./PlaygroundToolbar"
 import { PlaygroundWelcome } from "./PlaygroundWelcome"
+import { PromptCaptureToggle } from "./PromptCaptureToggle"
 import { CHAT_COLUMN } from "./playgroundLayout"
 
 export function PlaygroundPage() {
@@ -104,6 +105,14 @@ export function PlaygroundPage() {
               hasTranscript={hasTranscript}
               onToggleCompare={playground.toggleCompare}
               onNewChat={() => playground.setIsNewChatConfirmOpen(true)}
+              capture={
+                playground.canCapturePrompts ? (
+                  <PromptCaptureToggle
+                    isSelected={playground.capturePrompts}
+                    onChange={playground.setCapturePrompts}
+                  />
+                ) : null
+              }
               files={
                 playground.canAttachFiles ? (
                   <PlaygroundFiles
@@ -179,10 +188,11 @@ export function PlaygroundPage() {
             pinnedKeys={playground.pinnedKeys}
             onTogglePin={playground.togglePin}
             onRegenerate={playground.regenerate}
+            stopPanel={playground.stopPanel}
           />
           <div ref={follow.setEndMarker} aria-hidden className="h-0" />
           <div
-            className={`${playground.isComparing ? "w-full" : CHAT_COLUMN} -mb-5 sticky bottom-0 z-10 mt-auto bg-background pt-7 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:-mb-6 md:pb-6`}
+            className={`${playground.isComparing ? "w-full" : CHAT_COLUMN} -mb-5 sticky bottom-0 z-10 mt-auto bg-background pt-7 pb-5 md:-mb-6 md:pb-6`}
           >
             {playground.haveBothAnswered &&
             playground.ratingState !== "dismissed" ? (

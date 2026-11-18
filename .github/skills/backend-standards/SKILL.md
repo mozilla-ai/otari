@@ -81,7 +81,9 @@ remove a name when you move its code, and never add one.
 - **Reacting to another domain.** Dependencies between domains run one way. A domain that must
   react to a change in a domain that does not depend on it receives a listener interface by
   constructor injection, defined by the domain where the change happens. The listener runs in the
-  caller's transaction and never commits.
+  caller's transaction and never commits. One told of something no transaction records is run in a
+  background task by the domain that tells it, and works on a Unit of Work of its own
+  ([DOMAINS.md](../../../DOMAINS.md#the-target-shape)).
 - **Repositories** inherit `BaseRepository`, flush and never commit. A repository that turns a
   specific database error, such as `IntegrityError`, into a domain error is the module that
   imports it.
@@ -102,7 +104,7 @@ Catch specific exceptions, not a broad `except Exception`.
 
 A domain's service is its Service Layer, and [DOMAINS.md](../../../DOMAINS.md#the-target-shape)
 gives its shape: one service per domain with a small public API, built by constructor injection,
-from a builder in `api/deps.py`. One rule adds to it:
+from a builder in `api/deps/`. One rule adds to it:
 
 - **Moving old code.** A module-level function that takes a session becomes a method of its
   domain's service, or a repository method when all it does is run a query. A helper that
@@ -114,7 +116,7 @@ A Unit of Work (`core/unit_of_work.py`) marks where a business transaction start
 rolls back.
 
 - Each request, and each worker job, has one Unit of Work over its one session, and every service
-  built in that scope shares it. A request gets it from `get_unit_of_work` in `api/deps.py`. A
+  built in that scope shares it. A request gets it from `get_unit_of_work` in `api/deps/`. A
   worker job gets it from `create_unit_of_work()`, or from `create_log_unit_of_work()` for work
   on the metering pool. A worker whose own reads still take the session gets both from
   `create_unit_of_work_with_session()`, until those reads move into repositories.
@@ -139,7 +141,9 @@ commits move into blocks when the domain moves
 ([step 4](../../../DOMAINS.md#what-one-domain-change-does)).
 
 The boundary check refuses a `commit()` or `rollback()` call outside `core/unit_of_work.py`, except
-in the modules on `TRANSACTION_CONTROL_BASELINE`, which names that code. It also refuses an import
+in the modules on `TRANSACTION_CONTROL_BASELINE`, which names that code. It refuses `begin_nested()`
+the same way, except in a repository on `SAVEPOINT_BASELINE`, which may open a savepoint to diagnose
+a refusal of its own write ([DOMAINS.md](../../../DOMAINS.md)). It also refuses an import
 of `session_for` outside `repositories/`, and a `UnitOfWork(...)` call outside `get_unit_of_work`
 and the worker factories in `core/unit_of_work.py`, so nothing builds a second one over a session
 that already has one.

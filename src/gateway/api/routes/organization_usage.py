@@ -34,21 +34,21 @@ Reads only. Deleting rows and repricing them stay operator-only, as does
 ``/api/v1/usage/in-flight``: its registry entries carry no workspace at all
 (see ``usage.list_in_flight``), so there is nothing there to scope yet.
 
-Every aggregation is the one ``usage.py`` already runs. This module contributes
-route declarations and a scope predicate, and nothing that could compute a
-different answer to the same question.
+Every aggregation is the usage service's, the one ``usage.py`` calls too. This
+module contributes route declarations and a scope, and nothing that could compute
+a different answer to the same question.
 """
 
 import uuid
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import ColumnElement, false, func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from gateway.api.deps import CurrentIdentity, get_db, verify_master_key
+from gateway.api.deps import CurrentIdentity, UsageServiceDep, get_db, verify_master_key
 from gateway.api.routes.usage import (
     _API_KEY_MULTI_DESC,
     _COUNTS_DESC,
@@ -68,33 +68,29 @@ from gateway.api.routes.usage import (
     _TOOL_DESC,
     _USER_MULTI_DESC,
     _WORKSPACE_DESC,
-    Bucket,
     GroupByTag,
+    TagFilter,
+)
+from gateway.core.sql import MAX_FILTER_VALUES
+from gateway.core.surface import Surface
+from gateway.models.tenancy import User as TenancyUser
+from gateway.models.tenancy import Workspace
+from gateway.schemas.usage_and_telemetry import (
+    Bucket,
     SeriesGroupBy,
     SummaryDimension,
-    TagFilter,
     ToolFilter,
     UsageCount,
     UsageEntry,
     UsageGroupedSeries,
     UsageSummary,
-    _grouped_series_response,
-    _summary_context,
-    _summary_response,
-    _usage_filters,
 )
-from gateway.core.sql import MAX_FILTER_VALUES
-from gateway.core.surface import Surface
-from gateway.models.api_keys import APIKey
-from gateway.models.tenancy import User as TenancyUser
-from gateway.models.tenancy import Workspace
-from gateway.models.usage import UsageLog
-from gateway.models.users import User
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import (
     resolve_visible_workspace_scope,
     resolve_workspace_in_organization,
 )
+from gateway.services.usage_and_telemetry import UsageFilters, UsageScope, parse_tag_filters
 
 router = APIRouter(
     prefix="/organizations/me/usage",
@@ -110,13 +106,13 @@ router = APIRouter(
 SURFACE = Surface("organization_usage")
 
 
-async def _scope_condition(
+async def _scope(
     db: AsyncSession,
     *,
     user: TenancyUser,
     workspace_id: uuid.UUID | None,
-) -> ColumnElement[bool]:
-    """The WHERE clause that confines a read to what this caller may see.
+) -> UsageScope:
+    """The scope that confines a read to what this caller may see.
 
     Resolved per request rather than cached on the session: a membership can be
     suspended or a role changed between two requests, and the cheaper answer is
@@ -139,10 +135,10 @@ async def _scope_condition(
         # the caller is not a member of, which is what keeps the parameter from
         # being an existence oracle either way.
         #
-        # The equality returned below duplicates the one ``_usage_filters`` builds
-        # from the same parameter, and that is deliberate: the scope has to be
-        # sufficient on its own, so a later change to how the filter is applied
-        # cannot leave a request scoped by nothing.
+        # The scope returned below duplicates the filter built from the same
+        # parameter, and that is deliberate: the scope has to be sufficient on its
+        # own, so a later change to how the filter is applied cannot leave a
+        # request scoped by nothing.
         await resolve_workspace_in_organization(
             db,
             user=user,
@@ -150,24 +146,23 @@ async def _scope_condition(
             organization=organization,
             organizations=organizations,
         )
-        return col(UsageLog.workspace_id) == workspace_id
+        return UsageScope(workspaces=[workspace_id])
 
     scope = await resolve_visible_workspace_scope(db, user=user, organizations=organizations)
     if scope.sees_every_workspace:
-        return col(UsageLog.workspace_id).in_(
-            select(col(Workspace.id)).where(col(Workspace.organization_id) == scope.organization.id)
+        return UsageScope(
+            workspaces=select(col(Workspace.id)).where(col(Workspace.organization_id) == scope.organization.id)
         )
-    if not scope.workspace_ids:
-        # Belongs to no workspace yet. An empty result, and deliberately not a
-        # 403: nothing was refused, there is simply nothing here.
-        return false()
-    return col(UsageLog.workspace_id).in_(scope.workspace_ids)
+    # A caller in no workspace yet gets an empty scope. An empty result, and
+    # deliberately not a 403: nothing was refused, there is simply nothing here.
+    return UsageScope(workspaces=scope.workspace_ids or [])
 
 
 @router.get("")
 async def list_organization_usage(
     identity: CurrentIdentity,
     db: Annotated[AsyncSession, Depends(get_db)],
+    usage: UsageServiceDep,
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
     user_id: Annotated[list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_USER_MULTI_DESC)] = None,
@@ -198,7 +193,8 @@ async def list_organization_usage(
     JSON array, same separate ``/count`` for a paginator's total, confined to
     what the caller's membership lets them see. Scope is never a parameter here.
     """
-    conditions = _usage_filters(
+    scope = await _scope(db, user=identity, workspace_id=workspace_id)
+    filters = UsageFilters(
         start_date=start_date,
         end_date=end_date,
         user_id=user_id,
@@ -209,34 +205,22 @@ async def list_organization_usage(
         provider=provider,
         source=source,
         source_label=source_label,
-        tag=tag,
+        tags=parse_tag_filters(tag),
         api_key_id=api_key_id,
         priced=priced,
         tool=tool,
         counts_toward_budget=counts_toward_budget,
         request_group_id=request_group_id,
         workspace_id=workspace_id,
-        scope=await _scope_condition(db, user=identity, workspace_id=workspace_id),
     )
-    stmt = (
-        select(UsageLog, User.alias, APIKey.key_name)
-        .outerjoin(User, User.user_id == UsageLog.user_id)
-        .outerjoin(APIKey, APIKey.id == UsageLog.api_key_id)
-        .where(*conditions)
-        .order_by(UsageLog.timestamp.desc())
-        .offset(skip)
-        .limit(limit)
-    )
-    result = await db.execute(stmt)
-    return [
-        UsageEntry.from_model(log, user_alias=alias, api_key_name=key_name) for log, alias, key_name in result.all()
-    ]
+    return await usage.page(filters, scope, skip=skip, limit=limit)
 
 
 @router.get("/count")
 async def count_organization_usage(
     identity: CurrentIdentity,
     db: Annotated[AsyncSession, Depends(get_db)],
+    usage: UsageServiceDep,
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
     user_id: Annotated[list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_USER_MULTI_DESC)] = None,
@@ -268,7 +252,8 @@ async def count_organization_usage(
     is not narrowed to imported rows here: that narrowing sizes the bulk mutations, and
     this surface has none. So this total keeps matching the list beside it.
     """
-    conditions = _usage_filters(
+    scope = await _scope(db, user=identity, workspace_id=workspace_id)
+    filters = UsageFilters(
         start_date=start_date,
         end_date=end_date,
         user_id=user_id,
@@ -279,23 +264,22 @@ async def count_organization_usage(
         provider=provider,
         source=source,
         source_label=source_label,
-        tag=tag,
+        tags=parse_tag_filters(tag),
         api_key_id=api_key_id,
         priced=priced,
         tool=tool,
         counts_toward_budget=counts_toward_budget,
         request_group_id=request_group_id,
         workspace_id=workspace_id,
-        scope=await _scope_condition(db, user=identity, workspace_id=workspace_id),
     )
-    stmt: Any = select(func.count()).select_from(UsageLog).where(*conditions)
-    return UsageCount(total=(await db.execute(stmt)).scalar_one())
+    return UsageCount(total=await usage.count(filters, scope))
 
 
 @router.get("/summary")
 async def organization_usage_summary(
     identity: CurrentIdentity,
     db: Annotated[AsyncSession, Depends(get_db)],
+    usage: UsageServiceDep,
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
     user_id: Annotated[list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_USER_MULTI_DESC)] = None,
@@ -326,8 +310,8 @@ async def organization_usage_summary(
     caller reads. The breakdown by user names the people inside the caller's own
     scope, which is the roster they can already read.
     """
-    start, end, conditions, totals = await _summary_context(
-        db,
+    scope = await _scope(db, user=identity, workspace_id=workspace_id)
+    filters = UsageFilters(
         start_date=start_date,
         end_date=end_date,
         user_id=user_id,
@@ -338,31 +322,21 @@ async def organization_usage_summary(
         provider=provider,
         source=source,
         source_label=source_label,
-        tag=tag,
+        tags=parse_tag_filters(tag),
         api_key_id=api_key_id,
         priced=priced,
         tool=tool,
         counts_toward_budget=counts_toward_budget,
         workspace_id=workspace_id,
-        scope=await _scope_condition(db, user=identity, workspace_id=workspace_id),
     )
-    return await _summary_response(
-        db,
-        start=start,
-        end=end,
-        conditions=conditions,
-        totals=totals,
-        status=status,
-        bucket=bucket,
-        dimensions=dimensions,
-        group_by_tag=group_by_tag,
-    )
+    return await usage.summary(filters, scope, bucket=bucket, dimensions=dimensions, group_by_tag=group_by_tag)
 
 
 @router.get("/series")
 async def organization_usage_series(
     identity: CurrentIdentity,
     db: Annotated[AsyncSession, Depends(get_db)],
+    usage: UsageServiceDep,
     group_by: SeriesGroupBy = Query(description="Dimension to split the series by"),
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
@@ -391,8 +365,8 @@ async def organization_usage_series(
     dashboard serializes one filter object for both, so a filter one of them
     ignored would make the stacked chart disagree with the tiles beside it.
     """
-    start, end, conditions, totals = await _summary_context(
-        db,
+    scope = await _scope(db, user=identity, workspace_id=workspace_id)
+    filters = UsageFilters(
         start_date=start_date,
         end_date=end_date,
         user_id=user_id,
@@ -403,21 +377,11 @@ async def organization_usage_series(
         provider=provider,
         source=source,
         source_label=source_label,
-        tag=tag,
+        tags=parse_tag_filters(tag),
         api_key_id=api_key_id,
         priced=priced,
         tool=tool,
         counts_toward_budget=counts_toward_budget,
         workspace_id=workspace_id,
-        scope=await _scope_condition(db, user=identity, workspace_id=workspace_id),
     )
-    return await _grouped_series_response(
-        db,
-        start=start,
-        end=end,
-        conditions=conditions,
-        totals=totals,
-        status=status,
-        bucket=bucket,
-        group_by=group_by,
-    )
+    return await usage.grouped_series(filters, scope, bucket=bucket, group_by=group_by)

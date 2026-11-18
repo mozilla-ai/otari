@@ -1,7 +1,7 @@
 # otari-router
 
 Claude Code plugin for [Otari](https://github.com/mozilla-ai/otari), the
-open-source LLM gateway. When Claude Code spawns a subagent, the plugin asks
+open-source AI gateway. When Claude Code spawns a subagent, the plugin asks
 the gateway which model that subagent should run on, and starts it there.
 
 Switching the model inside a running conversation cold-starts its prompt
@@ -26,7 +26,7 @@ The install asks for two values, and both are required:
 | Option | What it is |
 | --- | --- |
 | `otari_url` | Base URL of the gateway, such as `https://otari.example.com`. Plain `http` only for a gateway on this machine, since the key travels in a header. |
-| `otari_api_key` | The key each recommendation is billed to. Stored in secure storage, never in a settings file. |
+| `otari_api_key` | The key each recommendation is billed to. It needs the `agents` [scope](../../docs/api-keys.md#scopes), which the **Coding agent** choice under **Access** in the key form includes. Stored in secure storage, never in a settings file. |
 
 Change them later with `/plugin configure otari-router`. The plugin is active
 in the session that installed it and in every session after.
@@ -48,15 +48,15 @@ One hooks module with two hooks:
    its token counts, so the pick can be checked against what it cost.
 
 Each spawn leaves a dim transcript line such as
-`Explore agent-… starts on claude-haiku-4-5, Otari's choice (jev-1.13.0 chose haiku with 81%)`.
+`Explore agent-… starts on claude-haiku-4-5, Otari's choice (haiku with 81%)`.
 
 ## Requirements
 
 - An Otari gateway. A self-hosted one needs a
-  [decision provider](../../docs/configuration.md#decision-providers)
-  configured, and the recommendation is one decision-model call billed to the
+  [subagent router](../../docs/routing.md#subagent-routers) switched on in its
+  dashboard, and the recommendation is one decision-model call billed to the
   key above; on otari.ai a managed recommender answers, with nothing to
-  configure. See [Use with Claude Code](../../docs/use-with-claude-code.md#let-otari-choose-a-subagents-model)
+  configure. See the [Claude Code guide](../../docs/claude-code.md#let-otari-choose-a-subagents-model)
   for what the gateway does with the request.
 - A Claude Code build with the mods API, which hooks modules run on.
 

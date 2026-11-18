@@ -19,6 +19,7 @@ from gateway.core.settings.declarations import declaration_digest
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 from gateway.models.api_keys import MAX_END_USER_BUDGETS
 from gateway.models.budgets import BUDGET_ID_PATTERN
+from gateway.types.key_scope import KeyScope, KeyScopeSet
 
 # A declared key's name follows the budget id rule, so it reads the same in a
 # config file, a log line and the dashboard.
@@ -85,6 +86,14 @@ class ApiKeyConfig(BaseModel):
     reject_user_mismatch: bool | None = Field(
         default=None, description="Per-key override of reject_user_mismatch; null inherits the deployment setting."
     )
+    scopes: list[KeyScope] | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "The endpoint groups the key may reach. Unset gives every scope that existed when scopes were "
+            "introduced, the end-users scopes only to a service key, and never a scope added since."
+        ),
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -110,13 +119,28 @@ class ApiKeyConfig(BaseModel):
             raise ValueError(msg)
         return self
 
+    @model_validator(mode="after")
+    def _scopes_fit_the_key(self) -> Self:
+        if self.scopes is not None:
+            KeyScopeSet.checked(self.scopes, is_service_key=self.is_service_key)
+        return self
+
+    def held_scopes(self) -> KeyScopeSet:
+        """The scopes the declared key holds: its own, or else what a key that names none holds."""
+        if self.scopes is None:
+            return KeyScopeSet.unscoped(is_service_key=self.is_service_key)
+        return KeyScopeSet.checked(self.scopes, is_service_key=self.is_service_key)
+
     def declaration_digest(self) -> str:
         """A digest of this entry, which changes when any field config.yml sets for it, or its secret, does.
 
         The secret enters as its own SHA-256, so the digest stored beside the key
         says no more about it than the key's hash already does.
         """
-        entry = self.model_dump(mode="json", exclude={"secret"})
+        # An entry naming no scopes digests as it did before ``scopes`` existed, so
+        # upgrading does not rewrite the key, and with it switch back on one an
+        # operator switched off. The migration gave such a key what ``held_scopes`` would.
+        entry = self.model_dump(mode="json", exclude={"secret"} | ({"scopes"} if self.scopes is None else set()))
         entry["secret_sha256"] = hashlib.sha256(self.secret.get_secret_value().encode()).hexdigest()
         return declaration_digest(entry)
 
@@ -195,6 +219,17 @@ class ApiKeySettings(BaseModel):
         ),
     )
 
+    federation_audiences: Annotated[list[str], Shown(SettingsGroup.GENERAL)] = Field(
+        default_factory=list,
+        description=(
+            "The audiences this deployment answers to. A workload identity token must name one of them in its "
+            "'aud' claim, which is what proves it was minted for this deployment and not for another service at "
+            "the same issuer. Required once an identity token can authenticate at all, and a deployment that "
+            "answers to more than one name lists each. A key's federation rule still names the audience its own "
+            "tokens carry."
+        ),
+    )
+
     federation_member_rules: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
         default=False,
         description=(
@@ -220,6 +255,21 @@ class ApiKeySettings(BaseModel):
             "token it was exchanged for. Between 60 and 3600."
         ),
     )
+
+    @field_validator("federation_audiences")
+    @classmethod
+    def _audiences_are_named_once(cls, value: list[str]) -> list[str]:
+        named: list[str] = []
+        for entry in value:
+            audience = entry.strip()
+            if not audience:
+                msg = "federation_audiences must name an audience in every entry"
+                raise ValueError(msg)
+            if audience in named:
+                msg = f"federation audience '{audience}' is listed more than once"
+                raise ValueError(msg)
+            named.append(audience)
+        return named
 
     @field_validator("federation_issuers", mode="before")
     @classmethod

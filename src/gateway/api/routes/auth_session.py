@@ -43,12 +43,13 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Self
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    GrowthSignalPortDep,
     IdentityServiceDep,
     MembershipListenerDep,
     UnitOfWorkDep,
@@ -58,6 +59,7 @@ from gateway.api.deps import (
     record_auth_failure,
 )
 from gateway.api.routes._helpers import database_error
+from gateway.core.addresses import MAX_STORED_ADDRESS_LENGTH
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.core.unit_of_work import UnitOfWork
@@ -74,10 +76,9 @@ from gateway.services.dashboard_session_service import (
 )
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.password_service import MAX_PASSWORD_BYTES
-from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
-from gateway.services.tenancy.user_service import authenticate, operator_has_password
+from gateway.services.tenancy.user_service import authenticate, operator_has_password, report_sign_in
 
 router = APIRouter(prefix="/auth/session", tags=["auth"])
 
@@ -130,7 +131,7 @@ class CreateSessionRequest(BaseModel):
     )
     email: str | None = Field(
         default=None,
-        max_length=MAX_EMAIL_LENGTH,
+        max_length=MAX_STORED_ADDRESS_LENGTH,
         description="The identity's sign-in address.",
     )
     password: str | None = Field(
@@ -286,6 +287,8 @@ async def create_session(
     uow: UnitOfWorkDep,
     membership_listener: MembershipListenerDep,
     identities: IdentityServiceDep,
+    growth: GrowthSignalPortDep,
+    background_tasks: BackgroundTasks,
 ) -> SessionResponse:
     """Verify a sign-in credential and set the HttpOnly session cookie.
 
@@ -340,9 +343,12 @@ async def create_session(
         assert body.email is not None and body.password is not None  # guaranteed by the model validator
         identity = await _sign_in_with_password(body.email, body.password, request, db)
     try:
-        signed_in = await identities.sign_in(identity)
+        signed_in = await identities.sign_in(identity, asserted_email=None)
     except DATABASE_ERRORS as exc:
         raise database_error("persist a dashboard session on sign-in", exc) from None
+    if body.master_key is None:
+        # The master key is the deployment's credential, not a person's, even once its operator holds an address.
+        await report_sign_in(growth, identity, background_tasks=background_tasks)
     apply_session_cookie(
         response, signed_in.session_token, signed_in.session_expires_at, secure=request_is_https(request)
     )

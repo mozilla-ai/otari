@@ -108,8 +108,9 @@ class GatewaySettings(BaseModel):
     )
     secret_key_configured: bool = Field(
         description=(
-            "Whether OTARI_SECRET_KEY is set on the server. Provider credentials are encrypted at rest with it, "
-            "so a deployment without it can store none. The dashboard reads the same fact from the membership "
+            "Whether the server has a key to encrypt stored credentials with: OTARI_SECRET_KEY, or the key file a "
+            "SQLite deployment generates beside its database. Provider credentials are encrypted at rest with it, "
+            "so a deployment without one can store none. The dashboard reads the same fact from the membership "
             "context's provider_key_encryption_available, because this endpoint is operator-only and the "
             "provider-key pages are read by tenants."
         )
@@ -129,7 +130,6 @@ class UpdateSettingsRequest(BaseModel):
     require_pricing: bool | None = None
     reject_user_mismatch: bool | None = None
     models_dev_metadata: bool | None = None
-    file_understanding_enabled: bool | None = None
     model_cache_ttl_seconds: int | None = Field(default=None, ge=0)
     models_dev_cache_ttl_seconds: int | None = Field(default=None, ge=0)
     vision_describe_max_tokens: int | None = Field(default=None, gt=0)
@@ -318,7 +318,7 @@ async def rotate_master_key(
         await record_session_key_marker(db, hashed)
         if session_identity is not None:
             # NOTE: The identity service's block also commits the rotation staged above.
-            reminted = await identities.start_session(session_identity)
+            reminted = await identities.start_session(session_identity, asserted_email=None)
         await db.commit()
     except MasterKeyRotationConflictError as exc:
         await db.rollback()

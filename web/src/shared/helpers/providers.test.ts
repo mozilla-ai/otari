@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest"
-import { providerDisplayName } from "@/shared/helpers/providers"
+import {
+  providerCatalogName,
+  providerDisplayName,
+} from "@/shared/helpers/providers"
 
 describe("providerDisplayName", () => {
   it("uses each vendor's own capitalization", () => {
@@ -33,5 +36,42 @@ describe("providerDisplayName", () => {
   it("matches whatever case the id arrives in", () => {
     expect(providerDisplayName("OpenAI")).toBe("OpenAI")
     expect(providerDisplayName(" Anthropic ")).toBe("Anthropic")
+  })
+})
+
+describe("providerCatalogName", () => {
+  // The rows the backend sends for the add-provider picker, which name two ids
+  // alike ("Azure", "Vertex") and fall back to the bare id for five more.
+  const rows = [
+    ["azure", "Azure"],
+    ["azureopenai", "Azure"],
+    ["vertexai", "Vertex"],
+    ["vertexaianthropic", "Vertex"],
+    ["mistral", "Mistral"],
+    ["gemini", "Google"],
+    ["lmstudio", "LMStudio"],
+    ["minimax", "MiniMax (minimax.io)"],
+    ["cascadia", "cascadia"],
+    ["liner", "liner"],
+    ["neosantara", "neosantara"],
+    ["tokenhub", "tokenhub"],
+    ["typesafe", "typesafe"],
+  ] as const
+
+  it("gives every picker row a distinct name", () => {
+    const names = rows.map(([id, name]) => providerCatalogName(id, name))
+    expect(new Set(names).size).toBe(rows.length)
+  })
+
+  it("prefers our name over the backend's, then the backend's, then the id", () => {
+    expect(providerCatalogName("azure", "Azure")).toBe("Azure AI Foundry")
+    expect(providerCatalogName("azureopenai", "Azure")).toBe("Azure OpenAI")
+    expect(providerCatalogName("vertexaianthropic", "Vertex")).toBe(
+      "Vertex AI Anthropic",
+    )
+    expect(providerCatalogName("typesafe", "typesafe")).toBe("TypeSafe")
+    expect(providerCatalogName(" AZURE ", "Azure")).toBe("Azure AI Foundry")
+    expect(providerCatalogName("brand-new", "Brand New")).toBe("Brand New")
+    expect(providerCatalogName("brand-new", undefined)).toBe("brand-new")
   })
 })

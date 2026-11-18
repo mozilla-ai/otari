@@ -65,6 +65,9 @@ class HostedCredential:
     # The any-llm implementation serving ``response_provider``, where that is a
     # name of the deployment's own (``openai-eu``) rather than an implementation.
     implementation: str | None = None
+    # The countries whose requests the credential serves, or None for every
+    # country. Checked as well as ``provider_supported_countries``.
+    supported_countries: tuple[str, ...] | None = None
 
     @property
     def upstream(self) -> str:

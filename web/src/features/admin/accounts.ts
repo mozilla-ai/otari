@@ -51,6 +51,23 @@ export function passwordLinkBlockedReason(
   return undefined
 }
 
+/**
+ * Why this account cannot be handed the bootstrap operator role, or `undefined` when it can.
+ *
+ * The ones the row shows. The gateway also requires a password and a verified,
+ * unblocked address, which the row does not carry, and says so when it refuses.
+ */
+export function bootstrapHandoverBlockedReason(
+  account: DeploymentUser,
+): string | undefined {
+  if (account.is_bootstrap_operator)
+    return "This is already the bootstrap operator"
+  if (!account.is_active) return "Reactivate this account first"
+  if (!account.is_superuser) return "Make this account an operator first"
+  if (!account.email) return "This account has no email address to sign in with"
+  return undefined
+}
+
 /** How the account is named in a row, a control's label, and a confirmation. */
 export function accountLabel(account: DeploymentUser): string {
   return account.full_name?.trim() || account.email || account.id

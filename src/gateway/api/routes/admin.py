@@ -15,9 +15,14 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, IdentityServiceDep, get_db, verify_master_key
+from gateway.api.deps import (
+    CurrentIdentity,
+    DeploymentUserServiceDep,
+    IdentityServiceDep,
+    TraceServiceDep,
+    verify_master_key,
+)
 from gateway.core.surface import Surface
 from gateway.exceptions.identity_exceptions import DeploymentAdministrationUnavailableError
 from gateway.models.tenancy import (
@@ -26,8 +31,14 @@ from gateway.models.tenancy import (
     DeploymentUsersPublic,
     DeploymentUserUpdateRequest,
 )
-from gateway.schemas.identity import PasswordLinkPublic
-from gateway.services.tenancy.deployment_user_service import DeploymentUserService
+from gateway.schemas.identity import (
+    BlockedEmailCreatedPublic,
+    BlockedEmailCreateRequest,
+    BlockedEmailPublic,
+    BlockedEmailsPublic,
+    BootstrapHandoverRequest,
+    PasswordLinkPublic,
+)
 
 # Auth on the router for the reason `routes/organizations.py` declares it there:
 # every handler happens to take an identity today, and one that did not would be
@@ -41,14 +52,6 @@ router = APIRouter(
 )
 
 SURFACE = Surface("admin")
-
-
-def get_deployment_user_service(db: Annotated[AsyncSession, Depends(get_db)]) -> DeploymentUserService:
-    """Build the deployment user service on the request's session."""
-    return DeploymentUserService(db)
-
-
-DeploymentUserServiceDep = Annotated[DeploymentUserService, Depends(get_deployment_user_service)]
 
 
 async def require_deployment_administration(
@@ -72,7 +75,10 @@ async def get_administration_access(
     the same thing without one. It publishes only the caller's own standing,
     which they could establish by trying an endpoint anyway.
     """
-    return DeploymentAdminAccessPublic(granted=await service.has_administration_access(current_identity))
+    return DeploymentAdminAccessPublic(
+        granted=await service.has_administration_access(current_identity),
+        is_bootstrap_operator=await service.is_bootstrap_operator(current_identity),
+    )
 
 
 @router.get("/users")
@@ -104,6 +110,7 @@ async def list_deployment_users(
 @router.patch("/users/{user_id}")
 async def update_deployment_user(
     service: DeploymentUserServiceDep,
+    traces: TraceServiceDep,
     current_identity: CurrentIdentity,
     user_id: uuid.UUID,
     body: DeploymentUserUpdateRequest,
@@ -113,14 +120,55 @@ async def update_deployment_user(
     Both fields are optional and omitting one leaves it alone; a body naming
     neither is refused rather than treated as a no-op. Deactivating also ends
     that account's dashboard sessions immediately, so a lost laptop stops
-    working now rather than when its cookie is next presented.
+    working now rather than when its cookie is next presented, and ends every
+    share of session content it made, which reactivating does not bring back.
 
     Two changes are refused to keep a deployment reachable: an operator may not
     deactivate their own account or drop their own operator access, and neither
     may be taken from the deployment's bootstrap operator, which is the identity
     master-key sign-in resolves to. Granting either is unguarded.
     """
-    return await service.update_user(actor=current_identity, user_id=user_id, request=body)
+    updated = await service.update_user(actor=current_identity, user_id=user_id, request=body)
+    if body.is_active is False:
+        await traces.end_shares_of(user_id)
+    return updated
+
+
+@router.post(
+    "/users/{user_id}/bootstrap-operator",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_deployment_administration)],
+)
+async def hand_over_bootstrap_operator(
+    identities: IdentityServiceDep,
+    current_identity: CurrentIdentity,
+    master_key: Annotated[str | None, Depends(verify_master_key)],
+    user_id: uuid.UUID,
+    body: BootstrapHandoverRequest | None = None,
+) -> None:
+    """Make another operator the deployment's bootstrap operator.
+
+    The bootstrap operator is the account the master key acts as: master-key sign-in
+    and requests carrying the master key resolve to it, and it cannot be deactivated or
+    lose operator access. Only the current bootstrap operator, or a request carrying the
+    master key, may hand the role on, and from a dashboard session it takes the caller's
+    ``current_password``. The previous bootstrap operator stays an operator, which the new
+    one may remove afterwards.
+
+    Refused with 400 when the caller is another operator, when the current password is
+    missing or wrong, for a session whose account has no password, and for a target that
+    is the caller, deactivated, not an operator, or without an unblocked email address that
+    is verified rather than only vouched for, and a password.
+
+    The master key keeps working and now acts as the new bootstrap operator, including
+    resetting their password, so rotate it when whoever held it should no longer.
+    """
+    await identities.hand_over_bootstrap_operator(
+        actor=current_identity,
+        user_id=user_id,
+        current_password=body.current_password if body is not None else None,
+        by_master_key=master_key is not None,
+    )
 
 
 @router.post(
@@ -128,7 +176,11 @@ async def update_deployment_user(
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_deployment_administration)],
 )
-async def issue_password_link(identities: IdentityServiceDep, user_id: uuid.UUID) -> PasswordLinkPublic:
+async def issue_password_link(
+    identities: IdentityServiceDep,
+    master_key: Annotated[str | None, Depends(verify_master_key)],
+    user_id: uuid.UUID,
+) -> PasswordLinkPublic:
     """Give an account a single-use link that sets its password, for someone who cannot sign in.
 
     Where this deployment can mail links, the link goes to the account's address and is not returned, the
@@ -139,7 +191,55 @@ async def issue_password_link(identities: IdentityServiceDep, user_id: uuid.UUID
 
     Refused with 409 for a deactivated account, one with no address, one that has no password and signs in
     with a provider or a passkey (its owner adds a password once signed in), and, where open_signup is
-    disabled, an unverified address no organization still has as a member or invitee.
+    disabled, an unverified address no organization still has as a member or invitee. The bootstrap operator's
+    account is refused too unless the request carries the master key.
     """
-    link = await identities.issue_password_link(user_id)
+    link = await identities.issue_password_link(account_id=user_id, by_master_key=master_key is not None)
     return PasswordLinkPublic(mail_sent=link.mail_sent, link=link.link, expires_at=link.expires_at)
+
+
+@router.get("/blocked-emails", dependencies=[Depends(require_deployment_administration)])
+async def list_blocked_emails(
+    identities: IdentityServiceDep,
+    skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
+) -> BlockedEmailsPublic:
+    """List the addresses and domains blocked from holding an account on this deployment, newest first."""
+    rows, count = await identities.list_blocked_emails(skip=skip, limit=limit)
+    return BlockedEmailsPublic(data=[BlockedEmailPublic.of(row) for row in rows], count=count)
+
+
+@router.post(
+    "/blocked-emails",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_deployment_administration)],
+)
+async def block_email(
+    identities: IdentityServiceDep,
+    current_identity: CurrentIdentity,
+    body: BlockedEmailCreateRequest,
+) -> BlockedEmailCreatedPublic:
+    """Block an address, or a domain and its subdomains, from holding an account on this deployment.
+
+    A blocked address cannot sign up, be added to or invited into an organization, or sign in by password,
+    passkey or provider, and nothing is mailed to it for signup, verification or a password reset. Every
+    existing account the entry matches has its dashboard sessions ended now; the account itself is kept, so
+    removing the entry lets it sign in again. API keys are not affected.
+
+    Refused with 400 for a value that is neither an address nor a domain, or one that would block your own
+    address or the deployment's bootstrap operator's, and with 409 for one already blocked.
+    """
+    block = await identities.block_email(actor=current_identity, value=body.value, reason=body.reason)
+    return BlockedEmailCreatedPublic(
+        **BlockedEmailPublic.of(block.entry).model_dump(), blocked_account_count=block.blocked_account_count
+    )
+
+
+@router.delete(
+    "/blocked-emails/{entry_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_deployment_administration)],
+)
+async def unblock_email(identities: IdentityServiceDep, current_identity: CurrentIdentity, entry_id: uuid.UUID) -> None:
+    """Remove a blocklist entry, so the accounts it matched may sign in again."""
+    await identities.unblock_email(actor=current_identity, entry_id=entry_id)

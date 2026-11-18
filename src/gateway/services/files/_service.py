@@ -7,11 +7,13 @@ from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, 
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+from typing import ClassVar
 
 from any_llm import LLMProvider
 
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
+from gateway.core.media_types import guess_mime_type
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.files_exceptions import (
     EmptyUploadError,
@@ -22,24 +24,19 @@ from gateway.exceptions.files_exceptions import (
 )
 from gateway.log_config import logger
 from gateway.models.files import FileObject, new_file_id
-from gateway.ports.file_storage_port import FileStoragePort
+from gateway.ports.file_storage_port import FILE_STORE_ERRORS, FileStoragePort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.repositories.files import FilePageQuery, FileRepositories
-from gateway.services.files._attachment_uploads import upload_attachment
+from gateway.services.files._attachment_uploads import upload_attachment, uploads_attachments
 from gateway.services.files._file_ids import file_id_in, page_token
-from gateway.services.files._metadata import expiry_for, guess_mime_type
-from gateway.services.files._provider_uploads import ProviderCopies
+from gateway.services.files._metadata import expiry_for
+from gateway.services.files._provider_uploads import ProviderCopies, provider_holds_copies
 from gateway.services.files._staging import StagedFile
 from gateway.types.provider_account import ProviderAccount, ResolvedCredential
 
 # Resolves the workspace a deployment-wide write lands in. It belongs to the
 # organizations domain, so files receives it rather than looking it up.
 DefaultWorkspace = Callable[[], Awaitable[uuid.UUID]]
-
-# Page bounds. The default is OpenAI's; the ceiling is well under OpenAI's 10000
-# because a page is one query and one JSON body.
-DEFAULT_LIST_LIMIT = 100
-MAX_LIST_LIMIT = 1000
 
 # How long a reserved row keeps its bytes before the sweep reclaims it. It has
 # to outlast the slowest write a deployment will accept, because a row younger
@@ -105,10 +102,15 @@ class NewOutput:
 class FileListing:
     """One page of a caller's files, as the request asked for it."""
 
+    # Page bounds. The default is OpenAI's; the ceiling is well under OpenAI's 10000
+    # because a page is one query and one JSON body.
+    DEFAULT_LIMIT: ClassVar[int] = 100
+    MAX_LIMIT: ClassVar[int] = 1000
+
     scope: FileScope
     dialect: FileDialect
-    # Clamped to ``MAX_LIST_LIMIT``, so a caller that does not bound it cannot ask for the whole table.
-    limit: int = DEFAULT_LIST_LIMIT
+    # Clamped to ``MAX_LIMIT``, so a caller that does not bound it cannot ask for the whole table.
+    limit: int = DEFAULT_LIMIT
     ascending: bool = False
     purpose: str | None = None
     # The files a caller named outright, which replaces paging through them.
@@ -183,6 +185,14 @@ class FileService:
         self._default_workspace = default_workspace
         self._provider_copies = ProviderCopies(uow, repositories.provider_copies, backends, config)
 
+    async def release_owned(self, user_ids: Collection[str], to_user_id: str) -> None:
+        """Move these users' files onto ``to_user_id`` as deleted and unnamed, for the sweep to give their bytes back.
+
+        Their rows outlive the users, so the sweep still finds the bytes once the users are gone.
+        """
+        async with self._uow:
+            await self._files.release_owned(user_ids, to_user_id, datetime.now(UTC))
+
     async def store(self, upload: NewFile) -> FileObject:
         """Store an upload's bytes and record the file, and return the row.
 
@@ -217,7 +227,7 @@ class FileService:
             UnknownPageCursorError: an Anthropic page token names no position this gateway issued.
             FileNotServedError: an OpenAI cursor names no file the caller owns.
         """
-        limit = min(listing.limit, MAX_LIST_LIMIT)
+        limit = min(listing.limit, FileListing.MAX_LIMIT)
         anthropic = listing.dialect is FileDialect.ANTHROPIC
         cursor_id = listing.cursor
         if anthropic and cursor_id is not None:
@@ -274,7 +284,7 @@ class FileService:
             raise FileNotServedError
         try:
             chunks = await _primed(self._file_store.get_stream(record.storage_ref))
-        except OSError as exc:
+        except FILE_STORE_ERRORS as exc:
             logger.error("Failed to read blob for file %s (ref=%s): %s", file_id, record.storage_ref, exc)
             raise FileStorageError(f"Could not read the bytes of {file_id}") from exc
         return FileContent(chunks=chunks, filename=record.filename, mime_type=record.mime_type)
@@ -283,8 +293,7 @@ class FileService:
         """The stored upload under ``file_id``, ready to be read or handed to a sandbox, or None.
 
         None whenever the file cannot be served to this caller, and for a row
-        whose bytes are not in the store, so that a reference to one is dropped
-        rather than failing the request that carried it.
+        whose bytes are not in the store.
 
         It answers whether or not the deployment serves the Files API, because
         it resolves a reference a request already holds rather than serving that
@@ -327,7 +336,7 @@ class FileService:
         if storage_ref is not None:
             try:
                 await self._file_store.delete(storage_ref)
-            except OSError as exc:
+            except FILE_STORE_ERRORS as exc:
                 logger.warning("Discarded file %s but failed to remove its blob %s: %s", file_id, storage_ref, exc)
 
     async def existing_output_ids(self, file_ids: Collection[str]) -> set[str]:
@@ -350,6 +359,10 @@ class FileService:
         record = await self._reserve_produced(output, storage_ref)
         return await self._write(record, chunks)
 
+    def provider_holds_copies(self, provider: LLMProvider) -> bool:
+        """Whether ``provider``'s own code execution can be given an attached file as a copy."""
+        return provider_holds_copies(provider)
+
     async def provider_file_ids(
         self, files: Sequence[StagedFile], account: ProviderAccount, credential: ResolvedCredential
     ) -> dict[str, str]:
@@ -365,6 +378,10 @@ class FileService:
             ProviderUploadFailedError: a copy could not be made or recorded.
         """
         return await self._provider_copies.file_ids_for(files, account, credential)
+
+    def uploads_attachments(self, provider: LLMProvider | str | None) -> bool:
+        """Whether an attachment can be moved into ``provider``'s own file storage."""
+        return uploads_attachments(provider)
 
     async def attachment_uri(
         self,
@@ -416,7 +433,7 @@ class FileService:
                 # An abandoned row may never have had bytes, and a blob already
                 # gone is the outcome this wanted.
                 pass
-            except OSError as exc:
+            except FILE_STORE_ERRORS as exc:
                 logger.warning("File sweep could not remove bytes for %s: %s", file_id, exc)
                 continue
             reclaimed.append(file_id)
@@ -440,7 +457,7 @@ class FileService:
                 await self._file_store.delete(record.storage_ref)
             except FileNotFoundError:
                 pass
-            except OSError as exc:
+            except FILE_STORE_ERRORS as exc:
                 logger.warning("Could not remove the bytes of the abandoned file %s: %s", record.id, exc)
                 return
         try:

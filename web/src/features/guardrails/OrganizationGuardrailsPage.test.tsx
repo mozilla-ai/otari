@@ -15,6 +15,11 @@ import {
   organizationGuardrail,
   organizationGuardrailDefinition,
 } from "@/tests/fixtures"
+import {
+  findRowMenuItem,
+  pressRowAction,
+  rowMenuItemNames,
+} from "@/tests/rowMenu"
 
 const ALPHA = "11111111-1111-1111-1111-111111111111"
 
@@ -88,13 +93,17 @@ function renderPage() {
   )
 }
 
-async function row(tableName: string, text: string) {
+async function rowElement(tableName: string, text: string) {
   const cell = await within(
     await screen.findByRole("grid", { name: tableName }),
   ).findByText(text)
   const found = cell.closest('[role="row"]')
   if (!(found instanceof HTMLElement)) throw new Error(`no row for ${text}`)
-  return within(found)
+  return found
+}
+
+async function row(tableName: string, text: string) {
+  return within(await rowElement(tableName, text))
 }
 
 const lakera = organizationGuardrailDefinition({
@@ -213,11 +222,11 @@ describe("OrganizationGuardrailsPage", () => {
     })
     renderPage()
 
-    await userEvent.click(
-      (await row("Guardrails you have configured", "prod-lakera")).getByRole(
-        "button",
-        { name: "Remove prod-lakera" },
-      ),
+    const user = userEvent.setup()
+    await pressRowAction(
+      user,
+      "Remove prod-lakera",
+      await rowElement("Guardrails you have configured", "prod-lakera"),
     )
 
     expect(
@@ -233,15 +242,15 @@ describe("OrganizationGuardrailsPage", () => {
     })
     renderPage()
 
-    const mandate = await row("Where they run", "pii")
-    const pause = mandate.getByRole("button", { name: "Pause pii" })
+    const user = userEvent.setup()
+    const mandate = await rowElement("Where they run", "pii")
     // Pause first, then test, edit and remove, and no status column beside them.
-    const actions = pause.closest("td")
-    expect(
-      [...(actions?.querySelectorAll("button") ?? [])].map((control) =>
-        control.getAttribute("aria-label"),
-      ),
-    ).toEqual(["Pause pii", "Test pii", "Edit pii", "Remove pii"])
+    expect(await rowMenuItemNames(user, mandate)).toEqual([
+      "Pause pii",
+      "Test pii",
+      "Edit pii",
+      "Remove pii",
+    ])
     expect(
       within(screen.getByRole("grid", { name: "Where they run" })).queryByRole(
         "columnheader",
@@ -249,7 +258,7 @@ describe("OrganizationGuardrailsPage", () => {
       ),
     ).toBeNull()
 
-    await userEvent.click(pause)
+    await pressRowAction(user, "Pause pii", mandate)
 
     await waitFor(() =>
       expect(calls.find((call) => call.method === "PATCH")?.body).toEqual({
@@ -262,19 +271,20 @@ describe("OrganizationGuardrailsPage", () => {
     mockApi({ definitions: [lakera] })
     renderPage()
 
-    const definition = await row(
+    const user = userEvent.setup()
+    const definition = await rowElement(
       "Guardrails you have configured",
       "prod-lakera",
     )
-    expect(definition.queryByRole("button", { name: /Switch/ })).toBeNull()
     expect(
-      definition
-        .getAllByRole("button")
-        .map((button) => button.getAttribute("aria-label")),
-    ).toEqual(["Test prod-lakera", "Edit prod-lakera", "Remove prod-lakera"])
-    await userEvent.click(
-      definition.getByRole("button", { name: "Test prod-lakera" }),
-    )
+      within(definition).queryByRole("button", { name: /Switch/ }),
+    ).toBeNull()
+    expect(await rowMenuItemNames(user, definition)).toEqual([
+      "Test prod-lakera",
+      "Edit prod-lakera",
+      "Remove prod-lakera",
+    ])
+    await pressRowAction(user, "Test prod-lakera", definition)
 
     expect(
       await screen.findByRole("heading", { name: "Test guardrail" }),
@@ -295,12 +305,16 @@ describe("OrganizationGuardrailsPage", () => {
     })
     renderPage()
 
-    const linked = await row("Where they run", "lakera")
+    const user = userEvent.setup()
+    const linked = await rowElement("Where they run", "lakera")
     // Tested from the configured guardrail's own row instead.
-    expect(linked.queryByRole("button", { name: "Test lakera" })).toBeNull()
+    expect(await findRowMenuItem(user, "Test lakera", linked)).toBeNull()
 
-    const remote = await row("Where they run", "pii")
-    await userEvent.click(remote.getByRole("button", { name: "Test pii" }))
+    await pressRowAction(
+      user,
+      "Test pii",
+      await rowElement("Where they run", "pii"),
+    )
 
     expect(
       await screen.findByRole("heading", { name: "Test guardrail" }),
@@ -316,10 +330,10 @@ describe("OrganizationGuardrailsPage", () => {
     })
     renderPage()
 
-    await userEvent.click(
-      (await row("Where they run", "pii")).getByRole("button", {
-        name: "Remove pii",
-      }),
+    await pressRowAction(
+      userEvent.setup(),
+      "Remove pii",
+      await rowElement("Where they run", "pii"),
     )
 
     expect(
@@ -333,10 +347,10 @@ describe("OrganizationGuardrailsPage", () => {
     })
     renderPage()
 
-    await userEvent.click(
-      (await row("Where they run", "pii")).getByRole("button", {
-        name: "Edit pii",
-      }),
+    await pressRowAction(
+      userEvent.setup(),
+      "Edit pii",
+      await rowElement("Where they run", "pii"),
     )
 
     expect(

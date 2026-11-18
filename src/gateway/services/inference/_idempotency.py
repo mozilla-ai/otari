@@ -17,7 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -25,6 +25,7 @@ from typing import Any, ClassVar
 
 from any_llm import LLMProvider
 from any_llm.types.completion import CreateEmbeddingResponse
+from any_llm.types.image import ImagesResponse
 from any_llm.types.rerank import RerankResponse as ProviderRerankResponse
 
 from gateway.core.config import GatewayConfig
@@ -33,9 +34,10 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
 from gateway.models.inference import IdempotencyRecord, IdempotencyState
 from gateway.repositories.inference import InferenceRepositories
-from gateway.schemas.inference import EmbeddingResponse, RerankResponse
+from gateway.schemas.inference import CountryDatabaseStatus, EmbeddingResponse, RerankResponse
+from gateway.services.inference._country_database import CountryDatabaseStore, CountryLimitedProviders
 from gateway.services.inference._embeddings import embedding_provider_options
-from gateway.services.inference._passthrough_responses import embeddings_response, rerank_response
+from gateway.services.inference._passthrough_responses import embeddings_response, images_response, rerank_response
 from gateway.services.pricing_service import ResolvedPricing
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
@@ -151,6 +153,8 @@ class UnknownCaller:
 class BlockedCaller:
     """The user the key would be claimed for is blocked, so is given nothing, not even a stored response."""
 
+    external_id: str | None = None
+
 
 Admission = Claimed | Replay | KeyReused | StillInFlight | UnknownCaller | BlockedCaller
 
@@ -171,7 +175,8 @@ class InferenceService:
     """The inference domain's service.
 
     It claims, replays and settles idempotency keys, one Unit of Work block per
-    step, and shapes what a pass-through endpoint sends and returns.
+    step, shapes what a pass-through endpoint sends and returns, and keeps the
+    country file an operator uploads.
     """
 
     def __init__(
@@ -179,10 +184,37 @@ class InferenceService:
         uow: UnitOfWork,
         repositories: InferenceRepositories,
         config: GatewayConfig,
+        *,
+        country_limited_providers: CountryLimitedProviders,
     ) -> None:
         self._uow = uow
         self._keys = repositories.idempotency
         self._config = config
+        self._country_database = CountryDatabaseStore(
+            uow, repositories.country_database, config, country_limited_providers=country_limited_providers
+        )
+
+    async def country_database_status(self) -> CountryDatabaseStatus:
+        """The stored country file, and whether ``client_country_database`` is read instead."""
+        return await self._country_database.status()
+
+    async def store_country_database(self, chunks: AsyncIterator[bytes]) -> CountryDatabaseStatus:
+        """Store the uploaded country file in place of the one stored before.
+
+        Raises:
+            CountryDatabaseTooLargeError: the upload is larger than a country file can be.
+            CountryDatabaseInvalidError: the upload is no MaxMind DB country file.
+        """
+        return await self._country_database.store(chunks)
+
+    async def remove_country_database(self) -> None:
+        """Remove the stored country file.
+
+        Raises:
+            CountryDatabaseInUseError: a list of supported countries has no other country source.
+            CountryDatabaseNotFoundError: no file is stored.
+        """
+        await self._country_database.remove()
 
     @staticmethod
     def embedding_provider_options(provider: LLMProvider, *, selector: str, input_type: str | None) -> dict[str, Any]:
@@ -214,6 +246,16 @@ class InferenceService:
         return embeddings_response(result, pricing=pricing, cost=cost)
 
     @staticmethod
+    def images_response(
+        result: ImagesResponse,
+        *,
+        pricing: ResolvedPricing | None,
+        cost: Decimal | None,
+    ) -> dict[str, Any]:
+        """The images response the gateway publishes for ``result``: the provider's body with the inline cost."""
+        return images_response(result, pricing=pricing, cost=cost)
+
+    @staticmethod
     def is_enabled(config: GatewayConfig) -> bool:
         """Whether this deployment honors idempotency keys, which needs a retention and a key to encrypt with."""
         return config.idempotency_retention_sec > 0 and secret_box_configured()
@@ -229,7 +271,7 @@ class InferenceService:
         if caller is None:
             return UnknownCaller()
         if caller.blocked:
-            return BlockedCaller()
+            return BlockedCaller(external_id=caller.external_id)
         for _ in range(_CHANGES_BEFORE_CONFLICT):
             async with self._uow:
                 outcome = await self._try_admit(request)

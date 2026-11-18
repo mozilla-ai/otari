@@ -15,23 +15,38 @@ A provider is one module, `<package>/src/<import name>/providers/<name>.py`, hol
 `_registry.py`. The base class checks option names and the shared parameters, sets the logging
 context and calls the adapter.
 
+The shared parameters are few on purpose: search's `max_results` and `time_range`, fetch's
+`max_chars`. A parameter becomes shared only when a host cannot do its job without it on every
+provider. Everything else stays native, under the provider's own name, even where many providers
+have a similar option (a domain filter, a country): a host that needs such a rule applied for
+certain, as otari's domain policy, checks the results itself.
+
 ## The procedure
 
 1. **Read the provider's documentation**, its OpenAPI spec when it has one, since that is usually
    the source of truth. Fill `METADATA`: the endpoint and method, where the key travels, whether
    a key or a base URL is required, the default base URL and the variable the provider's SDK
    reads it from, if any, the limits, and the native options under the provider's own names and
-   enums. Note the pricing, with the date you read it, in the module's docstring.
+   enums. Note the pricing, with the date you read it, in the module's docstring. When the
+   provider charges a call one of a few prices chosen by an option, mark that option `cost_tier`,
+   with the tiers as its `enum` and the provider's own as its `default`; set `reports_cost` when
+   its answer says what each call cost. Record no amount in the metadata.
 2. **Write the adapter.** Build the request from the shared parameters and the native options,
    read the response into the envelope, and write the date parser, the error reader and the cost
    reader. The rules:
-   - Send with `self._http.request`, which uses the host's client and the provider's timeout and
-     turns a transport failure into a `ProviderError` without its text.
+   - Send with `self._http.request`, which uses the host's client and the provider's timeout,
+     names the library in the request's `User-Agent` (`any-search/<version>` or
+     `any-fetch/<version>`) and turns a transport failure into a `ProviderError` without its
+     text. An adapter sets no `User-Agent` of its own, even where the provider's SDK names
+     itself: that header is the one exception to the next rule.
    - By default, send what the provider's own SDK sends, so moving from the SDK changes nothing.
      A caller who wants less passes the native option. What the envelope needs is always asked
      for, and no option turns it off: Exa's page text, Tabstack's metadata, which holds the title.
    - A shared parameter wins over the native option it maps to.
-   - Refuse a reserved key: the query, the key, and anything a shared parameter sets.
+   - Refuse a reserved key: the query and the key. A native option that a shared parameter also
+     sets stays offered, so its whole range stays reachable (Perplexity's `search_recency_filter`
+     takes `hour`, which `time_range` does not), and the shared parameter wins when both are
+     passed; say so in the option's description.
    - An HTTP status of 400 or more raises `ProviderError(provider, status, tag)`. Take the tag
      from the body only when it looks like a code, and never put body text, the URL, the query or
      the key in an error.
@@ -45,6 +60,8 @@ context and calls the adapter.
    - A date without a zone is UTC.
    - The cost is the provider's reported figure only, as a `Decimal`, with `cost_source` set.
    - `api_base` replaces the endpoint for every provider; strip its trailing slash.
+   - Bump the package's `__version__` (`<import name>/__init__.py`): it names the library in
+     every request's `User-Agent`, so a provider can tie a change in its traffic to a release.
 3. **Record fixtures and test.** Record one fixture per case (below) with
    `uv run python <package>/scripts/record_fixture.py`. Keep them small: ask for few results and
    little text. Check the key is not in them. Then add:
@@ -90,7 +107,9 @@ The four cases a fixture can record:
   native count option that stands in for it gets the same cap. Map `time_range` (`day`, `week`,
   `month`, `year`) to the provider's recency filter, rounded to the precision of its dates.
 - A hit needs a URL. Drop an item without one only when the provider's documentation allows such
-  an item; otherwise it is `unexpected_response`. `title` and `snippet` are strings, never `None`.
+  an item; otherwise it is `unexpected_response`. When the provider is seen to send a string that
+  is not an http(s) URL with a host, such as Serply's Google redirect tokens, drop that item too
+  and fill the count from the items after it. `title` and `snippet` are strings, never `None`.
   `snippet` is the provider's short text; `text` is page text, when it came back.
 - List the fields the adapter checks in the module's docstring and the README's section on the
   provider.
@@ -243,3 +262,180 @@ provider with no empty page.
   (`?spm=a2c6h`, `#1`); the adapter passes them as they are.
 - Fixture recipes: an empty search with `site:` set to a domain that does not exist; a refused
   key as any `sk-` string of the right length.
+
+### 2026-11-03, Serply (any-search)
+
+The first search provider with the query in the URL and the key in a header, and the first that
+returns a scraped results page.
+
+- Set `query_in_url` without `key_in_url` when only the query travels in the URL; the real-socket
+  log test still applies, since httpx logs the URL with the query in it.
+- A native option can be a request header: Serply's `X-Proxy-Location` and `X-User-Agent` keep
+  the provider's header names and go out as headers, and the key is set after them, so no option
+  replaces it.
+- A provider can pass parameters through that its documentation does not list: Serply forwards
+  Google's own `tbs` and `tbm`, which is how `time_range` is mapped. Check each one live before
+  offering it, and say in the docstring when it was checked: `tbm=nws` works, `tbm=isch` returned
+  no `results`.
+- A result can carry a value of the right type that is not what the field promises: Serply
+  sometimes returns an opaque Google token in `link` in place of a URL. Drop such an item rather
+  than failing the whole search, and fill the count from the items after it.
+- A provider can choose the region a search runs from unless an option pins it. Without `gl`,
+  Serply answered a news query with Swedish relative times, and the same English web result came
+  dated `May 27, 2026` on one call and `27.05.2026` on another. Say in the option's description
+  and in the pricing note which option an operator should set on the instance.
+- A results page shows its dates as text in the language of the region that served it: Serply's
+  come in `metadata.published_time` (`Oct 7, 2026`, `17 hours ago`) or `metadata.attributes`
+  (`27.05.2026`, `vor 23 Stunden`). Such a field stays in `raw`, as Tabstack's PDF dates do: a
+  parser for the one form a fixture shows dates some hits and silently drops the rest. Probe with
+  several queries rather than one repeated, since Serply answered a repeated query identically.
+- A documentation's default can be wrong: Serply documents `desktop` as its `X-User-Agent`
+  default, but its answers reported `mobile`. Describe an option by what it does, not by a default
+  you have not seen.
+
+### 2026-11-05, Synthetic (any-search)
+
+The first provider added without a recorded success: its search answers only a subscribed key.
+
+- A provider can refuse a valid key for want of a plan, with the same status as a bad one:
+  Synthetic answers both with a 401, and only the `error` sentence tells them apart
+  (`Invalid API Key.` against `The search API is subscription-only: ...`). Probe with a real key
+  before choosing tags, and give the plan refusal a tag of its own (`subscription_required`), so an
+  operator is not sent to rotate a key that works.
+- When no key can record a success, the `normal` fixture is the documentation's own example and
+  `empty` that shape with no results, said in a comment beside the conformance scenarios, and the
+  live workflow skips the provider on every trigger rather than failing a scheduled run without
+  the secret. What a recording would settle stays open in the PR: the most results a search
+  returns, whether `text` is page text or an excerpt, and whether `published` can be null.
+- A provider can take nothing but the query. Then `max_results` only cuts the hits, and
+  `time_range` filters them by date after the answer, keeping the undated ones, since nothing
+  says they fall outside the range.
+
+### 2026-11-05, SearXNG (any-search)
+
+The first provider with no key and no address of its own, and the first that replaced code otari
+already had for it.
+
+- An adapter speaks the provider's own API: its parameter names, its defaults and its fields,
+  nothing carried over from a client the host had before. otari's old SearXNG client read
+  `published_date` and `extracted_content`, which only otari's own SearXNG-shaped services sent;
+  the adapter reads `publishedDate` and `content`, as SearXNG sends them. When the provider has
+  no SDK, follow its server's own default: SearXNG's `server.method` is GET.
+- A provider that every user runs for themselves has no default address: set
+  `requires_api_base`, and an `env_api_base` so the CLI and the live tests can find an instance.
+  The conformance fixture gives every such variable a fake value, as it does a key.
+- What an instance answers depends on how its operator configured it. A name in `engines` that
+  SearXNG does not know is not an error: with no name it knows, it searches its default engines
+  (`mojeek` is not among its engines). `wikipedia` answers an infobox and no results. The engines that scrape search
+  sites (`duckduckgo`, `qwant`) answer a laptop and a CI runner with CAPTCHAs, on some calls and
+  not others. The live tests therefore pin two engines that call public APIs, `wikinews` and
+  `arxiv`, which date their hits; neither has a time filter, and SearXNG leaves an engine
+  without one out of a search that sets it, so that search comes back empty without an error.
+- An error inside a 200 can be partial: `unresponsive_engines` names each engine that failed,
+  beside the results of those that did not. Only a search that leaves no usable hit while an
+  engine failed is the search's error; with hits, the failures stay in `raw`.
+- When a provider documents none of its answer's fields, the 2026-10-13 rule applies in full:
+  require only what the adapter cannot answer without (SearXNG's `results`), take the rest as
+  optional but type-checked, and drop an item without a usable URL. A date in a form the provider
+  does not hold stays in `raw`; one that starts like ISO 8601 and does not parse
+  (`2026-13-40`) fails the call, since it means the provider's serializer broke.
+- Tag a status by what it can mean, not by its likeliest cause: SearXNG answers 403 when `json`
+  is not enabled, but so can a proxy in front of it, so the tag is `forbidden` and the docs name
+  the likely cause. An option whose values only the adapter acts on (`method`) is refused
+  outside its enum before any request; SearXNG cannot refuse what the adapter never sends.
+- For a provider the host runs itself, the live workflow starts it: a
+  container from a dated image, with the settings the host's compose file mounts, and the
+  workflow runs again when those settings change.
+- Fixture recipes: the `in_body_error` with `engines=google news`, which answers "access denied";
+  the `error` with `pageno` set to a word, a 400 with a sentence in `error` (an empty value gives
+  `Empty pageno parameter`); an empty search with `engines=wikinews` and words no article holds.
+  A 403 is SearXNG's answer when `json` is not among the instance's `search.formats`, which no
+  fixture records.
+
+### 2026-11-09, Perplexity (any-search)
+
+The first provider whose price per call depends on an option.
+
+- A provider can sell one search at several prices: Perplexity's `search_type` is `web` at $5 per
+  1,000 or `fast` at $1. A host that bills a flat price per tool cannot let a caller pick the
+  dearer tier on a tool priced for the cheaper one, unless the provider reports what the call
+  cost. Hence `cost_tier` and `reports_cost`: they state the provider's facts, and the host
+  decides what to lock. Exa's `type` is a cost tier too, but Exa reports its cost.
+- A field's name does not say what it holds. Perplexity's `snippet` is passages taken from the
+  page, cut to `max_tokens_per_page`, so it is the hit's `text`, and a host reads no page for it.
+  Map by meaning, and leave `text` empty when the provider sends an empty string.
+- The error shape a provider documents may never come. Perplexity documents only a 422 with
+  `detail` for its search; every failure probed came as a 400 or 401 with
+  `{"error": {"message", "type", "code"}}`, and a message can quote the request (`got USA`).
+  Probe several failures (a made-up key, a count out of range, a value outside a list, a field of
+  the wrong type) before choosing where the tag comes from.
+- Optional can mean absent rather than null: Perplexity leaves `date` out of a result it has no
+  date for, and never sent the documented `server_time`. Check what the adapter reads as
+  "absent or null".
+- The documentation, its schema and the SDK can disagree: Perplexity's schema allows 50 results,
+  its text says 20 for a web search, and its SDK's `search_type` lacks `fast`. The live probe
+  decides: 30 results is a 400.
+- A provider may accept what it does not apply. Perplexity ignores an unknown field and takes a
+  domain filter that mixes domains to search and to leave out, which its documentation says it
+  does not do. The base class refuses unknown options; say in an option's description what the
+  provider documents it does not do.
+- The base class checks an option's name, never its value, so an `enum` is documentation. When
+  the adapter leaves out a value the provider runs, as Perplexity's `people` search type, the
+  adapter refuses it before the request with `UnsupportedValueError`, as SearXNG's does for `method`
+  (CodeRabbit on #3046); a value the provider refuses can stay the provider's to refuse.
+- Fixture recipes: `normal` with `--max-results 2` and `max_tokens_per_page=40` keeps it small;
+  `empty` with `search_domain_filter` set to a domain that does not exist; `error` with a made-up
+  `pplx-` key.
+
+### 2026-11-14, Brave (any-search)
+
+The first provider that replaced old gateway code for a provider otari's own settings still name.
+
+- A refused key need not be a 401: Brave answers it with a 422 and `error.code`
+  `SUBSCRIPTION_TOKEN_INVALID`, the same status as a count out of range (`VALIDATION`). Take the
+  tag from the code, so the two stay apart; `detail` and `meta` can quote the request (a missing
+  header's `input`), so neither is read.
+- A provider can ignore a value it does not validate: Brave answers `freshness=zz` with results,
+  as if no filter was set. Map the shared parameters to values the provider documents, since
+  nothing will say a wrong one was dropped.
+- "Found nothing" can be a missing section: a Brave search with no web results has no `web` at
+  all, not an empty list. Treat the section's absence as no hits, and a section of the wrong type
+  as `unexpected_response`.
+- A provider's answer can hold more than the envelope reads: Brave's default answer adds videos,
+  news and a `mixed` ranking beside `web`. Leave them in `raw`, keep the provider's default, and
+  offer its own filter (`result_filter`).
+- A key's plan can be slower than the provider's published rate: the recording key allowed one
+  request a second (`x-ratelimit-limit: 1, 2000`), so back-to-back live tests got 429s. `EXPECTED`
+  takes a `wait` for such a provider, and the live tests sleep that long before each of its calls.
+- httpx writes a boolean parameter as `true` or `false`, which is Brave's spelling, so the adapter
+  passes booleans as they are. A `None` goes out as an empty value, so leave it out.
+- The gateway refuses an option value outside its `enum` when a tool or a key is saved. Give an
+  option an `enum` only for a short list the provider is unlikely to extend (`safesearch`), and
+  leave a long one that it validates itself (`country`) to the provider.
+- Fixture recipes: `normal` with `--max-results 2` and `result_filter=web` keeps it small; `empty`
+  with `site:` set to a domain that does not exist; `error` with a made-up key.
+
+### 2026-11-16, Tavily (any-search)
+
+The first provider whose old gateway client sent an option the provider leaves off by default.
+
+- When the host's old client sent an option the provider's own default leaves out, the adapter
+  sends the provider's default, and the host keeps the option where its callers rely on it.
+  otari's old client always asked Tavily for page text (`include_raw_content`). The adapter does
+  not: otari's legacy settings add the option themselves, and a data migration wrote it into each
+  stored key's options, where the key's owner sees it and can turn it off.
+- An error body can hold only a sentence: Tavily answers `{"detail": {"error": "Unauthorized:
+  ..."}}`, a 422 with pydantic's list that quotes the input, or its own statuses 432 and 433 for
+  plan limits. With no code to read, tag by the status the provider documents.
+- A provider can report what a call cost in its own unit: Tavily's `usage.credits`, sent when
+  `include_usage` asks, counts credits, whose dollar price depends on the plan. That is not a
+  reported cost: `reports_cost` stays false, and the host prices each tier (`search_depth`).
+- An option can raise the price by choosing a tier itself: `auto_parameters` costs 2 credits and
+  may pick `advanced`. Leave such an option out until the host can lock it.
+- Page text can be very large: one `raw_content` was 946,000 characters. The host cuts what
+  reaches a model; the adapter passes it as it came.
+- Dates can be RFC 1123 (`Thu, 15 Oct 2026 00:00:00 GMT`); `email.utils.parsedate_to_datetime`
+  reads them.
+- Fixture recipes: `normal` with `--max-results 2 -o topic=news`, which dates every hit; `empty`
+  with `include_domains=["example.com"]` and words no page there holds (a domain that does not
+  exist is a 400); `error` with a made-up `tvly-` key.

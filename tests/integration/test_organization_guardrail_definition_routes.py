@@ -2,7 +2,7 @@
 
 The rules and the storage are covered at the service layer in
 `test_organization_guardrail_definition_service.py`. What is here is the composition in
-`api/deps.py`, which is new for this surface: the service is built on the
+`api/deps/`, which is new for this surface: the service is built on the
 request's Unit of Work and takes the session only for the role gate.
 
 Every case acts as the bootstrap operator, who is the owner of a standalone
@@ -57,7 +57,7 @@ def test_the_surface_needs_a_credential(client: TestClient) -> None:
 
 
 def test_crud_over_http(client: TestClient, master_key_header: dict[str, str], _secret_key: None) -> None:
-    """The wiring in `api/deps.py`: one Unit of Work over the request's session.
+    """The wiring in `api/deps/`: one Unit of Work over the request's session.
 
     The bootstrap operator is the owner of a standalone deployment's one
     organization, so this is the identity a dashboard form actually arrives as.

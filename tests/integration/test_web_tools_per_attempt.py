@@ -9,7 +9,7 @@ request. The pure decision is in ``tests/unit/test_candidate_tools.py``.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from types import SimpleNamespace
@@ -76,6 +76,8 @@ def test_config(postgres_url: str) -> GatewayConfig:
         auto_migrate=False,
         require_pricing=False,
         model_discovery=False,
+        search_tools={"fake-search": {"provider": "fake"}},
+        web_search_default_tool="fake-search",
         routing=RoutingConfig.model_validate(
             {
                 "policies": {
@@ -108,7 +110,6 @@ def test_config(postgres_url: str) -> GatewayConfig:
 
 @pytest.fixture(autouse=True)
 def _web_tools(monkeypatch: pytest.MonkeyPatch, test_config: GatewayConfig) -> None:
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
     monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
     monkeypatch.delenv("OTARI_WEB_SEARCH_INTERCEPT", raising=False)
     monkeypatch.setattr(test_config, "web_fetch_enabled", True)
@@ -117,6 +118,19 @@ def _web_tools(monkeypatch: pytest.MonkeyPatch, test_config: GatewayConfig) -> N
 def _unavailable() -> httpx.HTTPStatusError:
     request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
     return httpx.HTTPStatusError("503", request=request, response=httpx.Response(503, request=request))
+
+
+def _billing_exhausted() -> httpx.HTTPStatusError:
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    return httpx.HTTPStatusError("402", request=request, response=httpx.Response(402, request=request))
+
+
+async def _failing_events(after_round: Callable[[], None] | None = None) -> AsyncIterator[MessageStreamEvent]:
+    """A tool-loop stream whose provider answers 402 before any event, after a hidden tool round if ``after_round``."""
+    if after_round is not None:
+        after_round()
+    raise _billing_exhausted()
+    yield  # pragma: no cover  (makes this an async generator)
 
 
 def _reply(text: str, content: list[Any] | None = None, stop_reason: str = "end_turn") -> MessageResponse:
@@ -246,6 +260,16 @@ def _fake_web_backend(seen: _Seen) -> Any:
     return _build
 
 
+def _fake_web_search_backends(seen: _Seen) -> Any:
+    """What a request's web tools open, as one fake backend that serves the search and the fetch."""
+    build = _fake_web_backend(seen)
+
+    def _build(*_args: Any, **kwargs: Any) -> list[_FakeWebBackend]:
+        return [build(**kwargs)]
+
+    return _build
+
+
 def _post_messages(
     client: TestClient,
     headers: dict[str, str],
@@ -253,11 +277,15 @@ def _post_messages(
     *,
     provider_fails: bool = False,
     loop_fails: bool = False,
+    loop_stream_fails: bool = False,
+    loop_stream_fails_after_round: bool = False,
     run_loop_for: str | None = None,
+    real_search_backends: bool = False,
 ) -> tuple[Any, _Seen]:
     """POST ``body`` to Messages with the providers, loops and backends faked.
 
     ``run_loop_for`` runs the real tool loop, whose model asks for that tool once.
+    ``real_search_backends`` opens the real search and fetch backends of a search on an instance.
     """
     seen = _Seen()
 
@@ -280,6 +308,10 @@ def _post_messages(
         *, completion_kwargs: Any, pool: Any, max_iterations: int, **extra: Any
     ) -> AsyncIterator[MessageStreamEvent]:
         seen.loop_calls.append((completion_kwargs, extra))
+        if loop_stream_fails and len(seen.loop_calls) == 1:
+            return _failing_events()
+        if loop_stream_fails_after_round and len(seen.loop_calls) == 1:
+            return _failing_events(extra["on_first_response"])
         return _events("via-otari")
 
     rounds: list[dict[str, Any]] = []
@@ -304,9 +336,10 @@ def _post_messages(
     )
     with ExitStack() as stack:
         stack.enter_context(patch("gateway.api.routes.messages.amessages", new=fake_amessages))
-        stack.enter_context(
-            patch("gateway.api.routes._pipeline._build_web_retrieval_backend", new=_fake_web_backend(seen))
-        )
+        if not real_search_backends:
+            stack.enter_context(
+                patch("gateway.api.routes._pipeline.build_web_search_backends", new=_fake_web_search_backends(seen))
+            )
         stack.enter_context(patch("gateway.api.routes._pipeline.SandboxBackend", new=_fake_sandbox(seen)))
         for loop in loops:
             stack.enter_context(loop)
@@ -482,8 +515,8 @@ def test_an_unpriced_tool_skips_only_the_fallback_that_needs_it(
     assert seen.loop_calls == []
     skipped = [row for row in _rows(db_session) if row.status == "absorbed" and row.provider == "vertexai"]
     assert len(skipped) == 1
-    assert f"otari:{_NAMES[tool]}" in (skipped[0].error_message or "")
-    rejections = [row for row in _rows(db_session) if row.provider == "otari" and row.status != "success"]
+    assert f"'{_NAMES[tool]}' has no pricing" in (skipped[0].error_message or "")
+    rejections = [row for row in _rows(db_session) if row.status == "error" and row.status_code == 402]
     assert rejections == [], "a refusal that answered no request was logged as one"
 
 
@@ -518,6 +551,135 @@ def test_otari_runs_otaris_tool_on_every_candidate(
     loop_kwargs, loop_extra = seen.loop_calls[0]
     assert seen.tool_types(loop_kwargs) == set()
     assert loop_extra.get("native_tools") == frozenset({_NAMES[tool]})
+
+
+_EXECUTOR_FIELDS = {"search": "search_executor", "fetch": "fetch_executor"}
+
+
+def _pin(client: TestClient, master_key_header: dict[str, str], tool: str, executor: str) -> None:
+    workspace_id = _default_workspace_id(client, master_key_header)
+    stored = client.put(
+        f"{API_ROOT}/workspaces/{workspace_id}/web-search",
+        json={"enabled": True, _EXECUTOR_FIELDS[tool]: executor},
+        headers=master_key_header,
+    )
+    assert stored.status_code == 200, stored.text
+    assert stored.json()[_EXECUTOR_FIELDS[tool]] == executor
+
+
+@pytest.mark.parametrize("tool", ["search", "fetch"])
+def test_a_workspace_pin_runs_the_providers_own_keyword_on_otari_with_no_header(
+    client: TestClient, api_key_header: dict[str, str], master_key_header: dict[str, str], tool: str
+) -> None:
+    """An Anthropic SDK client changes nothing: the workspace's pin brings the tool here, answered natively."""
+    _pin(client, master_key_header, tool, "otari")
+
+    response, seen = _post_messages(client, api_key_header, _messages_body("claude-then-vertex", _DECLARATIONS[tool]))
+
+    assert response.status_code == 200, response.text
+    assert seen.provider_calls == []
+    loop_kwargs, loop_extra = seen.loop_calls[0]
+    assert seen.tool_types(loop_kwargs) == set()
+    assert loop_extra.get("native_tools") == frozenset({_NAMES[tool]})
+
+
+@pytest.mark.parametrize("tool", ["search", "fetch"])
+def test_a_header_that_disagrees_with_the_workspace_pin_is_refused(
+    client: TestClient, api_key_header: dict[str, str], master_key_header: dict[str, str], tool: str
+) -> None:
+    _pin(client, master_key_header, tool, "otari")
+
+    response, seen = _post_messages(
+        client,
+        {**api_key_header, _HEADERS[tool]: "provider"},
+        _messages_body("claude-then-vertex", _DECLARATIONS[tool]),
+    )
+
+    assert response.status_code == 403, response.text
+    assert "web access policy decides who runs" in response.text
+    assert seen.provider_calls == []
+    assert seen.loop_calls == []
+
+
+def test_a_streamed_loop_candidates_failure_falls_over_to_the_next_candidate(
+    client: TestClient, api_key_header: dict[str, str]
+) -> None:
+    """A streamed tool loop whose provider fails before any output falls over, as a plain stream does."""
+    response, seen = _post_messages(
+        client,
+        {**api_key_header, WEB_SEARCH_HEADER: "otari"},
+        _messages_body("claude-then-vertex", _SEARCH, stream=True),
+        loop_stream_fails=True,
+    )
+
+    assert response.status_code == 200, response.text
+    assert "via-otari" in response.text
+    assert len(seen.loop_calls) == 2, "the walk must have tried both candidates' tool loops"
+
+
+class _McpPool:
+    """An MCP pool whose one server exposes a tool no built-in is named."""
+
+    # No server here refused an ended sign-in.
+    signed_out: tuple[()] = ()
+
+    def __init__(
+        self,
+        configs: Any,
+        *,
+        tally: Any = None,
+        trace: Any = None,
+        ceded_tool_names: Any = (),
+        contacts: Any = None,
+    ) -> None:
+        return None
+
+    async def __aenter__(self) -> _McpPool:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    @property
+    def openai_tools(self) -> list[dict[str, Any]]:
+        return [{"type": "function", "function": {"name": "lookup", "description": "", "parameters": {}}}]
+
+    def owns_tool(self, name: str) -> bool:
+        return name == "lookup"
+
+    def purpose_hints(self) -> list[tuple[str, str]]:
+        return []
+
+
+def test_a_streamed_mcp_only_loop_candidates_failure_falls_over_to_the_next_candidate(
+    client: TestClient, api_key_header: dict[str, str]
+) -> None:
+    """A stream whose only gateway tools are MCP servers is held for its first chunk like any other."""
+    body = _messages_body(
+        "claude-then-vertex", mcp_servers=[{"name": "docs", "url": "http://127.0.0.1:9999/mcp"}], stream=True
+    )
+
+    with patch("gateway.api.routes._pipeline.MCPClientPool", new=_McpPool):
+        response, seen = _post_messages(client, api_key_header, body, loop_stream_fails=True)
+
+    assert response.status_code == 200, response.text
+    assert "via-otari" in response.text
+    assert len(seen.loop_calls) == 2, "the walk must have tried both candidates' tool loops"
+
+
+def test_a_streamed_loop_that_ran_a_round_does_not_fall_over(
+    client: TestClient, api_key_header: dict[str, str]
+) -> None:
+    """A failure after the first round stays on its candidate, so the next one does not run the tools again."""
+    response, seen = _post_messages(
+        client,
+        {**api_key_header, WEB_SEARCH_HEADER: "otari"},
+        _messages_body("claude-then-vertex", _SEARCH, stream=True),
+        loop_stream_fails_after_round=True,
+    )
+
+    assert response.status_code >= 400, response.text
+    assert len(seen.loop_calls) == 1
 
 
 @pytest.mark.parametrize("tool", ["search", "fetch"])
@@ -601,7 +763,18 @@ def test_otaris_search_beside_the_providers_own_code_falls_back_to_running_both_
 class _ShadowingMcpPool:
     """An MCP pool whose one server exposes a tool named ``web_search``."""
 
-    def __init__(self, configs: Any, *, tally: Any = None, trace: Any = None) -> None:
+    # No server here refused an ended sign-in.
+    signed_out: tuple[()] = ()
+
+    def __init__(
+        self,
+        configs: Any,
+        *,
+        tally: Any = None,
+        trace: Any = None,
+        ceded_tool_names: Any = (),
+        contacts: Any = None,
+    ) -> None:
         return None
 
     async def __aenter__(self) -> _ShadowingMcpPool:
@@ -666,20 +839,21 @@ def test_caps_are_shared_by_attempts_that_run_different_tools(
 
 
 def test_attempts_searching_on_an_instance_share_one_call_allowance(
-    client: TestClient, api_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch, test_config: GatewayConfig
+    client: TestClient, api_key_header: dict[str, str]
 ) -> None:
     """Each attempt opens its own search and fetch backends, all on the request's one ``web_search_max_calls``.
 
     A request locks in to its attempt once it has answered or reported a call, so a
     search never runs on two attempts in a row; what holds the cap is that they share it.
     """
-    monkeypatch.delenv("OTARI_WEB_SEARCH_URL")
-    monkeypatch.setattr(test_config, "search_tools", {"fake-search": {"provider": "fake"}})
-    monkeypatch.setattr(test_config, "web_search_default_tool", "fake-search")
     headers = {**api_key_header, WEB_SEARCH_HEADER: "otari", WEB_FETCH_HEADER: "otari"}
 
     response, seen = _post_messages(
-        client, headers, _messages_body("claude-then-vertex", _SEARCH, _FETCH), loop_fails=True
+        client,
+        headers,
+        _messages_body("claude-then-vertex", _SEARCH, _FETCH),
+        loop_fails=True,
+        real_search_backends=True,
     )
 
     assert response.status_code == 200, response.text
@@ -691,7 +865,6 @@ def test_attempts_searching_on_an_instance_share_one_call_allowance(
         assert isinstance(search, WebSearchBackend) and isinstance(fetch, WebFetchBackend)
         caps |= {id(search._cap), id(fetch._cap)}
     assert len(caps) == 1, "every attempt's search and fetch draw on one allowance"
-    assert seen.web_backends == [], "the old backend served none of them"
 
 
 def test_gateway_minted_blocks_are_dropped_and_native_ones_forwarded_to_each_attempt(
@@ -751,7 +924,7 @@ def _post_responses(
     with (
         patch("gateway.api.routes.responses.aresponses", new=fake_aresponses),
         patch("gateway.api.routes.responses.responses_tool_loop", new=fake_loop),
-        patch("gateway.api.routes._pipeline._build_web_retrieval_backend", new=_fake_web_backend(seen)),
+        patch("gateway.api.routes._pipeline.build_web_search_backends", new=_fake_web_search_backends(seen)),
     ):
         response = client.post(f"{API_ROOT}/responses", json=body, headers=headers)
     return response, seen
@@ -796,3 +969,41 @@ def test_responses_decides_two_models_of_one_provider_apart(client: TestClient, 
     assert seen.tool_types(loop_kwargs) == set()
     assert loop_extra.get("native_tools") == frozenset({WEB_SEARCH_TOOL_NAME})
     assert len(seen.web_backends) == 1
+
+
+_RESPONSES_DECLARATIONS = {"search": {"type": "web_search"}, "fetch": _FETCH}
+# Responses has no fetch item of its own to answer a fetch with.
+_RESPONSES_NATIVE = {"search": frozenset({WEB_SEARCH_TOOL_NAME}), "fetch": None}
+
+
+@pytest.mark.parametrize("tool", ["search", "fetch"])
+def test_responses_runs_a_tool_the_workspace_pinned_to_otari_even_on_an_openai_head(
+    client: TestClient, api_key_header: dict[str, str], master_key_header: dict[str, str], tool: str
+) -> None:
+    """An OpenAI SDK client changes nothing: the pin takes the tool the provider would run."""
+    _pin(client, master_key_header, tool, "otari")
+
+    body = {**_responses_body(), "tools": [_RESPONSES_DECLARATIONS[tool]]}
+    response, seen = _post_responses(client, api_key_header, body)
+
+    assert response.status_code == 200, response.text
+    assert seen.provider_calls == []
+    loop_kwargs, loop_extra = seen.loop_calls[0]
+    assert seen.tool_types(loop_kwargs) == set()
+    assert loop_extra.get("native_tools") == _RESPONSES_NATIVE[tool]
+    assert len(seen.web_backends) == 1
+
+
+@pytest.mark.parametrize("tool", ["search", "fetch"])
+def test_responses_refuses_a_header_that_disagrees_with_the_workspace_pin(
+    client: TestClient, api_key_header: dict[str, str], master_key_header: dict[str, str], tool: str
+) -> None:
+    _pin(client, master_key_header, tool, "otari")
+
+    body = {**_responses_body(), "tools": [_RESPONSES_DECLARATIONS[tool]]}
+    response, seen = _post_responses(client, {**api_key_header, _HEADERS[tool]: "provider"}, body)
+
+    assert response.status_code == 403, response.text
+    assert "web access policy decides who runs" in response.json()["detail"]
+    assert seen.provider_calls == []
+    assert seen.loop_calls == []

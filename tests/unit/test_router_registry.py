@@ -25,6 +25,7 @@ _PASSTHROUGH = {
     "/audio/speech",
     "/audio/transcriptions",
     "/embeddings",
+    "/images/edits",
     "/images/generations",
     "/moderations",
     "/rerank",

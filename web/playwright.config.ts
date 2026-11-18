@@ -147,9 +147,42 @@ export default defineConfig({
       // dropped from the run silently, with no warning and a green exit.
       // The screenshot suite is excluded because it has its own six projects
       // below; without this it would also run here, once, unthemed.
-      testIgnore: [/dashboard\.spec\.ts/, /screenshots\//],
+      testIgnore: [/dashboard\.spec\.ts/, /e2e\/screenshots\//, /e2e\/docs\//],
       dependencies: ["seed"],
       use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      // The models spec covers a scroll container that focus can scroll
+      // irrecoverably, and whether focus scrolls a given ancestor is engine
+      // behavior rather than layout, so one engine cannot speak for the others.
+      // It is the only behavioral spec that runs twice: it reads the page and
+      // writes nothing to the gateway, which is what makes a second pass over
+      // the same database safe, the same property the screenshot projects below
+      // rely on.
+      name: "parity-webkit",
+      testMatch: /parity\.models\.spec\.ts/,
+      dependencies: ["seed"],
+      use: { ...devices["Desktop Safari"] },
+    },
+    {
+      // The docs' images (e2e/docs/fixtures.ts). Each spec walks the steps a
+      // docs page gives, by the labels the page uses, and writes its captures
+      // into docs/assets/screenshots; a flow that no longer matches the page
+      // fails here. Seed only, like the screenshot projects, and each spec
+      // removes what it creates, so the parity flows never see it.
+      name: "docs",
+      testDir: "./e2e/docs",
+      dependencies: ["seed"],
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1280, height: 800 },
+        // Sharp on the high-density screens most readers have.
+        deviceScaleFactor: 2,
+        colorScheme: "light",
+        locale: "en-US",
+        timezoneId: "UTC",
+        reducedMotion: "reduce",
+      },
     },
     ...screenshotProjects,
   ],

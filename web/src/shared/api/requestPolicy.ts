@@ -19,6 +19,13 @@ export interface RequestPolicy {
    * set is sent back to it.
    */
   credentials: RequestCredentials
+  /**
+   * The origin a program outside this page sends its requests to, when that is
+   * not `origin`: an edge that routes the API under the dashboard's host can
+   * cut a long request the API's own host would serve. Request snippets show
+   * it; the dashboard's own requests never use it. Unset means `origin`.
+   */
+  publicOrigin?: string
 }
 
 export const SAME_ORIGIN_POLICY: RequestPolicy = {

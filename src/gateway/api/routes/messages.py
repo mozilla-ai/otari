@@ -4,7 +4,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable, Coroutine, Mapping
 from functools import partial
 from http import HTTPStatus
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 from any_llm import AnyLLM
 from any_llm.types.completion import CompletionUsage
@@ -36,7 +36,9 @@ from gateway.api.deps import (
     verify_api_key_or_master_key,
 )
 from gateway.api.error_body import BodyHTTPException
-from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages, with_retry_hint
+from gateway.api.key_scopes import key_scope, may_read_files
+from gateway.api.routes._guardrail_targets import messages_targets
+from gateway.api.routes._helpers import routing_signal, with_retry_hint
 from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import (
     container_copies_step,
@@ -46,15 +48,10 @@ from gateway.api.routes._normalize import (
 )
 from gateway.api.routes._pipeline import (
     DeclaredTools,
-    ErrorKind,
     ToolBackends,
     ToolContext,
-    classify_provider_error,
     domain_error,
-    error_kind_for_status,
     prepare_gateway_tools,
-    provider_error_headers,
-    provider_failure_detail,
     release_reservation,
     resolve_dispatch_provider,
     resolve_request_context,
@@ -71,13 +68,14 @@ from gateway.api.routes._request_tags import (
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
-from gateway.core.error_codes import INVALID_REQUEST, error_headers
+from gateway.core.error_codes import INVALID_REQUEST, ErrorKind, body_fields_of, error_headers
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
 from gateway.exceptions import TenancyError
 from gateway.exceptions.files_exceptions import ProviderUploadFailedError
+from gateway.exceptions.guardrails_exceptions import AnswerRefused
 from gateway.log_config import logger
-from gateway.models.guardrails import GuardrailConfig
+from gateway.models.guardrails import RequestedGuardrails
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.schemas.inference import AnthropicErrorResponse, SettledCost
 from gateway.services.code_execution import ContainerLease, gateway_container_value
@@ -85,6 +83,7 @@ from gateway.services.content_normalizer import stage_container_blocks
 from gateway.services.files import StagedFile
 from gateway.services.inference import (
     CONVERSATION_CACHE_KEY_FIELD,
+    UpstreamFailure,
     bind_upstream_user,
     call_messages,
     conversation_cache_key,
@@ -96,7 +95,7 @@ from gateway.services.inference import (
     with_upstream_user,
 )
 from gateway.services.log_writer import LogWriter
-from gateway.services.mcp_loop import ToolBackend
+from gateway.services.mcp_loop import RoundGate, ToolBackend
 from gateway.services.mcp_loop_messages import (
     MAX_TOOL_ITERATIONS_CAP,
     MCP_ACTIVITY_ID_PREFIX,
@@ -104,6 +103,7 @@ from gateway.services.mcp_loop_messages import (
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
 )
+from gateway.services.pricing import PriceFacts
 from gateway.services.provider_kwargs import ProviderAccounts, apply_endpoint_defaults
 from gateway.services.providers import amessages
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
@@ -118,9 +118,10 @@ from gateway.services.tools import (
     provider_attempt_kwargs,
     with_typed_code_execution_tool,
 )
-from gateway.services.traces import read_turn
+from gateway.services.traces import read_context, read_turn
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT, IncompleteStreamError, StreamFormat
 from gateway.types.attempt import Attempt
+from gateway.types.key_scope import KeyScope
 from gateway.types.normalization_target import NormalizationTarget
 
 
@@ -274,7 +275,7 @@ class MessagesRequest(derive_request_base(MessagesParams)):  # type: ignore[misc
     # Bounded on the list arm, not the union, so the ceiling caps the number of
     # ids rather than the length of any one value (see `core/sql.MAX_FILTER_VALUES`).
     mcp_server_ids: Annotated[list[uuid.UUID], Field(max_length=MAX_MCP_SERVER_IDS)] | None = None
-    guardrails: list[GuardrailConfig] | None = Field(default=None, max_length=8)
+    guardrails: RequestedGuardrails | None = None
     tools_header: str | None = None
     max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
     session_label: str | None = Field(default=None, max_length=SESSION_LABEL_MAX_LENGTH, description=SESSION_LABEL_DESC)
@@ -544,9 +545,10 @@ _ERR_PERMISSION = "permission_error"
 _ERR_AUTHENTICATION = "authentication_error"
 _ERR_NOT_FOUND = "not_found_error"
 _ERR_RATE_LIMIT = "rate_limit_error"
+_ERR_REQUEST_TOO_LARGE = "request_too_large"
 
 # Every Anthropic ``error.type`` comes from this table. A bare status reaches it
-# through ``error_kind_for_status``, so one status cannot be classified two ways.
+# through ``ErrorKind.from_status``, so one status cannot be classified two ways.
 _ERROR_KIND_TO_ANTHROPIC_TYPE = {
     ErrorKind.API: _ERR_API,
     ErrorKind.AUTHENTICATION: _ERR_AUTHENTICATION,
@@ -554,6 +556,7 @@ _ERROR_KIND_TO_ANTHROPIC_TYPE = {
     ErrorKind.NOT_FOUND: _ERR_NOT_FOUND,
     ErrorKind.PERMISSION: _ERR_PERMISSION,
     ErrorKind.RATE_LIMIT: _ERR_RATE_LIMIT,
+    ErrorKind.REQUEST_TOO_LARGE: _ERR_REQUEST_TOO_LARGE,
 }
 
 
@@ -562,16 +565,20 @@ def _ensure_anthropic_error(exc: StarletteHTTPException) -> BodyHTTPException:
 
     One already in the envelope is returned as it is. A string detail becomes the
     message; a dict detail gives its ``message``, and its other fields ride beside it.
+    A ``RefusalException``'s fields go at the top of the body, where ``code`` goes.
     """
     if isinstance(exc, BodyHTTPException):
         return exc
-    error_type = _ERROR_KIND_TO_ANTHROPIC_TYPE[error_kind_for_status(exc.status_code)]
+    error_type = _ERROR_KIND_TO_ANTHROPIC_TYPE[ErrorKind.from_status(exc.status_code)]
     detail = exc.detail
     if isinstance(detail, dict):
         details = {key: value for key, value in detail.items() if key != "message"}
         message = str(detail.get("message", HTTPStatus(exc.status_code).phrase))
-        return _anthropic_error(error_type, message, exc.status_code, exc.headers, details=details)
-    return _anthropic_error(error_type, str(detail), exc.status_code, exc.headers)
+        enveloped = _anthropic_error(error_type, message, exc.status_code, exc.headers, details=details)
+    else:
+        enveloped = _anthropic_error(error_type, str(detail), exc.status_code, exc.headers)
+    enveloped.body.update(body_fields_of(exc))
+    return enveloped
 
 
 _ERR_OVERLOADED = "overloaded_error"
@@ -651,6 +658,8 @@ def _billable_messages_usage(usage: Any) -> GatewayUsage:
         cache_tokens_in_prompt=False,
         reasoning_tokens=getattr(getattr(usage, "output_tokens_details", None), "thinking_tokens", None) or 0,
         provider_web_searches=getattr(getattr(usage, "server_tool_use", None), "web_search_requests", None) or 0,
+        service_tier=_served_tier(usage),
+        inference_geo=_served_region(usage),
     )
 
 
@@ -671,8 +680,22 @@ def _messages_stream_usage(event: MessageStreamEvent) -> CompletionUsage | None:
                 cache_write_tokens=cache_write,
                 cache_write_1h_tokens=_cache_write_1h_tokens(usage),
                 cache_tokens_in_prompt=False,
+                service_tier=_served_tier(usage),
+                inference_geo=_served_region(usage),
             )
     return None
+
+
+def _served_tier(usage: Any) -> str | None:
+    """The tier Anthropic says it served the call at, which it reports in ``usage``."""
+    tier = getattr(usage, "service_tier", None)
+    return tier if isinstance(tier, str) else None
+
+
+def _served_region(usage: Any) -> str | None:
+    """The region Anthropic says it ran the call in, which it reports in ``usage``."""
+    region = getattr(usage, "inference_geo", None)
+    return region if isinstance(region, str) else None
 
 
 def _cache_write_1h_tokens(usage: Any) -> int:
@@ -741,18 +764,19 @@ class _MessagesAdapter:
         return _anthropic_error(_ERROR_KIND_TO_ANTHROPIC_TYPE[kind], message, status_code, headers)
 
     def provider_error(self, exc: BaseException, model: str | None = None) -> HTTPException:
-        mapping = classify_provider_error(exc, model=model)
+        failure = UpstreamFailure(exc, model=model)
+        mapping = failure.mapping
         if mapping is not None:
-            error_type = _ERROR_KIND_TO_ANTHROPIC_TYPE[error_kind_for_status(mapping.status_code)]
+            error_type = _ERROR_KIND_TO_ANTHROPIC_TYPE[ErrorKind.from_status(mapping.status_code)]
             return _anthropic_error(
                 error_type,
                 mapping.detail,
                 mapping.status_code,
-                with_retry_hint(exc, mapping.status_code, provider_error_headers(exc, mapping.status_code)),
+                with_retry_hint(exc, mapping.status_code, failure.headers),
             )
         return _anthropic_error(
             _ERR_API,
-            provider_failure_detail(exc, _PROVIDER_ERROR),
+            failure.unclassified_detail(_PROVIDER_ERROR),
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             with_retry_hint(exc, status.HTTP_500_INTERNAL_SERVER_ERROR, None),
         )
@@ -765,6 +789,10 @@ class _MessagesAdapter:
         return _reached_message_stop()
 
     def stream_error_payload(self, exc: BaseException, provider: str | None = None) -> str:
+        if isinstance(exc, AnswerRefused):
+            # The same type and fields the refusal has as a 403 before the stream commits.
+            refused = {"type": "error", "error": {"type": _ERR_PERMISSION, **cast("dict[str, Any]", exc.detail)}}
+            return f"event: error\ndata: {json.dumps(refused)}\n\n"
         if isinstance(exc, IncompleteStreamError):
             error_type, message = _ERR_API, _INCOMPLETE_STREAM_MESSAGE
         else:
@@ -800,12 +828,7 @@ class _MessagesAdapter:
             return False
         if usage is None:
             return False
-        updated = usage.model_copy(
-            update={
-                "cost_usd": settlement.cost_usd,
-                "pricing_source": settlement.pricing_source,
-            }
-        )
+        updated = usage.model_copy(update=settlement.usage_fields())
         value.usage = updated
         return True
 
@@ -833,6 +856,7 @@ class _MessagesAdapter:
         *,
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
+        round_gate: RoundGate | None = None,
         container: ContainerLease | None = None,
     ) -> MessageResponse:
         # Only pass the lock-in callback when given, so test fakes can mirror each call shape.
@@ -841,6 +865,8 @@ class _MessagesAdapter:
             extra["on_first_response"] = on_first_response
         if use_budget is not None:
             extra["use_budget"] = use_budget
+        if round_gate is not None:
+            extra["round_gate"] = round_gate
         if native_tools:
             extra["native_tools"] = native_tools
         if container is not None:
@@ -861,14 +887,20 @@ class _MessagesAdapter:
         *,
         native_tools: frozenset[str] = frozenset(),
         use_budget: ToolUseBudget | None = None,
+        round_gate: RoundGate | None = None,
         container: ContainerLease | None = None,
+        on_first_response: Callable[[], None] | None = None,
     ) -> AsyncIterator[MessageStreamEvent]:
         provider_kwargs, emit_native_mcp = _split_client_betas(_with_upstream_user(kwargs))
         extra: dict[str, Any] = {}
+        if on_first_response is not None:
+            extra["on_first_response"] = on_first_response
         if emit_native_mcp:
             extra["emit_native_mcp"] = True
         if use_budget is not None:
             extra["use_budget"] = use_budget
+        if round_gate is not None:
+            extra["round_gate"] = round_gate
         if native_tools:
             extra["native_tools"] = native_tools
         if container is not None:
@@ -910,7 +942,12 @@ def _adapter_for(config: GatewayConfig) -> _MessagesAdapter:
     return _MessagesAdapter(instances) if instances else _ADAPTER
 
 
-@router.post("/messages", response_model=None, responses=_ANTHROPIC_ERROR_RESPONSES)
+@router.post(
+    "/messages",
+    response_model=None,
+    responses=_ANTHROPIC_ERROR_RESPONSES,
+    openapi_extra=key_scope(KeyScope.INFERENCE_RUN),
+)
 async def create_message(
     raw_request: Request,
     response: Response,
@@ -955,8 +992,7 @@ async def create_message(
 
     async def _normalize(target: NormalizationTarget) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the Anthropic wire payload
-        # before the cost estimate. A no-op when the files feature is off or the
-        # request has no attachments.
+        # before the cost estimate. A no-op when the request has no attachments.
         code_execution_header = raw_request.headers.get(CODE_EXECUTION_HEADER)
         request.messages, stats = await normalize_request_messages(
             request.messages,
@@ -965,13 +1001,15 @@ async def create_message(
             provider=target.provider,
             model=target.model,
             files=files,
-            user_id=target.user_id,
+            user_id=target.file_user_id,
+            may_read_files=target.may_read_files,
             instance=target.instance,
             workspace_id=target.file_workspace_id,
             candidates=target.candidate_providers,
             credential_workspace_id=target.credential_workspace_id,
             hosted_credential=target.hosted_credential,
             upstream_user=target.upstream_user,
+            client_country=target.client_country,
             sandbox_requested=sandbox_requested(
                 request.tools,
                 config=config,
@@ -993,9 +1031,27 @@ async def create_message(
         sandbox_inputs.extend(stats.sandbox_inputs)
         return len(str(request.messages)) + len(str(request.system or "")), stats.vision_usage()
 
+    declared = DeclaredTools(
+        guardrails=request.guardrails,
+        guardrail_targets=lambda: messages_targets(request),
+        tools=request.tools,
+        mcp_servers=request.mcp_servers,
+        mcp_server_ids=request.mcp_server_ids,
+        max_tool_iterations=request.max_tool_iterations,
+        tools_header=request.tools_header,
+        code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
+        web_fetch_header=raw_request.headers.get(WEB_FETCH_HEADER),
+        web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
+        # Anthropic's own field, which is where an Anthropic SDK puts the id it
+        # read off the last response. Resolved at admission against this caller's
+        # leases; the provider never sees it when the sandbox runs the code.
+        container_id=request.container,
+    )
+
     try:
         ctx = await resolve_request_context(
             adapter=adapter,
+            price_facts=PriceFacts(service_tier=request.service_tier, region=request.inference_geo),
             raw_request=raw_request,
             response=response,
             db=db,
@@ -1014,16 +1070,16 @@ async def create_message(
             ),
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
             user_forbidden_detail=_USER_FORBIDDEN,
-            routing_signal=lambda: routing_signal_from_messages(
-                request.messages, raw_request, has_tools=bool(request.tools)
-            ),
+            streaming=bool(request.stream),
+            routing_signal=lambda: routing_signal(raw_request),
             normalize_messages=_normalize,
-            tools=request.tools,
+            declared=declared,
             code_execution_policies=tool_ports.code_execution_policy,
             model_provider=model_provider,
             idempotency=None if request.stream else idempotency,
             tags=resolved_tags(tags_header, request.metadata, ignore=frozenset({ANTHROPIC_USER_KEY})),
             turn=read_turn("messages", request.messages),
+            context=lambda: read_context("messages", request.messages, tools=request.tools, system=request.system),
             session_label=request.session_label,
         )
     except IdempotentReplay as replay:
@@ -1033,22 +1089,7 @@ async def create_message(
         adapter=adapter,
         ctx=ctx,
         response=response,
-        declared=DeclaredTools(
-            guardrails=request.guardrails,
-            guardrail_text=latest_user_text(request.messages),
-            tools=request.tools,
-            mcp_servers=request.mcp_servers,
-            mcp_server_ids=request.mcp_server_ids,
-            max_tool_iterations=request.max_tool_iterations,
-            tools_header=request.tools_header,
-            code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
-            web_fetch_header=raw_request.headers.get(WEB_FETCH_HEADER),
-            web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
-            # Anthropic's own field, which is where an Anthropic SDK puts the id it
-            # read off the last response. Resolved at admission against this caller's
-            # leases; the provider never sees it when the sandbox runs the code.
-            container_id=request.container,
-        ),
+        declared=declared,
         backends=ToolBackends(
             ports=tool_ports,
             sandbox_containers=build_sandbox_container_registry(
@@ -1057,6 +1098,7 @@ async def create_message(
                 user_id=ctx.user_id,
                 workspace_id=ctx.workspace_id,
                 port=tool_ports.code_execution,
+                may_read_stored_files=may_read_files(ctx.api_key),
             ),
             sandbox_files=build_sandbox_file_bridge(
                 raw_request=raw_request,
@@ -1066,6 +1108,7 @@ async def create_message(
                 workspace_id=ctx.workspace_id,
                 inputs=sandbox_inputs,
             ),
+            billing=billing,
         ),
     )
 
@@ -1144,6 +1187,7 @@ async def create_message(
             display_model=resolved.alias,
             base_request_fields=request_fields,
             prepare_kwargs=prepare_kwargs,
+            response=response,
         )
 
     # ------------------------------------------------------------------
@@ -1191,7 +1235,9 @@ def _estimate_input_tokens(request: CountTokensRequest) -> int:
     return max(1, math.ceil(chars / _CHARS_PER_TOKEN))
 
 
-@router.post("/messages/count_tokens", responses=_ANTHROPIC_ERROR_RESPONSES)
+@router.post(
+    "/messages/count_tokens", responses=_ANTHROPIC_ERROR_RESPONSES, openapi_extra=key_scope(KeyScope.INFERENCE_RUN)
+)
 async def count_message_tokens(
     raw_request: Request,
     request: CountTokensRequest,

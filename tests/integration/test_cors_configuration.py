@@ -173,7 +173,7 @@ def test_cors_preflight_allows_sdk_headers(postgres_url: str, test_db: Session) 
         "authorization,content-type,accept,x-stainless-os,x-stainless-runtime-version,"
         "x-stainless-package-version,x-stainless-runtime,x-stainless-arch,x-stainless-retry-count,"
         "x-stainless-lang,x-stainless-timeout,anthropic-version,anthropic-beta,"
-        "anthropic-dangerous-direct-browser-access"
+        "anthropic-dangerous-direct-browser-access,otari-conversation-id,otari-region"
     )
     try:
         with TestClient(app) as client:

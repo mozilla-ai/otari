@@ -12,6 +12,21 @@ function tryJson(text: string): unknown {
   }
 }
 
+/**
+ * Whether Formatted draws a value any differently from Raw: JSON kept as a
+ * string, a list of messages, or a record with a role or a message. A plain
+ * string or number reads the same in both.
+ */
+export function hasFormattedForm(value: unknown): boolean {
+  if (typeof value === "string") return tryJson(value) !== undefined
+  if (Array.isArray(value)) return true
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    ("role" in value || "message" in value)
+  )
+}
+
 // One chat message: its text as prose, or its JSON when the content is
 // structured.
 function MessageContent({ message }: { message: unknown }) {

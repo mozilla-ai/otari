@@ -1,11 +1,14 @@
 """Unit tests for `otari guardrails validate`, the offline check over a guardrail file.
 
 Offline is the contract, so these run with nothing stubbed: no gateway, no
-credential, no model CLI, no subprocess. The only thing the command touches
-beyond the guardrail file itself is the verifier script a verifier gate
-names, and that it stats rather than runs.
+credential, no model CLI. The only things the command touches beyond the
+guardrail file itself are the verifier script a verifier gate names, which it
+stats rather than runs, and `git ls-files`, which lists the files a glob can
+match. The tests that check a glob against files run Git in a real repository.
 """
 
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -164,6 +167,104 @@ def test_an_unaccepted_warning_beside_an_accepted_one_still_fails_strict(repo: P
     result = _invoke("--strict")
     assert result.exit_code == 1
     assert "0 error(s), 1 warning(s), 1 accepted." in result.output
+
+
+_DEAD_GLOBS = _HEADER + (
+    "  - id: no-generated-client\n"
+    "    type: path\n"
+    "    runs: [stop.working_tree]\n"
+    "    enforcement: required\n"
+    '    forbidden: ["src/gone.gen.ts"]\n'
+    "  - id: docs-need-build\n"
+    "    type: command_if_changed\n"
+    "    runs: [stop.session]\n"
+    "    enforcement: required\n"
+    '    when_changed: ["lib/**"]\n'
+    '    require: ["make docs"]\n'
+)
+
+
+def _git(repo: Path, *args: str) -> None:
+    """Run Git in `repo`, ignoring any repository a surrounding Git hook points the environment at.
+
+    The developer's own global ignore list is left out too, so `*.gen.ts` in it cannot hide a test file.
+    """
+    env = {k: v for k, v in os.environ.items() if k not in {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"}}
+    env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+    subprocess.run(["git", *args], cwd=repo, env=env, check=True)
+
+
+def _git_init(repo: Path) -> None:
+    (repo / ".git").rmdir()
+    _git(repo, "init", "-q")
+
+
+def test_a_when_changed_glob_matching_no_file_is_reported_in_a_real_repo(repo: Path) -> None:
+    _git_init(repo)
+    _write(repo, _DEAD_GLOBS)
+    result = _invoke("--strict")
+    assert result.exit_code == 1
+    assert "warning[glob-matches-no-file]: docs-need-build:" in result.output
+    assert "0 error(s), 1 warning(s)" in result.output
+
+
+def test_a_forbidden_glob_matching_no_file_is_not_reported(repo: Path) -> None:
+    """A prohibition over a path that should not exist is working precisely when nothing matches."""
+    _git_init(repo)
+    _write(repo, _DEAD_GLOBS)
+    assert "no-generated-client" not in _invoke("--strict").output
+
+
+_USER_LEVEL_GATE = _HEADER + (
+    "  - id: user-docs\n"
+    "    type: command_if_changed\n"
+    "    runs: [stop.session]\n"
+    "    enforcement: required\n"
+    '    when_changed: ["go/**"]\n'
+    '    require: ["make docs"]\n'
+)
+
+
+def test_a_user_level_gate_is_not_checked_against_this_repos_files(repo: Path, isolated_home: Path) -> None:
+    """A gate in ~/.otari is written for every repo, so the tree here cannot say whether it should match."""
+    _git_init(repo)
+    _write(repo, _DEAD_GLOBS)
+    _write_into(isolated_home, ".otari/guardrails.yml", _USER_LEVEL_GATE)
+    output = _invoke("--strict").output
+    assert "warning[glob-matches-no-file]: docs-need-build" in output
+    assert "warning[glob-matches-no-file]: user-docs" not in output
+    assert "0 error(s), 1 warning(s)" in output
+
+
+def test_a_file_named_directly_is_checked_against_this_repos_files(repo: Path, tmp_path: Path) -> None:
+    """Naming one file and one tree is the author saying these globs should match here."""
+    _git_init(repo)
+    snippet = tmp_path / "snippet.yml"
+    snippet.write_text(_DEAD_GLOBS, encoding="utf-8")
+    result = _invoke("--guardrail-file", str(snippet))
+    assert "warning[glob-matches-no-file]: docs-need-build:" in result.output
+
+
+def test_a_glob_matching_a_tracked_or_new_file_is_not_reported(repo: Path) -> None:
+    _git_init(repo)
+    (repo / "src").mkdir()
+    (repo / "src" / "gone.gen.ts").write_text("x", encoding="utf-8")
+    _git(repo, "add", "src/gone.gen.ts")
+    (repo / "lib").mkdir()
+    (repo / "lib" / "new.py").write_text("x", encoding="utf-8")
+    _write(repo, _DEAD_GLOBS)
+    result = _invoke("--strict")
+    assert result.exit_code == 0, result.output
+    assert "0 error(s), 0 warning(s)" in result.output
+
+
+def test_a_glob_matching_only_an_ignored_file_is_reported(repo: Path) -> None:
+    _git_init(repo)
+    (repo / ".gitignore").write_text("lib/\n", encoding="utf-8")
+    (repo / "lib").mkdir()
+    (repo / "lib" / "built.py").write_text("x", encoding="utf-8")
+    _write(repo, _DEAD_GLOBS)
+    assert "warning[glob-matches-no-file]: docs-need-build:" in _invoke().output
 
 
 def test_the_help_says_how_to_accept_a_warning() -> None:
@@ -685,3 +786,21 @@ def test_a_judge_gate_cap_outside_its_range_is_a_usage_error(repo: Path, value: 
     result = _invoke("--max-judges", value)
     assert result.exit_code == 2
     assert "--max-judges" in result.output
+
+
+def test_git_location_variables_from_a_hook_do_not_redirect_the_file_list(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _git_init(repo)
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "src").mkdir()
+    (other / "src" / "gone.gen.ts").write_text("x", encoding="utf-8")
+    _git(other, "init", "-q")
+    _git(other, "add", "src/gone.gen.ts")
+    monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(other))
+    _write(repo, _DEAD_GLOBS)
+    result = _invoke("--strict")
+    assert result.exit_code == 1
+    assert "warning[glob-matches-no-file]: docs-need-build:" in result.output

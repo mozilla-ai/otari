@@ -52,3 +52,13 @@ def test_both_rate_surfaces_name_the_rungs_the_same_way() -> None:
     offered = OrgProviderKeyModelPublic.model_fields["price_source"].annotation
     assert set(get_args(get_args(offered)[0])) == rungs
     assert set(get_args(get_args(ViewerPrice.__annotations__["source"])[0])) == rungs
+
+
+def test_a_block_naming_a_modality_not_known_here_is_refused() -> None:
+    with pytest.raises(ValidationError, match="modality not known here: imgae"):
+        SetPricingRequest.model_validate(
+            {
+                "model_key": "openai:gpt-image-1",
+                "rates": {"text": {"input": {"price": 3}}, "imgae": {"output": {"price": 0.04}}},
+            }
+        )

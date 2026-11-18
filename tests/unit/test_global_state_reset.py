@@ -21,7 +21,8 @@ def _request_without_app_config() -> Request:
     return cast(Request, SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace())))
 
 
-def test_reset_config_clears_state() -> None:
+@pytest.mark.asyncio
+async def test_reset_config_clears_state() -> None:
     config = GatewayConfig(
         database_url="postgresql://localhost/test",
         master_key="test",
@@ -29,12 +30,12 @@ def test_reset_config_clears_state() -> None:
     request = _request_without_app_config()
 
     set_config(config)
-    assert get_config(request) is config
+    assert await get_config(request) is config
 
     reset_config()
 
     with pytest.raises(RuntimeError, match="Config not initialized"):
-        get_config(request)
+        await get_config(request)
 
 
 def test_two_apps_hold_independent_configs() -> None:

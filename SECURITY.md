@@ -34,7 +34,7 @@ exploit traffic against any mozilla.ai-operated infrastructure.
 
 ## Scope Notes for Operators
 
-otari is a self-hosted LLM gateway; several controls are configuration-dependent:
+otari is a self-hosted AI gateway; several controls are configuration-dependent:
 
 - **Pricing is required by default.** `require_pricing` defaults to `true`:
   requests for models with no configured pricing are rejected (HTTP 402) so an
@@ -49,7 +49,8 @@ otari is a self-hosted LLM gateway; several controls are configuration-dependent
   to the API key's own user; only the master key may bill on behalf of an
   arbitrary user. By default a non-master key naming a different user is rejected
   (403); set `reject_user_mismatch=false` on a single key, or deployment-wide, to
-  instead bind to the key's own user while still forwarding `user` to the provider
-  as an end-user tag.
+  instead bind to the key's own user. The supplied name never reaches a provider
+  as the client wrote it: where a route sends an end-user identifier it is one
+  input to a digest, and elsewhere it is dropped.
 - **Audio and moderation endpoints** have no token-based pricing model and are
   exempt from `require_pricing` (treated as $0 when unpriced).

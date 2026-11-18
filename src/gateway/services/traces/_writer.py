@@ -23,12 +23,13 @@ from collections import deque
 from collections.abc import Awaitable, Callable
 from time import monotonic
 
-from gateway.core.database import DATA_ERRORS
-from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
+from gateway.core.database import DATA_ERRORS, database_refusal
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter, Gauge
-from gateway.services.traces._service import TraceService
 from gateway.types.traces import TraceWrite, WriteResult
+
+# A deadlock, or a serialization failure: the transaction lost a race, and trying again can win it.
+_RETRYABLE_SQLSTATES = frozenset({"40P01", "40001"})
 
 SPANS_DROPPED = Counter(
     "gateway_trace_spans_dropped",
@@ -55,16 +56,6 @@ _ERASED_FOR_S = 3600.0
 
 # Stores one batch and says how its spans were accounted for.
 StoreTraces = Callable[[tuple[TraceWrite, ...]], Awaitable[WriteResult]]
-
-
-def stored_by(build_service: Callable[[UnitOfWork], TraceService]) -> StoreTraces:
-    """Store each batch through the trace service, on a worker Unit of Work of its own."""
-
-    async def store(batch: tuple[TraceWrite, ...]) -> WriteResult:
-        async with create_unit_of_work() as uow:
-            return await build_service(uow).write(batch)
-
-    return store
 
 
 class TraceWriter:
@@ -185,7 +176,9 @@ class TraceWriter:
         QUEUED_SPANS.set(self._queued_spans)
         return tuple(batch)
 
-    async def _write(self, batch: tuple[TraceWrite, ...], *, timeout: float, on_timeout: str) -> None:
+    async def _write(
+        self, batch: tuple[TraceWrite, ...], *, timeout: float, on_timeout: str, retried: bool = False
+    ) -> None:
         size = sum(len(trace.spans) for trace in batch)
         try:
             result = await asyncio.wait_for(self._store(batch), timeout=timeout)
@@ -216,6 +209,11 @@ class TraceWriter:
             return
         # Best-effort by contract: whatever storing raises, the writer keeps serving.
         except Exception as exc:  # noqa: BLE001
+            # Chosen as a deadlock's victim (a workspace deleted as its content is stored,
+            # say), the batch rolled back whole and goes through once more as it is.
+            if not retried and database_refusal(exc)[0] in _RETRYABLE_SQLSTATES:
+                await self._write(batch, timeout=timeout, on_timeout=on_timeout, retried=True)
+                return
             self._drop(size, exc)
             return
         SPANS_WRITTEN.labels(result="accepted").inc(result.accepted)

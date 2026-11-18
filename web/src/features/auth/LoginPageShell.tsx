@@ -1,8 +1,10 @@
 import { type ReactNode, useRef } from "react"
 import { FiMoon, FiSun } from "react-icons/fi"
 import { IconButton } from "@/design-system/actions/IconButton"
+import { ProductLockup } from "@/design-system/ProductMark"
 import { AuthShellSlot } from "@/features/auth/overlayAuthShellSlot"
 import { siteHomeHref } from "@/features/models/publicCatalog"
+import { currentRoute } from "@/shared/helpers/appLocation"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { useTheme } from "@/shared/hooks/useTheme"
 import { authShellPage } from "./authShellSlot"
@@ -11,28 +13,17 @@ import savedBackground from "./background/login-background.json"
 
 function BrandMark() {
   const href = siteHomeHref(useDeployment())
-  const mark = (
-    <>
-      <img
-        src={`${import.meta.env.BASE_URL}favicon.svg`}
-        alt=""
-        width={273}
-        height={250}
-        className="h-6 w-[1.638rem]"
-      />
-      <span className="text-title transition-colors group-hover:text-muted motion-reduce:transition-none">
-        Otari
-      </span>
-    </>
+  const lockup = (
+    <ProductLockup className="h-9 w-auto text-accent transition-opacity group-hover:opacity-75 motion-reduce:transition-none" />
   )
-  if (!href) return <div className="flex items-center gap-3">{mark}</div>
+  if (!href) return <div className="flex items-center">{lockup}</div>
   return (
     <a
       href={href}
       aria-label="Otari home"
-      className="group -mx-1 flex min-h-11 items-center gap-3 px-1"
+      className="group -mx-1 flex min-h-11 items-center px-1"
     >
-      {mark}
+      {lockup}
     </a>
   )
 }
@@ -57,15 +48,15 @@ export function LoginPageShell({
         {/* No `md:` step down: the header is `min-h-14`, so a 44px target fits
             inside it at every width without moving the row. */}
         <div className="flex items-center gap-1">
-          <AuthShellSlot
-            page={authShellPage(window.location.hash)}
-            isBusy={isBusy}
-          />
+          <AuthShellSlot page={authShellPage(currentRoute())} isBusy={isBusy} />
           <IconButton
             variant="ghost"
             isIconOnly
             label={isDark ? "Switch to light theme" : "Switch to dark theme"}
             onPress={toggle}
+            // The glyph, not its 44px box, meets the header's right edge, as
+            // the lockup's own pull puts the mark on the left one.
+            className="-mr-3"
           >
             <ThemeIcon aria-hidden />
           </IconButton>

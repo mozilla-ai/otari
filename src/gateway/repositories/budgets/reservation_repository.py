@@ -194,7 +194,7 @@ class ReservationRepository(BaseRepository[BudgetReservation, Never, Never]):
         )
         return [
             ReservationLine(scoped_budget_id, HeldAmounts(amount=amount, tokens=tokens, requests=requests))
-            for scoped_budget_id, amount, tokens, requests in result.tuples().all()
+            for scoped_budget_id, amount, tokens, requests in result.all()
         ]
 
     async def list_terminal_ids(self, *, expired_before: datetime, limit: int) -> list[str]:

@@ -1,0 +1,163 @@
+{
+  "status": 200,
+  "body": {
+    "query": "python release",
+    "results": [
+      {
+        "url": "https://en.wikinews.org/wiki/Conservationists_capture_most_massive_Burmese_python_in_Florida_history",
+        "title": "Conservationists capture most massive Burmese python in Florida history",
+        "content": "Conservancy of Southwest Florida reported having captured a Burmese python (Python bivittatus) measuring nearly 18 feet (5 m) in length and 215 pounds",
+        "metadata": "",
+        "publishedDate": "2024-12-18T10:54:41",
+        "engine": "wikinews",
+        "template": "default.html",
+        "parsed_url": [
+          "https",
+          "en.wikinews.org",
+          "/wiki/Conservationists_capture_most_massive_Burmese_python_in_Florida_history",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "thumbnail": "",
+        "priority": "",
+        "engines": [
+          "wikinews"
+        ],
+        "positions": [
+          1
+        ],
+        "score": 1.0,
+        "category": "news",
+        "iframe_src": null,
+        "pubdate": "2024-12-18 10:54:41"
+      },
+      {
+        "url": "https://en.wikinews.org/wiki/Wikinews_discusses_DRM_and_DMCA_with_Richard_Stallman_after_GitHub_re-enables_public_access_to_youtube-dl",
+        "title": "Wikinews discusses DRM and DMCA with Richard Stallman after GitHub re-enables public access to youtube-dl",
+        "content": "in July 2008, youtube-dl is a free/libré open source software written in Python which can download videos from various websites. Citing alleged violation",
+        "metadata": "",
+        "publishedDate": "2024-12-19T05:21:26",
+        "engine": "wikinews",
+        "template": "default.html",
+        "parsed_url": [
+          "https",
+          "en.wikinews.org",
+          "/wiki/Wikinews_discusses_DRM_and_DMCA_with_Richard_Stallman_after_GitHub_re-enables_public_access_to_youtube-dl",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "thumbnail": "",
+        "priority": "",
+        "engines": [
+          "wikinews"
+        ],
+        "positions": [
+          2
+        ],
+        "score": 0.5,
+        "category": "news",
+        "iframe_src": null,
+        "pubdate": "2024-12-19 05:21:26"
+      },
+      {
+        "url": "https://en.wikinews.org/wiki/GitHub_blocks_public_access_to_youtube-dl_after_RIAA_issues_DMCA_notice",
+        "title": "GitHub blocks public access to youtube-dl after RIAA issues DMCA notice",
+        "content": "started in July 2008 by Ricardo Garcia, youtube-dl is a script written in Python which can download videos from multiple websites including YouTube, LiveLeak",
+        "metadata": "",
+        "publishedDate": "2024-12-18T12:27:56",
+        "engine": "wikinews",
+        "template": "default.html",
+        "parsed_url": [
+          "https",
+          "en.wikinews.org",
+          "/wiki/GitHub_blocks_public_access_to_youtube-dl_after_RIAA_issues_DMCA_notice",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "thumbnail": "",
+        "priority": "",
+        "engines": [
+          "wikinews"
+        ],
+        "positions": [
+          3
+        ],
+        "score": 0.3333333333333333,
+        "category": "news",
+        "iframe_src": null,
+        "pubdate": "2024-12-18 12:27:56"
+      },
+      {
+        "url": "https://en.wikinews.org/wiki/Open_source_game_developer_Perttu_Ahola_talks_about_Minetest_with_Wikinews",
+        "title": "Open source game developer Perttu Ahola talks about Minetest with Wikinews",
+        "content": "command-line utilities like grep, sed, screen. Git of course. Sometimes python scripts. Minetest uses the CMake build system which is simple to use from",
+        "metadata": "",
+        "publishedDate": "2024-12-18T15:46:50",
+        "engine": "wikinews",
+        "template": "default.html",
+        "parsed_url": [
+          "https",
+          "en.wikinews.org",
+          "/wiki/Open_source_game_developer_Perttu_Ahola_talks_about_Minetest_with_Wikinews",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "thumbnail": "",
+        "priority": "",
+        "engines": [
+          "wikinews"
+        ],
+        "positions": [
+          4
+        ],
+        "score": 0.25,
+        "category": "news",
+        "iframe_src": null,
+        "pubdate": "2024-12-18 15:46:50"
+      },
+      {
+        "url": "https://en.wikinews.org/wiki/Sun_Unveils_Java_6.0",
+        "title": "Sun Unveils Java 6.0",
+        "content": "has been added to allow scripting in Java, including both languages like Python and Ruby as well as Mozilla's open-source JavaScript implementation. This",
+        "metadata": "",
+        "publishedDate": "2009-12-13T17:18:57",
+        "engine": "wikinews",
+        "template": "default.html",
+        "parsed_url": [
+          "https",
+          "en.wikinews.org",
+          "/wiki/Sun_Unveils_Java_6.0",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "thumbnail": "",
+        "priority": "",
+        "engines": [
+          "wikinews"
+        ],
+        "positions": [
+          5
+        ],
+        "score": 0.2,
+        "category": "news",
+        "iframe_src": null,
+        "pubdate": "2009-12-13 17:18:57"
+      }
+    ],
+    "answers": [],
+    "corrections": [],
+    "infoboxes": [],
+    "suggestions": [],
+    "unresponsive_engines": []
+  }
+}

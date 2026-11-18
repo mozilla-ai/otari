@@ -12,9 +12,11 @@ import { PageIntro } from "@/design-system/layout/PageIntro"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { Toolbar } from "@/design-system/layout/Toolbar"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+import { CountryDatabaseCard } from "@/features/settings/CountryDatabaseCard"
 import { MailDeliveryCard } from "@/features/settings/MailDeliveryCard"
 import { MaintenanceModeCard } from "@/features/settings/MaintenanceModeCard"
 import { RateLimitsCard } from "@/features/settings/RateLimitsCard"
+import { UpdateCheckCard } from "@/features/settings/UpdateCheckCard"
 import { useRotateMasterKey } from "@/shared/api/auth"
 import {
   useHostedProviders,
@@ -659,11 +661,7 @@ export function SettingsPage() {
 
   return (
     <div className="flex flex-col">
-      <PageIntro title="Settings">
-        Every effective gateway setting. Settable fields apply immediately and
-        persist across restarts; startup-only fields are shown for reference and
-        change only via config.yml or environment variables (then a restart).
-      </PageIntro>
+      <PageIntro title="Settings" />
 
       <ErrorBanner error={settings.error ?? updateSettings.error} />
 
@@ -672,13 +670,21 @@ export function SettingsPage() {
           ref={searchRef}
           type="search"
           aria-label="Search settings"
-          placeholder="Search settings (press / to focus)…"
+          // The shortcut is a keyboard's, so the hint asks for a fine pointer
+          // rather than for the field helper's "not coarse": with no pointer
+          // to go on, a hint about a key nobody may have is left out.
+          placeholder={
+            window.matchMedia?.("(pointer: fine)").matches
+              ? "Search settings (press / to focus)…"
+              : "Search settings…"
+          }
+          aria-keyshortcuts="/"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Escape") setSearch("")
           }}
-          className="min-w-0 flex-1 rounded-lg border border-border bg-surface-alt px-3 py-2 text-body focus:border-accent focus:outline-none"
+          className={`min-w-0 flex-1 ${INPUT_CLASS}`}
         />
         <Checkbox isSelected={settableOnly} onChange={setSettableOnly}>
           Settable only
@@ -722,6 +728,9 @@ export function SettingsPage() {
       <MailDeliveryCard />
 
       <MaintenanceModeCard />
+
+      <CountryDatabaseCard />
+      <UpdateCheckCard />
 
       {data ? (
         <p className="pt-6 text-xs text-subtle">

@@ -1,18 +1,10 @@
-import { Button, Spinner } from "@heroui/react"
+import { Button } from "@heroui/react"
 import type { ReactNode } from "react"
-import { useRef, useState } from "react"
+import { useRef, useState, useSyncExternalStore } from "react"
 import { FiMinus, FiPlus } from "react-icons/fi"
 
 import { IconButton } from "@/design-system/actions/IconButton"
-import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
-import {
-  ChartLegend,
-  type SeriesDef,
-  type StackedPoint,
-  TrendChart,
-} from "@/design-system/metrics/charts"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
-import { formatNumber } from "@/shared/helpers/format"
 import {
   BUCKET_LABEL,
   bucketDurationMs,
@@ -22,6 +14,9 @@ import {
   type RangePreset,
   rangeFromBuckets,
 } from "@/shared/helpers/timeRange"
+import { ChartReadout } from "./ChartReadout"
+import { pointedReading, windowReading } from "./chartMath"
+import { type Pointed, StripChart } from "./StripChart"
 
 // A request-volume histogram that doubles as the time-range selector for the
 // Activity page (the context strip pattern CloudWatch Logs Insights, Kibana,
@@ -48,6 +43,9 @@ interface ActivityTimelineProps<B extends ChartBucket> {
   // while a sub-window is selected, since it still describes how far back we span.
   extentKey: string
   onPreset: (preset: RangePreset<B>) => void
+  // The presets are picked elsewhere (the Overview's filter bar), so the row
+  // drops them; they still bound how far the chart zooms out.
+  hidePresets?: boolean
   // A selected sub-window, resolved to absolute instants (end exclusive).
   onSelectRange: (startIso: string, endIso: string) => void
   // The selection was widened back to the whole extent: fall back to the rolling
@@ -63,6 +61,29 @@ interface ActivityTimelineProps<B extends ChartBucket> {
   action?: ReactNode
   // What a bar counts, in the heading and the tooltip.
   unitLabel?: string
+  // The count the window holds, from the caller. Null while it loads; left
+  // out, the totals are summed from the series when `additive`.
+  totals?: { count: number; failed: number | null } | null
+  // False when a bucket can hold what its neighbor holds (a session spans
+  // days), so the series must never be summed into a total.
+  additive?: boolean
+}
+
+// Below `md` the zoom buttons are 44px and the chart takes its phone geometry.
+const PHONE_QUERY = "(max-width: 767px)"
+function usePhone(): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      if (typeof window.matchMedia !== "function") return () => {}
+      const query = window.matchMedia(PHONE_QUERY)
+      query.addEventListener("change", onChange)
+      return () => query.removeEventListener("change", onChange)
+    },
+    () =>
+      typeof window.matchMedia === "function" &&
+      window.matchMedia(PHONE_QUERY).matches,
+    () => false,
+  )
 }
 
 function formatTick(iso: string, bucket: ChartBucket): string {
@@ -84,26 +105,11 @@ function formatTick(iso: string, bucket: ChartBucket): string {
   })
 }
 
-const SUCCESS_SERIES: SeriesDef = {
-  key: "success",
-  label: "Succeeded",
-  color: "var(--color-primary)",
-}
-const ERROR_SERIES: SeriesDef = {
-  key: "errors",
-  label: "Failed",
-  color: "var(--color-danger)",
-}
-const PLAIN_SERIES: SeriesDef = {
-  key: "requests",
-  label: "Requests",
-  color: "var(--color-primary)",
-}
-
 export function ActivityTimeline<B extends ChartBucket>({
   presets,
   extentKey,
   onPreset,
+  hidePresets = false,
   onSelectRange,
   onSelectFull,
   series,
@@ -114,23 +120,14 @@ export function ActivityTimeline<B extends ChartBucket>({
   ariaLabel = "Request volume over the selected window",
   action,
   unitLabel = "Requests",
+  totals,
+  additive = true,
 }: ActivityTimelineProps<B>) {
+  const phone = usePhone()
+  const [pointed, setPointed] = useState<Pointed | null>(null)
   const starts = series.map((point) => point.bucketStart)
   const n = series.length
   const label = formatWindowLabel(windowStart, windowEnd)
-
-  // Errors stack only when the window actually has any, so the everyday strip
-  // stays a single calm series and red keeps its "something failed" meaning.
-  const hasErrors = series.some((point) => (point.errors ?? 0) > 0)
-  const chartSeries = hasErrors
-    ? [SUCCESS_SERIES, ERROR_SERIES]
-    : [{ ...PLAIN_SERIES, label: unitLabel }]
-  const data: StackedPoint[] = series.map((point): StackedPoint => {
-    const errors = Math.min(point.errors ?? 0, point.requests)
-    return hasErrors
-      ? { x: point.bucketStart, success: point.requests - errors, errors }
-      : { x: point.bucketStart, requests: point.requests }
-  })
 
   // The active window as inclusive bucket indices of the extent series. The pan
   // rail keeps a local copy only while a drag is in flight (live feedback);
@@ -255,7 +252,10 @@ export function ActivityTimeline<B extends ChartBucket>({
     const { x, startIndex, railWidth } = panStart.current
     if (railWidth <= 0) return
     const dx = Math.round(((event.clientX - x) / railWidth) * n)
-    setPan(panTo(startIndex + dx))
+    const next = panTo(startIndex + dx)
+    // Same bucket as the last move: nothing to redraw.
+    if (next.startIndex === panSelRef.current?.startIndex) return
+    setPan(next)
   }
 
   const endPan = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -274,172 +274,206 @@ export function ActivityTimeline<B extends ChartBucket>({
   const hiPct = n ? ((sel.endIndex + 1) / n) * 100 : 100
   const panMax = Math.max(0, n - span)
 
+  // What the header reads out. Totals the caller gives win;
+  // otherwise they are summed over the active window, unless the series cannot
+  // be summed, when the tallest bucket stands in.
+  const buckets = series.map((point) => ({
+    requests: point.requests,
+    errors: point.errors ?? 0,
+  }))
+  const unitWord = unitLabel.toLowerCase()
+  const windowTotals = windowReading({
+    totals,
+    additive,
+    loading,
+    series: buckets,
+    startIndex: sel.startIndex,
+    endIndex: sel.endIndex,
+  })
+  const pointedTotals = pointed
+    ? pointedReading({
+        base: windowTotals,
+        additive,
+        series: buckets,
+        lo: pointed.lo,
+        hi: pointed.hi,
+      })
+    : null
+  const pointedLabel = pointed
+    ? pointed.lo === pointed.hi
+      ? formatTick(starts[pointed.lo], bucket)
+      : `${formatTick(starts[pointed.lo], bucket)} \u2013 ${formatTick(starts[pointed.hi], bucket)}`
+    : undefined
+  const readout = (
+    <ChartReadout
+      reading={pointedTotals ?? windowTotals}
+      label={pointedLabel}
+      unit={unitWord}
+    />
+  )
+
+  const toolbar = (
+    <div className="flex items-center gap-1.5">
+      <span className="hidden text-xs text-muted sm:inline">
+        Click a bar or drag to filter
+      </span>
+      {/* `md:min-h-8 md:min-w-8` on both: 44px where a finger does the
+                zooming, back to the toolbar's own 32px density from `md` up. */}
+      <IconButton
+        size="sm"
+        variant="ghost"
+        isIconOnly
+        className="md:min-h-8 md:min-w-8"
+        label="Zoom in"
+        isDisabled={n === 0}
+        onPress={zoomIn}
+      >
+        <FiPlus aria-hidden="true" className="h-4 w-4" />
+      </IconButton>
+      <IconButton
+        size="sm"
+        variant="ghost"
+        isIconOnly
+        className="md:min-h-8 md:min-w-8"
+        label="Zoom out"
+        isDisabled={n === 0 || (atFullExtent && !largerPreset)}
+        onPress={zoomOut}
+      >
+        <FiMinus aria-hidden="true" className="h-4 w-4" />
+      </IconButton>
+      {isZoomed ? (
+        <Button size="sm" variant="ghost" onPress={() => commit(0, n - 1)}>
+          Reset
+        </Button>
+      ) : null}
+    </div>
+  )
+
+  // Pan rail: a minimap-style scrollbar for the zoomed window. Only
+  // rendered while zoomed (at the full extent there is nothing to
+  // pan), so it never takes space or a tab stop otherwise.
+  const panRail =
+    isZoomed || panSel ? (
+      // The row is 44px so the handle inside it is a real touch target;
+      // the track and the handle keep the 10px they read best at, drawn
+      // as children so the grab area is the whole height rather than
+      // the stripe. A thumb the size of the stripe is unpannable on a
+      // phone, which is the only place the zoom is hard to redo.
+      <div
+        // The row is 44px so the handle inside it is a real touch
+        // target; the track and the handle keep the 10px they read best
+        // at, drawn as children so the grab area is the whole height
+        // rather than the stripe. A thumb the size of the stripe is
+        // unpannable on a phone, which is the only place the zoom is
+        // hard to redo.
+        ref={railRef}
+        className="relative flex h-11 w-full items-center"
+      >
+        <div
+          aria-hidden="true"
+          className="absolute inset-x-0 h-2.5 bg-surface-alt"
+        />
+        <div
+          role="slider"
+          aria-label="Pan the selected window"
+          aria-valuemin={0}
+          aria-valuemax={panMax}
+          aria-valuenow={Math.min(sel.startIndex, panMax)}
+          aria-valuetext={`Window starting at ${formatTick(starts[sel.startIndex] ?? starts[0], bucket)}`}
+          tabIndex={0}
+          // Square, and here that is the point rather than
+          // consistency: the window's edges assert two exact instants,
+          // and a rounded end blurs the only thing the shape states.
+          //
+          // The fill lives on the stripe inside, not here: this element
+          // is the 44px grab target and the stripe is the 10px drawing,
+          // and painting both stacked two 40% accents into one 64% one.
+          // `group` so the stripe's own variants have the ancestor they
+          // address; without it they matched nothing and the hover was
+          // dead. No `outline-none`, so the base `:focus-visible` rule
+          // still rings the element that actually takes focus.
+          className="group absolute inset-y-0 flex cursor-grab touch-none items-center active:cursor-grabbing"
+          style={{
+            left: `${loPct}%`,
+            width: `${Math.max(2, hiPct - loPct)}%`,
+          }}
+          onKeyDown={onPanKeyDown}
+          onPointerDown={(event) => {
+            event.preventDefault()
+            panStart.current = {
+              x: event.clientX,
+              startIndex: sel.startIndex,
+              railWidth: railRef.current?.getBoundingClientRect().width ?? 0,
+            }
+            setPan({ ...sel })
+            event.currentTarget.setPointerCapture(event.pointerId)
+          }}
+          onPointerMove={onPanMove}
+          onPointerUp={endPan}
+          onPointerCancel={endPan}
+        >
+          <div className="h-2.5 w-full bg-accent/40 group-hover:bg-accent/60" />
+        </div>
+      </div>
+    ) : null
+
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
-        <TabRow>
-          {presets.map((preset) => (
-            <Tab
-              key={preset.key}
-              isActive={extentKey === preset.key}
-              onPress={() => onPreset(preset)}
-            >
-              {preset.label}
-            </Tab>
-          ))}
-        </TabRow>
-        <div className="ml-auto flex items-center gap-3">
-          <span className="text-caption">Showing {label} · UTC</span>
+        {hidePresets ? null : (
+          <TabRow>
+            {presets.map((preset) => (
+              <Tab
+                key={preset.key}
+                isActive={extentKey === preset.key}
+                onPress={() => onPreset(preset)}
+              >
+                {preset.label}
+              </Tab>
+            ))}
+          </TabRow>
+        )}
+        {/* Full width on a phone, so the line starts on the column edge. */}
+        <div className="ml-auto flex items-center gap-3 max-md:ml-0 max-md:w-full max-md:justify-between">
+          {/* "· UTC" stays with the date before it and the lines balance, so a
+              narrow row never leaves "UTC" alone on a line. */}
+          <span className="text-caption text-balance">
+            Showing {label}
+            {"\u00a0·\u00a0"}UTC
+          </span>
           {action}
         </div>
       </div>
 
-      {/* A band of the page between rules, not a card. */}
+      {/* A band of the page between rules, not a card. The totals read out in
+          the header; there is no legend. */}
       <div className="border-y border-border py-3">
-        <div className="flex items-center justify-between gap-2 px-1 pb-1">
-          <span className="flex items-center gap-3">
-            <span className="text-overline">
-              {unitLabel} / {BUCKET_LABEL[bucket]}
-            </span>
-            <ChartLegend series={chartSeries} />
+        <div className="grid grid-cols-[1fr_auto] gap-x-2 gap-y-0.5 md:flex md:h-9 md:items-center md:gap-4">
+          <span className="self-center whitespace-nowrap text-overline md:order-1">
+            {unitLabel} / {BUCKET_LABEL[bucket]}
           </span>
-          <div className="flex items-center gap-1.5">
-            <span className="hidden text-xs text-muted sm:inline">
-              Drag to filter a range
-            </span>
-            {/* `md:min-h-8 md:min-w-8` on both: 44px where a finger does the
-                zooming, back to the toolbar's own 32px density from `md` up. */}
-            <IconButton
-              size="sm"
-              variant="ghost"
-              isIconOnly
-              className="md:min-h-8 md:min-w-8"
-              label="Zoom in"
-              isDisabled={n === 0}
-              onPress={zoomIn}
-            >
-              <FiPlus aria-hidden="true" className="h-4 w-4" />
-            </IconButton>
-            <IconButton
-              size="sm"
-              variant="ghost"
-              isIconOnly
-              className="md:min-h-8 md:min-w-8"
-              label="Zoom out"
-              isDisabled={n === 0 || (atFullExtent && !largerPreset)}
-              onPress={zoomOut}
-            >
-              <FiMinus aria-hidden="true" className="h-4 w-4" />
-            </IconButton>
-            {isZoomed ? (
-              <Button
-                size="sm"
-                variant="ghost"
-                onPress={() => commit(0, n - 1)}
-              >
-                Reset
-              </Button>
-            ) : null}
+          <div className="md:order-3 md:ml-auto">{toolbar}</div>
+          <div className="col-span-2 flex min-h-5 items-center md:order-2 md:col-auto md:min-h-0">
+            {readout}
           </div>
         </div>
-
-        {/* Both pre-data states hold the same reserved height, so the band does
-            not resize between them. */}
-        {loading && n === 0 ? (
-          <div className="flex h-[5.625rem] items-center justify-center">
-            <Spinner size="sm" />
-          </div>
-        ) : n === 0 ? (
-          <EmptyMessage minHeightClass="min-h-[5.625rem]">
-            No activity in this range.
-          </EmptyMessage>
-        ) : (
-          <div className="flex flex-col gap-1">
-            <TrendChart
-              data={data}
-              series={chartSeries}
-              formatValue={(value) => formatNumber(value)}
-              formatXTick={(iso) => formatTick(iso, bucket)}
-              ariaLabel={ariaLabel}
-              height={90}
-              // Three steps: this strip is a shape to drag on rather than a
-              // chart to read values off, and five would put more numbers
-              // beside it than it has room to justify.
-              showYAxis
-              yTickCount={3}
-              integerY
-              onSelectRange={commit}
-              window={isZoomed || panSel ? sel : undefined}
-            />
-            {/* Pan rail: a minimap-style scrollbar for the zoomed window. Only
-                rendered while zoomed (at the full extent there is nothing to
-                pan), so it never takes space or a tab stop otherwise. */}
-            {isZoomed || panSel ? (
-              // The row is 44px so the handle inside it is a real touch target;
-              // the track and the handle keep the 10px they read best at, drawn
-              // as children so the grab area is the whole height rather than
-              // the stripe. A thumb the size of the stripe is unpannable on a
-              // phone, which is the only place the zoom is hard to redo.
-              <div
-                // The row is 44px so the handle inside it is a real touch
-                // target; the track and the handle keep the 10px they read best
-                // at, drawn as children so the grab area is the whole height
-                // rather than the stripe. A thumb the size of the stripe is
-                // unpannable on a phone, which is the only place the zoom is
-                // hard to redo.
-                ref={railRef}
-                className="relative flex h-11 w-full items-center"
-              >
-                <div
-                  aria-hidden="true"
-                  className="absolute inset-x-0 h-2.5 bg-surface-alt"
-                />
-                <div
-                  role="slider"
-                  aria-label="Pan the selected window"
-                  aria-valuemin={0}
-                  aria-valuemax={panMax}
-                  aria-valuenow={Math.min(sel.startIndex, panMax)}
-                  aria-valuetext={`Window starting at ${formatTick(starts[sel.startIndex] ?? starts[0], bucket)}`}
-                  tabIndex={0}
-                  // Square, and here that is the point rather than
-                  // consistency: the window's edges assert two exact instants,
-                  // and a rounded end blurs the only thing the shape states.
-                  //
-                  // The fill lives on the stripe inside, not here: this element
-                  // is the 44px grab target and the stripe is the 10px drawing,
-                  // and painting both stacked two 40% accents into one 64% one.
-                  // `group` so the stripe's own variants have the ancestor they
-                  // address; without it they matched nothing and the hover was
-                  // dead. No `outline-none`, so the base `:focus-visible` rule
-                  // still rings the element that actually takes focus.
-                  className="group absolute inset-y-0 flex cursor-grab touch-none items-center active:cursor-grabbing"
-                  style={{
-                    left: `${loPct}%`,
-                    width: `${Math.max(2, hiPct - loPct)}%`,
-                  }}
-                  onKeyDown={onPanKeyDown}
-                  onPointerDown={(event) => {
-                    event.preventDefault()
-                    panStart.current = {
-                      x: event.clientX,
-                      startIndex: sel.startIndex,
-                      railWidth:
-                        railRef.current?.getBoundingClientRect().width ?? 0,
-                    }
-                    setPan({ ...sel })
-                    event.currentTarget.setPointerCapture(event.pointerId)
-                  }}
-                  onPointerMove={onPanMove}
-                  onPointerUp={endPan}
-                  onPointerCancel={endPan}
-                >
-                  <div className="h-2.5 w-full bg-accent/40 group-hover:bg-accent/60" />
-                </div>
-              </div>
-            ) : null}
-          </div>
-        )}
+        <div className="flex flex-col gap-1 pt-1">
+          <StripChart
+            data={buckets.map((point, index) => ({
+              ...point,
+              x: starts[index],
+            }))}
+            formatTick={(iso) => formatTick(iso, bucket)}
+            ariaLabel={ariaLabel}
+            window={isZoomed || panSel ? sel : undefined}
+            onSelectRange={commit}
+            onReading={setPointed}
+            phone={phone}
+            loading={loading}
+            emptyLabel="No activity in this range."
+          />
+          {panRail}
+        </div>
       </div>
     </div>
   )

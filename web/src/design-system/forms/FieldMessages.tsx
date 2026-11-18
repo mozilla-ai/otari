@@ -15,7 +15,7 @@ import type { ReactNode } from "react"
  * heading's paragraph has no error to make room for, so the question does not
  * arise for it.
  *
- * `reserve={false}` is for a field in a table row or a toolbar. Those never
+ * `shouldReserve={false}` is for a field in a table row or a toolbar. Those never
  * speak, and holding a line open under each one would put a band of empty
  * space through every row of a table.
  */

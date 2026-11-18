@@ -2,6 +2,9 @@
 
 from typing import Any
 
+import pytest
+from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice, CompletionUsage
+
 from gateway.api.routes import chat
 from gateway.api.routes.chat import ChatCompletionRequest
 
@@ -80,25 +83,26 @@ def test_no_injection_for_non_streaming() -> None:
     assert "stream_options" not in kwargs
 
 
-def test_stream_preserves_disabled_usage() -> None:
+def test_stream_asks_for_usage_when_the_caller_turned_it_off() -> None:
+    """The usage chunk is what a stream is billed on, so the provider is asked for it either way."""
     kwargs = chat._ADAPTER.prepare_stream_kwargs(
         {"stream_options": {"include_usage": False}},
     )
-    assert kwargs["stream_options"]["include_usage"] is False
+    assert kwargs["stream_options"]["include_usage"] is True
 
 
-def test_stream_preserves_empty_options() -> None:
+def test_stream_asks_for_usage_on_empty_options() -> None:
     kwargs = chat._ADAPTER.prepare_stream_kwargs(
         {"stream_options": {}},
     )
-    assert kwargs["stream_options"] == {}
+    assert kwargs["stream_options"] == {"include_usage": True}
 
 
-def test_stream_preserves_custom_options_without_usage() -> None:
+def test_stream_keeps_custom_options_and_asks_for_usage() -> None:
     kwargs = chat._ADAPTER.prepare_stream_kwargs(
         {"stream_options": {"custom_field": "value"}},
     )
-    assert kwargs["stream_options"] == {"custom_field": "value"}
+    assert kwargs["stream_options"] == {"custom_field": "value", "include_usage": True}
 
 
 def test_preserves_client_stream_options() -> None:
@@ -112,3 +116,27 @@ def test_preserves_client_stream_options() -> None:
         }
     )
     assert kwargs["stream_options"] == custom
+
+
+def _chunk(*, text: str | None = None, usage: bool = False) -> ChatCompletionChunk:
+    return ChatCompletionChunk(
+        id="c1",
+        choices=[] if text is None else [ChunkChoice(delta=ChoiceDelta(content=text), index=0)],
+        created=0,
+        model="m",
+        object="chat.completion.chunk",
+        usage=CompletionUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2) if usage else None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("stream_options", "forwarded"),
+    [(None, True), ({"include_usage": True}, True), ({"include_usage": False}, False), ({}, False)],
+)
+def test_the_usage_chunk_reaches_the_caller_only_when_it_asked_for_usage(
+    stream_options: dict[str, Any] | None, forwarded: bool
+) -> None:
+    """The provider is asked for usage either way; a caller that turned it off still gets a stream without it."""
+    adapter = chat._ADAPTER.for_stream_options(stream_options)
+    assert bool(adapter.format_chunk(_chunk(usage=True))) is forwarded
+    assert adapter.format_chunk(_chunk(text="hi")).startswith("data: ")

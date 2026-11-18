@@ -17,7 +17,7 @@ with underscores (`api_keys`).
 | Layer | Path | Does | Must not |
 | --- | --- | --- | --- |
 | Routes | `api/routes/<domain>.py` | Parse the request, call one service, return a schema | Run a query, hold business rules, define schemas inline |
-| Services | `services/<domain>/`, whose `__init__.py` exports the one service and the types its public methods use | Use cases: business rules and orchestration | Run a query, hold the session, touch HTTP, import another domain's repositories |
+| Services | `services/<domain>/`, whose `__init__.py` exports the one service and the types its public methods use | Use cases: business rules and orchestration | Run a query, hold the session, read a request or write a response, import another domain's repositories |
 | Repositories | `repositories/<domain>/`, with modules that end in `_repository.py`, and the bundle a service receives in `<domain>_repositories.py` | Every query, over `BaseRepository`; flush, never commit | Hold business rules, commit |
 | Schemas | `schemas/<domain>.py` | Pydantic request and response models, and their mapping from ORM rows | Anything else |
 | Exceptions | `exceptions/<domain>_exceptions.py` | The domain's error classes, each with its HTTP status | Handle errors |
@@ -37,21 +37,29 @@ How a domain fits together:
   block.
   [Who commits](.github/skills/backend-standards/SKILL.md#who-commits) gives
   the rules.
-- **Builders** live in `api/deps.py`. A worker job calls the same builder with a
+- **Savepoints.** A repository may open a savepoint for one purpose: to
+  diagnose a refusal of its own write, by asking the database why the flush
+  failed. It never opens one so that a step can continue.
+- **Builders** live in `api/deps/`. A worker job calls the same builder with a
   Unit of Work over its own session. Nothing under `services/` may import
   `api/`, so the code that starts a worker passes the builder in.
 - **Imports** follow the
   [layer and import rules](ARCHITECTURE.md#the-modular-monolith).
+- **HTTP vocabulary.** A service names the status and the headers one of its
+  own errors means, as an exceptions module does. It never reads a request or
+  writes a response.
 - **Reacting to another domain.** Dependencies between domains run one way.
   When a domain must react to a change in a domain that does not depend on it,
   the domain where the change happens defines a listener interface and receives
   an implementation by constructor injection (Observer, and the Dependency
   Inversion Principle). The listener runs inside the caller's transaction and
-  never commits. The parameter that receives it has no default, so a caller
-  cannot skip the listener by leaving it out. A listener interface's name ends
-  in `Listener`, and the architecture check finds such a parameter by a type
-  name that contains `Listener`. A package root may export a listener it
-  offers another domain.
+  never commits. A listener told of something no transaction records, such as a
+  request that failed, is run in a background task by the domain that tells it,
+  and does its work on a Unit of Work of its own. The parameter that receives
+  it has no default, so a caller cannot skip the listener by leaving it out. A
+  listener interface's name ends in `Listener`, and the architecture check
+  finds such a parameter by a type name that contains `Listener`. A package
+  root may export a listener it offers another domain.
 - **Divider comments** that cut a module into sections mean the module splits
   along them.
 - **The domain test.** A domain that cannot offer a small public API is more
@@ -82,7 +90,10 @@ sessions, email verification and reset, the profile, and deployment-wide
 account administration.
 
 Its tables sit in `models/tenancy.py` today, which organizations holds, except
-`oauth_identity_link` in `models/identity.py`.
+`oauth_identity_link` and `oidc_connection` in `models/identity.py`. The
+connection table is an organization's own way of signing in rather than a
+property of the organization, which is why it sits here and not with
+organizations.
 
 ### organizations
 
@@ -100,6 +111,11 @@ It also owns `models/users.py`, `repositories/users_repository.py` and
 ### api-keys
 
 The deployment's and the members' API keys, and which models a key may reach.
+
+A key's scopes say which endpoint groups it may call. They are a closed
+vocabulary several layers read, so the enum and its rules live in
+`types/key_scope.py` and the model imports them, as pricing does with
+`types/price_unit.py`.
 
 It also owns `services/model_access.py` and `services/bootstrap_service.py`.
 
@@ -127,7 +143,9 @@ meters a count is reported under.
 Provider credentials: instances configured at runtime, organization-scoped
 provider keys, endpoints a workspace or a user owns, the hosted providers the
 deployment serves on its own credentials with the models it offers on them,
-their health, and what a dispatch needs to reach a provider.
+their health, and what a dispatch needs to reach a provider. It also owns the
+connection to otari.ai, which stores a hosted provider from a key otari.ai
+issues ([docs/platform-connect-protocol.md](docs/platform-connect-protocol.md)).
 
 `tenancy/org_provider_key_service.py` has three divider sections (organization
 keys, workspace overrides, model restrictions) and splits along them.
@@ -140,6 +158,10 @@ short spellings and aliases.
 
 It also owns `services/tenancy/organization_model_access.py`.
 
+The models.dev document is typed in `types/models_dev.py`: catalog reads its
+facts and pricing reads its rates, so it sits below both and neither imports the
+other.
+
 ### routing
 
 Routing policies, their compiled plans and the router backends, and which
@@ -148,10 +170,13 @@ model a coding agent's subagent should start on.
 It owns `ports/agent_model_recommender_port.py` and its adapter in
 `adapters/`, and `exceptions/routing_exceptions.py`. The port names who
 answers a subagent model recommendation and at what price. The core asks the
-decision model the deployment configured, which may be a local one, and an
-overlay may bind a recommender of its own, so the composition root binds
-the implementation and no caller chooses between them. Neither implementation meters
-the call; the decisions scaffold does.
+subagent router switched on in the dashboard (the `agent_recommenders` table,
+administered through `/api/v1/routing/recommenders` and held in memory per
+worker for the quote), at the token rates stored with it; with none switched
+on, nothing answers. An overlay may bind a recommender of its own, or
+wrap the core one, so the composition root binds the implementation and no
+caller chooses between them. The adapter quotes the price where it owns one;
+the decisions scaffold meters the call.
 
 ### files
 
@@ -185,7 +210,12 @@ A workspace's MCP servers, web search policy and code execution policy are
 read from this deployment's own rows, by `WorkspaceMcpServers`,
 `WorkspaceWebSearchPolicies` and `WorkspaceCodeExecutionPolicies`, with no port
 between them and their callers. A resolved MCP server is connected to directly,
-and nothing proxies MCP traffic. The web search policy says who may search and
+and nothing proxies MCP traffic. A stored server sends one workspace credential
+(a token, or the account a manager signed in to for everyone) or, in per-user
+mode, each user's own: `McpConnectionService` runs a sign-in to such a server
+and ends a connection, and `McpUserTokens` reads the token a request carries
+(`mcp_user_connections`, `mcp_shared_connections`, `mcp_oauth_flows`,
+`mcp_sign_in_link_uses`). The web search policy says who may search and
 how far, and carries the workspace's own search key where its organization
 brought one; a tools service applies it to a request with one rule everywhere.
 The code execution policy says who may run code and within which limits, and
@@ -193,6 +223,13 @@ the request path and the Playground read it through the same service.
 
 It also owns an organization's web search keys and each workspace's choice
 among them (`org_web_search_keys`, `workspace_web_search_key_overrides`).
+So does a member's request for a catalog server and a manager's answer to it
+(`mcp_server_requests`): `McpServerRequestService` asks mcp-catalog for the
+entry a request names and the tenancy checks for who manages the workspace,
+both through interfaces it is handed.
+A stored server's display belongs here too: an admin's uploaded logo and tile
+choice (`workspace_mcp_server_logos`), kept apart from the catalog's fetched
+logos, which it asks mcp-catalog for through an interface it is handed.
 
 **The tool test.** A tool is something the model calls during a request. The
 domain holds the registry, the loop and each tool's settings. A capability the
@@ -232,12 +269,15 @@ billing source: usage-and-telemetry keeps the usage rows and their cost.
 Inference, tools and usage-and-telemetry depend on traces; traces depends on
 none of them.
 
-Built in the target shape from the start.
+An LLM span also keeps the size of each part of its request (system prompt,
+tool definitions, messages, tool results, files) as integers, and a read adds
+the model's context window from the pricing domain's catalog lookup. Neither
+keeps text.
 
 ### inference
 
-The request path: the completion dialects, the pass-through endpoints, batches
-and the Playground.
+The request path (the completion dialects, the pass-through endpoints, batches,
+video jobs and the Playground), and the country file a request's address is looked up in.
 
 ### platform
 
@@ -256,8 +296,6 @@ every request, so this domain holds no enforcement. Counting stays in
 `gateway/rate_limit.py`, over the rate-limit store port. A config.yml rule is
 listed and never edited here.
 
-Built in the target shape from the start.
-
 ### health-checks
 
 The scheduled checks an operator turns on from the Health page: every model the
@@ -268,6 +306,32 @@ usage row and holds no budget. The models come from the providers domain's
 serveable roster, never from the price list, and switching failing models off
 goes through the providers domain too. An outage that ends is kept for 90 days. Every replica
 polls, and the conditional update on the settings row decides which one runs.
+
+### update-check
+
+Whether a deployment checks otari.ai for new releases and the security fixes in
+them, and what the last check heard. Nothing is sent until an operator answers
+in the dashboard or `update_check` answers in config. A check sends the version
+and a random install id, once a day at a time of day picked by a seed that is
+never sent. Every replica polls, and the conditional update on the state row
+decides which one sends.
+
+### mcp-catalog
+
+The catalog of remote MCP servers a workspace can add: a copy of the official
+MCP Registry, kept only where Otari can connect, the sync that fills it, the
+hand-maintained Popular list matched against it, and server logos: the
+gateway finds one per catalog server, or per host for a server added by URL,
+fetches it once through the pinned retrieval client and serves it itself
+(`mcp_logos`).
+Who may ask for a sync is answered through the tenancy domain's workspace
+checks, passed in rather than imported.
+
+The catalog permits nothing and the model never calls it, so it is not part of
+tools. Being in the catalog gives a workspace no access: a catalog server is
+one the workspace stores only through the tools domain's own create. Whether a
+request may name a server inline instead is that domain's separate policy. Every replica polls, and the
+conditional update on the sync state row decides which one syncs.
 
 Built in the target shape from the start.
 
@@ -295,9 +359,10 @@ each domain it reads, and budgets is the first.
 ### feedback
 
 This domain holds the messages a signed-in dashboard user sends to the Otari
-team. The gateway forwards each one to otari.ai without the caller's
-credentials, and limits how often one caller may send. It is a core feature,
-switched by `feedback_enabled`.
+team from Contact. The gateway checks the address a reply may go to, limits how
+often one caller may send, and hands each message to `FeedbackDeliveryPort`,
+whose core adapter forwards it to otari.ai without the caller's credentials. It
+is a core feature, switched by `feedback_enabled`, which is off by default.
 
 ### Shared
 

@@ -9,7 +9,7 @@ import pytest
 
 from gateway.services.tenancy.password_reset_email import render_account_exists_email, render_password_reset_email
 
-RESET_LINK = "https://gw.example.com/#/reset-password?token=abc"
+RESET_LINK = "https://gw.example.com/reset-password#token=abc"
 
 
 def _render(**overrides: object) -> tuple[str, str, str]:

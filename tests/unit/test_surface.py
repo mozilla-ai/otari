@@ -24,6 +24,8 @@ def test_the_surface_lists_are_spelled_out() -> None:
     """Literal lists, so adding or dropping a surface anywhere fails here."""
     assert sorted(SURFACES) == [
         "admin",
+        # The decision models that pick a subagent's model.
+        "agent_recommenders",
         "budgets",
         # The deployment's own upstream credentials.
         "hosted_providers",

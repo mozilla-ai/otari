@@ -1,26 +1,23 @@
 import { Link } from "@tanstack/react-router"
 import { Fragment } from "react"
-import type {
-  ToolServiceName,
-  ToolSettingField,
-  UpdateToolSettingsRequest,
-} from "@/client"
+import type { ToolServiceName, ToolSettingField } from "@/client"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { Skeleton } from "@/design-system/feedback/Skeleton"
-import { PageIntro } from "@/design-system/layout/PageIntro"
 import { CONTROL_LANE, SettingRow } from "@/design-system/layout/SettingRow"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { AdvancedRows } from "@/features/tools/AdvancedRows"
 import { SandboxCredentialRow } from "@/features/tools/SandboxCredentialRow"
-import { SearchToolsCard } from "@/features/tools/SearchToolsCard"
-import type { FieldCopy } from "@/features/tools/ToolSettingRows"
-import { ToolSettingRow } from "@/features/tools/ToolSettingRows"
+import {
+  copyFor,
+  oneField,
+  type SettingCopy,
+  ToolSettingRow,
+} from "@/features/tools/ToolSettingRows"
 import {
   ToolStatusGroup,
   ToolStatusRow,
 } from "@/features/tools/ToolStatusGroup"
 import { WorkspaceCodeExecutionPolicyCard } from "@/features/tools/WorkspaceCodeExecutionPolicyCard"
-import { WorkspaceMcpServersCard } from "@/features/tools/WorkspaceMcpServersCard"
 import { WorkspaceWebSearchCard } from "@/features/tools/WorkspaceWebSearchCard"
 import { useDeploymentOperator } from "@/shared/api/organizations"
 import {
@@ -30,15 +27,6 @@ import {
 } from "@/shared/api/tools"
 import { docsSourceHref } from "@/shared/helpers/docs"
 
-// One settable field maps onto one key of the update request; cast at this one
-// boundary (the keys come from the backend's field list).
-function oneField(
-  key: string,
-  value: boolean | number | string | null,
-): UpdateToolSettingsRequest {
-  return { [key]: value } as UpdateToolSettingsRequest
-}
-
 /**
  * What each key is called in the dashboard, and the one line under it.
  *
@@ -47,36 +35,7 @@ function oneField(
  * fit under a label, so the page carries its own copy and falls back to the
  * backend's for a key it has not been told about yet.
  */
-const FIELD_COPY: Record<string, FieldCopy & { defaultLabel?: string }> = {
-  web_search_url: {
-    label: "Backend URL",
-    help: "A SearXNG-compatible service. Not needed when web_search_provider names Tavily or Brave; otherwise, while unset, otari_web_search requests are rejected with 400.",
-    placeholder: "http://searxng:8080",
-    isMachineReadable: true,
-  },
-  web_search_engines: {
-    label: "Engines",
-    help: "Comma-separated SearXNG engines. Blank uses the backend's defaults.",
-    placeholder: "google,bing,duckduckgo",
-    isMachineReadable: true,
-  },
-  web_search_max_results: {
-    label: "Default max results (all workspaces)",
-    help: "Cap on hits per call. A per-tool max_results still overrides it.",
-    placeholder: "10",
-  },
-  web_search_extract: {
-    label: "Extract page content",
-    help: "On: page text is extracted in-process. Off: snippet-only results.",
-    placeholder: "",
-    defaultLabel: "Default (on)",
-  },
-  web_search_intercept: {
-    label: "Intercept provider web search",
-    help: "Run a bare web_search declaration here instead of at the provider. Needs a backend URL.",
-    placeholder: "",
-    defaultLabel: "Default (off)",
-  },
+const FIELD_COPY: Record<string, SettingCopy> = {
   sandbox_url: {
     label: "Sandbox URL",
     help: "A sandbox you run that speaks the code-execution protocol. While unset, otari_code_execution requests are rejected with 400.",
@@ -116,19 +75,6 @@ const EXECUTOR_NEEDS_SANDBOX =
 // Fields only the `protocol` provider reads; E2B ignores both.
 const PROTOCOL_ONLY_KEYS = new Set(["sandbox_url", "sandbox_session_image"])
 
-function copyFor(field: ToolSettingField): FieldCopy & {
-  defaultLabel?: string
-} {
-  return (
-    FIELD_COPY[field.key] ?? {
-      label: field.key,
-      help: field.description ?? "",
-      placeholder: "",
-      isMachineReadable: true,
-    }
-  )
-}
-
 interface ManagedToolSpec {
   toolId: string
   /**
@@ -144,6 +90,11 @@ interface ManagedToolSpec {
   docsAnchor?: string
   /** A line for people, in place of the description the model is given. */
   help?: string
+  /**
+   * The deployment page an operator sets the tool up on, linked from its
+   * unavailable status.
+   */
+  setUpPage?: "/admin/web-search"
 }
 
 interface GroupSpec {
@@ -153,7 +104,7 @@ interface GroupSpec {
   docsAnchor: string
   keys: string[]
   /** Where the service's per-call prices are set, linked from this group. */
-  pricingPage?: "/admin/web-search" | "/admin/code-execution"
+  pricingPage?: "/admin/code-execution"
   /** Where a key the backend added but this page has not been told about goes. */
   catchAll?: boolean
   /** Keys collapsed under an Advanced row at the end of the group. */
@@ -183,7 +134,10 @@ const SERVICES: ServiceSpec[] = [
     managedTools: [
       {
         toolId: "otari_web_search",
-        urlBacked: true,
+        unavailableSummary: "Unavailable · no search tool",
+        unavailableHelp:
+          "No search tool serves the model, so every call is rejected with 400.",
+        setUpPage: "/admin/web-search",
         help: "Lets the model search the web for current information.",
       },
       {
@@ -199,25 +153,9 @@ const SERVICES: ServiceSpec[] = [
         help: "Lets the model read a web page by its URL.",
       },
     ],
-    groups: [
-      {
-        title: "Search backend",
-        blurb:
-          "What runs the model's searches, for every workspace. Fetch needs no backend.",
-        docsAnchor: "web-search",
-        keys: ["web_search_url"],
-        advanced: [
-          "web_search_engines",
-          "web_search_max_results",
-          "web_search_extract",
-          "web_search_intercept",
-        ],
-        pricingPage: "/admin/web-search",
-        catchAll: true,
-        isOperatorOnly: true,
-      },
-    ],
-    omit: ["web_search_purpose_hint"],
+    // Its tools, defaults and rates are set on Deployment > Web search; this
+    // page shows what a workspace sees and decides.
+    groups: [],
   },
   {
     key: "sandbox",
@@ -291,20 +229,14 @@ function SandboxProviderRow({ provider }: { provider: "protocol" | "e2b" }) {
 }
 
 /** Where the service's tools are priced: the deployment's page, not this one. */
-function PricingLinkRow({
-  to,
-}: {
-  to: "/admin/web-search" | "/admin/code-execution"
-}) {
+function PricingLinkRow({ to }: { to: "/admin/code-execution" }) {
   return (
     <SettingRow
       label="Price per call"
       help="Set for the whole deployment, beside its other tool rates."
       control={
         <Link to={to} className="font-medium text-link hover:text-link-hover">
-          {to === "/admin/web-search"
-            ? "Web search pricing"
-            : "Code execution pricing"}
+          Code execution pricing
         </Link>
       }
     />
@@ -336,26 +268,22 @@ function LoadingGroups() {
 }
 
 /**
- * The tool and guardrail service settings, whole or narrowed to one service.
- *
- * `only` is what makes the sidebar's Tools group work: each child route renders
- * this page filtered to its own service rather than scrolling one long page.
- * Omitted, every service renders, which is the /tools route the group's parent
- * still points at.
+ * One service's settings, as a view of Tools: web search, code execution, or
+ * the deployment's guardrail services. The tab above names the service, so the
+ * view draws no title of its own.
  *
  * Every control on the page saves itself: text on blur or Enter, selects on
  * change, each row reporting its own outcome where it happened. There is no
  * Save button and no page-level toast, because a page of independent settings
  * has nothing for one button to be about.
  */
-export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
+export function ToolsGuardrailsPage({ only }: { only: ToolServiceName }) {
   // The Tools group is member-visible for the workspace and organization cards
   // below. Of the deployment-wide reads above them, the tool settings answer a
   // tenant without the service endpoints in them (otari-ai#1969), and the tool
   // list is a catalog read any session may make, so both are asked
-  // unconditionally. The /api/v1/search tools stay operator-only on the
-  // server, so they are still gated on the same answer the sidebar uses rather
-  // than fired into a 403.
+  // unconditionally. Anything operator-only is a link to the deployment's own
+  // pages, shown on the same answer the sidebar uses.
   const { isOperator } = useDeploymentOperator()
   const query = useToolSettings()
   const tools = useTools()
@@ -372,27 +300,10 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
       )
       .map((field) => [field.key, field]),
   )
-  const shown = SERVICES.filter((service) => !only || service.key === only)
-  const narrowed = only ? shown[0] : undefined
+  const shown = SERVICES.filter((service) => service.key === only)
 
   return (
     <div className="flex flex-col gap-10 pb-10">
-      <PageIntro
-        title={narrowed?.label ?? "Tools & Guardrails"}
-        docsHref={toolsDocs(narrowed?.docsAnchor)}
-      >
-        {/* Two readings: an operator configures the service endpoints, and a
-            caller who does not is told what the deployment's tools do to their
-            requests instead of how to configure a backend they cannot reach.
-            A narrowed service's intro says only what its tools do, so it reads
-            the same to both. */}
-        {narrowed
-          ? narrowed.intro
-          : isOperator
-            ? "Configure the built-in tool and guardrail service endpoints without a restart. Changes apply immediately and persist."
-            : "How this deployment's built-in tools behave on your requests, what your workspace may use of them, and what your organization mandates."}
-      </PageIntro>
-
       <ErrorBanner error={query.error} />
 
       {query.isLoading ? <LoadingGroups /> : null}
@@ -426,7 +337,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
             .map((key) => byKey.get(key))
             .filter((field): field is ToolSettingField => Boolean(field))
         const renderField = (field: ToolSettingField) => {
-          const copy = copyFor(field)
+          const copy = copyFor(FIELD_COPY, field)
           return (
             <ToolSettingRow
               key={field.key}
@@ -464,6 +375,16 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
               help={spec.help}
               urlFieldKey={
                 spec.urlBacked && isOperator ? urlField?.key : undefined
+              }
+              setUp={
+                spec.setUpPage && isOperator ? (
+                  <Link
+                    to={spec.setUpPage}
+                    className="inline-flex min-h-11 items-center text-caption text-link hover:text-link-hover"
+                  >
+                    Set up search tools →
+                  </Link>
+                ) : undefined
               }
               // A tenant cannot set up a backend, so they are told the tool
               // is off here rather than how to turn it on.
@@ -536,12 +457,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
                 <SettingsGroup
                   isBounded
                   key={group.title}
-                  // On the combined page the service is not otherwise named,
-                  // and three groups called "Backend" say nothing about which
-                  // service each one configures.
-                  title={
-                    only ? group.title : `${service.label} · ${group.title}`
-                  }
+                  title={group.title}
                   description={group.blurb}
                   docsHref={toolsDocs(group.docsAnchor)}
                 >
@@ -555,12 +471,23 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
               )
             })}
 
-            {/* Last, because it configures the direct search API rather than
-                the model's tools. Below the backend, because a searxng search
-                tool with no URL of its own inherits the one set there.
-                Operator-only: its rows are the deployment's own credentials. */}
+            {/* Operator-only: the tools are the deployment's own credentials,
+                set with their rates and defaults on the deployment's page. */}
             {service.key === "web_search" && isOperator ? (
-              <SearchToolsCard docsHref={toolsDocs("direct-search")} />
+              <SettingsGroup isBounded>
+                <SettingRow
+                  label="Search and fetch tools"
+                  help="Set for the whole deployment, with their rates and which tool the model uses."
+                  control={
+                    <Link
+                      to="/admin/web-search"
+                      className="font-medium text-link hover:text-link-hover"
+                    >
+                      Web search
+                    </Link>
+                  }
+                />
+              </SettingsGroup>
             ) : null}
             {service.key === "guardrails" ? (
               // The organization's own guardrails moved to a page of their own;
@@ -580,11 +507,6 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
           </Fragment>
         )
       })}
-
-      {/* Beside the services rather than under one of them, and left out of
-          every narrowed view, each of which is one service. `/tools/mcp-servers`
-          renders the same card. */}
-      {only ? null : <WorkspaceMcpServersCard />}
     </div>
   )
 }

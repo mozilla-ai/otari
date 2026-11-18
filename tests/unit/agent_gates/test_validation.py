@@ -9,7 +9,7 @@ grammar, so both are checkable before the gate ever runs.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import fields
 from typing import Any, get_args
 
@@ -42,6 +42,8 @@ def _validate(
     judge_gate_limit: int = 5,
     verifier_gate_limit: int = 20,
     probe_verifier: Callable[[VerifierGate], str | None] | None = None,
+    repo_files: Sequence[str] | None = None,
+    tree_gate_ids: Collection[str] | None = None,
 ) -> tuple[Finding, ...]:
     spec = parse_policy(_policy(gates), source="test")
     return validate_policy(
@@ -49,6 +51,8 @@ def _validate(
         judge_gate_limit=judge_gate_limit,
         verifier_gate_limit=verifier_gate_limit,
         probe_verifier=probe_verifier,
+        repo_files=repo_files,
+        tree_gate_ids=tree_gate_ids,
     )
 
 
@@ -496,8 +500,12 @@ _GLOB_GATE_FIELDS: dict[GateType, str] = {
 
 _PROVOKING_GLOBS = {
     WarningCode.BACKSLASH_IN_GLOB: '"docs\\\\x.md"',
+    WarningCode.GLOB_MATCHES_NO_FILE: '"gone.txt"',
     WarningCode.GLOB_MISSES_SHALLOWER_DEPTH: '"**/CLAUDE.md"',
 }
+
+# Only a check that sees the tree can draw these.
+_NEEDS_REPO_FILES = {WarningCode.GLOB_MATCHES_NO_FILE}
 
 _PROVOKING_POLICIES: dict[WarningCode, tuple[str, dict[str, int]]] = {
     WarningCode.JUDGE_GATE_CAP: (_judge_gates(2), {"judge_gate_limit": 1}),
@@ -528,7 +536,7 @@ def test_every_gate_type_a_code_names_draws_that_code(code: WarningCode, gate_ty
     """A gate accepts a warning by its code, so each code must arrive on every gate type it names."""
     if code in _PROVOKING_GLOBS:
         gates = f"  - id: g\n    type: {gate_type}\n" + _GLOB_GATE_FIELDS[gate_type].format(glob=_PROVOKING_GLOBS[code])
-        limits: dict[str, int] = {}
+        limits: dict[str, Any] = {"repo_files": ["other.txt"]} if code in _NEEDS_REPO_FILES else {}
     else:
         gates, limits = _PROVOKING_POLICIES[code]
     assert _codes(gates, **limits) == [code]
@@ -573,6 +581,76 @@ def test_a_gate_accepts_the_warning_it_names_and_no_other() -> None:
         (WarningCode.GLOB_MISSES_SHALLOWER_DEPTH, False),
         (WarningCode.SHELL_WRITE_UNSEEN, True),
     ]
+
+
+_CHANGED_GATE = (
+    "  - id: {gate_id}\n    type: command_if_changed\n    runs: [stop.session]\n    enforcement: required\n"
+    '    require: ["make x"]\n    when_changed: {when_changed}\n'
+)
+
+
+def _changed_gate(when_changed: str, gate_id: str = "g") -> str:
+    return _CHANGED_GATE.format(gate_id=gate_id, when_changed=when_changed)
+
+
+def test_a_when_changed_glob_matching_no_file_warns_once_the_tree_is_known() -> None:
+    (finding,) = _validate(_changed_gate('["src/gone.gen.ts"]'), repo_files=["src/a.ts"])
+    assert (finding.severity, finding.code, finding.accepted) == ("warning", WarningCode.GLOB_MATCHES_NO_FILE, False)
+    assert "'src/gone.gen.ts'" in finding.message
+
+
+def test_a_when_changed_glob_matching_a_file_is_left_alone() -> None:
+    gates = _changed_gate('["src/*.ts", "docs/**"]')
+    assert _validate(gates, repo_files=["src/a.ts", "docs/x/y.md"]) == ()
+
+
+def test_a_forbidden_glob_matching_no_file_is_not_reported() -> None:
+    """A prohibition over a path that should not exist is working precisely when nothing matches."""
+    assert _validate(_PATH_GATE.format(forbidden='["src/gone.gen.ts"]'), repo_files=["src/a.ts"]) == ()
+
+
+def test_globs_are_not_checked_against_the_tree_without_a_file_list() -> None:
+    assert _validate(_changed_gate('["src/gone.gen.ts"]')) == ()
+
+
+@pytest.mark.parametrize("files", [["web/.env"], [".env"]])
+def test_a_double_star_glob_and_its_shallower_twin_are_one_unit(files: list[str]) -> None:
+    """A file either half reaches covers both, so neither is reported."""
+    assert _validate(_changed_gate('[".env", "**/.env"]'), repo_files=files) == ()
+
+
+def test_a_double_star_glob_and_its_twin_both_warn_when_neither_reaches_a_file() -> None:
+    findings = _validate(_changed_gate('[".env", "**/.env"]'), repo_files=["a.txt"])
+    assert [finding.code for finding in findings] == [WarningCode.GLOB_MATCHES_NO_FILE] * 2
+
+
+def test_an_empty_tree_is_not_the_same_as_an_unknown_one() -> None:
+    assert _codes(_changed_gate('["a.txt"]'), repo_files=[]) == [WarningCode.GLOB_MATCHES_NO_FILE]
+
+
+def test_one_matching_glob_does_not_excuse_a_sibling_that_matches_nothing() -> None:
+    (finding,) = _validate(_changed_gate('["a.txt", "gone.txt"]'), repo_files=["a.txt"])
+    assert "'gone.txt'" in finding.message
+
+
+def test_a_gate_can_accept_a_glob_naming_a_file_that_does_not_exist_yet() -> None:
+    gates = _changed_gate('["dist/app.js"]') + "    accept_warnings: [glob-matches-no-file]\n"
+    assert _accepted(gates, repo_files=["a.txt"]) == [(WarningCode.GLOB_MATCHES_NO_FILE, True)]
+
+
+def test_only_the_gates_the_tree_can_answer_for_are_checked() -> None:
+    """A user-level gate is written for every repo, so a glob there matching nothing here is not a finding."""
+    gates = _changed_gate('["gone.txt"]', "repo_gate") + _changed_gate('["gone.txt"]', "user_gate")
+    (finding,) = _validate(gates, repo_files=["a.txt"], tree_gate_ids={"repo_gate"})
+    assert finding.gate_id == "repo_gate"
+
+
+def test_a_glob_that_is_already_an_error_is_not_also_reported_as_matching_nothing() -> None:
+    assert _codes(_changed_gate('["/CHANGELOG.md"]'), repo_files=["CHANGELOG.md"]) == [None]
+
+
+def test_a_glob_with_a_backslash_draws_one_warning_not_two() -> None:
+    assert _codes(_changed_gate(r'["docs\\x.md"]'), repo_files=["a.txt"]) == [WarningCode.BACKSLASH_IN_GLOB]
 
 
 def _judge_gates_accepting(count: int, accepting: set[int]) -> str:

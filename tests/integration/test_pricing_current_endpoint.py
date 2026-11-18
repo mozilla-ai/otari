@@ -10,11 +10,15 @@ reading the collection (otari#1376).
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT
 from gateway.models.pricing import ModelPricing
+
+# The list these tests read starts with the rates they add.
+pytestmark = pytest.mark.usefixtures("unpriced_builtin_fetch")
 
 
 def _price(

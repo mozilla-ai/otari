@@ -28,7 +28,7 @@ export const OBSERVATION_TYPES: Record<
     barClass: "bg-trace-bar-span",
   },
   GENERATION: {
-    label: "Generation",
+    label: "Model request",
     icon: FiMessageSquare,
     inkClass: "text-chart-cat-1",
     barClass: "bg-trace-bar-generation",

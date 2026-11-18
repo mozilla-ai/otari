@@ -10,6 +10,7 @@ export function PlaygroundToolbar({
   hasTranscript,
   history,
   files,
+  capture,
 }: {
   isComparing: boolean
   onToggleCompare: () => void
@@ -18,9 +19,14 @@ export function PlaygroundToolbar({
   history: ReactNode
   /** The uploaded-files control, where the deployment serves uploads. */
   files?: ReactNode
+  /** The prompt-capture switch, where the deployment can keep trace content. */
+  capture?: ReactNode
 }) {
+  // On a phone the three buttons keep their glyphs and carry their words in
+  // the accessible name only, so the row fits on one line. The mode switch
+  // keeps its labels: its options have no glyphs to fall back on.
   return (
-    <div className="flex flex-wrap items-center gap-3">
+    <div className="flex flex-wrap items-center gap-3 max-sm:gap-2">
       <Segmented
         size="md"
         label="Playground mode"
@@ -35,12 +41,14 @@ export function PlaygroundToolbar({
       />
       {history}
       {files}
+      {capture}
       <Button
         onPress={onNewChat}
         isDisabled={!hasTranscript}
         className="min-h-11 md:min-h-9"
       >
-        <FiPlus aria-hidden className="size-4" /> New chat
+        <FiPlus aria-hidden className="size-4" />
+        <span className="max-sm:sr-only">New chat</span>
       </Button>
     </div>
   )

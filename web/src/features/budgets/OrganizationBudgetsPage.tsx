@@ -30,10 +30,7 @@ export function OrganizationBudgetsPage({
       {/* No action here, unlike every other page's intro: this page holds two
           collections, and each one's Add sits on its own section heading rather
           than competing for one slot that could only name one of them. */}
-      <PageIntro title="Spend & budgets">
-        What this organization may spend, and where each limit applies. A
-        request is refused when any ceiling covering it is out of headroom.
-      </PageIntro>
+      <PageIntro title="Spend & budgets" />
       <OrganizationBudgetsCard />
       <SpendCeilingsCard
         organizationId={organization.organization.id}

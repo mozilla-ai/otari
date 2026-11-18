@@ -3,25 +3,32 @@ from fastapi import APIRouter, Depends, FastAPI
 from gateway.api.deps import require_capability
 from gateway.api.routes import (
     admin,
+    agent_recommenders,
     agent_routing,
     agent_telemetry,
     aliases,
     audio,
+    auth_account,
     auth_oauth,
     auth_password,
     auth_password_reset,
     auth_profile,
     auth_session,
     auth_signup,
+    auth_sso,
     auth_webauthn,
     batches,
     bootstrap,
     budgets,
+    calling_key,
     catalog,
     chat,
+    code_execution,
+    country_database,
     decisions,
     embeddings,
     end_users,
+    fetch,
     files,
     health,
     hook_guardrails,
@@ -34,7 +41,10 @@ from gateway.api.routes import (
     mail,
     maintenance_mode,
     mcp,
+    mcp_connections,
+    mcp_server_requests,
     messages,
+    model_overrides,
     models,
     moderations,
     org_provider_keys,
@@ -44,6 +54,7 @@ from gateway.api.routes import (
     organization_keys,
     organization_pricing,
     organization_routing,
+    organization_sso,
     organization_usage,
     organizations,
     otlp,
@@ -57,7 +68,6 @@ from gateway.api.routes import (
     responses,
     retired_root,
     routing,
-    routing_memory,
     scoped_budgets,
     search,
     search_tools,
@@ -66,9 +76,11 @@ from gateway.api.routes import (
     tools,
     usage,
     users,
+    videos,
     web_search_keys,
     workspace_activation,
     workspace_code_execution_policy,
+    workspace_hosted_providers,
     workspace_mcp_servers,
     workspace_member_budget_policies,
     workspace_web_search,
@@ -129,6 +141,7 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     admin.router,
     auth_session.router,
     auth_password.router,
+    auth_account.router,
     auth_profile.router,
     auth_signup.router,
     auth_password_reset.router,
@@ -137,6 +150,8 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     # ceremony route that answers 503 still says passkeys exist here.
     auth_webauthn.router,
     auth_oauth.router,
+    auth_sso.router,
+    organization_sso.router,
     embeddings.router,
     images.router,
     audio.router,
@@ -148,7 +163,11 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     # since the harness dispatches the subagent to its own provider.
     agent_routing.router,
     search.router,
+    fetch.router,
+    code_execution.router,
+    code_execution.catalog_router,
     batches.router,
+    videos.router,
     # Discovery rather than dispatch, so these are not operator-gated. The
     # operator router goes first: its /discoverable and /metadata would
     # otherwise sit behind the catalog router's {model_id:path} catch-all.
@@ -158,6 +177,9 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     # listed flat for an SDK.
     catalog.router,
     catalog.operator_router,
+    # The deployment's half of the model metadata overrides; an organization's
+    # half sits with its provider keys below.
+    model_overrides.router,
     playground.router,
     # Split from the operator router because the organization provider-key
     # form is read by a tenant's owners and admins, who operate nothing.
@@ -166,6 +188,9 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     # The deployment's own upstream credentials and the models it offers on
     # them. Operator-only, and answered 404 to anyone else like /admin.
     hosted_providers.router,
+    # The decision models that pick a subagent's model, and their prices.
+    # Operator-only, and answered 404 to anyone else like /admin.
+    agent_recommenders.router,
     keys.router,
     # A service key managing its own end users, rather than the operator gate
     # ``keys.router`` holds over every key's.
@@ -197,19 +222,25 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     workspace_member_budget_policies.router,
     workspace_activation.router,
     workspace_mcp_servers.router,
+    mcp_connections.router,
+    mcp_connections.session_router,
+    mcp_connections.callback_router,
+    mcp_server_requests.router,
     workspace_code_execution_policy.router,
     workspace_web_search.router,
     web_search_keys.org_router,
     web_search_keys.workspace_router,
     org_provider_keys.org_router,
     org_provider_keys.workspace_router,
+    model_overrides.org_router,
+    workspace_hosted_providers.router,
+    workspace_hosted_providers.policy_router,
     budgets.router,
     scoped_budgets.router,
     overview.router,
     aliases.router,
     provider_endpoints.router,
     routing.router,
-    routing_memory.router,
     # Both prefixed /pricing, split by who may call them; operator first, so
     # its DELETE /{model_key:path} does not sit behind the catalog catch-all.
     pricing.operator_router,
@@ -219,11 +250,14 @@ _CORE_ROUTERS: tuple[APIRouter, ...] = (
     # mounted on their own router.
     usage.operator_router,
     usage.key_router,
+    # The calling API key's own usage and budget, answered for that key alone.
+    calling_key.router,
     agent_telemetry.router,
     settings.router,
     rate_limits.router,
     mail.router,
     maintenance_mode.router,
+    country_database.router,
     # All three prefixed /tool-settings, split by who may call them. Operator
     # first, matching the pairs above, though none ends with a catch-all.
     tool_settings.operator_router,

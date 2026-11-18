@@ -12,13 +12,20 @@ import type {
   OAuthAuthorizeResponse,
   OAuthCallbackRequest,
   OAuthSessionResponse,
+  SsoAuthorizeResponse,
+  SsoCallbackRequest,
+  SsoLookupResponse,
+  SsoSessionPublic,
 } from "@/client"
 import { requestPolicy } from "@/shared/api/overlayRequestPolicy"
 import { getPasskeyAssertion } from "@/shared/helpers/webauthn"
 
 export class ApiError extends Error {
   status: number
-  /** The refusal's `Otari-Error-Code`, or `""` where it carries none. */
+  /**
+   * The refusal's stable error code, read from the body's `code` (the gateway
+   * sends the same value as `Otari-Error-Code`), or `""` where it carries none.
+   */
   code: string
 
   constructor(
@@ -151,6 +158,12 @@ async function extractErrorMessage(response: Response): Promise<string> {
   return (await readRefusal(response)).message
 }
 
+// The error a failed response throws, with the refusal's message and code.
+async function refusalError(response: Response): Promise<ApiError> {
+  const refusal = await readRefusal(response)
+  return new ApiError(response.status, refusal.message, refusal.code)
+}
+
 // The credentials POST /v1/auth/session accepts. Exactly one form per request:
 // the gateway refuses a body carrying both. Which one a deployment currently
 // takes is published in the bootstrap's `sign_in_methods`, so the sign-in screen
@@ -234,10 +247,10 @@ export async function createSession(
     if (refusal.detail !== null) {
       return { isOk: false, message: refusal.detail, status: response.status }
     }
-    throw new ApiError(response.status, refusal.message)
+    throw new ApiError(response.status, refusal.message, refusal.code)
   }
   if (!response.ok) {
-    throw new ApiError(response.status, await extractErrorMessage(response))
+    throw await refusalError(response)
   }
   return { isOk: true }
 }
@@ -333,7 +346,7 @@ export async function completeOAuthSignIn(
   code: string,
   state: string,
   termsAccepted: boolean,
-): Promise<SignInResult & { passwordRemoved: boolean }> {
+): Promise<SignInResult & { passwordRemoved: boolean; newAccount: boolean }> {
   const payload: OAuthCallbackRequest = {
     code,
     state,
@@ -349,9 +362,109 @@ export async function completeOAuthSignIn(
       message: finished.message,
       status: finished.status,
       passwordRemoved: false,
+      newAccount: false,
     }
   }
   const session = finished.body as Partial<OAuthSessionResponse> | undefined
+  return {
+    isOk: true,
+    passwordRemoved: session?.password_removed === true,
+    newAccount: session?.new_account === true,
+  }
+}
+
+// Where an address's own organization admits a sign-in, or that none does.
+//
+// An unknown domain, one no organization has proven, and a proven one with no
+// enabled connection all answer alike, so this cannot be read as a directory of
+// which organizations use Otari. Hand-written beside the other sign-in calls,
+// and for the same reason: the authenticated fetcher below treats a 401 as an
+// expired session and bounces to the sign-in screen, which is exactly wrong on
+// the screen somebody is signing in from.
+export type SsoLookupResult =
+  | { isOk: true; found: true; organizationName: string; slug: string }
+  | { isOk: true; found: false }
+  | { isOk: false; message?: string; status?: number }
+
+export async function lookupSso(email: string): Promise<SsoLookupResult> {
+  const looked = await publicPost("/auth/sso/lookup", { email })
+  if (!looked.isOk) {
+    return { isOk: false, message: looked.message, status: looked.status }
+  }
+  const body = looked.body as Partial<SsoLookupResponse>
+  if (body.found !== true) {
+    return { isOk: true, found: false }
+  }
+  if (
+    typeof body.slug !== "string" ||
+    typeof body.organization_name !== "string"
+  ) {
+    throw new ApiError(0, "That company could not be matched.")
+  }
+  return {
+    isOk: true,
+    found: true,
+    organizationName: body.organization_name,
+    slug: body.slug,
+  }
+}
+
+// Start a sign-in through one organization's own connection: ask where to
+// send the browser. The `state` that comes back is a CSRF value kept in this
+// tab and compared when the identity provider redirects back, bound to a
+// cookie this call also sets.
+export type SsoStartResult =
+  | { isOk: true; authorizationUrl: string; state: string }
+  | { isOk: false; message?: string; status?: number }
+
+export async function startSsoSignIn(slug: string): Promise<SsoStartResult> {
+  const started = await publicGet(
+    `/auth/sso/${encodeURIComponent(slug)}/authorize`,
+  )
+  if (!started.isOk) {
+    return { isOk: false, message: started.message, status: started.status }
+  }
+  const body = started.body as Partial<SsoAuthorizeResponse>
+  if (
+    typeof body.authorization_url !== "string" ||
+    typeof body.state !== "string"
+  ) {
+    throw new ApiError(0, "Sign-in could not be started.")
+  }
+  return {
+    isOk: true,
+    authorizationUrl: body.authorization_url,
+    state: body.state,
+  }
+}
+
+// Finish a sign-in through one organization's own connection: spend the
+// authorization code for a session cookie. `iss` is sent only where the
+// provider's redirect carried one (RFC 9207); a caller must never supply a
+// value of its own, since substituting this deployment's configured issuer
+// would make the check against it trivially true.
+export async function completeSsoSignIn(
+  code: string,
+  state: string,
+  termsAccepted: boolean,
+  iss: string | null,
+): Promise<SignInResult & { passwordRemoved: boolean }> {
+  const payload: SsoCallbackRequest = {
+    code,
+    state,
+    terms_accepted: termsAccepted,
+    iss: iss ?? undefined,
+  }
+  const finished = await publicPost("/auth/sso/callback", payload)
+  if (!finished.isOk) {
+    return {
+      isOk: false,
+      message: finished.message,
+      status: finished.status,
+      passwordRemoved: false,
+    }
+  }
+  const session = finished.body as Partial<SsoSessionPublic> | undefined
   return { isOk: true, passwordRemoved: session?.password_removed === true }
 }
 
@@ -391,7 +504,7 @@ async function publicGet(path: string): Promise<{
     }
   }
   if (!response.ok) {
-    throw new ApiError(response.status, await extractErrorMessage(response))
+    throw await refusalError(response)
   }
   return {
     isOk: true,
@@ -439,8 +552,7 @@ async function publicPost(
     }
   }
   if (!response.ok) {
-    const refusal = await readRefusal(response)
-    throw new ApiError(response.status, refusal.message, refusal.code)
+    throw await refusalError(response)
   }
   return {
     isOk: true,
@@ -571,7 +683,7 @@ export async function siteFetch<T>(path: string): Promise<T> {
     throw new ApiError(0, "Network error: could not reach the gateway.")
   }
   if (!response.ok) {
-    throw new ApiError(response.status, await extractErrorMessage(response))
+    throw await refusalError(response)
   }
   return readJson<T>(response, TIMEOUT_MESSAGE)
 }
@@ -623,11 +735,11 @@ export async function apiFetch<T>(
   // the panel reports, the way every other 4xx does.
   if (response.status === 401) {
     unauthorizedHandler?.()
-    throw new ApiError(response.status, await extractErrorMessage(response))
+    throw await refusalError(response)
   }
 
   if (!response.ok) {
-    throw new ApiError(response.status, await extractErrorMessage(response))
+    throw await refusalError(response)
   }
 
   if (response.status === 204) {
@@ -682,10 +794,10 @@ export async function apiStream(
 
   if (response.status === 401) {
     unauthorizedHandler?.()
-    throw new ApiError(response.status, await extractErrorMessage(response))
+    throw await refusalError(response)
   }
   if (!response.ok) {
-    throw new ApiError(response.status, await extractErrorMessage(response))
+    throw await refusalError(response)
   }
   if (response.body === null) {
     throw new ApiError(0, "The gateway returned no response body.")

@@ -2,6 +2,7 @@ import { screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import { API_ROOT } from "@/shared/api/client"
 import { entry, mockApi, renderPage } from "@/tests/activity"
 import { flushRouter } from "@/tests/router"
 import { RequestDetail } from "./RequestDetail"
@@ -20,7 +21,6 @@ describe("RequestDetail", () => {
           status_code: 402,
           error_message: "no pricing configured for openai:gpt-4o",
         })}
-        onPriceModel={null}
       />,
     )
     await flushRouter()
@@ -29,6 +29,29 @@ describe("RequestDetail", () => {
     expect(
       screen.getByText("no pricing configured for openai:gpt-4o"),
     ).toBeInTheDocument()
+  })
+
+  it("shows the Otari-Request-ID the request was answered under, not the row's own id", async () => {
+    mockApi()
+    renderPage(
+      <RequestDetail
+        entry={entry({ id: "row-1", request_group_id: "req-9" })}
+      />,
+    )
+    await flushRouter()
+
+    expect(screen.getByText("req-9")).toBeInTheDocument()
+    expect(screen.queryByText("row-1")).toBeNull()
+  })
+
+  it("shows a row's own id when it predates request groups", async () => {
+    mockApi()
+    renderPage(
+      <RequestDetail entry={entry({ id: "row-1", request_group_id: null })} />,
+    )
+    await flushRouter()
+
+    expect(screen.getByText("row-1")).toBeInTheDocument()
   })
 
   it("names the model and the API key in full, which the row cuts short", async () => {
@@ -40,7 +63,6 @@ describe("RequestDetail", () => {
           api_key_id: "key-1",
           api_key_name: "production-backend-service",
         })}
-        onPriceModel={null}
       />,
     )
     await flushRouter()
@@ -62,7 +84,6 @@ describe("RequestDetail", () => {
           error_message:
             "Skipped: Rate limit 'flash-cap' exceeded: 2 requests per minute",
         })}
-        onPriceModel={null}
       />,
     )
     await flushRouter()
@@ -92,7 +113,6 @@ describe("RequestDetail", () => {
             completion_tokens: 200,
           },
         })}
-        onPriceModel={null}
       />,
     )
     await flushRouter()
@@ -113,7 +133,6 @@ describe("RequestDetail", () => {
           user_id: "81e24d08-7d1e-4287-a074-54aa57d9debc",
           user_alias: "Aleksandra Wiśniewska-Kowalczyk",
         })}
-        onPriceModel={null}
       />,
     )
     await flushRouter()
@@ -131,10 +150,7 @@ describe("RequestDetail", () => {
   it("shows the reasoning tokens, and a dash for a row that never recorded them", async () => {
     mockApi()
     const { unmount } = renderPage(
-      <RequestDetail
-        entry={entry({ reasoning_tokens: 1234 })}
-        onPriceModel={null}
-      />,
+      <RequestDetail entry={entry({ reasoning_tokens: 1234 })} />,
     )
     await flushRouter()
 
@@ -143,12 +159,39 @@ describe("RequestDetail", () => {
     ).toHaveTextContent("1,234")
     unmount()
 
-    renderPage(<RequestDetail entry={entry()} onPriceModel={null} />)
+    renderPage(<RequestDetail entry={entry()} />)
     await flushRouter()
 
     expect(
       screen.getByText("Reasoning tokens").parentElement,
     ).toHaveTextContent("—")
+  })
+
+  it("shows the path a served request was called on", async () => {
+    mockApi()
+    renderPage(<RequestDetail entry={entry()} />)
+    await flushRouter()
+
+    expect(screen.getByText("Endpoint").parentElement).toHaveTextContent(
+      `${API_ROOT}/chat/completions`,
+    )
+  })
+
+  it("shows an imported row's endpoint as its source reported it", async () => {
+    mockApi()
+    renderPage(
+      <RequestDetail
+        entry={entry({ source: "claude_code", endpoint: "/v1/messages" })}
+      />,
+    )
+    await flushRouter()
+
+    expect(screen.getByText("Endpoint").parentElement).toHaveTextContent(
+      "/v1/messages",
+    )
+    expect(screen.getByText("Endpoint").parentElement).not.toHaveTextContent(
+      API_ROOT,
+    )
   })
 
   it("names a row's tool calls and what they cost", async () => {
@@ -160,7 +203,6 @@ describe("RequestDetail", () => {
             tools: { web_search: { billed: 3, errors: 1, unit_rate: 0.01 } },
           },
         })}
-        onPriceModel={null}
       />,
     )
     await flushRouter()
@@ -176,7 +218,6 @@ describe("RequestDetail", () => {
         entry={entry({
           billing_meters: { tools: { web_search: { billed: 3 } } },
         })}
-        onPriceModel={null}
       />,
     )
     await flushRouter()
@@ -231,9 +272,7 @@ describe("RequestDetail", () => {
     // Pricing a model is a deployment-wide write, so offering the button to a
     // tenant would be offering a refusal; the sentence is still theirs to read.
     mockApi()
-    renderPage(
-      <RequestDetail entry={entry({ cost: null })} onPriceModel={null} />,
-    )
+    renderPage(<RequestDetail entry={entry({ cost: null })} />)
     await flushRouter()
 
     expect(
@@ -293,22 +332,14 @@ describe("RequestDetail", () => {
   it("renders the routing plan only for a routed request", async () => {
     mockApi()
     const { unmount } = renderPage(
-      <RequestDetail
-        entry={entry({ policy_name: null })}
-        onPriceModel={null}
-      />,
+      <RequestDetail entry={entry({ policy_name: null })} />,
     )
     await flushRouter()
     expect(screen.queryByText(/Routing plan/)).not.toBeInTheDocument()
     unmount()
 
     mockApi()
-    renderPage(
-      <RequestDetail
-        entry={entry({ policy_name: "cheap-first" })}
-        onPriceModel={null}
-      />,
-    )
+    renderPage(<RequestDetail entry={entry({ policy_name: "cheap-first" })} />)
     await flushRouter()
     expect(await screen.findByText(/Routing plan/)).toBeInTheDocument()
   })
@@ -333,7 +364,6 @@ describe("RequestDetail", () => {
             },
           ],
         })}
-        onPriceModel={null}
       />,
     )
     await flushRouter()
@@ -372,7 +402,6 @@ describe("RequestDetail", () => {
             },
           ],
         })}
-        onPriceModel={null}
       />,
     )
     await flushRouter()
@@ -392,7 +421,6 @@ describe("RequestDetail", () => {
     renderPage(
       <RequestDetail
         entry={entry({ provider: "groq", provider_latency_ms: 156 })}
-        onPriceModel={null}
       />,
     )
     await flushRouter()

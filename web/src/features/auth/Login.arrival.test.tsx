@@ -8,6 +8,10 @@ import {
   readSignInAddress,
   rememberSignInAddress,
 } from "@/features/auth/signInAddress"
+import {
+  readSignInNotice,
+  rememberSignInNotice,
+} from "@/features/auth/signInNotice"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap } from "@/tests/fixtures"
 import { AppProviders } from "@/tests/providers"
@@ -65,6 +69,20 @@ describe("the sign-in screen on arrival", () => {
     vi.unstubAllGlobals()
     window.localStorage.clear()
     window.sessionStorage.clear()
+  })
+
+  it("says why a setup link landed here, once", () => {
+    rememberSignInNotice("This gateway is already set up.")
+    render(
+      <Mounted>
+        <Login />
+      </Mounted>,
+    )
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "This gateway is already set up.",
+    )
+    expect(readSignInNotice()).toBeNull()
   })
 
   it("focuses the address on a desk", () => {

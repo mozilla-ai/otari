@@ -91,11 +91,7 @@ export function WorkspaceMembersPage() {
             </Button>
           ) : null
         }
-      >
-        {selected
-          ? `People assigned to ${selected.name} and their role in it. A workspace's members are a subset of the organization's, so someone joins the organization first.`
-          : "People assigned to this workspace and their role in it."}
-      </PageIntro>
+      />
       {/* Keyed on the open count, so each open remounts a blank form. Clearing
           the draft on close instead would blank the fields while the dialog is
           still animating away. */}

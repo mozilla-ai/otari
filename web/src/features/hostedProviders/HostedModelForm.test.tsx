@@ -23,7 +23,7 @@ function model(overrides: Partial<HostedModel> = {}): HostedModel {
     output_price_per_million: 0,
     cache_read_price_per_million: null,
     cache_write_price_per_million: null,
-    unit: "tokens",
+    unit: "token",
     price_source: "deployment",
     enabled: true,
     created_at: "2026-10-13T00:00:00Z",
@@ -105,16 +105,54 @@ describe("HostedModelForm", () => {
         output_price_per_million: 0,
         cache_read_price_per_million: null,
         cache_write_price_per_million: null,
-        unit: "requests",
+        unit: "request",
       },
     ])
   })
 
   it("opens a per-image price per thousand images", async () => {
     mockApi()
-    await renderForm(model({ unit: "images", input_price_per_million: 40_000 }))
+    await renderForm(model({ unit: "image", input_price_per_million: 40_000 }))
     expect(screen.getByRole("radio", { name: "Images" })).toBeChecked()
     expect(screen.getByLabelText(/Price per 1,000 images/)).toHaveValue("40")
+  })
+
+  it("prices a minute of audio on what it hears and what it says", async () => {
+    const patches = mockApi()
+    const user = userEvent.setup()
+    const { onSaved } = await renderForm(
+      model({
+        unit: "minute",
+        input_price_per_million: 3_000_000,
+        output_price_per_million: 15_000_000,
+      }),
+    )
+
+    expect(screen.getByLabelText(/Audio in, per minute/)).toHaveValue("3")
+    const output = screen.getByLabelText(/Audio out, per minute/)
+    expect(output).toHaveValue("15")
+    await user.clear(output)
+    await user.type(output, "12")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled())
+    expect(patches).toEqual([
+      expect.objectContaining({
+        input_price_per_million: 3_000_000,
+        output_price_per_million: 12_000_000,
+        unit: "minute",
+      }),
+    ])
+  })
+
+  it("does not reprice a model priced per second of video", async () => {
+    // Its columns would land on audio input, off the slot video billing reads.
+    mockApi()
+    await renderForm(model({ unit: "second", input_price_per_million: 20_000 }))
+
+    expect(screen.getByText(/priced per second of video/)).toBeInTheDocument()
+    expect(screen.queryByRole("radio", { name: "Tokens" })).toBeNull()
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
   })
 
   it("holds a rate that does not parse back from the save", async () => {

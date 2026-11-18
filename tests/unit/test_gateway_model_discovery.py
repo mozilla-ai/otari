@@ -485,6 +485,85 @@ class TestDiscoverAllModels:
         assert result == [("edge", result[0][1])]
         assert result[0][1].id == "m1"
 
+    @pytest.mark.asyncio
+    async def test_a_declared_model_the_backend_does_not_list_is_warned_once(
+        self, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # llama-server without --alias lists the GGUF path, not the id the operator declared.
+        monkeypatch.setattr("gateway.services.model_discovery_service._warned_undiscovered", {})
+        config = self._make_config(
+            providers={
+                "local-llm": {
+                    "provider_type": "openai",
+                    "api_base": "http://llama/v1",
+                    "models": ["qwen2.5-7b-instruct", "served"],
+                }
+            }
+        )
+        listed = [_make_model("/models/qwen2.5-7b-instruct-q4_k_m.gguf"), _make_model("served")]
+
+        with (
+            caplog.at_level(logging.WARNING),
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", new_callable=AsyncMock, return_value=listed),
+        ):
+            for _ in range(2):
+                with patch("gateway.services.model_discovery_service.get_model_cache", return_value=ModelCache()):
+                    await discover_all_models(config)
+
+        warnings = [r.getMessage() for r in caplog.records if "does not list" in r.getMessage()]
+        assert warnings == [
+            "Instance 'local-llm' declares models its backend does not list: qwen2.5-7b-instruct; "
+            "it lists: /models/qwen2.5-7b-instruct-q4_k_m.gguf, served"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_mismatch_that_clears_and_returns_is_warned_again(
+        self, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("gateway.services.model_discovery_service._warned_undiscovered", {})
+        config = self._make_config(
+            providers={"edge": {"provider_type": "openai", "api_base": "http://edge/v1", "models": ["m1"]}}
+        )
+        # The backend loses m1, serves it again, then loses it again.
+        listings = [[_make_model("m2")], [_make_model("m1")], [_make_model("m2")]]
+
+        with (
+            caplog.at_level(logging.WARNING),
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", new_callable=AsyncMock) as listed,
+        ):
+            for listing in listings:
+                listed.return_value = listing
+                with patch("gateway.services.model_discovery_service.get_model_cache", return_value=ModelCache()):
+                    await discover_all_models(config)
+
+        warnings = [r.getMessage() for r in caplog.records if "does not list" in r.getMessage()]
+        assert warnings == ["Instance 'edge' declares models its backend does not list: m1; it lists: m2"] * 2
+
+    @pytest.mark.asyncio
+    async def test_declared_models_the_backend_lists_are_not_warned(
+        self, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("gateway.services.model_discovery_service._warned_undiscovered", {})
+        config = self._make_config(
+            providers={"edge": {"provider_type": "openai", "api_base": "http://edge/v1", "models": ["m1"]}}
+        )
+
+        with (
+            caplog.at_level(logging.WARNING),
+            patch("gateway.services.model_discovery_service.get_model_cache", return_value=ModelCache()),
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch(
+                "gateway.services.model_discovery_service.alist_models",
+                new_callable=AsyncMock,
+                return_value=[_make_model("m1"), _make_model("m2")],
+            ),
+        ):
+            await discover_all_models(config)
+
+        assert "does not list" not in caplog.text
+
 
 class TestDiscoveryStallGuards:
     """Regressions for the discovery stall / over-calling that hung a DELETE.
@@ -1476,3 +1555,74 @@ class TestHostedProviderDiscovery:
 
         assert await discover_all_models(config) == []
         assert await discover_all_models(config, provider_filter="mistral") == []
+
+
+class TestTogetherServingModes:
+    """Together's listing names the models it serves on a plain key only when asked (issue #3168)."""
+
+    @staticmethod
+    def _listing(serverless: list[str] | Exception, everything: list[str]) -> AsyncMock:
+        async def _list(**kwargs: Any) -> list[Model]:
+            if kwargs.get("serverless"):
+                if isinstance(serverless, Exception):
+                    raise serverless
+                return [_make_model(name, owned_by="together") for name in serverless]
+            return [_make_model(name, owned_by="together") for name in everything]
+
+        return AsyncMock(side_effect=_list)
+
+    @staticmethod
+    async def _test(impl_name: str, listing: AsyncMock) -> ProviderDiscovery:
+        with (
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", listing),
+        ):
+            return await run_credentials_test(impl_name, api_key="key", declared=True)
+
+    @pytest.mark.asyncio
+    async def test_a_model_served_only_on_a_dedicated_endpoint_is_not_listed(self) -> None:
+        listing = self._listing(["served"], ["served", "dedicated-a", "dedicated-b"])
+
+        result = await self._test("together", listing)
+
+        assert result.error is None
+        assert [model.id for model in result.models] == ["served"]
+        assert [call.kwargs.get("serverless") for call in listing.await_args_list] == [None, True]
+        assert listing.await_args_list[1].kwargs["api_key"] == "key"
+
+    @pytest.mark.asyncio
+    async def test_a_serverless_listing_as_long_as_the_whole_drops_nothing(self) -> None:
+        """Together answers an unknown parameter with the unfiltered listing."""
+        result = await self._test("together", self._listing(["a", "b"], ["a", "b"]))
+
+        assert [model.id for model in result.models] == ["a", "b"]
+
+    @pytest.mark.asyncio
+    async def test_a_failed_serverless_listing_drops_nothing(self) -> None:
+        result = await self._test("together", self._listing(RuntimeError("boom"), ["a", "b"]))
+
+        assert result.error is None
+        assert [model.id for model in result.models] == ["a", "b"]
+
+    @pytest.mark.asyncio
+    async def test_another_provider_is_listed_once(self) -> None:
+        listing = self._listing(["a"], ["a", "b"])
+
+        result = await self._test("openai", listing)
+
+        assert [model.id for model in result.models] == ["a", "b"]
+        listing.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_a_configured_instance_lists_only_what_together_serves_serverless(self) -> None:
+        config = GatewayConfig(providers={"together": {"api_key": "tg-test"}})
+        listing = self._listing(["served"], ["served", "dedicated"])
+
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache", return_value=ModelCache()),
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", listing),
+        ):
+            result = await discover_all_models(config)
+
+        assert [model.id for _, model in result] == ["served"]

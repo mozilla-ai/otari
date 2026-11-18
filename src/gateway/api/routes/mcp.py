@@ -28,6 +28,7 @@ import asyncio
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
@@ -45,6 +46,8 @@ from gateway.api.deps import (
     get_db,
     verify_api_key_or_master_key,
 )
+from gateway.api.key_scopes import key_scope
+from gateway.api.trace_capture import begin_request_trace
 
 # ``GatewayConfig`` and ``AsyncSession`` are imported at runtime rather than
 # under ``TYPE_CHECKING``: this module uses postponed annotations, and FastAPI
@@ -53,11 +56,19 @@ from gateway.api.deps import (
 # parameters and every request fails validation before the handler runs.
 from gateway.core.config import API_ROOT, REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.database import release_session
+from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
+from gateway.exceptions.tools_exceptions import (
+    McpConnectionSetupError,
+    McpConnectionUnavailableError,
+    McpSignInRequiredError,
+    WorkspaceMcpServerAccessDeniedError,
+)
 from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.rate_limit import check_rate_limit
 from gateway.repositories.users_repository import get_active_user
+from gateway.schemas.tools import McpServerLeftOut
 
 # The module as well as the names below, so the whole-request deadline is read
 # off it at call time and stays tunable in the one place that owns the ceilings.
@@ -81,6 +92,7 @@ from gateway.services.mcp_stateless import (
     CODE_SERVER_CHANGED,
     CODE_SERVER_NOT_FOUND,
     CODE_SERVICE_UNAVAILABLE,
+    CODE_SIGN_IN_REQUIRED,
     CODE_TOOL_NOT_ALLOWED,
     CODE_UNSAFE_URL,
     DISCOVERY_MAX_TOOLS,
@@ -93,10 +105,19 @@ from gateway.services.mcp_stateless import (
     discovery_response_exceeds_bound,
     execute_stored_tool,
 )
+from gateway.services.model_access import (
+    McpAccess,
+    expand_mcp_tool_patterns,
+    is_mcp_tool_allowed,
+    resolve_request_mcp_access,
+)
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
-from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServers
+from gateway.services.tenancy.workspace_mcp_server_service import McpServerSummary, WorkspaceMcpServers
+from gateway.services.tools import McpConnectionService, mcp_server_contacts
+from gateway.services.traces import RequestTrace, harness_of, resolve_session
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 from gateway.services.workspace_scope import resolve_workspace_id
+from gateway.types.key_scope import KeyScope
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -126,6 +147,7 @@ SAFE_DETAILS: dict[str, str] = {
     CODE_RATE_LIMIT_EXCEEDED: "Rate limit exceeded",
     CODE_SERVICE_UNAVAILABLE: "MCP service is unavailable",
     CODE_SERVER_NOT_FOUND: "MCP server not found",
+    CODE_SIGN_IN_REQUIRED: "This MCP server uses each user's own account, and this key's user has not signed in to it",
     CODE_SERVER_CHANGED: "MCP server configuration changed, rediscover its tools",
     CODE_TOOL_NOT_ALLOWED: "The requested tool is not allowed for this MCP server",
     CODE_UNSAFE_URL: "MCP server URL is unsafe",
@@ -156,6 +178,11 @@ class McpErrorBody(BaseModel):
     code: str
     execution_state: ExecutionState
     request_id: str
+    sign_in_url: str | None = Field(
+        default=None,
+        description="With mcp_sign_in_required: a link that starts this key's user's own sign-in to the server. "
+        "It works for 30 minutes and stores nothing until it is opened",
+    )
 
 
 class _McpRoute(APIRoute):
@@ -187,6 +214,7 @@ class _McpRoute(APIRoute):
                     exc.status_code,
                     request_id,
                     headers=RETRY_AFTER_ONE if exc.code in _RETRYABLE_CAPACITY_CODES else None,
+                    sign_in_url=exc.sign_in_url,
                 )
             except StarletteHTTPException as exc:
                 code, execution_state, status_code = _classify(exc.status_code)
@@ -211,17 +239,22 @@ def _error_response(
     request_id: str,
     *,
     headers: dict[str, str] | None = None,
+    sign_in_url: str | None = None,
 ) -> JSONResponse:
     body = McpErrorBody(
         detail=SAFE_DETAILS.get(code, "MCP request failed"),
         code=code,
         execution_state=execution_state,
         request_id=request_id,
+        sign_in_url=sign_in_url,
     )
     response_headers = {REQUEST_ID_HEADER: request_id}
     if headers:
         response_headers.update(headers)
-    return JSONResponse(status_code=status_code, content=body.model_dump(mode="json"), headers=response_headers)
+    # A body with no link carries no ``sign_in_url`` key at all, as before the field existed.
+    return JSONResponse(
+        status_code=status_code, content=body.model_dump(mode="json", exclude_none=True), headers=response_headers
+    )
 
 
 def _classify(status_code: int) -> tuple[str, ExecutionState, int]:
@@ -315,6 +348,10 @@ class _Principal:
     """Who the request authenticated as."""
 
     workspace_id: uuid.UUID
+    # Which stored servers, and which of their tools, the key may reach.
+    mcp_access: McpAccess = McpAccess()
+    api_key_id: str | None = None
+    user_id: str | None = None
 
 
 async def _authenticate(
@@ -335,7 +372,13 @@ async def _authenticate(
     # every user-less key does not share one bucket keyed on ``"None"``.
     await check_rate_limit(raw_request, api_key.user_id or api_key.id)
     await _refuse_blocked_user(db, api_key)
-    return _Principal(workspace_id=await resolve_workspace_id(db, api_key))
+    workspace_id = await resolve_workspace_id(db, api_key)
+    return _Principal(
+        workspace_id=workspace_id,
+        mcp_access=await resolve_request_mcp_access(db, api_key, workspace_id),
+        api_key_id=api_key.id,
+        user_id=api_key.user_id,
+    )
 
 
 async def _refuse_blocked_user(db: AsyncSession, api_key: APIKey) -> None:
@@ -358,18 +401,60 @@ async def _refuse_blocked_user(db: AsyncSession, api_key: APIKey) -> None:
         raise McpExecutionError(CODE_AUTHENTICATION_FAILED, ExecutionState.NOT_STARTED, 401)
 
 
+def _sign_in_url(config: GatewayConfig | None, server_id: uuid.UUID, user_id: str | None) -> str | None:
+    """The link that starts ``user_id``'s sign-in to a server, or ``None`` where none can be made."""
+    if config is None or user_id is None:
+        return None
+    try:
+        return McpConnectionService.sign_in_link(config, server_id=server_id, user_id=user_id)
+    except (McpConnectionSetupError, SecretBoxUnavailableTenancyError):
+        return None
+
+
+def _with_sign_in_link(
+    exc: McpExecutionError, config: GatewayConfig, server_id: uuid.UUID, user_id: str | None
+) -> McpExecutionError:
+    """``exc`` with the caller's sign-in link when a renewal during the call found the sign-in gone."""
+    if exc.code == CODE_SIGN_IN_REQUIRED and exc.sign_in_url is None:
+        exc.sign_in_url = _sign_in_url(config, server_id, user_id)
+    return exc
+
+
 async def _resolve_server(
     principal: _Principal,
     servers: WorkspaceMcpServers,
     mcp_server_id: uuid.UUID,
+    config: GatewayConfig | None = None,
+    *,
+    on_denied: Callable[[WorkspaceMcpServerAccessDeniedError], None] | None = None,
 ) -> ResolvedMcpServer:
     """Resolve the stored server, applying the outcome ladder.
 
     No MCP network access happens here or in anything it raises, so a refusal on
-    these grounds never reaches the remote server.
+    these grounds never reaches the remote server. The caller's access is applied
+    before the stored token is decrypted, so a token that will not decrypt cannot
+    tell a caller with no access that the server exists. ``on_denied`` hears of a
+    server the access list refused, which is still answered as an unknown one.
     """
     try:
-        resolved = await servers.resolve_one(principal.workspace_id, mcp_server_id)
+        resolved = await servers.resolve_one(principal.workspace_id, mcp_server_id, principal.mcp_access)
+    except WorkspaceMcpServerAccessDeniedError as denied:
+        if on_denied is not None:
+            on_denied(denied)
+        raise McpExecutionError(CODE_SERVER_NOT_FOUND, ExecutionState.NOT_STARTED, 404) from None
+    except McpSignInRequiredError as required:
+        # Said only to a caller the access list admitted: the server exists for it, and what is
+        # missing is its user's own sign-in, which the link starts.
+        logger.info("Stateless MCP sign-in required server_id=%s", mcp_server_id)
+        raise McpExecutionError(
+            CODE_SIGN_IN_REQUIRED,
+            ExecutionState.NOT_STARTED,
+            403,
+            sign_in_url=_sign_in_url(config, required.mcp_server_id, required.user_id),
+        ) from None
+    except McpConnectionUnavailableError:
+        logger.warning("Stateless MCP user token could not be renewed server_id=%s", mcp_server_id)
+        raise McpExecutionError(CODE_CREDENTIALS_UNAVAILABLE, ExecutionState.NOT_STARTED, 503) from None
     except (SecretDecryptionError, SecretBoxUnavailableError):
         # Connecting without the credential the workspace configured would send
         # an unauthenticated request to a server that expects one.
@@ -383,18 +468,68 @@ async def _resolve_server(
         # Indistinguishable from an id naming no server, on purpose: a caller
         # learns that it cannot reach this server, not why.
         raise McpExecutionError(CODE_SERVER_NOT_FOUND, ExecutionState.NOT_STARTED, 404)
+    if not _caller_patterns(principal, server):
+        # The same answer again: a server whose access list grants the key nothing does not exist for it.
+        raise McpExecutionError(CODE_SERVER_NOT_FOUND, ExecutionState.NOT_STARTED, 404)
     return server
 
 
-def _require_allowed(server: ResolvedMcpServer, tool_name: str) -> None:
-    """Apply the stored allowlist to one tool name.
+def _caller_patterns(principal: _Principal, server: ResolvedMcpServer) -> list[str]:
+    """The tool patterns the authenticated key holds on a stored server; empty means it cannot reach it."""
+    return principal.mcp_access.patterns_for(server.id, server.everyone_tools, server.read_tools)
 
-    ``None`` admits every live tool, the meaning the column already carries in
-    the managed loop; an explicit empty list is a deny-all, so it refuses here
-    as well.
+
+def _decide_tool(principal: _Principal, server: ResolvedMcpServer, tool_name: str) -> tuple[bool, str]:
+    """Whether the caller may call one tool, and what decided it, as a trace's decision source.
+
+    The stored allowlist caps every rule: ``None`` admits every live tool, the
+    meaning the column already carries in the managed loop, and an explicit
+    empty list is a deny-all. Under it, the caller's key rule, user rule or the
+    server's default policy decides.
     """
     if server.allowed_tools is not None and tool_name not in server.allowed_tools:
-        raise McpExecutionError(CODE_TOOL_NOT_ALLOWED, ExecutionState.NOT_STARTED, 403)
+        return False, "mcp_server"
+    source, patterns = principal.mcp_access.decide(server.id, server.everyone_tools)
+    return is_mcp_tool_allowed(expand_mcp_tool_patterns(patterns, server.read_tools), tool_name), f"mcp_{source}"
+
+
+def _begin_trace(
+    raw_request: Request, config: GatewayConfig, principal: _Principal, started: float
+) -> RequestTrace | None:
+    """Open this call's trace: a step of the caller's session when it names one, as a completion's step is."""
+    if not config.trace_capture_enabled:
+        return None
+    trace = RequestTrace(
+        session=resolve_session(raw_request.headers, session_label=None, tags=None),
+        harness=harness_of(raw_request.headers),
+        request_id=raw_request.state.otari_request_id,
+        workspace_id=principal.workspace_id,
+        user_id=principal.user_id,
+        api_key_id=principal.api_key_id,
+        endpoint=EXECUTE_ENDPOINT,
+        started_at=datetime.now(UTC) - timedelta(seconds=time.monotonic() - started),
+        max_spans=config.trace_max_spans_per_request,
+    )
+    begin_request_trace(raw_request, trace)
+    return trace
+
+
+def _record_refusal(
+    trace: RequestTrace | None, tool_name: str, server_name: str, server_id: object, decided_by: str
+) -> None:
+    """Record a tool call the access rules refused before dispatch on the call's trace, if one is open."""
+    if trace is not None:
+        trace.record_tool_call(
+            tool_name=tool_name,
+            tool_type="mcp",
+            started=datetime.now(UTC),
+            ok=False,
+            arguments=None,
+            mcp_server=server_name,
+            mcp_server_id=str(server_id),
+            decided_by=decided_by,
+            refused=True,
+        )
 
 
 async def _require_safe_url(server: ResolvedMcpServer) -> None:
@@ -409,9 +544,10 @@ class McpToolDefinition(BaseModel):
     """One live tool a caller-orchestrated application may expose to its model.
 
     ``annotations`` is the remote server's own metadata, passed through as
-    untrusted data. Otari never turns ``readOnlyHint`` into an authorization
-    decision; each application owns its risk policy, and a server
-    cannot waive an application's approval gate by labeling itself read-only.
+    untrusted data. Otari reads ``readOnlyHint`` in one place only, as the
+    default for a stored server's read tools until a manager sets them; each
+    application owns its risk policy, and a server cannot waive an
+    application's approval gate by labeling itself read-only.
     """
 
     name: str = Field(description=f"The remote MCP tool name to send back to {API_ROOT}/mcp/execute.")
@@ -453,6 +589,63 @@ class McpToolsResponse(BaseModel):
     warnings: list[McpToolWarning]
 
 
+class McpServersResponse(BaseModel):
+    """The enabled stored servers the authenticated key can reach."""
+
+    servers: list[McpServerSummary]
+    left_out: list[McpServerLeftOut] = Field(
+        default_factory=list,
+        description="Servers the key's access list grants that are not in `servers`, each with the reason. "
+        "Empty for a key that belongs to a user.",
+    )
+
+
+@router.get(
+    "/servers",
+    response_model=McpServersResponse,
+    responses={
+        401: {"model": McpErrorBody},
+        404: {"model": McpErrorBody},
+        429: {"model": McpErrorBody},
+        500: {"model": McpErrorBody},
+        503: {"model": McpErrorBody},
+    },
+    openapi_extra=key_scope(KeyScope.MCP_READ),
+)
+async def list_mcp_servers(
+    raw_request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    servers: WorkspaceMcpServersDep,
+) -> McpServersResponse:
+    """List the enabled stored MCP servers this API key can reach.
+
+    A server appears when its access list grants the key something: the key's own grant, else its
+    owner's, else the server's `everyone_tools`. Each has the `id` to send in `mcp_server_ids`
+    (or to the tool discovery and execution routes), its `name`, and its `purpose_hint`. The URL and
+    the token are never returned. A master key has no workspace and is refused with a 404.
+
+    A server that sends each user's own credential is listed with `sign_in_required` true until this
+    key's user has signed in to it, with a `sign_in_url` to the page that starts their sign-in. Tool
+    discovery and execution answer such a server with a 403, the code `mcp_sign_in_required` and the
+    same `sign_in_url`. Making a link stores nothing, so listing is free. A key that has no user cannot
+    sign in, so such a server is not in `servers` for it: it is in `left_out` instead, with the reason.
+    """
+    principal = await _authenticate(raw_request, db, config)
+    listed = await servers.list_reachable(principal.workspace_id, principal.mcp_access)
+    needing_a_user = await servers.list_needing_a_user(principal.workspace_id, principal.mcp_access)
+    user_id = principal.mcp_access.user_id
+    return McpServersResponse(
+        servers=[
+            summary.model_copy(update={"sign_in_url": _sign_in_url(config, summary.id, user_id)})
+            if summary.sign_in_required
+            else summary
+            for summary in listed
+        ],
+        left_out=needing_a_user,
+    )
+
+
 @router.get(
     "/servers/{mcp_server_id}/tools",
     response_model=McpToolsResponse,
@@ -468,6 +661,7 @@ class McpToolsResponse(BaseModel):
         502: {"model": McpErrorBody},
         503: {"model": McpErrorBody},
     },
+    openapi_extra=key_scope(KeyScope.MCP_READ),
 )
 async def list_mcp_tools(
     raw_request: Request,
@@ -495,7 +689,7 @@ async def list_mcp_tools(
     try:
         async with asyncio.timeout(mcp_stateless.DISCOVERY_TOTAL_TIMEOUT_S):
             principal = await _authenticate(raw_request, db, config)
-            server = await _resolve_server(principal, servers, mcp_server_id)
+            server = await _resolve_server(principal, servers, mcp_server_id, config)
 
             if server.allowed_tools == []:
                 # An operator's explicit deny-all is a complete answer already,
@@ -513,7 +707,14 @@ async def list_mcp_tools(
             await release_session(db)
             await _require_safe_url(server)
             track_request(raw_request, endpoint=TOOLS_ENDPOINT, model=TOOLS_LABEL)
-            catalog = await discover_stored_tools(server)
+            patterns = _caller_patterns(principal, server)
+            try:
+                catalog = await discover_stored_tools(
+                    server, lambda name: is_mcp_tool_allowed(patterns, name), contacts=mcp_server_contacts
+                )
+            except McpExecutionError as failed:
+                raise _with_sign_in_link(failed, config, server.id, principal.user_id) from None
+            visible, warnings = catalog.tools, catalog.warnings
 
             response = McpToolsResponse(
                 server_id=server.id,
@@ -522,14 +723,14 @@ async def list_mcp_tools(
                     McpToolDefinition(
                         name=tool.name,
                         description=tool.description,
-                        input_schema=tool.inputSchema,
-                        annotations=tool.annotations.model_dump(mode="json", exclude_none=True)
+                        input_schema=tool.input_schema,
+                        annotations=tool.annotations.model_dump(mode="json", by_alias=True, exclude_none=True)
                         if tool.annotations is not None
                         else None,
                     )
-                    for tool in catalog.tools
+                    for tool in visible
                 ],
-                warnings=[McpToolWarning(tool_name=name, code=code) for name, code in catalog.warnings],
+                warnings=[McpToolWarning(tool_name=name, code=code) for name, code in warnings],
             )
             if discovery_response_exceeds_bound(response):
                 raise McpExecutionError(CODE_DISCOVERY_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 502)
@@ -557,8 +758,8 @@ async def list_mcp_tools(
         "Stateless MCP discovery request_id=%s server_id=%s outcome=ok tools=%d omitted=%d duration_ms=%.2f",
         getattr(raw_request.state, "otari_request_id", "-"),
         mcp_server_id,
-        len(catalog.tools),
-        len(catalog.warnings),
+        len(visible),
+        len(warnings),
         (time.monotonic() - started) * 1000,
     )
     return response
@@ -582,6 +783,7 @@ async def list_mcp_tools(
         503: {"model": McpErrorBody},
         504: {"model": McpErrorBody},
     },
+    openapi_extra=key_scope(KeyScope.MCP_EXECUTE),
 )
 async def execute_mcp_tool(
     raw_request: Request,
@@ -615,8 +817,17 @@ async def execute_mcp_tool(
     try:
         async with asyncio.timeout(mcp_stateless.EXECUTION_TOTAL_TIMEOUT_S):
             principal = await _authenticate(raw_request, db, config)
-            server = await _resolve_server(principal, servers, request.mcp_server_id)
-            _require_allowed(server, request.tool_name)
+            trace = _begin_trace(raw_request, config, principal, started)
+
+            def record_denied(denied: WorkspaceMcpServerAccessDeniedError) -> None:
+                # The caller is told the server does not exist; the trace says which server, and why.
+                _record_refusal(trace, request.tool_name, denied.name, denied.mcp_server_id, denied.decided_by)
+
+            server = await _resolve_server(principal, servers, request.mcp_server_id, config, on_denied=record_denied)
+            allowed, decided_by = _decide_tool(principal, server, request.tool_name)
+            if not allowed:
+                _record_refusal(trace, request.tool_name, server.name, server.id, decided_by)
+                raise McpExecutionError(CODE_TOOL_NOT_ALLOWED, ExecutionState.NOT_STARTED, 403)
             if request.server_revision != server.revision:
                 # In memory, over the resolution already made, so this costs no database or MCP round trip.
                 raise McpExecutionError(CODE_SERVER_CHANGED, ExecutionState.NOT_STARTED, 409)
@@ -628,13 +839,32 @@ async def execute_mcp_tool(
             timings["resolve_ms"] = (time.monotonic() - started) * 1000
             track_request(raw_request, endpoint=EXECUTE_ENDPOINT, model=EXECUTE_LABEL)
 
-            result = await execute_stored_tool(
-                server,
-                request.tool_name,
-                request.arguments,
-                on_dispatch=mark_dispatched,
-                timings=timings,
-            )
+            tool_started = datetime.now(UTC)
+            finished: CallToolResult | None = None
+            try:
+                result = finished = await execute_stored_tool(
+                    server,
+                    request.tool_name,
+                    request.arguments,
+                    on_dispatch=mark_dispatched,
+                    timings=timings,
+                    contacts=mcp_server_contacts,
+                )
+            except McpExecutionError as failed:
+                raise _with_sign_in_link(failed, config, server.id, principal.user_id) from None
+            finally:
+                # A finally rather than an except, so a call the deadline cancels is recorded as failed too.
+                if trace is not None:
+                    trace.record_tool_call(
+                        tool_name=request.tool_name,
+                        tool_type="mcp",
+                        started=tool_started,
+                        ok=finished is not None and not finished.is_error,
+                        arguments=None,
+                        mcp_server=server.name,
+                        mcp_server_id=str(server.id),
+                        decided_by=decided_by,
+                    )
     except TimeoutError:
         # The total deadline can only be reached before dispatch here: past it,
         # the call's own deadline is the shorter of the two and classifies the

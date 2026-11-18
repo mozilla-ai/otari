@@ -98,7 +98,7 @@ describe("the header's logo", () => {
     renderShell(undefined, { site_url: null, public_catalog: true })
     expect(screen.getByRole("link", { name: "Otari home" })).toHaveAttribute(
       "href",
-      "#/models",
+      "/models",
     )
   })
 
@@ -106,7 +106,9 @@ describe("the header's logo", () => {
   it("stays unlinked with neither a website nor a catalog", () => {
     renderShell(undefined, { site_url: null, public_catalog: false })
     expect(screen.queryByRole("link")).not.toBeInTheDocument()
-    expect(screen.getByText("Otari")).toBeInTheDocument()
+    expect(
+      screen.getByRole("img", { name: "Otari by Mozilla AI" }),
+    ).toBeInTheDocument()
   })
 })
 
@@ -121,17 +123,17 @@ describe("the header slot an edition fills", () => {
 describe("authShellPage", () => {
   it.each([
     ["", "login"],
-    ["#/", "login"],
-    ["#/signup", "signup"],
-    ["#/signup?email=ada%40example.com", "signup"],
-    ["#/recover-password", "recover-password"],
-    ["#/resend-verification", "resend-verification"],
+    ["/", "login"],
+    ["/signup", "signup"],
+    ["/signup?email=ada%40example.com", "signup"],
+    ["/recover-password", "recover-password"],
+    ["/resend-verification", "resend-verification"],
     // A page that spends a token from a link names where it came from.
-    ["#/verify-email?token=t", null],
-    ["#/reset-password?token=t", null],
-    ["#/check-email?type=signup", null],
-    ["#/auth/google/callback?code=c", null],
-  ])("reads %j as %j", (hash, page) => {
-    expect(authShellPage(hash)).toBe(page)
+    ["/verify-email?token=t", null],
+    ["/reset-password?token=t", null],
+    ["/check-email?type=signup", null],
+    ["/sign-in/google/callback?code=c", null],
+  ])("reads %j as %j", (route, page) => {
+    expect(authShellPage(route)).toBe(page)
   })
 })

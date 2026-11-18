@@ -12,25 +12,36 @@ from gateway.services.catalog._limits import (
     model_limits,
 )
 from gateway.services.merged_catalog_service import ModelObject
+from gateway.types.models_dev import parse_catalog
 
 # Limits that differ from the pricing snapshot's wherever both know the model, so a test can tell which one answered.
-MODELS_DEV: dict[str, Any] = {
-    "openai": {
-        "models": {
-            "gpt-4o": {
-                "name": "GPT-4o",
-                "tool_call": True,
-                "structured_output": True,
-                "modalities": {"input": ["text", "image"], "output": ["text"]},
-                "limit": {"context": 64000, "output": 16384},
+MODELS_DEV = parse_catalog(
+    {
+        "openai": {
+            "models": {
+                "gpt-4o": {
+                    "name": "GPT-4o",
+                    "tool_call": True,
+                    "structured_output": True,
+                    "modalities": {"input": ["text", "image"], "output": ["text"]},
+                    "limit": {"context": 64000, "output": 16384},
+                },
             },
         },
-    },
-    "nebius": {"models": {"Qwen/Qwen3-30B-A3B-Instruct-2507": {"limit": {"context": 262144, "output": 8192}}}},
-    "google": {"models": {"gemini-3.5-flash-lite": {"limit": {"context": 1048576, "output": 65536}}}},
-    # An entry with no window, so the dataset below it is asked.
-    "anthropic": {"models": {"claude-sonnet-4-5": {"limit": {"output": 64000}}}},
-}
+        "nebius": {"models": {"Qwen/Qwen3-30B-A3B-Instruct-2507": {"limit": {"context": 262144, "output": 8192}}}},
+        "google": {"models": {"gemini-3.5-flash-lite": {"limit": {"context": 1048576, "output": 65536}}}},
+        # An entry with no window, so the dataset below it is asked.
+        "anthropic": {"models": {"claude-sonnet-4-5": {"limit": {"output": 64000}}}},
+        "amazon-bedrock": {
+            "models": {
+                "nvidia.nemotron-nano-3-30b": {"tool_call": True, "structured_output": True},
+                "qwen.qwen3-coder-30b-a3b-v1:0": {"tool_call": True, "structured_output": True},
+                "us.anthropic.claude-sonnet-4-5-v1:0": {"structured_output": True},
+            },
+        },
+        "minimax": {"models": {"MiniMax-M2": {"tool_call": True, "structured_output": True}}},
+    }
+)
 
 
 def _config(**providers: dict[str, Any]) -> GatewayConfig:
@@ -93,6 +104,29 @@ def test_capabilities_map_models_dev_flags_to_openrouter_fields() -> None:
         input_modalities=["text", "image"],
         output_modalities=["text"],
     )
+
+
+def test_response_format_is_left_out_where_any_llm_refuses_it() -> None:
+    """Bedrock sends ``response_format`` only to Anthropic models, whatever models.dev flags."""
+    nemotron = model_capabilities(_config(), MODELS_DEV, "bedrock:nvidia.nemotron-nano-3-30b")
+    qwen_coder = model_capabilities(_config(), MODELS_DEV, "bedrock:qwen.qwen3-coder-30b-a3b-v1:0")
+    claude = model_capabilities(_config(), MODELS_DEV, "bedrock:us.anthropic.claude-sonnet-4-5-v1:0")
+    # An instance named otherwise is judged by the provider it declares.
+    declared = model_capabilities(
+        _config(aws={"provider_type": "bedrock"}), MODELS_DEV, "aws:nvidia.nemotron-nano-3-30b"
+    )
+
+    assert nemotron is not None and nemotron.supported_parameters == ["tools", "tool_choice"]
+    assert qwen_coder is not None and qwen_coder.supported_parameters == ["tools", "tool_choice"]
+    assert claude is not None and claude.supported_parameters == ["response_format"]
+    assert declared is not None and declared.supported_parameters == ["tools", "tool_choice"]
+
+
+def test_response_format_is_left_out_for_a_provider_that_refuses_it_for_every_model() -> None:
+    """MiniMax refuses ``response_format`` whatever the model, so no flag of models.dev's offers it."""
+    capabilities = model_capabilities(_config(), MODELS_DEV, "minimax:MiniMax-M2")
+
+    assert capabilities is not None and capabilities.supported_parameters == ["tools", "tool_choice"]
 
 
 def test_an_entry_without_flags_lists_no_parameters() -> None:

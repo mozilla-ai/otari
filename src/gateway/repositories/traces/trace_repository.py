@@ -39,10 +39,8 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.base import UtcDateTime
 from gateway.models.traces import Trace
 from gateway.repositories.base_repository import BaseRepository
-from gateway.types.traces import TraceFilter, TraceSort
-
-# A trace's key: its workspace and its id.
-TraceKey = tuple[uuid.UUID, str]
+from gateway.repositories.traces.span_repository import has_span_on_models
+from gateway.types.traces import TraceFilter, TraceKey, TraceSort
 
 
 @dataclass(frozen=True)
@@ -370,6 +368,8 @@ def _conditions(query: TraceFilter) -> list[ColumnElement[bool]]:
         conditions.append(Trace.user_id.in_(list(query.user_ids)))
     if query.api_key_ids:
         conditions.append(Trace.api_key_id.in_(list(query.api_key_ids)))
+    if query.models:
+        conditions.append(has_span_on_models(Trace.workspace_id, Trace.trace_id, query.models))
     if query.harnesses:
         conditions.append(Trace.harness.in_(list(query.harnesses)))
     if query.session_sources:

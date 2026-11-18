@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest"
 import {
+  hasHarnessMark,
   hasProviderMark,
   isProductMarkProvider,
 } from "@/shared/helpers/brandMarkKeys"
-import { makerMark, providerMark } from "@/shared/helpers/brandMarks"
+import {
+  harnessMark,
+  makerMark,
+  providerMark,
+} from "@/shared/helpers/brandMarks"
 
 describe("providerMark", () => {
   it("resolves a provider id to geometry", () => {
@@ -56,15 +61,15 @@ describe("providerMark", () => {
     expect(providerMark("llama")).toEqual(providerMark("meta"))
   })
 
-  it("tiles both AWS provider rows rather than showing the wordmark", () => {
-    // The rule would give them the AWS mark, but the only one in the set is the
-    // lowercase wordmark, unreadable at 16px. Asserted as absence, which is what
-    // makes the component draw a lettermark instead.
-    expect(providerMark("bedrock")).toBeUndefined()
+  it("gives Bedrock its own mark and never the AWS wordmark", () => {
+    // Bedrock has a product glyph, drawn with evenodd holes. SageMaker has
+    // none, and the only AWS mark in the set is the lowercase wordmark,
+    // unreadable at 16px, so it still tiles.
+    expect(hasProviderMark("bedrock")).toBe(true)
+    expect(providerMark("bedrock")?.shapes[0]?.fillRule).toBe("evenodd")
     expect(providerMark("sagemaker")).toBeUndefined()
-    expect(hasProviderMark("bedrock")).toBe(false)
-    // And the maker row for the same company agrees, so a card and a rail row
-    // never disagree about Amazon.
+    // The glyph names the service, not the company, so the Amazon maker row
+    // keeps its tile.
     expect(makerMark("amazon")).toBeUndefined()
   })
 
@@ -117,6 +122,7 @@ describe("hasProviderMark", () => {
     expect(hasProviderMark("mistral")).toBe(true)
     expect(hasProviderMark("otari")).toBe(true)
     expect(hasProviderMark("mzai")).toBe(true)
+    expect(hasProviderMark("otari-ai")).toBe(true)
     expect(hasProviderMark("my-local-llm")).toBe(false)
   })
 
@@ -200,7 +206,7 @@ describe("makerMark", () => {
 
   it("tiles the two makers that have no usable mark", () => {
     // Amazon's only mark in the set is the aws wordmark, unreadable at these
-    // steps, so it tiles like the Bedrock and SageMaker rows. OpenBMB has none.
+    // steps, so it tiles like the SageMaker row. OpenBMB has none.
     expect(makerMark("amazon")).toBeUndefined()
     expect(makerMark("openbmb")).toBeUndefined()
   })
@@ -240,5 +246,39 @@ describe("makerMark", () => {
     expect(SAMPLE.filter((slug) => makerMark(slug) === undefined)).toEqual(
       TILED,
     )
+  })
+})
+
+describe("harnessMark", () => {
+  it("resolves the name a session shows its harness by", () => {
+    expect(harnessMark("claude-code")?.shapes.length).toBeGreaterThan(0)
+    expect(harnessMark(" Kilo-Code ")).toEqual(harnessMark("kilo-code"))
+    expect(hasHarnessMark("roo-code")).toBe(true)
+  })
+
+  it("draws the harnesses known only by their User-Agent, and curl as a terminal", () => {
+    for (const harness of [
+      "hermes-agent",
+      "openclaw",
+      "oh-my-pi",
+      "mistral-vibe",
+      "kimi-code",
+      "qwen-code",
+      "github-copilot",
+      "zed",
+      "curl",
+    ]) {
+      expect(harnessMark(harness)?.shapes.length).toBeGreaterThan(0)
+    }
+    expect(harnessMark("curl")?.source).toBe("BsTerminalFill")
+  })
+
+  it("has no mark for a harness LobeHub does not draw, or one a client named itself", () => {
+    // The caller tiles these: Crush has no mark in the source set, and any
+    // other `User-Agent` product can reach a session as its harness.
+    expect(harnessMark("crush")).toBeUndefined()
+    expect(hasHarnessMark("my-agent")).toBe(false)
+    expect(harnessMark("constructor")).toBeUndefined()
+    expect(hasHarnessMark("toString")).toBe(false)
   })
 })

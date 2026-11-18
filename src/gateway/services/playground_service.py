@@ -46,12 +46,13 @@ from gateway.models.playground import (
     PlaygroundMessagePublic,
 )
 from gateway.models.tenancy import User as TenancyUser
-from gateway.models.tools import WorkspaceMcpServer, WorkspaceWebSearchConfig
+from gateway.models.tools import McpCredentialMode, WorkspaceMcpServer, WorkspaceWebSearchConfig
 from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_attribution_user
+from gateway.services.model_access import mcp_read_tools, resolve_request_mcp_access
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import resolve_workspace_in_organization
-from gateway.services.tools import WorkspaceCodeExecutionPolicies, web_search_configured
+from gateway.services.tools import McpSignedInServers, WorkspaceCodeExecutionPolicies, web_search_configured
 from gateway.services.workspace_scope import organization_default_workspace_id
 from gateway.types.session_principal import SessionPrincipal
 
@@ -76,8 +77,12 @@ async def resolve_playground_workspace(
     *,
     identity: TenancyUser,
     workspace_id: uuid.UUID | None,
+    spending: bool = False,
 ) -> uuid.UUID:
     """The workspace this caller is acting in, proved to be theirs.
+
+    ``spending`` also refuses a viewer, of the organization or of the workspace:
+    a completion or an upload spends as a key would, and a viewer is read-only.
 
     A named one goes through ``resolve_workspace_in_organization``, so a
     workspace in another organization, or one in this organization the caller
@@ -112,6 +117,10 @@ async def resolve_playground_workspace(
         if workspace_id is None:
             raise TenancyConflictError(_NO_WORKSPACE) from None
         raise
+    if spending:
+        await organizations.require_workspace_contributor_access(
+            user=identity, organization_id=organization.id, workspace_id=workspace.id
+        )
     return workspace.id
 
 
@@ -147,7 +156,9 @@ async def resolve_playground_principal(
     committed, because the route that asked for this is about to run a
     completion and the request's transaction boundary is that route's.
     """
-    resolved_workspace_id = await resolve_playground_workspace(db, identity=identity, workspace_id=workspace_id)
+    resolved_workspace_id = await resolve_playground_workspace(
+        db, identity=identity, workspace_id=workspace_id, spending=True
+    )
 
     # Deleting a spend identity is an operator's revocation
     # (``DELETE /api/v1/users`` soft-deletes the row and deactivates every key it
@@ -202,6 +213,8 @@ class McpServerAvailability:
     name: str
     purpose_hint: str | None
     enabled: bool
+    # The server sends each user's own credential, and this user has not signed in to it.
+    sign_in_required: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -259,7 +272,9 @@ async def resolve_tool_availability(
     config: GatewayConfig,
     offer: PlaygroundToolOffer,
     code_execution_policies: WorkspaceCodeExecutionPolicies,
+    signed_in: McpSignedInServers,
     workspace_id: uuid.UUID,
+    user_id: str,
 ) -> PlaygroundToolAvailability:
     """What the caller's workspace may attach to a Playground message.
 
@@ -269,7 +284,8 @@ async def resolve_tool_availability(
     the same direction, so the menu cannot offer something the request path would
     then refuse. It is a read of stored policy only and dials nothing: a live
     reachability probe belongs to the request that needs the backend, not to
-    drawing a menu.
+    drawing a menu. The MCP servers are the ones the user's access reaches, as
+    the request path admits them for a session.
     """
     web_search_row = (
         await db.execute(
@@ -289,6 +305,9 @@ async def resolve_tool_availability(
         .scalars()
         .all()
     )
+    access = await resolve_request_mcp_access(db, None, workspace_id, session_user_id=user_id)
+    per_user = [server.id for server in servers if server.credential_mode == McpCredentialMode.PER_USER]
+    connected = await signed_in.signed_in(user_id, per_user)
 
     return PlaygroundToolAvailability(
         web_search=_tool_availability(
@@ -302,8 +321,12 @@ async def resolve_tool_availability(
                 name=server.name,
                 purpose_hint=server.purpose_hint,
                 enabled=server.enabled,
+                sign_in_required=server.id in per_user and server.id not in connected,
             )
             for server in servers
+            if access.patterns_for(
+                server.id, server.everyone_tools, mcp_read_tools(server.read_tools, server.read_tools_hinted)
+            )
         ],
     )
 

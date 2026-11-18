@@ -30,8 +30,8 @@ vi.mock("./overlayNavItems", () => ({
     // The workspace rail, contributed from the same list the organization rail
     // reads: one module for both is what a unique section id buys.
     {
-      sectionId: "observe",
-      items: [{ to: "/usage", label: "Reports", icon: FiServer }],
+      sectionId: "index",
+      items: [{ to: "/models", label: "Reports", icon: FiServer }],
     },
     // And the deployment rail, from that same list: the process every tenant
     // is served by, which is neither a workspace's scope nor a tenant's.
@@ -54,8 +54,17 @@ describe("a build that replaces the nav-item module", () => {
 
   it("appends into the workspace rail from that same list", () => {
     expect(
-      section(NAV_SECTIONS, "observe")?.items.map((item) => item.label),
-    ).toEqual(["Activity", "Sessions", "Usage", "Reports"])
+      section(NAV_SECTIONS, "index")?.items.map((item) => item.label),
+    ).toEqual([
+      "Home",
+      "Sessions",
+      "People",
+      "Rules",
+      "Models",
+      "Tools",
+      "API keys",
+      "Reports",
+    ])
   })
 
   it("appends into the deployment rail from that same list", () => {
@@ -67,7 +76,8 @@ describe("a build that replaces the nav-item module", () => {
       "Settings",
       "Accounts",
       "Hosted providers",
-      "Web search pricing",
+      "Subagent router",
+      "Web search",
       "Code execution pricing",
       "Health",
       "Credit grants",
@@ -77,10 +87,15 @@ describe("a build that replaces the nav-item module", () => {
   it("leaves every section no contribution names alone", () => {
     expect(
       section(ORG_NAV_SECTIONS, "org-people")?.items.map((item) => item.label),
-    ).toEqual(["Workspaces", "Members & roles", "Email domains"])
+    ).toEqual([
+      "Workspaces",
+      "Members & roles",
+      "Email domains",
+      "Single sign-on",
+    ])
     expect(
-      section(NAV_SECTIONS, "gateway")?.items.map((item) => item.label),
-    ).toEqual(["Models", "Routing", "Tools"])
+      section(ORG_NAV_SECTIONS, "org-general")?.items.map((item) => item.label),
+    ).toEqual(["Providers", "Guardrails", "Org settings"])
   })
 
   it("leaves a contributed row ungated unless it says otherwise", () => {

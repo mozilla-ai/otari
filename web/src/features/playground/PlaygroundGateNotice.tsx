@@ -35,6 +35,15 @@ export function PlaygroundGateNotice({
     return <PageError error={error} />
   }
 
+  if (gate === "readOnly") {
+    return (
+      <EmptyState
+        title="The Playground is not open to viewers"
+        description="A Playground request spends like an API key does, and a viewer has read-only access. Ask an owner or admin for a member role to use it."
+      />
+    )
+  }
+
   if (gate === "noWorkspace") {
     return (
       <EmptyState

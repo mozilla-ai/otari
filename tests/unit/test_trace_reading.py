@@ -287,3 +287,100 @@ def test_a_requests_cost_the_ledger_priced_later_is_read_on_the_request_and_coun
     assert [(span.span_id, span.cost_snapshot) for span in spans] == [("turn", None), ("llm-1", Decimal("0.25"))]
     [turn] = _turns(spans, now=_T0 + timedelta(hours=1), last_activity=_T0)
     assert turn.cost == Decimal("0.25")
+
+
+def test_a_call_two_instrumentations_both_exported_is_priced_on_one_of_its_spans() -> None:
+    usage = _span("usage-1", "llm", operation="usage", request_id="msg_1", cost_snapshot=Decimal("0.25"))
+    spans = _price_requests(
+        [
+            replace(_span("sdk", "llm", request_id="msg_1"), origin="otlp"),
+            replace(_span("openllmetry", "llm", request_id="msg_1"), origin="otlp"),
+            usage,
+        ]
+    )
+
+    assert [(span.span_id, span.cost_snapshot) for span in spans] == [
+        ("sdk", Decimal("0.25")),
+        ("openllmetry", None),
+    ]
+
+
+def test_a_call_two_instrumentations_both_exported_counts_its_tokens_once_in_its_turn() -> None:
+    call = {"request_id": "msg_1", "input_tokens": 500, "output_tokens": 20, "cache_read_tokens": 300}
+    spans = [
+        _span("turn", "step", opens_turn=True),
+        replace(_span("sdk", "llm", "turn", **call), origin="otlp"),
+        replace(_span("openllmetry", "llm", "turn", **call), origin="otlp"),
+    ]
+
+    [turn] = _turns(spans, now=_T0 + timedelta(hours=1), last_activity=_T0)
+
+    assert (turn.llm_calls, turn.input_tokens, turn.output_tokens, turn.cache_read_tokens) == (1, 500, 20, 300)
+
+
+def test_a_call_two_instrumentations_reported_alike_keeps_the_span_that_counted_its_cache() -> None:
+    call = {"request_id": "msg_1", "input_tokens": 500, "output_tokens": 20}
+    spans = [
+        _span("turn", "step", opens_turn=True),
+        replace(_span("plain", "llm", "turn", **call), origin="otlp"),
+        replace(_span("cached", "llm", "turn", **call, cache_read_tokens=300), origin="otlp"),
+    ]
+
+    [turn] = _turns(spans, now=_T0 + timedelta(hours=1), last_activity=_T0)
+
+    assert turn.cache_read_tokens == 300
+
+
+def test_two_calls_whose_only_id_is_their_own_span_id_both_count_in_their_turn() -> None:
+    def call(span_id: str, trace: str) -> SpanRecord:
+        span = _span(span_id, "llm", "turn", request_id="00000000000000a1", input_tokens=500, output_tokens=20)
+        return replace(span, origin="otlp", otel_span_id="00000000000000a1", otel_trace_id=trace)
+
+    spans = [_span("turn", "step", opens_turn=True), call("a", "t1"), call("b", "t2")]
+
+    [turn] = _turns(spans, now=_T0 + timedelta(hours=1), last_activity=_T0)
+
+    assert (turn.llm_calls, turn.input_tokens) == (2, 1000)
+
+
+def test_a_call_whose_two_spans_fall_in_two_turns_counts_in_one() -> None:
+    call = {"request_id": "msg_1", "input_tokens": 500, "output_tokens": 20}
+    first = _span("turn-1", "step", opens_turn=True)
+    second = replace(_span("turn-2", "step", opens_turn=True), start_time=_T0 + timedelta(seconds=5))
+    spans = [
+        first,
+        second,
+        replace(_span("sdk", "llm", "turn-1", **call), origin="otlp"),
+        replace(_span("openllmetry", "llm", "turn-2", **call), origin="otlp"),
+    ]
+
+    turns = _turns(spans, now=_T0 + timedelta(hours=1), last_activity=_T0)
+
+    assert sum(turn.input_tokens for turn in turns) == 500
+    assert sum(turn.llm_calls for turn in turns) == 1
+
+
+def test_a_copy_of_a_call_no_turn_holds_never_takes_the_call_out_of_its_turn() -> None:
+    spans = [
+        _span("turn", "step", opens_turn=True),
+        replace(_span("in-turn", "llm", "turn", request_id="msg_1", input_tokens=500), origin="otlp"),
+        replace(_span("orphan", "llm", request_id="msg_1", input_tokens=900), origin="otlp"),
+    ]
+
+    [turn] = _turns(spans, now=_T0 + timedelta(hours=1), last_activity=_T0)
+
+    assert (turn.llm_calls, turn.input_tokens) == (1, 500)
+
+
+def test_a_call_reported_twice_keeps_the_rounds_its_uncounted_copy_holds() -> None:
+    spans = [
+        _span("turn", "step", opens_turn=True),
+        replace(_span("rich", "llm", "turn", request_id="msg_1", input_tokens=900), origin="otlp"),
+        replace(_span("loop", "llm", "turn", request_id="msg_1", input_tokens=100), origin="otlp"),
+        _span("round-1", "llm", "loop"),
+        _span("round-2", "llm", "loop"),
+    ]
+
+    [turn] = _turns(spans, now=_T0 + timedelta(hours=1), last_activity=_T0)
+
+    assert (turn.llm_calls, turn.input_tokens) == (2, 900)

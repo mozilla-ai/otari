@@ -1,14 +1,14 @@
 """The gateway's web searches and fetches, reported to a Chat Completions client in ``otari_tool_calls``.
 
-The web retrieval backend runs with only its search and its page fetch patched, so the
-real admission, backend and chat tool loop run. The provider is scripted to call the
-declared tools in one round and answer in the next.
+The search runs on a ``fake`` search instance and the fetch with only its page read
+patched, so the real admission, backends and chat tool loop run. The provider is
+scripted to call the declared tools in one round and answer in the next.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import contextmanager
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
@@ -28,7 +28,6 @@ from fastapi.testclient import TestClient
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.services.tools import OTARI_TOOL_CALLS_FIELD
 from gateway.services.web_fetch_service import WebFetchResult, WebFetchService
-from gateway.services.web_retrieval_backend import WebRetrievalBackend
 from gateway.services.web_retrieval_policy import canonicalize_web_url
 
 from .conftest import MODEL_NAME
@@ -54,16 +53,15 @@ def _page() -> WebFetchResult:
 
 
 @pytest.fixture
-def web_tools(monkeypatch: pytest.MonkeyPatch, test_config: GatewayConfig) -> Iterator[None]:
-    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://web-search.invalid")
+def web_tools(
+    monkeypatch: pytest.MonkeyPatch, test_config: GatewayConfig, serve_search_on_fake: Callable[..., None]
+) -> Iterator[None]:
     monkeypatch.setattr(test_config, "web_fetch_enabled", True)
-    hits = [{"url": "https://python.org", "title": "Python", "content": _PAGE_TEXT, "published_date": "2026-10-07"}]
-    with (
-        patch.object(WebRetrievalBackend, "_search", new=AsyncMock(return_value=hits)),
-        patch.object(WebFetchService, "fetch", new=AsyncMock(return_value=_page())),
-        # A search reads each hit's page through the same service; these hits keep their snippets.
-        patch.object(WebFetchService, "fetch_for_search", new=AsyncMock(side_effect=OSError)),
-    ):
+    # The hit carries its page text, so the search reads no page.
+    serve_search_on_fake(
+        {"hits": [{"url": "https://python.org", "title": "Python", "text": _PAGE_TEXT, "published": "2026-10-07"}]}
+    )
+    with patch.object(WebFetchService, "fetch", new=AsyncMock(return_value=_page())):
         yield
 
 

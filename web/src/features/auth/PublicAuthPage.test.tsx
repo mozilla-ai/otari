@@ -17,10 +17,14 @@ vi.mock("@/shared/api/client", async (importOriginal) => {
 })
 
 function renderPage(
-  path: PublicAuthPath,
-  { hash = `#${path}`, mailReady = true, oauthProviders = [] as string[] } = {},
+  path: PublicAuthPath | null,
+  {
+    route = path === null ? "/" : `#${path}`,
+    mailReady = true,
+    oauthProviders = [] as string[],
+  } = {},
 ) {
-  window.location.hash = hash
+  window.history.replaceState(null, "", route)
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
@@ -36,7 +40,7 @@ function renderPage(
             oauth_providers: oauthProviders,
           })}
         >
-          <PublicAuthPage path={path} hash={hash} />
+          <PublicAuthPage path={path} route={route} />
         </DeploymentProvider>
       </AppProviders>
     </QueryClientProvider>,
@@ -49,7 +53,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks()
-  window.location.hash = ""
+  window.history.replaceState(null, "", "/")
 })
 
 describe("PublicAuthPage: the mail gate", () => {
@@ -73,7 +77,7 @@ describe("PublicAuthPage: the mail gate", () => {
 
   it("still opens a reset link, whose message was sent while mail worked", () => {
     renderPage("/reset-password", {
-      hash: "#/reset-password?token=abc",
+      route: "/reset-password?token=abc",
       mailReady: false,
     })
 
@@ -84,7 +88,7 @@ describe("PublicAuthPage: the mail gate", () => {
 })
 
 describe("PublicAuthPage: the OAuth provider gate", () => {
-  it.each(["/auth/google/callback", "/auth/github/callback"] as const)(
+  it.each(["/sign-in/google/callback", "/sign-in/github/callback"] as const)(
     "answers %s with a panel naming the provider when this gateway configures none",
     (path) => {
       renderPage(path, { oauthProviders: [] })
@@ -102,7 +106,7 @@ describe("PublicAuthPage: the OAuth provider gate", () => {
   it("gates per provider, not per flow", () => {
     // Google configured, GitHub not: the GitHub callback still answers with the
     // panel, or a bookmark reaches a page whose only outcome is a 503.
-    renderPage("/auth/github/callback", { oauthProviders: ["google"] })
+    renderPage("/sign-in/github/callback", { oauthProviders: ["google"] })
 
     expect(
       screen.getByRole("heading", { name: "Not available on this gateway" }),
@@ -115,19 +119,53 @@ describe("PublicAuthPage: the OAuth provider gate", () => {
   })
 
   it("does not gate an OAuth callback on mail, which it never sends", () => {
-    renderPage("/auth/google/callback", {
+    renderPage("/sign-in/google/callback", {
       mailReady: false,
       oauthProviders: ["google"],
     })
 
     // The page renders, so the gate let it past. It refuses on its own terms a
-    // moment later, because this hash carries no code and no state, which is
+    // moment later, because this route carries no code and no state, which is
     // the callback page's answer and not the deployment's.
     expect(
       screen.queryByRole("heading", { name: "Not available on this gateway" }),
     ).toBeNull()
     expect(
       screen.getByRole("heading", { name: "That sign-in did not complete" }),
+    ).toBeInTheDocument()
+  })
+})
+
+describe("PublicAuthPage: the organization-connection callback", () => {
+  it("renders its own page rather than falling through to a blank screen", () => {
+    // No deployment gate applies to this path at all, unlike the OAuth pair
+    // above it, and a route with no arm in the switch renders nothing: this is
+    // the dispatch itself, not the callback page's own refusal handling.
+    renderPage("/sign-in/sso/callback", {
+      mailReady: false,
+      oauthProviders: [],
+    })
+
+    expect(
+      screen.queryByRole("heading", { name: "Not available on this gateway" }),
+    ).toBeNull()
+    expect(
+      screen.getByRole("heading", { name: "That sign-in did not complete" }),
+    ).toBeInTheDocument()
+  })
+})
+
+describe("PublicAuthPage: a direct link to an organization's own connection", () => {
+  it("renders its own page for a slug the fixed table holds no entry for", () => {
+    // `path` is null here: this covers the dispatch for an unmatched route,
+    // not just the page rendered on its own.
+    renderPage(null, { route: "/sso/acme" })
+
+    expect(
+      screen.getByRole("heading", { name: "Sign in with your company" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Continue to your provider" }),
     ).toBeInTheDocument()
   })
 })

@@ -45,6 +45,44 @@ export const Checked: Story = {
   },
 }
 
+/**
+ * `isIndeterminate`: a box over a group, with some of the group selected. It is
+ * announced as mixed, and a press selects the whole group.
+ */
+export const Indeterminate: Story = {
+  render: () => {
+    const [models, setModels] = useState(["deepseek-r1"])
+    const all = ["deepseek-r1", "deepseek-v3"]
+    return (
+      <div className="flex flex-col gap-1">
+        <Checkbox
+          isSelected={models.length === all.length}
+          isIndeterminate={models.length > 0 && models.length < all.length}
+          onChange={(selected) => setModels(selected ? all : [])}
+        >
+          deepseek
+        </Checkbox>
+        {all.map((model) => (
+          <Checkbox
+            key={model}
+            className="pl-6"
+            isSelected={models.includes(model)}
+            onChange={(selected) =>
+              setModels((current) =>
+                selected
+                  ? [...current, model]
+                  : current.filter((entry) => entry !== model),
+              )
+            }
+          >
+            {model}
+          </Checkbox>
+        ))}
+      </div>
+    )
+  },
+}
+
 export const Disabled: Story = {
   render: () => (
     <div className="flex flex-col gap-3">
@@ -56,6 +94,23 @@ export const Disabled: Story = {
       </Checkbox>
     </div>
   ),
+}
+
+/** A label too long for its column wraps under itself, with the box beside its first line. */
+export const WrappingLabel: Story = {
+  render: () => {
+    const [on, setOn] = useState(false)
+    return (
+      <div className="w-72">
+        <Checkbox isSelected={on} onChange={setOn}>
+          <span className="min-w-0 break-words">
+            Share maria-jose.fernandez@research.example.org so the team can
+            reply
+          </span>
+        </Checkbox>
+      </div>
+    )
+  },
 }
 
 /**

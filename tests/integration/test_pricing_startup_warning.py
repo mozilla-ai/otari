@@ -1,4 +1,4 @@
-"""Startup pricing warnings: require_pricing, and unpriced search tools."""
+"""Startup pricing warnings: require_pricing, and unpriced search and fetch tools."""
 
 import logging
 from datetime import UTC, datetime
@@ -11,9 +11,9 @@ from gateway.log_config import logger as gateway_logger
 from gateway.models.pricing import ModelPricing
 from gateway.services.pricing_init_service import (
     warn_about_legacy_tool_prices,
+    warn_about_unpriced_web_tools,
     warn_if_gateway_tools_lack_pricing,
     warn_if_require_pricing_without_pricing,
-    warn_if_search_tools_lack_flat_pricing,
 )
 
 _WARNING_MARKER = "ALL billable requests"
@@ -56,7 +56,7 @@ async def test_warning_when_default_pricing_disabled_and_no_rows(
     assert _WARNING_MARKER in caplog.text
 
 
-_SEARCH_WARNING_MARKER = "No flat per-request rate is configured for search tool(s)"
+_SEARCH_WARNING_MARKER = "No price is set for search or fetch tool(s)"
 
 
 def _search_config(*, require_pricing: bool) -> GatewayConfig:
@@ -67,14 +67,18 @@ def _search_config(*, require_pricing: bool) -> GatewayConfig:
     )
 
 
+async def _warn_for_web_tools(db: AsyncSession, caplog: pytest.LogCaptureFixture, config: GatewayConfig) -> None:
+    _capture_gateway_logs(caplog)
+    try:
+        await warn_about_unpriced_web_tools(config, db)
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+
 async def _warn_for_search_tools(
     db: AsyncSession, caplog: pytest.LogCaptureFixture, *, require_pricing: bool = False
 ) -> None:
-    _capture_gateway_logs(caplog)
-    try:
-        await warn_if_search_tools_lack_flat_pricing(_search_config(require_pricing=require_pricing), db)
-    finally:
-        gateway_logger.removeHandler(caplog.handler)
+    await _warn_for_web_tools(db, caplog, _search_config(require_pricing=require_pricing))
 
 
 @pytest.mark.asyncio
@@ -86,18 +90,18 @@ async def test_warning_for_a_search_tool_with_no_flat_rate(
     assert _SEARCH_WARNING_MARKER in caplog.text
     assert "exa-search" in caplog.text
     assert "price_per_call" in caplog.text
-    assert "Nothing is reserved" in caplog.text
+    assert "nothing is reserved" in caplog.text
 
 
 @pytest.mark.asyncio
 async def test_the_search_tool_warning_names_the_402_under_require_pricing(
     async_db: AsyncSession, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """With require_pricing on, an unpriced tool's searches are refused, not merely unreserved."""
+    """With require_pricing on, an unpriced tool's calls are refused, not merely unreserved."""
     await _warn_for_search_tools(async_db, caplog, require_pricing=True)
     assert _SEARCH_WARNING_MARKER in caplog.text
     assert "HTTP 402" in caplog.text
-    assert "Nothing is reserved" not in caplog.text
+    assert "nothing is reserved" not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -114,24 +118,56 @@ async def test_no_warning_once_a_flat_rate_exists(async_db: AsyncSession, caplog
     await async_db.commit()
 
     await _warn_for_search_tools(async_db, caplog)
-    assert _SEARCH_WARNING_MARKER not in caplog.text
+    assert "exa-search" not in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_gateway_tool_warning_includes_fetch_without_a_search_backend(
+async def test_the_tool_warning_names_builtin_fetch_with_no_price(
+    async_db: AsyncSession, caplog: pytest.LogCaptureFixture, unpriced_builtin_fetch: None
+) -> None:
+    """The built-in fetcher is a fetch tool priced by its own row, whatever serves search."""
+    await _warn_for_web_tools(async_db, caplog, GatewayConfig(require_pricing=False, web_fetch_enabled=True))
+
+    assert _SEARCH_WARNING_MARKER in caplog.text
+    assert "builtin_fetch" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_the_tool_warning_names_the_fetch_tool_that_reads_a_searchs_pages_with_the_fetch_tool_off(
     async_db: AsyncSession, caplog: pytest.LogCaptureFixture
 ) -> None:
-    _capture_gateway_logs(caplog)
-    try:
-        await warn_if_gateway_tools_lack_pricing(
-            GatewayConfig(require_pricing=False, web_fetch_enabled=True),
-            async_db,
-        )
-    finally:
-        gateway_logger.removeHandler(caplog.handler)
+    """The pages a search reads take that fetch tool's price, so it is checked whether or not the fetch tool is on."""
+    config = GatewayConfig(
+        require_pricing=True,
+        search_tools={"fake-search": {"provider": "fake", "fetch_tool": "fake-fetch"}},
+        fetch_tools={"fake-fetch": {"provider": "fake"}, "other-fetch": {"provider": "fake"}},
+    )
+    async_db.add(_tool_row("fake-search", kind="search"))
+    await async_db.commit()
 
-    assert "web_fetch" in caplog.text
-    assert "otari:web_fetch" in caplog.text
+    await _warn_for_web_tools(async_db, caplog, config)
+
+    assert _SEARCH_WARNING_MARKER in caplog.text
+    assert "fake-fetch" in caplog.text
+    assert "other-fetch" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_the_tool_warning_omits_the_fetch_tool_of_a_search_that_reads_no_page(
+    async_db: AsyncSession, caplog: pytest.LogCaptureFixture
+) -> None:
+    config = GatewayConfig(
+        require_pricing=True,
+        web_search_extract=False,
+        search_tools={"fake-search": {"provider": "fake", "fetch_tool": "fake-fetch"}},
+        fetch_tools={"fake-fetch": {"provider": "fake"}},
+    )
+    async_db.add(_tool_row("fake-search", kind="search"))
+    await async_db.commit()
+
+    await _warn_for_web_tools(async_db, caplog, config)
+
+    assert "fake-fetch" not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -156,7 +192,7 @@ def _tool_row(key: str, *, kind: str = "model") -> ModelPricing:
         effective_at=datetime(2020, 1, 1, tzinfo=UTC),
         input_price_per_million=5000.0,
         output_price_per_million=0.0,
-        unit="requests",
+        unit="request",
     )
 
 
@@ -168,7 +204,7 @@ async def test_a_search_tools_own_row_silences_the_unpriced_warning(
     await async_db.commit()
 
     await _warn_for_search_tools(async_db, caplog)
-    assert _SEARCH_WARNING_MARKER not in caplog.text
+    assert "exa-search" not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -257,26 +293,28 @@ async def _warn_for_gateway_tools(db: AsyncSession, caplog: pytest.LogCaptureFix
         (GatewayConfig(require_pricing=True, web_fetch_enabled=True), "builtin_fetch", "fetch"),
     ],
 )
-async def test_no_gateway_tool_warning_for_an_instance_priced_under_its_own_row(
+async def test_a_tools_own_row_leaves_it_out_of_the_tool_warning(
     async_db: AsyncSession, caplog: pytest.LogCaptureFixture, config: GatewayConfig, name: str, kind: str
 ) -> None:
-    """The row the check at admission finds first silences the warning, as it lets the calls through."""
+    """The row the check at admission finds silences the warning, as it lets the calls through."""
     async_db.add(_tool_row(name, kind=kind))
     await async_db.commit()
 
-    await _warn_for_gateway_tools(async_db, caplog, config)
+    await _warn_for_web_tools(async_db, caplog, config)
 
-    assert _TOOL_WARNING_MARKER not in caplog.text
+    assert name not in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_the_gateway_tool_warning_names_the_row_for_an_unpriced_instance(
+async def test_an_unpriced_instance_is_named_by_the_tool_warning_alone(
     async_db: AsyncSession, caplog: pytest.LogCaptureFixture
 ) -> None:
+    """``otari:web_search`` never prices an instance, so the gateway tool warning does not offer it."""
     config = GatewayConfig(require_pricing=True, search_tools={"fake-search": {"provider": "fake"}})
 
+    await _warn_for_web_tools(async_db, caplog, config)
     await _warn_for_gateway_tools(async_db, caplog, config)
 
-    assert _TOOL_WARNING_MARKER in caplog.text
-    assert "otari:web_search" in caplog.text
+    assert "fake-search" in caplog.text
     assert "HTTP 402" in caplog.text
+    assert _TOOL_WARNING_MARKER not in caplog.text

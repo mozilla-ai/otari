@@ -20,7 +20,7 @@ export function TopBarActions({
   onOpenFeedback,
   feedbackTriggerRef,
 }: {
-  /** Opens the feedback dialog, which the shell mounts. */
+  /** Opens the Contact dialog, which the shell mounts. */
   onOpenFeedback?: () => void
   /** So the shell can return focus here when the dialog closes. */
   feedbackTriggerRef?: RefObject<HTMLButtonElement | null>
@@ -57,7 +57,7 @@ export function TopBarActions({
           onClick={onOpenFeedback}
           className={`${ACTION} cursor-pointer`}
         >
-          Feedback
+          Contact
         </button>
       ) : null}
       <a

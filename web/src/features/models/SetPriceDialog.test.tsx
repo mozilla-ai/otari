@@ -62,7 +62,69 @@ describe("SetPriceDialog", () => {
         {
           input_price_per_million: 2000,
           output_price_per_million: 0,
-          unit: "requests",
+          unit: "request",
+        },
+        "",
+      ),
+    )
+  })
+
+  it("sends a second of video as the block a video is billed from", async () => {
+    const user = userEvent.setup()
+    const onSubmit = await renderDialog({ chooseUnit: true })
+
+    await user.click(screen.getByRole("radio", { name: "Seconds of video" }))
+    await user.type(screen.getByLabelText("Price per second of video"), "0.06")
+    await user.click(screen.getByRole("button", { name: "Set price" }))
+
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(
+        {
+          input_price_per_million: 60000,
+          output_price_per_million: 0,
+          unit: "second",
+          rates: { video: { output: { price: 0.06, unit: "second" } } },
+        },
+        "",
+      ),
+    )
+  })
+
+  it("sends a minute of audio's input and output rates", async () => {
+    const user = userEvent.setup()
+    const onSubmit = await renderDialog({ chooseUnit: true })
+
+    await user.click(screen.getByRole("radio", { name: "Minutes of audio" }))
+    await user.type(screen.getByLabelText("Audio in, per minute"), "0.003")
+    await user.type(screen.getByLabelText("Audio out, per minute"), "0.015")
+    await user.click(screen.getByRole("button", { name: "Set price" }))
+
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(
+        {
+          input_price_per_million: 3000,
+          output_price_per_million: 15000,
+          unit: "minute",
+        },
+        "",
+      ),
+    )
+  })
+
+  it("sends a search price per thousand as the per-million fields", async () => {
+    const user = userEvent.setup()
+    const onSubmit = await renderDialog({ chooseUnit: true })
+
+    await user.click(screen.getByRole("radio", { name: "Web searches" }))
+    await user.type(screen.getByLabelText("Price per 1,000 searches"), "10")
+    await user.click(screen.getByRole("button", { name: "Set price" }))
+
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(
+        {
+          input_price_per_million: 10000,
+          output_price_per_million: 0,
+          unit: "web_search",
         },
         "",
       ),
@@ -70,7 +132,7 @@ describe("SetPriceDialog", () => {
   })
 
   it("opens in the unit it is given", async () => {
-    await renderDialog({ chooseUnit: true, initialUnit: "images" })
+    await renderDialog({ chooseUnit: true, initialUnit: "image" })
 
     expect(screen.getByRole("radio", { name: "Images" })).toBeChecked()
     expect(screen.getByLabelText("Price per 1,000 images")).toBeInTheDocument()

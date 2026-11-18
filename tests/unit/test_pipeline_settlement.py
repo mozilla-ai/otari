@@ -14,6 +14,7 @@ identically for every format. These tests pin that contract:
 import asyncio
 import contextlib
 import dataclasses
+import importlib
 import json
 import logging
 import re
@@ -22,9 +23,13 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
+from functools import partial
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
+import anyio
+import httpx
 import pytest
 from any_llm import LLMProvider
 from any_llm.types.completion import (
@@ -37,10 +42,12 @@ from any_llm.types.completion import (
     CompletionUsage,
 )
 from fastapi import HTTPException, Response
+from sqlalchemy import exc as sqlalchemy_exc
 from sqlalchemy.exc import SQLAlchemyError
 
 import gateway.api.routes._pipeline as pipeline
 import gateway.streaming as streaming
+from _unavailable_model_support import RecordingListener, background_tasks_done, reporter_with_null_listener
 from gateway.api.deps import ToolPorts
 from gateway.api.routes import chat, messages, responses
 from gateway.api.routes._pipeline import (
@@ -50,14 +57,20 @@ from gateway.api.routes._pipeline import (
     ToolBackends,
     ToolContext,
     build_streaming_response,
+    log_absorbed_attempt,
+    log_exhausted_plan,
     log_usage,
     prepare_gateway_tools,
+    release_reservation,
     run_non_stream,
     run_single_attempt_stream,
 )
 from gateway.core.config import GatewayConfig
+from gateway.core.unit_of_work import UnitOfWork
+from gateway.core.usage import GatewayUsage, cache_read_tokens_of
 from gateway.exceptions import TenancyValidationError
 from gateway.exceptions.tools_exceptions import (
+    McpConnectionUnavailableError,
     WebAccessToolNotAuthorizedError,
     WebSearchNotEnabledError,
     WorkspaceMcpServerNotFoundError,
@@ -67,17 +80,27 @@ from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.tools import ResolvedCodeExecutionPolicy, ResolvedWebSearchConfig, WebTool
 from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH
 from gateway.rate_limit import RateLimitInfo
-from gateway.services.budgets import ReservationHandle
-from gateway.services.inference import DeploymentCharge
+from gateway.services.budgets import (
+    EstimateInputs,
+    ReservationHandle,
+    estimate_output_tokens,
+    settle_abandoned_stream,
+    settle_cut_stream,
+)
+from gateway.services.inference import DeploymentCharge, UnavailableModel, UnavailableModelReporter
+from gateway.services.mcp_loop import AnsweredRounds
 from gateway.services.pricing_service import ResolvedPricing
+from gateway.services.routing import CompiledPlan
+from gateway.services.tenancy.workspace_mcp_server_service import RequestMcpServers
 from gateway.services.tool_usage import ToolUsageTally
 from gateway.services.tools._mcp_admission import (
     MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL,
     MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL,
     duplicate_mcp_server_name_detail,
 )
-from gateway.services.tools._web_admission import WEB_FETCH_NOT_ENABLED_DETAIL
+from gateway.services.tools._web_admission import WEB_FETCH_NOT_ENABLED_DETAIL, WorkspaceWebExecutors
 from gateway.services.traces import SessionRef
+from gateway.types.attempt import Attempt
 
 ADAPTERS = [
     pytest.param(chat._ADAPTER, id="chat"),
@@ -127,10 +150,17 @@ class _Servers:
     def __init__(self, resolve_many: _ResolveMany) -> None:
         self._resolve_many = resolve_many
 
-    async def resolve_many(self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
-        return await self._resolve_many(workspace_id, server_ids)
+    async def resolve_for_request(
+        self, workspace_id: uuid.UUID, server_ids: list[uuid.UUID], access: Any, *, attach: bool
+    ) -> RequestMcpServers:
+        return RequestMcpServers(servers=await self._resolve_many(workspace_id, server_ids))
 
-    async def resolve_one(self, workspace_id: uuid.UUID, server_id: uuid.UUID) -> ResolvedMcpServer | None:
+    async def any_attached(self, workspace_id: uuid.UUID) -> bool:
+        return False
+
+    async def resolve_one(
+        self, workspace_id: uuid.UUID, server_id: uuid.UUID, access: object = None
+    ) -> ResolvedMcpServer | None:
         return None
 
 
@@ -147,6 +177,9 @@ class _Policy:
         self.asked.append(workspace_id)
         return self._policy
 
+    async def executors(self, workspace_id: uuid.UUID) -> WorkspaceWebExecutors:
+        return None, None
+
 
 def _ctx(
     config: GatewayConfig,
@@ -157,11 +190,13 @@ def _ctx(
     rate_limit_info: RateLimitInfo | None = None,
     workspace_id: uuid.UUID | None = None,
     organization_id: uuid.UUID | None = _ORGANIZATION_ID,
+    uow: UnitOfWork | None = None,
 ) -> RequestContext:
     return RequestContext(
+        unavailable_model_reporter=reporter_with_null_listener(),
         config=config,
         db=db,
-        uow=cast(Any, AsyncMock()),
+        uow=uow if uow is not None else cast(Any, AsyncMock()),
         log_writer=log_writer,
         api_key_id="key-1",
         user_id="user-1",
@@ -204,6 +239,7 @@ def test_all_settlement_callbacks_wired_for_every_format(
         yield  # unreachable; makes this a generator
 
     build_streaming_response(
+        report_refusal=lambda _exc: None,
         adapter=adapter,
         stream=_empty(),
         provider=LLMProvider.OPENAI,
@@ -256,6 +292,7 @@ def test_keepalive_interval_wired_from_config_for_every_format(
         yield  # unreachable; makes this a generator
 
     build_streaming_response(
+        report_refusal=lambda _exc: None,
         adapter=adapter,
         stream=_empty(),
         provider=LLMProvider.OPENAI,
@@ -280,9 +317,20 @@ def test_keepalive_interval_wired_from_config_for_every_format(
 class _Settlement:
     """Records which settlement primitives the callbacks invoked."""
 
-    def __init__(self, pricing_source: PriceSource | None = "deployment", *, per_request: bool = False) -> None:
+    def __init__(
+        self,
+        pricing_source: PriceSource | None = "deployment",
+        *,
+        per_request: bool = False,
+        broken: bool = False,
+        row_cost: Decimal = Decimal("0.25"),
+    ) -> None:
         self.pricing_source = pricing_source
         self.per_request = per_request
+        # What a row with usage costs; zero is a free model's row.
+        self.row_cost = row_cost
+        # Every usage write raises, as one whose rate lookup failed does.
+        self.broken = broken
         self.reconciled: list[float] = []
         self.settled_tokens: list[int] = []
         self.refunded = 0
@@ -291,12 +339,19 @@ class _Settlement:
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
         async def fake_record_usage(**kwargs: Any) -> LoggedUsage:
             self.logged.append(kwargs)
+            if self.broken:
+                raise RuntimeError("rate lookup failed")
+            logged = settled(kwargs)
+            # No tool ran, so a deployment-paid row is charged its whole cost, as record_usage reports it.
+            return logged._replace(deployment_paid_cost=logged.cost if kwargs.get("deployment_paid") else None)
+
+        def settled(kwargs: dict[str, Any]) -> LoggedUsage:
             usage = kwargs.get("usage_override")
             if kwargs.get("cost_override") is not None:
                 return LoggedUsage(Decimal(kwargs["cost_override"]), None)
             if self.per_request and kwargs.get("error") is None:
                 return LoggedUsage(Decimal("0.005"), self.pricing_source)
-            return LoggedUsage(Decimal("0.25"), self.pricing_source) if usage else LoggedUsage(None, None)
+            return LoggedUsage(self.row_cost, self.pricing_source) if usage else LoggedUsage(None, None)
 
         async def fake_log_usage(**kwargs: Any) -> Decimal | None:
             return (await fake_record_usage(**kwargs)).cost
@@ -347,8 +402,10 @@ def _build(
     deployment_charge: DeploymentCharge | None = None,
     db: Any = None,
     source_label: str | None = None,
+    prompt_chars: int | None = None,
 ) -> Any:
     return build_streaming_response(
+        report_refusal=lambda _exc: None,
         adapter=chat._ADAPTER,
         stream=stream,
         provider=LLMProvider.OPENAI,
@@ -366,6 +423,7 @@ def _build(
         request_id=request_id,
         deployment_charge=deployment_charge,
         source_label=source_label,
+        prompt_chars=prompt_chars,
     )
 
 
@@ -458,6 +516,24 @@ async def test_stream_without_usage_estimate_policy_charges_estimate(monkeypatch
 
     assert settlement.reconciled == [0.5]
     assert settlement.refunded == 0
+
+
+@pytest.mark.parametrize("policy", ["estimate", "fail"])
+@pytest.mark.asyncio
+async def test_stream_without_usage_refunds_when_the_row_cannot_be_written(
+    monkeypatch: pytest.MonkeyPatch, policy: str
+) -> None:
+    """The estimate's row resolves a rate first; a failure there must not leave the hold to the sweeper."""
+    settlement = _Settlement(broken=True)
+    settlement.install(monkeypatch)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk()
+
+    await _drain(_build(stream(), GatewayConfig(stream_missing_usage_policy=cast(Any, policy))))
+
+    assert settlement.refunded == 1
+    assert settlement.reconciled == []
 
 
 @pytest.mark.parametrize("policy", ["allow_free", "estimate", "fail"])
@@ -578,6 +654,121 @@ async def test_stream_error_after_reported_usage_bills_it(monkeypatch: pytest.Mo
     assert logged["request_id"] == "req-1"
 
 
+_ANSWERED = CompletionUsage(prompt_tokens=120, completion_tokens=30, total_tokens=150)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cost", [Decimal("0.25"), Decimal(0)], ids=["priced", "free"])
+@pytest.mark.parametrize("failed", ["non-streaming", "before-the-stream", "mid-stream"])
+async def test_a_failed_tool_loop_bills_the_rounds_the_provider_answered(
+    monkeypatch: pytest.MonkeyPatch, failed: str, cost: Decimal
+) -> None:
+    """A tool loop whose later round fails still owes for the rounds before it, as a broken stream does.
+
+    A round that only ran the gateway's tools sends the client nothing, so the failure can
+    land before the stream starts. Mid-stream, an Anthropic round's message_start has
+    already reported its input, which must not hide the output the round went on to bill.
+    A free model's rounds still count against a token ceiling.
+    """
+    settlement = _Settlement(row_cost=cost)
+    settlement.install(monkeypatch)
+    failure = RuntimeError("context length exceeded")
+    granted: list[int] = []
+
+    if failed == "non-streaming":
+        AnsweredRounds(result=_completion(usage=_ANSWERED)).attach(failure)
+        with pytest.raises(HTTPException):
+            await _run_non_stream(monkeypatch, error=failure, reservation=_reservation())
+    elif failed == "before-the-stream":
+        AnsweredRounds(events=(_chunk(_ANSWERED),)).attach(failure)
+
+        class _Grant:
+            async def admit_model(self, *_args: Any, **_kwargs: Any) -> None:
+                return None
+
+            async def settle(self, tokens: int) -> None:
+                granted.append(tokens)
+
+        async def failing_provider(**kwargs: Any) -> Any:
+            raise failure
+
+        ctx = _ctx(GatewayConfig(), db=object(), log_writer=object(), reservation=_reservation())
+        ctx.rate_limit_grant = cast(Any, _Grant())
+        monkeypatch.setattr(chat, "acompletion", failing_provider)
+        with pytest.raises(HTTPException):
+            await run_single_attempt_stream(
+                adapter=chat._ADAPTER,
+                ctx=ctx,
+                tool_ctx=_tool_ctx(),
+                call_kwargs={"model": "openai:gpt-4", "messages": [{"role": "user", "content": "hi"}]},
+                provider=LLMProvider.OPENAI,
+                model="gpt-4",
+            )
+    else:
+        AnsweredRounds(events=(_chunk(_ANSWERED),)).attach(failure)
+
+        async def broken() -> AsyncIterator[ChatCompletionChunk]:
+            yield _chunk(_PARTIAL_USAGE)
+            raise failure
+
+        await _drain(_build(broken(), GatewayConfig()))
+
+    assert settlement.refunded == 0
+    assert settlement.reconciled == [cost]
+    assert settlement.settled_tokens == [150]
+    # The per-minute token limit settles them too, where the request holds a grant.
+    assert granted == ([150] if failed == "before-the-stream" else [])
+    (logged,) = settlement.logged
+    billed = logged["usage_override"]
+    assert (billed.prompt_tokens, billed.completion_tokens) == (120, 30)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cost", [Decimal("0.25"), Decimal(0)], ids=["priced", "free"])
+@pytest.mark.parametrize("deployment_paid", [False, True], ids=["own-credential", "deployment-paid"])
+async def test_a_locked_plan_settles_the_tokens_of_the_rounds_the_provider_answered(
+    monkeypatch: pytest.MonkeyPatch, cost: Decimal, deployment_paid: bool
+) -> None:
+    """A tool loop that answered locks its plan, so a later failure exhausts it: its rounds settle as on one model."""
+    from gateway.services.routing import CompiledPlan
+    from gateway.types.attempt import Attempt
+
+    settlement = _Settlement(row_cost=cost)
+    settlement.install(monkeypatch)
+    granted: list[int] = []
+    charged: list[Decimal | None] = []
+
+    class _Grant:
+        async def settle(self, tokens: int) -> None:
+            granted.append(tokens)
+
+    class _Charge:
+        async def settle(self, amount: Decimal | None, **_kwargs: Any) -> None:
+            charged.append(amount)
+
+    ctx = _ctx(GatewayConfig(), db=SimpleNamespace(begin_nested=None), log_writer=object(), reservation=_reservation())
+    ctx.rate_limit_grant = cast(Any, _Grant())
+    ctx.prices = cast(Any, object())
+    if deployment_paid:
+        ctx.deployment_charge = cast(Any, _Charge())
+    ctx.plan = CompiledPlan("policy", [Attempt(1, "openai", LLMProvider.OPENAI, "gpt-4")])
+    failure = RuntimeError("context length exceeded")
+    AnsweredRounds(result=_completion(usage=_ANSWERED)).attach(failure)
+    exhausted = HTTPException(status_code=400, detail="context length exceeded")
+    exhausted.__cause__ = failure
+
+    await log_exhausted_plan(ctx, chat._ADAPTER, exhausted)
+    await release_reservation(ctx)
+
+    assert settlement.reconciled == [cost]
+    assert settlement.settled_tokens == [150]
+    assert granted == [150]
+    (logged,) = settlement.logged
+    assert logged["prices"] is ctx.prices
+    assert logged["deployment_paid"] is deployment_paid
+    assert charged == ([cost] if deployment_paid else [])
+
+
 @pytest.mark.asyncio
 async def test_client_disconnect_after_reported_usage_bills_it(monkeypatch: pytest.MonkeyPatch) -> None:
     settlement = _Settlement()
@@ -597,6 +788,390 @@ async def test_client_disconnect_after_reported_usage_bills_it(monkeypatch: pyte
     (logged,) = settlement.logged
     assert logged["usage_override"].prompt_tokens == 120
     assert logged["request_id"] == "req-1"
+
+
+def test_estimate_output_tokens_rounds_chars_over_four_up() -> None:
+    assert [estimate_output_tokens(n) for n in (-5, 0, 1, 4, 5, 400)] == [0, 0, 1, 1, 2, 100]
+
+
+def test_streamed_text_chars_reads_chat_deltas_and_responses_text_events() -> None:
+    event = SimpleNamespace(type="response.output_text.delta", delta="abc")
+    other = SimpleNamespace(type="response.created")
+    assert [pipeline._streamed_text_chars(c) for c in (_text_chunk("abcd"), _chunk(), event, other)] == [4, 0, 3, 0]
+
+
+def test_streamed_text_chars_reads_a_messages_text_and_tool_input_delta() -> None:
+    text = SimpleNamespace(type="content_block_delta", delta=SimpleNamespace(type="text_delta", text="abcd"))
+    tool = SimpleNamespace(
+        type="content_block_delta", delta=SimpleNamespace(type="input_json_delta", partial_json="{}")
+    )
+    start = SimpleNamespace(type="message_start")
+    no_delta = SimpleNamespace(type="content_block_delta")
+    assert [pipeline._streamed_text_chars(c) for c in (text, tool, start, no_delta)] == [4, 2, 0, 0]
+
+
+def test_streamed_text_chars_counts_tool_call_arguments_and_reasoning() -> None:
+    """Both are output the provider bills, so an interrupted stream that carried them owes for them."""
+    call = SimpleNamespace(function=SimpleNamespace(arguments="abcd"))
+    chat_call = SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=None, tool_calls=[call]))])
+    chat_reasoning = SimpleNamespace(
+        choices=[SimpleNamespace(delta=SimpleNamespace(reasoning=SimpleNamespace(content="abc")))]
+    )
+    thinking = SimpleNamespace(type="content_block_delta", delta=SimpleNamespace(type="thinking_delta", thinking="ab"))
+    arguments = SimpleNamespace(type="response.function_call_arguments.delta", delta="abcde")
+    reasoning = SimpleNamespace(type="response.reasoning_text.delta", delta="a")
+    events = (chat_call, chat_reasoning, thinking, arguments, reasoning)
+    assert [pipeline._streamed_text_chars(c) for c in events] == [4, 3, 2, 5, 1]
+
+
+def test_streamed_text_chars_counts_every_choice() -> None:
+    call = SimpleNamespace(function=SimpleNamespace(arguments="abcd"))
+    chunk = SimpleNamespace(
+        choices=[
+            SimpleNamespace(delta=SimpleNamespace(content=None)),
+            SimpleNamespace(delta=SimpleNamespace(content="ab", tool_calls=[call])),
+        ]
+    )
+    assert pipeline._streamed_text_chars(chunk) == 6
+
+
+def test_streamed_text_chars_tolerates_a_chunk_without_a_delta() -> None:
+    chunk = SimpleNamespace(choices=[SimpleNamespace(delta=None)])
+    assert pipeline._streamed_text_chars(chunk) == 0
+
+
+def _text_chunk(text: str) -> ChatCompletionChunk:
+    return ChatCompletionChunk(
+        id="c1",
+        choices=[ChunkChoice(delta=ChoiceDelta(content=text), index=0)],
+        created=0,
+        model="m",
+        object="chat.completion.chunk",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("policy", "rows"), [("estimate", 1), ("allow_free", 0)])
+async def test_abandoned_stream_before_usage_writes_an_incomplete_estimated_row(
+    monkeypatch: pytest.MonkeyPatch, policy: str, rows: int
+) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        for _ in range(10):
+            await asyncio.sleep(0.01)
+            yield _text_chunk("abcd" * 2)
+        yield _chunk(_PARTIAL_USAGE)
+
+    response = _build(stream(), GatewayConfig(stream_missing_usage_policy=policy), prompt_chars=40, request_id="req-1")
+    seen = 0
+
+    async def consume() -> None:
+        nonlocal seen
+        async for _ in response.body_iterator:
+            seen += 1
+
+    # A client disconnect cancels the response's scope, which is what the task group's cancel does here.
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(consume)
+        while seen < 3:
+            await asyncio.sleep(0.001)
+        tg.cancel_scope.cancel()
+
+    assert len(settlement.logged) == rows
+    if rows:
+        (logged,) = settlement.logged
+        usage = logged["usage_override"]
+        assert (usage.prompt_tokens, usage.completion_tokens) == (10, 6)
+        assert logged["incomplete"] is True
+        assert logged["error"] is None
+        assert logged["stream_cut_by"] == "client"
+        assert settlement.settled_tokens == [16]
+    else:
+        assert settlement.refunded == 1
+
+
+async def _cut_stream(
+    monkeypatch: pytest.MonkeyPatch,
+    chunks: list[ChatCompletionChunk],
+    exc: BaseException,
+    *,
+    policy: str = "estimate",
+    prompt_chars: int | None = 40,
+) -> _Settlement:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        for chunk in chunks:
+            yield chunk
+        raise exc
+
+    await _drain(
+        _build(stream(), GatewayConfig(stream_missing_usage_policy=policy), prompt_chars=prompt_chars, request_id="r1")
+    )
+    return settlement
+
+
+_TWO_TEXT_CHUNKS = [_text_chunk("abcd" * 2), _text_chunk("abcd" * 2)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "cut",
+    [streaming.IncompleteStreamError(2), httpx.RemoteProtocolError("peer closed connection")],
+    ids=["ended-without-completing", "connection-dropped"],
+)
+async def test_a_provider_cut_before_usage_writes_an_estimated_error_row(
+    monkeypatch: pytest.MonkeyPatch, cut: BaseException
+) -> None:
+    settlement = await _cut_stream(monkeypatch, _TWO_TEXT_CHUNKS, cut)
+
+    (logged,) = settlement.logged
+    usage = logged["usage_override"]
+    assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (10, 4, 14)
+    assert not logged.get("incomplete")
+    assert logged["stream_cut_by"] == "provider"
+    assert logged["error"]
+    assert settlement.refunded == 0
+    assert settlement.settled_tokens == [14]
+
+
+@pytest.mark.asyncio
+async def test_a_provider_cut_bills_the_tool_call_arguments_already_streamed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An agent writing a file through a tool call is cut after 4,000 characters of its arguments."""
+    from any_llm.types.completion import ChoiceDeltaToolCall, ChoiceDeltaToolCallFunction
+
+    call = ChoiceDeltaToolCall(index=0, function=ChoiceDeltaToolCallFunction(arguments="x" * 1000))
+    chunk = _text_chunk("").model_copy(update={"choices": [ChunkChoice(delta=ChoiceDelta(tool_calls=[call]), index=0)]})
+
+    settlement = await _cut_stream(monkeypatch, [chunk] * 4, streaming.IncompleteStreamError(4))
+
+    (logged,) = settlement.logged
+    assert logged["usage_override"].completion_tokens == 1000
+
+
+@pytest.mark.asyncio
+async def test_a_provider_cut_estimates_only_what_was_streamed_to_the_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    short = await _cut_stream(monkeypatch, [_text_chunk("abcd")], streaming.IncompleteStreamError(1))
+    long = await _cut_stream(monkeypatch, [_text_chunk("abcd" * 50)], streaming.IncompleteStreamError(1))
+
+    assert short.logged[0]["usage_override"].completion_tokens == 1
+    assert long.logged[0]["usage_override"].completion_tokens == 50
+
+
+@pytest.mark.asyncio
+async def test_a_provider_cut_after_the_prompt_was_reported_bills_the_streamed_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Anthropic reports the prompt in message_start and the output only at the end."""
+    started = CompletionUsage(prompt_tokens=120, completion_tokens=1, total_tokens=121)
+    chunks = [_text_chunk("").model_copy(update={"usage": started}), _text_chunk("abcd" * 100)]
+
+    settlement = await _cut_stream(monkeypatch, chunks, streaming.IncompleteStreamError(2))
+
+    (logged,) = settlement.logged
+    usage = logged["usage_override"]
+    assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (120, 100, 220)
+    assert not logged.get("incomplete")
+    assert logged["stream_cut_by"] == "provider"
+
+
+@pytest.mark.asyncio
+async def test_a_provider_cut_after_the_final_usage_report_bills_what_the_provider_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The streamed text would estimate 525 tokens, above the 500 the provider reported at the end."""
+    reported = CompletionUsage(prompt_tokens=120, completion_tokens=500, total_tokens=620)
+    chunks = [_text_chunk("abcd" * 525), _chunk(reported).model_copy(update={"choices": []})]
+
+    settlement = await _cut_stream(monkeypatch, chunks, streaming.IncompleteStreamError(2))
+
+    (logged,) = settlement.logged
+    usage = logged["usage_override"]
+    assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (120, 500, 620)
+    assert not logged.get("incomplete")
+    assert logged["stream_cut_by"] == "provider"
+
+
+def test_usage_is_final_on_the_event_that_ends_it_and_not_on_the_one_that_starts_it() -> None:
+    from test_inline_cost_adapters import _message_delta, _message_start
+
+    usage_only = _chunk(CompletionUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2)).model_copy(
+        update={"choices": []}
+    )
+    midstream = _text_chunk("hi").model_copy(
+        update={"usage": CompletionUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2)}
+    )
+
+    assert pipeline._is_final_usage(usage_only) is True
+    assert pipeline._is_final_usage(_chunk()) is True
+    assert pipeline._is_final_usage(midstream) is False
+    assert pipeline._is_final_usage(_message_delta()) is True
+    assert pipeline._is_final_usage(_message_start()) is False
+    assert pipeline._is_final_usage(SimpleNamespace(type="response.completed")) is True
+    assert pipeline._is_final_usage(SimpleNamespace(type="response.created")) is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("chunks", "exc", "policy", "prompt_chars"),
+    [
+        (_TWO_TEXT_CHUNKS, streaming.IncompleteStreamError(2), "allow_free", 40),
+        (_TWO_TEXT_CHUNKS, streaming.IncompleteStreamError(2), "fail", 40),
+    ],
+    ids=["allow_free", "fail"],
+)
+async def test_a_provider_cut_that_owes_no_estimate_is_still_attributed_to_the_provider(
+    monkeypatch: pytest.MonkeyPatch,
+    chunks: list[ChatCompletionChunk],
+    exc: BaseException,
+    policy: str,
+    prompt_chars: int | None,
+) -> None:
+    settlement = await _cut_stream(monkeypatch, chunks, exc, policy=policy, prompt_chars=prompt_chars)
+
+    (logged,) = settlement.logged
+    assert not logged.get("incomplete")
+    assert logged["stream_cut_by"] == "provider"
+    assert logged["usage_override"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("chunks", "exc"),
+    [
+        (_TWO_TEXT_CHUNKS, HTTPException(status_code=422, detail="tool loop cap")),
+        (_TWO_TEXT_CHUNKS, RuntimeError("chunk formatting failed")),
+        ([], httpx.RemoteProtocolError("dropped before any chunk")),
+    ],
+    ids=["gateway-refusal", "gateway-bug", "stream-never-started"],
+)
+async def test_a_failure_that_is_not_a_provider_cut_is_not_attributed_or_estimated(
+    monkeypatch: pytest.MonkeyPatch, chunks: list[ChatCompletionChunk], exc: BaseException
+) -> None:
+    settlement = await _cut_stream(monkeypatch, chunks, exc)
+
+    (logged,) = settlement.logged
+    assert not logged.get("incomplete")
+    assert logged["stream_cut_by"] is None
+    assert logged["usage_override"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_provider_cut_of_unknown_request_size_still_bills_the_streamed_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tool loop passes no request size; the output the client received is still owed."""
+    settlement = await _cut_stream(monkeypatch, _TWO_TEXT_CHUNKS, streaming.IncompleteStreamError(2), prompt_chars=None)
+
+    (logged,) = settlement.logged
+    usage = logged["usage_override"]
+    assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (0, 4, 4)
+    assert logged["stream_cut_by"] == "provider"
+
+
+@pytest.mark.asyncio
+async def test_a_free_models_cut_settles_its_tokens_instead_of_refunding(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A row that costs nothing still has tokens for the token ceiling to count."""
+    settlement = _Settlement(row_cost=Decimal(0))
+    settlement.install(monkeypatch)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        for chunk in _TWO_TEXT_CHUNKS:
+            yield chunk
+        raise streaming.IncompleteStreamError(2)
+
+    await _drain(_build(stream(), GatewayConfig(stream_missing_usage_policy="estimate"), prompt_chars=40))
+
+    assert settlement.refunded == 0
+    assert settlement.reconciled == [Decimal(0)]
+    assert settlement.settled_tokens == [14]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "exc",
+    [TimeoutError("tool call timed out"), sqlalchemy_exc.TimeoutError("QueuePool limit reached")],
+    ids=["asyncio-timeout", "database-pool-timeout"],
+)
+async def test_a_gateway_side_timeout_is_not_a_provider_cut(
+    monkeypatch: pytest.MonkeyPatch, exc: BaseException
+) -> None:
+    settlement = await _cut_stream(monkeypatch, _TWO_TEXT_CHUNKS, exc)
+
+    (logged,) = settlement.logged
+    assert logged["stream_cut_by"] is None
+    assert logged["usage_override"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_provider_read_timeout_is_a_provider_cut(monkeypatch: pytest.MonkeyPatch) -> None:
+    settlement = await _cut_stream(monkeypatch, _TWO_TEXT_CHUNKS, httpx.ReadTimeout("provider went quiet"))
+
+    (logged,) = settlement.logged
+    assert logged["stream_cut_by"] == "provider"
+    assert logged["usage_override"] is not None
+
+
+def test_a_provider_cut_row_is_an_error_and_a_client_abandon_is_incomplete() -> None:
+    assert pipeline._row_status(error="dropped", attribution=None) == "error"
+    assert pipeline._row_status(error=None, attribution=None, incomplete=True) == "incomplete"
+
+
+def test_settle_cut_stream_never_raises_the_reported_output() -> None:
+    reported = CompletionUsage(prompt_tokens=10, completion_tokens=9, total_tokens=19)
+
+    def settle(streamed_chars: int, usage: CompletionUsage | None, *, final: bool = False) -> Any:
+        return settle_cut_stream(
+            policy="estimate",
+            prompt_chars=40,
+            streamed_chars=streamed_chars,
+            reported_usage=usage,
+            usage_is_final=final,
+        )
+
+    assert settle(8, reported) is None
+    assert settle(400, reported, final=True) is None
+    usage = settle(400, reported)
+    assert usage is not None
+    assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (10, 100, 110)
+    unreported_prompt = CompletionUsage(prompt_tokens=0, completion_tokens=1, total_tokens=1)
+    usage = settle(400, unreported_prompt)
+    assert usage is not None
+    assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (10, 100, 110)
+
+
+def test_settle_cut_stream_estimates_an_unreported_prompt_even_when_the_output_is_covered() -> None:
+    """A provider that counts output per chunk and the prompt only at the end has not reported the prompt."""
+    output_only = CompletionUsage(prompt_tokens=0, completion_tokens=50, total_tokens=50)
+
+    usage = settle_cut_stream(
+        policy="estimate", prompt_chars=40, streamed_chars=8, reported_usage=output_only, usage_is_final=False
+    )
+
+    assert usage is not None
+    assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (10, 50, 60)
+
+
+def test_settle_cut_stream_keeps_a_prompt_served_entirely_from_the_cache() -> None:
+    """Anthropic reports input_tokens=0 when cache reads cover the prompt; those are billed on their own."""
+    cached = GatewayUsage(
+        prompt_tokens=0,
+        completion_tokens=0,
+        total_tokens=0,
+        cache_read_tokens=50_000,
+        cache_tokens_in_prompt=False,
+    )
+
+    usage = settle_cut_stream(
+        policy="estimate", prompt_chars=200_000, streamed_chars=400, reported_usage=cached, usage_is_final=False
+    )
+
+    assert usage is not None
+    assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (0, 100, 100)
+    assert cache_read_tokens_of(usage) == 50_000
 
 
 @pytest.mark.asyncio
@@ -816,6 +1391,43 @@ async def _settle(model: str) -> Any:
     return writer.put_rows[0]
 
 
+async def _settle_without_usage(unit: str, cost_override: Decimal) -> Any:
+    """A row written with a fixed amount and no usage, as the missing-usage estimate policy writes it."""
+    writer = _FakeLogWriter()
+    await log_usage(
+        db=cast(Any, object()),
+        log_writer=cast(Any, writer),
+        api_key_id=None,
+        model="gpt-4",
+        provider="openai",
+        endpoint="/v1/chat/completions",
+        cost_override=cost_override,
+    )
+    return writer.put_rows[0]
+
+
+@pytest.mark.asyncio
+async def test_an_estimate_settles_a_stream_without_usage_only_at_a_rate_with_a_completion_meter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def rate(unit: str) -> ResolvedPricing:
+        pricing = ModelPricing(
+            model_key="openai:gpt-4", input_price_per_million=Decimal(1), output_price_per_million=Decimal(1), unit=unit
+        )
+        return ResolvedPricing(pricing, "deployment", "openai:gpt-4")
+
+    _stub_pricing(monkeypatch, rate("token"))
+    assert (await _settle_without_usage("token", Decimal("0.5"))).cost == Decimal("0.5")
+
+    # The rate held nothing, so the row keeps no cost rather than a zero that reads as priced.
+    _stub_pricing(monkeypatch, rate("second"))
+    assert (await _settle_without_usage("second", Decimal(0))).cost is None
+
+    # An unpriced model records the zero its estimate was, as it always has.
+    _stub_pricing(monkeypatch, None)
+    assert (await _settle_without_usage("token", Decimal(0))).cost == Decimal(0)
+
+
 @pytest.fixture
 def gateway_caplog(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptureFixture]:
     """``caplog`` attached to the gateway logger, which does not propagate to root."""
@@ -978,6 +1590,130 @@ async def test_cost_override_settlement_names_no_rate(monkeypatch: pytest.Monkey
     assert row.cost == Decimal("0.5")
     assert (row.pricing_source, row.pricing_reference, row.pricing_effective_at) == (None, None, None)
     assert row.calculated_at == row.timestamp
+
+
+# OpenRouter's usage on the first row of mozilla-ai/otari#3029: 78 in (48 cached), 25 out.
+_OPENROUTER_USAGE = {
+    "prompt_tokens": 78,
+    "completion_tokens": 25,
+    "total_tokens": 103,
+    "prompt_tokens_details": {"cached_tokens": 48},
+    "cost": 0.00001015,
+    "is_byok": False,
+    "cost_details": {"upstream_inference_cost": 0.00001015},
+}
+
+
+def _openrouter_rate(*, origin: str | None, source: PriceSource = "organization") -> ResolvedPricing:
+    pricing = ModelPricing(
+        model_key="openrouter:openai/gpt-oss-120b",
+        input_price_per_million=Decimal("0.15"),
+        output_price_per_million=Decimal("0.60"),
+        cache_read_price_per_million=Decimal("0.075"),
+        origin=origin,
+    )
+    return ResolvedPricing(pricing, source, "row-id", datetime(2026, 9, 1, tzinfo=UTC))
+
+
+async def _settle_openrouter(usage: dict[str, Any], *, provider: str = "openrouter") -> tuple[Any, LoggedUsage]:
+    writer = _FakeLogWriter()
+    logged = await pipeline.record_usage(
+        db=cast(Any, object()),
+        log_writer=cast(Any, writer),
+        api_key_id=None,
+        model="openai/gpt-oss-120b",
+        provider=provider,
+        endpoint="/v1/chat/completions",
+        usage_override=CompletionUsage.model_validate(usage),
+    )
+    return writer.put_rows[0], logged
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "resolved",
+    [
+        pytest.param(_openrouter_rate(origin="seed"), id="seeded"),
+        pytest.param(_openrouter_rate(origin=None, source="defaults"), id="defaults"),
+        pytest.param(None, id="unpriced"),
+    ],
+)
+async def test_a_charge_openrouter_states_settles_in_place_of_a_rate_nobody_chose(
+    monkeypatch: pytest.MonkeyPatch, resolved: ResolvedPricing | None
+) -> None:
+    """A seeded rate is one headline price, and OpenRouter's moves with its upstream (mozilla-ai/otari#3029)."""
+    _stub_pricing(monkeypatch, resolved)
+
+    row, logged = await _settle_openrouter(_OPENROUTER_USAGE)
+
+    assert row.cost == Decimal("0.000010")
+    assert logged == LoggedUsage(Decimal("0.000010"), "reported", None, tool_cost=Decimal(0))
+    assert (row.pricing_source, row.pricing_reference, row.pricing_effective_at) == ("reported", None, None)
+    assert (row.billing_meters, row.pricing_breakdown) == (None, None)
+    assert row.calculated_at == row.timestamp
+    assert pipeline.inline_settlement(logged) is not None
+
+
+@pytest.mark.asyncio
+async def test_a_rate_somebody_set_prices_an_openrouter_call_over_its_stated_charge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_pricing(monkeypatch, _openrouter_rate(origin="api"))
+
+    row, logged = await _settle_openrouter(_OPENROUTER_USAGE)
+
+    # 30 x 0.15 + 48 x 0.075 + 25 x 0.60 micro-dollars.
+    assert row.cost == Decimal("0.000023")
+    assert logged.pricing_source == "organization"
+
+
+@pytest.mark.asyncio
+async def test_a_byok_openrouter_call_settles_at_its_fee_and_the_upstream_charge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_pricing(monkeypatch, _openrouter_rate(origin="seed"))
+    usage = _OPENROUTER_USAGE | {
+        "cost": 0.000001,
+        "is_byok": True,
+        "cost_details": {"upstream_inference_cost": 0.00002},
+    }
+
+    row, _ = await _settle_openrouter(usage)
+
+    assert row.cost == Decimal("0.000021")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("usage", "provider"),
+    [
+        pytest.param(_OPENROUTER_USAGE, "together", id="another-provider"),
+        pytest.param(_OPENROUTER_USAGE | {"cost": "0.00001015"}, "openrouter", id="not-a-number"),
+        pytest.param(_OPENROUTER_USAGE | {"cost": True}, "openrouter", id="a-bool"),
+        pytest.param(_OPENROUTER_USAGE | {"cost": -1.0}, "openrouter", id="negative"),
+        pytest.param(_OPENROUTER_USAGE | {"cost": float("nan")}, "openrouter", id="nan"),
+        pytest.param(_OPENROUTER_USAGE | {"is_byok": True, "cost_details": None}, "openrouter", id="byok-no-upstream"),
+        pytest.param(
+            _OPENROUTER_USAGE | {"cost": -0.01, "is_byok": True, "cost_details": {"upstream_inference_cost": 0.02}},
+            "openrouter",
+            id="byok-negative-part",
+        ),
+        pytest.param(
+            _OPENROUTER_USAGE | {"cost": 1e308, "is_byok": True, "cost_details": {"upstream_inference_cost": 1e308}},
+            "openrouter",
+            id="byok-overflow",
+        ),
+    ],
+)
+async def test_a_charge_nobody_can_read_leaves_the_seeded_rate_to_price_the_call(
+    monkeypatch: pytest.MonkeyPatch, usage: dict[str, Any], provider: str
+) -> None:
+    _stub_pricing(monkeypatch, _openrouter_rate(origin="seed"))
+
+    row, logged = await _settle_openrouter(usage, provider=provider)
+
+    assert row.cost == Decimal("0.000023")
+    assert logged.pricing_source == "organization"
 
 
 @pytest.mark.asyncio
@@ -1170,6 +1906,7 @@ def _build_inline_stream(
 ) -> AsyncIterator[str]:
     """A stream that settles inline, so its terminal carrier waits for the cost."""
     response = build_streaming_response(
+        report_refusal=lambda _exc: None,
         adapter=chat._ADAPTER,
         stream=stream,
         provider=LLMProvider.OPENAI,
@@ -1366,7 +2103,7 @@ async def _call_prepare_gateway_tools(ctx: RequestContext, **overrides: Any) -> 
 
     declared: dict[str, Any] = {
         "guardrails": None,
-        "guardrail_text": "",
+        "guardrail_targets": tuple,
         "tools": None,
         "mcp_servers": None,
         "mcp_server_ids": None,
@@ -1420,6 +2157,28 @@ async def test_successful_admission_releases_the_database_connection(monkeypatch
     db.commit.assert_awaited_once()
     # The reservation is still held: this request is going to the provider.
     assert settlement.refunded == 0
+
+
+@pytest.mark.asyncio
+async def test_a_client_that_disconnects_during_mcp_admission_has_its_reservation_released(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    monkeypatch.delenv("OTARI_SANDBOX_URL", raising=False)
+
+    async def disconnected(workspace_id: uuid.UUID, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
+        raise asyncio.CancelledError
+
+    db = AsyncMock()
+    ctx = _ctx(
+        GatewayConfig(), db=cast(Any, db), reservation=_reservation(), workspace_id=uuid.uuid4(), uow=UnitOfWork(db)
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await _call_prepare_gateway_tools(ctx, mcp_server=_Servers(disconnected), mcp_server_ids=[uuid.uuid4()])
+
+    db.rollback.assert_awaited_once()
+    assert settlement.refunded == 1
 
 
 @pytest.mark.asyncio
@@ -1899,9 +2658,9 @@ async def test_stored_mcp_servers_sharing_a_name_are_an_operator_error(
         )
 
     assert exc_info.value.status_code == 500
-    # The caller can neither see nor fix a stored server, so the name stays in
-    # the log, as it does for a stored URL that fails its safety check.
-    assert exc_info.value.detail == MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL
+    # The caller can neither see nor fix a stored server: a 5xx through `domain_error`
+    # keeps its message, and the name, in the log.
+    assert MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL not in str(exc_info.value.detail)
     assert "tools" not in str(exc_info.value.detail)
     assert settlement.refunded == 1
 
@@ -1926,6 +2685,7 @@ async def test_a_database_failure_releases_the_reservation(monkeypatch: pytest.M
         db=cast(Any, db),
         reservation=_reservation(),
         workspace_id=uuid.uuid4(),
+        uow=UnitOfWork(db),
     )
     with pytest.raises(SQLAlchemyError):
         await _call_prepare_gateway_tools(
@@ -1979,6 +2739,7 @@ async def test_a_release_that_also_fails_reraises_the_original(monkeypatch: pyte
         db=cast(Any, db),
         reservation=_reservation(),
         workspace_id=uuid.uuid4(),
+        uow=UnitOfWork(db),
     )
     with pytest.raises(SQLAlchemyError, match="connection reset"):
         await _call_prepare_gateway_tools(
@@ -1996,7 +2757,7 @@ async def test_guardrail_block_releases_reservation(monkeypatch: pytest.MonkeyPa
     async def blocking_guardrails(*args: Any, **kwargs: Any) -> None:
         raise HTTPException(status_code=403, detail="blocked")
 
-    monkeypatch.setattr(pipeline, "apply_input_guardrails", blocking_guardrails)
+    monkeypatch.setattr("gateway.api.routes._guardrails.RequestGuardrails.admit", blocking_guardrails)
 
     ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
     with pytest.raises(HTTPException) as exc_info:
@@ -2439,6 +3200,7 @@ def _deployment_charge(recorder: _ChargeRecorder) -> DeploymentCharge:
         api_key_id="key-1",
         actor_user_id=None,
         request_id="req-1",
+        billed=None,
     )
 
 
@@ -2662,3 +3424,472 @@ async def test_a_completions_row_says_whether_the_deployment_paid(
     (row,) = settlement.logged
     assert row["deployment_paid"] is paid
     assert (row.get("error") is not None) is fails
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS)
+@pytest.mark.parametrize("outcome", ["on_complete", "on_no_usage", "on_error", "on_incomplete"])
+@pytest.mark.asyncio
+async def test_automatic_load_is_released_by_every_stream_terminal_callback(
+    monkeypatch: pytest.MonkeyPatch, adapter: Any, outcome: str
+) -> None:
+    """Every terminal stream callback releases load, but only successful completion establishes affinity."""
+    from gateway.core.settings.routing import AutomaticRouting
+    from gateway.services.routing import AutomaticRouter, CompiledPlan
+    from gateway.types.attempt import Attempt
+
+    _Settlement().install(monkeypatch)
+    router = AutomaticRouter()
+    plan = router.rank(
+        CompiledPlan("model", [Attempt(1, "openai", LLMProvider.OPENAI, "m")]),
+        settings=AutomaticRouting(),
+        costs={"openai:m": Decimal(1)},
+        scope="workspace",
+        anchor="session",
+        region=None,
+        mode="stream",
+    )
+    assert plan.automatic is not None
+    observation = plan.automatic.start(plan.head)
+    captured: dict[str, Any] = {}
+
+    async def empty() -> AsyncIterator[Any]:
+        """Provide an exhausted stream so terminal callbacks can be exercised independently."""
+        return
+        yield
+
+    def capture(**kwargs: Any) -> AsyncIterator[Any]:
+        """Capture streaming callbacks for direct settlement and load-release assertions."""
+        captured.update(kwargs)
+        return empty()
+
+    monkeypatch.setattr(pipeline, "streaming_generator", capture)
+    build_streaming_response(
+        report_refusal=lambda _exc: None,
+        adapter=adapter,
+        stream=empty(),
+        provider=LLMProvider.OPENAI,
+        model="m",
+        config=GatewayConfig(),
+        db=cast(Any, object()),
+        log_writer=cast(Any, object()),
+        api_key_id=None,
+        user_id=None,
+        rate_limit_info=None,
+        reservation=None,
+        automatic_observation=observation,
+    )
+    captured["on_first_chunk"]()
+    assert observation.first_at is not None
+    args: list[Any] = []
+    if outcome == "on_complete":
+        args = [CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15)]
+    elif outcome == "on_error":
+        args = [TimeoutError()]
+    await captured[outcome](*args)
+    assert observation.finished
+    assert all(health.active == 0 for health in router.health.values())
+
+    assert bool(router.affinities) is (outcome in {"on_complete", "on_no_usage"})
+
+
+class _ModelNotServed(Exception):
+    status_code = 400
+
+    def __init__(self) -> None:
+        super().__init__("Unable to access non-serverless model m. Please visit the provider to start an endpoint.")
+
+
+def _refused_attempt() -> Attempt:
+    return Attempt(1, "together", LLMProvider.TOGETHER, "m", deployment_paid=True)
+
+
+def _reporting_ctx(listener: RecordingListener, *, plan: CompiledPlan | None = None) -> RequestContext:
+    ctx = _ctx(GatewayConfig(), db=object(), log_writer=object())
+    ctx.unavailable_model_reporter = UnavailableModelReporter(listener)
+    ctx.plan = plan
+    return ctx
+
+
+@pytest.mark.asyncio
+async def test_a_candidate_refusing_the_model_before_another_serves_is_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _Settlement().install(monkeypatch)
+    listener = RecordingListener()
+    refusal = _ModelNotServed()
+
+    await log_absorbed_attempt(_reporting_ctx(listener), chat._ADAPTER, _refused_attempt(), refusal)
+    await background_tasks_done()
+
+    assert listener.models == [UnavailableModel("together", "m", str(refusal), uses_deployment_credential=True)]
+
+
+@pytest.mark.asyncio
+async def test_a_plan_ending_on_a_candidate_refusing_the_model_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    _Settlement().install(monkeypatch)
+    listener = RecordingListener()
+    attempt = _refused_attempt()
+    refusal = _ModelNotServed()
+    exhausted = HTTPException(status_code=502, detail="every candidate failed")
+    exhausted.__cause__ = refusal
+
+    await log_exhausted_plan(
+        _reporting_ctx(listener, plan=CompiledPlan("model", [attempt])), chat._ADAPTER, exhausted, stopped_on=attempt
+    )
+    await background_tasks_done()
+
+    assert listener.models == [UnavailableModel("together", "m", str(refusal), uses_deployment_credential=True)]
+
+
+@pytest.mark.asyncio
+async def test_a_stream_ending_in_the_provider_refusing_the_model_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    _Settlement().install(monkeypatch)
+    listener = RecordingListener()
+    captured: dict[str, Any] = {}
+
+    async def empty() -> AsyncIterator[Any]:
+        return
+        yield
+
+    def capture(**kwargs: Any) -> AsyncIterator[Any]:
+        captured.update(kwargs)
+        return empty()
+
+    monkeypatch.setattr(pipeline, "streaming_generator", capture)
+    build_streaming_response(
+        report_refusal=partial(
+            UnavailableModelReporter(listener).report,
+            instance="together",
+            model="m",
+            uses_deployment_credential=True,
+        ),
+        adapter=chat._ADAPTER,
+        stream=empty(),
+        provider="together",
+        model="m",
+        config=GatewayConfig(),
+        db=cast(Any, object()),
+        log_writer=cast(Any, object()),
+        api_key_id=None,
+        user_id=None,
+        rate_limit_info=None,
+        reservation=None,
+    )
+    refusal = _ModelNotServed()
+
+    await captured["on_error"](refusal)
+    await background_tasks_done()
+
+    assert listener.models == [UnavailableModel("together", "m", str(refusal), uses_deployment_credential=True)]
+
+
+@pytest.mark.asyncio
+async def test_a_stream_the_provider_refuses_to_start_for_the_model_is_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _Settlement().install(monkeypatch)
+    listener = RecordingListener()
+    refusal = _ModelNotServed()
+
+    async def refusing_provider(**kwargs: Any) -> Any:
+        raise refusal
+
+    monkeypatch.setattr(chat, "acompletion", refusing_provider)
+    ctx = _reporting_ctx(listener)
+    ctx.deployment_paid = True
+
+    with pytest.raises(HTTPException):
+        await run_single_attempt_stream(
+            adapter=chat._ADAPTER,
+            ctx=ctx,
+            tool_ctx=_tool_ctx(),
+            call_kwargs={"model": "together:m", "messages": [{"role": "user", "content": "hi"}]},
+            provider=LLMProvider.TOGETHER,
+            model="m",
+        )
+    await background_tasks_done()
+
+    assert listener.models == [UnavailableModel("together", "m", str(refusal), uses_deployment_credential=True)]
+
+
+@pytest.mark.asyncio
+async def test_a_stream_refused_on_the_deployments_credential_with_nothing_to_charge_is_reported_as_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _Settlement().install(monkeypatch)
+    listener = RecordingListener()
+    captured: dict[str, Any] = {}
+
+    async def empty() -> AsyncIterator[Any]:
+        return
+        yield
+
+    async def streaming_provider(**kwargs: Any) -> Any:
+        return empty()
+
+    def capture(**kwargs: Any) -> AsyncIterator[Any]:
+        captured.update(kwargs)
+        return empty()
+
+    monkeypatch.setattr(chat, "acompletion", streaming_provider)
+    monkeypatch.setattr(pipeline, "streaming_generator", capture)
+    ctx = _reporting_ctx(listener)
+    ctx.deployment_paid = True
+    assert ctx.deployment_charge is None
+
+    await run_single_attempt_stream(
+        adapter=chat._ADAPTER,
+        ctx=ctx,
+        tool_ctx=_tool_ctx(),
+        call_kwargs={"model": "together:m", "messages": [{"role": "user", "content": "hi"}]},
+        provider=LLMProvider.TOGETHER,
+        model="m",
+    )
+    refusal = _ModelNotServed()
+    await captured["on_error"](refusal)
+    await background_tasks_done()
+
+    assert listener.models == [UnavailableModel("together", "m", str(refusal), uses_deployment_credential=True)]
+
+
+@pytest.mark.asyncio
+async def test_a_refused_stream_is_reported_with_the_credential_of_the_candidate_that_served_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _Settlement().install(monkeypatch)
+    listener = RecordingListener()
+    captured: dict[str, Any] = {}
+    own_key = Attempt(1, "openai", LLMProvider.OPENAI, "m")
+    hosted = _refused_attempt()
+
+    async def empty() -> AsyncIterator[Any]:
+        return
+        yield
+
+    async def serve_from_the_hosted_candidate(**kwargs: Any) -> tuple[Attempt, AsyncIterator[Any]]:
+        return hosted, empty()
+
+    def capture(**kwargs: Any) -> AsyncIterator[Any]:
+        captured.update(kwargs)
+        return empty()
+
+    monkeypatch.setattr(pipeline, "walk_attempts", serve_from_the_hosted_candidate)
+    monkeypatch.setattr(pipeline, "streaming_generator", capture)
+    ctx = _reporting_ctx(listener, plan=CompiledPlan("model", [own_key, hosted]))
+    assert not ctx.deployment_paid
+
+    await run_single_attempt_stream(
+        adapter=chat._ADAPTER,
+        ctx=ctx,
+        tool_ctx=_tool_ctx(),
+        call_kwargs={"model": "openai:m", "messages": [{"role": "user", "content": "hi"}]},
+        provider=LLMProvider.OPENAI,
+        model="m",
+        base_request_fields={},
+    )
+    refusal = _ModelNotServed()
+    await captured["on_error"](refusal)
+    await background_tasks_done()
+
+    assert listener.models == [UnavailableModel("together", "m", str(refusal), uses_deployment_credential=True)]
+
+
+def test_abandoned_stream_row_reads_as_incomplete_only_when_estimated() -> None:
+    args: dict[str, Any] = {
+        "policy": "estimate",
+        "prompt_chars": 400,
+        "streamed_chars": 10,
+        "has_tool_work": False,
+        "usage_is_final": True,
+    }
+    estimated = settle_abandoned_stream(**args, reported_usage=None)
+    assert estimated is not None
+    assert (estimated.incomplete, estimated.error) == (True, None)
+    assert estimated.usage is not None and estimated.usage.total_tokens == 103
+
+    reported = CompletionUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2)
+    disconnected = settle_abandoned_stream(**args, reported_usage=reported)
+    assert disconnected is not None
+    assert (disconnected.usage, disconnected.incomplete) == (reported, False)
+    assert disconnected.error == "client disconnected before the stream completed"
+
+    ignored = {**args, "policy": "ignore"}
+    assert settle_abandoned_stream(**ignored, reported_usage=None) is None
+    assert settle_abandoned_stream(**{**ignored, "has_tool_work": True}, reported_usage=None) is not None
+
+
+def test_an_abandoned_stream_with_only_its_input_reported_is_topped_up_like_a_provider_cut() -> None:
+    """Leaving an Anthropic stream before message_delta must not make its output free."""
+    started = CompletionUsage(prompt_tokens=120, completion_tokens=0, total_tokens=120)
+    args: dict[str, Any] = {"prompt_chars": 400, "streamed_chars": 8_000, "has_tool_work": False}
+
+    topped = settle_abandoned_stream(**args, policy="estimate", reported_usage=started, usage_is_final=False)
+    assert topped is not None and topped.usage is not None
+    assert (topped.usage.prompt_tokens, topped.usage.completion_tokens, topped.usage.total_tokens) == (120, 2000, 2120)
+    assert (topped.incomplete, topped.error) == (False, "client disconnected before the stream completed")
+
+    cut = settle_cut_stream(
+        policy="estimate", prompt_chars=400, streamed_chars=8_000, reported_usage=started, usage_is_final=False
+    )
+    assert cut == topped.usage
+
+    final = settle_abandoned_stream(**args, policy="estimate", reported_usage=started, usage_is_final=True)
+    assert final is not None and final.usage == started
+    unestimated = settle_abandoned_stream(**args, policy="allow_free", reported_usage=started, usage_is_final=False)
+    assert unestimated is not None and unestimated.usage == started
+
+
+@pytest.mark.asyncio
+async def test_an_unavailable_stored_server_credential_is_a_503_with_no_detail_of_the_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rendered through ``domain_error`` as every tenancy error here is: retryable, and the server stays in the log."""
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    server_id = uuid.uuid4()
+
+    async def unavailable(workspace_id: uuid.UUID, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
+        raise McpConnectionUnavailableError(server_id)
+
+    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_prepare_gateway_tools(ctx, mcp_server=_Servers(unavailable), mcp_server_ids=[server_id])
+
+    assert exc_info.value.status_code == 503
+    assert str(server_id) not in str(exc_info.value.detail)
+    assert settlement.refunded == 1
+
+
+def _round_gate_ctx(monkeypatch: pytest.MonkeyPatch, rate: float, hold: Callable[..., Any]) -> RequestContext:
+    """A request holding a reservation, served on a model priced at ``rate``, whose round holds go to ``hold``."""
+    monkeypatch.setattr(pipeline, "hold_tool_call", hold)
+    monkeypatch.setattr(pipeline, "release_session", AsyncMock())
+    handle = _reservation()
+    handle.reservation_id = "reservation-1"
+    ctx = _ctx(GatewayConfig(), db=SimpleNamespace(rollback=AsyncMock()), reservation=handle)
+    ctx.estimate_inputs = EstimateInputs(prompt_chars=40, max_output_tokens=8000, default_output_tokens=1024)
+    ctx.serving = ("openai", "gpt-4", False)
+    pricing = ModelPricing(model_key="openai:gpt-4", input_price_per_million=rate, output_price_per_million=rate)
+    ctx.prices = cast(Any, SimpleNamespace(resolve=AsyncMock(return_value=ResolvedPricing(pricing, "deployment"))))
+    return ctx
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("rate", "dollars"), [(10.0, 0.1), (0.0, 0.0)], ids=["priced", "free"])
+async def test_a_tool_loop_round_holds_its_prompt_and_a_free_one_its_tokens_alone(
+    monkeypatch: pytest.MonkeyPatch, rate: float, dollars: float
+) -> None:
+    """A round grows the hold by its own prompt only: the request's one output limit is already held."""
+    holds: list[tuple[Decimal, int, bool]] = []
+
+    async def fake_hold(
+        db: Any, handle: Any, amount: Decimal, *, strategy: str, tokens: int = 0, model_is_free: bool = False
+    ) -> Decimal:
+        holds.append((amount, tokens, model_is_free))
+        return amount
+
+    ctx = _round_gate_ctx(monkeypatch, rate, fake_hold)
+
+    assert await pipeline.ReservationRoundGate(ctx).admit(40_000, 0) is True
+
+    [(amount, tokens, model_is_free)] = holds
+    assert float(amount) == pytest.approx(dollars)
+    assert tokens == 10_000
+    assert model_is_free is (dollars == 0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("written", "output_tokens"), [(2_000, 2_000), (None, 8_000)], ids=["reported", "unreported"])
+async def test_a_tool_loop_round_holds_what_the_round_before_wrote(
+    monkeypatch: pytest.MonkeyPatch, written: int | None, output_tokens: int
+) -> None:
+    """The round before's reported output is held at the output rate; with no report, the request's output limit is."""
+    holds: list[tuple[Decimal, int]] = []
+
+    async def fake_hold(
+        db: Any, handle: Any, amount: Decimal, *, strategy: str, tokens: int = 0, model_is_free: bool = False
+    ) -> Decimal:
+        holds.append((amount, tokens))
+        return amount
+
+    ctx = _round_gate_ctx(monkeypatch, 10.0, fake_hold)
+
+    assert await pipeline.ReservationRoundGate(ctx).admit(40_000, written) is True
+
+    [(amount, tokens)] = holds
+    assert float(amount) == pytest.approx((10_000 + output_tokens) * 10 / 1_000_000)
+    assert tokens == 10_000 + output_tokens
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("reserved", "fits"), [(False, True), (True, False)], ids=["holds nothing", "unledgered"])
+async def test_a_tool_loop_round_grows_no_hold_without_a_ledger_row(
+    monkeypatch: pytest.MonkeyPatch, reserved: bool, fits: bool
+) -> None:
+    """A request that holds nothing is not gated; one whose hold has no ledger row ends its loop at that round.
+
+    A hold with no ledger row cannot be reclaimed if the request is abandoned, so it is not grown.
+    """
+    hold = AsyncMock(return_value=Decimal("0.1"))
+    ctx = _round_gate_ctx(monkeypatch, 10.0, hold)
+    assert ctx.reservation is not None
+    ctx.reservation.reservation_id = None
+    ctx.reservation.reserved = reserved
+
+    assert await pipeline.ReservationRoundGate(ctx).admit(40_000, 0) is fits
+    hold.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["no room", "database"])
+async def test_a_tool_loop_round_that_cannot_be_held_is_refused(monkeypatch: pytest.MonkeyPatch, failure: str) -> None:
+    """A round the budgets have no room for, or cannot be asked about, is not held and is sent as the last."""
+
+    async def fake_hold(
+        db: Any, handle: Any, amount: Decimal, *, strategy: str, tokens: int = 0, model_is_free: bool = False
+    ) -> Decimal | None:
+        if failure == "database":
+            raise SQLAlchemyError("budgets unavailable")
+        return None
+
+    ctx = _round_gate_ctx(monkeypatch, 10.0, fake_hold)
+
+    assert await pipeline.ReservationRoundGate(ctx).admit(40_000, 0) is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("route", "loop", "stream"),
+    [
+        ("chat", "mcp_tool_loop", False),
+        ("chat", "mcp_tool_loop_stream", True),
+        ("messages", "anthropic_tool_loop", False),
+        ("messages", "anthropic_tool_loop_stream", True),
+        ("responses", "responses_tool_loop", False),
+        ("responses", "responses_tool_loop_stream", True),
+    ],
+)
+async def test_every_format_hands_the_round_gate_to_its_tool_loop(
+    monkeypatch: pytest.MonkeyPatch, route: str, loop: str, stream: bool
+) -> None:
+    module = importlib.import_module(f"gateway.api.routes.{route}")
+    seen: dict[str, Any] = {}
+    gate = cast(Any, object())
+
+    def fake_stream(**kwargs: Any) -> Any:
+        seen.update(kwargs)
+        return None
+
+    async def fake_loop(**kwargs: Any) -> Any:
+        seen.update(kwargs)
+        return None
+
+    monkeypatch.setattr(module, loop, fake_stream if stream else fake_loop)
+    adapter = module._ADAPTER
+    kwargs = {"model": "m", "messages": []}
+    if stream:
+        adapter.open_tool_loop_stream(kwargs, cast(Any, object()), 3, round_gate=gate)
+    else:
+        await adapter.run_tool_loop(kwargs, cast(Any, object()), 3, round_gate=gate)
+
+    assert seen["round_gate"] is gate

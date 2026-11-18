@@ -10,12 +10,7 @@ import pytest
 
 from gateway.core.config import GatewayConfig
 from gateway.models.routing import PolicySpec
-from gateway.services.routing.backends import (
-    PRIORITY_BACKEND,
-    backend_pool_is_teachable,
-    backend_requires_pricing,
-    known_backends,
-)
+from gateway.services.routing.backends import PRIORITY_BACKEND, known_backends
 from gateway.services.routing.compiler import compile_policy
 from gateway.services.routing.decide import RoutingSignal, decide_ordering, explain_router_ordering
 
@@ -59,7 +54,7 @@ def test_the_plan_keeps_the_declared_order_ahead_of_on_failure(config: GatewayCo
             policy_name="spill",
             user_id="alice",
             allowlist=None,
-            signal=RoutingSignal(task_signal="hi", trace_signal="hi", trace_anchor="hi"),
+            signal=RoutingSignal(),
         )
     )
 
@@ -79,7 +74,7 @@ def test_a_candidate_the_caller_may_not_use_is_left_out(config: GatewayConfig) -
             policy_name="spill",
             user_id="alice",
             allowlist=["anthropic:claude-sonnet-4-5", "mistral:mistral-small"],
-            signal=RoutingSignal(task_signal="hi", trace_signal="hi", trace_anchor="hi"),
+            signal=RoutingSignal(),
         )
     )
 
@@ -95,7 +90,5 @@ def test_explain_shows_the_declared_order(config: GatewayConfig) -> None:
     assert _canonical(config, spec, ordering)[:2] == ["openai:gpt-5", "anthropic:claude-sonnet-4-5"]
 
 
-def test_priority_is_a_known_backend_that_needs_no_pricing_or_examples() -> None:
+def test_priority_is_a_known_backend() -> None:
     assert PRIORITY_BACKEND in known_backends()
-    assert not backend_requires_pricing(PRIORITY_BACKEND)
-    assert not backend_pool_is_teachable(PRIORITY_BACKEND)

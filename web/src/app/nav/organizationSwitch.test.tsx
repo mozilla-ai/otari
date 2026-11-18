@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { WorkspaceSwitcher } from "@/app/nav/WorkspaceSwitcher"
 import type { MembershipRole, UsageSummary } from "@/client"
-import { OverviewIndex } from "@/features/overview/OverviewPage"
+import { Home } from "@/features/home/Home"
 import * as apiClient from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
@@ -14,6 +14,7 @@ import {
   callerOrganizationMembership,
   organization,
   organizationContext,
+  organizationSpendCeiling,
   usageTotals,
 } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
@@ -27,6 +28,7 @@ import { withRouter } from "@/tests/router"
  * a gate reads is itself one of the things a switch moves.
  */
 
+const FIRST_ORGANIZATION_ID = "11111111-1111-1111-1111-111111111111"
 const SECOND_ORGANIZATION_ID = "99999999-9999-9999-9999-999999999999"
 const WORKSPACE_HERE = "44444444-4444-4444-4444-444444444444"
 const WORKSPACE_THERE = "55555555-5555-5555-5555-555555555555"
@@ -51,31 +53,26 @@ function emptySummary(): UsageSummary {
   }
 }
 
-/** The overview summary an organization admin gets, carrying one ceiling. */
-function ceilingSummary({
+/** One organization-wide spend ceiling, with no period end so it never lapses. */
+function ceilingsPage({
+  organizationId,
   spent,
   allocated,
 }: {
+  organizationId: string
   spent: number
   allocated: number
 }) {
-  return {
-    active_keys: 0,
-    active_members: 0,
-    budgets: null,
-    ceilings: {
-      over_count: spent >= allocated ? 1 : 0,
-      near_count: spent / allocated >= 0.8 && spent < allocated ? 1 : 0,
-      capped_count: 1,
-      total_count: 1,
-      worst: {
-        budget_id: "cccccccc-1111-2222-3333-444444444444",
-        name: "Ceiling",
-        spent,
-        allocated,
-      },
-    },
-  }
+  const rows = [
+    organizationSpendCeiling({
+      scope_id: organizationId,
+      max_budget: allocated,
+      current_spend: spent,
+      period_start: null,
+      period_end: null,
+    }),
+  ]
+  return { data: rows, count: rows.length }
 }
 
 /**
@@ -153,28 +150,26 @@ function mockApi({
       ]
       return { data: rows, count: rows.length } as never
     }
-    if (url.startsWith("/overview")) {
+    if (url.startsWith("/organizations/me/spend-ceilings")) {
       if (active === "there") {
-        if (roleThere !== "admin") {
-          // The strip is withheld rather than refused: the summary answers 200
-          // for a member and simply carries no ceilings.
-          return {
-            active_keys: 0,
-            active_members: 0,
-            budgets: null,
-            ceilings: null,
-          } as never
-        }
-        // A different figure from the one here, so the cell says which
-        // organization answered it: 10 of 100.
-        return ceilingSummary({ spent: 10, allocated: 100 }) as never
+        // A different figure from the one here, so Home says which
+        // organization answered it: 10 of 100, inside its limit.
+        return ceilingsPage({
+          organizationId: SECOND_ORGANIZATION_ID,
+          spent: 10,
+          allocated: 100,
+        }) as never
       }
       if (holdCeilingsHere) {
         await holdCeilingsHere.held
         holdCeilingsHere.answered()
       }
-      // 200 of 250, which the budget-health cell reads as 80.0%.
-      return ceilingSummary({ spent: 200, allocated: 250 }) as never
+      // 200 of 250, which Home shows as 80% of $250.
+      return ceilingsPage({
+        organizationId: FIRST_ORGANIZATION_ID,
+        spent: 200,
+        allocated: 250,
+      }) as never
     }
     if (url.startsWith("/organizations/me/usage/summary")) {
       return emptySummary() as never
@@ -186,6 +181,7 @@ function mockApi({
     // array, so the fallthrough answers the shape the caller walks.
     if (
       url.startsWith("/organizations/me/pending-memberships") ||
+      url.startsWith("/organizations/me/members") ||
       url.startsWith("/workspaces/")
     ) {
       return { data: [], count: 0 } as never
@@ -205,11 +201,11 @@ function renderShellOverPage() {
       <DeploymentProvider value={bootstrap()}>
         <SelectedWorkspaceProvider>
           <WorkspaceSwitcher isCollapsed={false} />
-          <OverviewIndex />
+          <Home />
         </SelectedWorkspaceProvider>
       </DeploymentProvider>
     </QueryClientProvider>,
-    { wrapper: withRouter({ url: "/overview" }) },
+    { wrapper: withRouter({ url: "/" }) },
   )
 }
 
@@ -251,34 +247,30 @@ describe("switching organization", () => {
   it("keeps a page working where the new role is lower", async () => {
     const requests = mockApi({ roleThere: "member" })
     renderShellOverPage()
-    await screen.findByText(/At-a-glance spend/)
+    await screen.findByRole("heading", { name: "Home" })
 
     await switchOrganization()
 
-    // The page's own reads are made again, the summary among them. It is asked
-    // for whatever the role, because it answers 200 and leaves the ceilings out
-    // for a caller who may not see them; the client used to have to withhold a
-    // ceilings read instead, and asking anyway left "Not enough privileges to
-    // perform this action" on a page that was working.
+    // The page's own reads are made again in the new role. The ceilings are
+    // a manager's alone, so a member is not asked for them: asking anyway once
+    // left "Not enough privileges to perform this action" on a page that was
+    // working.
     await waitFor(() => {
       expect(
         afterSwitch(requests).some((r) => r.includes("usage/summary")),
       ).toBe(true)
     })
-    await waitFor(() => {
-      expect(afterSwitch(requests).some((r) => r.includes("/overview"))).toBe(
-        true,
-      )
-    })
+    expect(
+      afterSwitch(requests).some((r) => r.includes("/spend-ceilings")),
+    ).toBe(false)
     expect(screen.queryByText(/Not enough privileges/)).toBeNull()
-    // And no budget cell, because the summary withheld the strip.
-    expect(screen.queryByText("10.0%")).toBeNull()
+    expect(screen.queryByText(/Change spend limit/)).toBeNull()
   })
 
   it("takes the new role from the switch's own answer", async () => {
     const requests = mockApi({ roleThere: "member" })
     renderShellOverPage()
-    await screen.findByText(/At-a-glance spend/)
+    await screen.findByRole("heading", { name: "Home" })
 
     await switchOrganization()
 
@@ -298,30 +290,35 @@ describe("switching organization", () => {
     // under that one rather than under the organization now on screen.
     const hold = deferred()
     const answered = deferred()
-    mockApi({
+    const requests = mockApi({
       roleThere: "admin",
       holdCeilingsHere: { held: hold.promise, answered: answered.resolve },
     })
     renderShellOverPage()
-    await screen.findByText(/At-a-glance spend/)
+    await screen.findByRole("heading", { name: "Home" })
 
     await switchOrganization()
-    // The organization switched into has answered, so the cell has a figure of
-    // its own for the late one to overwrite.
-    expect(await screen.findByText("10.0%")).toBeInTheDocument()
+    // The organization switched into has answered, with a ceiling well inside
+    // its limit, so Home shows 10 of $100 and no $250.
+    await waitFor(() => {
+      expect(
+        afterSwitch(requests).some((r) => r.includes("/spend-ceilings")),
+      ).toBe(true)
+    })
 
     hold.resolve()
     await answered.promise
     await act(async () => {})
 
-    expect(screen.getByText("10.0%")).toBeInTheDocument()
-    expect(screen.queryByText("80.0%")).toBeNull()
+    // The late answer is the one that is at 80% of $250 (200 of 250), and it
+    // is about the organization that was left.
+    expect(screen.queryByText(/\$250/)).toBeNull()
   })
 
   it("does not ask for a workspace of the organization it left", async () => {
     const requests = mockApi({ roleThere: "admin" })
     renderShellOverPage()
-    await screen.findByText(/At-a-glance spend/)
+    await screen.findByRole("heading", { name: "Home" })
     expect(requests.some((r) => r.includes(WORKSPACE_HERE))).toBe(true)
 
     await switchOrganization()
@@ -342,7 +339,7 @@ describe("switching organization", () => {
   it("makes the gated read again where the role survives the switch", async () => {
     const requests = mockApi({ roleThere: "admin" })
     renderShellOverPage()
-    await screen.findByText(/At-a-glance spend/)
+    await screen.findByRole("heading", { name: "Home" })
 
     await switchOrganization()
 
@@ -350,9 +347,9 @@ describe("switching organization", () => {
     // it belongs to the organization just left, not for as long as the caller
     // is switching.
     await waitFor(() => {
-      expect(afterSwitch(requests).some((r) => r.includes("/overview"))).toBe(
-        true,
-      )
+      expect(
+        afterSwitch(requests).some((r) => r.includes("/spend-ceilings")),
+      ).toBe(true)
     })
     expect(screen.queryByText(/Not enough privileges/)).toBeNull()
   })

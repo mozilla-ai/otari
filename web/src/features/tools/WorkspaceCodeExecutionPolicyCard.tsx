@@ -9,6 +9,7 @@ import { Toggle } from "@/design-system/forms/Toggle"
 import { SettingRow } from "@/design-system/layout/SettingRow"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { canManageWorkspace } from "@/features/organization/roles"
+import { ExecutorRow } from "@/features/tools/ExecutorRow"
 import { usePolicyWriter } from "@/features/tools/usePolicyWriter"
 import { WorkspaceToolStatus } from "@/features/tools/WorkspaceToolStatus"
 import { useOrganizationContext } from "@/shared/api/organizations"
@@ -21,8 +22,9 @@ import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useAutosave } from "@/shared/hooks/useAutosave"
 
 // The stored policy has three states (allowed, blocked, none) and can also
-// narrow limits, the image and the tool kinds. The card shows only the switch;
-// the narrowing fields are set through the API.
+// narrow limits, the image and the tool kinds, and pin who runs a provider's own
+// code tool. The card shows the switch and the pin; the narrowing fields are set
+// through the API.
 //
 // What "none" means is the deployment's `default_enabled`. Switching to that
 // value deletes a policy that narrows nothing else, and any other change writes.
@@ -206,6 +208,15 @@ export function WorkspaceCodeExecutionPolicyCard({
             isDisabled={isUnreadable || !hasSandbox || save.isSaving}
           />
         }
+      />
+      <ExecutorRow
+        label="Who runs provider code tools"
+        help="For a provider's own code tool (Anthropic code_execution, OpenAI code_interpreter)."
+        value={policy?.executor}
+        onChange={(executor) =>
+          void save.run(() => write({ enabled: true, executor }))
+        }
+        disabled={isUnreadable || !hasSandbox || !isOn || save.isSaving}
       />
     </SettingsGroup>
   )

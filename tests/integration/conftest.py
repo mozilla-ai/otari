@@ -5,10 +5,13 @@ import socket
 import sys
 import threading
 import time
-from collections.abc import AsyncGenerator, Callable, Generator
+from collections.abc import AsyncGenerator, Callable, Generator, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
@@ -17,7 +20,7 @@ from alembic import command
 from alembic.config import Config
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, create_engine, inspect, text
+from sqlalchemy import Engine, MetaData, create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -32,6 +35,7 @@ if "gateway" in sys.modules:
 
 from gateway.api.deps import (
     build_hosted_provider_service,
+    build_unavailable_model_reporter,
     get_membership_listener,
     set_config,
 )
@@ -40,9 +44,43 @@ from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.db import get_db
 from gateway.main import create_app, install_rate_limits
 from gateway.rate_limit import RateLimiter
+from gateway.services.budgets import reserve_budget
 from gateway.services.feedback import new_feedback_rate_limiter
+from gateway.services.providers import new_platform_connect_rate_limiter
+from gateway.services.tools import WebSearchBackend
+from gateway.types.key_scope import END_USER_SCOPES, KeyScope, KeyScopeSet
 
 MODEL_NAME = "gemini:gemini-2.5-flash"
+# Every scope a key that is not a service key may hold, for a test of something other than scopes.
+ALL_KEY_SCOPES_HELD = KeyScopeSet.checked((s for s in KeyScope if s not in END_USER_SCOPES), is_service_key=False)
+# The same scopes as a request body names them.
+ALL_KEY_SCOPES = ALL_KEY_SCOPES_HELD.stored
+# Every scope, which only a service key may hold.
+ALL_SERVICE_KEY_SCOPES = [scope.value for scope in KeyScope]
+
+
+def all_scopes(settings: dict[str, Any]) -> list[str]:
+    """Every scope a key created with ``settings`` may hold."""
+    return ALL_SERVICE_KEY_SCOPES if settings.get("is_service_key") else ALL_KEY_SCOPES
+
+
+# The ``fake`` search instance ``serve_search_on_fake`` serves the in-loop search on, and the fetch instance it may
+# enrich its hits through.
+FAKE_SEARCH = "fake-search"
+FAKE_FETCH = "fake-fetch"
+
+
+@contextmanager
+def held_reservations() -> Iterator[list[Decimal]]:
+    """Every amount a pass-through request reserved before calling the provider."""
+    held: list[Decimal] = []
+
+    async def capture(*args: Any, **kwargs: Any) -> Any:
+        held.append(Decimal(str(args[2])))
+        return await reserve_budget(*args, **kwargs)
+
+    with patch("gateway.api.routes._passthrough.reserve_budget", side_effect=capture):
+        yield held
 
 
 def alembic_config(database_url: str) -> Config:
@@ -83,9 +121,16 @@ def _reset_engine(database_url: str) -> Engine:
 
 
 def _build_reset_plan(database_url: str) -> _ResetPlan:
-    """Record the schema's tables, and whatever the migrations seeded into them."""
+    """Record the schema's tables, in an order safe to reinsert, and whatever the migrations seeded."""
     with _reset_engine(database_url).connect() as conn:
-        tables = [name for name in inspect(conn).get_table_names() if name != "alembic_version"]
+        metadata = MetaData()
+        metadata.reflect(conn)
+        # A seeded row in a child table can reference a seeded row in a parent table, so
+        # reinsertion needs that same order. Table-name order gives no such guarantee.
+        # NOTE: ``organization`` and ``user`` reference each other, so no foreign-key order exists
+        # for that pair and SQLAlchemy warns and orders them by name, which seeds them in the
+        # direction they need.
+        tables = [table.name for table in metadata.sorted_tables if table.name != "alembic_version"]
         seeds = tuple(
             (table, rows)
             for table in tables
@@ -214,6 +259,13 @@ def clean_database(postgres_url: str) -> None:
     """
     _run_alembic_migrations(postgres_url)
     reset_database(postgres_url)
+
+
+@pytest.fixture
+def unpriced_builtin_fetch(postgres_url: str, clean_database: None) -> None:
+    """A database whose ``builtin_fetch`` has no price: a migration gives it 0 on a fresh one."""
+    with _reset_engine(postgres_url).begin() as conn:
+        conn.execute(text("DELETE FROM model_pricing WHERE kind = 'fetch' AND model_key = 'builtin_fetch'"))
 
 
 @pytest.fixture
@@ -398,6 +450,7 @@ def _refresh_process_state(app: FastAPI, config: GatewayConfig) -> None:
         else None
     )
     app.state.feedback_rate_limiter = new_feedback_rate_limiter() if config.feedback_enabled else None
+    app.state.platform_connect_rate_limiter = new_platform_connect_rate_limiter()
     # Built on first use and caching each issuer's signing keys, so a test's stub must not serve the next test.
     app.state.federated_token_verifier = None
     app.state.container = build_container(
@@ -406,6 +459,7 @@ def _refresh_process_state(app: FastAPI, config: GatewayConfig) -> None:
         membership_listener=get_membership_listener,
         hosted_provider_service=functools.partial(build_hosted_provider_service, config=config),
     )
+    app.state.unavailable_model_reporter = build_unavailable_model_reporter(config)
     install_rate_limits(app, config)
 
 
@@ -419,7 +473,7 @@ def dispose_async_engine(async_engine: AsyncEngine) -> None:
         loop.close()
 
 
-def build_test_client(config: GatewayConfig) -> Generator[TestClient]:
+def build_test_client(config: GatewayConfig, *, base_url: str = "http://testserver") -> Generator[TestClient]:
     """Boot an app on the worker's database and hand back a client for it.
 
     Where a test client that owns its database lifecycle is assembled: the schema
@@ -428,6 +482,9 @@ def build_test_client(config: GatewayConfig) -> Generator[TestClient]:
     their own ``yield from`` this rather than restating it. A handful still build
     an app inline through ``build_async_session_override``; those never touched
     the schema, so they were left alone.
+
+    ``base_url`` is the address requests are sent to, which sets the scheme the
+    server sees.
     """
     _run_alembic_migrations(config.database_url)
     async_engine = create_async_engine(_to_async_url(config.database_url), pool_pre_ping=True)
@@ -443,7 +500,7 @@ def build_test_client(config: GatewayConfig) -> Generator[TestClient]:
     app.dependency_overrides = {get_db: override_get_db}
 
     try:
-        with TestClient(app) as test_client:
+        with TestClient(app, base_url=base_url) as test_client:
             yield test_client
     finally:
         dispose_async_engine(async_engine)
@@ -462,6 +519,64 @@ def client(test_config: GatewayConfig, clean_database: None) -> Generator[TestCl
 
 
 @pytest.fixture
+def serve_search_on_fake(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
+    """Serve the in-loop search on the ``fake`` search instance ``FAKE_SEARCH``, named in ``web_search_default_tool``.
+
+    Call it with the instance's options; with ``fetch``, the options of the
+    ``fake`` fetch instance ``FAKE_FETCH`` that enriches its hits; and with
+    ``extract=False`` for a search that reads no pages.
+
+    It sets the instances once the client has booted, on the config its app
+    reads, and sets them as that config's baseline too. The overlay rebuilds
+    the maps from the baseline at each boot and each refresh, and the worker's
+    shared ``test_config`` keeps the baseline it first boots with, so an
+    instance set before the boot would reach every later test, and one set only
+    in the maps would be dropped by a refresh during the test.
+    """
+    config: GatewayConfig = cast(FastAPI, client.app).state.config
+
+    def serve(
+        options: dict[str, Any] | None = None, *, fetch: dict[str, Any] | None = None, extract: bool = True
+    ) -> None:
+        search: dict[str, Any] = {"provider": "fake", "options": options or {}}
+        if fetch is not None:
+            search["fetch_tool"] = FAKE_FETCH
+            fetch_tools = {FAKE_FETCH: {"provider": "fake", "options": fetch}}
+            monkeypatch.setattr(config, "fetch_tools", fetch_tools)
+            monkeypatch.setattr(config, "_fetch_tool_baseline", fetch_tools)
+        monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+        monkeypatch.setattr(config, "search_tools", {FAKE_SEARCH: search})
+        monkeypatch.setattr(config, "_search_tool_baseline", {FAKE_SEARCH: search})
+        monkeypatch.setattr(config, "web_search_default_tool", FAKE_SEARCH)
+        if not extract:
+            monkeypatch.setattr(config, "web_search_extract", False)
+
+    return serve
+
+
+def price_fake_search(client: TestClient, headers: dict[str, str], *, per_million: float) -> dict[str, Any]:
+    """Price calls to ``FAKE_SEARCH`` at its own row, at ``per_million`` USD per million calls."""
+    response = client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "kind": "search",
+            "model_key": FAKE_SEARCH,
+            "input_price_per_million": per_million,
+            "output_price_per_million": 0.0,
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    priced: dict[str, Any] = response.json()
+    return priced
+
+
+def admitted_search_spy() -> Any:
+    """A spy on each search the library backend runs once its call cap and the request's budget admitted it."""
+    return patch.object(WebSearchBackend, "_call", autospec=True, side_effect=WebSearchBackend._call)
+
+
+@pytest.fixture
 def master_key_header(test_config: GatewayConfig) -> dict[str, str]:
     """Return authentication header with master key."""
     header_name = API_KEY_HEADER
@@ -470,10 +585,10 @@ def master_key_header(test_config: GatewayConfig) -> dict[str, str]:
 
 @pytest.fixture
 def api_key_obj(client: TestClient, master_key_header: dict[str, str]) -> dict[str, Any]:
-    """Create a test API key and return its details."""
+    """Create a test API key holding every scope a key that is not a service key may, and return its details."""
     response = client.post(
         f"{API_ROOT}/keys",
-        json={"key_name": "test-key"},
+        json={"key_name": "test-key", "scopes": ALL_KEY_SCOPES},
         headers=master_key_header,
     )
     assert response.status_code == 200

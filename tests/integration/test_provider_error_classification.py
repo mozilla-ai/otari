@@ -11,17 +11,15 @@ from unittest.mock import AsyncMock, patch
 
 import anthropic
 import httpx
+import httpx2
 import openai
 import pytest
 from any_llm.exceptions import UnsupportedParameterError
 from cohere.errors import BadRequestError as CohereBadRequestError
 from fastapi.testclient import TestClient
 
-from gateway.api.routes._pipeline import (
-    PROVIDER_CREDENTIALS_DETAIL,
-    PROVIDER_RATE_LIMITED_DETAIL,
-)
 from gateway.core.config import API_ROOT
+from gateway.core.error_details import ProviderDetail
 
 _RAW = "raw upstream message SECRET-9f3a"
 
@@ -51,16 +49,17 @@ class _ParamError(Exception):
 
 # (upstream status, mapped HTTP status, mapped detail). 500 and the bare case
 # fall through to the generic provider error each format already returned.
-# 400/422/404 are the caller's request to fix and 429 is theirs to act on, so
-# those carry the upstream message; the rest are the gateway's own fault and
+# 400/422/404/413 are the caller's request to fix and 429 is theirs to act on,
+# so those carry the upstream message; the rest are the gateway's own fault and
 # keep a fixed string.
 _CASES = [
     (400, 400, _RAW),
     (422, 400, _RAW),
     (404, 404, _RAW),
+    (413, 413, _RAW),
     (429, 429, _RAW),
-    (401, 424, PROVIDER_CREDENTIALS_DETAIL),
-    (403, 424, PROVIDER_CREDENTIALS_DETAIL),
+    (401, 424, ProviderDetail.CREDENTIALS),
+    (403, 424, ProviderDetail.CREDENTIALS),
 ]
 
 
@@ -114,7 +113,7 @@ def test_chat_rate_limit_falls_back_when_the_provider_said_nothing(
         )
 
     assert response.status_code == 429
-    assert response.json()["detail"] == PROVIDER_RATE_LIMITED_DETAIL
+    assert response.json()["detail"] == ProviderDetail.RATE_LIMITED
 
 
 def test_chat_forwards_the_upstream_retry_after(
@@ -291,8 +290,9 @@ def test_responses_classifies_provider_error(
 _MESSAGES_CASES = [
     (400, 400, _RAW, "invalid_request_error"),
     (404, 404, _RAW, "not_found_error"),
+    (413, 413, _RAW, "request_too_large"),
     (429, 429, _RAW, "rate_limit_error"),
-    (401, 424, PROVIDER_CREDENTIALS_DETAIL, "api_error"),
+    (401, 424, ProviderDetail.CREDENTIALS, "api_error"),
 ]
 
 
@@ -323,6 +323,45 @@ def test_messages_classifies_provider_error(
     assert detail["error"]["message"] == expected_detail
     if expected_detail != _RAW:
         assert "SECRET" not in response.text
+
+
+@pytest.mark.parametrize(
+    ("path", "target", "body_fixture"),
+    [
+        ("chat/completions", "gateway.api.routes.chat.acompletion", None),
+        ("responses", "gateway.api.routes.responses.aresponses", "responses_request_body"),
+        ("messages", "gateway.api.routes.messages.amessages", "messages_request_body"),
+    ],
+)
+def test_a_provider_413_carries_the_request_too_large_code(
+    request: pytest.FixtureRequest,
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_user: dict[str, Any],
+    path: str,
+    target: str,
+    body_fixture: str | None,
+) -> None:
+    """Every format names a provider 413 with the same code, so a caller can
+    tell it from a 400 without parsing the provider's sentence."""
+    body: dict[str, Any] = (
+        request.getfixturevalue(body_fixture)
+        if body_fixture
+        else {
+            "model": "openai:nonexistent-model-xyz",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "user": "test-user",
+        }
+    )
+    if path == "messages":
+        body["metadata"] = {"user_id": "test-user"}
+
+    with patch(target, new_callable=AsyncMock, side_effect=_StatusError(413)):
+        response = client.post(f"{API_ROOT}/{path}", json=body, headers=master_key_header)
+
+    assert response.status_code == 413
+    assert response.headers["Otari-Error-Code"] == "request_too_large"
+    assert "Retry-After" not in response.headers
 
 
 _TEMPERATURE_MSG = (
@@ -397,9 +436,9 @@ def test_messages_answers_a_provider_400_with_the_providers_sentence(
     messages_request_body: dict[str, Any],
 ) -> None:
     body = {"type": "error", "error": {"type": "invalid_request_error", "message": "max_tokens: Field required"}}
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     upstream = anthropic.BadRequestError(
-        f"Error code: 400 - {body}", response=httpx.Response(400, request=request, json=body), body=body
+        f"Error code: 400 - {body}", response=httpx2.Response(400, request=request, json=body), body=body
     )
     messages_request_body["metadata"] = {"user_id": "test-user"}
 

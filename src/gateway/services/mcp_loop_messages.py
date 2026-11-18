@@ -31,8 +31,11 @@ from any_llm.types.messages import (
 
 from gateway.log_config import logger
 from gateway.services._tool_loop import (
+    INVALID_ARGUMENTS_ERROR,
+    RoundGate,
     StreamAction,
     log_tool_failure,
+    parse_tool_arguments,
     run_tool_loop,
     run_tool_loop_stream,
     tool_failure_detail,
@@ -52,6 +55,7 @@ from gateway.services.tools import (
     MAX_USES_EXCEEDED_ERROR,
     Dialect,
     NativeCall,
+    Refusal,
     ToolUseBudget,
     is_capped_call,
     native_rendering,
@@ -117,13 +121,14 @@ class _NativeSink:
         self._blocks.extend(blocks)
 
 
-def _max_uses_exceeded_result(call: NativeCall, native: _NativeSink | None) -> dict[str, Any]:
-    """The tool_result for a call the use cap refused, collecting its native blocks."""
+def _refused_result(call: NativeCall, native: _NativeSink | None, reason: Refusal) -> dict[str, Any]:
+    """The tool_result for a call refused before it ran, collecting its native blocks."""
     if native is not None and native.wants(call.name):
         rendering = native_rendering(call.name, Dialect.MESSAGES)
         if rendering is not None:
-            native.extend(rendering.refused(call))
-    return {"type": "tool_result", "tool_use_id": call.id, "content": MAX_USES_EXCEEDED_ERROR}
+            native.extend(rendering.refused(call, reason))
+    error = MAX_USES_EXCEEDED_ERROR if reason is Refusal.CALL_LIMIT else INVALID_ARGUMENTS_ERROR
+    return {"type": "tool_result", "tool_use_id": call.id, "content": error}
 
 
 def _native_blocks_for_call(pool: ToolBackend, call: NativeCall) -> list[Any]:
@@ -182,7 +187,7 @@ async def _execute_tool_uses(
         arguments = dict(block.input or {})
         capped = is_capped_call(budget, pool, block.name)
         if capped and budget is not None and budget.exhausted(block.name):
-            out.append(_max_uses_exceeded_result(NativeCall(block.name, block.id, arguments), native))
+            out.append(_refused_result(NativeCall(block.name, block.id, arguments), native, Refusal.CALL_LIMIT))
             continue
         owner = owning_backend(pool, block.name)
         try:
@@ -365,7 +370,7 @@ class _MessagesStreamState:
 
 
 def _parsed_stream_input(state: _MessagesStreamState, spec: dict[str, Any]) -> dict[str, Any]:
-    """Parse one buffered tool input, falling back to the loop's historical empty object."""
+    """One buffered tool input as the assistant turn replays it, an empty object where it is not one."""
     try:
         value = json.loads(state.tool_use_json_bufs.get(spec["index"], "") or "{}")
     except json.JSONDecodeError:
@@ -435,15 +440,19 @@ async def _execute_stream_owned_events(
 ) -> AsyncGenerator[MessageStreamEvent, None]:
     """Execute owned calls and optionally yield MCP activity representations.
 
-    A search past ``budget`` is refused before it reaches the backend, so it emits
-    no activity for work that never happened and spends nothing.
+    A search past ``budget``, or a call whose arguments are not a JSON object, is
+    refused before it reaches the backend, so it emits no activity for work that
+    never happened and spends nothing.
     """
     for spec in state.owned_specs:
         name = str(spec["name"])
-        parsed_input = _parsed_stream_input(state, spec)
+        parsed_input = parse_tool_arguments(name, state.tool_use_json_bufs.get(spec["index"], ""))
+        if parsed_input is None:
+            results.append(_refused_result(NativeCall(name, spec["id"], {}), native, Refusal.INVALID_INPUT))
+            continue
         capped = is_capped_call(budget, pool, name)
         if capped and budget is not None and budget.exhausted(name):
-            results.append(_max_uses_exceeded_result(NativeCall(name, spec["id"], parsed_input), native))
+            results.append(_refused_result(NativeCall(name, spec["id"], parsed_input), native, Refusal.CALL_LIMIT))
             continue
         owner = owning_backend(pool, name)
         mcp_backend = _as_mcp_tool_backend(owner)
@@ -546,6 +555,9 @@ class _MessagesToolLoopStrategy:
             "native_blocks": [],
         }
 
+    def output_tokens(self, acc: _MessagesUsageAccumulator) -> int:
+        return acc["output"]
+
     def accumulate_usage(self, acc: _MessagesUsageAccumulator, result: MessageResponse) -> None:
         if result.usage:
             acc["input"] += result.usage.input_tokens or 0
@@ -573,16 +585,12 @@ class _MessagesToolLoopStrategy:
                 logger.warning("Could not add native server-tool blocks to the response content")
 
     def exit_before_split(self, result: MessageResponse) -> bool:
-        return False
+        # A round that stopped for any reason but ``tool_use`` (the token limit, a
+        # refusal) may hold a call with cut input, even beside the caller's own calls.
+        return result.stop_reason != "tool_use"
 
     def split_owned(self, result: MessageResponse, pool: ToolBackend) -> tuple[list[Any], bool]:
         return _split_tool_uses(list(result.content or []), pool)
-
-    def exit_after_split(self, result: MessageResponse) -> bool:
-        # The model emitted tool_use blocks but stopped for another reason
-        # (e.g. ``end_turn`` because ``max_tokens`` was hit mid-tool-call):
-        # exit rather than try to execute them.
-        return result.stop_reason != "tool_use"
 
     async def execute_owned(
         self, pool: ToolBackend, owned: list[Any], acc: _MessagesUsageAccumulator | None = None
@@ -615,6 +623,11 @@ class _MessagesToolLoopStrategy:
                 "Anthropic-mixed: could not filter content on response; client will see tool_use "
                 "blocks the gateway already executed (no-op on the client side).",
             )
+
+    def end_answer(self, result: MessageResponse) -> None:
+        """End the round as an answer once the gateway's calls are dropped and none of the caller's remain."""
+        if not any(getattr(block, "type", None) == "tool_use" for block in result.content or []):
+            result.stop_reason = "end_turn"
 
     async def advance_transcript(
         self,
@@ -798,6 +811,14 @@ class _MessagesToolLoopStrategy:
             ):
                 yield event
 
+    def end_stream_answer(self, state: _MessagesStreamState) -> None:
+        # Only the gateway's tool_use blocks reach here, and they were never forwarded.
+        state.stop_reason = "end_turn"
+        for term in state.deferred_terminal:
+            delta = getattr(term, "delta", None) if getattr(term, "type", None) == "message_delta" else None
+            if delta is not None and getattr(delta, "stop_reason", None) == "tool_use":
+                delta.stop_reason = "end_turn"
+
     def terminal_events(
         self,
         state: _MessagesStreamState,
@@ -811,6 +832,9 @@ class _MessagesToolLoopStrategy:
             *self._native_block_events(blocks, acc),
             *(_maybe_fold_message_delta(term, acc) for term in state.deferred_terminal),
         ]
+
+    def stream_output_tokens(self, acc: _MessagesStreamAccumulator) -> int:
+        return acc["output_tokens"]
 
     def accumulate_stream_usage(self, acc: _MessagesStreamAccumulator, state: _MessagesStreamState) -> None:
         for term in state.deferred_terminal:
@@ -943,6 +967,7 @@ async def anthropic_tool_loop(
     native_tools: frozenset[str] = frozenset(),
     use_budget: ToolUseBudget | None = None,
     container: ContainerLease | None = None,
+    round_gate: RoundGate | None = None,
 ) -> MessageResponse:
     """Non-streaming Anthropic Messages tool-use loop.
 
@@ -974,6 +999,7 @@ async def anthropic_tool_loop(
         pool=pool,
         max_iterations=max_iterations,
         on_first_response=on_first_response,
+        round_gate=round_gate,
     )
 
 
@@ -986,6 +1012,8 @@ async def anthropic_tool_loop_stream(
     emit_native_mcp: bool = False,
     use_budget: ToolUseBudget | None = None,
     container: ContainerLease | None = None,
+    on_first_response: Callable[[], None] | None = None,
+    round_gate: RoundGate | None = None,
 ) -> AsyncGenerator[MessageStreamEvent, None]:
     """Streaming Anthropic Messages tool-use loop.
 
@@ -1027,6 +1055,8 @@ async def anthropic_tool_loop_stream(
             completion_kwargs=completion_kwargs,
             pool=pool,
             max_iterations=max_iterations,
+            on_first_response=on_first_response,
+            round_gate=round_gate,
         )
     ) as inner:
         async for event in inner:

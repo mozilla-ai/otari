@@ -29,8 +29,8 @@ MARKS = Path(__file__).resolve().parents[2] / "web" / "src" / "shared" / "helper
 TILED = {
     # The only Amazon asset in the source set is the lowercase "aws" wordmark,
     # which is not legible at the 14px and 16px steps a mark is drawn at. The
-    # `bedrock` and `sagemaker` provider rows are left out for the same reason,
-    # so a card and a rail row agree about Amazon.
+    # `sagemaker` provider row tiles for the same reason; `bedrock` wears the
+    # service's own glyph, which does not stand for Amazon the maker.
     "amazon",
     # No mark for it in either source set.
     "openbmb",

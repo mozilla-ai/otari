@@ -28,7 +28,7 @@ def raw() -> dict[str, Any]:
 
 @pytest.fixture(scope="module")
 def index(raw: dict[str, Any]) -> ModelsDevPriceIndex:
-    return ModelsDevPriceIndex.from_catalog(raw)
+    return ModelsDevPriceIndex.from_document(raw)
 
 
 def test_parses_rates_metadata_and_reference(index: ModelsDevPriceIndex) -> None:
@@ -58,7 +58,7 @@ def test_rates_are_exact_decimals(index: ModelsDevPriceIndex) -> None:
 def test_missing_output_stays_none(raw: dict[str, Any]) -> None:
     raw = json.loads(json.dumps(raw))
     del raw["openai"]["models"]["gpt-4.1"]["cost"]["output"]
-    price = ModelsDevPriceIndex.from_catalog(raw).resolve("openai", "gpt-4.1")
+    price = ModelsDevPriceIndex.from_document(raw).resolve("openai", "gpt-4.1")
     assert price is not None
     assert price.input == Decimal("2")
     assert price.output is None
@@ -109,7 +109,7 @@ def test_non_context_tier_types_are_ignored_and_over_200k_ignored_beside_context
     raw["google"]["models"]["gemini-2.5-pro"]["cost"]["tiers"] = [
         {"tier": {"type": "context", "size": 100000}, "input": 9}
     ]
-    both = ModelsDevPriceIndex.from_catalog(raw).resolve("google", "gemini-2.5-pro")
+    both = ModelsDevPriceIndex.from_document(raw).resolve("google", "gemini-2.5-pro")
     assert both is not None
     assert [t["min_input_tokens"] for t in both.pricing_tiers()] == [100000]
 
@@ -177,6 +177,21 @@ def test_huggingface_backend_via_implementation(index: ModelsDevPriceIndex) -> N
     price = index.resolve("hf-prod", "meta-llama/Llama-3.3-70B-Instruct:together", implementation="huggingface")
     assert price is not None
     assert price.provider_id == "togetherai"
+
+
+@pytest.mark.parametrize("model", ["anthropic/claude-sonnet-4-5", "anthropic:claude-sonnet-4-5"])
+def test_an_otari_provider_prices_a_vendor_prefixed_id_from_the_vendor(index: ModelsDevPriceIndex, model: str) -> None:
+    price = index.resolve("otari-ai", model, implementation="otari")
+    assert price is not None
+    assert price.reference == "models.dev:anthropic/claude-sonnet-4-5"
+
+
+def test_a_vendor_prefixed_id_is_not_split_for_any_other_provider(index: ModelsDevPriceIndex) -> None:
+    assert index.resolve("openai-eu", "anthropic:claude-sonnet-4-5", implementation="openai") is None
+
+
+def test_an_otari_provider_does_not_price_a_model_its_vendor_does_not_list(index: ModelsDevPriceIndex) -> None:
+    assert index.resolve("otari-ai", "anthropic/no-such-model", implementation="otari") is None
 
 
 def test_huggingface_unpinned_uses_the_router_listing(index: ModelsDevPriceIndex) -> None:
@@ -262,7 +277,7 @@ def test_unknown_model_is_none(index: ModelsDevPriceIndex) -> None:
 
 
 def test_malformed_catalog_entries_are_skipped() -> None:
-    index = ModelsDevPriceIndex.from_catalog(
+    index = ModelsDevPriceIndex.from_document(
         {
             "a": "nope",
             "b": {"id": "b", "models": []},
@@ -290,7 +305,7 @@ def test_index_is_immutable(index: ModelsDevPriceIndex) -> None:
 def _generation(day: int, input_rate: int, *, baseline: bool = False) -> PriceGeneration:
     catalog = {"p": {"id": "p", "models": {"m": {"id": "m", "cost": {"input": input_rate, "output": 1}}}}}
     return PriceGeneration(
-        datetime(2026, 1, day, tzinfo=UTC), ModelsDevPriceIndex.from_catalog(catalog), baseline=baseline
+        datetime(2026, 1, day, tzinfo=UTC), ModelsDevPriceIndex.from_document(catalog), baseline=baseline
     )
 
 
@@ -340,7 +355,7 @@ def test_as_of_with_no_generations_is_none() -> None:
 
 def _bedrock(*models: tuple[str, int]) -> ModelsDevPriceIndex:
     listing = {m: {"id": m, "cost": {"input": rate, "output": 1}} for m, rate in models}
-    return ModelsDevPriceIndex.from_catalog({"amazon-bedrock": {"id": "amazon-bedrock", "models": listing}})
+    return ModelsDevPriceIndex.from_document({"amazon-bedrock": {"id": "amazon-bedrock", "models": listing}})
 
 
 def test_bedrock_v2_is_never_priced_from_v1() -> None:
@@ -371,7 +386,7 @@ def test_bedrock_global_request_does_not_match_a_regional_listing() -> None:
 
 
 def test_vendor_walk_uses_only_a_head_that_is_a_provider() -> None:
-    index = ModelsDevPriceIndex.from_catalog(
+    index = ModelsDevPriceIndex.from_document(
         {
             "openai": {"id": "openai", "models": {"gpt-4.1": {"id": "gpt-4.1", "cost": {"input": 2, "output": 8}}}},
             "other": {"id": "other", "models": {"x.gpt-4.1": {"id": "x.gpt-4.1", "cost": {"input": 9, "output": 9}}}},
@@ -386,19 +401,19 @@ def test_agnostic_match_blocked_by_an_unpriced_listing() -> None:
         "a": {"id": "a", "models": {"m": {"id": "m", "cost": {"input": 1, "output": 1}}}},
         "b": {"id": "b", "models": {"m": {"id": "m"}}},
     }
-    assert ModelsDevPriceIndex.from_catalog(catalog).resolve("x", "m") is None
+    assert ModelsDevPriceIndex.from_document(catalog).resolve("x", "m") is None
 
 
 def test_agnostic_match_without_a_slash_in_the_canonical_id_is_one_candidate() -> None:
     catalog = {"a": {"id": "a", "models": {"m": {"id": "m", "canonical_model_id": "m", "cost": {"input": 1}}}}}
-    found = ModelsDevPriceIndex.from_catalog(catalog).resolve("x", "m")
+    found = ModelsDevPriceIndex.from_document(catalog).resolve("x", "m")
     assert found is not None
     assert found.provider_id == "a"
 
 
 def _tiers_for(cost: dict[str, Any]) -> list[dict[str, float | int]]:
     catalog = {"p": {"id": "p", "models": {"m": {"id": "m", "cost": {"input": 1, "output": 1, **cost}}}}}
-    found = ModelsDevPriceIndex.from_catalog(catalog).resolve("p", "m")
+    found = ModelsDevPriceIndex.from_document(catalog).resolve("p", "m")
     assert found is not None
     return found.pricing_tiers()
 
@@ -432,3 +447,203 @@ def test_rates_inside_the_bounds_parse() -> None:
     assert parse_rate(0) == Decimal(0)
     assert parse_rate(0.3) == Decimal("0.3")
     assert parse_rate(1_000_000) == Decimal(1_000_000)
+
+
+def test_vertex_claude_is_priced_where_v2_lists_it_and_where_v1_does() -> None:
+    """v2 moved Vertex's Claude models under ``google-vertex``; v1 and older snapshots keep them apart."""
+    claude = "claude-sonnet-4-5@20250929"
+
+    def price(provider: str) -> Decimal | None:
+        # The same id at another price elsewhere, so only the scoped lookup can answer.
+        document = {
+            provider: {"models": {claude: {"cost": {"input": 3, "output": 15}}}},
+            "other": {"models": {claude: {"cost": {"input": 9, "output": 15}}}},
+        }
+        found = ModelsDevPriceIndex.from_document(document).resolve("vertexaianthropic", claude)
+        return None if found is None else found.input
+
+    assert price("google-vertex") == Decimal(3)
+    assert price("google-vertex-anthropic") == Decimal(3)
+
+
+def test_a_v2_entry_carries_every_price_the_document_gives() -> None:
+    """The index keeps the whole cost block beside the v1 rates it derives, for a row to store."""
+    from gateway.types.models_dev import parse_catalog_v2, pricing_document
+
+    sample = Path(__file__).resolve().parents[1] / "fixtures" / "models_dev_v2_sample.json"
+    document = json.loads(sample.read_text("utf-8"))
+    catalog = parse_catalog_v2(document)
+
+    index = ModelsDevPriceIndex.from_catalog(catalog)
+
+    entry = index.get("openai", "gpt-4o")
+    assert entry is not None and entry.pricing is not None
+    assert pricing_document(entry.pricing) == document["openai"]["models"]["gpt-4o"]["cost"]
+    assert entry.input == Decimal("2.5")
+
+
+def test_a_v1_entry_carries_no_block(index: ModelsDevPriceIndex) -> None:
+    entry = index.get("anthropic", "claude-sonnet-4-5")
+    assert entry is not None
+    assert entry.pricing is None
+
+
+def _two_hosts(first_search: float, second_search: float) -> ModelsDevPriceIndex:
+    from gateway.types.models_dev import parse_catalog_v2
+
+    def host(name: str, search: float) -> dict[str, Any]:
+        cost = {"text": {"input": {"price": 3}, "output": {"price": 15}}, "web_search": {"price": search}}
+        return {"id": name, "models": {"shared-model": {"id": "shared-model", "cost": cost}}}
+
+    return ModelsDevPriceIndex.from_catalog(
+        parse_catalog_v2({"hosta": host("hosta", first_search), "hostb": host("hostb", second_search)})
+    )
+
+
+def test_hosts_that_agree_on_the_text_price_alone_give_no_block() -> None:
+    entry = _two_hosts(10, 35).resolve(None, "shared-model")
+
+    assert entry is not None
+    assert (entry.input, entry.pricing) == (Decimal(3), None)
+
+
+def test_hosts_that_agree_on_the_whole_block_give_it() -> None:
+    entry = _two_hosts(10, 10).resolve(None, "shared-model")
+
+    assert entry is not None and entry.pricing is not None
+    assert entry.pricing.web_search is not None and entry.pricing.web_search.price == 10
+
+
+def _two_audio_hosts(first: float, second: float, *, second_search: float | None = None) -> ModelsDevPriceIndex:
+    from gateway.types.models_dev import parse_catalog_v2
+
+    def host(name: str, price: float, search: float | None) -> dict[str, Any]:
+        cost: dict[str, Any] = {"audio": {"input": {"price": price, "unit": "minute"}}}
+        if search is not None:
+            cost["web_search"] = {"price": search}
+        return {"id": name, "models": {"shared-model": {"id": "shared-model", "cost": cost}}}
+
+    return ModelsDevPriceIndex.from_catalog(
+        parse_catalog_v2({"hosta": host("hosta", first, None), "hostb": host("hostb", second, second_search)})
+    )
+
+
+def test_a_model_priced_only_in_a_measured_slot_is_priced_where_the_hosts_agree_on_it() -> None:
+    """A per-minute audio price with no text price still prices the model, and still has to agree across hosts."""
+    agreed = _two_audio_hosts(0.006, 0.006).resolve(None, "shared-model")
+
+    assert agreed is not None and agreed.priced
+    assert agreed.slot_columns is not None
+    assert (agreed.slot_columns.unit, agreed.slot_columns.input_price_per_million) == ("minute", Decimal(6000))
+    assert _two_audio_hosts(0.006, 0.01).resolve(None, "shared-model") is None
+    # The slot price is read from the block, so hosts that differ elsewhere in it give no default.
+    assert _two_audio_hosts(0.006, 0.006, second_search=10).resolve(None, "shared-model") is None
+
+
+def test_hosts_that_write_the_same_block_in_another_order_still_agree() -> None:
+    from gateway.types.models_dev import parse_catalog_v2
+
+    first = {"text": {"input": {"price": 3}, "output": {"price": 15}}, "web_search": {"price": 10}}
+    second = {"web_search": {"price": 10}, "text": {"output": {"price": 15}, "input": {"price": 3}}}
+    index = ModelsDevPriceIndex.from_catalog(
+        parse_catalog_v2(
+            {
+                "hosta": {"id": "hosta", "models": {"shared-model": {"id": "shared-model", "cost": first}}},
+                "hostb": {"id": "hostb", "models": {"shared-model": {"id": "shared-model", "cost": second}}},
+            }
+        )
+    )
+
+    entry = index.resolve(None, "shared-model")
+
+    assert entry is not None and entry.pricing is not None
+
+
+def _ovhcloud(**models: float) -> ModelsDevPriceIndex:
+    listing = {m: {"id": m, "cost": {"input": rate, "output": rate}} for m, rate in models.items()}
+    return ModelsDevPriceIndex.from_document(
+        {
+            "ovhcloud": {"id": "ovhcloud", "models": listing},
+            "scaleway": {
+                "id": "scaleway",
+                "models": {m.casefold(): {"id": m.casefold(), "cost": {"input": 9}} for m in models},
+            },
+        }
+    )
+
+
+def test_a_provider_id_that_differs_only_in_case_is_priced_from_its_provider() -> None:
+    """models.dev lowercases OVHcloud's ids; the provider lists them in mixed case."""
+    index = _ovhcloud(**{"mistral-small-3.2-24b-instruct-2506": 0.1})
+    found = index.resolve("ovhcloud", "Mistral-Small-3.2-24B-Instruct-2506")
+    assert found is not None
+    assert (found.provider_id, found.input) == ("ovhcloud", Decimal("0.1"))
+
+
+def test_a_case_folded_match_in_the_provider_beats_another_providers_price() -> None:
+    found = _ovhcloud(m=0.01).resolve("ovhcloud", "M")
+    assert found is not None
+    assert (found.provider_id, found.input) == ("ovhcloud", Decimal("0.01"))
+
+
+def test_the_exact_id_beats_one_that_differs_only_in_case() -> None:
+    index = _ovhcloud(**{"model-a": 1, "Model-A": 2})
+    found = index.resolve("ovhcloud", "Model-A")
+    assert found is not None
+    assert found.input == Decimal(2)
+
+
+def test_a_huggingface_backend_id_that_differs_only_in_case_is_priced() -> None:
+    found = _ovhcloud(**{"qwen3-32b": 0.5}).resolve("huggingface", "Qwen3-32B:ovh")
+    assert found is not None
+    assert found.provider_id == "ovhcloud"
+
+
+def test_an_id_listed_twice_resolves_alike_in_any_case() -> None:
+    listing = {"a": {"id": "Qwen3-32B", "cost": {"input": 1}}, "b": {"id": "Qwen3-32B", "cost": {"input": 2}}}
+    index = ModelsDevPriceIndex.from_document({"ovhcloud": {"id": "ovhcloud", "models": listing}})
+    exact = index.resolve("ovhcloud", "Qwen3-32B")
+    folded = index.resolve("ovhcloud", "qwen3-32b")
+    assert exact is not None
+    assert folded is exact
+
+
+def test_an_exact_id_under_a_later_provider_beats_one_in_another_case_under_an_earlier_one() -> None:
+    """Vertex's Claude models map to two provider ids; every exact id is tried before any case-folded one."""
+    index = ModelsDevPriceIndex.from_document(
+        {
+            "google-vertex-anthropic": {"id": "google-vertex-anthropic", "models": {"model-a": {"cost": {"input": 1}}}},
+            "google-vertex": {"id": "google-vertex", "models": {"Model-A": {"cost": {"input": 2}}}},
+        }
+    )
+    found = index.resolve("vertexaianthropic", "Model-A")
+    assert found is not None
+    assert (found.provider_id, found.input) == ("google-vertex", Decimal(2))
+
+
+def test_equal_rates_share_one_decimal() -> None:
+    assert parse_rate(0.25) is parse_rate(0.25)
+
+
+def test_a_shared_rate_keeps_its_spelling() -> None:
+    assert (str(parse_rate(1)), str(parse_rate(1.0))) == ("1", "1.0")
+
+
+def test_a_rate_that_is_not_a_price_is_still_refused_when_repeated() -> None:
+    assert parse_rate(-1.0) is None
+    assert parse_rate(-1.0) is None
+
+
+def test_an_unchanged_entry_is_reused_and_a_changed_one_is_not(raw: dict[str, Any]) -> None:
+    previous = ModelsDevPriceIndex.from_document(raw)
+    moved = json.loads(json.dumps(raw))
+    moved["anthropic"]["models"]["claude-sonnet-4-5"]["cost"]["input"] = 4
+
+    index = ModelsDevPriceIndex.from_document(moved, reuse=previous)
+
+    assert index.get("openai", "gpt-4o") is previous.get("openai", "gpt-4o")
+    changed = index.get("anthropic", "claude-sonnet-4-5")
+    assert changed is not None
+    assert changed is not previous.get("anthropic", "claude-sonnet-4-5")
+    assert changed.input == Decimal("4")
+    assert len(index) == len(previous)

@@ -194,3 +194,26 @@ def render_health_alert(
             "HEALTH_LINK": health_link,
         },
     )
+
+
+def render_unavailable_alert(
+    selector: str, refusal: str, *, deployment: str, providers_link: str, health_link: str, asset_root: str | None
+) -> MailMessage:
+    """The email saying a hosted model was switched off because its provider refused to serve it."""
+    return render_email(
+        "model_unavailable",
+        subject="Otari on {{DEPLOYMENT}}: {{HEADLINE}}",
+        preheader="{{INTRO}}",
+        asset_root=asset_root,
+        values={
+            "DEPLOYMENT": deployment,
+            "HEADLINE": f"{selector} switched off",
+            "INTRO": (
+                f"Its provider refused to serve it on {deployment}, so it is no longer listed or served. "
+                "Review it, and switch it back on if the refusal was wrong."
+            ),
+            "REFUSAL": refusal,
+            "PROVIDERS_LINK": providers_link,
+            "HEALTH_LINK": health_link,
+        },
+    )

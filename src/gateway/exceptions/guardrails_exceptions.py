@@ -1,8 +1,14 @@
-"""Errors an organization's guardrail configuration raises, and the HTTP status each carries."""
+"""Errors the guardrails domain raises, and the HTTP status each carries."""
 
-from fastapi import status
+from typing import TYPE_CHECKING, Any
 
+from fastapi import HTTPException, status
+
+from gateway.core.error_codes import GUARDRAIL_VIOLATION, error_headers
 from gateway.exceptions import TenancyConflictError, TenancyError, TenancyNotFoundError, TenancyValidationError
+
+if TYPE_CHECKING:
+    from any_llm.types.completion import CompletionUsage
 
 
 class OrganizationGuardrailNotFoundError(TenancyNotFoundError):
@@ -41,8 +47,8 @@ class OrganizationGuardrailCredentialNeedsUrlError(TenancyValidationError):
     """A credential was stored on an entry that names no endpoint of its own.
 
     Without a ``url`` the credential rides to whatever the deployment's
-    ``guardrails_url`` points at, which the shipped compose file makes a
-    same-host ``http://`` sidecar, so the bearer would cross the wire in clear.
+    ``guardrails_url`` points at, which may be plain ``http://``, so the bearer
+    could cross the wire in clear.
     Naming the endpoint is what puts it through ``validate_mcp_url``, which
     refuses ``http`` once a credential is in play, so requiring one here is what
     makes "a credential is sent over https" true rather than aspirational.
@@ -276,7 +282,21 @@ class OrganizationGuardrailDefinitionInUseError(TenancyConflictError):
         )
 
 
+class AnswerRefused(HTTPException):
+    """A guardrail refused the model's answer, after the model ran.
+
+    ``usage`` is what the provider reported for the answer, which a streamed
+    request bills on its error path; a request that is not streamed is billed
+    before this is raised.
+    """
+
+    def __init__(self, detail: dict[str, Any]) -> None:
+        super().__init__(status.HTTP_403_FORBIDDEN, detail=detail, headers=error_headers(GUARDRAIL_VIOLATION))
+        self.usage: CompletionUsage | None = None
+
+
 __all__ = [
+    "AnswerRefused",
     "OrganizationGuardrailAlreadyExistsError",
     "OrganizationGuardrailCheckFailedError",
     "OrganizationGuardrailCredentialNeedsUrlError",

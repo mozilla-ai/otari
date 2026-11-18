@@ -279,6 +279,80 @@ describe("OrganizationBudgetsPage", () => {
     expect(submit).toBeDisabled()
   })
 
+  it("creates a budget capping requests alone", async () => {
+    const requests = mockApi({ budgets: [] })
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByRole("grid", { name: "Organization budgets" })
+
+    await user.click(screen.getByRole("button", { name: "Add budget" }))
+    await user.click(
+      screen.getByRole("button", { name: "Token and request limits" }),
+    )
+    await user.type(screen.getByLabelText("Request limit"), "1")
+    const submit = screen.getAllByRole("button", { name: "Add budget" }).at(-1)
+    await user.click(submit as HTMLElement)
+
+    await waitFor(() =>
+      expect(requests.some((request) => request.method === "POST")).toBe(true),
+    )
+    const posted = requests.find((request) => request.method === "POST")
+    expect(posted?.body).toMatchObject({
+      max_budget: null,
+      token_limit: null,
+      request_limit: 1,
+    })
+  })
+
+  it("opens an edit on the counts the budget already caps", async () => {
+    // Collapsed, a cap in force would be one click from view and easy to
+    // forget while changing the dollar figure beside it.
+    const requests = mockApi({
+      budgets: [organizationBudget({ token_limit: 5000, request_limit: 10 })],
+    })
+    const user = userEvent.setup()
+    renderPage()
+    const table = await screen.findByRole("grid", {
+      name: "Organization budgets",
+    })
+
+    await user.click(await within(table).findByRole("button", { name: "Edit" }))
+    expect(screen.getByLabelText("Token limit")).toBeVisible()
+    expect(screen.getByLabelText("Token limit")).toHaveValue("5000")
+    expect(screen.getByLabelText("Request limit")).toHaveValue("10")
+
+    await user.clear(screen.getByLabelText("Token limit"))
+    await user.click(screen.getByRole("button", { name: "Save budget" }))
+    await waitFor(() =>
+      expect(requests.some((request) => request.method === "PATCH")).toBe(true),
+    )
+    const patched = requests.find((request) => request.method === "PATCH")
+    expect(patched?.body).toMatchObject({
+      token_limit: null,
+      request_limit: 10,
+    })
+  })
+
+  it("refuses a request limit that is not a whole number", async () => {
+    mockApi({ budgets: [] })
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByRole("grid", { name: "Organization budgets" })
+
+    await user.click(screen.getByRole("button", { name: "Add budget" }))
+    await user.click(
+      screen.getByRole("button", { name: "Token and request limits" }),
+    )
+    // Rounds to a whole 1 once converted, so it must be refused as typed.
+    await user.type(
+      screen.getByLabelText("Request limit"),
+      "1.0000000000000001",
+    )
+
+    const submit = screen.getAllByRole("button", { name: "Add budget" }).at(-1)
+    expect(submit).toBeDisabled()
+  })
+
   it("says a blank limit means no limit rather than zero", async () => {
     mockApi({ budgets: [organizationBudget({ max_budget: null })] })
     renderPage()

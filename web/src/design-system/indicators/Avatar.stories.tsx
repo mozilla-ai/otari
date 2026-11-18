@@ -5,11 +5,9 @@ import { Avatar } from "./Avatar"
 /**
  * A person or a workspace, as a monogram.
  *
- * It takes the letters rather than deriving them. Turning an identity into two
- * letters is application logic: this product falls back from a full name to an
- * email address and splits the two differently, and `AccountMenu`'s
- * `initialsFor` carries all of it. A derivation here would be the same rules
- * spelled worse, in a layer with no business knowing an account has an email.
+ * It takes the letters rather than deriving them: turning an identity into two
+ * letters is application logic, and this layer has no business knowing an
+ * account has a name or an email.
  *
  * `aria-hidden`, because in every place it renders the name is on screen beside
  * it. That is why no story below has an accessible name to show.

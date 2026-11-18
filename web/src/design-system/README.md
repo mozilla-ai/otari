@@ -30,7 +30,7 @@ callback, which is why every control is controlled and why `Avatar` takes
 `initials` rather than a name.
 
 A component that needs the transport, a domain formatter or a generated API type
-is an *application* component. It belongs in `src/shared/components/`, composing
+is an _application_ component. It belongs in `src/shared/components/`, composing
 the primitive from here. DESIGN.md's "The extraction contract" has the reasoning,
 the two directories that stayed behind, and the five plausible primitives
 deliberately not built.

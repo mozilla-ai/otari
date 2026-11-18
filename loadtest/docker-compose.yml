@@ -97,7 +97,12 @@ services:
   # dependency group from it, into an environment outside the mount.
   tools:
     <<: *others
-    image: ghcr.io/astral-sh/uv:python3.14-bookworm-slim
+    # Built, not pulled: the published uv images carry either a Python flavour or
+    # a version, never both, and the flavour tag's uv is older than the range
+    # pyproject.toml declares, which uv then refuses every command for.
+    build:
+      context: .
+      dockerfile: uv-tools.Dockerfile
     working_dir: /work/loadtest
     volumes:
       - ../:/work

@@ -12,7 +12,7 @@ import { Segmented } from "./Segmented"
  *
  * The line against `TabRow`: tabs switch which *view* is on screen, a segmented
  * control changes a *parameter* of the view that is already there. A page can
- * have both, and the usage page does.
+ * have both.
  */
 const meta = {
   title: "Design system/Navigation/Segmented",

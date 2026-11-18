@@ -203,6 +203,77 @@ def test_no_prompt_text_reaches_the_trace(
     assert "Acme" not in stored
 
 
+_CONTEXT_ATTRIBUTES = (
+    "otari.context.system_chars",
+    "otari.context.tools_chars",
+    "otari.context.user_chars",
+    "otari.context.assistant_chars",
+    "otari.context.tool_result_chars",
+    "otari.context.file_chars",
+    "otari.context.tool_count",
+    "otari.context.message_count",
+)
+_TOOL = {"type": "function", "function": {"name": "lookup", "parameters": {"type": "object"}}}
+
+
+def test_a_chat_request_keeps_the_size_of_each_part_and_never_its_text(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    messages = [
+        {"role": "system", "content": "Answer in French."},
+        {"role": "user", "content": "Summarize the quarterly report for Acme"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}],
+        },
+        {"role": "tool", "tool_call_id": "c1", "content": "revenue is up"},
+    ]
+    with patch("gateway.api.routes.chat.acompletion", return_value=_completion()):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": MODEL_NAME, "messages": messages, "tools": [_TOOL]},
+            headers=api_key_header,
+        )
+    assert response.status_code == 200
+    request_id = response.headers[REQUEST_ID_HEADER]
+
+    llm = _by_kind(_wait_for_spans(db_session_factory, request_id, 2))["llm"]
+    attributes = llm.attributes or {}
+
+    assert set(_CONTEXT_ATTRIBUTES) <= set(attributes)
+    assert attributes["otari.context.system_chars"] == len("Answer in French.")
+    assert attributes["otari.context.user_chars"] == len("Summarize the quarterly report for Acme")
+    assert attributes["otari.context.tool_result_chars"] == len("revenue is up")
+    assert (attributes["otari.context.tool_count"], attributes["otari.context.message_count"]) == (1, 4)
+    assert "quarterly" not in repr(attributes)
+    detail = client.get(f"{API_ROOT}/traces/{request_id}", headers=master_key_header).json()
+    [read] = [span for span in detail["spans"] if span["kind"] == "llm"]
+    assert read["attributes"]["otari.context.user_chars"] == len("Summarize the quarterly report for Acme")
+    assert "context_window" in read
+
+
+def test_a_messages_request_counts_its_system_parameter(
+    client: TestClient, api_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    with patch("gateway.api.routes.messages.amessages", return_value=_message()):
+        response = client.post(
+            f"{API_ROOT}/messages",
+            json={"model": MODEL_NAME, "max_tokens": 64, "messages": _MESSAGES, "system": "You are terse."},
+            headers=api_key_header,
+        )
+    assert response.status_code == 200
+
+    llm = _by_kind(_wait_for_spans(db_session_factory, response.headers[REQUEST_ID_HEADER], 2))["llm"]
+    attributes = llm.attributes or {}
+
+    assert attributes["otari.context.system_chars"] == len("You are terse.")
+    assert attributes["otari.context.message_count"] == 1
+
+
 _FAILING_ENDPOINTS: dict[str, tuple[str, str, dict[str, Any]]] = {
     "chat": ("chat/completions", "gateway.api.routes.chat.acompletion", {"model": MODEL_NAME, "messages": _MESSAGES}),
     "messages": (

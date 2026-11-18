@@ -14,6 +14,7 @@ import {
   useRegisterPasskey,
   useRenamePasskey,
 } from "@/shared/api/auth"
+import { allowsFieldAutoFocus } from "@/shared/helpers/autoFocus"
 import { formatDateTime } from "@/shared/helpers/format"
 import {
   MAX_PASSKEY_NAME_LENGTH,
@@ -85,13 +86,14 @@ function PasskeyRow({
       <RowActionRow>
         <RowAction
           icon={FiEdit2}
-          label="Rename"
+          label="Rename…"
           isDisabled={isBusy}
           onPress={onRename}
         />
         <RowAction
           icon={FiTrash2}
-          label="Delete"
+          label="Delete…"
+          isDestructive
           isDisabled={isBusy}
           onPress={onDelete}
         />
@@ -345,7 +347,10 @@ export function PasskeysCard() {
             className="flex flex-col gap-1"
           >
             <Label className="text-body">Name</Label>
-            <Input autoFocus maxLength={MAX_PASSKEY_NAME_LENGTH} />
+            <Input
+              autoFocus={allowsFieldAutoFocus()}
+              maxLength={MAX_PASSKEY_NAME_LENGTH}
+            />
           </TextField>
         }
       />

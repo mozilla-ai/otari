@@ -28,6 +28,7 @@ import gateway.api.routes
 from gateway.api.deps import (
     require_deployment_operator,
     require_deployment_operator_or_absent,
+    verify_api_key,
     verify_api_key_or_master_key,
     verify_catalog_reader,
     verify_catalog_reader_or_public,
@@ -35,28 +36,34 @@ from gateway.api.deps import (
     verify_service_key,
 )
 from gateway.api.routes import (
+    agent_recommenders,
     agent_telemetry,
     aliases,
     budgets,
+    calling_key,
     catalog,
+    code_execution,
+    country_database,
     end_users,
     health_checks,
     hook_guardrails,
     hooks,
     hosted_providers,
+    identity_apps,
     keys,
     mail,
     maintenance_mode,
+    mcp_catalog,
     models,
     pricing,
     providers,
     routing,
-    routing_memory,
     scoped_budgets,
     search_tools,
     settings,
     tool_settings,
     tools,
+    update_check,
     usage,
     users,
 )
@@ -67,6 +74,7 @@ _DEPLOYMENT_WIDE_ROUTERS: list[tuple[str, APIRouter]] = [
     ("agent_telemetry", agent_telemetry.router),
     ("aliases", aliases.router),
     ("budgets", budgets.router),
+    ("country_database", country_database.router),
     ("health_checks", health_checks.router),
     ("keys", keys.router),
     ("mail", mail.router),
@@ -75,11 +83,11 @@ _DEPLOYMENT_WIDE_ROUTERS: list[tuple[str, APIRouter]] = [
     ("pricing", pricing.operator_router),
     ("providers", providers.router),
     ("routing", routing.router),
-    ("routing_memory", routing_memory.router),
     ("scoped_budgets", scoped_budgets.router),
     ("search_tools", search_tools.router),
     ("settings", settings.router),
     ("tool_settings", tool_settings.operator_router),
+    ("update_check", update_check.router),
     ("usage", usage.operator_router),
     ("users", users.router),
 ]
@@ -96,8 +104,10 @@ _DEPLOYMENT_WIDE_ROUTERS: list[tuple[str, APIRouter]] = [
 # to be added by hand.
 _NON_OPERATOR_ROUTERS: list[tuple[str, APIRouter, Callable[..., Any]]] = [
     ("catalog", catalog.router, verify_catalog_reader_or_public),
+    ("code_execution.catalog", code_execution.catalog_router, verify_catalog_reader),
     ("end_users", end_users.router, verify_service_key),
     ("end_users.budgets", end_users.budgets_router, verify_service_key),
+    ("mcp_catalog", mcp_catalog.router, verify_master_key),
     ("models.catalog", models.catalog_router, verify_catalog_reader),
     ("pricing.catalog", pricing.catalog_router, verify_catalog_reader),
     ("providers.catalog", providers.catalog_router, verify_catalog_reader),
@@ -105,11 +115,14 @@ _NON_OPERATOR_ROUTERS: list[tuple[str, APIRouter, Callable[..., Any]]] = [
     ("tool_settings.catalog", tool_settings.catalog_router, verify_catalog_reader),
     ("tool_settings.reader", tool_settings.reader_router, verify_master_key),
     ("tools", tools.router, verify_catalog_reader),
+    ("identity_apps", identity_apps.router, verify_master_key),
     ("usage.key", usage.key_router, verify_api_key_or_master_key),
-    ("hooks", hooks.router, hooks.verify_hook_caller),
+    ("calling_key", calling_key.router, verify_api_key),
+    ("hooks", hooks.router, verify_api_key_or_master_key),
     ("hook_guardrails", hook_guardrails.router, verify_api_key_or_master_key),
     # Operator-only, with the 404 the admin surface answers rather than the 403:
     # the deployment's own credentials are not a surface to confirm to a member.
+    ("agent_recommenders", agent_recommenders.router, require_deployment_operator_or_absent),
     ("hosted_providers", hosted_providers.router, require_deployment_operator_or_absent),
 ]
 
@@ -127,25 +140,34 @@ _UNGATED_ROUTERS: dict[str, str] = {
     "audio.router": _DATA_PLANE,
     "batches.router": _DATA_PLANE,
     "chat.router": _DATA_PLANE,
+    "code_execution.router": _DATA_PLANE,
     "embeddings.router": _DATA_PLANE,
     "decisions.router": _DATA_PLANE,
+    "fetch.router": _DATA_PLANE,
     "files.router": _DATA_PLANE,
     "images.router": _DATA_PLANE,
     "mcp.router": _DATA_PLANE,
+    "mcp_connections.callback_router": (
+        "an authorization server's redirect: the session cookie does not travel on it, and the single-use "
+        "state in the query is what it acts on"
+    ),
     "messages.router": _DATA_PLANE,
     "moderations.router": _DATA_PLANE,
     "otlp.router": _DATA_PLANE,
     "rerank.router": _DATA_PLANE,
     "responses.router": _DATA_PLANE,
     "search.router": _DATA_PLANE,
+    "videos.router": _DATA_PLANE,
     "auth_oauth.router": _PUBLIC_AUTH,
     "auth_password_reset.router": _PUBLIC_AUTH,
     "auth_session.router": _PUBLIC_AUTH,
     "auth_signup.router": _PUBLIC_AUTH,
+    "auth_sso.router": _PUBLIC_AUTH,
     "auth_webauthn.router": _PUBLIC_AUTH,
     "identity.router": _PUBLIC_AUTH,
     "invitations.router": "the invitation token is the credential, and the invitee has no account yet",
     "oauth.router": "the identity token in the body is the credential, verified in the token exchange",
+    "identity_apps.public_router": "registered app metadata is public; exchanging a grant requires its S256 PKCE proof",
     "bootstrap.router": "unauthenticated on purpose: read before a browser knows whether to sign in",
     "health.router": "unauthenticated liveness and readiness",
     "retired_root.router": "a 404 naming the API root that replaced /v1; serves nothing",
@@ -160,8 +182,8 @@ _UNGATED_ROUTERS: dict[str, str] = {
 # then authorize the caller against the organization or workspace themselves.
 _ROUTER_LEVEL_GATES: frozenset[Callable[..., Any]] = frozenset(
     {
-        hooks.verify_hook_caller,
         require_deployment_operator,
+        verify_api_key,
         verify_api_key_or_master_key,
         verify_catalog_reader,
         verify_catalog_reader_or_public,
@@ -211,13 +233,13 @@ def test_each_deployment_wide_router_declares_the_gate_itself(name: str, router:
     assert any(dependency.dependency is require_deployment_operator for dependency in router.dependencies), name
 
 
-@pytest.mark.parametrize("route", _routes(_DEPLOYMENT_WIDE_ROUTERS))
+@pytest.mark.parametrize("route", list(_routes(_DEPLOYMENT_WIDE_ROUTERS)))
 def test_every_route_on_a_deployment_wide_router_resolves_the_gate(route: APIRoute) -> None:
     """The declaration above, read back per route as FastAPI resolves it."""
     assert _resolves(route.dependant, require_deployment_operator)
 
 
-@pytest.mark.parametrize(("route", "gate"), _non_operator_routes())
+@pytest.mark.parametrize(("route", "gate"), list(_non_operator_routes()))
 def test_the_non_operator_routers_admit_their_own_caller_instead(route: APIRoute, gate: Callable[..., Any]) -> None:
     """Both directions: the route keeps the dependency it takes, and gains no operator gate."""
     assert _resolves(route.dependant, gate)

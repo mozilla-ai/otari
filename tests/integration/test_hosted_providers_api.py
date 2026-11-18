@@ -102,9 +102,11 @@ def _walk(client: TestClient, headers: dict[str, str]) -> list[tuple[str, int, s
         json={"model": "o3", "input_price_per_million": 1, "output_price_per_million": 2},
     )
     record("PATCH", f"{PATH}/openai/models/{model['id']}", json={"enabled": False})
+    record("PATCH", f"{PATH}/openai/vendors", json={"vendor": "OpenAI", "enabled": False})
+    record("POST", f"{PATH}/openai/models/switch", json={"vendor": "OpenAI", "enabled": True})
+    record("POST", f"{PATH}/openai/models/reset-prices", json={"dry_run": True})
     record("POST", f"{PATH}/openai/models/refresh")
-    record("GET", f"{PATH}/refresh/preview")
-    record("POST", f"{PATH}/refresh")
+    record("POST", f"{PATH}/catalog-update", json={})
     record("PATCH", f"{PATH}/openai", json={"api_key": "sk-live-rotated-9876", "enabled": False})
     record("DELETE", f"{PATH}/openai/models/{model['id']}")
     record("DELETE", f"{PATH}/openai")
@@ -315,3 +317,95 @@ def test_a_deployment_superuser_reaches_the_surface_with_a_session(
 
     assert response.status_code == 200
     assert response.json()["count"] == 1
+
+
+def test_a_provider_keeps_the_countries_it_serves(client: TestClient, master_key_header: dict[str, str]) -> None:
+    created = _create(client, master_key_header, supported_countries=["de", "us"])
+
+    assert created["supported_countries"] == ["DE", "US"]
+    [listed] = client.get(PATH, headers=master_key_header).json()["data"]
+    assert listed["supported_countries"] == ["DE", "US"]
+
+
+def test_a_new_provider_serves_every_country(client: TestClient, master_key_header: dict[str, str]) -> None:
+    assert _create(client, master_key_header)["supported_countries"] is None
+
+
+def test_an_edit_keeps_closes_and_lifts_the_supported_countries(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    _create(client, master_key_header, supported_countries=["DE"])
+
+    def patch(body: dict[str, Any]) -> Any:
+        response = client.patch(f"{PATH}/openai", json=body, headers=master_key_header)
+        assert response.status_code == 200, response.text
+        return response.json()["supported_countries"]
+
+    assert patch({"enabled": False}) == ["DE"]
+    assert patch({"supported_countries": []}) == []
+    assert patch({"supported_countries": None}) is None
+
+
+def test_a_provider_keeps_its_zero_data_retention_declaration(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    assert _create(client, master_key_header)["zero_data_retention"] is False
+    client.delete(f"{PATH}/openai", headers=master_key_header)
+    assert _create(client, master_key_header, zero_data_retention=True)["zero_data_retention"] is True
+
+    def patch(body: dict[str, Any]) -> Any:
+        response = client.patch(f"{PATH}/openai", json=body, headers=master_key_header)
+        assert response.status_code == 200, response.text
+        return response.json()["zero_data_retention"]
+
+    assert patch({"enabled": False}) is True
+    assert patch({"zero_data_retention": False}) is False
+    [listed] = client.get(PATH, headers=master_key_header).json()["data"]
+    assert listed["zero_data_retention"] is False
+
+
+def test_a_provider_keeps_its_policy_links(client: TestClient, master_key_header: dict[str, str]) -> None:
+    created = _create(
+        client, master_key_header, terms_url=" https://openai.com/policies/terms ", privacy_url="https://openai.com/p"
+    )
+    assert (created["terms_url"], created["privacy_url"]) == (
+        "https://openai.com/policies/terms",
+        "https://openai.com/p",
+    )
+
+    def patch(body: dict[str, Any]) -> tuple[str | None, str | None]:
+        response = client.patch(f"{PATH}/openai", json=body, headers=master_key_header)
+        assert response.status_code == 200, response.text
+        return response.json()["terms_url"], response.json()["privacy_url"]
+
+    assert patch({"enabled": False}) == ("https://openai.com/policies/terms", "https://openai.com/p")
+    assert patch({"terms_url": "http://example.com/terms"}) == ("http://example.com/terms", "https://openai.com/p")
+    assert patch({"terms_url": None, "privacy_url": ""}) == (None, None)
+    [listed] = client.get(PATH, headers=master_key_header).json()["data"]
+    assert (listed["terms_url"], listed["privacy_url"]) == (None, None)
+
+
+@pytest.mark.parametrize("field", ["terms_url", "privacy_url"])
+@pytest.mark.parametrize(
+    "url", ["javascript:alert(1)", "https://user:pw@example.com/terms", "/relative/terms", "ftp://example.com"]
+)
+def test_a_policy_link_that_is_no_public_web_address_is_refused(
+    client: TestClient, master_key_header: dict[str, str], field: str, url: str
+) -> None:
+    created = client.post(PATH, json={"provider": "openai", "api_key": KEY, field: url}, headers=master_key_header)
+    assert created.status_code == 422, created.text
+
+    _create(client, master_key_header)
+    updated = client.patch(f"{PATH}/openai", json={field: url}, headers=master_key_header)
+    assert updated.status_code == 422, updated.text
+
+
+@pytest.mark.parametrize("code", ["USA", "1A", "", "XX"])
+def test_a_value_that_is_no_country_code_is_refused(
+    client: TestClient, master_key_header: dict[str, str], code: str
+) -> None:
+    response = client.post(
+        PATH, json={"provider": "openai", "api_key": KEY, "supported_countries": [code]}, headers=master_key_header
+    )
+
+    assert response.status_code == 422, response.text

@@ -1,12 +1,15 @@
 """The one interface a mail-dependent feature calls.
 
-A caller asks two questions and never a third: *can this deployment send mail
-that links back to itself* (:attr:`Mailer.can_send_links`), and *did this
-message go out* (:meth:`Mailer.send`). Which shape a given surface takes, and
-why, is in ``src/gateway/AGENTS.md``.
+A caller asks one of two questions before a send, and one after it.
+Before: *can this deployment send mail that links back to itself* (:attr:`Mailer.can_send_links`),
+or, for a send that no person watches, *does such an email reach its recipient*
+(:attr:`Mailer.can_deliver_links`).
+After: *did this message go out* (:meth:`Mailer.send`).
+Which shape a given surface takes, and why, is in ``src/gateway/AGENTS.md``.
 """
 
 import asyncio
+from urllib.parse import urlsplit
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
@@ -67,6 +70,21 @@ class Mailer:
         return self._config.mail_ready
 
     @property
+    def can_deliver_links(self) -> bool:
+        """Whether an email that carries a link back to this deployment reaches its recipient.
+
+        It is True only when ``can_send_links`` is True, the transport delivers to recipients,
+        and the link is an HTTP or HTTPS URL with a host.
+        """
+        if not self.can_send_links or self._transport is None or not self._transport.delivers_to_recipients:
+            return False
+        try:
+            link = urlsplit(self.link("/"))
+        except ValueError:
+            return False
+        return link.scheme in ("http", "https") and bool(link.hostname)
+
+    @property
     def missing_settings(self) -> tuple[str, ...]:
         """Which settings stand between this deployment and a delivered link."""
         return self._config.missing_mail_settings
@@ -98,8 +116,14 @@ class Mailer:
         """Where this deployment's dashboard serves its static files, or ``None`` if its address is unknown."""
         return self._config.effective_ui_base_url.partition("?")[0].rstrip("/") or None
 
-    async def send(self, *, to: str, message: MailMessage) -> MailDelivery:
-        """Deliver one rendered message. Never raises.
+    async def send(
+        self, *, to: str, message: MailMessage, reply_to: str | None = None, sender_name: str | None = None
+    ) -> MailDelivery:
+        """Deliver one rendered message, with ``reply_to`` as its Reply-To when given. Never raises.
+
+        ``sender_name`` replaces the configured From name for this message only, as
+        for one relayed on someone's behalf. The From address stays this
+        deployment's own: a mail service sends only from addresses it verified.
 
         A mail failure must not fail the request that triggered it: creating an
         invitation still succeeds when only the notification did not go out. The
@@ -115,8 +139,9 @@ class Mailer:
         envelope = MailEnvelope(
             to=to,
             sender_email=self._config.mail_from_email or _FALLBACK_SENDER,
-            sender_name=self._config.mail_from_name,
+            sender_name=sender_name or self._config.mail_from_name,
             message=message,
+            reply_to=reply_to,
         )
         try:
             # deliver() is synchronous socket I/O, and each SMTP step carries its

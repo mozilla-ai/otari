@@ -51,6 +51,7 @@ export function traceSpan(overrides: Partial<TraceSpan> = {}): TraceSpan {
     cache_read_tokens: null,
     cache_write_tokens: null,
     reasoning_tokens: null,
+    context_window: null,
     cost: null,
     tool_name: null,
     tool_type: null,
@@ -60,6 +61,7 @@ export function traceSpan(overrides: Partial<TraceSpan> = {}): TraceSpan {
     otel_span_id: null,
     attributes: {},
     content: {},
+    content_private: false,
     ...overrides,
   }
 }
@@ -130,6 +132,8 @@ export function traceDetail(overrides: Partial<TraceDetail> = {}): TraceDetail {
     truncated: false,
     gates: [],
     tool_costs: [],
+    content_access: "none",
+    content_share: null,
     ...overrides,
   }
 }

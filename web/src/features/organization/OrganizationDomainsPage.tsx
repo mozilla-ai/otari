@@ -26,7 +26,6 @@ import {
   useVerifyOrganizationDomain,
 } from "@/shared/api/organizations"
 import { formatRelative } from "@/shared/helpers/format"
-
 import { canManage, membershipLabel } from "./roles"
 
 // Email-domain auto-join: anyone who signs in with a verified address at a
@@ -304,12 +303,7 @@ export function OrganizationDomainsPage() {
             </Button>
           ) : null
         }
-      >
-        Let colleagues join this organization automatically. Anyone who signs in
-        with a verified address at a domain you have proven you control becomes
-        a member, at the role you choose. A claim does nothing until its DNS
-        record is verified.
-      </PageIntro>
+      />
 
       <ErrorBanner error={context.error ?? domains.error ?? update.error} />
 
@@ -338,6 +332,7 @@ export function OrganizationDomainsPage() {
         <TableScrollFrame className="otari-domains-table">
           <DataTable
             ariaLabel="Organization email domains"
+            mobileLayout="cards"
             columns={columns}
             rows={rows}
             getRowKey={(row) => row.id}

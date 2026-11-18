@@ -5,7 +5,7 @@ import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Field } from "@/design-system/forms/Field"
 import { FieldMessages } from "@/design-system/forms/FieldMessages"
 import { SecretField } from "@/design-system/forms/SecretField"
-import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+import { Select } from "@/design-system/forms/Select"
 import { GuardrailJsonField } from "@/features/guardrails/GuardrailJsonField"
 import {
   type ParameterErrors,
@@ -89,28 +89,25 @@ function ParameterControl({
 
   if (spec.type === "enum" && spec.choices) {
     return (
-      <div className="flex flex-col gap-1">
-        <FilterSelect
-          label={label}
-          value={String(value ?? "")}
-          disabled={disabled}
-          onChange={onChange}
-          // A blank option is what leaves the profile's own default in force,
-          // so an optional enum stays clearable; a required one has no such
-          // state and its blank entry is the unset the error message names.
-          options={[
-            { value: "", label: spec.required ? "Choose a value" : "Default" },
-            ...spec.choices.map((choice) => ({ value: choice, label: choice })),
-          ]}
-        />
-        <FieldMessages shouldReserve>
-          {error ? (
-            <span className="text-caption text-danger">{error}</span>
-          ) : description ? (
-            <span className="text-caption">{description}</span>
-          ) : null}
-        </FieldMessages>
-      </div>
+      <Select
+        label={label}
+        value={String(value ?? "")}
+        isDisabled={disabled}
+        onChange={onChange}
+        // `Select` shows "" as nothing chosen, so the unset state is named by
+        // the placeholder. An optional enum also offers it as a blank entry,
+        // which leaves the profile's own default in force; a required one has
+        // no such state, so the prompt is a placeholder and never a choice.
+        placeholder={spec.required ? "Choose a value" : "Default"}
+        description={error ? undefined : description}
+        isInvalid={Boolean(error)}
+        errorMessage={error}
+        shouldReserveMessage
+        options={[
+          ...(spec.required ? [] : [{ value: "", label: "Default" }]),
+          ...spec.choices.map((choice) => ({ value: choice, label: choice })),
+        ]}
+      />
     )
   }
 

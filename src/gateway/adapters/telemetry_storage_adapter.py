@@ -222,6 +222,7 @@ class DatabaseTelemetryStorageAdapter(TelemetryStoragePort):
                 value=float(value),
             )
             for name, series_key, series_start, temporality, timestamp, value in rows
+            if value is not None
         )
 
     async def behavior_counts(self, *, filters: TelemetryFilter) -> BehaviorCounts:

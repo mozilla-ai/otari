@@ -9,9 +9,10 @@ with a schema nobody ships.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 
 import httpx
 import pytest
@@ -25,11 +26,14 @@ from any_guardrail.taxonomy import GuardrailStage as UpstreamStage
 from gateway.log_config import logger as gateway_logger
 from gateway.services.guardrail_catalog import (
     _KNOWN_TYPES,
+    GUARDRAIL_CATALOG_TTL_S,
     BuiltInGuardrailCatalog,
     BuiltInGuardrailSpec,
     GuardrailParameterSpec,
     build_builtin_guardrail_catalog,
     builtin_guardrail_spec,
+    cached_guardrail_catalog,
+    clear_guardrail_catalog_cache,
     definable_by_an_organization,
     fetch_guardrail_catalog,
 )
@@ -267,6 +271,140 @@ async def test_an_unusable_configured_url_is_a_reason_not_a_500(monkeypatch: pyt
     assert catalog.available is False
     assert catalog.profiles == []
     assert catalog.reason is not None
+
+
+# ---------------------------------------------------------------------------
+# The cached read (``cached_guardrail_catalog``), which any API key reaches.
+# ---------------------------------------------------------------------------
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> Iterator[_Clock]:
+    clock = _Clock()
+    monkeypatch.setattr("gateway.services.guardrail_catalog.time.monotonic", clock)
+    clear_guardrail_catalog_cache()
+    yield clock
+    clear_guardrail_catalog_cache()
+
+
+def _counting_handler(calls: list[str]) -> Callable[[httpx.Request], httpx.Response]:
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        return httpx.Response(200, json=[{"name": "prompt-injection", "guardrail_name": "injec_guard"}])
+
+    return handler
+
+
+@pytest.mark.asyncio
+async def test_repeated_reads_dial_the_service_once(monkeypatch: pytest.MonkeyPatch, clock: _Clock) -> None:
+    """A workspace key reaches this read, so repeated reads must reuse one answer."""
+    calls: list[str] = []
+    _patch_transport(monkeypatch, _counting_handler(calls))
+
+    first = await cached_guardrail_catalog(_URL)
+    clock.now += GUARDRAIL_CATALOG_TTL_S - 1
+    second = await cached_guardrail_catalog(_URL)
+
+    assert first == second
+    assert first.available is True
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_concurrent_misses_dial_the_service_once(monkeypatch: pytest.MonkeyPatch, clock: _Clock) -> None:
+    """A burst that arrives before the first answer must not become one request each."""
+    calls: list[str] = []
+    release = asyncio.Event()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        await release.wait()
+        return httpx.Response(200, json=[{"name": "prompt-injection", "guardrail_name": "injec_guard"}])
+
+    transport = httpx.MockTransport(handler)
+    real_async_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        "gateway.services.guardrail_catalog.httpx.AsyncClient",
+        lambda *_a, **_k: real_async_client(transport=transport),
+    )
+
+    reads = [asyncio.create_task(cached_guardrail_catalog(_URL)) for _ in range(5)]
+    for _ in range(10):
+        await asyncio.sleep(0)
+    release.set()
+    results = await asyncio.gather(*reads)
+
+    assert len(calls) == 1
+    assert all(result == results[0] for result in results)
+
+
+@pytest.mark.asyncio
+async def test_a_slow_answer_is_fresh_for_the_whole_period(monkeypatch: pytest.MonkeyPatch, clock: _Clock) -> None:
+    """The period starts when the answer arrives, or a slow service would be asked again at once."""
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        clock.now += GUARDRAIL_CATALOG_TTL_S
+        return httpx.Response(200, json=[{"name": "prompt-injection", "guardrail_name": "injec_guard"}])
+
+    _patch_transport(monkeypatch, handler)
+
+    await cached_guardrail_catalog(_URL)
+    await cached_guardrail_catalog(_URL)
+
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_stale_read_dials_the_service_again(monkeypatch: pytest.MonkeyPatch, clock: _Clock) -> None:
+    calls: list[str] = []
+    _patch_transport(monkeypatch, _counting_handler(calls))
+
+    await cached_guardrail_catalog(_URL)
+    clock.now += GUARDRAIL_CATALOG_TTL_S
+    await cached_guardrail_catalog(_URL)
+
+    assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_changed_service_url_is_read_fresh(monkeypatch: pytest.MonkeyPatch, clock: _Clock) -> None:
+    """An operator who points ``guardrails_url`` somewhere else sees the new service at once."""
+    calls: list[str] = []
+    _patch_transport(monkeypatch, _counting_handler(calls))
+
+    await cached_guardrail_catalog(_URL)
+    await cached_guardrail_catalog("http://other-guardrails:8000")
+
+    assert calls == [f"{_URL}/profiles", "http://other-guardrails:8000/profiles"]
+
+
+@pytest.mark.asyncio
+async def test_an_unavailable_answer_is_cached_too(monkeypatch: pytest.MonkeyPatch, clock: _Clock) -> None:
+    """An outage is when a burst of reads would cost the most, one timeout each."""
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        raise httpx.ConnectError("connection refused")
+
+    _patch_transport(monkeypatch, handler)
+
+    first = await cached_guardrail_catalog(_URL)
+    second = await cached_guardrail_catalog(_URL)
+
+    assert first.available is False
+    assert second == first
+    assert len(calls) == 1
 
 
 # ---------------------------------------------------------------------------

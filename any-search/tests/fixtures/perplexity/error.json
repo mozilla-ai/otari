@@ -1,0 +1,10 @@
+{
+  "status": 401,
+  "body": {
+    "error": {
+      "message": "Invalid API key provided. You can find your API key at https://console.perplexity.ai.",
+      "type": "invalid_api_key",
+      "code": 401
+    }
+  }
+}

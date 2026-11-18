@@ -49,7 +49,7 @@ _TOKEN = re.compile(r"token=([\w-]+)")
 
 def call(method: str, path: str, body: dict | None = None, *, auth: bool = True) -> tuple[int, dict | list | None]:
     data = json.dumps(body).encode() if body is not None else None
-    request = urllib.request.Request(f"{BASE}{path}", data=data, method=method)
+    request = urllib.request.Request(f"{BASE}/api{path}", data=data, method=method)
     request.add_header("Content-Type", "application/json")
     if auth:
         request.add_header("Authorization", f"Bearer {MASTER_KEY}")
@@ -146,7 +146,7 @@ def signup_and_verify(email: str) -> None:
         # Already claimed on an earlier run: signup answers 200 without writing
         # anything, by design. Sign-in will tell.
         return
-    status, payload = call("POST", "/v1/auth/verify-email", {"token": token}, auth=False)
+    status, payload = call("POST", "/v1/auth/verify-email", {"token": token, "password": PASSWORD}, auth=False)
     must(status, payload, f"verifying {email}")
 
 

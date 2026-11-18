@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
 import pydantic
 from sqlmodel import Field, SQLModel
@@ -16,6 +16,7 @@ from sqlmodel import Field, SQLModel
 from gateway.core.settings.tools import ToolKind
 from gateway.models.secret_fields import redact_secret_like_values
 from gateway.models.tools import OrgWebSearchKey, SearchToolCredential
+from gateway.schemas.mcp_catalog import McpCatalogServerPublic
 
 
 class OrgWebSearchKeyCreateRequest(SQLModel):
@@ -35,7 +36,7 @@ class OrgWebSearchKeyCreateRequest(SQLModel):
         max_length=255,
         description=(
             "The provider the key is for: one the provider catalog, GET /api/v1/search-tools/providers, "
-            "lists for the key's kind, other than searxng, or tavily or brave for a search key."
+            "lists for the key's kind, other than searxng."
         ),
     )
     name: str = Field(max_length=255, description="How the organization tells this key apart from its others.")
@@ -142,6 +143,13 @@ class WorkspaceWebSearchKeyPublic(SQLModel):
     name: str
     last4: str | None = None
     is_default: bool = Field(description="The workspace pinned this key as its own for its kind.")
+    is_org_default: bool = Field(
+        default=False,
+        description=(
+            "The organization's default of its kind, which a workspace that pinned no key uses unless it turned the "
+            "key off or this deployment cannot decrypt it; the deployment's instance serves it then."
+        ),
+    )
     disabled: bool = Field(description="The workspace turned this key off.")
     is_effective: bool = Field(description="This is the key the workspace's calls of its kind use.")
     usable: bool
@@ -165,6 +173,20 @@ class WorkspaceWebSearchKeysPublic(SQLModel):
             "deployment's default fetch instance's, which is builtin for the built-in fetcher."
         ),
     )
+    deployment_search_tool: str | None = Field(
+        default=None,
+        description=(
+            "The name of the deployment's search tool, which the workspace's searches run on when no key serves "
+            "them, whether or not one does now. Null when the deployment has none."
+        ),
+    )
+    deployment_fetch_tool: str | None = Field(
+        default=None,
+        description=(
+            "The name of the deployment's fetch tool, which the workspace's fetches run on when no key serves "
+            "them, whether or not one does now: builtin_fetch for the built-in fetcher."
+        ),
+    )
 
 
 class SearchProviderOptionSchema(SQLModel):
@@ -177,7 +199,17 @@ class SearchProviderOptionSchema(SQLModel):
     description: str = ""
     operator_only: bool = Field(
         default=False,
-        description="True when only an instance or a credential may set it, never a workspace or a request.",
+        description=(
+            "True when only an instance or a credential may set it, never a workspace or a request: an option "
+            "the provider's library marks so, or a cost tier of a provider that reports no cost."
+        ),
+    )
+    cost_tier: bool = Field(
+        default=False,
+        description=(
+            "True when the option's values are the provider's cost tiers: the provider bills a call at a price "
+            "of its own for each value. enum lists the tiers, and default is the one used when the option is unset."
+        ),
     )
 
 
@@ -205,6 +237,10 @@ class SearchProviderSchema(SQLModel):
     )
     doc_url: str | None = Field(default=None, description="The provider's API documentation.")
     tier: str | None = Field(default=None, description="The library's tier for the provider.")
+    reports_cost: bool = Field(
+        default=False,
+        description="True when the provider's answer says what each call cost, which is then what the call is billed.",
+    )
     options: list[SearchProviderOptionSchema] | None = Field(
         default=None,
         description=(
@@ -275,9 +311,38 @@ class StoredSearchToolSchema(pydantic.BaseModel):
         *,
         decryptable: bool = True,
         shadows_config: bool = False,
-    ) -> "StoredSearchToolSchema":
-        """The public view of a stored row: never the key, only its last four characters."""
-        return cls(**row.to_public_dict(), decryptable=decryptable, shadows_config=shadows_config)
+        **fields: Any,
+    ) -> Self:
+        """The public view of a stored row: never the key, only its last four characters.
+
+        ``fields`` sets those a subclass adds.
+        """
+        return cls(**row.to_public_dict(), decryptable=decryptable, shadows_config=shadows_config, **fields)
+
+
+# Where a listed tool's price comes from: its own price row, that row while its
+# config.yml entry sets ``price_per_call``, its old ``<provider>:<name>`` row,
+# or no row.
+ToolPriceSource = Literal["own", "config", "old_key", "none"]
+
+_PRICE_PER_CALL_DESCRIPTION = (
+    "USD for one call on the deployment's own account when the provider reports no cost of its own, from the "
+    "deployment's price list. An override the operator set for one organization prices that organization's "
+    "calls instead. Null when no row prices the tool: with require_pricing on, its calls are refused."
+)
+_PRICE_SOURCE_DESCRIPTION = (
+    "Which row price_per_call comes from: 'own', the tool's own row (its kind and name as model_key); 'config', "
+    "that row while the tool's config.yml entry sets price_per_call, which each start writes to it again when the "
+    "rate in force differs, so a rate set through the API lasts until the next start; 'old_key', the tool's old "
+    "<provider>:<name> row, which prices it while it has no row of its own; 'none', no row."
+)
+
+
+class ListedSearchToolSchema(StoredSearchToolSchema):
+    """A stored instance as the listing shows it: with what one of its calls costs."""
+
+    price_per_call: float | None = pydantic.Field(description=_PRICE_PER_CALL_DESCRIPTION)
+    price_source: ToolPriceSource = pydantic.Field(description=_PRICE_SOURCE_DESCRIPTION)
 
 
 class CreatedSearchToolSchema(StoredSearchToolSchema):
@@ -314,13 +379,44 @@ class ConfigSearchToolSchema(pydantic.BaseModel):
         default=False,
         description="True when a stored instance of the same name and kind overrides this entry.",
     )
+    price_per_call: float | None = pydantic.Field(description=_PRICE_PER_CALL_DESCRIPTION)
+    price_source: ToolPriceSource = pydantic.Field(description=_PRICE_SOURCE_DESCRIPTION)
 
 
 class SearchToolsResponse(pydantic.BaseModel):
     """Every search instance ``POST /api/v1/search`` can name, or every fetch instance, by where it came from."""
 
-    stored: list[StoredSearchToolSchema]
+    stored: list[ListedSearchToolSchema]
     config: list[ConfigSearchToolSchema]
+
+
+class SearchToolCatalogEntry(pydantic.BaseModel):
+    """One search tool a direct search may name, as any caller may see it: never its key, endpoint or options."""
+
+    id: str = pydantic.Field(description="The tool's name, to send as 'search_tool_name' or in /api/v1/search/{tool}.")
+    object: Literal["search_tool"] = "search_tool"
+    provider: str = pydantic.Field(description="The search provider the tool runs on.")
+    label: str = pydantic.Field(description="A display name for the tool: its provider's name, capitalized.")
+    price_per_call: float | None = pydantic.Field(
+        description=(
+            "USD the caller's organization is charged for one search on the tool when the provider reports no "
+            "cost of its own: the organization's override, else the deployment's price list. Null when no row "
+            "prices it."
+        )
+    )
+    default: bool = pydantic.Field(
+        description=(
+            "True for the deployment's default, the tool a direct search that names none runs on unless the "
+            "caller's organization brings its own search key."
+        )
+    )
+
+
+class SearchToolCatalogResponse(pydantic.BaseModel):
+    """The search tools a direct search may name."""
+
+    object: Literal["list"] = "list"
+    data: list[SearchToolCatalogEntry]
 
 
 class CreateSearchToolRequest(pydantic.BaseModel):
@@ -534,6 +630,178 @@ class SearchResponse(pydantic.BaseModel):
     )
 
 
+class FetchRequest(pydantic.BaseModel):
+    """A direct fetch request: one page, read through the deployment's fetch tool or the one named."""
+
+    model_config = pydantic.ConfigDict(
+        json_schema_extra={"example": {"url": "https://example.com/article", "max_chars": 20000}},
+    )
+
+    url: str = pydantic.Field(min_length=1, description="The page to fetch: one public http or https URL.")
+    fetch_tool_name: str | None = pydantic.Field(
+        default=None,
+        description=(
+            "Configured fetch tool to run on, builtin_fetch included. Optional: the deployment's "
+            "web_fetch_default_tool serves, else builtin_fetch. Ignored on POST /api/v1/fetch/{fetch_tool_name}."
+        ),
+    )
+    max_chars: int | None = pydantic.Field(
+        default=None,
+        ge=1,
+        description=(
+            "Cut the page text to this many characters. Unset, the tool's own max_chars option applies, "
+            "else the provider's own limits."
+        ),
+    )
+    include_raw: bool = pydantic.Field(
+        default=False,
+        description=(
+            "Also return the provider's whole response, as raw. builtin_fetch calls no provider, so its raw "
+            "holds only content_kind and redirect_count."
+        ),
+    )
+    provider_options: dict[str, Any] | None = pydantic.Field(
+        default=None,
+        description=(
+            "Native options for the provider that serves the call, under the provider's own names, as "
+            "GET /api/v1/search-tools/providers?kind=fetch lists them. An option the provider does not take from a "
+            "request is refused with a 400. On a call that names no tool they go to whichever provider "
+            "serves it, so name the tool when they are meant for one provider."
+        ),
+    )
+    user: str | None = pydantic.Field(default=None, description="User ID for usage attribution")
+
+
+class FetchResponse(pydantic.BaseModel):
+    """A completed direct fetch: one page's text and where it came from."""
+
+    object: Literal["fetch"] = "fetch"
+    fetch_tool: str = pydantic.Field(description="The configured fetch tool that served the request")
+    url: str = pydantic.Field(description="The URL fetched, as asked, in canonical form.")
+    final_url: str = pydantic.Field(
+        description=(
+            "Where the page was found after redirects. The URL asked for when the provider does not report "
+            "where a redirect led (reports_final_url in the provider catalog)."
+        )
+    )
+    title: str = pydantic.Field(default="", description="The page's title; empty when the provider gave none.")
+    content_type: str = pydantic.Field(
+        default="", description="The page's content type; empty when the provider does not report one."
+    )
+    text: str = pydantic.Field(description="The page's text, as the provider extracted it.")
+    published: datetime | None = pydantic.Field(
+        default=None, description="When the page was published, where the provider reports it."
+    )
+    truncated: bool = pydantic.Field(
+        description=(
+            "Whether text is less than the whole page: the body or the extracted text hit a limit of the "
+            "provider's, or max_chars cut it."
+        )
+    )
+    raw: dict[str, Any] | None = pydantic.Field(
+        default=None,
+        exclude_if=lambda raw: raw is None,
+        description="The provider's whole response, untouched; only when the request set include_raw.",
+    )
+
+
+_MAX_CODE_EXECUTION_INPUTS = 32
+
+
+class CodeExecuteRequest(pydantic.BaseModel):
+    """A direct code execution request: the code to run, and the sandbox to run it in."""
+
+    model_config = pydantic.ConfigDict(
+        json_schema_extra={"example": {"code": "print(1 + 1)", "container": "auto"}},
+    )
+
+    code: str = pydantic.Field(min_length=1, description="Python source to run in the sandbox")
+    container: str | None = pydantic.Field(
+        default=None,
+        description=(
+            "'auto' to hold the sandbox after the run, or a container id an earlier response named in "
+            "Otari-Container-Id to run in that sandbox again, with its files and interpreter state. "
+            "Omitted, the sandbox is released when the run ends."
+        ),
+    )
+    timeout_seconds: int | None = pydantic.Field(
+        default=None,
+        ge=1,
+        description=(
+            "How long the code may run. Never more than the workspace's code execution ceiling, "
+            "or 60 seconds when it sets none."
+        ),
+    )
+    environment: str | None = pydantic.Field(
+        default=None,
+        max_length=255,
+        pattern=r"^[A-Za-z0-9._:/@-]+$",
+        description=(
+            "The sandbox environment to run in: a name GET /api/v1/code/environments lists. Omitted, the "
+            "workspace's pinned environment, else the deployment's default. A held container keeps the "
+            "environment it was created in."
+        ),
+    )
+    file_ids: list[str] | None = pydantic.Field(
+        default=None,
+        max_length=_MAX_CODE_EXECUTION_INPUTS,
+        description=(
+            "Uploads from POST /api/v1/files to put in the working directory before the code runs, "
+            "each under its own filename."
+        ),
+    )
+    user: str | None = pydantic.Field(default=None, description="User ID for usage attribution")
+
+    @pydantic.field_validator("code")
+    @classmethod
+    def _code_is_not_blank(cls, code: str) -> str:
+        if not code.strip():
+            raise ValueError("code must contain something to run")
+        return code
+
+
+class CodeExecutionOutputFile(pydantic.BaseModel):
+    """A file the code wrote, stored in the Files API."""
+
+    file_id: str = pydantic.Field(description="Download it from GET /api/v1/files/{file_id}/content")
+    filename: str = pydantic.Field(description="The name the code gave it in the working directory")
+
+
+class CodeExecuteResponse(pydantic.BaseModel):
+    """A completed code execution. Code that failed is a completed execution with a nonzero ``return_code``."""
+
+    object: Literal["code_execution.result"] = "code_execution.result"
+    stdout: str
+    stderr: str
+    return_code: int | None = pydantic.Field(
+        description="The program's exit status; null when the sandbox did not report one."
+    )
+    files: list[CodeExecutionOutputFile] = pydantic.Field(
+        description="The files the code wrote. Empty when it wrote none, or where the Files API is off."
+    )
+
+
+class CodeExecutionEnvironment(pydantic.BaseModel):
+    """A sandbox environment a direct code execution may name: what it contains, and what a run in it costs."""
+
+    object: Literal["code_execution.environment"] = "code_execution.environment"
+    name: str = pydantic.Field(description="What POST /api/v1/code/execute's environment field takes.")
+    label: str = pydantic.Field(description="A display name; the name itself when the operator gave none.")
+    description: str | None = pydantic.Field(description="What it contains and how big it is, when the operator said.")
+    price_per_run: float | None = pydantic.Field(
+        description="USD per run for the caller's organization: the environment's own price, else code execution's. "
+        "Null when unpriced."
+    )
+    default: bool = pydantic.Field(description="Whether a run that names no environment runs in this one.")
+
+
+class CodeExecutionEnvironmentList(pydantic.BaseModel):
+    """The sandbox environments the caller's workspace may run code in."""
+
+    object: Literal["list"] = "list"
+    data: list[CodeExecutionEnvironment]
+
+
 class OtariToolCallSource(pydantic.BaseModel):
     """One page a gateway-run search returned: where it is, never its text."""
 
@@ -552,14 +820,14 @@ class OtariToolCallError(pydantic.BaseModel):
 
 
 class OtariToolCall(pydantic.BaseModel):
-    """One web search or fetch the gateway ran, as a Chat Completions response reports it in ``otari_tool_calls``.
+    """One tool call the gateway ran, as a Chat Completions response reports it in ``otari_tool_calls``.
 
     A stream sends the entry when the call starts and again when it ends, both with
     the same ``id``. Fields not set are left out of the wire entry.
     """
 
     id: str
-    type: Literal["web_search", "web_fetch"]
+    type: Literal["web_search", "web_fetch", "code_execution", "mcp"]
     status: Literal["in_progress", "completed", "failed"]
     query: str | None = pydantic.Field(default=None, description="A search's query.")
     url: str | None = pydantic.Field(
@@ -567,6 +835,21 @@ class OtariToolCall(pydantic.BaseModel):
     )
     sources: list[OtariToolCallSource] | None = pydantic.Field(
         default=None, description="A completed search's results; empty when it found none."
+    )
+    code: str | None = pydantic.Field(
+        default=None, description="The code the model sent a code execution; a failed one may not have run."
+    )
+    stdout: str | None = pydantic.Field(default=None, description="What an ended code execution printed.")
+    stderr: str | None = pydantic.Field(default=None, description="What an ended code execution wrote to stderr.")
+    exit_code: int | None = pydantic.Field(default=None, description="An ended code execution's exit status.")
+    file_ids: list[str] | None = pydantic.Field(
+        default=None, description="The /v1/files IDs of the files a code execution produced."
+    )
+    server: str | None = pydantic.Field(default=None, description="The MCP server that ran the call.")
+    name: str | None = pydantic.Field(default=None, description="The MCP tool called.")
+    output: str | None = pydantic.Field(default=None, description="The text an ended MCP call gave the model.")
+    truncated: bool | None = pydantic.Field(
+        default=None, description="Whether stdout, stderr or output was cut to the report's limit."
     )
     error: OtariToolCallError | None = pydantic.Field(default=None, description="Why a failed call failed, when known.")
 
@@ -590,3 +873,222 @@ class SandboxCredentialRequest(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(json_schema_extra={"example": {"api_key": "e2b_0123456789abcdef"}})
 
     api_key: str = pydantic.Field(min_length=1)
+
+
+class McpConnectionStart(pydantic.BaseModel):
+    """What a caller sends to start their own sign-in to a per-user MCP server."""
+
+    return_to: str | None = pydantic.Field(
+        default=None,
+        max_length=2048,
+        description="A dashboard path to land on once signed in, such as /tools/mcp-servers. "
+        "Anything that is not a path inside the dashboard is refused",
+    )
+
+
+class McpServerLeftOut(pydantic.BaseModel):
+    """A server the key's access list grants and that is still not listed, and why."""
+
+    id: uuid.UUID
+    name: str
+    reason: Literal["key_has_no_user"] = pydantic.Field(
+        description="`key_has_no_user`: the server signs each person in with their own account, and this key "
+        "belongs to no person, so there is nobody to sign in as"
+    )
+    detail: str = pydantic.Field(description="The reason in a sentence, for a person reading the response")
+
+
+class McpConnectionStarted(pydantic.BaseModel):
+    """Where to send the caller's browser to sign in."""
+
+    authorization_url: str = pydantic.Field(
+        description="The MCP server's authorization page. It carries a single-use state that expires in 30 minutes"
+    )
+
+
+class McpConnectionComplete(pydantic.BaseModel):
+    """What the authorization server sent back, as the dashboard received it."""
+
+    state: str = pydantic.Field(min_length=1, max_length=512, description="The state from the redirect")
+    code: str = pydantic.Field(min_length=1, max_length=4096, description="The authorization code from the redirect")
+    iss: str | None = pydantic.Field(
+        default=None,
+        max_length=2048,
+        description="The redirect's iss, the authorization server's own name, if it sent one",
+    )
+
+
+class McpConnectionCompleted(pydantic.BaseModel):
+    """A finished sign-in: which server it connected, and where to land."""
+
+    server_id: uuid.UUID
+    workspace_id: uuid.UUID
+    server_name: str
+    return_to: str | None = pydantic.Field(description="The dashboard path the sign-in was started with, if any")
+    checked: bool = pydantic.Field(
+        default=False,
+        description="The sign-in was made only to check the server: its health was recorded and nothing was connected",
+    )
+    shared: bool = pydantic.Field(
+        default=False,
+        description="The sign-in was a manager's for everyone: it is now the shared server's account",
+    )
+
+
+class McpConnectionPublic(pydantic.BaseModel):
+    """One of the caller's own connections. Never carries a token."""
+
+    server_id: uuid.UUID
+    connected_at: datetime
+    updated_at: datetime
+    expires_at: datetime | None = pydantic.Field(
+        description="When the current access token expires; null when the server stated no lifetime"
+    )
+    renewable: bool = pydantic.Field(
+        description="Whether Otari can renew the token on its own; false means signing in again once it expires"
+    )
+
+
+class McpConnectionsPublic(pydantic.BaseModel):
+    data: list[McpConnectionPublic]
+    count: int = pydantic.Field(description="How many of the workspace's servers the caller is connected to in all")
+
+
+class McpServerConnectionPublic(pydantic.BaseModel):
+    """One user connected to a per-user MCP server, as a workspace manager sees them. Never carries a token."""
+
+    user_id: str = pydantic.Field(description="The request-plane user the connection belongs to")
+    email: str | None = pydantic.Field(description="The dashboard account's email, when the user is one's")
+    full_name: str | None
+    connected_at: datetime
+    updated_at: datetime
+
+
+class McpServerConnectionsPublic(pydantic.BaseModel):
+    data: list[McpServerConnectionPublic]
+    count: int = pydantic.Field(description="How many users are connected in all")
+
+
+MAX_MCP_SERVER_REQUEST_NOTE_LENGTH = 500
+McpServerRequestStatusValue = Literal["pending", "approved", "declined", "withdrawn"]
+
+
+class McpServerRequestCreate(pydantic.BaseModel):
+    """A member asking the workspace's admins to add one server of the MCP catalog."""
+
+    catalog_name: str = pydantic.Field(
+        min_length=1, max_length=512, description="The catalog server's `name`, such as `com.example/mcp`"
+    )
+    note: str | None = pydantic.Field(
+        default=None,
+        max_length=MAX_MCP_SERVER_REQUEST_NOTE_LENGTH,
+        description="What the member needs the server for, shown to the admins",
+    )
+
+
+class McpServerRequestPublic(pydantic.BaseModel):
+    """One of the caller's own requests for a catalog server."""
+
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    catalog_name: str
+    title: str = pydantic.Field(description="The catalog's title for the server when it was requested")
+    url: str = pydantic.Field(description="The server's endpoint when it was requested")
+    note: str | None
+    status: McpServerRequestStatusValue
+    decision_reason: str | None = pydantic.Field(description="An admin's reason for declining, when they gave one")
+    decided_at: datetime | None
+    server_id: uuid.UUID | None = pydantic.Field(description="The stored server an approval produced")
+    catalog_server: McpCatalogServerPublic | None = pydantic.Field(
+        description="The catalog's entry as it is now; null once the catalog no longer lists the server"
+    )
+    created_at: datetime
+
+
+class McpServerRequestsPublic(pydantic.BaseModel):
+    """The caller's pending requests in a workspace, and the answers they have not acknowledged, newest first."""
+
+    data: list[McpServerRequestPublic]
+
+
+class McpServerRequesterPublic(pydantic.BaseModel):
+    """One member who asked for a server, as a workspace manager sees them."""
+
+    request_id: uuid.UUID
+    user_id: uuid.UUID
+    full_name: str | None
+    email: str | None
+    note: str | None
+    requested_at: datetime
+
+
+class McpServerRequestGroupPublic(pydantic.BaseModel):
+    """Everyone waiting for one catalog server in a workspace."""
+
+    catalog_name: str
+    title: str
+    url: str
+    catalog_server: McpCatalogServerPublic | None = pydantic.Field(
+        description="The catalog's entry as it is now; null once the catalog no longer lists the server"
+    )
+    requesters: list[McpServerRequesterPublic] = pydantic.Field(
+        description="Who asked, earliest first, up to 5. Past that, the requesters list of this server has the rest"
+    )
+    requester_count: int = pydantic.Field(description="How many pending requests ask for this server in all")
+    first_requested_at: datetime
+
+
+class McpServerRequestersPublic(pydantic.BaseModel):
+    """A page of the members waiting for one catalog server in a workspace."""
+
+    data: list[McpServerRequesterPublic] = pydantic.Field(description="Who asked, earliest first")
+    count: int = pydantic.Field(description="How many pending requests ask for this server in all")
+
+
+class McpServerRequestGroupsPublic(pydantic.BaseModel):
+    """A workspace's pending requests, one entry per catalog server, the longest-waiting first."""
+
+    data: list[McpServerRequestGroupPublic]
+    count: int = pydantic.Field(description="How many requests are pending in all")
+    server_count: int = pydantic.Field(description="How many catalog servers have a request pending, for paging `data`")
+
+
+class McpServerRequestDecline(pydantic.BaseModel):
+    """Declines every pending request for one catalog server."""
+
+    catalog_name: str = pydantic.Field(min_length=1, max_length=512)
+    reason: str | None = pydantic.Field(
+        default=None, max_length=MAX_MCP_SERVER_REQUEST_NOTE_LENGTH, description="Shown to each requester"
+    )
+
+
+class McpServerRequestsDeclined(pydantic.BaseModel):
+    declined: int = pydantic.Field(description="How many requests were declined")
+
+
+class WorkspaceMcpServerLogoPublic(pydantic.BaseModel):
+    """How the dashboard shows one of a workspace's MCP servers."""
+
+    server_id: uuid.UUID
+    logo_url: str | None = pydantic.Field(
+        description=(
+            "Where this gateway serves the server's logo: an admin's upload, else the catalog's logo for its URL, "
+            "else one found on its host. Null when none was found; the dashboard shows the server's initial."
+        )
+    )
+    logo_tone: Literal["dark", "light", "tile"] | None = pydantic.Field(
+        description=(
+            "Where the logo needs a tile to stay visible: `dark` ink on a dark background, `light` ink on a light "
+            "background, `tile` on every background. Null when it reads on both, or the tile is `never`."
+        )
+    )
+    logo_tile: Literal["auto", "always", "never"] = pydantic.Field(
+        description="An admin's choice: a tile only where the logo would fade out, always, or never."
+    )
+    has_logo_override: bool = pydantic.Field(description="An admin uploaded this server's logo.")
+
+
+class WorkspaceMcpServerLogosPublic(pydantic.BaseModel):
+    """The logo of each of a workspace's MCP servers."""
+
+    data: list[WorkspaceMcpServerLogoPublic]

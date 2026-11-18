@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from gateway.api.deps import build_model_metadata_override_service
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.providers_exceptions import HostedCatalogEmptyError, HostedProviderReadOnlyError
@@ -31,6 +32,7 @@ from gateway.repositories.pricing import ModelPricingRepository, OrganizationMod
 from gateway.repositories.providers import (
     HostedProviderModelRepository,
     HostedProviderRepository,
+    HostedProviderVendorRepository,
     ProviderEndpointRepository,
 )
 from gateway.repositories.tenancy import OrganizationRepository, OrgProviderKeyRepository
@@ -96,12 +98,14 @@ def _service(db: AsyncSession, config: GatewayConfig) -> HostedProviderService:
         providers=providers,
         sources=HostedSources(config, providers),
         models=HostedProviderModelRepository(uow),
+        vendors=HostedProviderVendorRepository(uow),
         endpoints=ProviderEndpointRepository(uow),
         pricing=DeploymentPricingService(
             uow, pricing=ModelPricingRepository(uow), overrides=OrganizationModelPricingRepository(uow)
         ),
         live_byo_pairs=OrgProviderKeyRepository(uow).live_provider_pairs,
         organization_exists=OrganizationRepository(uow).exists,
+        metadata_overrides=build_model_metadata_override_service(uow),
     )
 
 
@@ -576,3 +580,15 @@ def test_a_request_is_served_on_a_keyless_configured_provider(
     assert captured["api_base"] == "http://vllm.internal:8000/v1"
     # The keyless placeholder, never None and never another provider's key.
     assert captured["api_key"] == "otari-no-key-required"
+
+
+@pytest.mark.asyncio
+async def test_a_configured_provider_lists_its_supported_countries(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _discovery(monkeypatch)
+
+    listed = await _service(async_db, _configured(supported_countries=["gb", "de"])).list_providers()
+
+    [public] = listed.data
+    assert public.supported_countries == ["GB", "DE"]

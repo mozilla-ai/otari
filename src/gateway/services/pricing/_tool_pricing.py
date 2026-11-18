@@ -11,27 +11,47 @@ request does: an override the organization wrote itself would let it name the
 deployment's cost, down to zero.
 """
 
+import re
 from collections.abc import Mapping, Sequence
 from decimal import Decimal
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from gateway.core.metered_pricing import quantize_cost
-from gateway.models.pricing import PriceSource
+from gateway.models.pricing import ModelPricing, PriceSource
+from gateway.services.pricing._price_rules import NO_FACTS, Condition, PriceFacts, apply_rules
+from gateway.services.pricing._slot_pricing import search_rate
 from gateway.types.tool_charges import (
     GATEWAY_TOOL_PRICING_PROVIDER,
     ORGANIZATION_KEY_LABEL_PREFIX,
     LabelCalls,
     RateKey,
     gateway_tool_pricing_key,
+    is_provider_web_search,
 )
 
 # Published per-search prices of searches a provider runs itself, keyed by label.
 # Default pricing prices a provider-run search at its list price when the operator
 # set no rate, as models.dev prices a model. Anthropic: $10 per 1,000 searches
 # (https://docs.claude.com/en/docs/agents-and-tools/tool-use/web-search-tool), read 2026-10-17.
+# OpenAI: $10 per 1,000 calls (https://platform.openai.com/docs/pricing), as every
+# OpenAI model in the bundled models.dev catalog prices it, read 2026-11-10.
 PROVIDER_TOOL_LIST_PRICES: Mapping[str, Decimal] = {
     "anthropic:web_search": Decimal("0.01"),
+    "openai:web_search": Decimal("0.01"),
 }
+
+# Gemini 2.5 and earlier bill Google Search grounding per grounded prompt, however
+# many queries it ran; Gemini 3 bills each query (https://ai.google.dev/gemini-api/docs/pricing).
+# Keyed on the model alone: only Google's grounding reports searches on these
+# models, and a hosted provider or organization key serving them has a name of its own.
+_PER_PROMPT_SEARCH_MODEL = re.compile(r"(?:^|/)gemini-[12][.-]")
+
+
+def billed_provider_searches(model: str, searches: int) -> int:
+    """How many of the ``searches`` a model's provider ran it bills: one per prompt on Gemini 2.5 and earlier."""
+    if _PER_PROMPT_SEARCH_MODEL.search(model):
+        return min(searches, 1)
+    return searches
 
 
 class ToolRate(NamedTuple):
@@ -41,6 +61,36 @@ class ToolRate(NamedTuple):
     #: USD per call.
     unit_rate: Decimal
     source: PriceSource
+    #: True when an instance's rate is stored under its old model-kind
+    #: ``<provider>:<instance>`` key, the second spelling of its own.
+    old_key: bool = False
+    #: The conditions that changed the price, where it is a model's own search price.
+    rules: tuple[Condition, ...] = ()
+
+
+class ModelSearchRate(NamedTuple):
+    """What a model's own rate says a search its provider runs costs, USD per search, and where the rate came from."""
+
+    unit_rate: Decimal
+    source: PriceSource
+    #: The conditions of the rules the request met that changed the price.
+    rules: tuple[Condition, ...] = ()
+
+
+def model_search_rate(
+    rate: ModelPricing | None, source: PriceSource, *, facts: PriceFacts = NO_FACTS
+) -> ModelSearchRate | None:
+    """The per-search rate ``rate``'s block gives at the rules ``facts`` meet, or ``None`` when it prices no web search.
+
+    The catalog prices a provider's search beside the model, per thousand
+    searches, so a search the provider ran is priced from the model's own rate
+    where the operator priced no ``<provider>:web_search`` row.
+    """
+    if rate is None:
+        return None
+    applied = apply_rules(rate, facts)
+    found = search_rate(applied.rate)
+    return None if found is None else ModelSearchRate(found.cost(1), source, applied.rules.get("web_search", ()))
 
 
 class ToolRateLookup(NamedTuple):
@@ -68,22 +118,29 @@ class ToolCharges(NamedTuple):
     ``lines`` holds one charge line per tool and label, ``unit_rates`` each
     tool's cost over its calls, and ``unpriced`` the labels that ran calls no
     row could price. A tool served under several labels has one unit rate, so
-    its calls times that rate is still its spend.
+    its calls times that rate is still its spend. ``deployment_paid_total`` is
+    the part of ``total`` the deployment's account ran, which its organization
+    is charged for whoever paid for the model call, and ``deployment_paid_tools``
+    splits it per gateway-run tool, keyed by the tool's pricing name, as calls
+    and cost. Searches a model's provider ran are in the total but not the split:
+    they are part of the model call.
     """
 
     total: Decimal
-    lines: list[dict[str, float | int | str]]
+    lines: list[dict[str, Any]]
     unit_rates: dict[str, Decimal]
     unpriced: list[UnpricedToolLabel]
+    deployment_paid_total: Decimal
+    deployment_paid_tools: dict[str, tuple[int, Decimal]]
 
 
 def paid_by_the_deployment(label: str | None) -> bool:
     """Whether a call under ``label`` ran on the deployment's account.
 
-    An instance's label and ``builtin:builtin_fetch`` did. An organization key's
+    The fallback for a call recorded without saying whose account ran it. An
+    instance's label and ``builtin:builtin_fetch`` did. An organization key's
     ``org:<provider>`` did not. Neither can be told for a call with no label or an
-    ``otari:<tool>`` one, which in the loop still includes an organization key's
-    calls the old backend serves, so those count as not.
+    ``otari:<tool>`` one, such as an MCP tool's, so those count as not.
     """
     return label is not None and not label.startswith(
         (ORGANIZATION_KEY_LABEL_PREFIX, f"{GATEWAY_TOOL_PRICING_PROVIDER}:")
@@ -99,32 +156,38 @@ def tool_rate_lookup(entry: LabelCalls) -> ToolRateLookup | None:
     if entry.calls <= 0 or entry.unreported_calls <= 0:
         return None
     rate_keys = entry.rate_keys if entry.rate_keys is not None else (gateway_tool_pricing_key(entry.tool),)
-    deployment_paid = (
-        entry.deployment_paid if entry.deployment_paid is not None else paid_by_the_deployment(entry.label)
-    )
-    return ToolRateLookup(rate_keys, deployment_paid)
+    return ToolRateLookup(rate_keys, _deployment_paid(entry))
+
+
+def _deployment_paid(entry: LabelCalls) -> bool:
+    """Whether the deployment's account ran ``entry``'s calls, as recorded or else as its label says."""
+    return entry.deployment_paid if entry.deployment_paid is not None else paid_by_the_deployment(entry.label)
 
 
 def charge_tool_calls(calls: Sequence[LabelCalls], rates: Mapping[ToolRateLookup, ToolRate | None]) -> ToolCharges:
     """Price a request's successful gateway-run tool calls, per tool and label.
 
     A label costs the costs its calls reported, plus the rate ``rates`` holds for
-    its :func:`tool_rate_lookup` for each call that reported none, plus what its
-    enrichment fetches reported. A label of ``None`` means the tool's own
-    ``otari:<tool>``.
+    its :func:`tool_rate_lookup` for each call that reported none. A label of
+    ``None`` means the tool's own ``otari:<tool>``.
 
     Charge lines use the shape ``calculate_metered_cost`` produces so both
     kinds share ``UsageLog.pricing_breakdown`` and the dashboard's renderer,
     except that a tool line carries ``unit_rate`` (USD per call, the label's
     cost over its calls) where a token line carries ``rate_per_million``. That
     key is what tells a reader, and the UI, which unit convention applies. A
-    tool line also names its ``label``. A label with no reported cost and no
+    tool line also names its ``label``, and ``deployment_paid``: whether the
+    deployment's account ran its calls, and so whether the organization's funds
+    were charged for them. A label with no reported cost and no
     pricing row still gets a line, at a zero rate, so the work stays on the row
     and in the audit trail even when the operator has not priced it.
     """
-    # Keyed by tool and label, so two records of one label with different rate
-    # keys still settle as one line.
-    by_label: dict[tuple[str, str], tuple[int, Decimal]] = {}
+    # Keyed by tool, label and whose account ran the calls, so two records of one
+    # label with different rate keys still settle as one line, and a line says
+    # whether the organization's funds were charged for it.
+    by_label: dict[tuple[str, str, bool], tuple[int, Decimal]] = {}
+    paid_tools: dict[str, tuple[int, Decimal]] = {}
+    rules: dict[tuple[str, str, bool], list[Condition]] = {}
     unpriced: dict[tuple[str, str, RateKey], UnpricedToolLabel] = {}
     for entry in calls:
         if entry.calls <= 0:
@@ -132,13 +195,18 @@ def charge_tool_calls(calls: Sequence[LabelCalls], rates: Mapping[ToolRateLookup
         label = entry.label if entry.label is not None else gateway_tool_pricing_key(entry.tool)
         lookup = tool_rate_lookup(entry)
         rate = rates.get(lookup) if lookup is not None else None
-        cost = (
-            entry.reported_cost
-            + entry.unreported_calls * (rate.unit_rate if rate is not None else Decimal(0))
-            + entry.enrichment_cost
-        )
-        units, label_cost = by_label.get((entry.tool, label), (0, Decimal(0)))
-        by_label[(entry.tool, label)] = (units + entry.calls, label_cost + cost)
+        cost = entry.reported_cost + entry.unreported_calls * (rate.unit_rate if rate is not None else Decimal(0))
+        line = (entry.tool, label, _deployment_paid(entry))
+        units, label_cost = by_label.get(line, (0, Decimal(0)))
+        by_label[line] = (units + entry.calls, label_cost + cost)
+        if _deployment_paid(entry) and not is_provider_web_search(entry.label, entry.rate_keys):
+            tool_key = gateway_tool_pricing_key(entry.tool)
+            tool_calls, tool_cost = paid_tools.get(tool_key, (0, Decimal(0)))
+            paid_tools[tool_key] = (tool_calls + entry.calls, tool_cost + cost)
+        if rate is not None and entry.unreported_calls > 0:
+            found = rules.setdefault(line, [])
+            seen = list(found)
+            found.extend(rule for rule in rate.rules if rule not in seen)
         if lookup is not None and lookup.rate_keys and rate is None:
             first = lookup.rate_keys[0]
             previous = unpriced.get((entry.tool, label, first))
@@ -148,20 +216,32 @@ def charge_tool_calls(calls: Sequence[LabelCalls], rates: Mapping[ToolRateLookup
 
     # ``float`` for the JSON charge line; the returned total that settles the
     # row stays Decimal.
-    lines: list[dict[str, float | int | str]] = [
-        {
+    lines: list[dict[str, Any]] = []
+    for key, (units, cost) in sorted(by_label.items()):
+        tool, label, paid = key
+        charge_line: dict[str, Any] = {
             "meter": f"{tool}_calls",
             "label": label,
             "units": units,
             "unit_rate": float(cost / units),
             "cost": float(cost),
+            "deployment_paid": paid,
         }
-        for (tool, label), (units, cost) in sorted(by_label.items())
-    ]
+        if rules.get(key):
+            charge_line["rules"] = [dict(rule) for rule in rules[key]]
+        lines.append(charge_line)
     by_tool: dict[str, tuple[int, Decimal]] = {}
-    for (tool, _label), (units, cost) in by_label.items():
+    for (tool, _label, _paid), (units, cost) in by_label.items():
         tool_units, tool_cost = by_tool.get(tool, (0, Decimal(0)))
         by_tool[tool] = (tool_units + units, tool_cost + cost)
     total = quantize_cost(sum((cost for _units, cost in by_tool.values()), Decimal(0)))
     unit_rates = {tool: cost / units for tool, (units, cost) in by_tool.items()}
-    return ToolCharges(total, lines, unit_rates, list(unpriced.values()))
+    deployment_paid = sum((cost for (_tool, _label, paid), (_units, cost) in by_label.items() if paid), Decimal(0))
+    return ToolCharges(
+        total,
+        lines,
+        unit_rates,
+        list(unpriced.values()),
+        quantize_cost(deployment_paid),
+        {key: (calls, quantize_cost(cost)) for key, (calls, cost) in sorted(paid_tools.items())},
+    )

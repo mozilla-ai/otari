@@ -14,16 +14,33 @@ import pytest
 
 from gateway.core.metered_pricing import (
     COST_QUANTUM,
+    UnitCharge,
+    UnitRate,
     billable_usage,
     calculate_token_cost,
+    charge_unit,
+    charge_unit_price,
     effective_rates,
     estimate_metered_cost,
+    estimate_unit_cost,
     price_billable_usage,
     price_request,
     priced_per_request,
     quantize_cost,
+    slot_price,
     to_decimal,
+    unit_cost,
+    unit_rate,
+    web_search_rate,
 )
+from gateway.types.models_dev import (
+    MODELS_DEV_UNITS,
+    ModelsDevCachePrices,
+    ModelsDevModalityCost,
+    ModelsDevPricing,
+    ModelsDevUnitPrice,
+)
+from gateway.types.price_unit import PRICE_UNITS
 
 
 def _pricing(**overrides: Any) -> SimpleNamespace:
@@ -286,6 +303,20 @@ def test_a_claude_1h_write_bills_at_twice_the_input_rate() -> None:
         ("openai:gpt-5", "0.000500"),
         # An Anthropic-compatible endpoint serving another vendor's model.
         ("minimax:MiniMax-M2", "0.000500"),
+        # An instance named for Claude serving another vendor's model is not Claude.
+        ("claude-proxy:MiniMax-M2", "0.000500"),
+        # No provider: the key is the bare model id, whose Bedrock ":<n>" suffix is a version.
+        ("claude-haiku-5-5", "0.000800"),
+        ("us.anthropic.claude-haiku-5-5-v1:0", "0.000800"),
+        ("anthropic.claude-haiku-5-5-v1:0", "0.000800"),
+        ("anthropic.claude-3-sonnet-20240229-v1:0:200k", "0.000800"),
+        ("meta.llama3-70b-instruct-v1:0", "0.000500"),
+        # A non-ASCII digit is not a version, so the instance name stays ignored.
+        ("claude-proxy:\u00b2", "0.000500"),
+        # Digits followed by more than a colon start a model id, not a version.
+        ("claude-proxy:4o-mini", "0.000500"),
+        # A provider and a Bedrock id that carries its own version suffix.
+        ("bedrock:us.anthropic.claude-haiku-5-5-v1:0", "0.000800"),
     ],
 )
 def test_a_1h_write_bills_at_twice_input_only_for_a_claude_model(model_key: str, cost: str) -> None:
@@ -429,7 +460,7 @@ def test_an_estimate_never_prices_below_the_input_rate() -> None:
 
 
 def test_a_rate_priced_per_request_settles_one_request_whatever_the_tokens() -> None:
-    pricing = _pricing(input_price_per_million=Decimal("5000"), output_price_per_million=Decimal("0"), unit="requests")
+    pricing = _pricing(input_price_per_million=Decimal("5000"), output_price_per_million=Decimal("0"), unit="request")
 
     cost, meters, lines = price_request(pricing)
 
@@ -441,30 +472,30 @@ def test_a_rate_priced_per_request_settles_one_request_whatever_the_tokens() -> 
 
 def test_a_per_request_charge_line_agrees_with_the_settled_cost() -> None:
     """A rate below a micro-dollar per request rounds once, and the line shows the rounded amount."""
-    cost, _, lines = price_request(_pricing(input_price_per_million=Decimal("1.5"), unit="requests"))
+    cost, _, lines = price_request(_pricing(input_price_per_million=Decimal("1.5"), unit="request"))
 
     assert cost == Decimal("0.000002")
     assert lines == [{"meter": "request", "units": 1, "unit_rate": 0.000002, "cost": 0.000002}]
 
-    cost, _, lines = price_request(_pricing(input_price_per_million=Decimal("0.4"), unit="requests"))
+    cost, _, lines = price_request(_pricing(input_price_per_million=Decimal("0.4"), unit="request"))
 
     assert (cost, lines) == (Decimal("0"), [])
 
 
 def test_a_free_per_request_rate_writes_no_charge_line() -> None:
-    cost, meters, lines = price_request(_pricing(input_price_per_million=Decimal("0"), unit="requests"))
+    cost, meters, lines = price_request(_pricing(input_price_per_million=Decimal("0"), unit="request"))
 
     assert (cost, meters, lines) == (Decimal("0"), {"requests": 1}, [])
 
 
 def test_a_per_request_rate_refuses_an_unusable_rate() -> None:
     with pytest.raises(ValueError, match="no usable per-request rate"):
-        price_request(_pricing(input_price_per_million=None, unit="requests"))
+        price_request(_pricing(input_price_per_million=None, unit="request"))
 
 
 def test_a_per_request_rate_is_estimated_at_one_request() -> None:
     """The reservation holds what the request settles at, not a token estimate."""
-    pricing = _pricing(input_price_per_million=Decimal("5000"), output_price_per_million=Decimal("0"), unit="requests")
+    pricing = _pricing(input_price_per_million=Decimal("5000"), output_price_per_million=Decimal("0"), unit="request")
 
     estimate = estimate_metered_cost(pricing, estimated_input_tokens=1_000_000, estimated_output_tokens=4096)
 
@@ -480,3 +511,288 @@ def test_a_rate_not_priced_per_request_keeps_token_pricing(unit: str | None) -> 
     assert estimate_metered_cost(
         pricing, estimated_input_tokens=1_000_000, estimated_output_tokens=1_000_000
     ) == Decimal("90")
+
+
+# ---------------------------------------------------------------------------
+# A price in any unit, read from a cost block
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("unit", "quantity", "price", "cost"),
+    [
+        ("token", 1_000, "30", "0.03"),
+        ("character", 2_000_000, "15", "30"),
+        ("request", 2, "0.005", "0.01"),
+        ("image", 3, "0.04", "0.12"),
+        ("megapixel", Decimal("2.5"), "0.01", "0.025"),
+        ("second", Decimal("12.5"), "0.006", "0.075"),
+        ("minute", Decimal("1.5"), "0.4", "0.6"),
+        ("web_search", 7, "10", "0.07"),
+    ],
+)
+def test_a_quantity_of_any_unit_costs_its_price_per_what_the_unit_is_published_per(
+    unit: Any, quantity: int | Decimal, price: str, cost: str
+) -> None:
+    assert unit_cost(quantity, unit, Decimal(price)) == Decimal(cost)
+
+
+def test_every_price_unit_has_a_meter() -> None:
+    """A rate in any unit the list knows prices a quantity; the list is pinned to models.dev's elsewhere."""
+    for unit in PRICE_UNITS:
+        assert unit_cost(1, unit, Decimal(1)) > 0
+    assert set(MODELS_DEV_UNITS) <= set(PRICE_UNITS)
+
+
+@pytest.mark.parametrize("quantity", [-1, Decimal("-0.5"), Decimal("NaN"), Decimal("Infinity")])
+def test_a_quantity_that_is_not_a_finite_non_negative_number_is_refused(quantity: Decimal | int) -> None:
+    with pytest.raises(ValueError, match="finite non-negative"):
+        unit_cost(quantity, "second", Decimal(1))
+
+
+def test_a_per_second_price_is_read_as_published_and_not_through_the_column_scale() -> None:
+    """$0.006 per second for 12.5 seconds is $0.075: no per-million factor is applied."""
+    rate = unit_rate(ModelsDevUnitPrice(price=0.006, unit="second"))
+
+    assert rate == UnitRate("second", Decimal("0.006"))
+    assert charge_unit(rate, "audio_input", Decimal("12.5")) == UnitCharge(
+        Decimal("0.075"),
+        [{"meter": "audio_input", "units": 12.5, "unit": "second", "unit_rate": 0.006, "cost": 0.075}],
+    )
+
+
+def test_a_per_million_unit_explains_itself_per_million_and_a_per_one_unit_per_one() -> None:
+    characters = charge_unit(UnitRate("character", Decimal("15")), "tts_input", 2_000_000)
+    searches = charge_unit(UnitRate("web_search", Decimal("10")), "web_search", 3)
+
+    assert characters.lines == [
+        {"meter": "tts_input", "units": 2_000_000, "unit": "character", "rate_per_million": 15.0, "cost": 30.0}
+    ]
+    assert searches.cost == Decimal("0.03")
+    assert searches.lines == [
+        {"meter": "web_search", "units": 3, "unit": "web_search", "unit_rate": 0.01, "cost": 0.03}
+    ]
+
+
+def test_a_charge_is_exact_and_rounded_once_by_the_caller() -> None:
+    """Three images at a third of a micro-dollar each: exact sub-micro amounts sum, then round once."""
+    rate = UnitRate("image", Decimal("0.0000004"))
+
+    charges = [charge_unit(rate, "image", 1) for _ in range(3)]
+    total = quantize_cost(sum((charge.cost for charge in charges), Decimal(0)))
+
+    assert all(charge.cost == Decimal("0.0000004") for charge in charges)
+    assert total == Decimal("0.000001")
+
+
+def test_a_zero_quantity_costs_nothing_and_explains_nothing() -> None:
+    assert charge_unit(UnitRate("image", Decimal("0.04")), "image", 0) == UnitCharge(Decimal(0), [])
+
+
+def test_a_free_price_still_explains_a_quantity() -> None:
+    charge = charge_unit(UnitRate("image", Decimal(0)), "image", 2)
+
+    assert charge.cost == 0
+    assert charge.lines == [{"meter": "image", "units": 2, "unit": "image", "unit_rate": 0.0, "cost": 0.0}]
+
+
+def _slot(**fields: Any) -> ModelsDevUnitPrice:
+    return ModelsDevUnitPrice(
+        price=0.5,
+        unit="second",
+        reasoning=0.9,
+        cache=ModelsDevCachePrices(read=0.05, write=0.6, write_ttls=(("5m", 0.6), ("1h", 1.0)), storage=0.02),
+        **fields,
+    )
+
+
+@pytest.mark.parametrize(
+    ("kind", "ttl", "price"),
+    [
+        ("price", None, "0.5"),
+        ("reasoning", None, "0.9"),
+        ("cache_read", None, "0.05"),
+        ("cache_write", None, "0.6"),
+        ("cache_write", "5m", "0.6"),
+        ("cache_write", "1h", "1.0"),
+        ("cache_write", "7d", "0.6"),
+        ("cache_storage", None, "0.02"),
+    ],
+)
+def test_each_price_of_a_slot_has_a_meter_in_the_slots_unit(kind: Any, ttl: str | None, price: str) -> None:
+    """A TTL the slot does not price bills as a plain write, as a 1h write does on a rate with no 1h price."""
+    charge = charge_unit_price(_slot(), 10, meter=kind, kind=kind, cache_write_ttl=ttl)
+
+    assert charge is not None
+    assert charge.cost == Decimal(price) * 10
+    assert charge.lines[0]["unit"] == "second"
+
+
+def test_a_ttl_price_that_is_no_price_bills_as_a_plain_write() -> None:
+    """The reader keeps a number as written; one that is no price reads as absent, so the TTL falls back."""
+    slot = ModelsDevUnitPrice(
+        price=0.5, unit="second", cache=ModelsDevCachePrices(write=0.6, write_ttls=(("5m", 0.6), ("1h", -1)))
+    )
+
+    assert unit_rate(slot, "cache_write", cache_write_ttl="1h") == UnitRate("second", Decimal("0.6"))
+    assert estimate_unit_cost(slot, 10, cache_write_ttl="1h") == Decimal("6")
+
+
+@pytest.mark.parametrize("kind", ["reasoning", "cache_read", "cache_write", "cache_storage"])
+def test_a_price_the_slot_does_not_give_prices_nothing(kind: Any) -> None:
+    bare = ModelsDevUnitPrice(price=0.5, unit="second")
+
+    assert charge_unit_price(bare, 10, meter=kind, kind=kind) is None
+    assert charge_unit_price(bare, 10, meter="audio_input") is not None
+
+
+def test_a_slot_with_no_unit_is_per_token() -> None:
+    charge = charge_unit_price(ModelsDevUnitPrice(price=3), 1_000_000, meter="input")
+
+    assert charge is not None
+    assert (charge.cost, charge.lines[0]["unit"], charge.lines[0]["rate_per_million"]) == (Decimal(3), "token", 3.0)
+
+
+def test_a_slot_in_a_unit_no_meter_knows_prices_nothing_rather_than_tokens() -> None:
+    """A unit models.dev adds is named in the catalog's issues; here it bills nothing, never tokens."""
+    parsec = ModelsDevUnitPrice(price=1, unit="parsec", cache=ModelsDevCachePrices(read=0.1))
+
+    assert unit_rate(parsec) is None
+    assert unit_rate(parsec, "cache_read") is None
+    assert charge_unit_price(parsec, 1_000_000, meter="input") is None
+    assert estimate_unit_cost(parsec, 1_000_000) == 0
+
+
+@pytest.mark.parametrize("value", [-1, float("nan"), float("inf"), True])
+def test_a_slot_price_that_is_not_a_believable_number_prices_nothing(value: Any) -> None:
+    """A price the reader kept as a number but that is no price; a string never gets this far, the reader names it."""
+    assert unit_rate(ModelsDevUnitPrice(price=value, unit="image")) is None
+
+
+def test_a_block_is_read_by_modality_and_direction() -> None:
+    image_out = ModelsDevUnitPrice(price=0.04, unit="image")
+    audio_in = ModelsDevUnitPrice(price=0.006, unit="second")
+    pricing = ModelsDevPricing(
+        modalities={
+            "text": ModelsDevModalityCost(input=ModelsDevUnitPrice(price=3), output=ModelsDevUnitPrice(price=15)),
+            "image": ModelsDevModalityCost(output=image_out),
+            "audio": ModelsDevModalityCost(input=audio_in),
+        },
+        web_search=ModelsDevUnitPrice(price=10),
+    )
+
+    assert slot_price(pricing, "image", "output") is image_out
+    assert slot_price(pricing, "image", "input") is None
+    assert slot_price(pricing, "audio", "input") is audio_in
+    assert slot_price(pricing, "video", "output") is None
+    assert web_search_rate(pricing) == UnitRate("web_search", Decimal("10"))
+    assert web_search_rate(ModelsDevPricing(modalities={})) is None
+
+
+def test_an_estimate_reserves_the_dearest_price_a_unit_could_attract() -> None:
+    slot = _slot()
+
+    assert estimate_unit_cost(slot, 10) == Decimal("9")
+    assert estimate_unit_cost(slot, 10, cache_write_ttl="1h") == Decimal("10")
+    assert estimate_unit_cost(ModelsDevUnitPrice(price=0.006, unit="second"), Decimal("12.5")) == Decimal("0.075")
+    assert estimate_unit_cost(ModelsDevUnitPrice(price=None, unit="second"), 10) == 0
+
+
+def test_an_estimate_in_a_rates_unit_is_never_zero_for_a_priced_rate() -> None:
+    """A per-second rate, stored per million seconds, is estimated at the seconds the caller expects."""
+    pricing = _pricing(
+        input_price_per_million=Decimal("6000"),
+        output_price_per_million=Decimal("0"),
+        cache_read_price_per_million=Decimal("9000"),
+        unit="second",
+    )
+
+    estimate = estimate_metered_cost(
+        pricing, estimated_input_tokens=0, estimated_output_tokens=0, estimated_units=Decimal("12.5")
+    )
+
+    assert estimate == Decimal("0.1125")
+    assert estimate_metered_cost(pricing, estimated_input_tokens=0, estimated_output_tokens=0) == 0
+
+
+def test_an_estimate_in_a_rates_unit_covers_an_output_priced_above_input() -> None:
+    """One quantity cannot say which side of the slot it is on, so the dearest rate of the row bounds it."""
+    pricing = _pricing(
+        input_price_per_million=Decimal("6000"), output_price_per_million=Decimal("24000"), unit="second"
+    )
+
+    assert estimate_metered_cost(
+        pricing, estimated_input_tokens=0, estimated_output_tokens=0, estimated_units=Decimal("2.5")
+    ) == Decimal("0.06")
+
+
+def test_an_estimate_in_a_rates_unit_takes_the_tier_the_estimated_input_reaches() -> None:
+    """A unit row's tiers are keyed on input tokens, as a token row's are, so the estimated input picks one."""
+    pricing = _pricing(
+        input_price_per_million=Decimal("6000"),
+        output_price_per_million=Decimal("0"),
+        pricing_tiers=[{"min_input_tokens": 100, "input_price_per_million": 12000}],
+        unit="second",
+    )
+
+    below = estimate_metered_cost(pricing, estimated_input_tokens=99, estimated_output_tokens=0, estimated_units=1)
+    reached = estimate_metered_cost(pricing, estimated_input_tokens=100, estimated_output_tokens=0, estimated_units=1)
+
+    assert (below, reached) == (Decimal("0.006"), Decimal("0.012"))
+
+
+def test_an_estimate_in_a_rates_unit_covers_a_claude_1h_write_priced_above_every_other_rate() -> None:
+    """A Claude row bills a 1h write at twice its input rate; the unit estimate holds that too."""
+    pricing = _pricing(
+        model_key="anthropic:claude-x",
+        input_price_per_million=Decimal("6000"),
+        output_price_per_million=Decimal("0"),
+        cache_write_price_per_million=Decimal("7500"),
+        unit="second",
+    )
+
+    five_minute = estimate_metered_cost(
+        pricing, estimated_input_tokens=0, estimated_output_tokens=0, estimated_units=1, cache_write_ttl="5m"
+    )
+    one_hour = estimate_metered_cost(
+        pricing, estimated_input_tokens=0, estimated_output_tokens=0, estimated_units=1, cache_write_ttl="1h"
+    )
+
+    assert (five_minute, one_hour) == (Decimal("0.0075"), Decimal("0.012"))
+
+
+def test_a_retired_unit_spelling_is_read_as_the_current_one() -> None:
+    per_request = _pricing(
+        input_price_per_million=Decimal("5000"), output_price_per_million=Decimal("0"), unit="requests"
+    )
+
+    assert priced_per_request(per_request)
+    assert estimate_metered_cost(
+        per_request, estimated_input_tokens=0, estimated_output_tokens=0, estimated_units=5
+    ) == Decimal("0.005")
+
+
+def test_a_negative_estimated_quantity_holds_nothing_rather_than_a_credit() -> None:
+    pricing = _pricing(input_price_per_million=Decimal("6000"), output_price_per_million=Decimal("0"), unit="second")
+
+    assert estimate_metered_cost(pricing, estimated_input_tokens=0, estimated_output_tokens=0, estimated_units=-5) == 0
+    assert estimate_unit_cost(ModelsDevUnitPrice(price=0.006, unit="second"), -5) == 0
+    with pytest.raises(ValueError, match="finite"):
+        estimate_unit_cost(ModelsDevUnitPrice(price=0.006, unit="second"), Decimal("NaN"))
+
+
+def test_an_estimate_in_tokens_or_requests_ignores_a_unit_quantity() -> None:
+    per_request = _pricing(
+        input_price_per_million=Decimal("5000"), output_price_per_million=Decimal("0"), unit="request"
+    )
+
+    assert estimate_metered_cost(
+        _pricing(), estimated_input_tokens=1_000_000, estimated_output_tokens=0, estimated_units=5
+    ) == Decimal("30")
+    assert estimate_metered_cost(
+        per_request, estimated_input_tokens=0, estimated_output_tokens=0, estimated_units=5
+    ) == Decimal("0.005")
+    # A row an older writer stored still spells the unit ``tokens``; it is a token rate.
+    assert estimate_metered_cost(
+        _pricing(unit="tokens"), estimated_input_tokens=1_000_000, estimated_output_tokens=0, estimated_units=5
+    ) == Decimal("30")

@@ -9,7 +9,7 @@ from decimal import Decimal
 
 import pytest
 
-from gateway.core.config import DEFAULT_AGENT_MODEL_CANDIDATES, validate_agent_recommender
+from gateway.core.config import DEFAULT_AGENT_MODEL_CANDIDATES, validate_agent_recommender_candidates
 from gateway.exceptions.routing_exceptions import CandidatesNotAllowedError, UnreadableRecommendationError
 from gateway.ports.agent_model_recommender_port import RecommendationUsage, SubagentSpawn
 from gateway.schemas.inference import DecisionResponse
@@ -107,7 +107,7 @@ def test_reads_the_chosen_candidate_and_its_probability() -> None:
     recommendation = recommendation_from_decision(answer, candidates=CANDIDATES)
 
     assert recommendation.model == "sonnet"
-    assert recommendation.reason == "jev-1.13.0 chose sonnet with 70%"
+    assert recommendation.reason == "sonnet with 70%"
     assert recommendation.probabilities == {"haiku": 0.2, "sonnet": 0.7, "opus": 0.1}
 
 
@@ -115,7 +115,7 @@ def test_a_choice_without_probabilities_still_recommends() -> None:
     recommendation = recommendation_from_decision(_answer(choice="haiku"), candidates=CANDIDATES)
 
     assert recommendation.model == "haiku"
-    assert recommendation.reason == "jev-1.13.0 chose haiku"
+    assert recommendation.reason == "haiku"
     assert recommendation.probabilities is None
 
 
@@ -159,26 +159,21 @@ def test_an_answer_to_another_question_is_unreadable() -> None:
 
 
 @pytest.mark.parametrize(
-    ("model", "candidates"),
-    [
-        ("typesafe:jev-latest", DEFAULT_AGENT_MODEL_CANDIDATES),
-        ("openrouter:typesafe/jev-1.13", {"small": None, "large": "the hard cases"}),
-    ],
+    "candidates",
+    [DEFAULT_AGENT_MODEL_CANDIDATES, {"small": None, "large": "the hard cases"}],
 )
-def test_valid_recommender_settings_are_accepted(model: str, candidates: dict[str, str | None]) -> None:
-    validate_agent_recommender(model, candidates)
+def test_valid_candidates_are_accepted(candidates: dict[str, str | None]) -> None:
+    validate_agent_recommender_candidates(candidates)
 
 
 @pytest.mark.parametrize(
-    ("model", "candidates", "message"),
+    ("candidates", "message"),
     [
-        ("jev-latest", DEFAULT_AGENT_MODEL_CANDIDATES, "'<provider>:<model>'"),
-        ("typesafe:", DEFAULT_AGENT_MODEL_CANDIDATES, "'<provider>:<model>'"),
-        ("typesafe:jev-latest", {"haiku": None}, "at least two"),
-        ("typesafe:jev-latest", {"haiku": None, " ": None}, "empty model name"),
-        ("typesafe:jev-latest", {f"model-{i}": None for i in range(256)}, "at most 255"),
+        ({"haiku": None}, "at least two"),
+        ({"haiku": None, " ": None}, "empty model name"),
+        ({f"model-{i}": None for i in range(256)}, "at most 255"),
     ],
 )
-def test_invalid_recommender_settings_are_refused(model: str, candidates: dict[str, str | None], message: str) -> None:
+def test_invalid_candidates_are_refused(candidates: dict[str, str | None], message: str) -> None:
     with pytest.raises(ValueError, match=message):
-        validate_agent_recommender(model, candidates)
+        validate_agent_recommender_candidates(candidates)

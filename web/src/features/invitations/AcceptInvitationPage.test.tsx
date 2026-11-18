@@ -6,9 +6,11 @@ import { AuthProvider } from "@/features/auth/AuthContext"
 import { readSignInAddress } from "@/features/auth/signInAddress"
 import { AcceptInvitationPage } from "@/features/invitations/AcceptInvitationPage"
 import { ApiError, apiFetch } from "@/shared/api/client"
+import { currentRoute } from "@/shared/helpers/appLocation"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { ThemeProvider } from "@/shared/hooks/useTheme"
 import { bootstrap } from "@/tests/fixtures"
+import { routeLocation } from "@/tests/location"
 
 // Mocks the network boundary (apiFetch), not the hooks, per
 // .github/instructions/frontend-standards.instructions.md: the hooks
@@ -97,14 +99,14 @@ function mockApi(opts: {
 // page is answering; the fixture's own default is a gateway with no transport,
 // and the test about that case names it.
 function renderPage(
-  hash: string,
+  route: string,
   {
     mailReady = true,
     oauthProviders = [] as string[],
     termsUrl = null as string | null,
   } = {},
 ) {
-  window.location.hash = hash
+  window.history.replaceState(null, "", route)
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -132,7 +134,7 @@ function renderPage(
 
 afterEach(() => {
   vi.restoreAllMocks()
-  window.location.hash = ""
+  window.history.replaceState(null, "", "/")
   window.localStorage.clear()
   window.sessionStorage.clear()
 })
@@ -141,7 +143,7 @@ describe("AcceptInvitationPage", () => {
   it("previews the invitation and accepts it on confirmation", async () => {
     const accepted = mockApi({})
     const user = userEvent.setup()
-    renderPage("#/accept-invitation?token=abc123")
+    renderPage("/accept-invitation?token=abc123")
 
     expect(await screen.findByText("Acme")).toBeInTheDocument()
     expect(screen.getByText("ada@example.com")).toBeInTheDocument()
@@ -160,7 +162,7 @@ describe("AcceptInvitationPage", () => {
   it("sends an address that can already sign in to the sign-in screen", async () => {
     mockApi({})
     const user = userEvent.setup()
-    renderPage("#/accept-invitation?token=abc123")
+    renderPage("/accept-invitation?token=abc123")
 
     await user.click(
       await screen.findByRole("button", { name: "Accept invitation" }),
@@ -176,14 +178,14 @@ describe("AcceptInvitationPage", () => {
       }),
     ).toBeNull()
     await user.click(screen.getByRole("button", { name: "Go to sign in" }))
-    expect(window.location.hash).toBe("#/")
+    expect(currentRoute()).toBe("/")
   })
 
   it("says to verify first when the address signed up and has not verified yet", async () => {
     // Accepting never verifies: whoever signed up may not hold the mailbox.
     mockApi({ verificationPending: true })
     const user = userEvent.setup()
-    renderPage("#/accept-invitation?token=abc123")
+    renderPage("/accept-invitation?token=abc123")
 
     await user.click(
       await screen.findByRole("button", { name: "Accept invitation" }),
@@ -198,13 +200,13 @@ describe("AcceptInvitationPage", () => {
       screen.getByRole("link", {
         name: "Didn't sign up? Set a password instead",
       }),
-    ).toHaveAttribute("href", "#/recover-password")
+    ).toHaveAttribute("href", "/recover-password")
   })
 
   it("sets a password for an address that has never signed in, in the same step", async () => {
     const accepted = mockApi({ needsPassword: true })
     const user = userEvent.setup()
-    renderPage("#/accept-invitation?token=abc123")
+    renderPage("/accept-invitation?token=abc123")
 
     await screen.findByText(/Set a password to sign in as ada@example.com/)
     expect(
@@ -232,7 +234,7 @@ describe("AcceptInvitationPage", () => {
     // the link over, and setting the password here is the whole way in.
     mockApi({ needsPassword: true })
     const user = userEvent.setup()
-    renderPage("#/accept-invitation?token=abc123", { mailReady: false })
+    renderPage("/accept-invitation?token=abc123", { mailReady: false })
 
     await user.type(await screen.findByLabelText("Password"), "correct-horse")
     await user.type(screen.getByLabelText("Confirm password"), "correct-horse")
@@ -247,7 +249,7 @@ describe("AcceptInvitationPage", () => {
   it("holds the submit until the two passwords match", async () => {
     const accepted = mockApi({ needsPassword: true })
     const user = userEvent.setup()
-    renderPage("#/accept-invitation?token=abc123")
+    renderPage("/accept-invitation?token=abc123")
 
     await user.type(await screen.findByLabelText("Password"), "correct-horse")
     await user.type(screen.getByLabelText("Confirm password"), "correct-hors")
@@ -261,7 +263,7 @@ describe("AcceptInvitationPage", () => {
   it("requires the terms where the deployment publishes them", async () => {
     const accepted = mockApi({ needsPassword: true })
     const user = userEvent.setup()
-    renderPage("#/accept-invitation?token=abc123", {
+    renderPage("/accept-invitation?token=abc123", {
       termsUrl: "https://example.com/terms",
     })
 
@@ -272,7 +274,7 @@ describe("AcceptInvitationPage", () => {
     })
     expect(submit).toBeDisabled()
 
-    await user.click(screen.getByLabelText("I accept the terms of service"))
+    await user.click(screen.getByLabelText("I accept the Terms of Service"))
     await user.click(submit)
 
     await screen.findByText(/Your password is set/)
@@ -292,7 +294,7 @@ describe("AcceptInvitationPage", () => {
     // way in.
     const accepted = mockApi({ needsPassword: true, waysIn: ["provider"] })
     const user = userEvent.setup()
-    renderPage("#/accept-invitation?token=abc123", {
+    renderPage("/accept-invitation?token=abc123", {
       mailReady: false,
       oauthProviders: ["google"],
     })
@@ -329,7 +331,7 @@ describe("AcceptInvitationPage", () => {
     it("holds the provider way in until the terms are accepted", async () => {
       const accepted = mockApi({ needsPassword: true })
       const user = userEvent.setup()
-      renderPage("#/accept-invitation?token=abc123", terms)
+      renderPage("/accept-invitation?token=abc123", terms)
 
       const instead = await screen.findByRole("button", {
         name: "Accept and sign in with a provider instead",
@@ -339,7 +341,7 @@ describe("AcceptInvitationPage", () => {
       expect(accepted).toEqual([])
 
       await user.click(
-        screen.getByRole("checkbox", { name: "I accept the terms of service" }),
+        screen.getByRole("checkbox", { name: "I accept the Terms of Service" }),
       )
       await user.click(instead)
 
@@ -352,7 +354,11 @@ describe("AcceptInvitationPage", () => {
       const assign = vi.fn()
       Object.defineProperty(window, "location", {
         configurable: true,
-        value: { ...window.location, assign, hash: "" },
+        value: {
+          ...window.location,
+          ...routeLocation("/accept-invitation?token=abc123"),
+          assign,
+        },
       })
       vi.spyOn(globalThis, "fetch").mockResolvedValue(
         new Response(
@@ -364,11 +370,11 @@ describe("AcceptInvitationPage", () => {
         ),
       )
       const user = userEvent.setup()
-      renderPage("#/accept-invitation?token=abc123", terms)
+      renderPage("/accept-invitation?token=abc123", terms)
 
       await user.click(
         await screen.findByRole("checkbox", {
-          name: "I accept the terms of service",
+          name: "I accept the Terms of Service",
         }),
       )
       await user.click(
@@ -399,7 +405,7 @@ describe("AcceptInvitationPage", () => {
     // its password, and "Sign in to get started" would be a dead end.
     mockApi({ canSignIn: false, waysIn: ["provider", "password_reset"] })
     const user = userEvent.setup()
-    renderPage("#/accept-invitation?token=abc123", {
+    renderPage("/accept-invitation?token=abc123", {
       oauthProviders: ["github"],
     })
 
@@ -414,13 +420,13 @@ describe("AcceptInvitationPage", () => {
     expect(screen.queryByText("Sign in to get started.")).toBeNull()
     expect(
       screen.getByRole("link", { name: "Choose a password" }),
-    ).toHaveAttribute("href", "#/recover-password")
+    ).toHaveAttribute("href", "/recover-password")
   })
 
   it("sends a stranded invitee to whoever administers the gateway", async () => {
     mockApi({ canSignIn: false })
     const user = userEvent.setup()
-    renderPage("#/accept-invitation?token=abc123", { mailReady: false })
+    renderPage("/accept-invitation?token=abc123", { mailReady: false })
 
     await user.click(
       await screen.findByRole("button", { name: "Accept invitation" }),
@@ -434,7 +440,7 @@ describe("AcceptInvitationPage", () => {
 
   it("offers no provider route where the deployment has none", async () => {
     mockApi({ needsPassword: true })
-    renderPage("#/accept-invitation?token=abc123")
+    renderPage("/accept-invitation?token=abc123")
 
     await screen.findByLabelText("Password")
     expect(
@@ -448,7 +454,7 @@ describe("AcceptInvitationPage", () => {
     window.localStorage.setItem(SESSION_MARKER, "1")
     mockApi({ sessionEmail: "Ada@Example.com" })
     const user = userEvent.setup()
-    renderPage("#/accept-invitation?token=abc123")
+    renderPage("/accept-invitation?token=abc123")
 
     await user.click(
       await screen.findByRole("button", { name: "Accept invitation" }),
@@ -458,14 +464,14 @@ describe("AcceptInvitationPage", () => {
     await user.click(
       screen.getByRole("button", { name: "Go to the dashboard" }),
     )
-    expect(window.location.hash).toBe("#/")
+    expect(currentRoute()).toBe("/")
   })
 
   it("tells a session for another address who the invitation is for", async () => {
     window.localStorage.setItem(SESSION_MARKER, "1")
     const accepted = mockApi({ sessionEmail: "bob@example.com" })
     const user = userEvent.setup()
-    renderPage("#/accept-invitation?token=abc123")
+    renderPage("/accept-invitation?token=abc123")
 
     expect(
       await screen.findByText(/This invitation is for ada@example.com/),
@@ -491,7 +497,7 @@ describe("AcceptInvitationPage", () => {
     // this is cannot be known, and "you're already signed in" would be a guess.
     window.localStorage.setItem(SESSION_MARKER, "1")
     const accepted = mockApi({})
-    renderPage("#/accept-invitation?token=abc123")
+    renderPage("/accept-invitation?token=abc123")
 
     expect(
       await screen.findByText(/This invitation is for ada@example.com/),
@@ -508,7 +514,7 @@ describe("AcceptInvitationPage", () => {
   it("holds every action when whose session this is cannot be read", async () => {
     window.localStorage.setItem(SESSION_MARKER, "1")
     mockApi({ profileStatus: 500 })
-    renderPage("#/accept-invitation?token=abc123")
+    renderPage("/accept-invitation?token=abc123")
 
     expect(await screen.findByText("Internal server error")).toBeInTheDocument()
     expect(screen.getByText("Acme")).toBeInTheDocument()
@@ -524,7 +530,7 @@ describe("AcceptInvitationPage", () => {
   it("offers no password for somebody else's address to a session", async () => {
     window.localStorage.setItem(SESSION_MARKER, "1")
     mockApi({ sessionEmail: "bob@example.com", needsPassword: true })
-    renderPage("#/accept-invitation?token=abc123")
+    renderPage("/accept-invitation?token=abc123")
 
     expect(
       await screen.findByText(/This invitation is for ada@example.com/),
@@ -535,7 +541,7 @@ describe("AcceptInvitationPage", () => {
   it("hands the invited address to the sign-in screen", async () => {
     mockApi({ needsPassword: true })
     const user = userEvent.setup()
-    renderPage("#/accept-invitation?token=abc123")
+    renderPage("/accept-invitation?token=abc123")
 
     await user.type(await screen.findByLabelText("Password"), "a-long-password")
     await user.type(
@@ -582,7 +588,7 @@ describe("AcceptInvitationPage", () => {
       } as never
     })
     const user = userEvent.setup()
-    const { client } = renderPage("#/accept-invitation?token=abc123")
+    const { client } = renderPage("/accept-invitation?token=abc123")
 
     await user.click(
       await screen.findByRole("button", { name: "Accept invitation" }),
@@ -603,7 +609,7 @@ describe("AcceptInvitationPage", () => {
 
   it("says there is nothing to accept when the link has no token", () => {
     mockApi({})
-    renderPage("#/accept-invitation")
+    renderPage("/accept-invitation")
 
     expect(screen.getByText(/missing its invitation token/)).toBeInTheDocument()
     expect(screen.queryByLabelText("Password")).toBeNull()
@@ -611,12 +617,12 @@ describe("AcceptInvitationPage", () => {
     // spent token lands here.
     expect(
       screen.getByRole("link", { name: "Back to sign in" }),
-    ).toHaveAttribute("href", "#/")
+    ).toHaveAttribute("href", "/")
   })
 
   it("shows the server's reason when the token is invalid or expired", async () => {
     mockApi({ previewError: "This invitation has expired" })
-    renderPage("#/accept-invitation?token=expired")
+    renderPage("/accept-invitation?token=expired")
 
     expect(
       await screen.findByText("This invitation has expired"),
@@ -630,7 +636,7 @@ describe("AcceptInvitationPage", () => {
     expect(screen.queryByLabelText("Password")).toBeNull()
     expect(
       screen.getByRole("link", { name: "Back to sign in" }),
-    ).toHaveAttribute("href", "#/")
+    ).toHaveAttribute("href", "/")
   })
 
   it("shows the server's reason when accepting fails", async () => {
@@ -639,7 +645,7 @@ describe("AcceptInvitationPage", () => {
         "This invitation has already been used or is no longer valid",
     })
     const user = userEvent.setup()
-    renderPage("#/accept-invitation?token=abc123")
+    renderPage("/accept-invitation?token=abc123")
 
     await user.click(
       await screen.findByRole("button", { name: "Accept invitation" }),
@@ -657,7 +663,7 @@ describe("AcceptInvitationPage", () => {
   // invitee can do nothing with, so no state of this page links to it.
   it("offers no welcome guide, which is the operator's page", async () => {
     mockApi({})
-    renderPage("#/accept-invitation?token=abc123")
+    renderPage("/accept-invitation?token=abc123")
 
     expect(await screen.findByText("Acme")).toBeInTheDocument()
     expect(screen.queryByRole("link", { name: /welcome guide/ })).toBeNull()

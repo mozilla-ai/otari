@@ -1,14 +1,63 @@
 """Inference request settings."""
 
+import re
+from collections.abc import Iterable
 from typing import Annotated
 
-from pydantic import BaseModel, Field
+from any_llm import LLMProvider
+from pydantic import BaseModel, Field, field_validator
 
+from gateway.core.country_codes import COUNTRY_CODES
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
+
+# An RFC 9110 field name (a token).
+_HEADER_NAME = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
+
+
+def country_codes(values: Iterable[object]) -> list[str]:
+    """``values`` as upper-case ISO 3166-1 alpha-2 codes, in order and without repeats.
+
+    Raises:
+        ValueError: a value is no country code.
+    """
+    codes: list[str] = []
+    for value in values:
+        code = str(value).strip().upper()
+        if code not in COUNTRY_CODES:
+            msg = f"{value!r} is not an ISO 3166-1 alpha-2 country code"
+            raise ValueError(msg)
+        if code not in codes:
+            codes.append(code)
+    return codes
+
+
+# Which models no open-weight plan covers; see ``is_closed_model`` in the inference domain.
+DEFAULT_CLOSED_MODEL_PROVIDERS: tuple[str, ...] = (
+    "anthropic",
+    "azureanthropic",
+    "vertexaianthropic",
+    "gemini",
+    "vertexai",
+    "xai",
+    "openai",
+    "azureopenai",
+)
+DEFAULT_CLOSED_MODEL_FAMILIES: tuple[str, ...] = (
+    "claude",
+    "gemini",
+    "grok",
+    "gpt-",
+    "chatgpt",
+    *(f"o{n}" for n in range(1, 10)),
+)
+DEFAULT_OPEN_MODEL_FAMILIES: tuple[str, ...] = ("gpt-oss", "gemma")
 
 
 class InferenceSettings(BaseModel):
-    """How a completion request is sent and retried upstream, deduplicated, streamed and attributed to an end user."""
+    """How a completion request is sent and retried upstream, deduplicated, streamed and attributed to an end user.
+
+    Also which providers the country a request comes from may reach.
+    """
 
     provider_max_retries: Annotated[int | None, Shown(SettingsGroup.MODELS)] = Field(
         default=None,
@@ -42,6 +91,58 @@ class InferenceSettings(BaseModel):
         ),
     )
 
+    provider_supported_countries: Annotated[dict[str, list[str]], OMITTED] = Field(
+        default_factory=dict,
+        description=(
+            "The ISO country codes each provider type serves, such as openai: [US, DE]. A request from "
+            "another country, or from one no source knows, skips that provider's candidates. A provider "
+            "type with no entry serves every country. Needs client_country_header, "
+            "client_country_database or a country file stored from the Settings page."
+        ),
+    )
+
+    client_country_header: Annotated[str | None, Shown(SettingsGroup.SERVER)] = Field(
+        default=None,
+        description=(
+            "A header a trusted proxy sets to the client's ISO country code, such as Cloudflare's "
+            "CF-IPCountry. Read before client_country_database. Set it only when every request reaches "
+            "Otari through that proxy, which replaces any value a client sends: otherwise a client "
+            "picks its own country."
+        ),
+    )
+
+    client_country_database: Annotated[str | None, Shown(SettingsGroup.SERVER)] = Field(
+        default=None,
+        description=(
+            "Path to a MaxMind DB country file (GeoLite2 Country, DB-IP Lite Country) in which the "
+            "client address is looked up. A replaced file is read again without a restart. When set, "
+            "a country file stored from the Settings page is not read. Needs the geoip extra."
+        ),
+    )
+
+    closed_model_providers: Annotated[list[str], Shown(SettingsGroup.METERING)] = Field(
+        default_factory=lambda: list(DEFAULT_CLOSED_MODEL_PROVIDERS),
+        description=(
+            "Providers whose models are all closed, so no plan for open-weight models covers them, "
+            "unless the model is in closed_model_open_families. Every other model counts as open-weight."
+        ),
+    )
+    closed_model_families: Annotated[list[str], Shown(SettingsGroup.METERING)] = Field(
+        default_factory=lambda: list(DEFAULT_CLOSED_MODEL_FAMILIES),
+        description=(
+            "Model name prefixes that are closed on any provider, matched on the name after its last '/' "
+            "(so OpenRouter's anthropic/claude-sonnet-4 is a 'claude'). A prefix ending in '-' matches any "
+            "name it starts; any other matches a whole word ('o3' matches o3-mini, not o3x)."
+        ),
+    )
+    closed_model_open_families: Annotated[list[str], Shown(SettingsGroup.METERING)] = Field(
+        default_factory=lambda: list(DEFAULT_OPEN_MODEL_FAMILIES),
+        description=(
+            "Model name prefixes that are open-weight even on a closed provider or in a closed family, "
+            "such as OpenAI's gpt-oss and Google's Gemma."
+        ),
+    )
+
     streaming_first_chunk_hold_ms: Annotated[int, Shown(SettingsGroup.GENERAL)] = Field(
         default=15000,
         ge=0,
@@ -49,9 +150,12 @@ class InferenceSettings(BaseModel):
             "How long in milliseconds the gateway holds a streaming response's status line "
             "for the provider's first chunk, so a provider failure before any output is answered with "
             "its own HTTP status (and falls over in a routing policy) rather than as an error event "
-            "after a 200. A provider slower than this still streams: the response is committed and "
-            "keeps waiting. Streams that run gateway tools are not held. 0 commits the response as "
-            "soon as the stream opens."
+            "after a 200. A tool loop's hold ends with its first round instead, which can run the "
+            "gateway's tools before anything is sent, so a failure past that point cannot fall over "
+            "either, even though nothing has reached the client yet. A provider slower than this still "
+            "streams: the response is committed and keeps waiting. Opening a tool loop's backends, such as "
+            "connecting to its MCP servers, counts toward the hold. 0 commits the response as soon as the "
+            "stream opens."
         ),
     )
 
@@ -79,3 +183,52 @@ class InferenceSettings(BaseModel):
         ge=1,
         description="How often expired idempotency records are deleted.",
     )
+
+    @field_validator("client_country_header", "client_country_database")
+    @classmethod
+    def _blank_is_off(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        return value.strip()
+
+    @field_validator("client_country_header")
+    @classmethod
+    def _validate_client_country_header(cls, value: str | None) -> str | None:
+        if value is not None and not _HEADER_NAME.fullmatch(value):
+            msg = f"client_country_header must be an HTTP header name, got {value!r}"
+            raise ValueError(msg)
+        return value
+
+    @field_validator("provider_supported_countries", mode="before")
+    @classmethod
+    def _normalize_provider_supported_countries(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        known = {member.value for member in LLMProvider}
+        normalized: dict[str, list[str]] = {}
+        for raw_type, raw_codes in value.items():
+            provider_type = str(raw_type).strip().lower()
+            if provider_type not in known:
+                msg = f"provider_supported_countries: {raw_type!r} is not a provider type"
+                raise ValueError(msg)
+            if not isinstance(raw_codes, list):
+                msg = f"provider_supported_countries.{provider_type} must be a list of country codes"
+                raise ValueError(msg)
+            try:
+                normalized[provider_type] = country_codes(raw_codes)
+            except ValueError as exc:
+                msg = f"provider_supported_countries.{provider_type}: {exc}"
+                raise ValueError(msg) from None
+        return normalized
+
+    def country_gate_needs_stored_database(self) -> bool:
+        """Whether ``provider_supported_countries`` has no country source but a stored country file.
+
+        Checked at startup and when the stored file is removed, since config
+        validation cannot see the database.
+        """
+        return (
+            bool(self.provider_supported_countries)
+            and self.client_country_header is None
+            and self.client_country_database is None
+        )

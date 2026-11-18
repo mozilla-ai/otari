@@ -1,0 +1,150 @@
+{
+  "status": 200,
+  "body": {
+    "results": [
+      {
+        "title": "Status of Python versions",
+        "description": "The latest release for each Python version can be found on the download page. New binaries are built and released roughly every two months. ...",
+        "position": 1,
+        "realPosition": 1,
+        "result_type": "organic",
+        "metadata": {
+          "display_url": "devguide.python.org",
+          "published_time": "May 27, 2026"
+        },
+        "link": "https://devguide.python.org/versions/"
+      },
+      {
+        "title": "What is the 'true' latest stable version of Python WRT library compatibility?",
+        "description": "The official latest stable is 3.12, the most recent Ubuntu LTS is running 3.10. 3.12 is ready for prime time. Numpy 2.0 is far more of a change.",
+        "position": 2,
+        "realPosition": 2,
+        "result_type": "organic",
+        "metadata": {
+          "display_url": "www.reddit.com",
+          "published_time": "Mar 19, 2024",
+          "sitelinks": [
+            {
+              "title": "Python Version in Production - Reddit",
+              "url": "https://www.reddit.com/r/Python/comments/1qgt083/python_version_in_production/"
+            },
+            {
+              "title": "What's the most used python version in research? - Reddit",
+              "url": "https://www.reddit.com/r/learnpython/comments/1dzh17y/whats_the_most_used_python_version_in_research/"
+            },
+            {
+              "title": "More results from www.reddit.com",
+              "url": "/search?q=latest+stable+python+release+site:www.reddit.com&num=3&client=ms-opera-mini-android&sca_esv=a5849753dad976a5&channel=new&sxsrf=APpeQnvEivGHzt0SE-LI_C_4HLqcGUqJMg:1792070335909"
+            }
+          ]
+        },
+        "link": "https://www.reddit.com/r/learnpython/comments/1biqyik/what_is_the_true_latest_stable_version_of_python/"
+      },
+      {
+        "title": "Download Python - Python.org",
+        "description": "Download the latest version of Python. Download Python 3.15.0. Looking for Python with a different OS? Python for Windows, Linux/Unix, macOS, Android, iOS, ...",
+        "position": 3,
+        "realPosition": 3,
+        "result_type": "organic",
+        "metadata": {
+          "display_url": "www.python.org"
+        },
+        "link": "https://www.python.org/downloads/"
+      }
+    ],
+    "ads": [],
+    "ads_count": 0,
+    "answers": [],
+    "image_results": [],
+    "shopping_ads": [],
+    "places": [],
+    "local_businesses": [],
+    "related_searches": {
+      "images": [],
+      "text": [
+        {
+          "title": "Latest stable python release reddit",
+          "description": null,
+          "position": 0,
+          "realPosition": 0,
+          "result_type": "people_also_search",
+          "metadata": {},
+          "link": "https://www.google.com/search?num=3&client=ms-opera-mini-android&sca_esv=a5849753dad976a5&channel=new&sxsrf=APpeQnvEivGHzt0SE-LI_C_4HLqcGUqJMg:1792070335909&q=Latest+stable+python+release+reddit&sa=X&ved=2ahUKEwjB66KejryXAxXJL1kFHeWNMH8Q1QJ6BAgKEAI"
+        },
+        {
+          "title": "Latest stable python release for windows 10",
+          "description": null,
+          "position": 0,
+          "realPosition": 0,
+          "result_type": "people_also_search",
+          "metadata": {},
+          "link": "https://www.google.com/search?num=3&client=ms-opera-mini-android&sca_esv=a5849753dad976a5&channel=new&sxsrf=APpeQnvEivGHzt0SE-LI_C_4HLqcGUqJMg:1792070335909&q=Latest+stable+python+release+for+windows+10&sa=X&ved=2ahUKEwjB66KejryXAxXJL1kFHeWNMH8Q1QJ6BAgKEAQ"
+        },
+        {
+          "title": "Python 3.10 Release date",
+          "description": null,
+          "position": 0,
+          "realPosition": 0,
+          "result_type": "people_also_search",
+          "metadata": {},
+          "link": "https://www.google.com/search?num=3&client=ms-opera-mini-android&sca_esv=a5849753dad976a5&channel=new&sxsrf=APpeQnvEivGHzt0SE-LI_C_4HLqcGUqJMg:1792070335909&q=Python+3.10+Release+date&sa=X&ved=2ahUKEwjB66KejryXAxXJL1kFHeWNMH8Q1QJ6BAgKEAY"
+        },
+        {
+          "title": "Python 3.13 Release date",
+          "description": null,
+          "position": 0,
+          "realPosition": 0,
+          "result_type": "people_also_search",
+          "metadata": {},
+          "link": "https://www.google.com/search?num=3&client=ms-opera-mini-android&sca_esv=a5849753dad976a5&channel=new&sxsrf=APpeQnvEivGHzt0SE-LI_C_4HLqcGUqJMg:1792070335909&q=Python+3.13+Release+date&sa=X&ved=2ahUKEwjB66KejryXAxXJL1kFHeWNMH8Q1QJ6BAgKEAg"
+        },
+        {
+          "title": "Python stable version",
+          "description": null,
+          "position": 0,
+          "realPosition": 0,
+          "result_type": "people_also_search",
+          "metadata": {},
+          "link": "https://www.google.com/search?num=3&client=ms-opera-mini-android&sca_esv=a5849753dad976a5&channel=new&sxsrf=APpeQnvEivGHzt0SE-LI_C_4HLqcGUqJMg:1792070335909&q=Python+stable+version&sa=X&ved=2ahUKEwjB66KejryXAxXJL1kFHeWNMH8Q1QJ6BAgKEAo"
+        },
+        {
+          "title": "Python 3.12 Release date",
+          "description": null,
+          "position": 0,
+          "realPosition": 0,
+          "result_type": "people_also_search",
+          "metadata": {},
+          "link": "https://www.google.com/search?num=3&client=ms-opera-mini-android&sca_esv=a5849753dad976a5&channel=new&sxsrf=APpeQnvEivGHzt0SE-LI_C_4HLqcGUqJMg:1792070335909&q=Python+3.12+Release+date&sa=X&ved=2ahUKEwjB66KejryXAxXJL1kFHeWNMH8Q1QJ6BAgKEAw"
+        },
+        {
+          "title": "Python release notes",
+          "description": null,
+          "position": 0,
+          "realPosition": 0,
+          "result_type": "people_also_search",
+          "metadata": {},
+          "link": "https://www.google.com/search?num=3&client=ms-opera-mini-android&sca_esv=a5849753dad976a5&channel=new&sxsrf=APpeQnvEivGHzt0SE-LI_C_4HLqcGUqJMg:1792070335909&q=Python+release+notes&sa=X&ved=2ahUKEwjB66KejryXAxXJL1kFHeWNMH8Q1QJ6BAgKEA4"
+        },
+        {
+          "title": "Python releases",
+          "description": null,
+          "position": 0,
+          "realPosition": 0,
+          "result_type": "people_also_search",
+          "metadata": {},
+          "link": "https://www.google.com/search?num=3&client=ms-opera-mini-android&sca_esv=a5849753dad976a5&channel=new&sxsrf=APpeQnvEivGHzt0SE-LI_C_4HLqcGUqJMg:1792070335909&q=Python+releases&sa=X&ved=2ahUKEwjB66KejryXAxXJL1kFHeWNMH8Q1QJ6BAgKEBA"
+        }
+      ]
+    },
+    "carousel": [],
+    "company": {},
+    "total": null,
+    "knowledge_graph": "",
+    "related_questions": [],
+    "carousel_count": 0,
+    "ts": 0.6820487976074219,
+    "device_region": "",
+    "device_type": "mobile",
+    "query": "q=latest+stable+python+release&num=3"
+  }
+}

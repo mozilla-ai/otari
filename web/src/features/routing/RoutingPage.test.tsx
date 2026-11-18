@@ -14,14 +14,20 @@ import {
   ADMIN_WORKSPACE,
   adminContext,
   CHAIN,
-  LEARNED,
   MEMBERS,
   mockApi,
   policy,
   renderInWorkspace,
   renderPage,
+  UNKNOWN_ROUTER,
   WEIGHTED,
 } from "@/tests/routing"
+import {
+  findRowMenuItem,
+  getRowMenuItem,
+  pressRowAction,
+  rowMenuItemNames,
+} from "@/tests/rowMenu"
 
 // The list. Creating a policy is in RoutingPage.create.test.tsx, and a
 // policy's own page in PolicyDetailPage.test.tsx.
@@ -31,15 +37,12 @@ afterEach(() => {
 })
 
 /**
- * The page's own create action, scoped to the heading's header: once the
- * dialog is open its submit says "Create policy" too.
+ * The page's own create action, the first of its name: it leads the view,
+ * above the empty state's, and once the dialog is open its submit says
+ * "Create policy" too.
  */
-const createTrigger = async () => {
-  const heading = await screen.findByRole("heading", { name: "Routing" })
-  const header = heading.closest("header")
-  if (!header) throw new Error("PageIntro's header is gone")
-  return within(header).findByRole("button", { name: "Create policy" })
-}
+const createTrigger = async () =>
+  (await screen.findAllByRole("button", { name: "Create policy" }))[0]
 
 /** Where a row's Edit or View lands: the policy's page, with its scope. */
 function PolicyProbe() {
@@ -98,21 +101,16 @@ describe("RoutingPage", () => {
   })
 
   it("does not offer to edit or delete a policy that lives in config.yml", async () => {
+    const user = userEvent.setup()
     mockApi()
     renderPage(<RoutingPage />)
 
     const autoRow = (await screen.findByText("auto")).closest("tr")!
     expect(within(autoRow).getByText("set in config.yml")).toBeInTheDocument()
-    expect(
-      within(autoRow).queryByRole("button", { name: "Edit" }),
-    ).not.toBeInTheDocument()
-    expect(
-      within(autoRow).queryByRole("button", { name: "Delete" }),
-    ).not.toBeInTheDocument()
+    expect(await findRowMenuItem(user, /^Edit(?: |$)/, autoRow)).toBeNull()
+    expect(await findRowMenuItem(user, /^Delete(?: |$)/, autoRow)).toBeNull()
     // Its page still opens, read-only.
-    expect(
-      within(autoRow).getByRole("button", { name: "View" }),
-    ).toBeInTheDocument()
+    expect(await getRowMenuItem(user, "View auto", autoRow)).toBeInTheDocument()
   })
 
   it("keeps the page's create action visible while the dialog is open", async () => {
@@ -154,7 +152,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />, "/routing", POLICY_PAGE)
 
     const row = (await screen.findByText("fast")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    await pressRowAction(user, "Edit fast", row)
     expect(await screen.findByText("Policy page for fast")).toBeInTheDocument()
   })
 
@@ -166,13 +164,14 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />, "/routing", POLICY_PAGE)
 
     const row = (await screen.findByText("cheap")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    await pressRowAction(user, "Edit cheap", row)
     expect(
       await screen.findByText("Policy page for cheap as u-bob"),
     ).toBeInTheDocument()
   })
 
   it("does not offer Edit for a policy the form would silently truncate", async () => {
+    const user = userEvent.setup()
     // The editor models only a `budget_used_pct.gte` condition. Offering Edit on a
     // policy built through the API with anything else would drop it on save, which
     // is worse than not offering the button.
@@ -187,19 +186,15 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("api-authored")).closest("tr")!
-    expect(
-      within(row).queryByRole("button", { name: "Edit" }),
-    ).not.toBeInTheDocument()
-    expect(
-      within(row).getByRole("button", { name: "View" }),
-    ).toBeInTheDocument()
+    const names = await rowMenuItemNames(user, row)
+    expect(names.some((name) => /^Edit(?: |$)/.test(name))).toBe(false)
+    expect(names).toContain("View api-authored")
     // Delete stays available: removing a policy is never lossy.
-    expect(
-      within(row).getByRole("button", { name: "Delete" }),
-    ).toBeInTheDocument()
+    expect(names).toContain("Delete api-authored")
   })
 
   it("lists stored aliases alongside policies, so nothing is unmanageable", async () => {
+    const user = userEvent.setup()
     // Aliases were folded into this page. If they were not listed here they would
     // be invisible and undeletable from the dashboard, since the Aliases tab is gone.
     mockApi([], "http://guardrails:8000", [
@@ -215,9 +210,7 @@ describe("RoutingPage", () => {
     const row = (await screen.findByText("legacy")).closest("tr")!
     expect(within(row).getByText("gpt-4o-mini")).toBeInTheDocument()
     expect(within(row).getByText("alias")).toBeInTheDocument()
-    expect(
-      within(row).getByRole("button", { name: "Delete" }),
-    ).toBeInTheDocument()
+    expect(await getRowMenuItem(user, "Delete legacy", row)).toBeInTheDocument()
   })
 
   it("names the policy in a confirm dialog before deleting it", async () => {
@@ -230,7 +223,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("fast")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Delete" }))
+    await pressRowAction(user, "Delete fast", row)
 
     const dialog = await screen.findByRole("alertdialog")
     expect(within(dialog).getByText(/^fast stops resolving/)).toBeVisible()
@@ -252,7 +245,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("fast")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Delete" }))
+    await pressRowAction(user, "Delete fast", row)
     const dialog = await screen.findByRole("alertdialog")
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }))
 
@@ -270,7 +263,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("fast")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Delete" }))
+    await pressRowAction(user, "Delete fast", row)
     const dialog = await screen.findByRole("alertdialog")
     await user.click(
       within(dialog).getByRole("button", { name: "Delete policy" }),
@@ -289,14 +282,19 @@ describe("RoutingPage", () => {
     // The mutation holds its error until the next call, and the dialog reads it,
     // so without clearing it on close the second row opens already reporting a
     // failure that was about the first.
-    mockApi([policy("fast", CHAIN), policy("smart", LEARNED)], undefined, [], {
-      deleteBody: { status: 409, detail: "fast is referenced by an alias" },
-    })
+    mockApi(
+      [policy("fast", CHAIN), policy("smart", UNKNOWN_ROUTER)],
+      undefined,
+      [],
+      {
+        deleteBody: { status: 409, detail: "fast is referenced by an alias" },
+      },
+    )
     const user = userEvent.setup()
     renderPage(<RoutingPage />)
 
     const fast = (await screen.findByText("fast")).closest("tr")!
-    await user.click(within(fast).getByRole("button", { name: "Delete" }))
+    await pressRowAction(user, "Delete fast", fast)
     const first = await screen.findByRole("alertdialog")
     await user.click(
       within(first).getByRole("button", { name: "Delete policy" }),
@@ -305,7 +303,7 @@ describe("RoutingPage", () => {
     await user.click(within(first).getByRole("button", { name: "Cancel" }))
 
     const smart = screen.getByText("smart").closest("tr")!
-    await user.click(within(smart).getByRole("button", { name: "Delete" }))
+    await pressRowAction(user, "Delete smart", smart)
 
     const second = await screen.findByRole("alertdialog")
     expect(within(second).getByText(/^smart stops resolving/)).toBeVisible()
@@ -325,7 +323,7 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("legacy")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Delete" }))
+    await pressRowAction(user, "Delete legacy", row)
     await user.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", {
         name: "Delete alias",
@@ -339,18 +337,15 @@ describe("RoutingPage", () => {
     expect(deletes[0].url).toContain(`${API_ROOT}/aliases/legacy`)
   })
 
-  it("summarises a learned policy by its pool rather than as an opaque dynamic row", async () => {
-    // "Chosen per request" is true of a tier-down too. What an operator needs to
-    // see here is that a router picks between named models, and which one serves
-    // when it declines.
-    mockApi([policy("smart", LEARNED, { is_dynamic: true })])
+  it("summarizes an unknown router's policy by its pool under the neutral label", async () => {
+    // The gateway has no such backend, so the policy serves its default target;
+    // the row names the pool and that default rather than a router kind.
+    mockApi([policy("smart", UNKNOWN_ROUTER, { is_dynamic: true })])
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("smart")).closest("tr")!
     expect(
-      within(row).getByText(
-        /Learned . 2 candidates, gpt-5 · OpenAI by default/,
-      ),
+      within(row).getByText(/Routed . 2 candidates, gpt-5 · OpenAI by default/),
     ).toBeInTheDocument()
   })
 
@@ -367,9 +362,7 @@ describe("RoutingPage", () => {
     ).toBeInTheDocument()
   })
 
-  it("names a router backend it does not know without claiming it learns", async () => {
-    // Only "knn" learns. Labelling every other backend "Learned" would make the table
-    // lie about the first backend added after this line was written.
+  it("names a router backend it does not know with the neutral label", async () => {
     mockApi([
       policy("future", {
         select: [
@@ -385,23 +378,19 @@ describe("RoutingPage", () => {
 
     const row = (await screen.findByText("future")).closest("tr")!
     expect(within(row).getByText("ROUTED")).toBeInTheDocument()
-    expect(within(row).queryByText("Learned")).not.toBeInTheDocument()
   })
 
-  it("does not offer the examples panel for a weighted policy, which learns nothing", async () => {
+  it("offers Edit for a weighted policy", async () => {
+    const user = userEvent.setup()
     mockApi([policy("balanced", WEIGHTED, { is_dynamic: true })])
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("balanced")).closest("tr")!
-    expect(
-      within(row).queryByRole("button", { name: "Examples" }),
-    ).not.toBeInTheDocument()
-    expect(
-      within(row).getByRole("button", { name: "Edit" }),
-    ).toBeInTheDocument()
+    expect(await getRowMenuItem(user, "Edit balanced", row)).toBeInTheDocument()
   })
 
   it("does not offer Edit for a weighted policy with no split to show", async () => {
+    const user = userEvent.setup()
     // The form would have to invent the shares, and the API refuses such a spec
     // anyway, so this one is only reachable as an older or hand-written document.
     mockApi([
@@ -418,12 +407,11 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("legacy")).closest("tr")!
-    expect(
-      within(row).queryByRole("button", { name: "Edit" }),
-    ).not.toBeInTheDocument()
+    expect(await findRowMenuItem(user, /^Edit(?: |$)/, row)).toBeNull()
   })
 
   it("does not offer Edit for a router backend the form cannot write", async () => {
+    const user = userEvent.setup()
     mockApi([
       policy("future", {
         select: [
@@ -438,131 +426,33 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("future")).closest("tr")!
-    expect(
-      within(row).queryByRole("button", { name: "Edit" }),
-    ).not.toBeInTheDocument()
+    expect(await findRowMenuItem(user, /^Edit(?: |$)/, row)).toBeNull()
   })
 
-  it("offers the examples panel only on a policy that actually uses a router", async () => {
-    // Readiness is a per-policy question, so it belongs on the row like Edit does
-    // rather than in a panel that is always on the page.
-    mockApi([
-      policy("smart", LEARNED, { is_dynamic: true }),
-      policy("fast", CHAIN),
-    ])
-    renderPage(<RoutingPage />)
+  it.each(["stored", "config"] as const)(
+    "shows an unknown router's policy from %s read-only",
+    async (source) => {
+      const user = userEvent.setup()
+      mockApi([policy("smart", UNKNOWN_ROUTER, { is_dynamic: true, source })])
+      renderPage(<RoutingPage />)
 
-    const learnedRow = (await screen.findByText("smart")).closest("tr")!
-    const plainRow = (await screen.findByText("fast")).closest("tr")!
-    expect(
-      within(learnedRow).getByRole("button", { name: "Examples" }),
-    ).toBeInTheDocument()
-    expect(
-      within(plainRow).queryByRole("button", { name: "Examples" }),
-    ).not.toBeInTheDocument()
-    // Nothing about learned routing is on the page until asked for.
-    expect(screen.queryByText(/Whose memory/)).not.toBeInTheDocument()
-  })
-
-  it("offers the examples panel for a config.yml policy, which cannot be edited", async () => {
-    // Reading readiness is safe for a policy this page cannot change, and without it
-    // a config-defined learned policy would be entirely opaque here.
-    mockApi([policy("smart", LEARNED, { is_dynamic: true, source: "config" })])
-    renderPage(<RoutingPage />)
-
-    const row = (await screen.findByText("smart")).closest("tr")!
-    expect(
-      within(row).getByRole("button", { name: "Examples" }),
-    ).toBeInTheDocument()
-    expect(
-      within(row).queryByRole("button", { name: "Edit" }),
-    ).not.toBeInTheDocument()
-    expect(within(row).getByText("set in config.yml")).toBeInTheDocument()
-  })
-
-  it("names the pool and what serves when the router declines", async () => {
-    mockApi([policy("smart", LEARNED, { is_dynamic: true })])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    const row = (await screen.findByText("smart")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Examples" }))
-
-    expect(
-      await screen.findByText(/ranks openai:gpt-5-nano, openai:gpt-5/),
-    ).toBeInTheDocument()
-    expect(screen.getByText(/serves whenever it declines/)).toBeInTheDocument()
-    // The honest empty state: no user picked yet, so no warmth claim.
-    expect(screen.getByText(/Pick a user to see how warm/)).toBeInTheDocument()
-  })
-
-  it("reports each pool's warmth for the chosen user, since memory is per user", async () => {
-    mockApi([policy("smart", LEARNED, { is_dynamic: true })])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    const row = (await screen.findByText("smart")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Examples" }))
-    await user.type(
-      screen.getByRole("combobox", { name: /whose memory/i }),
-      "alice",
-    )
-    await user.keyboard("{Escape}")
-
-    expect(await screen.findByText("6 / 20 examples")).toBeInTheDocument()
-    expect(screen.getByText("WARMING UP")).toBeInTheDocument()
-    // A task partition warms on its own, so it gets its own line.
-    expect(screen.getByText("summaries")).toBeInTheDocument()
-    expect(screen.getByText("21 / 20 examples")).toBeInTheDocument()
-    expect(screen.getByText("ROUTING")).toBeInTheDocument()
-  })
-
-  it("says where examples come from instead of offering to collect them", async () => {
-    // Recording examples is an API job in this release. The panel has to say so, or
-    // an operator reads "0 examples" as a bug with no next step.
-    mockApi([policy("smart", LEARNED, { is_dynamic: true })])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    const row = (await screen.findByText("smart")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Examples" }))
-
-    expect(
-      await screen.findByText(/POST \/api\/v1\/routing\/preferences\/rank/),
-    ).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /teach it/i })).toBeInTheDocument()
-    // No write affordance anywhere in it.
-    expect(
-      screen.queryByRole("button", { name: /ask all/i }),
-    ).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole("button", { name: /record these scores/i }),
-    ).not.toBeInTheDocument()
-  })
-
-  it("does not ask whose memory for a user-scoped policy", async () => {
-    // A policy scoped to one user can only use that user's memory, so asking would
-    // be a question with one answer, and a wrong answer would be accepted.
-    mockApi([policy("smart", LEARNED, { is_dynamic: true, user_id: "alice" })])
-    const user = userEvent.setup()
-    renderPage(<RoutingPage />)
-
-    const row = (await screen.findByText("smart")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Examples" }))
-
-    expect(
-      screen.queryByRole("combobox", { name: /whose memory/i }),
-    ).not.toBeInTheDocument()
-    expect(await screen.findByText("6 / 20 examples")).toBeInTheDocument()
-  })
+      const row = (await screen.findByText("smart")).closest("tr")!
+      expect(await getRowMenuItem(user, "View smart", row)).toBeInTheDocument()
+      expect(await findRowMenuItem(user, /^Edit(?: |$)/, row)).toBeNull()
+    },
+  )
 
   it("refuses to edit a policy whose router sits before its conditions", async () => {
+    const user = userEvent.setup()
     // Selection is order-sensitive server-side and the form always re-emits
     // conditions first, so editing this spec would silently change what it does.
     mockApi([
       policy("api-authored", {
         select: [
-          { router: "knn", candidates: ["openai:gpt-5-nano", "openai:gpt-5"] },
+          {
+            router: "priority",
+            candidates: ["openai:gpt-5-nano", "openai:gpt-5"],
+          },
           {
             when: { budget_used_pct: { gte: 80 } },
             target: "openai:gpt-5-nano",
@@ -574,19 +464,14 @@ describe("RoutingPage", () => {
     renderPage(<RoutingPage />)
 
     const row = (await screen.findByText("api-authored")).closest("tr")!
+    expect(await findRowMenuItem(user, /^Edit(?: |$)/, row)).toBeNull()
     expect(
-      within(row).queryByRole("button", { name: "Edit" }),
-    ).not.toBeInTheDocument()
-    expect(
-      within(row).getByRole("button", { name: "View" }),
-    ).toBeInTheDocument()
-    // Reading its readiness is still fine.
-    expect(
-      within(row).getByRole("button", { name: "Examples" }),
+      await getRowMenuItem(user, "View api-authored", row),
     ).toBeInTheDocument()
   })
 
   it("lists the tenant-scoped policies read-only for a non-operator", async () => {
+    const user = userEvent.setup()
     // The member half of otari-ai#1942: the page reads
     // /v1/organizations/me/routing-policies and offers nothing that writes.
     mockApi([], null, [], {
@@ -603,17 +488,8 @@ describe("RoutingPage", () => {
     expect(
       screen.queryByRole("button", { name: "New policy" }),
     ).not.toBeInTheDocument()
-    expect(
-      within(row).queryByRole("button", { name: "Edit" }),
-    ).not.toBeInTheDocument()
-    expect(
-      within(row).queryByRole("button", { name: "Delete" }),
-    ).not.toBeInTheDocument()
-    // The Examples panel reads the operator-only /v1/routing/status, so its
-    // opener goes with the rest of the actions column.
-    expect(
-      within(row).queryByRole("button", { name: "Examples" }),
-    ).not.toBeInTheDocument()
+    expect(await findRowMenuItem(user, /^Edit(?: |$)/, row)).toBeNull()
+    expect(await findRowMenuItem(user, /^Delete(?: |$)/, row)).toBeNull()
   })
 
   it("keeps cached operator rows out of a member's table", async () => {
@@ -783,7 +659,7 @@ describe("RoutingPage scoped to the selected workspace", () => {
     renderInWorkspace(<RoutingPage />)
 
     await screen.findByText("doomed")
-    await user.click(screen.getByRole("button", { name: "Delete" }))
+    await pressRowAction(user, "Delete doomed")
     await user.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", {
         name: "Delete policy",
@@ -809,7 +685,7 @@ describe("RoutingPage for an organization admin", () => {
     renderInWorkspace(<RoutingPage />)
 
     await screen.findByText("doomed")
-    await user.click(screen.getByRole("button", { name: "Delete" }))
+    await pressRowAction(user, "Delete doomed")
     await user.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", {
         name: "Delete policy",
@@ -861,7 +737,7 @@ describe("RoutingPage for an organization admin", () => {
     renderInWorkspace(<RoutingPage />)
 
     await screen.findByText("doomed-alias")
-    await user.click(screen.getByRole("button", { name: "Delete" }))
+    await pressRowAction(user, "Delete doomed-alias")
     await user.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", {
         name: "Delete alias",
@@ -874,6 +750,7 @@ describe("RoutingPage for an organization admin", () => {
   })
 
   it("withholds the write affordances from an admin in no workspace", async () => {
+    const user = userEvent.setup()
     // The switcher is seeded from the caller's own memberships, so an admin who
     // joined none has no workspace to scope a write to and gets the read-only
     // page rather than a form whose only outcome is a 422.
@@ -890,12 +767,11 @@ describe("RoutingPage for an organization admin", () => {
     expect(
       screen.queryByRole("button", { name: "New policy" }),
     ).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole("button", { name: "Delete" }),
-    ).not.toBeInTheDocument()
+    expect(await findRowMenuItem(user, /^Delete(?: |$)/)).toBeNull()
   })
 
   it("still withholds the write affordances from a member", async () => {
+    const user = userEvent.setup()
     mockApi([], null, [], {
       context: organizationContext({
         deployment_operator: false,
@@ -912,9 +788,7 @@ describe("RoutingPage for an organization admin", () => {
     expect(
       screen.queryByRole("button", { name: "New policy" }),
     ).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole("button", { name: "Delete" }),
-    ).not.toBeInTheDocument()
+    expect(await findRowMenuItem(user, /^Delete(?: |$)/)).toBeNull()
   })
 
   it("lists the automatic fallbacks the gateway reports, in its order", async () => {
@@ -928,6 +802,7 @@ describe("RoutingPage for an organization admin", () => {
               selector: "bedrock:anthropic.claude-sonnet-5-5",
               provider: "bedrock",
               provider_type: "bedrock",
+              input_price: 3,
               own_tools: [],
               otari_tools: ["web_search"],
             },
@@ -935,6 +810,7 @@ describe("RoutingPage for an organization admin", () => {
               selector: "anthropic:claude-sonnet-5-5",
               provider: "anthropic",
               provider_type: "anthropic",
+              input_price: 3,
               own_tools: ["web_search"],
               otari_tools: [],
             },
@@ -943,12 +819,15 @@ describe("RoutingPage for an organization admin", () => {
           fell_back: 2,
           pinned: 0,
           pinned_provider: null,
+          pinned_keys: [],
         },
       ],
     })
     renderPage(<RoutingPage />)
 
-    const row = (await screen.findByText("Claude Sonnet 5.5")).closest("tr")!
+    const row = (
+      await screen.findByText("anthropic/claude-sonnet-5.5")
+    ).closest("tr")!
     // The server's order, not the catalog's: Bedrock is tried first here.
     const bedrock = within(row).getByText("Bedrock")
     const anthropic = within(row).getByText("Anthropic")

@@ -4,65 +4,105 @@ import { OAUTH_PROVIDER_LABELS } from "@/features/auth/oauthProviders"
 import {
   isAcceptInvitationPath,
   isPublicAuthPageAvailable,
+  isSsoAuthorizePath,
   oauthCallbackProvider,
   PUBLIC_AUTH_PAGES,
   publicAuthPath,
   rendersAheadOfRouter,
-  resolveSignInReturnHash,
+  resolveSignInReturnRoute,
+  ssoAuthorizeSlug,
 } from "@/features/auth/publicAuthPaths"
 
 describe("isAcceptInvitationPath", () => {
-  it("names the page by hash or by pathname, whatever its query string", () => {
-    expect(isAcceptInvitationPath("#/accept-invitation?token=abc")).toBe(true)
+  it("names the page by route or by pathname, whatever its query string", () => {
+    expect(isAcceptInvitationPath("/accept-invitation?token=abc")).toBe(true)
     expect(isAcceptInvitationPath("/accept-invitation")).toBe(true)
-    expect(isAcceptInvitationPath("#/accept-invitations")).toBe(false)
-    expect(isAcceptInvitationPath("#/invitations")).toBe(false)
+    expect(isAcceptInvitationPath("/accept-invitations")).toBe(false)
+    expect(isAcceptInvitationPath("/invitations")).toBe(false)
   })
 
   it("is one of the paths the router leaves to the page above it", () => {
     expect(rendersAheadOfRouter("/accept-invitation")).toBe(true)
     expect(rendersAheadOfRouter("/signup")).toBe(true)
+    expect(rendersAheadOfRouter("/sso/acme")).toBe(true)
     expect(rendersAheadOfRouter("/usage")).toBe(false)
   })
 })
 
-describe("resolveSignInReturnHash", () => {
+describe("isSsoAuthorizePath", () => {
+  it("names a sign-in in progress through one organization's own connection, whatever its query string", () => {
+    expect(isSsoAuthorizePath("/sso/acme")).toBe(true)
+    expect(isSsoAuthorizePath("/sso/acme")).toBe(true)
+    expect(isSsoAuthorizePath("/sso/acme?x=1")).toBe(true)
+  })
+
+  it("claims nothing it does not own", () => {
+    expect(isSsoAuthorizePath("/sso")).toBe(false)
+    expect(isSsoAuthorizePath("/sso/")).toBe(false)
+    expect(isSsoAuthorizePath("/sso/acme/extra")).toBe(false)
+    expect(isSsoAuthorizePath("/")).toBe(false)
+  })
+})
+
+describe("ssoAuthorizeSlug", () => {
+  it("names the organization a direct link's slug names, whatever its query string", () => {
+    expect(ssoAuthorizeSlug("/sso/acme")).toBe("acme")
+    expect(ssoAuthorizeSlug("/sso/acme")).toBe("acme")
+    expect(ssoAuthorizeSlug("/sso/acme?x=1")).toBe("acme")
+  })
+
+  it("decodes a slug a browser percent-encoded", () => {
+    expect(ssoAuthorizeSlug("/sso/acme%20corp")).toBe("acme corp")
+  })
+
+  it("answers null for every path that is not one, malformed encoding included", () => {
+    expect(ssoAuthorizeSlug("/sso")).toBeNull()
+    expect(ssoAuthorizeSlug("/sso/")).toBeNull()
+    expect(ssoAuthorizeSlug("/sso/acme/extra")).toBeNull()
+    expect(ssoAuthorizeSlug("/")).toBeNull()
+    expect(ssoAuthorizeSlug("/sso/%")).toBeNull()
+  })
+})
+
+describe("resolveSignInReturnRoute", () => {
   it("keeps a page the router serves, query string and all", () => {
-    expect(resolveSignInReturnHash("#/organization/billing")).toBe(
-      "#/organization/billing",
+    expect(resolveSignInReturnRoute("/organization/billing")).toBe(
+      "/organization/billing",
     )
-    expect(resolveSignInReturnHash("#/usage?range=7d")).toBe("#/usage?range=7d")
-    expect(resolveSignInReturnHash("#/models/z-ai/glm-5.3")).toBe(
-      "#/models/z-ai/glm-5.3",
+    expect(resolveSignInReturnRoute("/usage?range=7d")).toBe("/usage?range=7d")
+    expect(resolveSignInReturnRoute("/models/z-ai/glm-5.3")).toBe(
+      "/models/z-ai/glm-5.3",
     )
   })
 
   it("sends a page rendered ahead of the router home instead", () => {
     // Nothing on these is left to do for a session, and three of them carry a
     // single-use token.
-    for (const hash of [
-      "#/signup",
-      "#/auth/google/callback?code=c&state=s",
-      "#/verify-email?token=t",
-      "#/reset-password?token=t",
-      "#/accept-invitation?token=t",
+    for (const route of [
+      "/signup",
+      "/sign-in/google/callback?code=c&state=s",
+      "/sign-in/sso/callback?code=c&state=s",
+      "/verify-email?token=t",
+      "/reset-password?token=t",
+      "/accept-invitation?token=t",
+      "/sso/acme",
     ]) {
-      expect(resolveSignInReturnHash(hash)).toBe("#/")
+      expect(resolveSignInReturnRoute(route)).toBe("/")
     }
   })
 
-  it("sends anything that is not a hash path in this app home", () => {
+  it("sends anything that is not a route path in this app home", () => {
     for (const value of [
       "",
       "#",
-      "#keys",
-      "/organization/billing",
-      "https://evil.example/#/keys",
+      "#/keys",
+      "keys",
+      "https://evil.example/keys",
       "javascript:alert(1)",
-      "#//evil.example",
-      "#/\\evil.example",
+      "//evil.example",
+      "/\\evil.example",
     ]) {
-      expect(resolveSignInReturnHash(value)).toBe("#/")
+      expect(resolveSignInReturnRoute(value)).toBe("/")
     }
   })
 })
@@ -72,31 +112,37 @@ const NOTHING_CONFIGURED = { mailReady: false, oauthProviders: [] } as const
 
 describe("publicAuthPath", () => {
   it("matches on the path alone, so a query string does not hide a known page", () => {
-    expect(publicAuthPath("#/signup")).toBe("/signup")
-    expect(publicAuthPath("#/verify-email?token=abc")).toBe("/verify-email")
-    expect(publicAuthPath("#/check-email?type=resend")).toBe("/check-email")
+    expect(publicAuthPath("/signup")).toBe("/signup")
+    expect(publicAuthPath("/verify-email?token=abc")).toBe("/verify-email")
+    expect(publicAuthPath("/check-email?type=resend")).toBe("/check-email")
+  })
+
+  it("recognizes the organization-connection callback, fixed for every organization alike", () => {
+    expect(publicAuthPath("/sign-in/sso/callback?code=c&state=s")).toBe(
+      "/sign-in/sso/callback",
+    )
   })
 
   it("recognizes the two paths the gateway itself mails", () => {
     // `services/tenancy/user_service.py` builds `/#/verify-email?token=…` and
     // `/#/reset-password?token=…`; a rename here breaks a link already sent.
-    expect(publicAuthPath("#/verify-email?token=t")).toBe("/verify-email")
-    expect(publicAuthPath("#/reset-password?token=t")).toBe("/reset-password")
+    expect(publicAuthPath("/verify-email?token=t")).toBe("/verify-email")
+    expect(publicAuthPath("/reset-password?token=t")).toBe("/reset-password")
   })
 
   it("claims nothing it does not own", () => {
-    expect(publicAuthPath("#/")).toBeNull()
-    expect(publicAuthPath("#/keys")).toBeNull()
-    expect(publicAuthPath("#/accept-invitation?token=t")).toBeNull()
+    expect(publicAuthPath("/")).toBeNull()
+    expect(publicAuthPath("/keys")).toBeNull()
+    expect(publicAuthPath("/accept-invitation?token=t")).toBeNull()
     expect(publicAuthPath("")).toBeNull()
     // A prefix match would swallow this one; the table is exact.
-    expect(publicAuthPath("#/signup-something-else")).toBeNull()
+    expect(publicAuthPath("/signup-something-else")).toBeNull()
     // `in` would answer these, because it walks the prototype chain, and the
     // exhaustive switch that renders a page would fall off the end into a
     // blank screen. `Object.hasOwn` is what keeps them out.
-    expect(publicAuthPath("#toString")).toBeNull()
-    expect(publicAuthPath("#constructor")).toBeNull()
-    expect(publicAuthPath("#__proto__")).toBeNull()
+    expect(publicAuthPath("/toString")).toBeNull()
+    expect(publicAuthPath("toString")).toBeNull()
+    expect(publicAuthPath("__proto__")).toBeNull()
   })
 })
 
@@ -132,31 +178,37 @@ describe("isPublicAuthPageAvailable", () => {
     // not must answer the GitHub callback with the panel, or a bookmark reaches
     // a page whose only outcome is the gateway's 503.
     const googleOnly = { mailReady: false, oauthProviders: ["google"] }
-    expect(isPublicAuthPageAvailable("/auth/google/callback", googleOnly)).toBe(
-      true,
-    )
-    expect(isPublicAuthPageAvailable("/auth/github/callback", googleOnly)).toBe(
-      false,
-    )
     expect(
-      isPublicAuthPageAvailable("/auth/google/callback", NOTHING_CONFIGURED),
+      isPublicAuthPageAvailable("/sign-in/google/callback", googleOnly),
+    ).toBe(true)
+    expect(
+      isPublicAuthPageAvailable("/sign-in/github/callback", googleOnly),
+    ).toBe(false)
+    expect(
+      isPublicAuthPageAvailable("/sign-in/google/callback", NOTHING_CONFIGURED),
     ).toBe(false)
   })
 
   it("does not gate an OAuth callback on mail, which it never sends", () => {
     expect(
-      isPublicAuthPageAvailable("/auth/google/callback", {
+      isPublicAuthPageAvailable("/sign-in/google/callback", {
         mailReady: false,
         oauthProviders: ["google"],
       }),
+    ).toBe(true)
+  })
+
+  it("opens the organization-connection callback on any deployment, unlike the OAuth pair", () => {
+    expect(
+      isPublicAuthPageAvailable("/sign-in/sso/callback", NOTHING_CONFIGURED),
     ).toBe(true)
   })
 })
 
 describe("oauthCallbackProvider", () => {
   it("names the provider an OAuth callback path finishes", () => {
-    expect(oauthCallbackProvider("/auth/google/callback")).toBe("google")
-    expect(oauthCallbackProvider("/auth/github/callback")).toBe("github")
+    expect(oauthCallbackProvider("/sign-in/google/callback")).toBe("google")
+    expect(oauthCallbackProvider("/sign-in/github/callback")).toBe("github")
   })
 
   it("answers null for every page that is not one", () => {
@@ -166,26 +218,26 @@ describe("oauthCallbackProvider", () => {
 })
 
 describe("every renderable provider has a callback page", () => {
-  it("holds an /auth/{provider}/callback entry for each OAuthProvider", () => {
+  it("holds a /sign-in/{provider}/callback entry for each OAuthProvider", () => {
     // `PUBLIC_AUTH_PAGES` is already type-linked to the `OAuthProvider` union,
     // so a forgotten entry is a compile error. This asserts the same rule at
     // runtime, because the type annotation is one edit away from being widened
     // back to a plain `Record<string, …>` and the failure it prevents is silent
     // and expensive: the sign-in screen renders the button, the gateway
-    // redirects to the callback hash, `publicAuthPath` answers null,
+    // redirects to the callback route, `publicAuthPath` answers null,
     // `DeploymentRoot` falls through to the auth gate, and the person lands
     // back on sign-in with their authorization code unspent and no error shown.
     //
     // The gateway asserts its own half of the same pair at import
     // (`set(_PROVIDERS) == set(OAUTH_PROVIDERS)`); this is the browser's half.
     for (const provider of Object.keys(OAUTH_PROVIDER_LABELS)) {
-      const path = `/auth/${provider}/callback`
+      const path = `/sign-in/${provider}/callback`
       expect(Object.hasOwn(PUBLIC_AUTH_PAGES, path)).toBe(true)
       expect(PUBLIC_AUTH_PAGES[path as keyof typeof PUBLIC_AUTH_PAGES]).toBe(
         "oauth",
       )
-      // And the hash a provider actually redirects to resolves to it.
-      expect(publicAuthPath(`#${path}?code=c&state=s`)).toBe(path)
+      // And the route a provider actually redirects to resolves to it.
+      expect(publicAuthPath(`${path}?code=c&state=s`)).toBe(path)
     }
   })
 })

@@ -144,6 +144,7 @@ describe("MandateDialog, creating one", () => {
       profile: "prod-patronus",
       definition_id: "d1",
       mode: "block",
+      on: ["input"],
       on_unavailable: "block",
       validate_kwargs: { output_text: "the answer" },
       applies_to_all_workspaces: false,

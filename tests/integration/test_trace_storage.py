@@ -7,6 +7,7 @@ the tenancy rows it points at are committed before it runs.
 """
 
 import asyncio
+import dataclasses
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
@@ -20,23 +21,54 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from gateway.adapters.content_key_adapter import build_content_key_port
+from gateway.api.deps import is_workspace_member, workspaces_keeping_content_for
 from gateway.core.config import GatewayConfig
 from gateway.core.database import dispose_db, init_db
 from gateway.core.unit_of_work import create_unit_of_work
-from gateway.exceptions.traces_exceptions import TraceAmbiguousError
-from gateway.models.traces import TraceSpan
+from gateway.exceptions.traces_exceptions import GuardrailVersionLimitError, TraceAmbiguousError
+from gateway.models.tenancy import OrganizationMember, Workspace
+from gateway.models.tenancy import User as TenancyUser
+from gateway.models.traces import Trace, TraceContentRead, TraceGuardrailDefinition, TraceSpan, TraceUserBarrier
 from gateway.models.users import User
 from gateway.repositories.tenancy import OrganizationRepository, WorkspaceRepository
 from gateway.repositories.traces import TracesRepositories
+from gateway.repositories.traces.barrier_repository import ContentBarrierRepository, UserBarrierRepository
+from gateway.repositories.traces.definition_repository import GuardrailDefinitionRepository
 from gateway.services.secret_box import generate_secret_key
-from gateway.services.traces import TraceService
+from gateway.services.traces import SpanContent, TraceService
 from gateway.services.traces import _service as trace_service_module
 from gateway.services.traces._collector import call_id_digest
-from gateway.types.traces import SpanRecord, TraceFilter, TraceScope, TraceWrite
+from gateway.types.traces import BreakGlass, SpanRecord, TraceFilter, TraceScope, TraceWrite, WorkspaceContent
+from otari_agent.domain.definitions import GateDefinition, definition_digest
+
+
+def _no_window(provider: str | None, model: str, organization_id: uuid.UUID | None) -> int | None:
+    return None
+
 
 pytestmark = pytest.mark.asyncio
 
 _T0 = datetime(2026, 10, 7, 12, 0, tzinfo=UTC)
+
+
+class _Members:
+    """Every user is a member of every workspace, but for those named as gone."""
+
+    def __init__(self, gone: frozenset[str] = frozenset()) -> None:
+        self.gone = set(gone)
+
+    async def is_member(self, workspace_id: uuid.UUID, user_id: str | None) -> bool:
+        return user_id is not None and user_id not in self.gone
+
+    async def content_kept_for(self, pairs: Any) -> set[tuple[uuid.UUID, str | None]]:
+        return {pair for pair in pairs if await self.is_member(*pair)}
+
+    async def content_kept(self, workspace_id: uuid.UUID, user_id: str | None) -> WorkspaceContent:
+        return WorkspaceContent(keeps=await self.is_member(workspace_id, user_id), tool_output=True)
+
+    async def organization_of(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
+        return None
 
 
 @pytest_asyncio.fixture
@@ -44,7 +76,13 @@ async def store(test_config: GatewayConfig, clean_database: None) -> AsyncIterat
     init_db(test_config)
     try:
         async with create_unit_of_work() as uow:
-            yield TraceService(uow, TracesRepositories.on(uow))
+            yield TraceService(
+                uow,
+                TracesRepositories.on(uow),
+                SpanContent(build_content_key_port(test_config)),
+                _Members(),
+                _no_window,
+            )
     finally:
         await dispose_db()
 
@@ -85,6 +123,7 @@ def _write(
     session_source: str = "harness",
     name: str | None = None,
     harness: str = "claude-code",
+    content_generation: int | None = 0,
 ) -> TraceWrite:
     return TraceWrite(
         workspace_id=workspace_id,
@@ -95,6 +134,7 @@ def _write(
         harness=harness,
         name=name,
         spans=spans,
+        content_generation=content_generation,
     )
 
 
@@ -444,7 +484,9 @@ async def test_a_batch_costs_the_same_statements_however_many_traces_it_holds(
     finally:
         event.remove(Engine, "before_cursor_execute", count)
 
-    assert len(statements) == 4, statements
+    # Lock the users' erasure rows (create, then lock), create the traces, read
+    # their owners, insert the spans, grow the totals. Still fixed, however many.
+    assert len(statements) == 6, statements
 
 
 async def test_two_writers_sharing_traces_in_opposite_order_do_not_deadlock(
@@ -455,9 +497,13 @@ async def test_two_writers_sharing_traces_in_opposite_order_do_not_deadlock(
 
     async def write(order: list[str], tag: str) -> None:
         async with create_unit_of_work() as uow:
-            await TraceService(uow, TracesRepositories.on(uow)).write(
-                tuple(_write(workspace, trace_id, _span(f"{tag}-{trace_id}")) for trace_id in order)
-            )
+            await TraceService(
+                uow,
+                TracesRepositories.on(uow),
+                SpanContent(build_content_key_port(test_config)),
+                _Members(),
+                _no_window,
+            ).write(tuple(_write(workspace, trace_id, _span(f"{tag}-{trace_id}")) for trace_id in order))
 
     for attempt in range(5):
         await asyncio.gather(write(ids, f"a{attempt}"), write(ids[::-1], f"b{attempt}"))
@@ -629,3 +675,581 @@ async def test_without_a_key_what_a_span_was_about_is_not_stored(
         await async_db.execute(select(TraceSpan.content_sealed).where(col(TraceSpan.span_id) == "tool-1"))
     ).scalar_one()
     assert sealed is None
+
+
+async def test_concurrent_new_guardrail_versions_never_pass_the_workspace_cap(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(trace_service_module, "MAX_GUARDRAIL_VERSIONS_PER_WORKSPACE", 2)
+    workspace, _ = tenants
+
+    def gates(message: str) -> tuple[GateDefinition, ...]:
+        return (
+            GateDefinition(
+                gate_id="no-changelog",
+                gate_type="path",
+                enforcement="required",
+                origin="repo",
+                runs=("pre_tool_use.edit_target",),
+                message=message,
+            ),
+        )
+
+    first = gates("version 0")
+    await store.record_definition(workspace, first, definition_digest(first))
+
+    # Widen the window between the count and the insert, so writers that are not serialized all pass the count.
+    count_for_workspace = GuardrailDefinitionRepository.count_for_workspace
+
+    async def slow_count(self: GuardrailDefinitionRepository, workspace_id: uuid.UUID) -> int:
+        count = await count_for_workspace(self, workspace_id)
+        await asyncio.sleep(0.1)
+        return count
+
+    monkeypatch.setattr(GuardrailDefinitionRepository, "count_for_workspace", slow_count)
+
+    async def record(index: int) -> bool:
+        version = gates(f"version {index}")
+        async with create_unit_of_work() as uow:
+            try:
+                await TraceService(
+                    uow, TracesRepositories.on(uow), SpanContent.disabled(), _Members(), _no_window
+                ).record_definition(workspace, version, definition_digest(version))
+            except GuardrailVersionLimitError:
+                return False
+        return True
+
+    stored = await asyncio.gather(*(record(index) for index in range(1, 6)))
+
+    assert stored.count(True) == 1
+    digests = (
+        await async_db.execute(
+            select(TraceGuardrailDefinition.digest).where(col(TraceGuardrailDefinition.workspace_id) == workspace)
+        )
+    ).all()
+    assert len(digests) == 2
+
+
+async def test_two_users_spans_sharing_an_id_in_one_batch_keep_their_own_content(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exported span ids come from the client's OTel ids, so two users' spans can share one."""
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    workspace, _ = tenants
+    await store.write(
+        (
+            _write(workspace, "alice-session", _span("tool-1", kind="tool", content={"prompt": "alice's secret"})),
+            _write(workspace, "bob-session", _span("tool-1", kind="tool"), user_id="bob"),
+            _write(
+                workspace, "bob-other", _span("tool-1", kind="tool", content={"prompt": "bob's own"}), user_id="bob"
+            ),
+        )
+    )
+
+    sealed = dict((await async_db.execute(select(TraceSpan.trace_id, TraceSpan.content_sealed))).tuples().all())
+    assert sealed["bob-session"] is None
+    alice = await store.get(TraceScope.deployment(), "alice-session", span_limit=10)
+    bob = await store.get(TraceScope.deployment(), "bob-other", span_limit=10)
+    assert alice is not None and bob is not None
+    assert dict(alice.spans[0].content) == {"prompt": "alice's secret"}
+    assert dict(bob.spans[0].content) == {"prompt": "bob's own"}
+
+
+def _store_on(config: GatewayConfig, uow: Any) -> TraceService:
+    return TraceService(
+        uow, TracesRepositories.on(uow), SpanContent(build_content_key_port(config)), _Members(), _no_window
+    )
+
+
+async def _sealed_of(async_db: AsyncSession, trace_id: str) -> str | None:
+    async_db.expire_all()
+    return (
+        await async_db.execute(select(TraceSpan.content_sealed).where(col(TraceSpan.trace_id) == trace_id))
+    ).scalar_one()
+
+
+@pytest.mark.parametrize("stop", ["forget_content", "stop_content"])
+async def test_content_queued_before_a_workspace_stops_or_deletes_it_is_never_stored(
+    store: TraceService,
+    tenants: tuple[uuid.UUID, uuid.UUID],
+    async_db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    stop: str,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    workspace, _ = tenants
+    generation = await store.content_generation(workspace)
+    queued = _write(
+        workspace, "s-queued", _span("tool-1", kind="tool", content={"prompt": "x"}), content_generation=generation
+    )
+
+    await getattr(store, stop)(workspace)
+    result = await store.write((queued,))
+
+    assert result.accepted == 1
+    assert await _sealed_of(async_db, "s-queued") is None
+    after = await store.content_generation(workspace)
+    await store.write(
+        (_write(workspace, "s-after", _span("tool-1", kind="tool", content={"prompt": "y"}), content_generation=after),)
+    )
+    assert await _sealed_of(async_db, "s-after") is not None
+
+
+async def test_content_deleted_while_its_batch_waits_on_the_key_source_is_never_stored(
+    test_config: GatewayConfig,
+    store: TraceService,
+    tenants: tuple[uuid.UUID, uuid.UUID],
+    async_db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    workspace, _ = tenants
+    generation = await store.content_generation(workspace)
+    real_seal = SpanContent.seal_many
+
+    async def seal_then_delete(self: SpanContent, *args: Any, **kwargs: Any) -> list[str | None]:
+        values = await real_seal(self, *args, **kwargs)
+        async with create_unit_of_work() as other:
+            await _store_on(test_config, other).forget_content(workspace)
+        return values
+
+    monkeypatch.setattr(SpanContent, "seal_many", seal_then_delete)
+    await store.write(
+        (
+            _write(
+                workspace, "s-1", _span("tool-1", kind="tool", content={"prompt": "x"}), content_generation=generation
+            ),
+        )
+    )
+
+    assert await _sealed_of(async_db, "s-1") is None
+
+
+async def test_a_delete_waits_for_a_write_already_holding_the_workspace_and_then_clears_it(
+    test_config: GatewayConfig,
+    tenants: tuple[uuid.UUID, uuid.UUID],
+    async_db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    clean_database: None,
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    init_db(test_config)
+    try:
+        workspace, _ = tenants
+        locked, release = asyncio.Event(), asyncio.Event()
+        real_lock = ContentBarrierRepository.lock
+
+        async def lock_and_hold(self: ContentBarrierRepository, workspace_ids: Any) -> dict[uuid.UUID, int]:
+            held = await real_lock(self, workspace_ids)
+            if workspace_ids and not locked.is_set():
+                locked.set()
+                await release.wait()
+            return held
+
+        monkeypatch.setattr(ContentBarrierRepository, "lock", lock_and_hold)
+
+        async def write() -> None:
+            async with create_unit_of_work() as uow:
+                await _store_on(test_config, uow).write(
+                    (
+                        _write(
+                            workspace,
+                            "s-1",
+                            _span("tool-1", kind="tool", content={"prompt": "x"}),
+                            content_generation=0,
+                        ),
+                    )
+                )
+
+        async def forget() -> None:
+            async with create_unit_of_work() as uow:
+                await _store_on(test_config, uow).forget_content(workspace)
+
+        writing = asyncio.create_task(write())
+        await asyncio.wait_for(locked.wait(), timeout=5)
+        forgetting = asyncio.create_task(forget())
+        await asyncio.sleep(0.3)
+        assert not forgetting.done(), "the delete went ahead while a write held the workspace"
+        release.set()
+        await asyncio.wait_for(asyncio.gather(writing, forgetting), timeout=10)
+
+        assert await _sealed_of(async_db, "s-1") is None
+    finally:
+        await dispose_db()
+
+
+async def test_forgetting_erasures_deletes_in_batches_and_still_reaches_every_row(
+    store: TraceService, async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(trace_service_module, "FORGET_ERASURES_BATCH", 2)
+    async_db.add_all(TraceUserBarrier(user_id=f"user-{n}") for n in range(5))
+    await async_db.commit()
+
+    assert await store.expire_erasures(now=datetime.now(UTC)) == 5
+    assert (await async_db.execute(select(TraceUserBarrier))).scalars().all() == []
+
+
+async def test_forgetting_erasures_skips_a_user_a_write_holds_rather_than_waiting_for_it(
+    test_config: GatewayConfig,
+    tenants: tuple[uuid.UUID, uuid.UUID],
+    monkeypatch: pytest.MonkeyPatch,
+    clean_database: None,
+) -> None:
+    init_db(test_config)
+    try:
+        workspace, _ = tenants
+        async with create_unit_of_work() as uow:
+            await _store_on(test_config, uow).write(
+                (
+                    _write(workspace, "s-bob", _span("step-0"), user_id="bob"),
+                    _write(workspace, "s-alice", _span("step-0")),
+                )
+            )
+        locked, release = asyncio.Event(), asyncio.Event()
+        real_lock = UserBarrierRepository.lock
+
+        async def lock_and_hold(self: UserBarrierRepository, user_ids: Any) -> dict[str, datetime | None]:
+            held = await real_lock(self, user_ids)
+            if "alice" in user_ids and not locked.is_set():
+                locked.set()
+                await release.wait()
+            return held
+
+        monkeypatch.setattr(UserBarrierRepository, "lock", lock_and_hold)
+
+        async def write() -> None:
+            async with create_unit_of_work() as uow:
+                await _store_on(test_config, uow).write((_write(workspace, "s-alice", _span("step-1")),))
+
+        writing = asyncio.create_task(write())
+        await asyncio.wait_for(locked.wait(), timeout=5)
+        try:
+            async with create_unit_of_work() as uow:
+                # Locking in scan order, as a plain DELETE does, would wait here for the write.
+                forgotten = await asyncio.wait_for(
+                    _store_on(test_config, uow).expire_erasures(now=datetime.now(UTC)), timeout=5
+                )
+        finally:
+            release.set()
+            await asyncio.wait_for(writing, timeout=10)
+
+        assert forgotten == 1
+        async with create_unit_of_work() as uow:
+            assert await _store_on(test_config, uow).expire_erasures(now=datetime.now(UTC)) == 1
+    finally:
+        await dispose_db()
+
+
+async def test_a_rejected_write_cannot_supply_another_writes_content(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    workspace, _ = tenants
+    await store.write((_write(workspace, "s-alice", _span("step-0")),))
+
+    result = await store.write(
+        (
+            _write(workspace, "s-alice", _span("tool-1", kind="tool", content={"prompt": "bob's"}), user_id="bob"),
+            _write(workspace, "s-alice", _span("tool-1", kind="tool")),
+        )
+    )
+
+    assert result.rejected == 1
+    sealed = (
+        await async_db.execute(select(TraceSpan.content_sealed).where(col(TraceSpan.span_id) == "tool-1"))
+    ).scalar_one()
+    assert sealed is None
+
+
+async def test_a_batch_another_replica_held_from_before_an_erasure_is_never_stored(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    workspace, _ = tenants
+    # Replica B took this in, and has not flushed it yet.
+    held = _write(workspace, "s-alice", _span("tool-1", kind="tool", content={"prompt": "x"}))
+    await store.write((_write(workspace, "s-alice", _span("step-0")),))
+
+    # Replica A erases the user.
+    await store.purge_user("alice")
+    # Replica B flushes.
+    result = await store.write((held,))
+
+    assert result.accepted == 0
+    async_db.expire_all()
+    assert (await async_db.execute(select(TraceSpan.span_id))).scalars().all() == []
+    # Nor does it bring back the session it names, with the erased user's id on it.
+    assert (await async_db.execute(select(Trace.trace_id))).scalars().all() == []
+    # Someone else's spans are stored as ever.
+    bob = await store.write((_write(workspace, "s-bob", _span("step-0"), user_id="bob"),))
+    assert bob.accepted == 1
+
+
+async def test_an_erased_users_id_goes_from_the_barrier_and_the_access_records(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession
+) -> None:
+    workspace, _ = tenants
+    await store.write((_write(workspace, "s-1", _span("step-0")),))
+    organization_id = (
+        await async_db.execute(select(col(Workspace.organization_id)).where(col(Workspace.id) == workspace))
+    ).scalar_one()
+    break_glass = BreakGlass(
+        kind="deployment",
+        organization_id=organization_id,
+        reader_user_id=None,
+        reader_email="operator@example.test",
+        reason="Legal request from the regulator",
+        reference="LEGAL-1",
+    )
+    await store.break_glass_detail(TraceScope.deployment(), "s-1", break_glass=break_glass, workspace_id=workspace)
+    async_db.add(
+        TraceContentRead(
+            workspace_id=workspace,
+            trace_id="s-1",
+            session_user_id="alice",
+            audience="organization_admins",
+            reader_email="admin@example.test",
+        )
+    )
+    await async_db.commit()
+
+    await store.purge_user("alice")
+
+    [read], _ = await store.break_glass_reads(organization_id=None, kind=None, limit=10)
+    assert read.session_user_id is None and read.reason == "Legal request from the regulator"
+    async_db.expire_all()
+    [share_read] = (await async_db.execute(select(TraceContentRead))).scalars().all()
+    assert share_read.session_user_id is None and share_read.reader_email == "admin@example.test"
+    kept_until = datetime.now(UTC) + trace_service_module.ERASURE_MARGIN + trace_service_module.ERASURE_KEPT_FOR
+    assert await store.expire_erasures(now=kept_until - timedelta(minutes=1)) == 0
+    assert await store.expire_erasures(now=kept_until + timedelta(minutes=1)) == 1
+
+
+async def test_an_upload_admitted_before_an_erasure_and_finished_long_after_is_never_stored(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    workspace, _ = tenants
+    admitted = datetime.now(UTC)
+    await store.purge_user("alice")
+    late = dataclasses.replace(
+        _write(workspace, "s-late", _span("tool-1", kind="tool", content={"prompt": "x"})),
+        captured_at=admitted,
+    )
+    # However long the upload took, it is judged from when it was let in.
+    result = await store.write((late,))
+
+    assert result.accepted == 0
+    async_db.expire_all()
+    assert (await async_db.execute(select(Trace.trace_id))).scalars().all() == []
+
+
+async def test_content_is_kept_only_where_the_workspace_switch_is_still_on(
+    tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession
+) -> None:
+    """The switch is read where content is stored, not trusted from the export's admission.
+
+    Turning it off and moving the workspace's content generation on are two commits,
+    so an export let in between them carries a generation that is still current.
+    """
+    workspace_id, _ = tenants
+    workspace = await async_db.get(Workspace, workspace_id)
+    assert workspace is not None
+    person = TenancyUser(email="switch@example.test", full_name="Dev", active_organization_id=workspace.organization_id)
+    async_db.add(person)
+    await async_db.flush()
+    async_db.add(
+        OrganizationMember(organization_id=workspace.organization_id, user_id=person.id, role="admin", status="active")
+    )
+    # A member's spend identity is their control-plane id, which is what a trace carries.
+    async_db.add(User(user_id=str(person.id)))
+    workspace.trace_content_enabled = True
+    await async_db.commit()
+    pair = (workspace_id, str(person.id))
+
+    assert await workspaces_keeping_content_for(async_db, [pair]) == {pair}
+
+    workspace.trace_content_enabled = False
+    await async_db.commit()
+
+    assert await workspaces_keeping_content_for(async_db, [pair]) == set()
+    # Still a member; it is the workspace that stopped keeping content.
+    assert await is_workspace_member(async_db, workspace_id, str(person.id))
+
+
+async def test_forgetting_erasures_commits_each_batch_before_taking_the_next(
+    store: TraceService,
+    tenants: tuple[uuid.UUID, uuid.UUID],
+    async_db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A batch per block, so a write holding one of these rows waits for a batch and not for the table."""
+    monkeypatch.setattr(trace_service_module, "FORGET_ERASURES_BATCH", 2)
+    workspace, _ = tenants
+    users = [f"u{n}" for n in range(5)]
+    # A trace's user is a real spend identity, which the barrier rows follow.
+    async_db.add_all([User(user_id=user) for user in users])
+    await async_db.commit()
+    for user in users:
+        await store.write((_write(workspace, f"s-{user}", _span("tool-1", kind="tool"), user_id=user),))
+
+    committed = 0
+    real_commit = AsyncSession.commit
+
+    async def counting_commit(self: AsyncSession) -> None:
+        nonlocal committed
+        await real_commit(self)
+        committed += 1
+
+    commits_seen: list[int] = []
+    real_forget = UserBarrierRepository.forget_erased_before
+
+    async def recording_forget(
+        self: UserBarrierRepository, cutoff: datetime, *, limit: int, after: str | None = None
+    ) -> tuple[int, str | None]:
+        commits_seen.append(committed)
+        return await real_forget(self, cutoff, limit=limit, after=after)
+
+    monkeypatch.setattr(AsyncSession, "commit", counting_commit)
+    monkeypatch.setattr(UserBarrierRepository, "forget_erased_before", recording_forget)
+
+    assert await store.expire_erasures(now=datetime.now(UTC)) == len(users)
+    # Three batches of at most two, each taken once the one before it committed.
+    assert [seen - commits_seen[0] for seen in commits_seen] == [0, 1, 2]
+
+
+async def test_forgetting_erasures_finishes_while_writers_remake_rows_behind_it(
+    store: TraceService, async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A write remakes a never-erased user's row, so a sweep that started over each batch could run forever."""
+    monkeypatch.setattr(trace_service_module, "FORGET_ERASURES_BATCH", 2)
+    async_db.add_all(TraceUserBarrier(user_id=f"user-{n}") for n in range(5))
+    await async_db.commit()
+    real_forget = UserBarrierRepository.forget_erased_before
+    batches = 0
+
+    async def remaking_forget(
+        self: UserBarrierRepository, cutoff: datetime, *, limit: int, after: str | None = None
+    ) -> tuple[int, str | None]:
+        nonlocal batches
+        batches += 1
+        answer = await real_forget(self, cutoff, limit=limit, after=after)
+        # Two rows sorting before every user the sweep has reached, made between batches.
+        self.db.add_all(TraceUserBarrier(user_id=f"a-{batches}-{n}") for n in range(2))
+        await self.db.flush()
+        return answer
+
+    monkeypatch.setattr(UserBarrierRepository, "forget_erased_before", remaking_forget)
+
+    assert await asyncio.wait_for(store.expire_erasures(now=datetime.now(UTC)), timeout=10) == 5
+    assert batches == 3
+
+
+async def test_an_upload_still_held_when_its_users_erasure_is_forgotten_is_never_stored(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    workspace, _ = tenants
+    await store.purge_user("alice")
+    # The erasure's row is forgotten only once this long has passed, so by then an
+    # upload let in before the erasure is at least this old when it is written.
+    forgotten_after = trace_service_module.ERASURE_MARGIN + trace_service_module.ERASURE_KEPT_FOR
+    assert await store.expire_erasures(now=datetime.now(UTC) + forgotten_after + timedelta(seconds=1)) == 1
+    late = dataclasses.replace(
+        _write(workspace, "s-late", _span("tool-1", kind="tool", content={"prompt": "x"})),
+        captured_at=datetime.now(UTC) - forgotten_after,
+    )
+
+    result = await store.write((late,))
+
+    assert result.accepted == 0 and result.rejected == 1
+    async_db.expire_all()
+    assert (await async_db.execute(select(Trace.trace_id))).scalars().all() == []
+
+
+async def test_a_write_taken_in_longer_ago_than_any_write_is_held_is_refused_whole(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    workspace, _ = tenants
+    now = datetime.now(UTC)
+    old = dataclasses.replace(
+        _write(workspace, "s-old", _span("step-0")),
+        captured_at=now - trace_service_module.MAX_WRITE_AGE - timedelta(minutes=1),
+    )
+    recent = dataclasses.replace(
+        _write(workspace, "s-recent", _span("step-0")),
+        captured_at=now - trace_service_module.MAX_WRITE_AGE + timedelta(minutes=1),
+    )
+
+    result = await store.write((old, recent))
+
+    assert (result.accepted, result.rejected) == (1, 1)
+
+
+class _SwitchedOff(_Members):
+    """Every user is still a member, of a workspace that no longer keeps content."""
+
+    async def content_kept_for(self, pairs: Any) -> set[tuple[uuid.UUID, str | None]]:
+        return set()
+
+
+async def test_content_is_not_stored_where_the_workspace_stopped_keeping_it_before_the_write(
+    test_config: GatewayConfig,
+    clean_database: None,
+    tenants: tuple[uuid.UUID, uuid.UUID],
+    async_db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The write asks which sessions may keep content, not only who is a member, as it stores."""
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    workspace, _ = tenants
+    init_db(test_config)
+    try:
+        async with create_unit_of_work() as uow:
+            store = TraceService(
+                uow,
+                TracesRepositories.on(uow),
+                SpanContent(build_content_key_port(test_config)),
+                _SwitchedOff(),
+                _no_window,
+            )
+            result = await store.write(
+                (_write(workspace, "s-off", _span("tool-1", kind="tool", content={"prompt": "x"})),)
+            )
+    finally:
+        await dispose_db()
+
+    assert result.accepted == 1
+    assert await _sealed_of(async_db, "s-off") is None
+
+
+async def test_content_is_not_stored_for_a_user_who_left_the_workspace_before_the_write(
+    test_config: GatewayConfig,
+    clean_database: None,
+    tenants: tuple[uuid.UUID, uuid.UUID],
+    async_db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Membership is read again as the write stores, so content in flight while a member is removed is dropped."""
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    workspace, _ = tenants
+    init_db(test_config)
+    try:
+        async with create_unit_of_work() as uow:
+            store = TraceService(
+                uow,
+                TracesRepositories.on(uow),
+                SpanContent(build_content_key_port(test_config)),
+                _Members(gone=frozenset({"alice"})),
+                _no_window,
+            )
+            result = await store.write(
+                (_write(workspace, "s-left", _span("tool-1", kind="tool", content={"prompt": "x"})),)
+            )
+    finally:
+        await dispose_db()
+
+    assert result.accepted == 1
+    async_db.expire_all()
+    stored = (await async_db.execute(select(TraceSpan.content_sealed).where(col(TraceSpan.trace_id) == "s-left"))).one()
+    assert stored == (None,)

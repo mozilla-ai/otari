@@ -41,7 +41,6 @@ from gateway.services.tools import (
 )
 from gateway.services.traces import RequestTrace
 from gateway.services.web_fetch_service import WebFetchResult, WebFetchService
-from gateway.services.web_retrieval_backend import WebRetrievalBackend
 from gateway.services.web_retrieval_network import PinnedAsyncHTTPTransport, TrustedProxyAsyncHTTPTransport
 from gateway.services.web_retrieval_policy import DomainPolicy, canonicalize_domain_rules, canonicalize_web_url
 from gateway.types.tool_charges import LabelCalls, instance_rate_key
@@ -473,7 +472,7 @@ async def test_a_provider_instance_is_never_asked_for_an_address_that_is_not_pub
 
     assert spy.call_count == 0
     assert text.endswith("\nHere.")
-    assert tally.label_calls()[0].enrichment_cost == Decimal(0)
+    assert WEB_FETCH_TOOL_NAME not in tally.meters(), "a page never asked for is not a fetch"
 
 
 @pytest.mark.asyncio
@@ -484,7 +483,7 @@ async def test_a_page_a_provider_found_off_the_rules_is_refused_and_not_counted(
     text = await _search_once(_backend(config, max_results=1, policy=_allowing("example.com"), tally=tally))
 
     assert text.endswith("https://example.com/a\nSnippet A.")
-    assert tally.label_calls()[0].enrichment_cost == Decimal(0)
+    assert WEB_FETCH_TOOL_NAME not in tally.meters(), "a refused page is neither billed nor counted"
 
 
 @pytest.mark.parametrize(("own", "asked"), [(None, 1501), (300, 300), (9000, 1501)])
@@ -516,14 +515,112 @@ async def test_a_search_enriches_its_first_results_up_to_the_bound_and_shows_the
 
 
 @pytest.mark.asyncio
-async def test_enrichment_takes_no_slot_and_records_no_fetch() -> None:
+async def test_enrichment_takes_no_slot_and_records_each_page_as_a_fetch() -> None:
     cap, tally = WebToolCallCap(1), ToolUsageTally()
 
     text = await _search_once(_backend(_config(fetch={"text": "Page."}), cap=cap, tally=tally))
 
     assert text.count("\n\nPage.") == 2
     assert cap.used == 1
-    assert set(tally.meters()) == {WEB_SEARCH_TOOL_NAME}
+    assert tally.meters() == {
+        WEB_FETCH_TOOL_NAME: {"billed": 2, "errors": 0},
+        WEB_SEARCH_TOOL_NAME: {"billed": 1, "errors": 0},
+    }
+
+
+class _Gate:
+    """A spend gate that refuses every call of ``refuses``, and keeps what it was asked."""
+
+    def __init__(self, *, refuses: str | None = None) -> None:
+        self.refuses = refuses
+        self.asked: list[LabelCalls] = []
+
+    async def admit(self, call: LabelCalls) -> bool:
+        self.asked.append(call)
+        return call.tool != self.refuses
+
+
+@pytest.mark.asyncio
+async def test_the_pages_a_search_reads_are_one_hold_for_exactly_the_hits_without_text() -> None:
+    tally = ToolUsageTally()
+    tally.spend_gate = gate = _Gate()
+
+    await _search_once(_backend(_config(fetch={"cost": 0.002}), tally=tally))
+
+    [search, pages] = gate.asked
+    assert (search.tool, search.calls) == (WEB_SEARCH_TOOL_NAME, 1)
+    assert (pages.tool, pages.label, pages.rate_keys, pages.calls, pages.unreported_calls, pages.deployment_paid) == (
+        WEB_FETCH_TOOL_NAME,
+        f"fake:{_FETCH}",
+        (instance_rate_key("fetch", _FETCH, "fake"),),
+        2,
+        2,
+        True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_hold_the_budget_refuses_reads_no_page_and_leaves_every_hit_its_snippet() -> None:
+    tally = ToolUsageTally()
+    tally.spend_gate = _Gate(refuses=WEB_FETCH_TOOL_NAME)
+    with patch.object(FakeFetchProvider, "_fetch", autospec=True, side_effect=FakeFetchProvider._fetch) as spy:
+        text = await _search_once(_backend(_config(fetch={"text": "Page."}), tally=tally))
+
+    assert spy.call_count == 0
+    assert "Page." not in text
+    assert "https://example.com/a\nSnippet A." in text
+    assert tally.meters() == {WEB_SEARCH_TOOL_NAME: {"billed": 1, "errors": 0}}, "the search itself is billed"
+
+
+@pytest.mark.asyncio
+async def test_no_hold_is_taken_for_a_search_whose_hits_all_have_text() -> None:
+    hits = [{"url": "https://example.com/a", "snippet": "Snippet A.", "text": "Text A."}]
+    tally = ToolUsageTally()
+    tally.spend_gate = gate = _Gate()
+
+    await _search_once(_backend(_config(search={"hits": hits}, fetch={}), tally=tally))
+
+    assert [call.tool for call in gate.asked] == [WEB_SEARCH_TOOL_NAME]
+
+
+@pytest.mark.asyncio
+async def test_the_built_in_fetchers_pages_are_recorded_under_builtin_fetch(fetcher: AsyncMock) -> None:
+    tally = ToolUsageTally()
+
+    await _search_once(_backend(tally=tally))
+
+    [pages] = [entry for entry in tally.label_calls() if entry.tool == WEB_FETCH_TOOL_NAME]
+    assert (pages.label, pages.rate_keys, pages.calls, pages.unreported_calls, pages.deployment_paid) == (
+        "builtin:builtin_fetch",
+        (instance_rate_key("fetch", "builtin_fetch", "builtin"),),
+        2,
+        2,
+        True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_pages_read_on_the_workspaces_own_fetch_key_are_recorded_as_its() -> None:
+    search = _search(_config(fetch={"cost": 0.002}))
+    on_key = replace(
+        search,
+        enrichment=replace(
+            search.enrichment, name=None, label="org:fake", rate_keys=("otari:web_fetch",), on_credential=True
+        ),
+    )
+    tally = ToolUsageTally()
+    tally.spend_gate = gate = _Gate()
+
+    await _search_once(WebSearchBackend(on_key, cap=WebToolCallCap(10), max_results=5, tally=tally))
+
+    [pages] = [entry for entry in tally.label_calls() if entry.tool == WEB_FETCH_TOOL_NAME]
+    assert (pages.label, pages.rate_keys, pages.reported_cost, pages.deployment_paid) == (
+        "org:fake",
+        ("otari:web_fetch",),
+        Decimal("0.004"),
+        False,
+    )
+    assert gate.asked[1].deployment_paid is False
 
 
 @pytest.mark.asyncio
@@ -578,7 +675,7 @@ async def test_a_failure_the_backend_does_not_know_is_counted_and_traced_before_
 
 
 @pytest.mark.asyncio
-async def test_the_search_and_its_enrichment_are_recorded_under_the_instance_with_their_costs_apart() -> None:
+async def test_the_search_and_its_pages_are_recorded_apart_each_under_the_instance_that_served_it() -> None:
     tally = ToolUsageTally()
     priced = _config(search={"cost": 0.005}, fetch={"cost": 0.002})
     unpriced = _config(fetch={})
@@ -586,17 +683,26 @@ async def test_the_search_and_its_enrichment_are_recorded_under_the_instance_wit
     await _search_once(_backend(priced, tally=tally))
     await _search_once(_backend(unpriced, tally=tally))
 
-    assert tally.label_calls() == [
+    assert sorted(tally.label_calls(), key=lambda entry: entry.tool) == [
+        LabelCalls(
+            tool=WEB_FETCH_TOOL_NAME,
+            label=f"fake:{_FETCH}",
+            rate_keys=(instance_rate_key("fetch", _FETCH, "fake"),),
+            calls=4,
+            unreported_calls=2,
+            reported_cost=Decimal("0.004"),
+            deployment_paid=True,
+        ),
         LabelCalls(
             tool=WEB_SEARCH_TOOL_NAME,
             label=_LABEL,
-            rate_keys=(instance_rate_key("search", _SEARCH, "fake"), "otari:web_search"),
+            rate_keys=(instance_rate_key("search", _SEARCH, "fake"),),
             calls=2,
             unreported_calls=1,
             reported_cost=Decimal("0.005"),
-            enrichment_cost=Decimal("0.004"),
-        )
-    ], "two hits enriched at 0.002; an enrichment fetcher that reports nothing adds nothing"
+            deployment_paid=True,
+        ),
+    ], "two pages a search at 0.002 each, then two whose fetcher reported nothing, which the rate prices"
 
 
 @pytest.mark.asyncio
@@ -675,9 +781,29 @@ def test_a_request_option_the_provider_does_not_take_is_refused_and_a_workspace_
     assert dict(search.search.options) == {"hits": _HITS, "cost": 0.01}
 
 
-def test_the_legacy_settings_resolve_to_no_in_loop_search_on_the_libraries() -> None:
-    assert resolve_in_loop_search(GatewayConfig(web_search_url="http://searxng:8080"), None) is None
+def test_the_legacy_provider_pair_resolves_to_in_loop_search_on_tavilys_adapter() -> None:
+    legacy_pair = GatewayConfig(web_search_provider="tavily", web_search_provider_api_key="tvly-key")
+    in_loop = resolve_in_loop_search(legacy_pair, None)
+
+    assert in_loop is not None
+    assert (in_loop.search.provider, in_loop.search.runner, in_loop.search.label) == (
+        "tavily",
+        "library",
+        "otari:web_search",
+    )
     assert resolve_in_loop_search(GatewayConfig(), None) is None
+
+
+def test_the_legacy_url_resolves_to_in_loop_search_on_searxngs_adapter() -> None:
+    in_loop = resolve_in_loop_search(GatewayConfig(web_search_url="http://searxng:8080"), None)
+
+    assert in_loop is not None
+    assert (in_loop.search.provider, in_loop.search.runner, in_loop.search.label) == (
+        "searxng",
+        "library",
+        "otari:web_search",
+    )
+    assert in_loop.enrichment.name == "builtin_fetch"
 
 
 def _context(config: GatewayConfig, *, search: bool, fetch: bool, entry: dict[str, Any] | None = None) -> ToolContext:
@@ -708,11 +834,9 @@ def test_a_request_on_the_libraries_gets_its_search_and_fetch_as_two_backends_wi
     search_only = _context(config, search=True, fetch=False).build_web_backends()
     context = _context(config, search=True, fetch=True)
     both = context.build_web_backends()
-    fetch_only = _context(config, search=False, fetch=True).build_web_backends()
 
     assert [type(backend) for backend in search_only] == [WebSearchBackend]
     assert [type(backend) for backend in both] == [WebSearchBackend, WebFetchBackend]
-    assert [type(backend) for backend in fetch_only] == [WebRetrievalBackend], "a fetch alone keeps the old backend"
     search, fetch = both
     assert isinstance(search, WebSearchBackend) and isinstance(fetch, WebFetchBackend)
     assert search._cap is context.web_call_cap is fetch._cap
@@ -724,6 +848,17 @@ def test_a_request_on_the_libraries_gets_its_search_and_fetch_as_two_backends_wi
         WEB_SEARCH_TOOL_NAME,
         WEB_FETCH_TOOL_NAME,
     ]
+
+
+def test_a_request_that_declares_only_fetch_gets_the_fetch_backend_on_the_requests_cap() -> None:
+    context = _context(_config(), search=False, fetch=True)
+
+    (fetch,) = context.build_web_backends()
+
+    assert isinstance(fetch, WebFetchBackend)
+    assert fetch._cap is context.web_call_cap
+    assert fetch._resolved is context.web.fetch
+    assert [tool["function"]["name"] for tool in fetch.openai_tools] == [WEB_FETCH_TOOL_NAME]
 
 
 def test_the_requests_cap_is_the_deployments_call_limit() -> None:

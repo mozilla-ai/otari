@@ -1,10 +1,10 @@
 import { useState } from "react"
-
+import { routeSearchParams } from "@/shared/helpers/appLocation"
 import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"
 import { readSignInAddress } from "./signInAddress"
 
 /**
- * `#/check-email`: where signup and a verification resend both land.
+ * `/check-email`: where signup and a verification resend both land.
  *
  * It makes no request and knows nothing about the address beyond what the
  * visitor typed on the page before. That is the point: both routes behind it
@@ -18,8 +18,8 @@ import { readSignInAddress } from "./signInAddress"
  * being validated, since the page is correct either way and a visitor who
  * hand-edited the URL should still get a page.
  */
-export function CheckEmailPage({ hash }: { hash: string }) {
-  const type = new URLSearchParams(hash.split("?")[1] ?? "").get("type")
+export function CheckEmailPage({ route }: { route: string }) {
+  const type = routeSearchParams(route).get("type")
   const [email] = useState(readSignInAddress)
   const address = email === "" ? "that address" : email
 
@@ -33,10 +33,10 @@ export function CheckEmailPage({ hash }: { hash: string }) {
       }
       footer={
         <>
-          <PublicAuthLink to="#/resend-verification">
+          <PublicAuthLink to="/resend-verification">
             Didn't get it? Send another link
           </PublicAuthLink>
-          <PublicAuthLink to="#/">Back to sign in</PublicAuthLink>
+          <PublicAuthLink to="/">Back to sign in</PublicAuthLink>
         </>
       }
     >

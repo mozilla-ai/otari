@@ -20,9 +20,9 @@ from any_llm.utils.exception_handler import convert_exception
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from gateway.api.routes._pipeline import PROVIDER_CREDENTIALS_DETAIL
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.error_codes import ERROR_CODE_HEADER, PROVIDER_CREDENTIAL_REJECTED
+from gateway.core.error_details import ProviderDetail
 from gateway.models.routing import RoutingConfig
 from gateway.models.usage import UsageLog
 
@@ -53,7 +53,7 @@ def _assert_credential_rejected_body(response: Any) -> None:
     _assert_credential_rejected(response)
     body = response.json()
     assert body["code"] == PROVIDER_CREDENTIAL_REJECTED
-    assert body["detail"] == PROVIDER_CREDENTIALS_DETAIL
+    assert body["detail"] == ProviderDetail.CREDENTIALS
 
 
 @pytest.mark.parametrize("status_code", [401, 403])
@@ -105,7 +105,7 @@ def test_the_responses_route_answers_the_same_way(
             headers=api_key_header,
         )
     _assert_credential_rejected(response)
-    assert PROVIDER_CREDENTIALS_DETAIL in response.text
+    assert ProviderDetail.CREDENTIALS in response.text
 
 
 def test_the_messages_route_answers_in_its_own_envelope(
@@ -120,7 +120,7 @@ def test_the_messages_route_answers_in_its_own_envelope(
             headers=api_key_header,
         )
     _assert_credential_rejected(response)
-    assert response.json()["error"]["message"] == PROVIDER_CREDENTIALS_DETAIL
+    assert response.json()["error"]["message"] == ProviderDetail.CREDENTIALS
 
 
 @pytest.mark.parametrize(

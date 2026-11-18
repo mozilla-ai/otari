@@ -14,8 +14,8 @@ a helper:
   provider having a bad minute sheds its share.
 * A drained (zero-weight) candidate takes no traffic and still backs a failure.
 * The split is bounded by the caller's allow-list, like every other policy.
-* No pricing is required, unlike the learned router: weight is operator-declared
-  capacity, not a number derived from cost.
+* No pricing is required: weight is operator-declared capacity, not a number
+  derived from cost.
 
 The RNG is seeded through the backend the registry hands out, so these assert an
 exact split rather than a distribution: a statistical assertion here would be a
@@ -297,9 +297,8 @@ def test_explain_renormalizes_the_split_over_an_allow_list(client: TestClient) -
 
 
 def test_a_stored_weighted_policy_needs_no_pricing(client: TestClient) -> None:
-    # The learned router is refused here without pricing for every candidate,
-    # because it scores by cost. The weighted router reads no prices, so the same
-    # gate must not apply: nothing in this gateway has a pricing row.
+    # The weighted router reads no prices, so a policy naming it is stored and
+    # served although nothing in this gateway has a pricing row.
     resp = client.post(
         f"{API_ROOT}/routing/policies",
         json={
@@ -319,6 +318,23 @@ def test_a_stored_weighted_policy_needs_no_pricing(client: TestClient) -> None:
     served, calls = _chat(client, "stored-balanced")
     assert served.status_code == 200, served.text
     assert calls[0] in {HEAVY, LIGHT}
+
+
+def test_a_stored_policy_naming_a_router_this_build_lacks_serves_its_default(client: TestClient) -> None:
+    resp = client.post(
+        f"{API_ROOT}/routing/policies",
+        json={
+            "name": "stored-unknown",
+            "spec": {"select": [{"router": "cheapest", "candidates": [LIGHT, BACKUP]}, {"default": HEAVY}]},
+        },
+        headers=HEADERS,
+    )
+    assert resp.status_code == 200, resp.text
+
+    for _ in range(3):
+        served, calls = _chat(client, "stored-unknown")
+        assert served.status_code == 200, served.text
+        assert calls == [HEAVY]
 
 
 def test_a_malformed_split_is_refused_with_field_level_errors(client: TestClient) -> None:

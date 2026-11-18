@@ -136,8 +136,61 @@ def is_public_email_domain(domain: str) -> bool:
     return any(".".join(labels[start:]) in PUBLIC_EMAIL_DOMAINS for start in range(len(labels) - 1))
 
 
+# ``_DOMAIN_PATTERN`` with a punycoded top-level domain allowed as well, so ``example.рф`` (``example.xn--p1ai``)
+# can be blocked. A claim keeps the stricter pattern.
+_BLOCKABLE_DOMAIN_PATTERN = re.compile(
+    r"^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{2,}|xn--[a-z0-9-]{1,59})$"
+)
+
+
+def blocklist_entry(value: str) -> str | None:
+    """Normalize an operator's typed blocklist entry, or return ``None`` when it can block nobody.
+
+    An entry is a whole address (``person@example.com``) or a domain (``example.com``, also typed as
+    ``@example.com`` or ``*.example.com``), and a domain entry covers its subdomains. The domain part is
+    punycoded, so the entry matches whichever form an address arrives in (see ``blocklist_keys``).
+    """
+    candidate = value.strip().lower().rstrip(".")
+    for prefix in ("*.", "@"):
+        if candidate.startswith(prefix):
+            # A prefix marks a domain, so what follows it must not be an address.
+            candidate = candidate.removeprefix(prefix)
+            if "@" in candidate:
+                return None
+            break
+    local, at, domain = candidate.rpartition("@")
+    try:
+        # Strict, unlike ``_ascii``: a label the library refuses (``xn--a-``) could never match an address.
+        domain = idna.encode(domain, uts46=True, transitional=False).decode("ascii")
+    except (idna.IDNAError, UnicodeError):
+        return None
+    if not _BLOCKABLE_DOMAIN_PATTERN.match(domain):
+        return None
+    if not at:
+        return domain
+    if not local or "@" in local or any(character.isspace() for character in local):
+        return None
+    return f"{local}@{domain}"
+
+
+def blocklist_keys(email: str) -> tuple[str, ...]:
+    """Every blocklist entry that would match ``email``: the address itself, then each domain it sits under.
+
+    ``person@mail.example.com`` yields the address, ``mail.example.com`` and ``example.com``, and never a
+    bare top-level domain, so one lookup on these keys answers whether any entry blocks the address.
+    """
+    domain = email_domain(email)
+    if domain is None:
+        return ()
+    local = email.rsplit("@", 1)[0].strip().lower()
+    labels = domain.split(".")
+    return (f"{local}@{domain}", *(".".join(labels[start:]) for start in range(len(labels) - 1)))
+
+
 __all__ = [
     "PUBLIC_EMAIL_DOMAINS",
+    "blocklist_entry",
+    "blocklist_keys",
     "email_domain",
     "is_public_email_domain",
     "is_registrable_domain",

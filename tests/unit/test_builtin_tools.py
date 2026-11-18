@@ -7,9 +7,9 @@ from typing import Any
 import pytest
 
 from gateway.adapters.code_execution_adapter import ProtocolCodeExecutionAdapter
-from gateway.api.routes.tools import _managed_tools
-from gateway.api.routes.usage import GATEWAY_TOOL_NAMES
+from gateway.api.routes.tools import _DirectAvailability, _managed_tools, _WorkspaceSwitches
 from gateway.core.config import GatewayConfig
+from gateway.schemas.usage_and_telemetry import GATEWAY_TOOL_NAMES
 from gateway.services._tool_loop import ToolBackend
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, SandboxBackend
 from gateway.services.tools import (
@@ -19,6 +19,7 @@ from gateway.services.tools import (
     BuiltinTool,
     Dialect,
     NativeCall,
+    Refusal,
     Tool,
     native_rendering,
 )
@@ -113,10 +114,10 @@ def test_a_listed_tool_is_reachable_by_name_in_every_dialect_it_renders(tool: Bu
             assert native_rendering(tool.name, dialect) is None
 
 
-def test_chat_completions_reports_the_web_tools_and_not_code_execution() -> None:
+def test_chat_completions_reports_every_builtin_tool() -> None:
     assert native_rendering(WEB_SEARCH_TOOL_NAME, Dialect.CHAT) is not None
     assert native_rendering(WEB_FETCH_TOOL_NAME, Dialect.CHAT) is not None
-    assert native_rendering(CODE_EXECUTION_TOOL_NAME, Dialect.CHAT) is None
+    assert native_rendering(CODE_EXECUTION_TOOL_NAME, Dialect.CHAT) is not None
 
 
 @pytest.mark.parametrize("tool", BUILTIN_TOOLS, ids=lambda tool: tool.name)
@@ -130,16 +131,16 @@ def test_only_chat_completions_announces_a_call_as_it_starts(tool: BuiltinTool) 
 @pytest.mark.parametrize(
     ("declared_type", "expected"),
     [
-        ("code_execution_20250825", {Dialect.MESSAGES}),
-        ("code_interpreter", {Dialect.RESPONSES}),
-        ("code_execution", set()),
-        ("otari_code_execution", set()),
+        ("code_execution_20250825", {Dialect.CHAT, Dialect.MESSAGES}),
+        ("code_interpreter", {Dialect.CHAT, Dialect.RESPONSES}),
+        ("code_execution", {Dialect.CHAT}),
+        ("otari_code_execution", {Dialect.CHAT}),
     ],
 )
 def test_code_execution_is_rendered_only_in_the_dialect_whose_keyword_declared_it(
     declared_type: str, expected: set[Dialect]
 ) -> None:
-    """A provider's keyword asks for that provider's blocks back; the gateway's own words ask for none."""
+    """A provider's keyword asks for that provider's blocks back; Chat Completions reports every declaration."""
     rendered = {
         dialect
         for dialect in Dialect
@@ -147,6 +148,30 @@ def test_code_execution_is_rendered_only_in_the_dialect_whose_keyword_declared_i
         and rendering.declared({"type": declared_type})
     }
     assert rendered == expected
+
+
+@pytest.mark.parametrize("dialect", list(Dialect))
+def test_a_code_execution_is_never_refused_for_a_call_limit(dialect: Dialect) -> None:
+    rendering = native_rendering(CODE_EXECUTION_TOOL_NAME, dialect)
+    assert rendering is not None
+
+    assert rendering.refused(NativeCall(CODE_EXECUTION_TOOL_NAME, "c1", {}), Refusal.CALL_LIMIT) == []
+
+
+def test_a_code_execution_with_invalid_input_is_reported_failed_in_every_dialect() -> None:
+    call = NativeCall(CODE_EXECUTION_TOOL_NAME, "c1", {})
+
+    def rendered(dialect: Dialect) -> list[Any]:
+        rendering = native_rendering(CODE_EXECUTION_TOOL_NAME, dialect)
+        assert rendering is not None
+        return rendering.refused(call, Refusal.INVALID_INPUT)
+
+    [entry] = rendered(Dialect.CHAT)
+    assert (entry["status"], entry["error"]["tag"]) == ("failed", "invalid_input")
+    _use, result = rendered(Dialect.MESSAGES)
+    assert result.content.error_code == "invalid_tool_input"
+    [item] = rendered(Dialect.RESPONSES)
+    assert (item.type, item.status) == ("code_interpreter_call", "failed")
 
 
 def test_a_name_the_registry_does_not_list_has_no_rendering() -> None:
@@ -191,6 +216,44 @@ def test_configured_agrees_with_what_the_tools_endpoint_reports(
     for name, value in env.items():
         monkeypatch.setenv(name, value)
 
-    reported = {tool.id: tool.available for tool in _managed_tools(config)}
+    reported = {tool.id: tool.available for tool in _managed_tools(config, _WorkspaceSwitches(), _DirectAvailability())}
 
     assert reported == {f"otari_{tool.name}": tool.configured(config) for tool in BUILTIN_TOOLS}
+
+
+# The vocabularies a request reaches the scope gate in, and the one it cannot.
+# NOTE: Gemini's untyped ``{"code_execution": {}}`` is absent because the route
+# rewrites it to a typed entry before the gate reads the declarations.
+_DECLARATIONS: dict[str, tuple[list[dict[str, Any]], set[str]]] = {
+    "the gateway's own types": (
+        [{"type": "otari_web_search"}, {"type": "otari_web_fetch"}, {"type": "otari_code_execution"}],
+        {WEB_SEARCH_TOOL_NAME, WEB_FETCH_TOOL_NAME, CODE_EXECUTION_TOOL_NAME},
+    ),
+    "anthropic's dated keywords": (
+        [{"type": "web_search_20250305"}, {"type": "web_fetch_20250910"}, {"type": "code_execution_20250522"}],
+        {WEB_SEARCH_TOOL_NAME, WEB_FETCH_TOOL_NAME, CODE_EXECUTION_TOOL_NAME},
+    ),
+    "openai's keywords": (
+        [{"type": "web_search_preview"}, {"type": "code_interpreter"}],
+        {WEB_SEARCH_TOOL_NAME, CODE_EXECUTION_TOOL_NAME},
+    ),
+    "a caller's own function of the same name": (
+        [{"type": "function", "function": {"name": "web_search"}}, {"type": "function", "name": "code_execution"}],
+        set(),
+    ),
+    "nothing": ([], set()),
+}
+
+
+@pytest.mark.parametrize("vocabulary", list(_DECLARATIONS))
+def test_each_tool_recognizes_a_declaration_of_itself_and_no_other(vocabulary: str) -> None:
+    """``declares`` decides whether a key needs the tool's scope, so a wrong answer refuses or admits wrongly."""
+    tools, expected = _DECLARATIONS[vocabulary]
+
+    assert {tool.name for tool in BUILTIN_TOOLS if tool.declares(tools)} == expected
+
+
+@pytest.mark.parametrize("tool", BUILTIN_TOOLS, ids=lambda tool: tool.name)
+def test_no_tool_reads_an_entry_that_is_not_a_mapping(tool: BuiltinTool) -> None:
+    assert not tool.declares(None)
+    assert not tool.declares(["web_search", None])  # type: ignore[list-item]

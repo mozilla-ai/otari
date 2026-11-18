@@ -17,6 +17,7 @@ from sqlmodel import col
 
 from gateway.core.config import API_ROOT
 from gateway.models.budgets import Budget, ScopedBudget
+from gateway.models.identity import oidc_identity_provider
 from gateway.models.tenancy import (
     ActiveOrganizationMemberPublic,
     ActiveOrganizationMembersPublic,
@@ -300,6 +301,52 @@ async def test_the_roster_asks_for_the_placements_of_its_page_only(async_db: Asy
     assert page.count == 6
     assert len(page.data) == 1
     assert [p.workspace_name for p in page.data[0].workspaces] == ["Engineering"]
+
+
+@pytest.mark.asyncio
+async def test_a_member_admitted_through_an_organization_connection_is_an_sso_account(
+    async_db: AsyncSession,
+) -> None:
+    organization = await _organization(async_db, slug="acme-join-sso")
+    owner = await _member(async_db, organization, full_name="Owner", role="owner")
+    admitted = await _member(async_db, organization, full_name="Ada Lovelace")
+    admitted.oauth_provider = oidc_identity_provider("https://login.example.com")
+    await async_db.flush()
+
+    row = _row_for(await _roster(async_db, owner), admitted)
+
+    assert row.is_sso_account is True
+    assert row.email is None
+
+
+@pytest.mark.asyncio
+async def test_a_member_who_signed_in_with_a_built_in_provider_is_not_an_sso_account(
+    async_db: AsyncSession,
+) -> None:
+    organization = await _organization(async_db, slug="acme-join-builtin")
+    owner = await _member(async_db, organization, full_name="Owner", role="owner")
+    social = await _member(async_db, organization, full_name="Grace Hopper")
+    social.oauth_provider = "google"
+    await async_db.flush()
+
+    row = _row_for(await _roster(async_db, owner), social)
+
+    assert row.is_sso_account is False
+
+
+@pytest.mark.asyncio
+async def test_a_member_holding_no_address_and_no_provider_is_not_an_sso_account(
+    async_db: AsyncSession,
+) -> None:
+    """An unclaimed operator identity: no address, and no connection behind it."""
+
+    organization = await _organization(async_db, slug="acme-join-unclaimed")
+    owner = await _member(async_db, organization, full_name="Operator", role="owner")
+
+    row = _row_for(await _roster(async_db, owner), owner)
+
+    assert row.email is None
+    assert row.is_sso_account is False
 
 
 @pytest.mark.asyncio

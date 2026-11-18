@@ -1,29 +1,31 @@
 import { useState } from "react"
-import { FiCheck } from "react-icons/fi"
-
-import type { WorkspaceMcpServer } from "@/client"
+import type { McpCredentialMode } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
-import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Field } from "@/design-system/forms/Field"
+import { RadioGroup, type RadioOption } from "@/design-system/forms/RadioGroup"
 import { SecretField } from "@/design-system/forms/SecretField"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
+import { ALL_TOOLS, isLiteralToolName } from "@/features/tools/mcpAccess"
+import {
+  AVAILABILITY_OPTIONS,
+  availabilityFields,
+  type McpAvailability,
+} from "@/features/tools/mcpAvailability"
+import {
+  parseAllowedTools,
+  SIGN_IN_MODE_LABEL,
+  SIGN_IN_MODES,
+  urlProblem,
+} from "@/features/tools/mcpServerForm"
 import { healthDetail } from "@/features/tools/mcpServerHealth"
+import { ToolChecklist } from "@/features/tools/ToolChecklist"
 import { useTestWorkspaceMcpServerConnection } from "@/shared/api/tools"
 
-// The form behind both Add and Edit, one component rather than two: the only
-// field that behaves differently between them is the bearer token, and keeping
-// one form is what stops the two drifting apart.
-//
-// **The token has three states, not two.** The server never returns it, only
-// whether one is stored (`has_token`), so an empty box cannot mean "no token":
-// it means "I was shown nothing and typed nothing". The endpoint spells the
-// three out (`WorkspaceMcpServerUpdate`) and this dialog maps a form onto them:
-// leave the box alone to keep the stored token, type a value to rotate it, or
-// tick Remove to clear it. That is why an edit sends every other field back and
-// still omits this one.
+// The form that registers a server. Changing one afterwards happens on the
+// server's own page (`McpServerDetailPage`), so this is an add and nothing else.
 
 export interface McpServerDraft {
   name: string
@@ -31,133 +33,39 @@ export interface McpServerDraft {
   purpose_hint: string | null
   allowed_tools: string[] | null
   enabled: boolean
-  /** `undefined` keeps the stored token, `""` clears it, a value rotates it. */
+  /** What every key of the workspace may call: `["*"]` or nobody yet, `[]`. */
+  everyone_tools: string[]
+  /** Absent when the box was left blank. */
   authorization_token: string | undefined
+  /** Whose credential a call carries: the workspace's token, or each user's own. */
+  credential_mode: McpCredentialMode
+  /** Absent to let Otari register itself with the server's authorization server. */
+  oauth_client_id: string | undefined
+  oauth_client_secret: string | undefined
+  /** Added to every model request from the workspace's keys without being named. */
+  attach_by_default: boolean
 }
 
-// Comma-separated in the form, a list on the wire, and null rather than `[]`
-// for "expose every tool this server offers": the tool loop reads `[]` as a
-// deny-all, so a blank field must not send one.
-function parseAllowedTools(raw: string): string[] | null {
-  const names = raw
-    .split(",")
-    .map((name) => name.trim())
-    .filter((name) => name !== "")
-  return names.length > 0 ? names : null
-}
+type WhoCanUse = "everyone" | "nobody"
 
-// The same two rules the gateway applies when it stores a URL
-// (`services/url_safety.validate_mcp_url`): an http(s) endpoint, and https once
-// a bearer token rides on it. Checked here as well so the message lands under
-// the field rather than arriving as a banner after a round trip. The SSRF half
-// of that check is deliberately not mirrored: it resolves the host, which only
-// the gateway can do, and it stays the authority either way.
-function urlProblem(raw: string, willHaveToken: boolean): string | undefined {
-  const trimmed = raw.trim()
-  if (trimmed === "") return undefined
-  let parsed: URL
-  try {
-    parsed = new URL(trimmed)
-  } catch {
-    return "Give the server's full endpoint, such as https://mcp.example.com/github."
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    return "An MCP endpoint is reached over http or https."
-  }
-  if (willHaveToken && parsed.protocol !== "https:") {
-    return "A server with an authorization token needs an https URL, so the token is not sent in the clear."
-  }
-  return undefined
-}
-
-// The server's catalog as a check listed it, each name a toggle on the
-// allow-list, so choosing what to expose is picking from what is there rather
-// than typing names from memory. An allow-listed name the server does not offer
-// is called out, because a request would quietly expose nothing for it.
-function ToolPicker({
-  tools,
-  allowed,
-  onToggle,
-}: {
-  tools: string[]
-  allowed: string[]
-  onToggle: (name: string) => void
-}) {
-  const missing = allowed.filter((name) => !tools.includes(name))
-  return (
-    <div className="flex flex-col gap-2">
-      <p className="text-sm text-muted">
-        {tools.length === 0
-          ? "Connected. The server offers no tools."
-          : `Connected. ${tools.length} ${tools.length === 1 ? "tool" : "tools"} available; click to allow.`}
-      </p>
-      {tools.length > 0 ? (
-        <ul
-          aria-label="Tools the server offers"
-          className="flex max-h-40 flex-wrap gap-1 overflow-y-auto"
-        >
-          {tools.map((name) => {
-            const isAllowed = allowed.includes(name)
-            // An empty allow-list exposes every tool, so taking the last name
-            // off would widen it to all of them. Clearing the field is how an
-            // operator asks for that, deliberately.
-            const isLast = isAllowed && allowed.length === 1
-            return (
-              <li key={name}>
-                <Button
-                  size="sm"
-                  aria-pressed={isAllowed}
-                  isDisabled={isLast}
-                  onPress={() => onToggle(name)}
-                  className="gap-1"
-                >
-                  {isAllowed ? (
-                    <FiCheck aria-hidden className="size-3" />
-                  ) : null}
-                  <span className="font-mono">{name}</span>
-                </Button>
-              </li>
-            )
-          })}
-        </ul>
-      ) : null}
-      {missing.length > 0 ? (
-        <InfoBanner tone="warning">
-          Not offered by the server: {missing.join(", ")}
-        </InfoBanner>
-      ) : null}
-    </div>
-  )
-}
-
-// What a save's connection check found, when it found something. The server is
-// stored either way, which is what the first word says.
-function CheckNotice({ server }: { server: WorkspaceMcpServer }) {
-  const health = server.health
-  return (
-    <div role="status">
-      <InfoBanner tone="warning">
-        {health === null
-          ? "Saved, but not checked: the gateway was busy. Use Recheck on its row."
-          : health.status === "failing"
-            ? `Saved, but the connection failed. ${healthDetail(health)}`
-            : "Saved. Some allowed tools are not offered; see below."}
-      </InfoBanner>
-    </div>
-  )
-}
+const WHO_CAN_USE: RadioOption[] = [
+  {
+    value: "everyone",
+    label: "Allow",
+    description:
+      "Everyone in the workspace can use it, unless an access rule says otherwise.",
+  },
+  {
+    value: "nobody",
+    label: "Deny",
+    description:
+      "Nobody can use it until you add access rules on the server's page.",
+  },
+]
 
 export interface McpServerDialogProps {
   isOpen: boolean
   onOpenChange: (open: boolean) => void
-  /** The server being edited; absent means this is an add. */
-  editing?: WorkspaceMcpServer
-  /**
-   * The server as this dialog last saved it, when that save's connection check
-   * needs a look. The dialog stays open on it, so a fix is an edit of what was
-   * just stored.
-   */
-  saved?: WorkspaceMcpServer
   /** Where Test connection checks the draft, without storing it. */
   workspaceId: string
   isPending: boolean
@@ -168,73 +76,47 @@ export interface McpServerDialogProps {
 export function McpServerDialog({
   isOpen,
   onOpenChange,
-  editing,
-  saved,
   workspaceId,
   isPending,
   error,
   onSubmit,
 }: McpServerDialogProps) {
-  // Seeded on mount only. The caller remounts this on each open, so there is
-  // no effect reseeding it: a draft is cleared on the way in rather than on the
-  // way out, and the fields survive the closing animation intact. The token box
-  // is always seeded empty, because there is nothing to seed it from: the
-  // server never returns one.
-  const seed = {
-    name: editing?.name ?? "",
-    url: editing?.url ?? "",
-    hint: editing?.purpose_hint ?? "",
-    allowedTools: (editing?.allowed_tools ?? []).join(", "),
-    enabled: editing?.enabled ?? true,
-  }
-  const [name, setName] = useState(seed.name)
-  const [url, setUrl] = useState(seed.url)
+  // The caller remounts this on each open, so the draft is cleared on the way
+  // in and the fields survive the closing animation intact.
+  const [name, setName] = useState("")
+  const [url, setUrl] = useState("")
   const [token, setToken] = useState("")
-  const [clearToken, setClearToken] = useState(false)
-  const [hint, setHint] = useState(seed.hint)
-  const [allowedTools, setAllowedTools] = useState(seed.allowedTools)
-  const [enabled, setEnabled] = useState(seed.enabled)
+  const [hint, setHint] = useState("")
+  const [allowedTools, setAllowedTools] = useState("")
+  const [availability, setAvailability] =
+    useState<McpAvailability>("on_request")
+  const [whoCanUse, setWhoCanUse] = useState<WhoCanUse>("everyone")
+  const [mode, setMode] = useState<McpCredentialMode>("shared")
+  const [clientId, setClientId] = useState("")
+  const [clientSecret, setClientSecret] = useState("")
 
-  const typedToken = token.trim() !== ""
-  // What the row will hold once this save lands, which is what the https rule
-  // is really about: a rename that leaves a stored token in place still has to
-  // satisfy it, and a PATCH that only clears the token no longer does.
-  const willHaveToken =
-    typedToken || (!clearToken && Boolean(editing?.has_token))
-
-  const urlReason = urlProblem(url, willHaveToken)
+  const isPerUser = mode === "per_user"
+  const typedToken = !isPerUser && token.trim() !== ""
+  // A user's own token travels to a per-user server, so it needs https as one with a token does.
+  const urlReason = urlProblem(url, typedToken, isPerUser)
   const isInvalid =
     name.trim() === "" || url.trim() === "" || urlReason !== undefined
   // One predicate naming every field the operator can change, so "is there
   // anything to lose" cannot drift from what the form actually holds.
-  const { isDirty, reset } = useDirtySnapshot({
+  const { isDirty } = useDirtySnapshot({
     name,
     url,
     token,
-    clearToken,
     hint,
     allowedTools,
-    enabled,
+    availability,
+    whoCanUse,
+    mode,
+    clientId,
+    clientSecret,
   })
-  // A save that kept the dialog open is the new baseline: the token it carried
-  // is stored now, so the box empties, and closing asks nothing.
-  const [seenSave, setSeenSave] = useState(saved)
-  if (saved !== seenSave) {
-    setSeenSave(saved)
-    setToken("")
-    setClearToken(false)
-    reset({
-      name,
-      url,
-      token: "",
-      clearToken: false,
-      hint,
-      allowedTools,
-      enabled,
-    })
-  }
 
-  const tokenField = typedToken ? token.trim() : clearToken ? "" : undefined
+  const tokenField = typedToken ? token.trim() : undefined
   // A test answers for the URL and token it was run with, and stops answering
   // once either changes. The allow-list is left out on purpose: the picker below
   // edits it, and the catalog a test listed does not depend on it.
@@ -243,23 +125,8 @@ export function McpServerDialog({
   const [testedConnection, setTestedConnection] = useState<string>()
   const testIsCurrent = testedConnection === connection && !test.isPending
   const tested = testIsCurrent ? test.data : undefined
-  // The stored server's own last check, while the draft still describes the
-  // connection that check was made on.
-  const stored =
-    editing && url.trim() === editing.url && tokenField === undefined
-      ? editing.health
-      : null
-  // Once a test has answered for this connection, it alone decides: a failed
-  // test hides the stored catalog rather than showing it beside the failure.
-  const latest = testIsCurrent ? tested : stored
-  const listed = latest?.status === "healthy" ? latest : undefined
+  const listed = tested?.status === "healthy" ? tested : undefined
   const allowed = parseAllowedTools(allowedTools) ?? []
-  const toggleTool = (name: string) => {
-    const next = allowed.includes(name)
-      ? allowed.filter((entry) => entry !== name)
-      : [...allowed, name]
-    if (next.length > 0) setAllowedTools(next.join(", "))
-  }
   const runTest = () => {
     setTestedConnection(connection)
     test.mutate({
@@ -268,7 +135,6 @@ export function McpServerDialog({
         url: url.trim(),
         authorization_token: tokenField,
         allowed_tools: parseAllowedTools(allowedTools),
-        server_id: editing?.id,
       },
     })
   }
@@ -280,11 +146,15 @@ export function McpServerDialog({
       url: url.trim(),
       purpose_hint: hint.trim() === "" ? null : hint.trim(),
       allowed_tools: parseAllowedTools(allowedTools),
-      enabled,
-      authorization_token: typedToken
-        ? token.trim()
-        : clearToken
-          ? ""
+      ...availabilityFields(availability),
+      everyone_tools: whoCanUse === "everyone" ? [ALL_TOOLS] : [],
+      authorization_token: tokenField,
+      credential_mode: mode,
+      oauth_client_id:
+        isPerUser && clientId.trim() !== "" ? clientId.trim() : undefined,
+      oauth_client_secret:
+        isPerUser && clientId.trim() !== "" && clientSecret.trim() !== ""
+          ? clientSecret.trim()
           : undefined,
     })
   }
@@ -294,31 +164,28 @@ export function McpServerDialog({
       isOpen={isOpen}
       onOpenChange={onOpenChange}
       size="lg"
-      title={editing ? "Edit MCP server" : "New MCP server"}
-      description={
-        <>
-          Requests use it by id in{" "}
-          <code className="font-mono">mcp_server_ids</code>. It must be
-          reachable from the gateway.
-        </>
-      }
-      submitLabel={editing ? "Save server" : "Add MCP server"}
+      title="New MCP server"
+      description="Connect a remote MCP server to this workspace."
+      submitLabel="Add MCP server"
       onSubmit={submit}
       isPending={isPending}
       isSubmitDisabled={isInvalid}
       isDirty={isDirty}
       error={error}
       footerStart={
-        <Button
-          onPress={runTest}
-          isPending={test.isPending}
-          isDisabled={url.trim() === "" || urlReason !== undefined}
-        >
-          Test connection
-        </Button>
+        // A per-user server is checked with a person's own connection, which
+        // exists only once the server is stored.
+        isPerUser ? null : (
+          <Button
+            onPress={runTest}
+            isPending={test.isPending}
+            isDisabled={url.trim() === "" || urlReason !== undefined}
+          >
+            Test connection
+          </Button>
+        )
       }
     >
-      {saved ? <CheckNotice server={saved} /> : null}
       <Field
         label="Name"
         value={name}
@@ -341,38 +208,53 @@ export function McpServerDialog({
         errorMessage={urlReason}
       />
 
-      <div className="flex flex-col gap-2">
-        {/* Masked, like the provider API key it is the sibling of: the gateway
-            stores this encrypted and never reads it back, so it must not sit in
-            the clear on the one form that collects it, nor be offered to a
-            password manager. */}
+      <RadioGroup
+        label={SIGN_IN_MODE_LABEL}
+        value={mode}
+        onChange={(next) => setMode(next as McpCredentialMode)}
+        options={SIGN_IN_MODES}
+      />
+      {isPerUser ? (
+        <>
+          <InfoBanner>
+            After adding it, use Check on its page to list its tools. Checking
+            opens a sign-in and connects nobody.
+          </InfoBanner>
+          <Field
+            label="OAuth client ID"
+            value={clientId}
+            onChange={setClientId}
+            placeholder="Optional"
+            description="Only for a server that does not let Otari register itself. Blank registers automatically."
+          />
+          {/* Always on screen beside the ID, so a provider that wants both
+              (GitHub) is not met with a field that appears only after typing. */}
+          <SecretField
+            label="Client secret"
+            value={clientSecret}
+            onChange={setClientSecret}
+            placeholder="Optional"
+            isDisabled={clientId.trim() === ""}
+            description={
+              clientId.trim() === ""
+                ? "Goes with a client ID. Some providers, such as GitHub, need both."
+                : "Encrypted, never shown again."
+            }
+          />
+        </>
+      ) : (
+        // Masked, like the provider API key it is the sibling of: the gateway
+        // stores this encrypted and never reads it back, so it must not sit in
+        // the clear on the one form that collects it, nor be offered to a
+        // password manager.
         <SecretField
           label="Authorization token"
           value={token}
-          // Typing a replacement takes the tick off Remove rather than sitting
-          // beside it: the two say opposite things and only one of them can be
-          // what the operator meant.
-          onChange={(next) => {
-            setToken(next)
-            if (next.trim() !== "") setClearToken(false)
-          }}
-          placeholder={
-            editing?.has_token
-              ? "Leave blank to keep the stored token"
-              : "Optional"
-          }
-          description={
-            editing?.has_token
-              ? "Stored and never shown. Type a new one to replace it."
-              : "Sent as a bearer token. Encrypted, never shown again."
-          }
+          onChange={setToken}
+          placeholder="Optional"
+          description="Sent as a bearer token. To sign in for everyone instead, leave this blank and set the account up on the server's page after adding."
         />
-        {editing?.has_token ? (
-          <Checkbox isSelected={clearToken} onChange={setClearToken}>
-            Remove the stored token
-          </Checkbox>
-        ) : null}
-      </div>
+      )}
 
       <Field
         label="Purpose hint"
@@ -381,13 +263,15 @@ export function McpServerDialog({
         placeholder="Use for repository and issue lookups"
         description="Helps the model choose this server's tools."
       />
-      <Field
-        label="Allowed tools"
-        value={allowedTools}
-        onChange={setAllowedTools}
-        placeholder="All tools"
-        description="Comma separated. Blank allows every tool."
-      />
+      {listed ? null : (
+        <Field
+          label="Allowed tools"
+          value={allowedTools}
+          onChange={setAllowedTools}
+          placeholder="All tools"
+          description="Comma separated. Leave blank for every tool."
+        />
+      )}
       <div role="status" className="flex flex-col gap-2">
         {testIsCurrent ? <ErrorBanner error={test.error} /> : null}
         {tested?.status === "failing" ? (
@@ -396,20 +280,36 @@ export function McpServerDialog({
           </InfoBanner>
         ) : null}
         {listed ? (
-          <ToolPicker
-            tools={listed.tools ?? []}
-            allowed={allowed}
-            onToggle={toggleTool}
-          />
+          <div className="flex flex-col gap-2">
+            <p className="text-sm text-muted">
+              Allowed tools. Pick none to allow every tool the server offers.
+            </p>
+            <ToolChecklist
+              label="Allowed tools"
+              tools={(listed.tools ?? []).filter(isLiteralToolName)}
+              descriptions={listed.tool_descriptions ?? {}}
+              isKnown
+              selected={allowed}
+              onChange={(next) => setAllowedTools(next.join(", "))}
+              allowPatterns={false}
+            />
+          </div>
         ) : null}
       </div>
 
-      <div className="flex flex-col gap-1">
-        <Checkbox isSelected={enabled} onChange={setEnabled}>
-          Enabled
-        </Checkbox>
-        <span className="text-caption">Requests skip a disabled server.</span>
-      </div>
+      <RadioGroup
+        label="Availability"
+        value={availability}
+        onChange={(next) => setAvailability(next as McpAvailability)}
+        options={AVAILABILITY_OPTIONS}
+      />
+
+      <RadioGroup
+        label="Default policy"
+        value={whoCanUse}
+        onChange={(next) => setWhoCanUse(next as WhoCanUse)}
+        options={WHO_CAN_USE}
+      />
     </FormDialog>
   )
 }

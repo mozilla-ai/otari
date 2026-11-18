@@ -13,6 +13,7 @@ import { MainSelectionGroup } from "./MainSelectionGroup"
 import { PolicyNameGroup } from "./PolicyNameGroup"
 import { PolicyPreview } from "./PolicyPreview"
 import { PolicyReadOnly } from "./PolicyReadOnly"
+import { PolicyTestGroup } from "./PolicyTestGroup"
 import { draftFromSpec, fallthroughOf, isRouted } from "./policyDraft"
 import { isEditableInForm, rowKeyOf } from "./policyModel"
 import { TierDownGroup } from "./TierDownGroup"
@@ -70,6 +71,7 @@ export function PolicyDetailPage({ name }: { name: string }) {
   const isRepresentable = isEditableInForm(row.spec)
   const isEditable = canEdit && !isConfig && isRepresentable
   const stored = draftFromSpec(row.spec)
+  const explainWorkspaceId = row.workspace_id ?? writeWorkspaceId
   const sectionProps = {
     row,
     stored,
@@ -84,18 +86,7 @@ export function PolicyDetailPage({ name }: { name: string }) {
   return (
     <div className="flex flex-col gap-6">
       {back}
-      <PageIntro title={row.name}>
-        {row.kind === "alias" ? "An alias for one model. " : null}
-        Callers send{" "}
-        <code className="font-mono text-caption">model: "{row.name}"</code>.
-        Applies to{" "}
-        {row.user_id ? (
-          <code className="font-mono text-caption">{row.user_id}</code>
-        ) : (
-          "every caller"
-        )}
-        .
-      </PageIntro>
+      <PageIntro title={row.name} />
 
       <ErrorBanner error={error} />
 
@@ -178,6 +169,11 @@ export function PolicyDetailPage({ name }: { name: string }) {
           </p>
         </>
       )}
+
+      {/* The tenant surface compiles in a named workspace only. */}
+      {row.kind === "policy" && (isOperator || explainWorkspaceId !== null) ? (
+        <PolicyTestGroup row={row} workspaceId={explainWorkspaceId} />
+      ) : null}
     </div>
   )
 }

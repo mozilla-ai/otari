@@ -11,7 +11,9 @@ API key that authenticated it and never from a header, exactly as every other
 request-plane row does. A keyed request is confined to its own key's workspace on
 every verb; a master-key request is the operator acting deployment-wide and sees
 every workspace, narrowable on the listing with ``workspace_id``, matching
-``GET /api/v1/keys``.
+``GET /api/v1/keys``. A service key's ``user`` naming one of its end users makes
+that end user the owner, on every verb, so a key keeps each end user's files apart
+and reads what that end user's code execution runs wrote.
 
 The same five routes serve two SDKs. OpenAI's and Anthropic's Files APIs share
 their paths and verbs and differ only in the JSON they return, so the response
@@ -26,12 +28,22 @@ from collections.abc import AsyncIterator
 from typing import Annotated, Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import Response, StreamingResponse
+from pydantic import TypeAdapter
 
-from gateway.api.deps import FileServiceDep, get_config, verify_api_key_or_master_key
-from gateway.api.routes._helpers import resolve_user_id
+from gateway.api.deps import (
+    BudgetServiceDep,
+    FileServiceDep,
+    get_config,
+    verify_api_key_or_master_key,
+    verify_api_key_or_master_key_for_upload,
+)
+from gateway.api.key_scopes import key_scope
+from gateway.api.routes._helpers import bounded_body
+from gateway.api.routes._request_body import MULTIPART_OVERHEAD_BYTES, form_field
 from gateway.core.config import GatewayConfig
+from gateway.exceptions.budget_exceptions import EndUserNotFoundError
 from gateway.exceptions.files_exceptions import FilesDisabledError
 from gateway.models.api_keys import APIKey
 from gateway.schemas.files import (
@@ -42,14 +54,14 @@ from gateway.schemas.files import (
     OpenAIFileList,
     OpenAIFileObject,
 )
+from gateway.services.api_keys import names_end_user, resolve_user_id
 from gateway.services.files import (
-    DEFAULT_LIST_LIMIT,
-    MAX_LIST_LIMIT,
     FileDialect,
     FileListing,
     FileScope,
     NewFile,
 )
+from gateway.types.key_scope import KeyScope
 
 _FILES_BETA = "files-api-2025-04-14"
 
@@ -81,6 +93,20 @@ router = APIRouter(tags=["files"], dependencies=[Depends(_require_files_enabled)
 # OpenAI's documented file purposes plus a generic default. We don't enforce the
 # enum (forward-compat), but normalise the empty case to "user_data".
 _DEFAULT_PURPOSE = "user_data"
+_UPLOAD_FILE_ADAPTER: TypeAdapter[UploadFile] = TypeAdapter(UploadFile)
+_STRING_ADAPTER: TypeAdapter[str] = TypeAdapter(str)
+_OPTIONAL_STRING_ADAPTER: TypeAdapter[str | None] = TypeAdapter(str | None)
+
+_FILE_UPLOAD_SCHEMA = {
+    "title": "Body_files-create_file",
+    "type": "object",
+    "properties": {
+        "file": {"contentMediaType": "application/octet-stream", "title": "File", "type": "string"},
+        "purpose": {"default": _DEFAULT_PURPOSE, "title": "Purpose", "type": "string"},
+        "user": {"anyOf": [{"type": "string"}, {"type": "null"}], "title": "User"},
+    },
+    "required": ["file"],
+}
 
 # The most files ``ids[]`` may name in one page.
 _MAX_LIST_IDS = 100
@@ -158,10 +184,33 @@ def _resolve_user(
     )
 
 
-def _scope(auth_result: tuple[APIKey | None, bool], user: str | None, config: GatewayConfig) -> FileScope:
-    """The rows this request may reach: its billed user, and its key's workspace."""
+async def _owner(
+    auth_result: tuple[APIKey | None, bool],
+    user: str | None,
+    config: GatewayConfig,
+    budgets: BudgetServiceDep,
+    *,
+    create: bool = False,
+) -> str:
+    """The user the request's files belong to: the end user a service key names, else its billed user.
+
+    Only an upload creates the end user, as a request naming one does; any other
+    verb naming an end user the key never used is a 404.
+    """
+    api_key, _is_master_key = auth_result
+    if api_key is not None and user is not None and names_end_user(api_key, user):
+        if create:
+            return (await budgets.resolve_end_user(api_key=api_key, external_id=user)).user_id
+        return (await budgets.get_end_user(api_key=api_key, external_id=user)).user_id
+    return _resolve_user(auth_result, user, config)
+
+
+async def _scope(
+    auth_result: tuple[APIKey | None, bool], user: str | None, config: GatewayConfig, budgets: BudgetServiceDep
+) -> FileScope:
+    """The rows this request may reach: its owner, and its key's workspace."""
     return FileScope(
-        user_id=_resolve_user(auth_result, user, config),
+        user_id=await _owner(auth_result, user, config, budgets),
         workspace_id=_request_workspace_id(auth_result),
     )
 
@@ -188,42 +237,65 @@ def _content_disposition(filename: str) -> str:
     return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded}"
 
 
-@router.post("/files")
+@router.post(
+    "/files",
+    responses={
+        413: {"description": "The upload exceeds the configured maximum size."},
+        422: {
+            "description": "Validation Error",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}},
+        },
+    },
+    openapi_extra=key_scope(
+        KeyScope.FILES_WRITE,
+        requestBody={
+            "required": True,
+            "content": {"multipart/form-data": {"schema": _FILE_UPLOAD_SCHEMA}},
+        },
+    ),
+)
 async def create_file(
     raw_request: Request,
-    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
+    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key_for_upload)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     files: FileServiceDep,
-    file: UploadFile = File(...),
-    purpose: str = Form(_DEFAULT_PURPOSE),
-    user: str | None = Form(None),
+    budgets: BudgetServiceDep,
 ) -> OpenAIFileObject | AnthropicFileMetadata:
     """Upload a file. Answers in the OpenAI or Anthropic file shape, following the caller's headers."""
-    record = await files.store(
-        NewFile(
-            user_id=_resolve_user(auth_result, user, config),
-            workspace_id=_request_workspace_id(auth_result),
-            filename=file.filename,
-            content_type=file.content_type,
-            purpose=purpose or _DEFAULT_PURPOSE,
-            chunks=_upload_chunks(file),
+    async with bounded_body(
+        raw_request,
+        config.files_max_bytes + MULTIPART_OVERHEAD_BYTES,
+        "File upload request exceeds the configured maximum size.",
+    ).form() as form:
+        file = form_field(form, "file", _UPLOAD_FILE_ADAPTER, required=True)
+        purpose = form_field(form, "purpose", _STRING_ADAPTER, default=_DEFAULT_PURPOSE)
+        user = form_field(form, "user", _OPTIONAL_STRING_ADAPTER)
+        record = await files.store(
+            NewFile(
+                user_id=await _owner(auth_result, user, config, budgets, create=True),
+                workspace_id=_request_workspace_id(auth_result),
+                filename=file.filename,
+                content_type=file.content_type,
+                purpose=purpose or _DEFAULT_PURPOSE,
+                chunks=_upload_chunks(file),
+            )
         )
-    )
-    if _dialect(raw_request) is FileDialect.ANTHROPIC:
-        return AnthropicFileMetadata.of(record)
-    return OpenAIFileObject.of(record)
+        if _dialect(raw_request) is FileDialect.ANTHROPIC:
+            return AnthropicFileMetadata.of(record)
+        return OpenAIFileObject.of(record)
 
 
-@router.get("/files")
+@router.get("/files", openapi_extra=key_scope(KeyScope.FILES_READ))
 async def list_files(
     raw_request: Request,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     files: FileServiceDep,
+    budgets: BudgetServiceDep,
     user: str | None = None,
     purpose: str | None = None,
     workspace_id: uuid.UUID | None = None,
-    limit: Annotated[int, Query(ge=1, le=MAX_LIST_LIMIT)] = DEFAULT_LIST_LIMIT,
+    limit: Annotated[int, Query(ge=1, le=FileListing.MAX_LIMIT)] = FileListing.DEFAULT_LIMIT,
     after: str | None = None,
     order: Literal["asc", "desc"] = "desc",
     page: str | None = None,
@@ -251,10 +323,14 @@ async def list_files(
     # 400ing on a mismatch: the parameter is a master-key narrowing, and a keyed
     # request is confined either way, so refusing it would only add a way to get
     # an error instead of the same answer.
-    scope = FileScope(
-        user_id=_resolve_user(auth_result, user, config),
-        workspace_id=_request_workspace_id(auth_result) or workspace_id,
-    )
+    try:
+        owner = await _owner(auth_result, user, config, budgets)
+    except EndUserNotFoundError:
+        # An end user the key never used owns nothing, which a listing says as an empty page.
+        if dialect is FileDialect.ANTHROPIC:
+            return AnthropicFileList(data=[], next_page=None)
+        return OpenAIFileList(data=[], has_more=False, first_id=None, last_id=None)
+    scope = FileScope(user_id=owner, workspace_id=_request_workspace_id(auth_result) or workspace_id)
 
     result = await files.page(
         FileListing(
@@ -280,17 +356,18 @@ async def list_files(
     )
 
 
-@router.get("/files/{file_id}")
+@router.get("/files/{file_id}", openapi_extra=key_scope(KeyScope.FILES_READ))
 async def get_file(
     file_id: str,
     raw_request: Request,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     files: FileServiceDep,
+    budgets: BudgetServiceDep,
     user: str | None = None,
 ) -> OpenAIFileObject | AnthropicFileMetadata:
     """Retrieve metadata for a single file."""
-    record = await files.stored_file(file_id, _scope(auth_result, user, config))
+    record = await files.stored_file(file_id, await _scope(auth_result, user, config, budgets))
     if _dialect(raw_request) is FileDialect.ANTHROPIC:
         return AnthropicFileMetadata.of(record)
     return OpenAIFileObject.of(record)
@@ -316,16 +393,18 @@ async def get_file(
             },
         }
     },
+    openapi_extra=key_scope(KeyScope.FILES_READ),
 )
 async def get_file_content(
     file_id: str,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     files: FileServiceDep,
+    budgets: BudgetServiceDep,
     user: str | None = None,
 ) -> Response:
     """Download the raw bytes of a file, streamed rather than buffered whole."""
-    content = await files.content(file_id, _scope(auth_result, user, config))
+    content = await files.content(file_id, await _scope(auth_result, user, config, budgets))
     # No Content-Length: it would come from the row's byte count while the body
     # comes from the storage backend. If those ever diverge (partial write,
     # corruption), a length header derived from the row would be wrong, and
@@ -338,17 +417,18 @@ async def get_file_content(
     )
 
 
-@router.delete("/files/{file_id}")
+@router.delete("/files/{file_id}", openapi_extra=key_scope(KeyScope.FILES_WRITE))
 async def delete_file(
     file_id: str,
     raw_request: Request,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     files: FileServiceDep,
+    budgets: BudgetServiceDep,
     user: str | None = None,
 ) -> OpenAIFileDeleted | AnthropicFileDeleted:
     """Soft-delete a file's metadata and remove its bytes from the backend."""
-    await files.discard(file_id, _scope(auth_result, user, config))
+    await files.discard(file_id, await _scope(auth_result, user, config, budgets))
     if _dialect(raw_request) is FileDialect.ANTHROPIC:
         return AnthropicFileDeleted(id=file_id)
     return OpenAIFileDeleted(id=file_id)

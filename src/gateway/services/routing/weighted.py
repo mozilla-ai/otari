@@ -11,15 +11,15 @@ Three properties are worth stating because they are the reasons this is the
 simplest correct design and not a placeholder for a smarter one:
 
 * **Stateless.** Each request is an independent draw, so the split is exactly as
-  correct behind twenty replicas as behind one. Unlike learned trace stickiness,
-  it needs no cross-request decision store. The cost is that the ratio converges
-  statistically: a ten-request burst is not necessarily seven and three.
-* **No pricing needed by the router.** Unlike the kNN router, nothing here scores
-  cost, so an unpriced candidate is neither refused at policy-write time nor a
-  reason to decline the draw. Weight is the operator's statement about capacity,
-  not a number the gateway derives. The gateway's own ``require_pricing`` billing
-  gate is separate and unchanged: it still 402s a metered caller drawn onto an
-  unpriced candidate, exactly as it would for that model named directly.
+  correct behind twenty replicas as behind one, with no cross-request decision
+  store. The cost is that the ratio converges statistically: a ten-request burst
+  is not necessarily seven and three.
+* **No pricing needed by the router.** Nothing here scores cost, so an unpriced
+  candidate is neither refused at policy-write time nor a reason to decline the
+  draw. Weight is the operator's statement about capacity, not a number the
+  gateway derives. The gateway's own ``require_pricing`` billing gate is separate
+  and unchanged: it still 402s a metered caller drawn onto an unpriced candidate,
+  exactly as it would for that model named directly.
 * **The whole ordering is the plan.** The draw continues without replacement over
   the candidates that were not picked, so a provider that fails before it has
   responded hands the request to another weighted provider (itself chosen by
@@ -164,8 +164,7 @@ class WeightedRouterBackend:
         return RoutingDecision(
             ordered_models=ordered,
             # The head's own share, so a decision log line reads as "this provider
-            # was due about 70% of the traffic" rather than borrowing the kNN
-            # meaning of confidence (neighbor support), which has no analogue here.
+            # was due about 70% of the traffic".
             confidence=shares[ordered[0]] / 100.0,
             rationale=f"weighted split ({describe_split(pool, ctx.weights)})",
             # One line per request is one line per request forever for a load

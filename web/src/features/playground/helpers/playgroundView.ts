@@ -19,6 +19,7 @@ export type PlaygroundGate =
   | "loading"
   | "catalogError"
   | "noWorkspace"
+  | "readOnly"
   | "noModels"
   | "ready"
 
@@ -30,17 +31,21 @@ export type PlaygroundGate =
  * is separated from an empty catalog: the first is not actionable by configuring
  * a provider and saying so would send somebody to the wrong page. A caller with
  * no workspace comes before "no models" because the catalog read is scoped to a
- * workspace, so with none the model count is meaningless rather than zero.
+ * workspace, so with none the model count is meaningless rather than zero. A
+ * viewer comes next: the server refuses them every completion, so there is no
+ * model to offer whatever the catalog holds.
  */
 export function derivePlaygroundGate(params: {
   isLoading: boolean
   isCatalogError: boolean
   hasWorkspace: boolean
+  canRun: boolean
   modelCount: number
 }): PlaygroundGate {
   if (params.isLoading) return "loading"
   if (params.isCatalogError) return "catalogError"
   if (!params.hasWorkspace) return "noWorkspace"
+  if (!params.canRun) return "readOnly"
   if (params.modelCount === 0) return "noModels"
   return "ready"
 }

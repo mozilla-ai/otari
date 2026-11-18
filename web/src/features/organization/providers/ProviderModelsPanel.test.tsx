@@ -1,11 +1,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { OrgProviderModel } from "@/client"
+import type { ServingFilter } from "@/features/models/OfferedModelFilters"
+import type { KindFilter } from "@/features/models/offeredKinds"
 import { orgProviderKey, orgProviderModel } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
+import { findRowMenuItem, pressRowAction } from "@/tests/rowMenu"
 
 import { ProviderModelsPanel } from "./ProviderModelsPanel"
 
@@ -23,6 +27,15 @@ interface MockOpts {
   /** What a refresh answers, which is where a provider's own refusal arrives. */
   refresh?: Record<string, unknown>
   listFails?: boolean
+}
+
+function typeCounts(models: OrgProviderModel[]): Record<string, number> {
+  const counts: Record<string, number> = {}
+  for (const model of models) {
+    const kind = model.type ?? "unknown"
+    counts[kind] = (counts[kind] ?? 0) + 1
+  }
+  return counts
 }
 
 function mockApi(opts: MockOpts = {}) {
@@ -45,9 +58,18 @@ function mockApi(opts: MockOpts = {}) {
       return jsonResponse({ provider: "openai", models: ["gpt-4o-mini"] })
     }
     if (url.includes("/models") && method === "GET") {
+      // The kind asked for, as the gateway filters it; every kind is counted.
+      const kind = new URL(url, "http://otari.test").searchParams.get("type")
+      const shown = kind
+        ? models.filter((model) => (model.type ?? "unknown") === kind)
+        : models
       return opts.listFails
         ? jsonResponse({ detail: "Tenancy is unavailable" }, 500)
-        : jsonResponse({ count: models.length, data: models })
+        : jsonResponse({
+            count: shown.length,
+            data: shown,
+            type_counts: typeCounts(models),
+          })
     }
     // Every write answers with a row the panel re-reads through the invalidated
     // list, so one is enough for all of them.
@@ -66,6 +88,12 @@ function renderPanel(
     pageSize?: number
     onPageChange?: (page: number) => void
     onPageSizeChange?: (size: number) => void
+    kind?: KindFilter
+    onKindChange?: (kind: KindFilter) => void
+    serving?: ServingFilter
+    onServingChange?: (serving: ServingFilter) => void
+    search?: string
+    onSearchChange?: (search: string) => void
   } = {},
 ) {
   const client = new QueryClient({
@@ -81,6 +109,12 @@ function renderPanel(
         pageSize={pager.pageSize ?? 25}
         onPageChange={pager.onPageChange ?? vi.fn()}
         onPageSizeChange={pager.onPageSizeChange ?? vi.fn()}
+        kind={pager.kind ?? ""}
+        onKindChange={pager.onKindChange ?? vi.fn()}
+        serving={pager.serving ?? ""}
+        onServingChange={pager.onServingChange ?? vi.fn()}
+        search={pager.search ?? ""}
+        onSearchChange={pager.onSearchChange ?? vi.fn()}
       />
     </QueryClientProvider>,
   )
@@ -168,7 +202,7 @@ describe("ProviderModelsPanel", () => {
           input_price_per_million: 2000,
           output_price_per_million: 0,
           price_source: "organization",
-          unit: "requests",
+          unit: "request",
         }),
       ],
     })
@@ -177,8 +211,229 @@ describe("ProviderModelsPanel", () => {
     const table = await screen.findByRole("grid", {
       name: "Models on Production",
     })
-    expect(within(table).getByText("$0.002 per request")).toBeInTheDocument()
+    expect(
+      within(table).getByText(/Request: \$0\.002\/request/).parentElement,
+    ).toHaveTextContent("$0.002")
     expect(within(table).queryByText("$2,000.00")).toBeNull()
+  })
+
+  it("offers one tab per kind of model, each with its count", async () => {
+    mockApi({
+      models: [
+        orgProviderModel(),
+        orgProviderModel({
+          id: "v",
+          model: "sora-2",
+          type: "video",
+          unit: "second",
+          input_price_per_million: 100_000,
+          output_price_per_million: null,
+        }),
+        orgProviderModel({ id: "u", model: "mystery", type: null }),
+      ],
+    })
+    const onKindChange = vi.fn()
+    await renderPanel(true, vi.fn(), { onKindChange })
+
+    await screen.findByRole("grid", { name: "Models on Production" })
+    expect(screen.getByRole("button", { name: "All 3" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    for (const name of ["Text 1", "Video 1", "Unknown 1"]) {
+      expect(screen.getByRole("button", { name })).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      )
+    }
+
+    await userEvent.click(screen.getByRole("button", { name: "Video 1" }))
+    expect(onKindChange).toHaveBeenCalledWith("video")
+  })
+
+  it("asks the gateway for the kind shown", async () => {
+    const requests = mockApi()
+    await renderPanel(true, vi.fn(), { kind: "video" })
+
+    await screen.findByRole("grid", { name: "Models on Production" })
+    expect(requests.some((request) => request.url.includes("type=video"))).toBe(
+      true,
+    )
+  })
+
+  it("keeps one set of price columns and puts a video price under Output", async () => {
+    // Every tab has the same columns. A token price is bare, per million
+    // tokens; a video price is billed on what the model makes, so it sits
+    // under Output and names its unit when hovered.
+    mockApi({
+      models: [
+        orgProviderModel(),
+        orgProviderModel({
+          id: "v",
+          model: "sora-2",
+          type: "video",
+          unit: "second",
+          input_price_per_million: 100_000,
+          output_price_per_million: null,
+        }),
+      ],
+    })
+    await renderPanel(true, vi.fn())
+
+    const table = await screen.findByRole("grid", {
+      name: "Models on Production",
+    })
+    const headers = within(table)
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent)
+    expect(headers).toEqual(
+      expect.arrayContaining(["Input", "Output", "Cache read", "Cache write"]),
+    )
+    expect(within(table).getByText("$2.50")).toBeInTheDocument()
+    expect(within(table).getByText("$10.00")).toBeInTheDocument()
+
+    const video = within(table).getByText(/Video output: \$0\.10\/second/)
+    expect(video.parentElement).toHaveTextContent("$0.10")
+    const cells = within(
+      within(table).getByRole("row", { name: /sora-2/ }),
+    ).getAllByRole("gridcell")
+    const output = cells.find((cell) => cell.contains(video))
+    // The model's name is the row header, so Input is the first cell.
+    expect(cells.indexOf(output as HTMLElement)).toBe(1)
+  })
+
+  it("lists only the kind its tab names", async () => {
+    mockApi({
+      models: [
+        orgProviderModel(),
+        orgProviderModel({ id: "v", model: "sora-2", type: "video" }),
+      ],
+    })
+    await renderPanel(true, vi.fn(), { kind: "video" })
+
+    const table = await screen.findByRole("grid", {
+      name: "Models on Production",
+    })
+    expect(
+      await within(table).findByRole("row", { name: /sora-2/ }),
+    ).toBeInTheDocument()
+    expect(within(table).queryByRole("row", { name: /gpt-4o/ })).toBeNull()
+  })
+
+  it("shows an empty table, not an empty catalog, under a kind with no models left", async () => {
+    mockApi({ models: [] })
+    await renderPanel(true, vi.fn(), { kind: "image" })
+
+    expect(
+      await screen.findByRole("button", { name: "Image 0" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("No models offered yet")).toBeNull()
+  })
+
+  it("asks the gateway for the models a search names, and reports what is typed", async () => {
+    const requests = mockApi()
+    const onSearchChange = vi.fn()
+    await renderPanel(true, vi.fn(), { search: "gpt", onSearchChange })
+
+    await screen.findByRole("grid", { name: "Models on Production" })
+    expect(requests.some((request) => request.url.includes("search=gpt"))).toBe(
+      true,
+    )
+
+    await userEvent.type(
+      screen.getByRole("searchbox", { name: "Search models on Production" }),
+      "-4",
+    )
+    expect(onSearchChange).toHaveBeenLastCalledWith("gpt-4")
+  })
+
+  it("asks the gateway for the models a serving filter names, and reports a choice", async () => {
+    const requests = mockApi()
+    const onServingChange = vi.fn()
+    await renderPanel(true, vi.fn(), { serving: "withheld", onServingChange })
+
+    await screen.findByRole("grid", { name: "Models on Production" })
+    expect(
+      requests.some((request) => request.url.includes("enabled=false")),
+    ).toBe(true)
+
+    await userEvent.click(screen.getByRole("radio", { name: "Serving" }))
+    expect(onServingChange).toHaveBeenLastCalledWith("serving")
+  })
+
+  it("says every model is served when none is withheld", async () => {
+    mockApi({ models: [] })
+    await renderPanel(true, vi.fn(), { serving: "withheld" })
+
+    expect(
+      await screen.findByText("Every model here is served."),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("No models offered yet")).toBeNull()
+  })
+
+  it("shows an empty table, not an empty catalog, when a search matches nothing", async () => {
+    mockApi({ models: [] })
+    await renderPanel(true, vi.fn(), { search: "nothing" })
+
+    expect(
+      await screen.findByText("No models match this search."),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("No models offered yet")).toBeNull()
+  })
+
+  it("keeps the search box while a cleared search loads every model", async () => {
+    // The search's empty answer stays on screen while the unfiltered list is
+    // on its way, which must not read as an empty catalog.
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input).includes("search=")
+        ? jsonResponse({ count: 0, data: [], type_counts: {} })
+        : new Promise<Response>(() => {}),
+    )
+    function Harness() {
+      const [search, setSearch] = useState("nothing")
+      return (
+        <ProviderModelsPanel
+          providerKey={KEY}
+          canEdit
+          onEditRate={vi.fn()}
+          page={0}
+          pageSize={25}
+          onPageChange={vi.fn()}
+          onPageSizeChange={vi.fn()}
+          kind=""
+          onKindChange={vi.fn()}
+          serving=""
+          onServingChange={vi.fn()}
+          search={search}
+          onSearchChange={setSearch}
+        />
+      )
+    }
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    await renderWithRouter(
+      <QueryClientProvider client={client}>
+        <Harness />
+      </QueryClientProvider>,
+    )
+    await screen.findByText("No models match this search.")
+
+    await userEvent.clear(
+      screen.getByRole("searchbox", { name: "Search models on Production" }),
+    )
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(globalThis.fetch)
+          .mock.calls.some(([input]) => !String(input).includes("search=")),
+      ).toBe(true),
+    )
+
+    expect(
+      screen.getByRole("searchbox", { name: "Search models on Production" }),
+    ).toHaveFocus()
+    expect(screen.queryByText("No models offered yet")).toBeNull()
   })
 
   it("withholds a model with its serving switch", async () => {
@@ -328,9 +583,8 @@ describe("ProviderModelsPanel", () => {
     const user = userEvent.setup()
     await renderPanel(true, onEditRate)
 
-    await user.click(
-      await screen.findByRole("button", { name: "Set your rate for gpt-4o" }),
-    )
+    await screen.findByText("gpt-4o")
+    await pressRowAction(user, "Set your rate for gpt-4o")
 
     expect(onEditRate).toHaveBeenCalledWith(
       expect.objectContaining({ model: "gpt-4o" }),
@@ -361,17 +615,18 @@ describe("ProviderModelsPanel", () => {
 
     await screen.findByRole("grid", { name: "Models on Production" })
     expect(
-      screen.queryByRole("button", {
-        name: "Use the default rate for priced-by-default",
-      }),
+      await findRowMenuItem(
+        user,
+        "Use the default rate for priced-by-default…",
+      ),
     ).toBeNull()
 
+    await pressRowAction(user, "Use the default rate for priced-by-us…")
     await user.click(
-      screen.getByRole("button", {
-        name: "Use the default rate for priced-by-us",
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Use default",
       }),
     )
-    await user.click(screen.getByRole("button", { name: "Use default" }))
 
     await waitFor(() => {
       expect(
@@ -391,9 +646,8 @@ describe("ProviderModelsPanel", () => {
     const user = userEvent.setup()
     await renderPanel()
 
-    await user.click(
-      await screen.findByRole("button", { name: "Stop offering gpt-4o" }),
-    )
+    await screen.findByText("gpt-4o")
+    await pressRowAction(user, "Stop offering gpt-4o")
 
     // `alertdialog`, which is what `ConfirmDialog` renders: it interrupts to ask
     // rather than opening a form.

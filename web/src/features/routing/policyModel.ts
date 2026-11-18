@@ -20,7 +20,6 @@ export type RoutingRow = RoutingPolicyResponse & { kind: "policy" | "alias" }
 
 /** The router backends the form can write. Any other is shown read-only rather
  *  than rewritten as one of these on save. */
-export const KNN_BACKEND = "knn"
 export const WEIGHTED_BACKEND = "weighted"
 export const PRIORITY_BACKEND = "priority"
 
@@ -57,8 +56,8 @@ export function buildInitialPool(spec: PolicySpec): string[] {
 
 /** A backend name as the server reads it.
  *
- *  The resolver matches on `name.strip().lower()`, so `" KNN "` selects the learned
- *  router. Comparing the raw string here would show a policy the gateway routes
+ *  The resolver matches on `name.strip().lower()`, so `" Weighted "` selects the
+ *  weighted router. Comparing the raw string here would show a policy the gateway routes
  *  perfectly well as an unrecognized backend, read-only and mislabelled.
  */
 export function normalizeBackend(name: string | undefined): string | undefined {
@@ -171,12 +170,10 @@ export function aliasAsRow(alias: AliasResponse): RoutingRow {
 export const rowKeyOf = (row: RoutingRow): string =>
   JSON.stringify([row.kind, row.user_id, row.name])
 
-/** Whether the dashboard can edit a spec without losing part of it.
+/** Whether the dashboard offers editing for a spec.
  *
- *  An edit rebuilds the spec from its sections, so anything they do not model
- *  (a `user_id`/`key_id` condition, a comparator other than `gte`, an unknown
- *  router) would be dropped on save. Those are shown read-only: refusing to
- *  edit is recoverable, a silent lossy save is not.
+ * Unsupported options, including a router backend the form does not know, stay
+ * read-only, because the form would drop them when rebuilding the spec on save.
  */
 export function isEditableInForm(spec: PolicySpec): boolean {
   // Sections re-emit `select` as tier-downs, then the router, then the
@@ -200,7 +197,7 @@ export function isEditableInForm(spec: PolicySpec): boolean {
     if (entry.router !== undefined) {
       if ((entry.candidates?.length ?? 0) === 0) return false
       const backend = normalizeBackend(entry.router)
-      if (backend === KNN_BACKEND || backend === PRIORITY_BACKEND) return true
+      if (backend === PRIORITY_BACKEND) return true
       // A weighted entry without weights cannot be saved back (the API
       // refuses it), so the form would have to invent a split.
       return (

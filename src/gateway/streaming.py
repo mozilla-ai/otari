@@ -19,6 +19,7 @@ from gateway.core.usage import (
     cache_write_tokens_of,
     provider_web_searches_of,
     reasoning_tokens_of,
+    service_tier_of,
 )
 from gateway.log_config import logger
 from gateway.model_labeling import relabel_model
@@ -54,7 +55,8 @@ class IncompleteStreamError(Exception):
 class StreamFormat:
     """SSE formatting configuration for a streaming protocol."""
 
-    done_marker: str
+    # What closes a stream after its last event; None where the protocol closes with an event of its own.
+    done_marker: str | None
     error_payload: str
     yield_done_on_error: bool
     keepalive: str
@@ -110,7 +112,9 @@ RESPONSES_STREAM_FORMAT = StreamFormat(
 RESPONSES_TERMINAL_EVENTS = frozenset({"response.completed", "response.incomplete", "response.failed"})
 
 ANTHROPIC_STREAM_FORMAT = StreamFormat(
-    done_marker="event: done\ndata: {}\n\n",
+    # A Messages stream ends with its own ``message_stop`` event; anything after it is
+    # an event Anthropic's SDKs hand their caller with no type.
+    done_marker=None,
     error_payload=f"event: error\ndata: {_ANTHROPIC_ERROR}\n\n",
     yield_done_on_error=False,
     # ``ping`` is part of the Messages stream vocabulary, so existing Anthropic
@@ -138,6 +142,9 @@ def merge_stream_usage(current: CompletionUsage, update: CompletionUsage) -> Com
         cache_tokens_in_prompt=cache_tokens_in_prompt_of(update) and cache_tokens_in_prompt_of(current),
         reasoning_tokens=reasoning_tokens_of(update) or reasoning_tokens_of(current),
         provider_web_searches=provider_web_searches_of(update) or provider_web_searches_of(current),
+        service_tier=service_tier_of(update) or service_tier_of(current),
+        # Anthropic reports the region on the stream's first usage, and not on its last.
+        inference_geo=update.inference_geo or current.inference_geo,
     )
 
 
@@ -379,7 +386,8 @@ async def streaming_generator(
         for buffered_chunk in terminal_buffer:
             yield _format_and_mark_first(buffered_chunk)
         terminal_buffer.clear()
-        yield fmt.done_marker
+        if fmt.done_marker is not None:
+            yield fmt.done_marker
     except Exception as e:
         # A carrier may have been buffered just before the upstream failed. It
         # remains an ordinary provider event and must precede the safe error.
@@ -387,7 +395,7 @@ async def streaming_generator(
             yield _format_and_mark_first(buffered_chunk)
         terminal_buffer.clear()
         yield error_payload(e) if error_payload is not None else fmt.error_payload
-        if fmt.yield_done_on_error:
+        if fmt.yield_done_on_error and fmt.done_marker is not None:
             yield fmt.done_marker
         settled = True
         try:

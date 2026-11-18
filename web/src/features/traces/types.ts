@@ -3,7 +3,8 @@
 
 import type { TraceGateSummary, TraceToolCost } from "@/client"
 
-import type { Explanation } from "./explain"
+import type { ContextWeights, SessionRequests } from "./contextMap"
+import type { Explanation, NoInput } from "./explain"
 import type { GatewayEvent, GuardrailVerdict } from "./gateway"
 import type { SessionStats } from "./sessionStats"
 import type { ToolCostBreakdown } from "./toolCostBreakdown"
@@ -40,9 +41,17 @@ export interface Observation {
   cachedTokens?: number
   cacheWriteTokens?: number
   reasoningTokens?: number
+  /** The model's context window, where the catalog knows it. */
+  contextWindow?: number
+  /** Characters per kind of input, for a request the gateway served. */
+  context?: ContextWeights
   cost?: number
+  /** A gateway LLM call's request group: every attempt the request made. */
+  requestGroupId?: string
   input?: unknown
   output?: unknown
+  /** Why there is no input, for a span or turn that has none. */
+  noInput?: NoInput
   metadata?: Record<string, string>
   /** A guardrail gate's check: what the gate is, what it decided and what it read. */
   gate?: GateCheck
@@ -87,6 +96,8 @@ export interface JudgeCalls {
 export interface Trace {
   id: string
   name: string
+  /** The agent that ran it, where the gateway recognized one. */
+  harness?: string | null
   timestamp: string
   observations: Observation[]
   /** Absent until the session's spans have loaded. */
@@ -102,6 +113,8 @@ export interface Trace {
     /** What each tool cost, estimated; null when no call could be. */
     toolCosts: ToolCostBreakdown | null
     stats: SessionStats
+    /** Its last model request with any input, and its fullest, which the context map is read from. */
+    context?: SessionRequests
   }
 }
 
@@ -114,7 +127,6 @@ export interface TraceTotals {
   totalTokens: number
   totalCost: number
   models: string[]
-  level: ObservationLevel
 }
 
 export function summarizeTrace(trace: Trace): TraceTotals {
@@ -124,7 +136,6 @@ export function summarizeTrace(trace: Trace): TraceTotals {
   let cachedTokens = 0
   let cacheWriteTokens = 0
   let totalCost = 0
-  let level: ObservationLevel = "DEFAULT"
   const models = new Set<string>()
   for (const o of trace.observations) {
     latencyMs = Math.max(latencyMs, o.endMs)
@@ -134,11 +145,10 @@ export function summarizeTrace(trace: Trace): TraceTotals {
       completionTokens += o.completionTokens ?? 0
       cachedTokens += o.cachedTokens ?? 0
       cacheWriteTokens += o.cacheWriteTokens ?? 0
+      // Only a request's model: a judge gate names the model it called too.
+      if (o.model) models.add(o.model)
     }
     if (!o.isRollup) totalCost += o.cost ?? 0
-    if (o.model) models.add(o.model)
-    if (o.level === "ERROR") level = "ERROR"
-    else if (o.level === "WARNING" && level !== "ERROR") level = "WARNING"
   }
   return {
     latencyMs,
@@ -149,6 +159,5 @@ export function summarizeTrace(trace: Trace): TraceTotals {
     totalTokens: promptTokens + completionTokens,
     totalCost,
     models: [...models],
-    level,
   }
 }

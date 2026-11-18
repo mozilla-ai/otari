@@ -8,6 +8,7 @@ import { formatUnitRate } from "@/shared/helpers/format"
 import { providerDisplayName } from "@/shared/helpers/providers"
 import {
   buildTokenComposition,
+  calledPath,
   computeToolCost,
   describeSkip,
   describeSource,
@@ -34,17 +35,23 @@ import { apiKeyLabel } from "./requestColumns"
 export function RequestDetail({
   entry,
   onPriceModel,
+  isInset = true,
 }: {
   entry: UsageEntry
   /**
-   * Null for a caller who does not operate the deployment. Pricing a model is a
+   * Whether the detail pads itself to the panel's 16px edge. Off inside a
+   * trace's detail column, which already pads its contents by that much.
+   */
+  isInset?: boolean
+  /**
+   * Absent for a caller who does not operate the deployment. Pricing a model is a
    * deployment-wide write (`/pricing`), so offering the button to a tenant
    * would be offering a refusal; the sentence beside it is still theirs to read,
    * because "this row cost nothing" is a fact about their own request. The
    * endpoint goes with the model, so the price can open in the unit that
    * endpoint is billed in.
    */
-  onPriceModel: ((model: string, endpoint: string) => void) | null
+  onPriceModel?: (model: string, endpoint: string) => void
 }) {
   const memberLabels = useMemberAttributionLabels()
   // A served request with no cost (cost IS NULL, the same test the "Priced?"
@@ -59,12 +66,15 @@ export function RequestDetail({
   const isUnpricedServed = entry.status === "success" && entry.cost === null
   const pricingKey = findPricingSelector(entry)
   const isSkipped = isSkippedAttempt(entry)
+  const requestId = entry.request_group_id || entry.id
   const user =
     entry.user_id === null
       ? null
       : userDisplay(entry.user_id, entry.user_alias, memberLabels)
   return (
-    <div className="flex flex-col gap-5 px-3 pt-3 pb-4">
+    <div
+      className={`@container flex flex-col gap-5 ${isInset ? "px-4 pt-3 pb-4" : ""}`}
+    >
       {/* A skip is the walk moving past a full model, not a failure, so it is
           worded and styled as a note rather than an error. */}
       {isSkipped ? (
@@ -91,14 +101,14 @@ export function RequestDetail({
       {entry.policy_name !== null && entry.policy_name !== undefined ? (
         <RoutingPlan entry={entry} />
       ) : null}
-      <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-x-6 gap-y-3 @xs:grid-cols-2 @3xl:grid-cols-4">
         {/* In full: the row's Model and API key lanes cut them short, and a
             title is no help to a keyboard or a touch screen. */}
         <DetailField label="Model">{entry.model}</DetailField>
         <DetailField label="Provider">
           {entry.provider ? providerDisplayName(entry.provider) : "—"}
         </DetailField>
-        <DetailField label="Endpoint">{entry.endpoint}</DetailField>
+        <DetailField label="Endpoint">{calledPath(entry)}</DetailField>
         <DetailField label="Source">{describeSource(entry.source)}</DetailField>
         {entry.source_label ? (
           <DetailField label="Session">{entry.source_label}</DetailField>
@@ -176,7 +186,7 @@ export function RequestDetail({
       </div>
       {/* The two ids on a row of their own, each half the panel: a 36-character
           id does not fit a quarter of it beside its copy control. */}
-      <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+      <div className="grid gap-x-6 gap-y-3 @xs:grid-cols-2">
         <DetailField
           label="API key ID"
           copyValue={entry.api_key_id}
@@ -185,8 +195,10 @@ export function RequestDetail({
         >
           {entry.api_key_id ?? "—"}
         </DetailField>
-        <DetailField label="Request ID" copyValue={entry.id} isId>
-          {entry.id}
+        {/* The id the request was answered under (`Otari-Request-ID`), which every
+            attempt's row shares; a row older than request groups has only its own. */}
+        <DetailField label="Request ID" copyValue={requestId} isId>
+          {requestId}
         </DetailField>
       </div>
       {isUnpricedServed ? (
@@ -222,7 +234,7 @@ export function RequestDetail({
       {entry.pricing_breakdown?.length ? (
         <div className="flex flex-col gap-2">
           <span className="text-overline">Billed meters</span>
-          <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-x-6 gap-y-3 @xs:grid-cols-2 @3xl:grid-cols-4">
             {sortChargeLines(entry.pricing_breakdown).map((line) => {
               // A line of neither known shape was written by an older gateway.
               // Its cost is still real, so it is shown as a charge with no rate

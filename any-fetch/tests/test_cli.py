@@ -151,3 +151,11 @@ def test_describe_refuses_an_unknown_provider(capsys: pytest.CaptureFixture[str]
         main(["--describe", "nope"])
     assert exited.value.code == 2
     assert "invalid choice: 'nope'" in capsys.readouterr().err
+
+
+def test_describe_marks_a_cost_tier_and_whether_the_cost_is_reported(capsys: pytest.CaptureFixture[str]) -> None:
+    out = _describe("fake", capsys)
+    assert "Cost: not reported" in out
+    assert '  depth (string, cost tier), default "basic"' in out
+    assert "Cost tier: the provider bills a call at a price of its own for each value." in out
+    assert "Cost: reported with each fetch" in _describe("exa", capsys)

@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query"
+import { keepPreviousData, useQueries, useQuery } from "@tanstack/react-query"
 import type {
   InFlightResponse,
   SummaryDimension,
@@ -41,6 +41,7 @@ function usageParams(filters: UsageFilters): URLSearchParams {
   if (filters.start_date) params.set("start_date", filters.start_date)
   if (filters.end_date) params.set("end_date", filters.end_date)
   if (filters.status) params.set("status", filters.status)
+  if (filters.status_code) params.set("status_code", filters.status_code)
   appendAll("model", filters.model)
   if (filters.endpoint) params.set("endpoint", filters.endpoint)
   if (filters.provider) params.set("provider", filters.provider)
@@ -80,7 +81,7 @@ function usageParams(filters: UsageFilters): URLSearchParams {
 // can never read each other's cached rows.
 //
 // `"organization"` pins the narrow surface regardless of who is asking. It
-// exists for the organization-wide Usage page (otari-ai#1963), whose question is
+// exists for the organization-wide reads (otari-ai#1963), whose question is
 // "this organization", so for an operator the caller-derived scope would answer
 // a different one: `/usage` reads every tenant on the deployment, and a page
 // titled with the organization would silently overstate it. A pinned base needs
@@ -107,6 +108,7 @@ export function useUsageLogs(
   filters: UsageFilters,
   page: number,
   pageSize: number,
+  enabled = true,
 ) {
   const scope = useUsageScope()
   return useQuery({
@@ -118,7 +120,7 @@ export function useUsageLogs(
       params.set("limit", String(pageSize))
       return apiFetch<UsageEntry[]>(`${scope.base}?${params.toString()}`)
     },
-    enabled: scope.isReady,
+    enabled: enabled && scope.isReady,
     placeholderData: keepPreviousData,
     // The log is a snapshot an operator reads, not a feed. On a busy gateway rows
     // arrive faster than anyone can inspect them, so a page that refetched on its
@@ -341,7 +343,7 @@ export function useRequestGroups(groupIds: readonly string[]) {
 // bare `[]` at each call site so it is clear the omission is deliberate.
 export const NO_BREAKDOWNS: SummaryDimension[] = []
 
-// Aggregated spend/tokens/requests for the Usage page. Shares the activity
+// Aggregated spend/tokens/requests over a window. Shares the activity
 // filter serialization and adds the time-series bucket. `enabled` lets a caller
 // skip the request (e.g. the previous-period query when the range is unbounded,
 // so there is nothing to compare against). staleTime is longer than the live
@@ -422,5 +424,153 @@ export function useUsageGroupedSeries(
     // the page falls back to the ungrouped view with a notice instead.
     retry: (failureCount, error) =>
       !(error instanceof ApiError && error.status === 404) && failureCount < 3,
+  })
+}
+
+/**
+ * Requests the gateway refused since `start`, by person, or only `userId`'s
+ * when one is named. The gateway records its own refusals with the status it
+ * answered, and 403 is the one it gives an over-budget or blocked caller and a
+ * model outside a key's allow-list.
+ */
+export function useRefusalsSince(
+  start: string,
+  workspaceId?: string,
+  isEnabled = true,
+  userId?: string,
+) {
+  const scope = useUsageScope("organization")
+  return useQuery({
+    queryKey: [
+      USAGE,
+      "refusals",
+      scope.base,
+      start,
+      workspaceId ?? "",
+      userId ?? "",
+    ],
+    queryFn: () =>
+      apiFetch<UsageSummary>(
+        `${scope.base}/summary?${new URLSearchParams({
+          start_date: start,
+          status_code: "403",
+          bucket: "day",
+          dimensions: "user",
+          ...(workspaceId ? { workspace_id: workspaceId } : {}),
+          ...(userId ? { user_id: userId } : {}),
+        })}`,
+      ),
+    enabled: scope.isReady && isEnabled,
+    staleTime: 30_000,
+  })
+}
+
+/**
+ * Each workspace's spend since `start`, by model. The summary has no workspace
+ * breakdown, so this asks once per workspace: a handful, read in parallel.
+ */
+export function useWorkspaceSpendSummaries(
+  workspaceIds: readonly string[],
+  start: string,
+  isEnabled: boolean,
+) {
+  const scope = useUsageScope("organization")
+  return useQueries({
+    queries: workspaceIds.map((workspaceId) => ({
+      queryKey: [
+        USAGE,
+        "workspace-spend",
+        scope.base,
+        workspaceId,
+        start,
+        "model",
+      ],
+      queryFn: () =>
+        apiFetch<UsageSummary>(
+          `${scope.base}/summary?${new URLSearchParams({
+            workspace_id: workspaceId,
+            start_date: start,
+            bucket: "day",
+            dimensions: "model",
+          })}`,
+        ),
+      enabled: isEnabled && scope.isReady,
+      staleTime: 30_000,
+    })),
+  })
+}
+
+/**
+ * Requests the gateway refused with a 403 since `start`, newest first, for the
+ * people, keys or workspace named, or the whole organization when none is.
+ * The usage log does not say which limit refused a request.
+ */
+export function useRefusedUsage(
+  subject: {
+    userIds?: readonly string[]
+    apiKeyIds?: readonly string[]
+    workspaceId?: string
+  },
+  start: string,
+  limit: number,
+  isEnabled: boolean,
+) {
+  const scope = useUsageScope("organization")
+  return useQuery({
+    queryKey: [USAGE, "refused", scope.base, subject, start, limit],
+    queryFn: () => {
+      const params = new URLSearchParams({
+        start_date: start,
+        status_code: "403",
+        limit: String(limit),
+      })
+      for (const id of subject.userIds ?? []) params.append("user_id", id)
+      for (const id of subject.apiKeyIds ?? []) params.append("api_key_id", id)
+      if (subject.workspaceId) params.set("workspace_id", subject.workspaceId)
+      return apiFetch<UsageEntry[]>(`${scope.base}?${params}`)
+    },
+    enabled: scope.isReady && isEnabled,
+    staleTime: 30_000,
+  })
+}
+
+/**
+ * One spend-by-model summary since `start` per value of `param` (a person or a
+ * key), in parallel. A null value asks nothing, so a caller passes only the
+ * rows it shows and can ask about.
+ */
+export function useModelSummariesBy(
+  param: "user_id" | "api_key_id",
+  values: readonly (string | null)[],
+  start: string,
+  { workspaceId, userId }: { workspaceId: string; userId?: string },
+) {
+  const scope = useUsageScope("organization")
+  return useQueries({
+    queries: values.map((value) => ({
+      queryKey: [
+        USAGE,
+        "model-summary",
+        scope.base,
+        param,
+        value,
+        start,
+        workspaceId,
+        userId ?? null,
+      ],
+      queryFn: () =>
+        apiFetch<UsageSummary>(
+          `${scope.base}/summary?${new URLSearchParams({
+            start_date: start,
+            bucket: "day",
+            dimensions: "model",
+            [param]: value ?? "",
+            ...(workspaceId ? { workspace_id: workspaceId } : {}),
+            ...(userId ? { user_id: userId } : {}),
+          })}`,
+        ),
+      enabled: scope.isReady && value !== null,
+      staleTime: 30_000,
+    })),
   })
 }

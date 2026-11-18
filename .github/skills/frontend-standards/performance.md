@@ -56,11 +56,11 @@ before changing the groups.
 For anything heavy that is not a route, lazy-load it:
 
 ```tsx
-const ShareDialog = lazy(() => import("./ShareDialog"))
+const ExportDialog = lazy(() => import("./ExportDialog"))
 
-{isSharing && (
+{isExporting && (
   <Suspense fallback={null}>
-    <ShareDialog onClose={close} />
+    <ExportDialog onClose={close} />
   </Suspense>
 )}
 ```
@@ -105,6 +105,19 @@ the page's shape.
 
 **If the endpoint you need does not exist, that is the change to make.** Not a walk, not a
 client-side join, not a filter over everything. The gateway is in this repository.
+
+**The one exception is a lookup into a list the gateway caps small enough to arrive whole.** A
+workspace holds at most 50 MCP servers (`MAX_MCP_SERVERS_PER_WORKSPACE`, refused on create), and
+`useWorkspaceMcpServers` reads them in one request. So the MCP pages that put a server's name or
+logo beside the caller's own connections or requests, or ask which servers the caller has
+connected, look the server up in that list by id: `McpMemberServers`, `McpRequestAnswers`,
+`McpOwnAccount`, `McpMemberTools`, `WorkspaceMcpServersCard`, `useWorkspaceMcpServerLogos` and
+the waiting-request map in `McpRequestServerDialog`. That is a table already in memory, not a
+walk: nothing is missed, nothing extra is read, and the gateway doing it would send the same 50
+rows again inside a second response. It holds only while all three stay true: the cap is
+enforced on create, the whole capped list comes back in one request, and the other side of the
+join is the caller's own rows. A list with no hard cap does not qualify because it is short
+today.
 
 **Reading a whole collection is not an exception to that, it is the thing it forbids.** A cap
 on such a walk stops it looping forever against a backend that ignores `skip`; it does not make

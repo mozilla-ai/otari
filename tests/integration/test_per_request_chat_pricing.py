@@ -170,7 +170,7 @@ def test_a_successful_call_is_reserved_and_settled_at_one_request(
     db_session_factory: Callable[[], Session],
     stream: bool,
 ) -> None:
-    _price(client, master_key_header, unit="requests")
+    _price(client, master_key_header, unit="request")
     headers = _user_key(client, master_key_header)
 
     response, reserved = _chat(client, headers, stream=stream)
@@ -196,7 +196,7 @@ def test_reported_tokens_are_recorded_but_not_priced(
     stream: bool,
 ) -> None:
     # A non-zero output rate a token pricing would apply, so a token charge would show.
-    _price(client, master_key_header, unit="requests", output=1_000_000.0)
+    _price(client, master_key_header, unit="request", output=1_000_000.0)
     headers = _user_key(client, master_key_header)
 
     response, _ = _chat(client, headers, stream=stream, usage=REPORTED_USAGE)
@@ -216,7 +216,7 @@ def test_a_call_that_reports_no_usage_is_still_charged(
     stream: bool,
 ) -> None:
     """For a stream this bypasses ``stream_missing_usage_policy``: the request is the billed unit."""
-    _price(client, master_key_header, unit="requests")
+    _price(client, master_key_header, unit="request")
     headers = _user_key(client, master_key_header)
 
     response, _ = _chat(client, headers, stream=stream, usage=None)
@@ -238,7 +238,7 @@ def test_a_failed_call_costs_nothing_and_releases_its_hold(
     db_session_factory: Callable[[], Session],
     stream: bool,
 ) -> None:
-    _price(client, master_key_header, unit="requests")
+    _price(client, master_key_header, unit="request")
     headers = _user_key(client, master_key_header)
 
     # The stream fails after reporting usage, which a token-priced model would still owe for.
@@ -264,7 +264,7 @@ def test_the_budget_gate_admits_against_the_flat_price(
     master_key_header: dict[str, str],
 ) -> None:
     """A budget below one request's price refuses the call before it is made."""
-    _price(client, master_key_header, unit="requests")
+    _price(client, master_key_header, unit="request")
     headers = _user_key(client, master_key_header, max_budget=0.004)
 
     response, _ = _chat(client, headers, stream=False)
@@ -280,7 +280,7 @@ def test_a_model_priced_per_token_is_unchanged(
     stream: bool,
 ) -> None:
     """The same rate under ``unit: tokens`` reserves a token estimate and settles the reported tokens."""
-    _price(client, master_key_header, unit="tokens")
+    _price(client, master_key_header, unit="token")
     headers = _user_key(client, master_key_header, max_budget=100.0)
 
     response, reserved = _chat(client, headers, stream=stream, usage=REPORTED_USAGE)
@@ -313,7 +313,7 @@ def test_price_per_request_sets_and_reports_the_same_flat_price(
         f"{API_ROOT}/pricing", json={"model_key": MODEL_NAME, "price_per_request": 0.005}, headers=master_key_header
     )
     assert priced.status_code == 200, priced.text
-    assert priced.json()["unit"] == "requests"
+    assert priced.json()["unit"] == "request"
     assert priced.json()["input_price_per_million"] == PER_REQUEST_RATE
     assert priced.json()["price_per_request"] == pytest.approx(0.005)
     headers = _user_key(client, master_key_header)
@@ -344,3 +344,26 @@ def test_a_price_per_request_that_is_not_a_number_is_refused(
     )
 
     assert refused.status_code == 422
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_a_model_priced_in_a_unit_with_no_meter_settles_unpriced(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    stream: bool,
+) -> None:
+    """A rate stored ahead of its meter prices nothing: the tokens are recorded, no cost, nothing held."""
+    # A non-zero output rate a token pricing would apply, so a token charge would show.
+    _price(client, master_key_header, unit="second", output=1_000_000.0)
+    headers = _user_key(client, master_key_header)
+
+    response, reserved = _chat(client, headers, stream=stream, usage=REPORTED_USAGE)
+
+    assert response.status_code == 200, response.text
+    assert all(amount == 0 for amount in reserved), reserved
+    row = _row(db_session_factory)
+    assert (row.prompt_tokens, row.completion_tokens) == (12, 34)
+    assert row.cost is None
+    assert row.billing_meters is None
+    assert _user(client, master_key_header)["spend"] == 0

@@ -54,7 +54,7 @@ is what makes it directly testable: `features/organization/roles.ts`,
 
 ## Callback props are `on*`, handlers are what they do
 
-This tree names the prop for the event (`onConfirm`, `onRevoke`, `onSelectAllMatching`,
+This tree names the prop for the event (`onConfirm`, `onRemove`, `onSelectAllMatching`,
 `onSaved`), and that is the convention to follow. It is deliberately not otari-ai's
 `handle<Subject><Verb>` prop naming: renaming ~200 call sites would be churn with no reader
 benefit, and the two trees converge on component structure rather than on prop spelling.
@@ -83,9 +83,8 @@ that can diverge. A mistyped *identifier* fails to compile; a mistyped *literal*
 which is exactly why the literal is written once. See [data-fetching.md](./data-fetching.md).
 
 A literal table that drives a union carries `as const`, so the values stay literals and the
-derived type is the set rather than `string[]`: `THEME_PREFERENCES` in
-`shared/hooks/useTheme.tsx`, and the nav registry's
-`] as const satisfies readonly NavSection[]`.
+derived type is the set rather than `string[]`: the nav registry's
+`] as const satisfies readonly NavSection[]` in `app/nav/registry.ts`.
 
 ## Vocabulary that carries meaning
 

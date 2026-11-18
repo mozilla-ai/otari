@@ -9,7 +9,8 @@ import type {
   AliasResponse,
   AutomaticFallbacksResponse,
   CreateAliasRequest,
-  RouterStatus,
+  ExplainPolicyRequest,
+  ExplainPolicyResponse,
   RoutingPolicyResponse,
   SetRoutingPolicyRequest,
 } from "@/client"
@@ -20,7 +21,7 @@ import {
   AUTOMATIC_FALLBACKS,
   CATALOG,
   MODELS,
-  ROUTER_STATUS,
+  ROUTING_EXPLAIN,
   ROUTING_POLICIES,
   workspaceMeta,
 } from "@/shared/api/queryKeys"
@@ -99,17 +100,42 @@ export function useRoutingPolicies(workspaceId?: string) {
   })
 }
 
+// What a policy compiles to, without dispatching anything. A read, though it is
+// a POST, so it is a query: the body is the whole key, and a changed spec or
+// simulated budget compiles again.
+export function useExplainPolicy(body: ExplainPolicyRequest, enabled: boolean) {
+  const scope = useRoutingScope()
+  const path = `${scope.policies}/explain`
+  return useQuery({
+    queryKey: [ROUTING_EXPLAIN, path, body],
+    meta: workspaceMeta(body.workspace_id),
+    queryFn: () =>
+      apiFetch<ExplainPolicyResponse>(path, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    placeholderData: (previous) => previous,
+    enabled: enabled && scope.isReady,
+  })
+}
+
 // The models the caller's organization used in the last 30 days, each with the
 // offerings its catalog ID tries in order. One endpoint for every caller: the
-// server scopes the traffic to the workspaces the caller may see.
-export function useAutomaticFallbacks() {
+// server scopes the traffic to the workspaces the caller may see, and
+// `workspaceId` keeps only the offerings that workspace may call, and `null`
+// holds the read until the workspace is known (`useNarrowingWorkspace`).
+export function useAutomaticFallbacks(workspaceId: string | null = "") {
   return useQuery({
-    queryKey: [AUTOMATIC_FALLBACKS],
+    queryKey: [AUTOMATIC_FALLBACKS, workspaceId ?? ""],
+    meta: workspaceMeta(workspaceId),
     queryFn: () =>
       apiFetch<AutomaticFallbacksResponse>(
-        "/organizations/me/automatic-fallbacks",
+        workspaceId
+          ? `/organizations/me/automatic-fallbacks?workspace_id=${encodeURIComponent(workspaceId)}`
+          : "/organizations/me/automatic-fallbacks",
       ),
     staleTime: 60_000,
+    enabled: workspaceId !== null,
   })
 }
 
@@ -253,27 +279,6 @@ export function useDeleteOrganizationAlias() {
         { method: "DELETE" },
       ),
     onSuccess: () => invalidateRoutingLists(queryClient),
-  })
-}
-
-// --- Learned routing ------------------------------------------------------
-
-/** How warm a user's routing memory is.
- *
- *  Keyed by user because warmth is per user: the records hold that user's
- *  prompts, so a global learned policy warms once per caller. Disabled until a
- *  user is chosen rather than defaulting to one, because "whose memory" has no
- *  sensible default.
- */
-export function useRouterStatus(userId: string | null) {
-  return useQuery({
-    queryKey: [ROUTER_STATUS, userId],
-    queryFn: () =>
-      apiFetch<RouterStatus>(
-        `/routing/status?user_id=${encodeURIComponent(userId ?? "")}`,
-      ),
-    enabled: userId !== null && userId !== "",
-    staleTime: 30_000,
   })
 }
 

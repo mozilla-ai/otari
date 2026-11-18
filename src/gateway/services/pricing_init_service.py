@@ -1,5 +1,6 @@
 """Pricing initialization from configuration."""
 
+import logging
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -11,8 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger
 from gateway.models.money import to_usd
-from gateway.models.pricing import MODEL_KIND, ModelPricing, PricingKind
+from gateway.models.pricing import MODEL_KIND, ModelPricing, PricingKind, rates_of
 from gateway.repositories.pricing import OrganizationModelPricingRepository
+from gateway.services.pricing import DeploymentPricingService
 from gateway.services.pricing_service import (
     GATEWAY_TOOL_PRICING_PROVIDER,
     gateway_tool_pricing_key,
@@ -21,12 +23,15 @@ from gateway.services.pricing_service import (
     resolve_tool_rate,
 )
 from gateway.services.provider_kwargs import normalize_pricing_key
-from gateway.services.tools import configured_tools_to_price
-from gateway.types.tool_charges import instance_rate_key
+from gateway.services.tools import configured_tools_to_price, deployment_tool_rate_keys, enriching_fetch_tool
+from gateway.types.price_rates import dump_rates, load_rates
+from gateway.types.tool_charges import InstanceRateKey
 
 
-async def warn_if_require_pricing_without_pricing(config: GatewayConfig, db: AsyncSession) -> None:
-    """Warn at startup when require_pricing is on but no pricing is configured.
+async def warn_if_require_pricing_without_pricing(
+    config: GatewayConfig, db: AsyncSession, level: int = logging.WARNING
+) -> None:
+    """Warn at startup, at ``level``, when require_pricing is on but no pricing is configured.
 
     With ``require_pricing=True`` (the default), any model lacking a pricing
     entry is rejected with HTTP 402 — so a deployment with zero pricing rows
@@ -58,47 +63,54 @@ async def warn_if_require_pricing_without_pricing(config: GatewayConfig, db: Asy
     if count > 0:
         return
     if not config.default_pricing:
-        logger.warning(
+        logger.log(
+            level,
             "require_pricing is enabled but no model pricing is configured: ALL billable requests "
             f"will be rejected with HTTP 402. Add pricing (config `pricing` section or POST {API_ROOT}/pricing), "
-            "set require_pricing=false, or add explicit $0 pricing for free/self-hosted models."
+            "set require_pricing=false, or add explicit $0 pricing for free/self-hosted models.",
         )
     else:
-        logger.warning(
+        logger.log(
+            level,
             "require_pricing is enabled with no configured pricing; relying on default_pricing "
-            "(models.dev) for billing. Models outside its coverage are still rejected with HTTP 402."
+            "(models.dev) for billing. Models outside its coverage are still rejected with HTTP 402.",
         )
 
 
-async def warn_if_search_tools_lack_flat_pricing(config: GatewayConfig, db: AsyncSession) -> None:
-    """Warn at startup for a search tool with no flat per-request rate.
+async def warn_about_unpriced_web_tools(config: GatewayConfig, db: AsyncSession) -> None:
+    """Warn at startup for each search and fetch tool, ``builtin_fetch`` included, with no price of its own.
 
-    With ``require_pricing`` on, its direct searches are refused. With it off,
-    they reserve nothing before the provider is called, so a user just under
-    their cap can overshoot by a search. A rate of 0 is a deliberate "this tool
-    is free" and is left alone.
+    That row prices the tool's calls, in the loop and on the direct endpoint.
+    With ``require_pricing`` on, a request that would run the tool is refused
+    with HTTP 402, except on a key exempt from budgets. With it off, a call
+    reserves nothing before the provider is called and settles at zero unless
+    its provider reports a cost. A rate of 0 is a price. A fetch tool is checked
+    where the fetch tool is enabled, and where it reads the pages of the in-loop
+    search's hits, which take its price.
     """
-    unpriced: list[str] = []
-    for name, entry in config.search_tools.items():
-        provider = str(entry.get("provider") or name) if isinstance(entry, dict) else name
-        if await resolve_tool_rate(db, (instance_rate_key("search", name, provider),)) is None:
-            unpriced.append(name)
+    enriching = enriching_fetch_tool(config)
+    keys = [
+        key
+        for key in deployment_tool_rate_keys(config)
+        if key.kind == "search" or config.web_fetch_enabled or key.name == enriching
+    ]
+    unpriced = [key.name for key in keys if await resolve_tool_rate(db, (key,)) is None]
     if not unpriced:
         return
     if config.require_pricing:
         consequence = (
-            f"require_pricing is on, so POST {API_ROOT}/search refuses their searches with HTTP 402, except on "
-            "keys exempt from budgets. Set a rate, 0 included"
+            "require_pricing is on, so a request that would run one is refused with HTTP 402, except on keys "
+            "exempt from budgets. Set a rate, 0 included"
         )
     else:
         consequence = (
-            "Nothing is reserved against a caller's budget before the search runs, so a user just under their "
-            "cap can overshoot by one search. Set a rate"
+            "Their calls are recorded at zero cost unless the provider reports one, and nothing is reserved "
+            "against a caller's budget before they run. Set a rate"
         )
     logger.warning(
-        "No flat per-request rate is configured for search tool(s): %s. %s: POST %s/pricing with kind 'search' "
-        "and the tool's name as model_key, or price_per_call (USD per search) on its entry if it is declared in "
-        "config.yml.",
+        "No price is set for search or fetch tool(s): %s. %s: on the dashboard's Web search page, with POST "
+        "%s/pricing and kind 'search' or 'fetch' with the tool's name as model_key, or with price_per_call "
+        "(USD per call) on its entry if it is declared in config.yml.",
         ", ".join(sorted(unpriced)),
         consequence,
         API_ROOT,
@@ -106,11 +118,11 @@ async def warn_if_search_tools_lack_flat_pricing(config: GatewayConfig, db: Asyn
 
 
 async def warn_if_gateway_tools_lack_pricing(config: GatewayConfig, db: AsyncSession) -> None:
-    """Warn at startup when a configured gateway-run tool has no per-request rate.
+    """Warn at startup when a configured gateway-run tool priced under ``otari:<tool>`` has no per-request rate.
 
-    It checks the rows the check at admission looks up for a call with no
-    workspace key: the in-loop search's or the fetch tool's instance row, then
-    ``otari:<tool>``, as settlement prices them. With ``require_pricing`` on, an
+    Those are code execution, and web search on the legacy settings or on the
+    old backend; :func:`warn_about_unpriced_web_tools` names the search and
+    fetch tools priced by their own row. With ``require_pricing`` on, an
     unpriced tool is refused at admission, so this warning is what tells the
     operator *before* the first 402 rather than after. With ``require_pricing``
     off the tool runs, and a call its provider reports no cost for is recorded at
@@ -119,7 +131,8 @@ async def warn_if_gateway_tools_lack_pricing(config: GatewayConfig, db: AsyncSes
     unpriced = [
         tool.name
         for tool in configured_tools_to_price(config)
-        if await resolve_tool_rate(db, tool.rate_keys, label=tool.label) is None
+        if not isinstance(tool.rate_keys[0], InstanceRateKey)
+        and await resolve_tool_rate(db, tool.rate_keys, label=tool.label, deployment_paid=tool.deployment_paid) is None
     ]
     if not unpriced:
         return
@@ -145,45 +158,43 @@ async def warn_if_gateway_tools_lack_pricing(config: GatewayConfig, db: AsyncSes
         )
 
 
-async def warn_if_router_candidates_lack_pricing(config: GatewayConfig, db: AsyncSession) -> None:
-    """Warn at startup when a learned policy has an unpriced candidate.
+def _same_rates_block(stored: ModelPricing, configured: ModelPricing) -> bool:
+    """Whether two versions' ``rates`` blocks agree, numbers compared by value.
 
-    The *learned* router scores candidates by cost, so it declines the moment one
-    of them has no price, and the policy quietly serves its default target forever.
-    That looks like a broken router rather than a missing pricing row, which is what
-    this line exists to say. The weighted router reads no prices, so it is exempt.
-
-    A warning rather than a refusal, unlike the same check on the write path
-    (``POST /v1/routing/policies``, which 400s). Refusing here would take a running
-    gateway down over an optimization that has a safe fallback; refusing a write
-    costs an operator one corrected request, with the policy in front of them.
+    The columns cannot tell apart two blocks that differ only where no column
+    reaches, such as a rate on another modality.
     """
-    from gateway.services.routing import backend_requires_pricing, unpriced_router_candidates
-
-    for name, spec in config.routing.policies.items():
-        if not backend_requires_pricing(spec.router_backend):
-            continue
-        missing = await unpriced_router_candidates(config, db, spec.router_candidates)
-        if missing:
-            logger.warning(
-                "Routing policy '%s' uses router '%s' but candidate(s) %s have no pricing, so the router "
-                "will decline every request and the policy will always serve '%s'. Add pricing (config "
-                f"`pricing` section or POST {API_ROOT}/pricing) for those models.",
-                name,
-                spec.router_backend,
-                ", ".join(missing),
-                spec.default_target,
-            )
+    return load_rates(dump_rates(rates_of(stored))) == load_rates(dump_rates(rates_of(configured)))
 
 
-async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession) -> None:
-    """Initialize model pricing from configuration file."""
+async def initialize_pricing_from_config(
+    config: GatewayConfig, db: AsyncSession, pricing: DeploymentPricingService
+) -> None:
+    """Initialize model pricing from configuration file.
+
+    An entry with no ``effective_at`` is dated now, so it adds a version only
+    when its rates differ from the version in force: an unchanged file adds
+    nothing on a restart.
+    """
 
     if not config.pricing:
         logger.debug("No pricing configuration found in config file")
         return
 
     logger.info("Loading pricing configuration for %s model(s)", len(config.pricing))
+
+    now = datetime.now(UTC)
+    undated_keys: list[str] = []
+    # A dated entry this run may add can overtake the version in force, so an
+    # undated entry is skipped only over a version at least as new as it.
+    latest_dated: dict[str, datetime] = {}
+    for key, entry in config.pricing.items():
+        normalized_key = normalize_pricing_key(config, key)
+        if not entry.effective_at:
+            undated_keys.append(normalized_key)
+        elif (dated := normalize_effective_at(entry.effective_at)) <= now:
+            latest_dated[normalized_key] = max(dated, latest_dated.get(normalized_key, dated))
+    in_force = await pricing.current_versions(undated_keys, now) if undated_keys else {}
 
     # A search or fetch instance's rate written here under its old
     # ``<provider>:<instance>`` key keeps loading, matched whole (the deprecation
@@ -230,6 +241,28 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
         pricing_tiers = [tier.model_dump(exclude_none=True) for tier in pricing_config.pricing_tiers]
         effective_at = normalize_effective_at(pricing_config.effective_at)
 
+        new_pricing = ModelPricing(
+            model_key=model_key,
+            effective_at=effective_at,
+            input_price_per_million=input_price,
+            output_price_per_million=output_price,
+            cache_read_price_per_million=cache_read_price,
+            cache_write_price_per_million=cache_write_price,
+            pricing_tiers=pricing_tiers,
+            unit=pricing_config.unit,
+            rates=None if pricing_config.rates is None else pricing_config.rates.document(),
+            origin="config",
+        )
+        current = None if pricing_config.effective_at else in_force.get(model_key)
+        if (
+            current is not None
+            and current.effective_at >= latest_dated.get(model_key, current.effective_at)
+            and DeploymentPricingService.rates_match(current, new_pricing)
+            and _same_rates_block(current, new_pricing)
+        ):
+            logger.debug("Pricing for '%s' is unchanged; keeping the version in force", model_key)
+            continue
+
         existing_pricing = (
             await db.execute(
                 select(ModelPricing).where(
@@ -249,17 +282,6 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
             )
             continue
 
-        new_pricing = ModelPricing(
-            model_key=model_key,
-            effective_at=effective_at,
-            input_price_per_million=input_price,
-            output_price_per_million=output_price,
-            cache_read_price_per_million=cache_read_price,
-            cache_write_price_per_million=cache_write_price,
-            pricing_tiers=pricing_tiers,
-            unit=pricing_config.unit,
-            origin="config",
-        )
         db.add(new_pricing)
         logger.info("Added pricing for '%s': input=$%s/M, output=$%s/M", model_key, input_price, output_price)
 
@@ -298,7 +320,7 @@ async def initialize_tool_prices_from_config(config: GatewayConfig, db: AsyncSes
                 .limit(1)
             )
         ).scalar_one_or_none()
-        if latest is not None and latest.input_price_per_million == per_million and latest.unit == "requests":
+        if latest is not None and latest.input_price_per_million == per_million and latest.unit == "request":
             continue
         db.add(
             ModelPricing(
@@ -308,7 +330,7 @@ async def initialize_tool_prices_from_config(config: GatewayConfig, db: AsyncSes
                 input_price_per_million=per_million,
                 output_price_per_million=Decimal(0),
                 pricing_tiers=[],
-                unit="requests",
+                unit="request",
                 origin="config",
             )
         )

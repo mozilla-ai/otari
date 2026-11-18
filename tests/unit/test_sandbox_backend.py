@@ -23,11 +23,14 @@ from gateway.adapters.code_execution_adapter import ProtocolCodeExecutionAdapter
 from gateway.services.code_execution import ContainerLease
 from gateway.services.sandbox_backend import (
     CODE_EXECUTION_TOOL_NAME,
+    EMPTY_CODE_TEXT,
     SandboxBackend,
     SandboxNotReachableError,
     SandboxSessionGoneError,
     SandboxUnavailableError,
 )
+from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, ToolUsageTally, is_tool_error
+from gateway.types.code_execution import CodeExecutionResult, ResultBlock
 
 
 class _MockTransport(httpx.AsyncBaseTransport):
@@ -1561,7 +1564,8 @@ async def test_a_session_nothing_can_resume_is_never_leased_a_container_id() -> 
 
 
 @pytest.mark.asyncio
-async def test_a_session_the_request_cannot_use_is_discarded_and_leaves_no_lease() -> None:
+@pytest.mark.parametrize("read_error", [OSError("no such blob"), ValueError("ref escapes the store")])
+async def test_a_session_the_request_cannot_use_is_discarded_and_leaves_no_lease(read_error: Exception) -> None:
     """A seed that fails releases the sandbox rather than holding one nobody was told about."""
     discarded: list[bool] = []
 
@@ -1577,7 +1581,7 @@ async def test_a_session_the_request_cannot_use_is_discarded_and_leaves_no_lease
 
     class _FailingFiles(_FakeFiles):
         async def read_input(self, staged: Any) -> bytes:
-            raise OSError("no such blob")
+            raise read_error
 
     containers = _FakeContainers()
     backend = SandboxBackend(port=_DiscardablePort(), containers=containers, files=_FailingFiles(inputs=[_staged()]))
@@ -1640,7 +1644,9 @@ class _FakeContainers:
     def keep_alive_s(self, resumed: ContainerLease | None) -> float:
         return self.idle_s
 
-    def lease(self, container_id: str, provider_session_id: str, *, resumed: ContainerLease | None) -> ContainerLease:
+    def lease(
+        self, container_id: str, provider_session_id: str, *, resumed: ContainerLease | None, image: str | None
+    ) -> ContainerLease:
         now = datetime.now(UTC)
         return ContainerLease(
             container_id=container_id,
@@ -1648,6 +1654,7 @@ class _FakeContainers:
             provider_session_id=provider_session_id,
             expires_at=now + timedelta(seconds=self.idle_s),
             hard_expires_at=resumed.hard_expires_at if resumed else now + timedelta(hours=1),
+            image=resumed.image if resumed else image,
         )
 
     async def record(self, lease: ContainerLease) -> None:
@@ -1725,8 +1732,97 @@ async def test_a_resumed_lease_keeps_its_id_and_resumes_the_providers_session() 
 
 
 @pytest.mark.asyncio
+async def test_a_fresh_lease_records_the_image_and_a_resume_keeps_the_one_it_was_created_in() -> None:
+    containers = _FakeContainers()
+    async with SandboxBackend(port=_HoldingPort(), containers=containers, image="python-data"):
+        pass
+    created = containers.recorded[0]
+    assert created.image == "python-data"
+
+    async with SandboxBackend(port=_HoldingPort(), container=created, containers=containers, image="python"):
+        pass
+    assert containers.recorded[1].image == "python-data"
+
+
+@pytest.mark.asyncio
+async def test_a_call_in_an_environment_is_held_and_recorded_under_its_own_row_first() -> None:
+    held: list[Any] = []
+
+    class _Admit:
+        async def admit(self, call: Any) -> bool:
+            held.append(call)
+            return True
+
+    tally = ToolUsageTally()
+    tally.spend_gate = _Admit()
+    backend = _sandbox(tally=tally, image="python-data")
+    backend.owns_tool = lambda name: name == CODE_EXECUTION_TOOL_NAME  # type: ignore[method-assign]
+
+    async def ran(_code: str) -> Any:
+        return "ok", ResultBlock(type="code_execution_tool_result", content=CodeExecutionResult(stdout="ok")), {}
+
+    backend._exec_tool = ran  # type: ignore[method-assign,assignment]
+
+    await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(1)"})
+
+    rows = ("otari:code_execution:python-data", "otari:code_execution")
+    assert [call.rate_keys for call in held] == [rows]
+    assert [call.rate_keys for call in tally.label_calls()] == [rows]
+
+
+@pytest.mark.asyncio
 async def test_without_a_registry_nothing_is_held_or_reported() -> None:
     port = _HoldingPort()
     async with SandboxBackend(port=port) as backend:
         assert port.keep_alive_s is None
         assert backend.lease is None
+
+
+@pytest.mark.asyncio
+async def test_a_call_the_budget_cannot_hold_never_reaches_the_sandbox() -> None:
+    """Refused before it runs, and counted as a failure, so it is never billed."""
+
+    class _Refuse:
+        async def admit(self, _call: Any) -> bool:
+            return False
+
+    tally = ToolUsageTally()
+    tally.spend_gate = _Refuse()
+    backend = _sandbox(tally=tally)
+    backend.owns_tool = lambda name: name == CODE_EXECUTION_TOOL_NAME  # type: ignore[method-assign]
+
+    async def never(_code: str) -> Any:
+        raise AssertionError("the sandbox ran a call the budget refused")
+
+    backend._exec_tool = never  # type: ignore[method-assign,assignment]
+
+    assert await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(1)"}) == TOOL_BUDGET_EXCEEDED_TEXT
+    assert tally.meters() == {CODE_EXECUTION_TOOL_NAME: {"billed": 0, "errors": 1}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("arguments", [{"code": ""}, {"code": "  \n\t "}, {}, {"code": None}])
+async def test_a_call_with_no_code_is_refused_before_the_sandbox(arguments: dict[str, Any]) -> None:
+    """An empty program would exit 0 and read as a run that worked (#2954)."""
+
+    class _Admit:
+        async def admit(self, _call: Any) -> bool:
+            raise AssertionError("a call with no code reached budget admission")
+
+    tally = ToolUsageTally()
+    tally.spend_gate = _Admit()
+    backend = _sandbox(tally=tally)
+    backend.owns_tool = lambda name: name == CODE_EXECUTION_TOOL_NAME  # type: ignore[method-assign]
+
+    async def never(_code: str) -> Any:
+        raise AssertionError("the sandbox ran a call with no code")
+
+    backend._exec_tool = never  # type: ignore[method-assign,assignment]
+
+    text = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, arguments)
+    assert text == EMPTY_CODE_TEXT
+    assert is_tool_error(text)
+    [execution] = backend.take_executions()
+    assert execution.result is None
+    assert execution.invalid_input is True
+    assert tally.meters() == {CODE_EXECUTION_TOOL_NAME: {"billed": 0, "errors": 1}}

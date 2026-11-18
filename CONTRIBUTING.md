@@ -48,7 +48,7 @@ print(
 
 - keys, users, orgs, workspaces, budgets, usage records, or pricing
 - route schemas, the OpenAPI spec, or the Anthropic and Responses envelopes
-- routing, fallback across attempts, or routing memory
+- routing, or fallback across attempts
 - `config.yml` layering, the `providers:` block, or provider instances and aliases
 - the dashboard, built-in tools, the MCP loop, or guardrails
 
@@ -61,9 +61,12 @@ sanitized message.
 Otari sometimes has to carry a workaround while any-llm catches up. That is a
 legitimate PR here, with conditions: keep the shim as small as the problem
 allows, comment it with a link to the any-llm issue, and open an Otari issue to
-remove it once the SDK pin moves. `service_tier` in
-`src/gateway/api/routes/chat.py` is the worked example. File the upstream issue
-first; a shim with no upstream issue is permanent by accident.
+remove it once the SDK pin moves. The worked example is `service_tier` on chat
+completions: [#561](https://github.com/mozilla-ai/otari/pull/561) declared it by
+hand while any-llm's `CompletionParams` lacked it, and
+[#565](https://github.com/mozilla-ai/otari/issues/565) removed the declaration
+once the pin moved. File the upstream issue first; a shim with no upstream issue
+is permanent by accident.
 
 ## Does this change belong in Otari?
 
@@ -99,7 +102,7 @@ and overlays. If no row fits, open an issue and ask.
 
 ## Dev setup
 
-**Prerequisites:** Python 3.13+, `uv`, Docker (for integration tests).
+**Prerequisites:** Python 3.13+, `uv` within the `required-version` range in `pyproject.toml` (uv refuses every command outside it; `uv self update <version>` moves an installer-managed uv), Docker (for integration tests).
 
 ```bash
 git clone https://github.com/mozilla-ai/otari
@@ -139,13 +142,11 @@ make test        # unit + integration
 
 Run a single test: `uv run pytest tests/unit/test_gateway_cli.py -v`
 
-If you changed any API routes or schemas, regenerate both generated artifacts and commit them:
+If you changed any API routes or schemas, regenerate the generated artifact and commit it:
 
 ```bash
 uv run python scripts/generate_openapi.py
-uv run python scripts/generate_postman.py
 make openapi-check
-make postman-check
 ```
 
 ## Dependencies
@@ -154,12 +155,14 @@ Most dependencies are floored (`>=`) rather than pinned, and `uv.lock` is commit
 because CI and the Docker image both install from it with `--frozen`. Two mechanisms
 keep it current, and they cover different things:
 
-- **Dependabot** (`.github/dependabot.yml`) opens weekly version-update PRs for the
-  `uv` and `github-actions` ecosystems. Security updates are separate, need no
-  config, and already cover every supported ecosystem here. The dashboard is not
-  covered by either, because `web/` uses a pnpm newer than Dependabot supports;
-  see #1001.
-- **`.github/workflows/otari-dashboard-audit.yml`** stands in for Dependabot's
+- **Dependabot** (`.github/dependabot.yml`) opens monthly version-update PRs for the
+  `uv`, `github-actions`, `docker` and dashboard (`npm`, which covers pnpm)
+  ecosystems. Security updates are separate, need no config, and cover every
+  ecosystem here but the dashboard: they follow alerts, and the dependency graph
+  reads only the first of the two YAML documents pnpm 11+ writes to
+  `web/pnpm-lock.yaml`, the one pinning pnpm itself, so it raises none for the
+  dashboard's packages.
+- **`.github/workflows/otari-dashboard-audit.yml`** stands in for those
   security alerts on the dashboard. It runs `pnpm audit` against `web/pnpm-lock.yaml`
   on every PR that changes the dashboard's dependencies and weekly, failing on a
   high or critical advisory, and keeps a tracking issue open while one remains.
@@ -191,6 +194,40 @@ uv run --frozen --no-dev python scripts/oss_edition_smoke.py
   create and drop databases. Never use production, and do not run concurrent
   suites against the same server URL because their worker database names collide.
 
+## Writing docs
+
+`docs/` is the one source for [docs.otari.ai](https://docs.otari.ai), for otari.ai and for
+your own gateway alike, and it publishes with each release. The pages are flat files in
+`docs/`; [`docs/SUMMARY.md`](docs/SUMMARY.md) places each one in the site.
+
+Each `#` heading of `SUMMARY.md` is one entry of the site's top bar, and its `##` headings
+are the sidebar groups under it:
+
+| Top bar | For |
+| --- | --- |
+| Otari | What Otari is, a first request, and the otari.ai guide: concepts, dashboard how-tos, workspace tools, integrations, the playground |
+| Guides | Doing one thing with Otari: access, the dashboard, agents and frameworks, guardrails, observability |
+| Self-Hosting | Deploying, configuring and operating your own gateway |
+| Reference | Lookup material: the API, models, routing, tools, file formats, protocols |
+
+Write each page as one [Diátaxis](https://diataxis.fr) kind: a tutorial, a how-to guide,
+reference, or explanation. A section of another kind goes on a page of that kind, linked.
+
+Say otari.ai or your own gateway only where it changes something:
+
+1. **Write for the product, not the deployment.** If a sentence is true on both, mention
+   neither.
+2. **Base URLs live in one place.** The API reference's [Base URL](docs/api-reference.md#base-url)
+   section gives them, with the form each SDK expects; elsewhere, use one in a command, or
+   link there.
+3. **A procedure for running a gateway belongs in Self-Hosting**, and what only the service
+   has, such as billing, says so in its title.
+
+A new page owes an entry in `docs/SUMMARY.md`, and `tests/unit/test_gitbook_site.py` fails
+without one. A page's URL comes from its top-bar entry, its sidebar group and its file name,
+so moving or renaming a page changes its URL. Images go in `docs/assets/`. Spell in US
+English and avoid em dashes, as [AGENTS.md](AGENTS.md#writing-style) says.
+
 ## Pull requests
 
 - PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/); CI enforces this.
@@ -198,7 +235,6 @@ uv run --frozen --no-dev python scripts/oss_edition_smoke.py
 - Mark a breaking change with `!` in the title, for example `feat(api)!: ...`. See [Breaking changes](RELEASE.md#breaking-changes).
 - Keep diffs focused; avoid unrelated refactors in the same PR.
 - Do not hand-edit `CHANGELOG.md`; it is regenerated from commit history at release time.
-- The PR description must keep the **PR Type**, **Checklist**, and **AI Usage** sections from the [PR template](https://github.com/mozilla-ai/otari/blob/main/.github/pull_request_template.md). CI checks for these sections and will auto-close PRs that are missing them after 24 hours.
 - Until one of your PRs has been approved or merged, keep only one open at a time. CI closes any extra PRs from a first-time contributor (keeping the oldest open); reopen them once the first PR is approved. A maintainer can exempt a PR with the `skip-pr-limit` label.
 - Before opening a PR for an issue, check whether an open PR is already linked to it, and keep no more than four PRs open at a time. CI comments on a PR that duplicates another, and closes a newly opened or reopened PR that would take you past four (unless it carries the `skip-pr-limit` label).
 

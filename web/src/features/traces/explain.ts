@@ -1,20 +1,106 @@
 import type { TraceSpan } from "@/client"
+import { docsSourceHref } from "@/shared/helpers/docs"
+import { formatNumber } from "@/shared/helpers/format"
 
+import { CONTENT_PRIVATE } from "./exceptionalAccess"
 import { formatDuration } from "./format"
-import type { GuardrailVerdict } from "./gateway"
+import { type GuardrailVerdict, gateVerdict, mcpServer } from "./gateway"
 import { clip, clipPath } from "./traceModel"
 
 // What a span means, in a sentence and a few facts, for the panel a picked span
 // opens. Built from what the span already holds; nothing here is stored.
 export interface Explanation {
   sentence: string
-  facts: [term: string, value: string][]
+  facts: Fact[]
+}
+
+/**
+ * An MCP server's page, in the workspace the call ran in, with its access test
+ * set to one key and tool when both are known.
+ */
+export interface McpServerLink {
+  serverId: string
+  workspace?: string
+  key?: string
+  tool?: string
+}
+
+export type Fact = [term: string, value: string, link?: McpServerLink]
+
+// Why a span shows no input. The dashboard cannot tell a deployment that keeps
+// no content from an agent that sent none or a reader not allowed to see it, so
+// a span that can hold content says it is not shown, and links the docs on all three.
+export interface NoInput {
+  sentence: string
+  docsHref?: string
+}
+
+export const KEEPING_CONTENT = docsSourceHref(
+  "sessions.md",
+  "keep-what-a-session-was-about",
+)
+
+// The tools Claude Code reports a command or a file path for. Otari keeps
+// Claude Code's full_command and file_path; these are the tools that send them.
+const TOOL_KEEPS: Record<string, string> = {
+  Bash: "command",
+  Read: "file path",
+  Edit: "file path",
+  Write: "file path",
+}
+
+// A step that opens a turn can keep its prompt, routed or exported. A routed
+// request can keep each tool call's arguments; a tool Claude Code exported only
+// a command or file path, and an exported gate what it checked.
+function notShown(span: TraceSpan): string | undefined {
+  if (span.kind === "step" && span.opens_turn) return "Its prompt is not shown."
+  if (span.origin === "gateway")
+    return span.kind === "tool" ? "Its arguments are not shown." : undefined
+  const tool = span.tool_name ?? ""
+  // Claude Code names its tool spans' operation "tool"; other exporters' tools keep nothing.
+  if (
+    span.kind === "tool" &&
+    span.operation === "tool" &&
+    Object.hasOwn(TOOL_KEEPS, tool)
+  )
+    return `Its ${TOOL_KEEPS[tool]} is not shown.`
+  if (gateVerdict(span)) return "What the gate checked is not shown."
+  return undefined
+}
+
+export const TURN_NO_INPUT: NoInput = {
+  sentence: "A turn keeps nothing of its own. Its steps are under it.",
+}
+
+export const GATES_NO_INPUT: NoInput = { sentence: "Its gates are under it." }
+
+// A span holding content this reader may not open: who may, rather than why there is none.
+export const PRIVATE_NO_INPUT: NoInput = { sentence: CONTENT_PRIVATE }
+
+export function noInput(span: TraceSpan): NoInput {
+  const sentence = notShown(span)
+  if (sentence) return { sentence, docsHref: KEEPING_CONTENT }
+  if (span.kind === "llm")
+    return {
+      sentence: "Otari never keeps what a model request sent or got back.",
+    }
+  if (span.kind === "step")
+    return {
+      sentence: "A request that continues a turn keeps nothing of its own.",
+    }
+  if (span.kind === "tool")
+    return { sentence: "Otari keeps no content for this tool." }
+  return { sentence: "Otari keeps no content for this kind of span." }
 }
 
 const DECIDED_BY: Record<string, string> = {
   config: "a permission rule in your settings",
   hook: "a hook",
   user: "the user",
+  mcp_key: "the key's rule on this MCP server",
+  mcp_user: "the user's rule on this MCP server",
+  mcp_everyone: "this MCP server's default policy",
+  mcp_server: "this MCP server's tool list",
 }
 
 // Claude Code reports a user's decision as user_reject, user_temporary and so on.
@@ -34,16 +120,26 @@ const STOPPED_BECAUSE: Record<string, string> = {
   refusal: "It refused",
 }
 
+// How long the span's row says it ran: between its two timestamps, which is
+// how the rows measure, so the sentence and the row never differ by the
+// millisecond that rounding its stated duration can add. A span missing a
+// timestamp has only the duration it states.
 function took(span: TraceSpan): string | null {
-  return span.duration_ms === null ? null : formatDuration(span.duration_ms)
+  const ms =
+    span.start_time && span.end_time
+      ? Math.max(0, Date.parse(span.end_time) - Date.parse(span.start_time))
+      : span.duration_ms
+  return ms === null ? null : formatDuration(ms)
 }
 
 function count(value: unknown): string | null {
-  return typeof value === "number" ? value.toLocaleString("en-US") : null
+  return typeof value === "number" ? formatNumber(value) : null
 }
 
-function facts(...pairs: [string, string | null | undefined][]) {
-  return pairs.filter((pair): pair is [string, string] => Boolean(pair[1]))
+function facts(
+  ...pairs: [string, string | null | undefined, McpServerLink?][]
+): Fact[] {
+  return pairs.filter((pair): pair is Fact => Boolean(pair[1]))
 }
 
 // What a tool call was asked to do, the way its row names it.
@@ -106,6 +202,8 @@ function tool(
   span: TraceSpan,
   blockedBy: readonly string[],
   gates: GateTally | undefined,
+  apiKeyId: string | null,
+  workspaceId: string | null,
 ): Explanation {
   const source = decisionSource(span)
   const decision = span.attributes["otari.tool.decision"]
@@ -123,11 +221,23 @@ function tool(
         : returnedError(span)
           ? "It ran and returned an error, which the agent read."
           : "It ran."
+  const serverId = span.attributes["otari.mcp.server_id"]
+  const server =
+    typeof serverId === "string"
+      ? { serverId, workspace: workspaceId ?? undefined }
+      : undefined
   return {
     sentence: `The agent called ${asked(span)}. ${outcome}`,
     facts: facts(
       ["Tool", span.tool_name],
-      ["Decision", decided],
+      ["MCP server", mcpServer(span), server],
+      [
+        "Decision",
+        decided,
+        server && apiKeyId && span.tool_name
+          ? { ...server, key: apiKeyId, tool: span.tool_name }
+          : server,
+      ],
       ["Took", span.outcome === "blocked" ? null : took(span)],
       ["Gates", gates ? describeTally(gates) : null],
     ),
@@ -166,7 +276,7 @@ function prompt(span: TraceSpan): Explanation {
   return {
     sentence: span.content.prompt
       ? "The prompt that started this turn."
-      : "A turn the agent took. Its prompt is not kept here.",
+      : "A turn the agent took.",
     facts: facts(["Took", took(span)]),
   }
 }
@@ -176,10 +286,13 @@ export function explainSpan(
   parent: TraceSpan | undefined,
   blockedBy: readonly string[],
   gates: GateTally | undefined,
+  apiKeyId: string | null = null,
+  workspaceId: string | null = null,
 ): Explanation | undefined {
   if (span.operation === "tool.blocked_on_user") return permission(span, parent)
   if (span.operation === "tool.execution") return ran(span)
-  if (span.kind === "tool") return tool(span, blockedBy, gates)
+  if (span.kind === "tool")
+    return tool(span, blockedBy, gates, apiKeyId, workspaceId)
   if (span.kind === "llm") return llm(span)
   if (span.kind === "step" && span.operation === "interaction")
     return prompt(span)
