@@ -58,9 +58,11 @@ resending the whole conversation so far. The hold above covers the loop's first
 round and its output limit. Every later round grows the hold by its own prompt
 before it is sent: the whole request it carries (the conversation, a system
 prompt or instructions, and the tools), at the same four characters per token.
-Each round's own output is billed as output too, and only the one output limit
-admission holds covers it, so a long loop can settle somewhat past its hold. A
-round on a free or unpriced model holds its tokens alone. A round the budget
+It grows it by what the round before wrote too, at the output rate, so the hold
+is always the output written so far plus one output limit for the round being
+sent. A round whose provider reported no usage is held at the output allowance
+admission holds: the request's own limit, or the deployment default, an estimate
+the model can write past, when it sets none. A round on a free or unpriced model holds its tokens alone. A round the budget
 cannot hold is sent as the loop's last: it offers none of Otari's tools and asks
 the model to answer from what it already has, and it may settle past the budget.
 The model can answer from those results; if it calls one of Otari's tools in

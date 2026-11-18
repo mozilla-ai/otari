@@ -45,6 +45,36 @@ no name until they set one; with no name, you are shown by your sign-in address.
 Signing in can also add you to an organization that has proven your email
 domain; see [Email-domain auto-join](https://docs.otari.ai/guides/organize/members#email-domain-auto-join).
 
+### Deleting your account
+
+**Account settings** ends with **Delete account** (`DELETE /api/v1/auth/account`).
+You confirm it by typing your sign-in address, and your password if you have
+one. It cannot be undone.
+
+What identifies you is deleted: your sign-in identity, sessions, passkeys and
+linked Google or GitHub accounts, your Playground conversations, your agent
+traces and telemetry, your files (their bytes go with the next files sweep),
+your keys, and the end users your service keys named.
+
+What the deployment still has to count is kept, under a new id that nothing
+links back to you: your usage rows stay in their organizations' totals with
+their tokens and cost, and lose their request tags, session labels and end-user
+identifier. An organization nobody else is active in is renamed **Deleted
+organization**, its keys are revoked, and the credentials it stored are removed:
+provider and web search keys, MCP server tokens, guardrail secrets and its
+single sign-on connection. Its usage and the rest of its configuration stay
+attached to it.
+In an organization other people use, you lose only your membership.
+Invitations to your address are withdrawn in every organization.
+
+Deletion is refused while you are the last active owner of an organization
+other people are active in; make one of them an owner first. The bootstrap
+operator cannot delete its own account.
+
+The `erased_account` table keeps each deleted account's old id and when it was
+deleted, and nothing else, so an operator restoring a backup taken before a
+deletion knows which accounts to delete again.
+
 ### Dashboard sessions and identity
 
 The first operator signs in with the master key, which Otari exchanges for an
@@ -255,8 +285,9 @@ Send the master key as `Authorization: Bearer <master-key>` or
 inference request on the master key uses the deployment's default workspace.
 
 Operators can read the operator usage API (`/api/v1/usage`), covering every
-workspace of the operator's active organization (the default organization for
-the master key).
+workspace of the operator's active organization. For the master key that is the
+bootstrap operator's active organization, which is the default organization
+until that account switches or the role is handed to an account in another one.
 
 The **Accounts** page (`/api/v1/admin/users`) lists every account, a page at a
 time, searchable by name or email (`search`, case-insensitive). From it an
@@ -267,6 +298,44 @@ operator can:
   them.
 - grant or remove operator access.
 - send a password link.
+
+The bootstrap operator can also hand that role to another operator (see
+[The bootstrap operator](#the-bootstrap-operator)).
+
+#### The bootstrap operator
+
+The bootstrap operator is the account the deployment provisioned on first start,
+or the one the role was last handed to. Every other operator holds operator
+access that can be removed. The bootstrap operator differs in that:
+
+- the master key acts as it, for master-key sign-in and for requests carrying the
+  master key, including tenant management in its active organization;
+- its password is the one that retires master-key sign-in, and the only one the
+  master key can reset;
+- only the master key can get a password link for it, so a session cannot set
+  its password without the current one;
+- it cannot be deactivated, lose operator access, or have its address blocked.
+
+`POST /api/v1/admin/users/{user_id}/bootstrap-operator` hands the role to another
+account ([how to](run-the-dashboard.md#hand-over-the-bootstrap-operator)). Only the
+bootstrap operator or the master key may call it, so no other operator can take
+the role for themselves. From a dashboard session it takes the caller's
+`current_password`, as a password change does, and a session whose account has
+no password is refused: set one first, or use the master key. It is refused with 400 for a
+target that is not an active operator with a verified (not only vouched for), unblocked email address
+and a password, which is what keeps master-key sign-in retired.
+
+After a handover:
+
+- the previous bootstrap operator stays an operator, which the new one can
+  remove from **Accounts**;
+- a password link issued to the new bootstrap operator before the handover no
+  longer works;
+- sessions the previous one already holds stay theirs, so a session opened with
+  the master key before the handover keeps acting as the previous account;
+- the master key acts as the new bootstrap operator, so whoever holds it can
+  reset that account's password and sign in as it. Rotate the master key when
+  someone who should no longer have that power holds it.
 
 #### Password links
 
@@ -280,7 +349,8 @@ from a forgotten password on a deployment without mail.
 - A password chosen through a passed-on link records the address as vouched
   for, not proven, like an [invitation](https://docs.otari.ai/guides/organize/members#invitations) link.
 - It is refused for a deactivated account, one with no address, one with no
-  password that signs in with a provider or passkey, and, with `open_signup`
+  password that signs in with a provider or passkey, the bootstrap operator's
+  account unless the request carries the master key, and, with `open_signup`
   disabled, an unverified address no organization still has as a member or
   invitee. With `open_signup` enabled, such an address gets a link, and the
   password chosen through it gives the account its own organization and

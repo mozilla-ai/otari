@@ -6,6 +6,8 @@
 * [Web search](web-search.md)
 * [Code execution](code-execution.md)
 * [MCP servers](mcp-servers.md)
+* [Connect your account to an MCP server](connect-your-account-to-an-mcp-server.md)
+* [Connect an MCP server on a private network](connect-a-private-mcp-server.md)
 
 ## Integrations
 

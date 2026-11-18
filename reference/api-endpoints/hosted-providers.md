@@ -60,10 +60,22 @@
 [OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
 {% endopenapi-operation %}
 
+{% openapi-operation spec="otari-openapi-spec" path="/api/v1/hosted-providers/{provider}/models/reset-prices" method="post" %}
+[OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
+{% endopenapi-operation %}
+
+{% openapi-operation spec="otari-openapi-spec" path="/api/v1/hosted-providers/{provider}/models/switch" method="post" %}
+[OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
+{% endopenapi-operation %}
+
 {% openapi-operation spec="otari-openapi-spec" path="/api/v1/hosted-providers/{provider}/models/{model_id}" method="patch" %}
 [OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
 {% endopenapi-operation %}
 
 {% openapi-operation spec="otari-openapi-spec" path="/api/v1/hosted-providers/{provider}/models/{model_id}" method="delete" %}
+[OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
+{% endopenapi-operation %}
+
+{% openapi-operation spec="otari-openapi-spec" path="/api/v1/hosted-providers/{provider}/vendors" method="patch" %}
 [OpenAPI otari-openapi-spec](https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json)
 {% endopenapi-operation %}

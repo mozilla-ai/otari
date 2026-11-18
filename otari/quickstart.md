@@ -24,7 +24,7 @@ Generate the credential your app will actually send to otari.ai. This token star
 
 1. Open the **API keys** page.
 2. Click **Create key**.
-3. Give the key a name and, if needed, set an expiration date. By default, the key inherits your existing model access, but you can limit it to specific models. To customize model access, click **Advanced** and select the models you want the key to use.
+3. Give the key a name and, if needed, set an expiration date. By default, the key inherits your existing model access, but you can limit it to specific models. To customize model access, click **More options** and select the models you want the key to use.
 4. Click **Create key**, then copy the token right away. It is only shown once.
 
 ![The New key dialog, with a name and an owner filled in.](assets/screenshots/api-keys-create.png)

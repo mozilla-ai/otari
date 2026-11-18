@@ -12,18 +12,20 @@ accepted headers are in [Base URL](https://docs.otari.ai/reference#base-url) and
 
 1. Open the workspace's **API keys** page and click **Create key**.
 2. Enter a **Name** and, optionally, an expiry under **Expires (optional)**.
-3. Optionally, click **Advanced** to narrow the models and tools the key can
+3. Optionally, click **More options** to narrow the models and tools the key can
    use. By default a key inherits your model access, and it can never exceed
    it.
 4. Click **Create key**, then copy the key. It is shown once, so store it
    before you close the dialog.
 
 **Access** sets what the key may call: one checkbox per scope, grouped by
-area (Models, Files, Batches, Tools, Coding agents, Usage, and End users on a
-service key). A group's own box checks or clears the whole group. A new key
-starts with **Call models** alone, the `inference:run` scope; the Claude Code
-plugin's hooks, routing and telemetry need the **Coding agents** group too. See
-[Scopes](#scopes). Edit a key to change its access later.
+area. Models and Tools are shown; Files, Batches, MCP, Coding agents, Usage,
+and End users on a service key are under **Advanced scopes**, which opens by
+itself on a key that holds one of them. A group's own box checks or clears the
+whole group. A new key starts with **Call models** alone, the `inference:run`
+scope; the Claude Code plugin's hooks, routing and telemetry need the
+**Coding agents** group too. See [Scopes](#scopes). Edit a key to change its
+access later.
 
 ![The New key dialog, with a name and an owner filled in.](assets/screenshots/api-keys-create.png)
 
@@ -46,7 +48,7 @@ anything else with `403`.
 
 Some clients fill that field with a value of their own: Claude Code and Junie
 do, and so do applications that pass their customers' ids. For those keys, set
-**Mismatched `user` field** under **Advanced** in the key form, or on the edit
+**Mismatched `user` field** under **More options** in the key form, or on the edit
 form:
 
 | Choice | A request naming another user |
@@ -126,7 +128,7 @@ Membership changes switch keys off:
 - Keys made before Otari recorded who made them are left alone on a demotion.
   When you demote someone to viewer, check the keys billed to them.
 
-The key routes are in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.48.0/docs/public/openapi.json).
+The key routes are in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.50.0/docs/public/openapi.json).
 
 ### Model and search tool access
 
@@ -226,7 +228,7 @@ answer rather than the caller's. A call that attaches a stored file by its
 container, because the container still holds what earlier runs staged into it.
 A key without `files:read` can still open a fresh container; only resuming an
 existing one is refused. The master key holds
-every scope. Each operation in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.48.0/docs/public/openapi.json)
+every scope. Each operation in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.50.0/docs/public/openapi.json)
 lists the scope it asks of every caller in `x-otari-key-scopes`, empty where
 every key may call it. A scope a request needs only for something it asked for,
 such as `files:read` for a `file_id` or a container, is named in this page

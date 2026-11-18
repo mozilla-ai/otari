@@ -17,18 +17,36 @@ Otari never guesses from content.
 | The `Otari-Conversation-Id` header | `Otari-Conversation-Id: chat-42` | `client` |
 | The `session_label` request field | `"session_label": "chat-42"` | `client` |
 | A `session_id` request tag | `"metadata": {"session_id": "chat-42"}` | `client` |
-| Claude Code's own session id | `x-claude-code-session-id`, sent on every request | `harness` |
+| Claude Code's own session id | `x-claude-code-session-id`, sent on every request (oh-my-pi 18.1.6 and later send it too, on the Anthropic API; earlier versions only when signed in with Claude Code) | `harness` |
+| opencode's own session id | `x-opencode-session-id`, sent on every request | `harness` |
+| Amp's own thread id | `x-amp-thread-id`, sent on every request | `harness` |
+| goose's own session id | `agent-session-id`, sent on every request | `harness` |
 | Codex's own session id | `thread-id`, or `session-id` without one, when `originator` or `User-Agent` starts with `codex` | `harness` |
+| Kilo Code's own session id | `x-session-id`, when `User-Agent` starts with `Kilo-Code/` or `kilo/` | `harness` |
+| Crush's own session id | `x-session-id`, when `User-Agent` starts with `Charm-Crush/` | `harness` |
+| pi's own session id | `session-id`, else `session_id`, `x-session-affinity` or `x-session-id`, when `User-Agent` starts with `pi/` | `harness` |
+| Roo Code's own task id | `session_id`, when `originator` is `roo-code` or `User-Agent` starts with `roo-code/` | `harness` |
+| Mistral Vibe's root session id | `x-affinity`, when `User-Agent` starts with `Mistral-Vibe/` or `mistral-client-python/Mistral-Vibe/` | `harness` |
+| OpenClaw's own session id | `session_id`, else `x-session-affinity`, when `originator` is `openclaw` or `User-Agent` starts with `openclaw/` | `harness` |
+| A LiteLLM session id, which OpenHands sends | `x-litellm-session-id` | `harness` |
 | A Claude Code span's session | `session.id` on an exported span | `otlp` |
 | An OTLP span's Claude session | `anthropic.session.id` on an exported span | `otlp` |
 | An OTLP span's conversation | `gen_ai.conversation.id` on an exported span | `otlp` |
 | An OTLP span's Otari label | `otari.user_session_label`, else `otari.session_label`, on an exported span | `otlp` |
 
 - A request that names no session is a trace of its own.
+- The harness a session shows comes from its `User-Agent` mark first, then from
+  the harness that owns its session header, then from the `User-Agent`'s product
+  name. So oh-my-pi (`omp/`) shows as itself while sending Claude Code's header,
+  and a client that names only its product is shown by it: `HermesAgent/`,
+  `kimi-code-cli/`, `QwenCode/`, `GitHubCopilotChat/`, `Zed/` and `curl/` show as
+  `hermes-agent`, `kimi-code`, `qwen-code`, `github-copilot`, `zed` and `curl`.
 - When a request carries more than one signal, the first row in the table wins.
 - An exported span that names no session joins its nearest ancestor's session,
   then the session another span in its OTel trace names (within the same export),
   and otherwise is grouped by its OTel trace.
+- Mistral Vibe gives a subagent its root session's id, so a subagent's task
+  reads as a new turn of that session.
 - A Claude Code session routed through Otari and the spans exported for it land
   on one trace, because they share an id. Its source is whichever reached Otari
   first, so filtering by `harness` or `otlp` alone can miss it.
@@ -39,9 +57,38 @@ Usage groups spend by the same sessions: a request's usage row records its
 session's trace id as `source_label`, so a session in one view finds its match in
 the other. A request with no session reads as "(no session)".
 
+## Agents that send a session id when asked
+
+Some harnesses keep their session id to themselves until it is turned on, and
+send no `User-Agent` of their own to an endpoint they do not know. Set both on
+the provider that points at Otari.
+
+**Hermes Agent.** On the provider entry, `session_affinity_header` names the
+header that carries the conversation id, and `extra_headers` sets the
+`User-Agent`. A subagent shares its parent's id.
+
+```yaml
+providers:
+  otari:
+    api: https://api.otari.ai/api/v1
+    key_env: OTARI_API_KEY
+    session_affinity_header: x-litellm-session-id
+    extra_headers:
+      User-Agent: HermesAgent/1.0
+```
+
+**OpenClaw.** Turn on `compat.sendSessionAffinityHeaders` on the model, and set
+`User-Agent: openclaw/1.0` in the provider's `headers`. OpenClaw then sends its
+session id on the Chat Completions API, unless prompt caching is off for the
+model. A subagent gets an id of its own.
+
+Kimi Code, Qwen Code, Zed and GitHub Copilot Chat name themselves in
+`User-Agent` but send no session header to Otari, so each of their requests is a
+trace of its own unless the client adds `Otari-Conversation-Id`.
+
 ## Grouping your own agent's requests
 
-Claude Code and Codex are recognized automatically. For your own agent:
+The harnesses in the table above are recognized automatically. For your own agent:
 
 1. **Send one `Otari-Conversation-Id` on every request of a run**, including the
    follow-ups that return tool results, and retries. A request without it starts

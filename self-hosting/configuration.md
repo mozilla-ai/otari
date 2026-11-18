@@ -1,16 +1,19 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.48.0/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.50.0/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
 ## Config file
 
-Pass a file explicitly:
+Pass a file explicitly, or name it in `OTARI_CONFIG_PATH`, which a container or
+service manager can set without changing the command. `--config` wins when both
+are given.
 
 ```bash
 otari serve --config config.yml
+OTARI_CONFIG_PATH=config.yml otari serve
 ```
 
 A small configuration looks like this:
@@ -86,6 +89,9 @@ the corresponding startup value after the database is available.
 | `platform_url` | The otari.ai address **Connect otari.ai** asks for a key. Defaults to `https://api.otari.ai`; an empty value removes the option. Startup setting. See [Connecting otari.ai](hosted-providers.md#connecting-otariai). |
 | `update_check` | Check otari.ai daily for new releases and security fixes, sending the version and a random install id. Unset (the default) asks an operator in the dashboard, except that `DO_NOT_TRACK` (`1`, `true` or `yes`) or a non-empty `CI` then answers `false` and nothing is asked; `true` or `false` answers for them and wins over both. See [Update check](update-check.md). |
 | `health_checks_enabled` | Offer the Health page and its scheduled checks of the hosted providers' models. Defaults to `true`; startup setting. See [Health checks](health-checks.md). |
+| `mcp_catalog_enabled` | Offer the MCP server catalog. Defaults to `true`; startup setting. See [MCP server catalog](mcp-catalog.md). |
+| `mcp_catalog_sync` | Whether Otari copies the MCP Registry into the catalog: `off`, `manual` (the default, loaded from **Browse catalog**), or `scheduled`. `off` suits a deployment with no outbound access. |
+| `mcp_catalog_sync_interval_hours` | Hours between syncs when `mcp_catalog_sync` is `scheduled`, from 1 to 720. Defaults to 24. |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
 | `rate_limit_rpm` | Per-user request limit. Unset disables it. |
@@ -117,7 +123,7 @@ the corresponding startup value after the database is available.
 | `trace_platform_break_glass_enabled` | Let the deployment's operator open any organization's session content, recorded with a reason and a reference. Defaults to `false`. See [Who reads content](https://docs.otari.ai/reference/gateway/sessions-reference#who-reads-content). |
 | `trace_content_key_backend` | What seals that content: `secret_key` (the default, `OTARI_SECRET_KEY`), `aws_kms`, or `aws_kms_only`, which opens nothing `OTARI_SECRET_KEY` sealed. See [Sealing content with AWS KMS](trace-storage.md#sealing-content-with-aws-kms). |
 | `cors_allow_origins` | Origins whose pages may call any route, with credentials, so a dashboard served from another host keeps its session. `*` opens every route to any origin without credentials, so a dashboard session needs its origin named. Empty, the default, sends no CORS headers. Startup setting. |
-| `cors_inference_origins` | Origins whose pages may call the model endpoints from a browser with an API key, or `*` for any. Never with credentials. Empty, the default, opens none. Startup setting. See [Calling models from a browser](#calling-models-from-a-browser). |
+| `cors_inference_origins` | Origins whose pages may call the model and web tool endpoints from a browser with an API key, and exchange an OAuth app code for one, or `*` for any. Never with credentials. Empty, the default, opens none. Startup setting. See [Calling models from a browser](#calling-models-from-a-browser). |
 | `accept_incoming_trace_context` | Join spans the gateway creates to the caller's trace. Defaults to `false`. See [Trace context propagation](#trace-context-propagation). |
 | `enable_docs` | Serve OpenAPI, Swagger UI, and ReDoc. |
 
@@ -311,9 +317,12 @@ cors_inference_origins: ["*"]
 
 It opens these endpoints, and no others: chat completions, responses,
 messages and message token counts, embeddings, rerank, moderations, the audio
-and image endpoints, and the model list (`GET /api/v1/models`), which a page
-reads to offer its models. The rest of the API, the dashboard's included,
-answers a page on another origin as it did before.
+and image endpoints, direct web search and fetch (`/api/v1/search`,
+`/api/v1/fetch`), the model list (`GET /api/v1/models`) and the tool list
+(`GET /api/v1/tools`), which a page reads to offer its models and tools, and
+the token exchange and revocation of [OAuth apps](oauth-apps.md). The rest of
+the API, the dashboard's included and the app consent screen with it, answers a
+page on another origin as it did before.
 
 A browser never sends credentials under it, so a page cannot use the session
 of someone signed in to the dashboard: only the API key the page itself holds.
@@ -674,8 +683,10 @@ How the request is translated:
 - `stop_sequences` is refused with a 400 (no Responses equivalent); `top_k`,
   `cache_control` and `metadata` are dropped.
 - With no `prompt_cache_key`, the request's session (`Otari-Conversation-Id`,
-  or the session id Claude Code sends) keys the provider's prompt cache, scoped
-  to the caller, so the session id itself never reaches the provider.
+  or the session id a recognized harness sends, as
+  [What makes a session](https://docs.otari.ai/reference/gateway/sessions-reference#what-makes-a-session) lists) keys
+  the provider's prompt cache, scoped to the caller, so the session id itself
+  never reaches the provider.
 - Anthropic's server tools are not forwarded: Otari's own web search, web fetch
   and code execution serve them where configured (see [Built-in tools](https://docs.otari.ai/reference/gateway/tools)),
   and one Otari does not serve is dropped.
@@ -856,7 +867,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/v0.48.0/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/v0.50.0/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -1127,6 +1138,15 @@ organization, an organization's
 override, key-scoped allow-list, or usage. A caller who sends a credential is
 served as that caller, valid or not. The setting is off by default and can be
 changed at runtime.
+
+The same setting publishes the Providers pages: `GET /api/v1/catalog/providers`
+lists every provider instance offering a model the caller may see, with how many,
+and `GET /api/v1/catalog/providers/{name}` lists that instance's models at its own
+rates for the caller. Both are read from the Models catalog, so a provider is
+listed exactly when one of its models is, and an instance the caller may not see
+answers 404. A hosted provider links its own terms of service and privacy policy
+there through its `terms_url` and `privacy_url`, each an absolute `http` or `https`
+address with no username or password; a `providers:` instance has neither.
 
 Anonymous reads are throttled per client address by
 `public_catalog_rate_limit_per_minute`, sixty a minute by default and its own
@@ -1620,13 +1640,6 @@ with the key and a price, and name it in `web_search_default_tool`; for Tavily,
 add `include_raw_content: true` to its options to keep each page's full text.
 The startup log says the same while they are set.
 
-### The older in-loop backend
-
-The older in-loop backend still serves a request that declares only the fetch
-tool, until it is removed. `web_fetch_default_tool` governs every fetch tool call,
-while `web_search_max_calls` does not apply there: the older backend keeps its
-fixed limit of 10 calls and its 422 past it.
-
 ## Decision providers
 
 `decision_providers` configures the upstreams behind `POST /api/v1/decisions`. The
@@ -1878,9 +1891,9 @@ Unset, `public_base_url` is used.
 - Supply an absolute http(s) URL with no trailing slash.
 - Credentials and fragments are refused, since the value goes into redirects
   and mail.
-- A query string is kept and placed ahead of the hash route in every link
-  (`https://app.example.com/dashboard/?edge=a#/verify-email?token=…`), for an
-  edge that serves one interface for several deployments.
+- A query string is kept and joined to every link's own query, ahead of its
+  fragment (`https://app.example.com/dashboard/verify-email?edge=a#token=…`),
+  for an edge that serves one interface for several deployments.
 
 A dashboard served from a sibling host of this process may hold a session here
 only when that host is listed in `cors_allow_origins`: the session cookie is
@@ -1899,7 +1912,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.48.0/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.50.0/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Contacting the Otari team

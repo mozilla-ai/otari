@@ -10,6 +10,7 @@
 
 ## Providers
 
+* [Connect otari.ai](providers/otari-ai.md)
 * [Connect OpenAI](providers/openai.md)
 * [Connect Gemini](providers/gemini.md)
 * [Connect a llama.cpp server](providers/llamacpp.md)
@@ -21,6 +22,7 @@
 
 * [Workload identity](workload-identity.md)
 * [Health checks](health-checks.md)
+* [MCP server catalog](mcp-catalog.md)
 * [Update check](update-check.md)
 * [Store agent traces](trace-storage.md)
 * [Service keys on a deployment you run](operator-service-keys.md)

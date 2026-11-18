@@ -2,7 +2,7 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.48.0/docs/public/openapi.json), the source of truth for paths,
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.50.0/docs/public/openapi.json), the source of truth for paths,
 parameters, and schemas.
 
 ## Base URL
@@ -254,7 +254,7 @@ apply to its type is left out:
 |---|---|
 | `id` | The call's ID: `otari_ws_…` for a search, `otari_wf_…` for a fetch, `otari_ci_…` for code execution, `otari_mcp_…` for an MCP call. |
 | `type` | `web_search`, `web_fetch`, `code_execution` or `mcp`. |
-| `status` | `in_progress`, `completed` or `failed`. A run that exits non-zero, a code execution called with no code (which never reaches the sandbox), and an MCP call that returned a tool error, are `failed`. |
+| `status` | `in_progress`, `completed` or `failed`. A run that exits non-zero, a code execution called with no code or with arguments that are not a JSON object (neither reaches the sandbox), and an MCP call that returned a tool error, are `failed`. |
 | `query` | A search's query. |
 | `url` | The URL the model asked a fetch for, without its query string and fragment. A redirect does not change it. |
 | `sources` | A completed search's results, each with its `url`, `title` and `published_date` (an ISO date, or date and time, for a search on a search instance; the provider's own date string on the legacy search settings; or `null`); empty when it found none. Never page text. |
@@ -264,7 +264,7 @@ apply to its type is left out:
 | `server`, `name` | The MCP server and the tool the model called on it. |
 | `output` | The text an ended MCP call gave the model. A failed call's is Otari's own `[tool error] …` text, never the server's exception. |
 | `truncated` | `true` when `stdout`, `stderr` or `output` was cut to 64 KiB. The model read it whole. |
-| `error` | Why a failed call failed, when Otari can say: `provider`, `status`, `tag` and `retryable`, the same four fields the [Search](#search) endpoint's `Otari-Error-*` headers carry. A call refused past its declaration's `max_uses`, or past the request's `web_search_max_calls`, has `"tag": "call_limit"` and a `null` provider. Absent when Otari can say no more than that the call failed. |
+| `error` | Why a failed call failed, when Otari can say: `provider`, `status`, `tag` and `retryable`, the same four fields the [Search](#search) endpoint's `Otari-Error-*` headers carry. A call refused past its declaration's `max_uses`, or past the request's `web_search_max_calls`, has `"tag": "call_limit"` and a `null` provider, and a call whose arguments were not a JSON object has `"tag": "invalid_input"`. Absent when Otari can say no more than that the call failed. |
 
 A response that is not streamed carries the ended entry of every call, across
 all of the tool loop's rounds:
@@ -427,6 +427,10 @@ To tag a request with a free-form end-user ID, put it in `metadata`
   disconnected. A provider failure before the first chunk is an ordinary
   error, and a client disconnect that writes no row (above) records nothing.
   The field is null on any row whose stream was not cut.
+- A request whose gateway tool loop (MCP servers, web search or fetch, code
+  execution) fails after the provider answered one or more of its rounds is
+  billed for the rounds the provider answered, streamed or not. The row stays
+  an `error`.
 
 `GET /api/v1/usage/requests/{request_id}` returns what a request was billed,
 looked up by its `Otari-Request-ID`:
@@ -463,7 +467,7 @@ has a key of its own.
 | Route | Returns |
 |---|---|
 | `GET /api/v1/key/budget` | What the key may still spend, and every cap that decides it. On a service key, `end_users` also gives how many end users its cap counts and the cap (`max_end_users`, `null` for none); `null` on any other key. |
-| `GET /api/v1/key/usage/summary` | The `/api/v1/usage/summary` response over the key's own requests, with the same filters, `dimensions` and `group_by_tag`. |
+| `GET /api/v1/key/usage/summary` | The `/api/v1/usage/summary` response over the key's own requests, with the same filters, `dimensions` and `group_by_tag`. The key's own user is listed in `by_user` with `label: null`; a service key's end users keep the label the service gave them. |
 | `GET /api/v1/key/usage/series` | The `/api/v1/usage/series` response over the key's own requests. |
 
 ```json
@@ -511,8 +515,9 @@ What a retry costs depends on how the first attempt ended:
 
 | First attempt | Billed | A retry |
 |---|---|---|
-| Refused by the provider or the gateway (a 429, a 529, any other error) | No: its budget hold is refunded | Can be sent as it is. |
-| A stream that failed or that the client disconnected from | The tokens the provider reported before it ended, and nothing more (see [Cost of a failed or interrupted request](#cost-of-a-failed-or-interrupted-request)) | Is a new request, billed on its own. |
+| Refused by the provider or the gateway (a 429, a 529, any other error) | No: its budget hold is refunded, unless its gateway tool loop had rounds the provider answered (see [Cost of a failed or interrupted request](#cost-of-a-failed-or-interrupted-request)) | Can be sent as it is. |
+| A stream that failed | The tokens the provider reported before it ended, plus the gateway tool loop rounds the provider answered; under `estimate`, a stream the provider cut may be topped up to an estimate of what it streamed (see [Cost of a failed or interrupted request](#cost-of-a-failed-or-interrupted-request)) | Is a new request, billed on its own. |
+| A stream the client disconnected from | The tokens the provider reported before it ended, and under `estimate` an estimate of what it did not report (the request's input, the output already streamed) (see [Cost of a failed or interrupted request](#cost-of-a-failed-or-interrupted-request)) | Is a new request, billed on its own. |
 | A non-streaming request that succeeded while its response was lost (a dropped connection, a client timeout) | Yes | Calls the provider again and is billed again, unless both carry the same `Idempotency-Key`. |
 
 #### `Idempotency-Key`
@@ -1263,7 +1268,7 @@ at the top level of the body.
 | `invalid_model` | 400 | The model selector names no configured provider, alias, policy or catalog model id; checked before the key's allow-list, so a restricted key gets it too, and before `require_pricing`, so it is never answered as `pricing_required`. A `provider:model` selector whose provider resolves is not judged here, since only the provider knows its models | |
 | `model_not_allowed` | 403 | The key may not use the model | |
 | `model_not_serving` | 403 | The organization offers the model on a provider key, with its serving switch off | |
-| `model_not_found` | 404 | A provider key of the organization serves the provider, and none offers the model | |
+| `model_not_found` | 404 | A provider key of the organization serves the provider, and none offers the model; or no credential serves the provider and neither the caller's catalog nor models.dev knows the model (a misspelled catalog id), when `detail` names up to two of the nearest catalog ids | |
 | `country_not_supported` | 403 | `provider_supported_countries` closes the model's provider to the country the request comes from, or the country is unknown. See [Supported countries](https://docs.otari.ai/self-hosting/configuration#supported-countries) | |
 | `context_length_exceeded` | 400 | The prompt is too long for the model | |
 | `request_too_large` | 413 | The provider refused the request for its size, such as a prompt over a tokens-per-minute limit | |
@@ -1272,7 +1277,7 @@ at the top level of the body.
 | `structured_output_failed` | 400 | The model failed to produce output matching the request's JSON schema (`response_format` or `text.format`), which the provider reported with its own code (Groq's `json_validate_failed`). Unlike other 400s, resending the same request may succeed, so a client can retry it or send it to another model. The partial output the provider returns is not relayed. A routing policy moves on to its next candidate first, and answers with this code when every candidate failed this way | |
 | `wrong_model_type` | 400 | The model is a kind the endpoint cannot serve. A chat completion, a message or a response is refused for an embedding model, which the provider's model listing or models.dev may name, or for a rerank model, a transcription model or one that writes no text, which only the listing names; for a routing policy or a catalog ID, only when every candidate is such a kind. `/embeddings` is refused only for a model its provider's listing names as another kind; a listed `other` model, and one only models.dev describes, still reach the provider. `detail` names the kind, except for a model the listing says writes no text, which it calls not a chat model. GET /models carries the kind as `type` | |
 | `all_candidates_rejected` | 400 | Every model a routing policy or a catalog ID tried rejected the request as invalid | |
-| `insufficient_funds` | 402 | The organization has no funds paid in to cover what the deployment's account would run: the model, served on a credential the deployment pays for, or a gateway-run tool ([Tools](tools.md#pricing-a-gateway-run-tool)). A tool's refusal names the tool in `detail`; a model's does not name the model. Nothing was sent upstream | |
+| `insufficient_funds` | 402 | The organization has no funds paid in to cover what the deployment's account would run: the model, served on a credential the deployment pays for, or a gateway-run tool ([Tools](tools.md#pricing-a-gateway-run-tool)). A tool's refusal names the tool in `detail`; a model's does not name the model. Nothing was sent upstream | `Otari-Billing-Url`, and `billing_url` in the body: where the organization adds funds, when the deployment's billing names a page for it; `detail` then ends `Add funds at <url>.` |
 | `pricing_required` | 402 | `require_pricing` is on and the model resolves but has no price, a direct search has no price (see [Search](#search)), or a gateway-run tool the request declares has no row to price its calls ([Tools](tools.md#pricing-a-gateway-run-tool)). An unpriced model whose provider has no credential answers `provider_not_configured` instead | |
 | `provider_not_configured` | 424 | Nothing declares the model's provider, or its declaration names no key the provider needs, so nothing was sent upstream. Not a 5xx, so a client does not retry it: an operator adds the provider as a [hosted provider](https://docs.otari.ai/self-hosting/providers/hosted-providers) (switching on the model), or the organization adds its own provider key. A provider's environment variable alone serves nothing | |
 | `provider_credential_rejected` | 424 | The provider refused the credential the gateway holds for it (an upstream 401, or a 403 other than one rejecting the request, which is a 400). It is the gateway's key, not the caller's, so it is never a 401 or 403; and not a 5xx, because no retry makes the key valid. Replace or fix the provider credential. The usage row keeps the provider's own status. A routing policy moves on to its next candidate first, and answers with this code when every candidate either had no credential or had it rejected, and at least one was rejected | |

@@ -7,18 +7,27 @@ reliable than a copied provider table.
 
 ## Model format
 
-Use `provider:model`:
+A request names its model in one of two forms:
 
 ```text
-openai:gpt-5
+openai/gpt-oss-120b          # catalog id, vendor/model: Otari picks the provider
+openai:gpt-5                 # provider:model: pinned to that provider
 anthropic:claude-sonnet-4-6
 ollama:llama3
 ```
 
-The prefix selects a provider or named provider instance. Everything after the
-first colon is sent as the provider's model ID.
+`vendor/model` (`deepseek/deepseek-v4.1-flash`) is the model's catalog id, the `id` that [`GET /api/v1/models`](#listing-available-models) lists, and Otari picks the provider: among the priced offerings the caller can reach, the organization's own provider key where it offers the model, then the vendor's own provider where it serves the model, then the cheapest. `provider:vendor/model` (`nebius:deepseek/deepseek-v4.1-flash`) pins the provider and lets Otari pick the model id that provider spells it under. See [Catalog spellings](#catalog-spellings) for the rules.
 
-A request may also name the model the way the catalog does. `vendor/model` (`deepseek/deepseek-v4.1-flash`) is the model's catalog id, and Otari picks the provider: among the priced offerings the caller can reach, the organization's own provider key where it offers the model, then the vendor's own provider where it serves the model, then the cheapest. `provider:vendor/model` (`nebius:deepseek/deepseek-v4.1-flash`) pins the provider and lets Otari pick the model id that provider spells it under. See [Catalog spellings](#catalog-spellings) for the rules.
+In `provider:model`, the prefix selects a provider or named provider instance,
+and everything after the first colon is sent as the provider's model ID, colons
+included (`bedrock:anthropic.claude-sonnet-4-20250514-v1:0`). The two separators
+are not interchangeable: `openai/gpt-oss-120b` is a catalog id, while
+`openai:gpt-oss-120b` asks the `openai` provider itself for that model.
+
+A model neither the catalog nor models.dev knows, such as a misspelled catalog
+id, is refused with `404` (`model_not_found`), naming up to two of the nearest
+catalog ids. A model that exists but whose provider has no credential is
+refused with `424` (`provider_not_configured`).
 
 The legacy `provider/model` spelling is still honored where it names an
 offering the deployment serves (`openai/gpt-4o` while an `openai` instance
