@@ -20,7 +20,7 @@ import {
   UNKNOWN_LIMITS,
 } from "@/features/spend/limits"
 import { keyName, memberName } from "@/features/spend/names"
-import type { SpendWindow } from "@/features/spend/period"
+import { type SpendWindow, usageRange } from "@/features/spend/period"
 import { billedTokenTotal } from "@/features/usage/usageTotals"
 import { useKeys } from "@/shared/api/apiKeys"
 import { useAllSpendCeilings } from "@/shared/api/budgets"
@@ -343,14 +343,18 @@ export function useSpend(
     user_id: userId ? [userId] : undefined,
   }
   const current = useUsageSummary(
-    { ...scope, start_date: window.start },
-    "day",
+    { ...scope, ...usageRange(window) },
+    window.bucket,
     ["user", "api_key", "model", "provider"],
     isEnabled,
     "organization",
   )
   const previous = useUsageSummary(
-    { ...scope, start_date: window.previousStart, end_date: window.start },
+    {
+      ...scope,
+      start_date: window.previousStart,
+      end_date: window.previousEnd,
+    },
     "day",
     NO_BREAKDOWNS,
     isEnabled && withPrevious,
@@ -480,6 +484,7 @@ export function useWorkspaceSpend(
     workspaceList.map((workspace) => workspace.id),
     window.start,
     isEnabled,
+    window.end,
   )
   const rows = workspaceList
     .map((workspace, index): SpendRow => {

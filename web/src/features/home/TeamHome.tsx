@@ -34,14 +34,18 @@ import {
 } from "@/features/spend/limits"
 import { paceOf } from "@/features/spend/pace"
 import {
-  isPeriodKey,
-  PERIODS,
-  type PeriodKey,
+  comparedWith,
+  DEFAULT_PERIOD,
+  figureLabel,
+  periodFromUrl,
   sessionsSearchFor,
+  usageRange,
   windowOf,
   windowWords,
 } from "@/features/spend/period"
 import { SetLimitDialog } from "@/features/spend/SetLimitDialog"
+import { SpendPeriodPicker } from "@/features/spend/SpendPeriodPicker"
+import { usePageClock } from "@/features/spend/usePageClock"
 import {
   type SpendRow,
   useSpend,
@@ -122,7 +126,7 @@ const CUTS: {
   },
 ]
 
-const URL_DEFAULTS = { period: "month", by: "", workspace: "" }
+const URL_DEFAULTS = { period: DEFAULT_PERIOD, by: "", workspace: "" }
 
 /** The limit figure's label, by how often the organization's limit resets. */
 const LIMIT_LABELS: Record<string, string | undefined> = {
@@ -204,7 +208,7 @@ export function TeamHome({
   notice?: ReactNode
 }) {
   // One clock for the page's life, so its windows and query keys hold still.
-  const [now] = useState(() => Date.now())
+  const [now, refreshClock] = usePageClock()
   const navigate = useNavigate()
   const { get, patch } = useUrlState(URL_DEFAULTS)
   const { select } = useSelectedWorkspace()
@@ -219,8 +223,7 @@ export function TeamHome({
   // The list `useSpend` reads, so this asks nothing new.
   const keys = useKeys()
 
-  const rawPeriod = get("period")
-  const period: PeriodKey = isPeriodKey(rawPeriod) ? rawPeriod : "month"
+  const period = periodFromUrl(get("period"))
   const window = windowOf(period, now)
   const workspaceId = get("workspace")
   const hasWorkspaces = (workspaces.data?.length ?? 0) > 1
@@ -251,7 +254,7 @@ export function TeamHome({
   const hasSessions = hasSurface("traces")
   const hasRequests = hasSurface("usage")
   const sessions = useTraceCount(
-    { workspaceId, start: window.start, q: "" },
+    { workspaceId, start: window.start, end: window.end || undefined, q: "" },
     hasSessions,
   )
 
@@ -312,7 +315,7 @@ export function TeamHome({
         apiFetch<UsageSummary>(
           `${usageScope.base}/summary?${new URLSearchParams({
             workspace_id: candidate,
-            start_date: window.start,
+            ...usageRange(window),
             bucket: "day",
             dimensions: "none",
             [filter]: row.filterKey ?? "",
@@ -378,7 +381,7 @@ export function TeamHome({
             : cut.value === "providers"
               ? "See its requests"
               : "See its sessions",
-        hint: `What ran ${windowWords(period, window)}`,
+        hint: `What ran ${windowWords(window)}`,
         icon: FiLayers,
         run: () => void open(row),
       })
@@ -536,12 +539,12 @@ export function TeamHome({
         title="Home"
         action={
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <Segmented
-              label="Window"
-              size="md"
-              options={PERIODS}
+            <SpendPeriodPicker
               value={period}
-              onChange={(next) => patch({ period: next })}
+              onChange={(next) => {
+                refreshClock()
+                patch({ period: next })
+              }}
             />
             {hasWorkspaces ? (
               <FilterSelect
@@ -569,18 +572,14 @@ export function TeamHome({
       />
       <KpiStrip isEmpty={false} columns={5}>
         <KpiCell
-          label={
-            period === "month"
-              ? "Spent this month"
-              : `Spent, ${window.days} days`
-          }
+          label={figureLabel("Spent", window)}
           value={spend.totals ? formatUsd(total) : "—"}
           delta={
             delta !== null ? (
               <TrendChip
                 fraction={delta}
                 polarity="neutral"
-                caption={`vs prior ${window.days} days`}
+                caption={comparedWith(window)}
               />
             ) : undefined
           }
@@ -595,7 +594,7 @@ export function TeamHome({
             spend.series.length > 1 ? (
               <Sparkline
                 values={spend.series.map((point) => point.cost)}
-                ariaLabel="Spend per day over the window"
+                ariaLabel={`Spend per ${window.bucket} over the window`}
                 height={40}
               />
             ) : undefined
@@ -657,17 +656,13 @@ export function TeamHome({
             value={spend.totals ? formatPct(errorRate) : "—"}
             subline={
               spend.totals
-                ? `${formatNumber(spend.totals.error_count)} failed requests`
+                ? `${formatNumber(spend.totals.error_count)} failed ${spend.totals.error_count === 1 ? "request" : "requests"}`
                 : unreadLine
             }
           />
         )}
         <KpiCell
-          label={
-            period === "month"
-              ? "Tokens this month"
-              : `Tokens, ${window.days} days`
-          }
+          label={figureLabel("Tokens", window)}
           value={
             spend.totals
               ? formatTokens(billedTokenTotal(spend.totals) ?? 0)
@@ -686,7 +681,7 @@ export function TeamHome({
                 values={spend.series.map(
                   (point) => point.input_tokens + point.output_tokens,
                 )}
-                ariaLabel="Billed tokens per day over the window"
+                ariaLabel={`Billed tokens per ${window.bucket} over the window`}
                 height={40}
               />
             ) : undefined
@@ -700,7 +695,7 @@ export function TeamHome({
           subline={
             sessionCount === undefined
               ? `in ${scopeName}`
-              : `${formatNumber(sessionCount)} ${sessionCount === 1 ? "session" : "sessions"} ${windowWords(period, window)}`
+              : `${formatNumber(sessionCount)} ${sessionCount === 1 ? "session" : "sessions"} ${windowWords(window)}`
           }
           graphic={
             hasSessions ? (
@@ -756,7 +751,9 @@ export function TeamHome({
                 <EmptyMessage>
                   {isTableFailed
                     ? "Could not load"
-                    : "Nothing was spent in this window. Pick a longer one above."}
+                    : period === "6m"
+                      ? "Nothing was spent in this window."
+                      : "Nothing was spent in this window. Pick a longer one above."}
                 </EmptyMessage>
               }
               onRowAction={
