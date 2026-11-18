@@ -11,7 +11,7 @@ import asyncio
 import uuid
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from time import monotonic
 from typing import Any, ClassVar, Literal
@@ -402,6 +402,9 @@ class McpServerContacts:
             per_user = server.credential_mode == McpCredentialMode.PER_USER
             if per_user and contact.failure in _ONE_USERS_REFUSAL:
                 return "discarded"
+            if per_user and server.workspace_id is None:
+                # One person's account listed it, and an organization's health is read in every workspace.
+                contact = replace(contact, listing=None)
             health = health_after_contact(
                 server.health,
                 allowed_tools=server.allowed_tools,

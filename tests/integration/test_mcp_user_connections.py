@@ -88,6 +88,8 @@ from gateway.services.tools import (
     AttachedMcpServerIndex,
     McpConnectionService,
     McpGrantMembershipListener,
+    McpServerContact,
+    McpServerContacts,
     McpSignInReason,
     McpUserTokens,
     McpWorkspaceServers,
@@ -690,6 +692,35 @@ async def test_a_members_sign_in_lists_the_server_once_and_records_it_as_a_check
     assert health is not None
     assert (health["status"], health["tools"]) == ("healthy", ["list_files", "read_file", "delete_file"])
     assert health["checked_at"]
+
+
+async def test_one_person_s_listing_is_not_recorded_on_an_organization_s_per_user_server(
+    async_db: AsyncSession, config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every workspace of the organization reads the server's health, and one account lists what that account may."""
+    seen: list[ResolvedMcpServer] = []
+    _catalog(monkeypatch, seen)
+    world = await _world(async_db, config)
+    row = await _row(async_db, world.server.id)
+    row.workspace_id = None
+    await async_db.commit()
+
+    await _sign_in(async_db, config, world, world.member)
+    assert seen == []
+    assert (await _row(async_db, world.server.id)).health is None
+
+    # Nor what a request through that person's connection listed: it still says the server answered.
+    @asynccontextmanager
+    async def unit_of_work() -> AsyncIterator[UnitOfWork]:
+        async with AsyncSession(async_db.bind, expire_on_commit=False) as session:
+            yield UnitOfWork(session)
+
+    listing = ServerCheck(tool_names=["list_files", "delete_file"])
+    contact = McpServerContact(server_id=world.server.id, url=PUBLIC_URL, listing=listing)
+    assert await McpServerContacts(unit_of_work=unit_of_work)._store(contact) == "decided"
+    health = (await _row(async_db, world.server.id)).health
+    assert health is not None
+    assert (health["status"], health.get("tools", [])) == ("healthy", [])
 
 
 async def test_a_listing_that_fails_right_after_a_sign_in_is_recorded_and_does_not_fail_the_sign_in(

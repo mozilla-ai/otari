@@ -57,6 +57,15 @@ class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Nev
             and_(WorkspaceMcpServer.workspace_id.is_(None), WorkspaceMcpServer.organization_id == organization_id),
         )
 
+    async def find_reached(
+        self, server_id: uuid.UUID, workspace_id: uuid.UUID, organization_id: uuid.UUID
+    ) -> WorkspaceMcpServer | None:
+        """One server the workspace reaches before its settings on it: its own, or its organization's; else ``None``."""
+        query = select(WorkspaceMcpServer).where(
+            WorkspaceMcpServer.id == server_id, self._reached_from(workspace_id, organization_id)
+        )
+        return (await self.db.execute(query)).scalar_one_or_none()
+
     async def ids_in_workspace(
         self, workspace_id: uuid.UUID, organization_id: uuid.UUID | None = None
     ) -> list[uuid.UUID]:

@@ -65,10 +65,12 @@ class WorkspaceMcpServerGrantRepository(BaseRepository[WorkspaceMcpServerGrant, 
         self, server_id: uuid.UUID, grant_id: uuid.UUID, workspace_id: uuid.UUID | None = None
     ) -> WorkspaceMcpServerGrant | None:
         """One grant of a server, applying in ``workspace_id`` when given, or ``None`` when the id names none."""
-        grant = await self.db.get(WorkspaceMcpServerGrant, grant_id)
-        if grant is None or grant.server_id != server_id:
-            return None
-        return grant if workspace_id is None or grant.workspace_id == workspace_id else None
+        query = select(WorkspaceMcpServerGrant).where(
+            WorkspaceMcpServerGrant.id == grant_id, WorkspaceMcpServerGrant.server_id == server_id
+        )
+        if workspace_id is not None:
+            query = query.where(WorkspaceMcpServerGrant.workspace_id == workspace_id)
+        return (await self.db.execute(query)).scalar_one_or_none()
 
     async def put(
         self,
