@@ -6664,7 +6664,7 @@
             "title": "Reject User Mismatch"
           },
           "scopes": {
-            "description": "The endpoint groups the key may reach. Omitted, the key gets 'inference:run' alone, which calls models and nothing else. The end-users scopes are a service key's alone.",
+            "description": "The endpoint groups the key may reach. Omitted, the key gets 'inference:run', 'web:search', 'web:fetch', 'code:execute', 'mcp:read' and 'mcp:execute': it calls models and tools and lists MCP servers, and nothing else. The end-users scopes are a service key's alone.",
             "items": {
               "$ref": "#/components/schemas/KeyScope"
             },
@@ -7042,7 +7042,7 @@
             "title": "Reject User Mismatch"
           },
           "scopes": {
-            "description": "The endpoint groups the key may reach. Omitted, the key gets 'inference:run' alone, which calls models and nothing else. The end-users scopes are a service key's alone.",
+            "description": "The endpoint groups the key may reach. Omitted, the key gets 'inference:run', 'web:search', 'web:fetch', 'code:execute', 'mcp:read' and 'mcp:execute': it calls models and tools and lists MCP servers, and nothing else. The end-users scopes are a service key's alone.",
             "items": {
               "$ref": "#/components/schemas/KeyScope"
             },
@@ -10169,7 +10169,7 @@
         "type": "string"
       },
       "GuardrailConfig": {
-        "description": "A single guardrail check the caller wants the gateway to enforce.\n\nURL safety: when ``url`` is supplied it is validated by\n:func:`gateway.services.guardrails.check_guardrail_urls` (not here at parse\ntime \u2014 the check does a DNS lookup that must be awaited) with the same\nSSRF guard used for MCP server URLs (loopback allowed by default for\nsame-host sidecars; gated by ``OTARI_MCP_ALLOW_LOOPBACK`` /\n``OTARI_MCP_ALLOW_PRIVATE_HOSTS``). Most deployments omit ``url`` and rely\non the operator-set ``OTARI_GUARDRAILS_URL`` instead.",
+        "description": "A single guardrail check the caller wants the gateway to enforce.\n\nURL safety: when ``url`` is supplied it is validated by\n:func:`gateway.services.guardrails.check_guardrail_urls` (not here at parse\ntime, since the check does a DNS lookup that must be awaited) with the same\nSSRF guard used for MCP server URLs: public addresses only, connected at the\naddress that was checked, with no redirect followed. Most deployments omit\n``url`` and rely on the operator-set ``OTARI_GUARDRAILS_URL`` instead, which\nmay be on a private address.",
         "properties": {
           "credential": {
             "anyOf": [
@@ -11280,7 +11280,7 @@
         "type": "object"
       },
       "HostedModelPublic": {
-        "description": "One offered model, with the price the deployment currently serves it at.\n\n``price_source`` says which rung of the deployment's ladder answered:\n``deployment`` for a rate an operator set, ``provider`` for the rate the\nprovider's own listing named, ``defaults`` for the community-maintained\nrate, whether this surface stored it or the fallback supplies it, and None\nwhen nothing prices the model yet. ``unit`` says what\nthe rates are per, so a per-request rate is not read as a per-token one.\n``enabled`` is the serving switch; a model offered without a discoverable\nprice starts off. ``disabled_reason`` says why a model is off: ``unpriced``\nwhile it waits for a rate, ``operator`` when an operator switched it off,\n``unavailable`` when its provider refused to serve it. ``type`` is the\nkind of model, from models.dev, and None when it does not know.\n``vendor`` is who makes the model, ``Other`` when nothing names one.\n``default_rates`` is what the default rung (models.dev, or the provider's\nown listing) would price a model an operator priced, where it prices it\nand the two differ; None otherwise.",
+        "description": "One offered model, with the price the deployment currently serves it at.\n\n``price_source`` says which rung of the deployment's ladder answered:\n``deployment`` for a rate an operator set, ``provider`` for the rate the\nprovider's own listing named, ``defaults`` for the community-maintained\nrate, whether this surface stored it or the fallback supplies it, and None\nwhen nothing prices the model yet. ``unit`` says what\nthe rates are per, so a per-request rate is not read as a per-token one.\n``enabled`` is the serving switch; a model offered without a discoverable\nprice starts off. ``disabled_reason`` says why a model is off: ``unpriced``\nwhile it waits for a rate, ``operator`` when an operator switched it off,\n``unavailable`` when its provider refused to serve it. ``type`` is the\nkind of model, from models.dev, and None when it does not know.\n``vendor`` is who makes the model, ``Other`` when nothing names one.\n``default_rates`` is what the default rung (models.dev, or the provider's\nown listing) would price a model an operator priced, where it prices it\nand the two differ; None otherwise. ``region_rates`` holds, by region slug,\nthe rates a region of the provider sets of its own (stored under\n``<provider>@<slug>:<model>`` through the pricing endpoint); a region\nabsent from it settles at the provider's rate.",
         "properties": {
           "cache_read_price_per_million": {
             "anyOf": [
@@ -11390,6 +11390,13 @@
           "provider": {
             "title": "Provider",
             "type": "string"
+          },
+          "region_rates": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/HostedModelRates"
+            },
+            "title": "Region Rates",
+            "type": "object"
           },
           "type": {
             "anyOf": [
@@ -11795,7 +11802,7 @@
         "type": "object"
       },
       "HostedProviderCreateRequest": {
-        "description": "Configure a provider this deployment will serve hosted inference on.\n\n``provider`` is the any-llm implementation. ``name`` is what requests\naddress it by (``name:model``), defaulting to ``provider``; a name of its\nown lets two endpoints of one implementation coexist. ``api_key`` may be\nleft out for a backend that needs none, or for an endpoint of its own\n(``api_base``), which is called with a placeholder key.\n\n``client_args`` is whatever the provider's SDK client needs beyond the key\n(Bedrock's region and IAM pair), the same shape an organization provider\nkey takes. Values under credential-shaped names come back masked.\n``restricted_to_organization_id`` keeps the provider to one organization;\nevery other one is served as if it were not configured.\n``serves_unlisted_models`` serves a model the roster does not list, as a\n``config.yml`` instance does, and switches on every model it offers\nwhether or not something prices it. ``supported_countries`` keeps the\nprovider to requests from those ISO country codes, checked as well as\n``provider_supported_countries``; null serves every country.\n``zero_data_retention`` declares that the upstream keeps no prompt or\ncompletion data; the catalog shows it and nothing enforces it.\n``terms_url`` and ``privacy_url`` link the upstream's own terms of service\nand privacy policy from the public Providers pages: absolute http(s)\naddresses with no username or password.",
+        "description": "Configure a provider this deployment will serve hosted inference on.\n\n``provider`` is the any-llm implementation. ``name`` is what requests\naddress it by (``name:model``), defaulting to ``provider``; a name of its\nown lets two endpoints of one implementation coexist. ``api_key`` may be\nleft out for a backend that needs none, or for an endpoint of its own\n(``api_base``), which is called with a placeholder key.\n\n``client_args`` is whatever the provider's SDK client needs beyond the key\n(Bedrock's region and IAM pair), the same shape an organization provider\nkey takes. Values under credential-shaped names come back masked.\n``restricted_to_organization_id`` keeps the provider to one organization;\nevery other one is served as if it were not configured.\n``serves_unlisted_models`` serves a model the roster does not list, as a\n``config.yml`` instance does, and switches on every model it offers\nwhether or not something prices it. ``supported_countries`` keeps the\nprovider to requests from those ISO country codes, checked as well as\n``provider_supported_countries``; null serves every country.\n``data_location`` declares where the upstream keeps request data: an ISO\n3166-1 alpha-2 country code, ``EU`` or ``GLOBAL``; null leaves it undeclared.\nA workspace that lists the locations it accepts is served only from one of them.\n``zero_data_retention`` declares that the upstream keeps no prompt or\ncompletion data; the catalog shows it and nothing enforces it.\n``terms_url`` and ``privacy_url`` link the upstream's own terms of service\nand privacy policy from the public Providers pages: absolute http(s)\naddresses with no username or password.",
         "example": {
           "api_key": "<your OpenAI API key>",
           "provider": "openai"
@@ -11837,6 +11844,18 @@
               }
             ],
             "title": "Client Args"
+          },
+          "data_location": {
+            "anyOf": [
+              {
+                "maxLength": 16,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Location"
           },
           "enabled": {
             "default": true,
@@ -11960,7 +11979,7 @@
         "type": "object"
       },
       "HostedProviderPublic": {
-        "description": "One hosted provider, known by its name, its implementation and the tail of its key.\n\nNo shape in this section carries key material: a stored credential is\nknown by its last four characters and nothing else, ``client_args`` goes\nout with credential-shaped values masked, and ``api_base`` with the\npassword in its userinfo and its query values masked.\n\n``name`` is what requests address and every route takes; ``provider`` is\nthe any-llm implementation. ``source`` says where the provider is defined.\nA ``config`` provider comes from the ``hosted_providers:`` block, has no\nrow and so no ``id`` or timestamps, and is changed by editing the\nconfiguration rather than through this API; its models are administered as\na stored provider's are. ``shadows_config`` marks a stored provider that\nwins over a configuration entry of the same name, which serves again once\nthe row is deleted. ``has_api_key`` is false for one stored without a key,\nand ``decryptable`` false for one whose key or extras no configured\n``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.\n``serves_unlisted_models`` is true for one that serves a model its roster\ndoes not list. ``supported_countries`` is null for one that serves every\ncountry. ``zero_data_retention`` is the operator's declaration that the\nupstream keeps no prompt or completion data. ``terms_url`` and\n``privacy_url`` are the upstream's policies, null where none is linked.\n``models`` counts its offered models, on the list only.",
+        "description": "One hosted provider, known by its name, its implementation and the tail of its key.\n\nNo shape in this section carries key material: a stored credential is\nknown by its last four characters and nothing else, ``client_args`` goes\nout with credential-shaped values masked, and ``api_base`` with the\npassword in its userinfo and its query values masked.\n\n``name`` is what requests address and every route takes; ``provider`` is\nthe any-llm implementation. ``source`` says where the provider is defined.\nA ``config`` provider comes from the ``hosted_providers:`` block, has no\nrow and so no ``id`` or timestamps, and is changed by editing the\nconfiguration rather than through this API; its models are administered as\na stored provider's are. ``shadows_config`` marks a stored provider that\nwins over a configuration entry of the same name, which serves again once\nthe row is deleted. ``has_api_key`` is false for one stored without a key,\nand ``decryptable`` false for one whose key or extras no configured\n``OTARI_SECRET_KEY`` reads, which serves nothing until re-entered.\n``serves_unlisted_models`` is true for one that serves a model its roster\ndoes not list. ``supported_countries`` is null for one that serves every\ncountry. ``zero_data_retention`` is the operator's declaration that the\nupstream keeps no prompt or completion data. ``terms_url`` and\n``privacy_url`` are the upstream's policies, null where none is linked.\n``data_location`` is where the upstream keeps request data, null where\nnobody declared it. ``regions`` lists the regions it serves from, in the\norder they are tried, and is empty for a provider that serves from its own\nconnection alone. ``models`` counts its offered models, on the list only.",
         "properties": {
           "api_base": {
             "anyOf": [
@@ -12007,6 +12026,17 @@
               }
             ],
             "title": "Created At"
+          },
+          "data_location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Location"
           },
           "decryptable": {
             "default": true,
@@ -12062,6 +12092,13 @@
           "provider": {
             "title": "Provider",
             "type": "string"
+          },
+          "regions": {
+            "items": {
+              "$ref": "#/components/schemas/HostedProviderRegionPublic"
+            },
+            "title": "Regions",
+            "type": "array"
           },
           "restricted_to_organization_id": {
             "anyOf": [
@@ -12143,6 +12180,369 @@
           "enabled"
         ],
         "title": "HostedProviderPublic",
+        "type": "object"
+      },
+      "HostedProviderRegionCreateRequest": {
+        "description": "Add a region a hosted provider serves from.\n\nOnly what differs from the provider is given; every field left out is the\nprovider's. ``slug`` pins the region in a selector\n(``<provider>@<slug>:<model>``) and names it in every route. ``api_key``\nleft out uses the provider's key, which a region on another origin than\nthe provider's endpoint may not: it needs a key of its own there.\n``client_args`` are merged over the provider's on the provider's origin, so\na Bedrock region gives its ``region_name`` alone; a region on another\norigin takes its own alone. An ``api_base`` that carries a key must be https.\n``data_location`` declares where the region keeps request data. Left out, it\ncopies the provider's declaration as it stands; null declares nothing. It is\nthe region's own from then on: a later change to the provider's does not\nmove it.\n\nA request is served by the first enabled region whose countries admit it\nand whose data location the workspace accepts; a pinned region is held to\nthe same filters. A provider with no regions yet serves from its own connection. Adding its\nfirst region keeps that connection as a region of its own, ahead of the new\none, under ``primary_slug`` and ``primary_label``: by default the\nprovider's data location, or ``primary``.",
+        "example": {
+          "api_base": "https://tokenhub-intl.example.com/v1",
+          "api_key": "<the region's key>",
+          "data_location": "SG",
+          "label": "Southeast Asia",
+          "slug": "sg"
+        },
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "client_args": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Args"
+          },
+          "data_location": {
+            "anyOf": [
+              {
+                "maxLength": 16,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Location"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "label": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "primary_label": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Label"
+          },
+          "primary_slug": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Slug"
+          },
+          "slug": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Slug",
+            "type": "string"
+          },
+          "supported_countries": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 300,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supported Countries"
+          }
+        },
+        "required": [
+          "slug",
+          "label"
+        ],
+        "title": "HostedProviderRegionCreateRequest",
+        "type": "object"
+      },
+      "HostedProviderRegionPublic": {
+        "description": "One region of a hosted provider, as stored: null wherever it uses the provider's value.\n\n``data_location`` is the exception: it is the region's own, and null there\nmeans nothing is declared.\n\n``selector`` is what pins it in a request (``tokenhub@sg``). ``has_api_key``\nis true for a region with a key of its own, known by its last four\ncharacters; ``client_args`` holds only the region's own extras, masked as\nthe provider's are. ``decryptable`` is false for a region whose own key or\nextras no configured ``OTARI_SECRET_KEY`` reads, which serves nothing until\nre-entered.",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "api_key_last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key Last4"
+          },
+          "client_args": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Args"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "data_location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Location"
+          },
+          "decryptable": {
+            "default": true,
+            "title": "Decryptable",
+            "type": "boolean"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "has_api_key": {
+            "default": false,
+            "title": "Has Api Key",
+            "type": "boolean"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "selector": {
+            "title": "Selector",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "supported_countries": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supported Countries"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "slug",
+          "selector",
+          "label",
+          "position",
+          "enabled"
+        ],
+        "title": "HostedProviderRegionPublic",
+        "type": "object"
+      },
+      "HostedProviderRegionUpdateRequest": {
+        "description": "Change one region. A field left out is left alone.\n\nNull puts a field the region inherits back on the provider's value:\n``api_key`` null returns the region to the provider's key, an empty\n``api_base`` or null to the provider's endpoint, and so on for\n``client_args`` and ``supported_countries``. ``data_location`` is the\nregion's own, so null declares nothing. Null on ``label``, ``enabled`` or\n``position`` changes nothing. ``client_args`` echoed\nback with masked entries keeps the stored values. ``position`` moves the\nregion to that place in the order regions are tried, counted from 0.",
+        "example": {
+          "enabled": false
+        },
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "client_args": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Args"
+          },
+          "data_location": {
+            "anyOf": [
+              {
+                "maxLength": 16,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Location"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "maximum": 1000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position"
+          },
+          "supported_countries": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 300,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supported Countries"
+          }
+        },
+        "title": "HostedProviderRegionUpdateRequest",
         "type": "object"
       },
       "HostedProviderTestPublic": {
@@ -12251,7 +12651,7 @@
         "type": "object"
       },
       "HostedProviderUpdateRequest": {
-        "description": "Rotate the key, repoint the base, or turn a provider off.\n\n``provider`` and ``name`` are immutable: changing either is a delete plus a\ncreate, because the key belongs to the provider it was issued by and\nrequests address the name. Omitting ``api_key`` leaves the stored\ncredential untouched, so a toggle never re-sends a secret the caller does\nnot have; an explicit null removes it, where the provider can be served\nwithout one. ``client_args`` omitted is left alone; an explicit\nnull clears it, and an entry echoed back as the mask keeps the stored value.\n``restricted_to_organization_id`` reads the same way: omitted keeps the\nrestriction, null lifts it, and so does ``supported_countries``, where an\nempty list closes the provider to every country. ``terms_url`` and\n``privacy_url`` omitted are left alone; null or an empty string removes the link.",
+        "description": "Rotate the key, repoint the base, or turn a provider off.\n\n``provider`` and ``name`` are immutable: changing either is a delete plus a\ncreate, because the key belongs to the provider it was issued by and\nrequests address the name. Omitting ``api_key`` leaves the stored\ncredential untouched, so a toggle never re-sends a secret the caller does\nnot have; an explicit null removes it, where the provider can be served\nwithout one. ``client_args`` omitted is left alone; an explicit\nnull clears it, and an entry echoed back as the mask keeps the stored value.\n``restricted_to_organization_id`` reads the same way: omitted keeps the\nrestriction, null lifts it, and so does ``supported_countries``, where an\nempty list closes the provider to every country, and ``data_location``. ``terms_url`` and\n``privacy_url`` omitted are left alone; null or an empty string removes the link.",
         "example": {
           "enabled": false
         },
@@ -12292,6 +12692,18 @@
               }
             ],
             "title": "Client Args"
+          },
+          "data_location": {
+            "anyOf": [
+              {
+                "maxLength": 16,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Location"
           },
           "enabled": {
             "anyOf": [
@@ -13892,6 +14304,18 @@
             "description": "What the tool does, as the model is told.",
             "title": "Description",
             "type": "string"
+          },
+          "direct_available": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For web search and web fetch, whether `POST /api/v1/search` or `POST /api/v1/fetch` naming no tool would be admitted for this caller: something is set up to run it, the workspace allows web access, the organization can pay for a call on the deployment's account, and for an API key, the key holds the `web:search` or `web:fetch` scope and its tool list allows the instance the call would run on. Pricing and budgets still apply to the call itself. It can differ from `available`, which is about declaring the tool in a model request. `null` for the other tools, which have no direct endpoint here.",
+            "title": "Direct Available"
           },
           "example": {
             "additionalProperties": true,
@@ -18745,8 +19169,20 @@
       "OrganizationGuardrailDefinitionPublic": {
         "description": "The API-facing shape. Carries the names of the stored secrets and none of their values.",
         "properties": {
+          "build_refusal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When build_state is failed because the definition breaks one of the gateway's own rules (an address off the vendor's hosts or not public, or an endpoint without its own credential), which rule and which argument. Null otherwise, including when the vendor's library failed, whose reason stays in the gateway's log because it can repeat what was sent",
+            "title": "Build Refusal"
+          },
           "build_state": {
-            "description": "Whether the worker that answered this request holds a guardrail built from this version of the definition. built means it does and the check runs; failed means that worker tried these exact arguments and could not build them, so every mandate pointing here is unevaluable; pending means it holds nothing for this version yet, which is the answer right after a write and on any worker that has not caught up within the refresh interval; disabled means the definition is switched off and nothing is built on purpose. It answers for one worker, so two reads can disagree while a write propagates. Why a build failed is never reported here: the reason is in the gateway's log",
+            "description": "Whether the worker that answered this request holds a guardrail built from this version of the definition. built means it does and the check runs; failed means that worker tried these exact arguments and could not build them, so every mandate pointing here is unevaluable; pending means it holds nothing for this version yet, which is the answer right after a write and on any worker that has not caught up within the refresh interval; disabled means the definition is switched off and nothing is built on purpose. It answers for one worker, so two reads can disagree while a write propagates. Why a build failed is not reported here: see build_refusal for a rule this definition breaks, and the gateway's log for anything else",
             "enum": [
               "built",
               "failed",
@@ -21142,7 +21578,7 @@
         "description": "Whether one gateway-run tool can be attached right now, and why not.\n\nThree states from two fields, which is what the composer's menu draws: a\ntool the deployment never configured is not offered, one the deployment\nconfigured and this workspace turned off is shown disabled with the reason,\nand an available one is a plain checkbox. A single boolean would collapse\nthe first two, which is how a checkbox comes to look attachable and then\nfail at request time (otari-ai#1419).",
         "properties": {
           "configured": {
-            "description": "Whether this deployment has a backend for the tool at all.",
+            "description": "Whether the menu lists the tool: the deployment, or for web search the workspace's organization search key, provides it. Whether it can be attached, and why not, are enabled and reason.",
             "title": "Configured",
             "type": "boolean"
           },
@@ -21188,12 +21624,17 @@
             "title": "Mcp Servers",
             "type": "array"
           },
+          "web_fetch": {
+            "$ref": "#/components/schemas/PlaygroundToolStatus",
+            "description": "Whether a message may declare otari_web_fetch."
+          },
           "web_search": {
             "$ref": "#/components/schemas/PlaygroundToolStatus"
           }
         },
         "required": [
           "web_search",
+          "web_fetch",
           "code_execution",
           "files",
           "mcp_servers"
@@ -26925,6 +27366,38 @@
             ],
             "title": "Api Key Id"
           },
+          "client_language": {
+            "anyOf": [
+              {
+                "enum": [
+                  "python",
+                  "javascript",
+                  "go",
+                  "java",
+                  "rust",
+                  "ruby"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The language the client was written in, from its SDK's headers or its HTTP library's User-Agent. `javascript` covers TypeScript.",
+            "title": "Client Language"
+          },
+          "client_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The client's version, from its own User-Agent.",
+            "title": "Client Version"
+          },
           "cost": {
             "description": "USD, a snapshot of the usage rows' cost. Usage stays the billing record.",
             "title": "Cost",
@@ -29002,6 +29475,18 @@
           "counts_toward_budget": {
             "title": "Counts Toward Budget",
             "type": "boolean"
+          },
+          "data_location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the hosted provider or region that served the request declared it keeps request data when the row was written: an ISO 3166-1 alpha-2 code, EU or GLOBAL. Null where the deployment did not serve it or nothing was declared.",
+            "title": "Data Location"
           },
           "endpoint": {
             "title": "Endpoint",
@@ -31326,6 +31811,21 @@
             "title": "Customized",
             "type": "boolean"
           },
+          "data_locations": {
+            "description": "Where each region the provider serves from declares it keeps request data (one entry for a provider with no regions), null where nothing is declared. A workspace listing allowed data locations is refused the provider when none of these is on its list.",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Data Locations",
+            "type": "array"
+          },
           "enabled": {
             "title": "Enabled",
             "type": "boolean"
@@ -32879,6 +33379,20 @@
       },
       "WorkspaceProviderPolicyPublic": {
         "properties": {
+          "allowed_data_locations": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Data Locations"
+          },
           "require_zero_data_retention": {
             "title": "Require Zero Data Retention",
             "type": "boolean"
@@ -32893,15 +33407,35 @@
       "WorkspaceProviderPolicyRequest": {
         "description": "What one workspace requires of every provider serving it.",
         "properties": {
+          "allowed_data_locations": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 300,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The data locations a hosted provider region must declare to serve the workspace: ISO 3166-1 alpha-2 country codes, EU (which also admits each member state) or GLOBAL. Null accepts any location, and omitting the field keeps the stored list. A region whose location nobody declared never matches a list.",
+            "title": "Allowed Data Locations"
+          },
           "require_zero_data_retention": {
-            "description": "Refuse every provider not declared zero data retention: an organization key or a hosted provider nobody declared, and every provider configured in config.yml or endpoint the workspace owns.",
-            "title": "Require Zero Data Retention",
-            "type": "boolean"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Refuse every provider not declared zero data retention: an organization key or a hosted provider nobody declared, and every provider configured in config.yml or endpoint the workspace owns. Omitted keeps the stored setting.",
+            "title": "Require Zero Data Retention"
           }
         },
-        "required": [
-          "require_zero_data_retention"
-        ],
         "title": "WorkspaceProviderPolicyRequest",
         "type": "object"
       },
@@ -33597,7 +34131,7 @@
   "info": {
     "description": "Otari, an OpenAI-compatible AI gateway with API key management",
     "title": "otari",
-    "version": "0.51.0"
+    "version": "0.53.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -40698,6 +41232,195 @@
           }
         ],
         "summary": "Update Hosted Model",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers/{provider}/regions": {
+      "post": {
+        "description": "Add a region the provider serves from, after its others, and answer the provider.\n\nThe first region added keeps the provider's own connection as a region\nahead of it, so what was served keeps being served. A request to the\nprovider is served by the first enabled region whose countries admit it,\nand ``<provider>@<slug>:<model>`` pins one. A provider defined in\nconfiguration answers 409.",
+        "operationId": "hosted-providers-add_hosted_provider_region",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostedProviderRegionCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedProviderPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Add Hosted Provider Region",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers/{provider}/regions/{slug}": {
+      "delete": {
+        "description": "Remove one region, and answer the provider.\n\nRemoving the last region leaves the provider serving from its own connection.",
+        "operationId": "hosted-providers-remove_hosted_provider_region",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedProviderPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Remove Hosted Provider Region",
+        "tags": [
+          "hosted-providers"
+        ]
+      },
+      "patch": {
+        "description": "Change, switch off or move one region, and answer the provider.",
+        "operationId": "hosted-providers-update_hosted_provider_region",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostedProviderRegionUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedProviderPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Hosted Provider Region",
         "tags": [
           "hosted-providers"
         ]
@@ -57668,7 +58391,7 @@
     },
     "/api/v1/tools": {
       "get": {
-        "description": "List the tools Otari runs itself, with the declaration forms it accepts.\n\nCalled with an API key, a tool its workspace does not allow is listed as\nunavailable, and so is a tool that runs on the deployment's account while\nthe key's organization has no funds. Every other `tools[]` entry, including\nprovider-native keywords not listed here, is forwarded to the upstream\nprovider untouched.",
+        "description": "List the tools Otari runs itself, with the declaration forms it accepts.\n\nCalled with an API key, a tool its workspace does not allow is listed as\nunavailable, and so is a tool that runs on the deployment's account while\nthe key's organization has no funds. Every other `tools[]` entry, including\nprovider-native keywords not listed here, is forwarded to the upstream\nprovider untouched. Web search and web fetch also say whether their direct\nendpoints would run a call from this caller.",
         "operationId": "tools-list_tools",
         "responses": {
           "200": {

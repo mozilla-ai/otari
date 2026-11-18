@@ -38,6 +38,15 @@ Unavailable but recognized tools remain in the response with
 A master key or a dashboard session belongs to no single workspace, so its
 answer reflects the deployment alone.
 
+Web search and web fetch also carry `direct_available`: whether
+`POST /api/v1/search` or `POST /api/v1/fetch`, naming no tool, would run for the
+caller. That is a separate question from `available`, which is about declaring
+the tool in a model request. A direct call also needs the API key to hold the
+`web:search` or `web:fetch` [scope](https://docs.otari.ai/guides/control/api-keys#scopes), and the key's tool list
+to allow the tool the call runs on. Pricing and budgets still apply to the call
+itself, so an admitted call can still be refused for those. Code execution has no direct endpoint here,
+so its `direct_available` is `null`.
+
 ## Who runs a tool
 
 An `otari_*` type is executed by Otari. A provider-native web-search type is
@@ -813,10 +822,11 @@ its own side:
   and may not be `localhost` or a non-public IP address in any of its forms.
 - Other hostnames are the provider's to resolve; Otari does not check where
   they lead, as the built-in fetcher does.
-- DeepSeek, Exa and Tabstack answer with the URL as asked even after a redirect
-  (`reports_final_url` is false in the provider catalog), so a redirect they
-  follow escapes the domain policy. Where a workspace's domain lists must hold
-  on every hop, keep the fetch tool, and enrichment, on `builtin_fetch`.
+- DeepSeek, Exa, Tabstack and You.com answer with the URL as asked even after
+  a redirect (`reports_final_url` is false in the provider catalog), so a
+  redirect they follow escapes the domain policy. Where a workspace's domain
+  lists must hold on every hop, keep the fetch tool, and enrichment, on
+  `builtin_fetch`.
 - When enriching a search's results, the same checks apply under the search's
   own domain rules.
 - A provider's failure reaches the model as
@@ -850,6 +860,23 @@ Each provider's limits are in the
   whether the plan's monthly credits are used up, so $0.001 to $0.003 a page.
   Tabstack documents up to 15 seconds a page at its default `effort` and up to
   60 at `effort: max`, so give the instance a `timeout` to match.
+- **You.com** (`youdotcom`) needs an API key, read from the instance's
+  `api_key`, such as `${YDC_API_KEY}`, the key a You.com search tool takes too.
+  Name the instance apart from a You.com search tool, such as `youdotcom-fetch`,
+  since names are unique across `search_tools` and `fetch_tools`. It reports no
+  cost, so a fetch is billed at the instance's own rate (its `price_per_call`, or
+  a `fetch` price set on the dashboard's Web search page or through the API).
+  You.com's [pricing](https://you.com/pricing), read
+  2026-11-11, is $0.90 per 1,000 URLs. Its `parse_effort` is the cost tier:
+  `lite`, which Otari sends unless the instance's `options` say otherwise, adds
+  nothing, while `standard` adds $0.50 per 1,000 PDF pages, so a 350-page PDF
+  costs $0.0009 under `lite` and $0.1759 under `standard`. Only the instance's
+  configuration sets it, since You.com reports no cost; price an instance set to
+  `standard` for the PDFs it will read. You.com may spend up to 30 seconds on a
+  page unless the instance's `options` set its `timeout` (2 to 100), so give the
+  instance a `timeout` above that. A page You.com cannot extract, such as a
+  zero-byte file or a private address, fails the fetch, and a site's error page
+  comes back as its text.
 
 ### Web search
 
@@ -1041,12 +1068,12 @@ the pin, and any other member sees the list read-only.
 
 A workspace with a usable search key serves an explicit `otari_web_search`
 declaration even where the deployment has no search of its own, and the
-workspace's web-access policy still applies. Three things stay with the
-deployment's own configuration: `GET /api/v1/tools` and the Playground report
-web search only when the deployment can search, and a provider-native search
-declaration or the `Otari-Web-Search` header is handed to Otari only then, since
-that is decided before the workspace's policy is read. Elsewhere such a
-declaration goes to the model's provider.
+workspace's web-access policy still applies. `GET /api/v1/tools`, for an API
+key, and the Playground's tools menu count that key when they work out whether
+web search is available. A provider-native search declaration or the `Otari-Web-Search` header is
+handed to Otari only where the deployment can search, since that is decided
+before the workspace's policy is read. Elsewhere such a declaration goes to the
+model's provider.
 
 A key's calls are labeled `org:<provider>` and priced under `otari:web_search`
 or `otari:web_fetch`, at the cost the provider reported when it reports one (see
@@ -1247,6 +1274,23 @@ refuse such a value when a tool is saved.
   offer, each at its own price. A search returns at most 20 results, with a
   snippet; set `include_raw_content: true` in the tool's `options` for each
   page's full text, which spares the in-loop tool reading the pages itself.
+- **You.com** (`youdotcom`) needs an API key, read from the tool's `api_key`, such
+  as `${YDC_API_KEY}`. It reports no cost, so a search is billed at the tool's own
+  rate (its `price_per_call`, or a `search` price set on the dashboard's Web
+  search page or through the API). You.com's
+  [pricing](https://you.com/docs/administration/billing), read 2026-11-09, is
+  $5 per 1,000 searches, up to 100 results each, highlights included.
+  `extraction: {extraction_mode: full_page}`, which returns each page as text,
+  adds $1 per 1,000 pages You.com crawls live rather than serves from its
+  cache, so a full-page search for 10 results costs from $0.005 to $0.015.
+  `extraction` is not a cost tier, so a workspace or a request can set it; set
+  the tool's rate with that in mind. A search returns at most 100 results, 50
+  under highlights, the default, and its hits carry the highlights as a snippet
+  and page text only under `full_page`. Highlights share 8,192 tokens across a
+  search's results, so a search for few results returns long snippets, which
+  Otari cuts before a model or a direct search sees them;
+  `extraction: {extraction_mode: highlights, highlights: {total_max_tokens: 1024}}`
+  asks for less.
 - **SearXNG** (`searxng`) is self-hosted and reports no cost, so a search is billed
   at the tool's rate. The tool's `api_base` is the instance's root URL, and the
   instance must list `json` under `search.formats`, or every search fails with

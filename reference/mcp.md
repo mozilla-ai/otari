@@ -183,9 +183,13 @@ In the dashboard it is the **Every request** choice of **Availability**, on the
 server's page and in the form that adds one; the server's row under
 **Tools → MCP servers** shows it.
 
+- **Other replicas pick it up on their next refresh.** Attaching a server
+  applies at once on the replica that served the change; the others refresh
+  every 30 seconds. Detaching, switching off or deleting a server takes effect
+  everywhere at once.
 - **The key needs the `mcp:execute` scope.** A key without it gets no attached
-  server and is served as if none were attached. A new key holds `inference:run`
-  alone unless its creator names more; see [Scopes](https://docs.otari.ai/guides/control/api-keys#scopes).
+  server and is served as if none were attached. A new key holds it unless its
+  creator names scopes without it; see [Scopes](https://docs.otari.ai/guides/control/api-keys#scopes).
 - **The access list still decides.** An attached server joins only the requests
   whose key it grants something, with the tools that key holds and under the
   server's `allowed_tools`. A key it denies is left without it, silently. To keep
@@ -670,9 +674,10 @@ one per key.
   - an `mcp_servers` name colliding with a stored server named in `mcp_server_ids`: `400` with a fixed detail that names neither server (rename or remove the inline entry). A server the workspace attaches to every request under that name is left out of the request instead;
   - two stored servers sharing a name: `500`, with the names in the log
 - A URL whose host Otari cannot read is refused as invalid with a `400` before any address check, so an IPv6 host needs brackets (`http://[2400:8901::1]:8787/mcp`) and a port has to be a number
-- MCP URLs are validated to reduce SSRF risk; by default, private, reserved and other non-public addresses (such as the `100.64.0.0/10` shared range) are blocked, loopback is allowed, and `http://` is rejected when `authorization_token` is present
-- The managed MCP loop follows redirects only when the scheme, host, and port stay the same, or when a default-port `http://` URL upgrades to `https://` on the same host. Caller-orchestrated discovery and execution do not follow redirects. Configure the final URL when a managed-loop redirect changes host or port
-- `OTARI_MCP_ALLOW_LOOPBACK=false` disables loopback; `OTARI_MCP_ALLOW_PRIVATE_HOSTS=true` relaxes the private-host restriction
+- An MCP server must be on a public address. Loopback (`127.0.0.1`, `localhost`), private, link-local, reserved and other non-public addresses (such as the `100.64.0.0/10` shared range) are refused, and so is a host that does not resolve. A workspace or a caller chooses the URL, not the operator, so the one exception is a host the operator lists exactly in `mcp_private_hosts` on a single-tenant or trusted deployment; link-local and metadata addresses stay refused even then (see [route 2](https://docs.otari.ai/guides/build/connect-a-private-mcp-server#route-2-list-the-host-on-your-own-gateway)). `http://` is also rejected when `authorization_token` is present. To reach a server on a private network, see [Connect an MCP server on a private network](https://docs.otari.ai/guides/build/connect-a-private-mcp-server)
+- The address is checked when a server is saved or sent, and again on every connection: Otari resolves the host itself, refuses it unless every address is public, and connects to the address it checked. A name that is re-pointed to an internal address after it was saved reaches nothing. The same holds for a sign-in's discovery and token addresses
+- The managed MCP loop follows redirects only when the scheme, host, and port stay the same, or when a default-port `http://` URL upgrades to `https://` on the same host, and each hop is checked again. Caller-orchestrated discovery and execution, connection checks and sign-ins do not follow redirects. Configure the final URL when a managed-loop redirect changes host or port
+- MCP connections, and a guardrail entry's own `url`, do not go through `HTTP_PROXY` or `HTTPS_PROXY`, since a proxy would resolve the name again after Otari checked it. A deployment that reaches the internet only through a proxy cannot reach MCP servers
 
 ## Messages streaming activity
 

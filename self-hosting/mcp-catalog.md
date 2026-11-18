@@ -185,9 +185,7 @@ sync over after ten minutes without a sign of life and resumes it.
 A sync calls `https://registry.modelcontextprotocol.io` and nothing else. It
 follows no redirect and reads at most 4 MB per page. The registry's address
 goes through the same check as an MCP server's, so it is refused if it resolves
-to a private address, unless `mcp_allow_private_hosts` is on. Loopback
-addresses pass by default (`mcp_allow_loopback`, on unless you turn it off),
-even while private hosts are refused.
+to anything but a public address.
 
 A sync never connects to the servers it lists. A server's address is resolved
 and checked when someone adds it to a workspace, and again on every request

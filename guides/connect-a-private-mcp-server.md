@@ -14,38 +14,42 @@ server, see [MCP servers](mcp-servers.md).
 Otari connects to a stored MCP server from the gateway process, not from your
 browser or your laptop. Before it does, it checks where the URL points. A URL
 that names a server inside someone's network is how an attacker would make a
-gateway probe that network, so Otari refuses these by default:
+gateway probe that network, or the gateway's own machine, so Otari refuses:
 
+- loopback (`127.0.0.1`, `::1`, and a name such as `localhost` that resolves
+  to one);
 - private ranges (`10.x.x.x`, `172.16.x.x` to `172.31.x.x`, `192.168.x.x`, and
   IPv6 `fd00::/8` style addresses);
 - link-local addresses such as `169.254.169.254`, the cloud metadata address;
 - multicast, unspecified and reserved addresses;
 - any other address outside the public address space, such as `100.64.0.0/10`,
   the range Tailscale and carrier-grade NAT use for devices;
-- a hostname that does not resolve when Otari checks it.
+- a hostname that does not resolve when Otari checks it;
+- a name that only means something on the gateway's own network: a single
+  label such as `gateway`, or one ending in `.local`, `.internal` or
+  `.localhost`;
+- an address written as a name, such as `127.1` or `0177.0.0.1`.
 
-Loopback (`127.0.0.1`, `localhost`) is allowed by default, for a server running
-beside the gateway.
+A workspace, an organization or an API key holder chooses an MCP server's
+address, not the person running the gateway. Otari checks the address when you
+save the server and again on every connection, and connects to the address it
+checked, so a name that is re-pointed after it was saved still reaches nothing
+internal. The one exception is a host the operator lists by name in
+`mcp_private_hosts` (see [route 2](#route-2-list-the-host-on-your-own-gateway)).
 
 When you save a server, or press **Test connection**, with a private address,
 the request is refused with a message like this:
 
 ```text
-MCP server host '192.168.1.20' resolves to 192.168.1.20 which is in a private range (RFC 1918 / ULA); rejecting to prevent SSRF. Set OTARI_MCP_ALLOW_PRIVATE_HOSTS=true to override.
+MCP server host '192.168.1.20' resolves to 192.168.1.20 which is in a private range (RFC 1918 / ULA); rejecting to prevent SSRF. The MCP server must be on a public address.
 ```
-
-The last sentence names a setting only the person who runs the gateway can
-change. On a hosted Otari that is not you, so you need the tunnel route below.
 
 ## Choose a route
 
 | Your situation | Route |
 | --- | --- |
-| You use a hosted Otari, or any Otari that is not on the same network as the server | [Publish the server through an HTTPS tunnel](#route-1-publish-the-server-through-an-https-tunnel) |
-| You run Otari yourself, on the same network as the server | [Let your gateway reach private addresses](#route-2-let-your-own-gateway-reach-the-private-address) |
-
-If you can choose, route 2 keeps the server off the internet entirely. It does
-cost you a gateway setting that is all or nothing (see below).
+| You use a hosted Otari, or any Otari shared with people you do not fully trust | [Publish the server through an HTTPS tunnel](#route-1-publish-the-server-through-an-https-tunnel) |
+| You run Otari yourself, for yourself or a trusted team, on a network that can reach the server | [List the host on your own gateway](#route-2-list-the-host-on-your-own-gateway) |
 
 ## Route 1: publish the server through an HTTPS tunnel
 
@@ -130,67 +134,64 @@ Assistant's sign-in satisfies what Otari asks of a server (see
 [Connect your account to an MCP server](connect-your-account-to-an-mcp-server.md))
 is unconfirmed. Try it with **Test connection** or a sign-in before you rely on it.
 
-## Route 2: let your own gateway reach the private address
+## Route 2: list the host on your own gateway
 
-If you run Otari yourself on the same network, or on a machine that can reach
-the server, you can change the gateway's setting rather than publish the
-server. Two settings control it. Set them where you set the rest of the gateway's
-configuration (see [Configuration](https://docs.otari.ai/self-hosting/configuration)).
+If you run Otari yourself, you can name the private hosts it may reach in
+`mcp_private_hosts`. Each entry is an exact host, a name or an IP address, with
+an optional port:
 
-| Setting | Default | What it does |
-| --- | --- | --- |
-| `OTARI_MCP_ALLOW_LOOPBACK` | `true` | Allows `127.0.0.1` and `localhost`. Set `false`, `0` or `no` to refuse them. |
-| `OTARI_MCP_ALLOW_PRIVATE_HOSTS` | `false` | Set `true`, `1` or `yes` to turn the address check off. |
+```bash
+OTARI_MCP_PRIVATE_HOSTS=mcp-docs:8000,homeassistant.lan,192.168.1.20:8123
+```
 
-- If the server runs in the same network namespace as the gateway (both
-  directly on one machine), you need no change: `http://127.0.0.1:<port>/mcp` is
-  accepted. A gateway in a container does not share the host's loopback, so
-  `127.0.0.1` there means the container itself. Use an address of the host or of
-  the server that the container can reach. That is usually a private address, so
-  it needs the next step.
-- If it is on another machine, set `OTARI_MCP_ALLOW_PRIVATE_HOSTS=true` and
-  restart the gateway. With it on, the loopback setting no longer matters:
-  `OTARI_MCP_ALLOW_LOOPBACK=false` does not refuse loopback while the private-host
-  setting is `true`, because the address check is skipped altogether.
+In a mounted config file, the same setting is a list:
+
+```yaml
+mcp_private_hosts:
+  - mcp-docs:8000
+  - homeassistant.lan
+  - 192.168.1.20:8123
+```
+
+How it matches:
+
+- An entry matches only the host written in the server's URL, exactly. There
+  are no wildcards, ranges or suffixes: `homeassistant.lan` does not admit
+  `other.lan`, and `192.168.1.20` does not admit `192.168.1.21`.
+- An entry with a port matches only that port. Without one, any port matches.
+  A URL with no port uses 80 for `http` and 443 for `https`.
+- A listed host may resolve to loopback or a private address. Otari still
+  connects to the address it checked on every request, follows no redirect
+  off the server's origin, and refuses link-local addresses (the cloud metadata
+  service among them), other metadata addresses and `0.0.0.0` even for a
+  listed host.
+- A server's sign-in addresses go through the same list, so a sign-in service
+  on a private host needs its own entry.
+- Guardrail endpoints never read this list.
+
+**Every tenant who can name an MCP server can reach a listed host.** That
+includes workspace admins and, in a workspace where **Allow servers outside
+this list** is on, any API key holder. So list only hosts you would let all of
+them reach, and use this on a single-tenant or trusted deployment, not a shared
+one. It is empty by default, it is read only from the environment or the
+config file, and the dashboard cannot change it.
 
 With the Docker Compose file from the
-[Self-hosted quickstart](https://docs.otari.ai/self-hosting), adding the variable to `.env`
-is not enough: `docker-compose.yml` only passes into the container the variables
-it lists, and this one is not among them. Pass it through an override file next
-to `docker-compose.yml`, named `docker-compose.override.yml`, which Compose reads
-automatically:
+[Self-hosted quickstart](https://docs.otari.ai/self-hosting), `docker-compose.yml` only
+passes into the container the variables it lists, so pass this one through a
+`docker-compose.override.yml` next to it, then run `docker compose up -d`
+again:
 
 ```yaml
 services:
   otari:
     environment:
-      - OTARI_MCP_ALLOW_PRIVATE_HOSTS=true
+      - OTARI_MCP_PRIVATE_HOSTS=mcp-docs:8000
 ```
 
-Then run `docker compose up -d` again so the container is recreated with the new
-environment. If you use a mounted config file instead, the same setting is
-`mcp_allow_private_hosts: true` in it.
-
-Know what that setting does before you turn it on. It is a single switch for the
-whole gateway. There is no way to allow one host and still refuse the rest, so
-it lifts the address check for every stored MCP server in every workspace, and
-for the guardrail endpoints that share the same check. That includes addresses
-like the cloud metadata address. It also lets a hostname that fails to resolve
-through. Anyone who can name a server URL can then aim the gateway at your network: not
-only workspace admins, but also any API key holder in a workspace where
-**Allow servers outside this list** is on (it sits under the page title on
-**Tools**, then **MCP servers**). New workspaces start with it off, but a
-workspace that existed before access lists keeps it on. Check that switch in
-every workspace before you turn the setting on, and keep the gateway's
-own network rules (a firewall or an egress policy) as the real limit on where it
-can connect.
-
-These two settings are shown on the dashboard's settings page for reference but
-cannot be changed there. Change them through the environment or the config file.
-
-A Tailscale address (`100.x.x.x`, or a MagicDNS name that resolves to one) is
-refused as "outside the public address space", so a gateway on your tailnet needs
-this setting too to reach a server by its tailnet address.
+A gateway in a container does not share the host's loopback, so `127.0.0.1`
+there means the container itself. Use a name or address the container can
+reach, such as the Compose service name of the MCP server.
 
 ## Store the credentials in Otari
 
@@ -216,19 +217,15 @@ there; it is not repeated here.
 
 What that means on a private network:
 
-- A token requires an `https://` URL. This holds even for loopback or a private
-  address: `http://127.0.0.1:8123/mcp` with a token is refused. A personal
-  server needs `https://` too. So a private server that needs a credential also
-  needs TLS on the address Otari dials. Whether Otari accepts a self-signed
-  certificate there has not been verified for this guide.
+- A token requires an `https://` URL. A personal server needs `https://` too.
+  A tunnel's public address already is one; a listed private host needs a
+  certificate the gateway trusts.
 - The addresses a sign-in discovers (the server's authorization, token,
   registration and revocation endpoints) must be `https://` and pass the same
   address check as the server's own URL. If your server's sign-in lives at a
-  private address, it is refused the same way, and
-  `OTARI_MCP_ALLOW_PRIVATE_HOSTS=true` lifts that too. Through a tunnel, a
-  sign-in server on a public address is checked like any other public address.
-  A full sign-in against a server on a private network has not been run for
-  this guide.
+  private address, it is refused the same way: publish it too, or list its
+  host in `mcp_private_hosts`. A full sign-in through a tunnel or a listed host
+  has not been run for this guide.
 
 Use **Test connection** in the add dialog before you save. It connects once,
 lists the tools, and tells you what failed if it did. A **Personal accounts**
@@ -264,13 +261,18 @@ A reachable server is not a safe one until you decide who may use it.
 
 | Message or state | Cause and fix |
 | --- | --- |
-| `... resolves to <address> which is in a private range (RFC 1918 / ULA); rejecting to prevent SSRF` | The URL points at a private address. Use a tunnel, or on your own gateway set `OTARI_MCP_ALLOW_PRIVATE_HOSTS=true`. |
-| `... which is link-local`, `... which is loopback`, `... which is multicast`, `... which is in a reserved range`, `... which is outside the public address space` | Same check, different range. Loopback is refused only when `OTARI_MCP_ALLOW_LOOPBACK` is off. A Tailscale `100.x.x.x` address lands in the last one. |
-| `... could not be resolved at validation time; rejecting to avoid DNS-rebinding` | The gateway cannot look up the name. For a tunnel, check the DNS record exists. For a private name, use `OTARI_MCP_ALLOW_PRIVATE_HOSTS=true` or the address itself. |
+| `... resolves to <address> which is in a private range (RFC 1918 / ULA); rejecting to prevent SSRF` | The URL points at a private address. Publish the server through a tunnel, or on your own gateway list the host in `mcp_private_hosts`. |
+| `... which is refused even for a host in mcp_private_hosts` | The listed host resolves to a link-local, metadata or unspecified address, which no entry admits. |
+| `... which is link-local`, `... which is loopback`, `... which is multicast`, `... which is in a reserved range`, `... which is outside the public address space` | Same check, different range. A Tailscale `100.x.x.x` address lands in the last one. |
+| `... is a local name` or `... is an address written as a name` | The host is a single-label or `.local` name, or an address in a short form. Use the server's public name, or list the host exactly in `mcp_private_hosts`. |
+| `... ends with a dot; write the host without it` | The URL's host is written with a trailing dot (`localhost.`). Remove it. |
+| Health `tls_failed` on a listed private host | The gateway trusts only the default certificate store, not `SSL_CERT_FILE` or `SSL_CERT_DIR`, so a certificate from a private CA is refused. |
+| `... could not be resolved at validation time; rejecting to avoid DNS-rebinding` | The gateway cannot look up the name. For a tunnel, check the DNS record exists. |
 | `MCP server URL must use https when a credential travels with it` | A token is set and the URL starts with `http://`. Use an `https://` address. |
 | `Signing in to an MCP server needs public_base_url set ...` | A sign-in needs the deployment's `public_base_url`. Set it, as [Before you start](connect-your-account-to-an-mcp-server.md#before-you-start) says. |
-| `The authorization endpoint URL failed its safety check` (or `token endpoint`, `registration endpoint`, `revocation endpoint`) | A sign-in address the server published is not `https://` or is on a private address. Fix the server's sign-in address, or use `OTARI_MCP_ALLOW_PRIVATE_HOSTS=true` for the private case. The gateway log says which check failed. |
+| `The authorization endpoint URL failed its safety check` (or `token endpoint`, `registration endpoint`, `revocation endpoint`) | A sign-in address the server published is not `https://` or is on a private address. Fix the server's sign-in address. The gateway log says which check failed. |
 | Health `unsafe_url` | The stored URL failed the address check, before any connection was tried. |
+| Health `connection_failed` | Among other causes, the name resolved to a non-public address when the gateway connected, though it was public when checked. Check the server's DNS record. |
 | Health `unreachable` or `timeout` | The gateway passed the address check but could not connect. Check the tunnel is healthy and the server is running. On a server set to **Every request**, these also make requests skip it for 60 seconds. |
 | Health `tls_failed` | The certificate on the address is not one the gateway trusts. |
 | Health `unauthorized` or `forbidden` | The server rejected the credential. Re-enter the token, or sign in again. |
