@@ -2,14 +2,18 @@ name: Otari Baseline Ratchet
 
 # Every baseline in the architecture check records debt the repository has
 # already taken on, and each one only shrinks. The check itself reads the number
-# and the code from the same tree, so a change that moves a builder out and
-# raises the number together passes it. This compares the branch point with the
-# change instead, which is the half the check cannot reach.
+# and the code from the same tree, so a change that adds a builder and raises
+# the number together passes it. This compares the branch point with the change
+# instead, which is the half the check cannot reach.
 #
 # The script and the baselines it measures against both come from the branch
-# point, so a pull request cannot edit what judges it. A branch point from
-# before the script existed cannot check anything, and the job says so rather
-# than passing silently.
+# point, so the values a pull request is judged by are not its own. This file is
+# not covered: a pull_request workflow runs as the pull request has it, which is
+# why it holds no secret and asks for nothing but read access. The code-owner
+# review that /.github/workflows/ carries is what keeps it honest.
+#
+# A branch point from before the script existed cannot check anything, and the
+# job says so rather than passing silently.
 
 on:
   pull_request:
