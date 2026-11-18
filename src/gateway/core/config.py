@@ -164,11 +164,10 @@ ENV_BRIDGED_FIELDS = (
     "web_search_max_results",
     "web_search_extract",
     "web_search_allow_private_hosts",
+    "mcp_private_hosts",
     "web_search_default_tool",
     "web_fetch_default_tool",
     "web_search_max_calls",
-    "mcp_allow_loopback",
-    "mcp_allow_private_hosts",
     "provider_allow_private_hosts",
 )
 
@@ -1514,19 +1513,6 @@ class GatewayConfig(
             "False makes code execution something a workspace admin turns on."
         ),
     )
-    mcp_allow_loopback: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
-        default=True,
-        description=(
-            "SSRF gate: allow MCP server URLs that resolve to loopback (useful for same-host sidecars). On by default."
-        ),
-    )
-    mcp_allow_private_hosts: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
-        default=False,
-        description=(
-            "SSRF gate: allow MCP server URLs that resolve to private/reserved hosts, and accept "
-            "hostnames that fail to resolve at validation time. Off by default."
-        ),
-    )
     provider_allow_private_hosts: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
         default=True,
         description=(
@@ -2635,6 +2621,7 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
         config_dict.update(structured_env_config)
     _apply_json_env_overrides(config_dict)
     _warn_about_unknown_keys(config_dict)
+    _warn_about_retired_mcp_settings(config_dict)
 
     # Snapshot which bridged fields the YAML config set, before the env
     # overrides below inject OTARI_ values into the same dict: only YAML-set
@@ -2659,6 +2646,28 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     config.warn_about_half_configured_web_search()
     _bridge_yaml_fields_to_env(config, yaml_bridged_fields)
     return config
+
+
+# Settings that once relaxed the address check for every tenant's MCP URL. They
+# are read by nothing now, so a deployment still setting one is told what replaced it.
+_RETIRED_MCP_SETTINGS = ("mcp_allow_loopback", "mcp_allow_private_hosts")
+
+
+def _warn_about_retired_mcp_settings(config: dict[str, Any]) -> None:
+    """Say so when a removed MCP address setting is still set, in the config file or the environment."""
+    found = [name for name in _RETIRED_MCP_SETTINGS if name in config]
+    found += [
+        f"{OTARI_ENV_PREFIX}{name.upper()}"
+        for name in _RETIRED_MCP_SETTINGS
+        if os.getenv(f"{OTARI_ENV_PREFIX}{name.upper()}") is not None
+    ]
+    if found:
+        logger.warning(
+            "Ignoring %s: MCP server URLs must reach public addresses, and no setting relaxes that for every "
+            "tenant any more. List exact private hosts in mcp_private_hosts (OTARI_MCP_PRIVATE_HOSTS) on a "
+            "single-tenant or trusted deployment.",
+            ", ".join(found),
+        )
 
 
 def _warn_about_unknown_keys(config: dict[str, Any]) -> None:

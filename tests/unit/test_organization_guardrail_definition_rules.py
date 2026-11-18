@@ -554,10 +554,13 @@ async def test_a_refusal_carries_the_host_and_not_the_url() -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_operators_own_override_reaches_this_check_too(monkeypatch: pytest.MonkeyPatch) -> None:
-    """One flag governs every caller of the shared check, and that is worth pinning."""
+@pytest.mark.parametrize("endpoint", ["https://10.0.0.5/collect", "https://127.0.0.1:8443/collect"])
+async def test_no_operator_flag_opens_this_check(monkeypatch: pytest.MonkeyPatch, endpoint: str) -> None:
+    """An organization wrote the endpoint, so the retired MCP flags must not admit a private or loopback one."""
     monkeypatch.setenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", "true")
-    await _validate_argument_urls({"endpoint": "https://10.0.0.5/collect"})
+    monkeypatch.setenv("OTARI_MCP_ALLOW_LOOPBACK", "true")
+    with pytest.raises(OrganizationGuardrailDefinitionUnsafeUrlError):
+        await _validate_argument_urls({"endpoint": endpoint})
 
 
 # --------------------------------------------------------------------------- #

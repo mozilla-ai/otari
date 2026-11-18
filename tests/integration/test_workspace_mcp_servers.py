@@ -422,6 +422,39 @@ async def test_a_token_on_a_plain_http_url_is_rejected(async_db: AsyncSession) -
         )
 
 
+@pytest.mark.parametrize(
+    ("url", "resolves_to"),
+    [
+        ("http://127.0.0.1:8000/mcp", None),
+        ("http://127.1:8000/mcp", None),
+        ("http://0177.0.0.1:8000/mcp", None),
+        ("http://[::1]:8000/mcp", None),
+        ("http://localhost:8000/mcp", "127.0.0.1"),
+        ("https://10.0.0.5/mcp", None),
+        ("https://mcp.internal.corp.example/mcp", "192.168.1.20"),
+    ],
+)
+async def test_a_loopback_or_private_url_is_rejected_whatever_the_retired_flags_say(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch, url: str, resolves_to: str | None
+) -> None:
+    """A workspace chose the URL, so it must be public: the gateway's own task is not a destination."""
+    monkeypatch.setenv("OTARI_MCP_ALLOW_LOOPBACK", "true")
+    monkeypatch.setenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", "true")
+    if resolves_to is not None:
+
+        async def resolve(_host: str) -> list[object]:
+            return [ipaddress.ip_address(resolves_to)]
+
+        monkeypatch.setattr("gateway.services.url_safety._resolve_all_async", resolve)
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    service = WorkspaceMcpServerService(async_db)
+
+    with pytest.raises(WorkspaceMcpServerUnsafeUrlError):
+        await service.create_server(user=owner, workspace_id=workspace.id, request=_create(url=url))
+
+
 async def test_a_non_http_scheme_is_rejected(async_db: AsyncSession) -> None:
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")

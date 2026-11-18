@@ -115,7 +115,7 @@ from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecrypt
 from gateway.services.tenancy.workspace_mcp_server_service import McpServerSummary, WorkspaceMcpServers
 from gateway.services.tools import McpConnectionService, mcp_server_contacts
 from gateway.services.traces import RequestClient, RequestTrace, resolve_session
-from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
+from gateway.services.url_safety import UnsafeURLError, mcp_private_hosts, validate_mcp_url
 from gateway.services.workspace_scope import resolve_workspace_id
 from gateway.types.key_scope import KeyScope
 
@@ -538,7 +538,9 @@ def _record_refusal(
 async def _require_safe_url(server: ResolvedMcpServer) -> None:
     """Run the existing MCP SSRF policy over the resolved URL."""
     try:
-        await validate_mcp_url(server.url, has_authorization_token=bool(server.authorization_token))
+        await validate_mcp_url(
+            server.url, has_authorization_token=bool(server.authorization_token), private_hosts=mcp_private_hosts()
+        )
     except UnsafeURLError:
         raise McpExecutionError(CODE_UNSAFE_URL, ExecutionState.NOT_STARTED, 400) from None
 

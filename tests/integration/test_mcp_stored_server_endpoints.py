@@ -359,6 +359,42 @@ def test_an_unblocked_user_is_unaffected(
     assert response.status_code == 200, response.text
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1:8000/mcp",
+        "http://127.1:8000/mcp",
+        "http://0177.0.0.1:8000/mcp",
+        "http://[::1]:8000/mcp",
+        "https://10.0.0.5/mcp",
+    ],
+)
+def test_a_stored_server_on_an_internal_address_is_not_called(
+    client: TestClient,
+    test_db: Session,
+    api_key_obj: dict[str, Any],
+    api_key_header: dict[str, str],
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+    url: str,
+) -> None:
+    """A row written before loopback was refused still reaches nothing: execution re-checks the URL."""
+    monkeypatch.setenv("OTARI_MCP_ALLOW_LOOPBACK", "true")
+    monkeypatch.setenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", "true")
+    row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]), url=url, token=None)
+
+    response = client.post(
+        f"{API_ROOT}/mcp/execute",
+        headers=api_key_header,
+        json=_execute_body(row, server_revision=_revision(row, token=None)),
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["code"] == "unsafe_mcp_url"
+    assert response.json()["execution_state"] == "not_started"
+    assert session.calls == []
+
+
 def test_a_stored_token_is_never_sent_over_cleartext_http(
     client: TestClient,
     test_db: Session,

@@ -183,7 +183,7 @@ async def test_a_request_cannot_send_its_own_renewer() -> None:
         async def resolve_many(self, *args: Any) -> list[McpServerConfig]:
             return []
 
-    async def safe(url: str, *, has_authorization_token: bool) -> None:
+    async def safe(url: str, *, has_authorization_token: bool, **_: Any) -> None:
         return None
 
     with pytest.MonkeyPatch.context() as patched:
