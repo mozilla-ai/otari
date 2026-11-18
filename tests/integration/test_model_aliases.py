@@ -10,7 +10,7 @@ from collections.abc import AsyncIterator, Generator
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-import httpx
+import httpx2
 import openai
 import pytest
 from any_llm.types.completion import (
@@ -572,10 +572,10 @@ async def test_moderations_response_model_echoes_alias(client: TestClient) -> No
 def test_embeddings_error_detail_names_the_alias_not_its_target(client: TestClient) -> None:
     """A provider's refusal is passed through, but not the target it names."""
     _create_user(client)
-    request = httpx.Request("POST", "https://box.ts.net/v1/embeddings")
+    request = httpx2.Request("POST", "https://box.ts.net/v1/embeddings")
     upstream = openai.NotFoundError(
         "Error code: 404 - The model `qwen3` does not exist or you do not have access to it.",
-        response=httpx.Response(404, request=request),
+        response=httpx2.Response(404, request=request),
         body={"message": "The model `qwen3` does not exist or you do not have access to it."},
     )
 

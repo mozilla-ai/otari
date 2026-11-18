@@ -1,9 +1,9 @@
 """Drift gate between the gateway's maker vocabulary and the dashboard's marks.
 
-A model's vendor is voted from ``_ORG_VENDORS`` and ``_KEY_VENDORS`` in
-``services/model_identity.py`` and from nowhere else, so that pair is the whole
-maker vocabulary. The dashboard draws each maker's mark from a table keyed on
-``vendor_slug`` of that string (``web/src/shared/helpers/brandMarks.ts``).
+A vendor written into ``_ORG_VENDORS`` or ``_KEY_VENDORS`` in
+``services/model_identity.py`` is one somebody added in this repository. The
+dashboard draws each maker's mark from a table keyed on ``vendor_slug`` of that
+string (``web/src/shared/helpers/brandMarks.ts``).
 
 The two live in different languages and neither imports the other, so a vendor
 added on this side reaches the dashboard as a lettermark tile with nothing
@@ -12,8 +12,15 @@ only compare the table against a list somebody typed there by hand, which drifts
 the moment this vocabulary grows. So the assertion belongs here, where the
 vocabulary is defined and where the change that breaks it is made.
 
-Total both ways: every vendor is classified, and every key still names a vendor
-that exists.
+A vendor can also be any org a models.dev canonical id names (``baai``,
+``audio8``), and the table keys those as the hosted catalog shows them. They are
+not gated: they arrive with data rather than a change here, and some are a
+person's account with no mark to draw.
+
+Providers are not gated either. A provider is any id any-llm supports, so a new
+one arrives with an any-llm bump, often with no published mark. The dashboard
+tiles it until someone draws one, and a dependency bump should not fail over a
+missing logo.
 """
 
 from __future__ import annotations
@@ -25,42 +32,42 @@ from gateway.services.model_identity import _KEY_VENDORS, _ORG_VENDORS, vendor_s
 
 MARKS = Path(__file__).resolve().parents[2] / "web" / "src" / "shared" / "helpers" / "brandMarks.ts"
 
-# Makers deliberately drawn as a lettermark tile instead, with the reason.
+# Makers deliberately drawn as a lettermark tile instead, by reason.
 TILED = {
-    # The only Amazon asset in the source set is the lowercase "aws" wordmark,
-    # which is not legible at the 14px and 16px steps a mark is drawn at. The
-    # `sagemaker` provider row tiles for the same reason; `bedrock` wears the
-    # service's own glyph, which does not stand for Amazon the maker.
+    # Only a wordmark or a product's mark exists, and the row names the company.
+    # Amazon has the aws wordmark and the Nova and Bedrock product marks;
+    # Meituan's is its name in Chinese; inclusionAI's is the Ling family's.
     "amazon",
-    # No mark for it in either source set.
-    "openbmb",
-    # Labs named by models.dev's canonical ids whose marks are not vendored yet.
-    "aisingapore",
-    "arceeai",
     "inclusionai",
     "meituan",
-    "mixedbread",
+    # Drawn through a gradient mask the shape table cannot hold.
     "poolside",
+    # A mark exists, but the hosted catalog does not list the vendor yet.
+    "arceeai",
     "sakanaai",
+    "upstage",
+    # No vector mark in LobeHub, Simple Icons or on the vendor's own site.
+    "aisingapore",
+    "mixedbread",
     "sarvamai",
     "sdaia",
-    "stepfun",
     "swissai",
-    "tencent",
     "thinkingmachines",
     "trendyol",
-    "upstage",
     "writer",
-    "xiaomi",
 }
 
 
-def _maker_keys() -> set[str]:
-    """The keys of ``MAKER_MARKS``, read off the module rather than imported."""
+def _table_keys(table: str) -> set[str]:
+    """The keys of one mark table, read off the module rather than imported."""
     source = MARKS.read_text(encoding="utf-8")
-    start = source.index("const MAKER_MARKS")
+    start = source.index(f"const {table}")
     body = source[start : source.index("\n}\n", start)]
     return set(re.findall(r'^\s+"?([A-Za-z0-9_-]+)"?:', body, re.M))
+
+
+def _maker_keys() -> set[str]:
+    return _table_keys("MAKER_MARKS")
 
 
 def _vendor_slugs() -> set[str]:
@@ -76,12 +83,11 @@ def test_every_maker_is_marked_or_deliberately_tiled() -> None:
     )
 
 
-def test_no_mark_names_a_vendor_that_is_gone() -> None:
-    # The other direction, which is what keeps TILED honest as the vocabulary
-    # changes: a key or an exemption for a vendor nobody can be assigned any
-    # more is dead weight that reads as coverage.
-    slugs = _vendor_slugs()
-    stale_keys = _maker_keys() - slugs
-    stale_tiles = TILED - slugs
-    assert not stale_keys, f"{sorted(stale_keys)} is keyed in {MARKS.name} but is no longer a vendor"
-    assert not stale_tiles, f"{sorted(stale_tiles)} is exempted here but is no longer a vendor"
+def test_no_exemption_outlives_its_reason() -> None:
+    # The other direction, which is what keeps TILED honest: an exemption for a
+    # vendor nobody can be assigned any more, or one that has since been given a
+    # mark, is dead weight that reads as a gap.
+    stale = TILED - _vendor_slugs()
+    marked = TILED & _maker_keys()
+    assert not stale, f"{sorted(stale)} is exempted here but is no longer a vendor"
+    assert not marked, f"{sorted(marked)} has a mark in {MARKS.name} and is also in TILED"

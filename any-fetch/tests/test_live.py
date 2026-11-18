@@ -46,6 +46,7 @@ EXPECTED: dict[str, Expected] = {
     "deepseek": Expected(titles=True, missing_page="fails"),
     "exa": Expected(titles=True, missing_page="in_body_error"),
     "tabstack": Expected(titles=True, missing_page="site_page"),
+    "youdotcom": Expected(titles=True, missing_page="site_page"),
 }
 
 

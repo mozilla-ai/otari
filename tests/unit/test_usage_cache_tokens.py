@@ -370,7 +370,7 @@ def test_responses_captures_cached_tokens() -> None:
         input_tokens=100,
         output_tokens=20,
         total_tokens=120,
-        input_tokens_details=InputTokensDetails(cached_tokens=33),
+        input_tokens_details=InputTokensDetails(cached_tokens=33, cache_write_tokens=0),
         output_tokens_details=OutputTokensDetails(reasoning_tokens=0),
     )
     usage = _usage_to_completion_usage(usage_in)
