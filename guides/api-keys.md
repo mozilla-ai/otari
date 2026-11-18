@@ -22,11 +22,12 @@ accepted headers are in [Base URL](https://docs.otari.ai/reference#base-url) and
 The key is made in the workspace selected in the top-left corner.
 
 **Access**, under **More options**, sets what the key may call: one checkbox
-per scope, grouped by area. Models and Tools are shown; Files, Batches, MCP,
+per scope, grouped by area. Models, Tools and MCP are shown; Files, Batches,
 Coding agents, Usage, and End users on a service key are under **Advanced
 scopes**, which opens by itself on a key that holds one of them. A group's own
-box checks or clears the whole group. A new key starts with **Call models**
-alone, the `inference:run` scope; the Claude Code plugin's hooks, routing and
+box checks or clears the whole group. A new key starts with the Models, Tools
+and MCP groups (`inference:run`, `web:search`, `web:fetch`, `code:execute`,
+`mcp:read` and `mcp:execute`); the Claude Code plugin's hooks, routing and
 telemetry need the **Coding agents** group too. See [Scopes](#scopes). Edit a
 key to change its access later.
 
@@ -154,7 +155,7 @@ Membership changes switch keys off:
 - Keys made before Otari recorded who made them are left alone on a demotion.
   When you demote someone to viewer, check the keys billed to them.
 
-The key routes are in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/e355c6e90d0c0b19af491d1941630a5a79431f09/docs/public/openapi.json).
+The key routes are in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/5a30d2fd1c6307f3aafcc5842f3575a8941f4e8d/docs/public/openapi.json).
 
 ### Model and search tool access
 
@@ -224,7 +225,8 @@ scopes. No scope lets a key create or manage keys: that takes a dashboard
 session or the master key, so revoking a key always ends what it can do.
 
 A key created through the API or the dashboard without naming any scopes gets
-`inference:run` alone. (A key declared in the config file has a
+`inference:run`, `web:search`, `web:fetch`, `code:execute`, `mcp:read` and
+`mcp:execute`: it can call models and tools, and nothing else. (A key declared in the config file has a
 [different default](https://docs.otari.ai/self-hosting/configuration#budgets-and-api-keys-in-config).) Name
 them in `scopes` when you create the key, through `POST /api/v1/keys` or
 `POST /api/v1/organizations/me/keys`:
@@ -254,7 +256,7 @@ answer rather than the caller's. A call that attaches a stored file by its
 container, because the container still holds what earlier runs staged into it.
 A key without `files:read` can still open a fresh container; only resuming an
 existing one is refused. The master key holds
-every scope. Each operation in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/e355c6e90d0c0b19af491d1941630a5a79431f09/docs/public/openapi.json)
+every scope. Each operation in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/5a30d2fd1c6307f3aafcc5842f3575a8941f4e8d/docs/public/openapi.json)
 lists the scope it asks of every caller in `x-otari-key-scopes`, empty where
 every key may call it. A scope a request needs only for something it asked for,
 such as `files:read` for a `file_id` or a container, is named in this page
