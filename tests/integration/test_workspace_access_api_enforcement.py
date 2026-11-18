@@ -289,6 +289,7 @@ def test_allowed_data_locations_serve_from_the_region_that_keeps_data_there(
         )
     )
     _, served = _chat(client, headers, "openai:gpt-4o")
+    listed = _ok(client.get(f"{API_ROOT}/workspaces/{workspace_id}/hosted-providers", headers=master_key_header))
     _ok(
         client.put(
             url,
@@ -301,6 +302,7 @@ def test_allowed_data_locations_serve_from_the_region_that_keeps_data_there(
     cleared = _ok(client.put(url, json={"allowed_data_locations": None}, headers=master_key_header))
 
     assert policy == {"require_zero_data_retention": False, "allowed_data_locations": ["EU"]}
+    assert [row["data_locations"] for row in listed["data"]] == [["US", "DE"]]
     assert served.get("api_key") == "sk-hosted-eu", (
         "EU admits the region kept in Germany, not the US one first in order"
     )

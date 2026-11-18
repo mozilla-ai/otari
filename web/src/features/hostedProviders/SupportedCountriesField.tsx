@@ -8,6 +8,7 @@ import { Field } from "@/design-system/forms/Field"
 import {
   countriesFromJson,
   formatCountries,
+  isCountryCode,
   type ParsedCountries,
 } from "./supportedCountries"
 
@@ -38,6 +39,13 @@ export function SupportedCountriesField({
       // so a file of none is refused rather than read as no restriction.
       setFileError(
         "The file lists no country. To refuse every country, set an empty list through the API.",
+      )
+    } else if (loaded.ok && !loaded.value.every(isCountryCode)) {
+      // Checked here as well as once in the field: an entry such as "" would
+      // vanish from the text and leave it reading as every country.
+      const invalid = loaded.value.filter((code) => !isCountryCode(code))
+      setFileError(
+        `The file holds entries that are not two-letter country codes: ${invalid.map((code) => JSON.stringify(code)).join(", ")}`,
       )
     } else if (loaded.ok) {
       setFileError(null)

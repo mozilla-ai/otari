@@ -416,4 +416,5 @@ def _public(
         served_models=_sorted(served),
         served_by_own_key=served_by_own_key,
         zero_data_retention=hosted_zero_data_retention(provider),
+        data_locations=list(hosted_data_locations(provider)),
     )

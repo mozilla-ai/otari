@@ -1946,6 +1946,8 @@ async def move_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) ->
             price_of=_request_price_of(
                 ctx.db, ctx.prices if ctx.prices is not None else get_request_prices(ctx.db, ctx.organization_id)
             ),
+            # A region is held to its provider's ceilings, as the reservation was.
+            ceiling_instance=HostedRegionIndex.parent_of(attempt.instance),
         )
     except ProviderSpendCeilingExceededError as exc:
         raise CandidateCannotServe(spend_ceiling_refusal(exc)) from exc

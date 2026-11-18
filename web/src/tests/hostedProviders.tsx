@@ -235,6 +235,8 @@ export function mockApi(
     keyEncryption?: boolean
     /** What GET /settings answers about pricing. */
     pricing?: { require_pricing: boolean; default_pricing: boolean }
+    /** Pricing keys a DELETE /pricing answers 404 for, as nothing stored there. */
+    missingPrices?: string[]
   } = {},
 ) {
   const granted = opts.granted ?? true
@@ -397,6 +399,14 @@ export function mockApi(
         type_counts: typeCounts,
         vendors: vendorFacets(models, opts.vendorsOff ?? []),
       })
+    }
+    if (url.startsWith(`${API_ROOT}/pricing/`) && method === "DELETE") {
+      const key = decodeURIComponent(
+        url.slice(`${API_ROOT}/pricing/`.length).split("?")[0],
+      )
+      return (opts.missingPrices ?? []).includes(key)
+        ? jsonResponse({ detail: "Not Found" }, 404)
+        : new Response(null, { status: 204 })
     }
     const regionWrite = url.match(
       /\/hosted-providers\/([^/]+)\/regions\/([^/?]+)/,

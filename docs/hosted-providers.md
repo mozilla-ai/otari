@@ -76,16 +76,23 @@ or `GLOBAL` (an upstream that may process a request in any region). Otari
 cannot verify this; it records the declaration and shows it on the Hosted
 providers page. Leaving it unset declares nothing.
 
+A region's location is its own. A new region copies its provider's location
+unless it is given one, and the first region takes the provider's, but a later
+change to the provider's location moves no region. Each usage row a hosted
+provider serves records the location of the provider or region that served
+it, as it was declared at the time (`data_location` on `/api/v1/usage`), so
+where a past request went is never rewritten.
+
 It is not the same as [supported countries](configuration.md#supported-countries),
 which says where requests may come *from*. A workspace can list the data
 locations it accepts (**Allowed data locations** on its Providers tab, or
 `allowed_data_locations` on `/api/v1/workspaces/{workspace_id}/provider-policy`):
 
-- A region is used only when its location is on the list: its own, or its
-  provider's where it declares none. `EU` admits each EU member state as well
-  as `EU` itself; `GLOBAL` admits only `GLOBAL`.
-- A region whose location is unknown, neither declared nor inherited, never
-  matches a list.
+- A region is used only when its location is on the list. `EU` admits each
+  EU member state as well as `EU` itself; `GLOBAL` admits only `GLOBAL`.
+- A provider or region that declares no location never matches a list, so a
+  workspace with a list refuses it. The dialog lists the providers a list
+  would refuse before it is saved.
 - A hosted provider with no region left is refused with `403` and left out of
   the workspace's model lists.
 - Leaving the list unset accepts every location.
@@ -151,6 +158,17 @@ Regions are managed on the provider's page or through
 `/api/v1/hosted-providers/{provider}/regions`. A provider defined in
 `config.yml` has none, and model discovery and the health check use the first
 enabled region.
+
+Not supported yet, and planned to fit this model rather than replace it:
+
+- A region that changes only the model id, as Bedrock's `us.` and `global.`
+  inference profiles do on one key. Until then, offer each profile as a model
+  of its own on the provider.
+- Failover from one region to the next, and preferring a region from the
+  `Otari-Region` header. Both would be a policy on the provider whose default
+  stays the first region that admits the request, in order. A region's id is
+  only a name to pin it by and never a location.
+- Regions for a provider declared in `config.yml`.
 
 ## Who manages hosted providers
 

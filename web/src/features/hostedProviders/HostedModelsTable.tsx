@@ -6,6 +6,7 @@ import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { Toggle } from "@/design-system/forms/Toggle"
 import { Badge } from "@/design-system/indicators/Badge"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { Tooltip } from "@/design-system/overlays/Tooltip"
 import { offeredPriceColumns } from "@/features/models/offeredPriceColumns"
 import {
   formatOfferingPrice,
@@ -97,6 +98,20 @@ function RegionPriceCell({
   )
 }
 
+/** The provider price's header beside regions: the default they fall back on. */
+function defaultHeader(label: string) {
+  return (
+    <Tooltip
+      content="What a region without a price of its own charges. $ per million tokens for text models."
+      delay={0}
+    >
+      <span className="underline decoration-dotted underline-offset-4">
+        {label}
+      </span>
+    </Tooltip>
+  )
+}
+
 /**
  * Models in today's row shape: price, where it comes from, the serving switch
  * and Edit price. A Custom price the default rung now prices differently names
@@ -111,6 +126,7 @@ export function HostedModelsTable({
   emptyContent,
   pendingModelId,
   regions = [],
+  hasRegions = regions.length > 0,
   onToggle,
   onEdit,
   onEditRegionPrice,
@@ -133,6 +149,11 @@ export function HostedModelsTable({
    * caller passes them only for a provider with two or more.
    */
   regions?: readonly HostedProviderRegion[]
+  /**
+   * The provider has regions, whether or not any has a column here: its own
+   * price is then the default for regions without one.
+   */
+  hasRegions?: boolean
   onEditRegionPrice?: (row: HostedModel, region: HostedProviderRegion) => void
   onUseDefault: (row: HostedModel) => void
 }) {
@@ -149,12 +170,21 @@ export function HostedModelsTable({
       ),
     },
     // Beside region columns the provider's cache rates give way, so a row
-    // still fits a desktop width; the price editor carries them.
-    ...offeredPriceColumns<HostedModel>().filter(
-      (column) =>
-        regions.length === 0 ||
-        (column.id !== "cache_read" && column.id !== "cache_write"),
-    ),
+    // still fits a desktop width; the price editor carries them. Its input and
+    // output are then the default every region without a price charges.
+    ...(hasRegions
+      ? offeredPriceColumns<HostedModel>()
+          .filter(
+            (column) =>
+              column.id !== "cache_read" && column.id !== "cache_write",
+          )
+          .map((column) => ({
+            ...column,
+            header: defaultHeader(
+              column.id === "input" ? "Default in" : "Default out",
+            ),
+          }))
+      : offeredPriceColumns<HostedModel>()),
     {
       id: "source",
       header: "Rate",
@@ -228,7 +258,7 @@ export function HostedModelsTable({
   ]
   return (
     <TableScrollFrame
-      className={`otari-offered-models-table${regions.length > 0 ? " otari-offered-models-table--regions" : ""}`}
+      className={`otari-offered-models-table${hasRegions ? " otari-offered-models-table--regions" : ""}`}
     >
       <DataTable
         ariaLabel={ariaLabel}

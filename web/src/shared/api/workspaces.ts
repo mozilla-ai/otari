@@ -533,8 +533,9 @@ export function useWorkspaceProviderPolicy(workspaceId: string | null) {
 
 /**
  * Set what the workspace requires of every provider serving it: zero data
- * retention, and the data locations a hosted region must declare.
- * `allowedDataLocations` left out keeps the stored list; null accepts any.
+ * retention, and the data locations a hosted provider must declare. Either
+ * left out keeps what is stored, so one control never writes the other's
+ * value back. For the list, null accepts any location and an empty list none.
  */
 export function useSetWorkspaceProviderPolicy() {
   const queryClient = useQueryClient()
@@ -545,7 +546,7 @@ export function useSetWorkspaceProviderPolicy() {
       allowedDataLocations,
     }: {
       workspaceId: string
-      requireZeroDataRetention: boolean
+      requireZeroDataRetention?: boolean
       allowedDataLocations?: string[] | null
     }) =>
       apiFetch<WorkspaceProviderPolicy>(
@@ -553,7 +554,9 @@ export function useSetWorkspaceProviderPolicy() {
         {
           method: "PUT",
           body: JSON.stringify({
-            require_zero_data_retention: requireZeroDataRetention,
+            ...(requireZeroDataRetention === undefined
+              ? {}
+              : { require_zero_data_retention: requireZeroDataRetention }),
             ...(allowedDataLocations === undefined
               ? {}
               : { allowed_data_locations: allowedDataLocations }),

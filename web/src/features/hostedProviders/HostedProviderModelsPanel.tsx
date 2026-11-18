@@ -7,6 +7,7 @@ import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
+import { Toggle } from "@/design-system/forms/Toggle"
 import { OfferedKindTabs } from "@/features/models/OfferedKindTabs"
 import {
   filteredEmptyContent,
@@ -28,6 +29,7 @@ import { orderedRegions } from "./dataLocations"
 import { HostedModelForm } from "./HostedModelForm"
 import { HostedModelsTable } from "./HostedModelsTable"
 import { HostedVendorRow, type VendorBulkAction } from "./HostedVendorRow"
+import { regionRatesOf } from "./modelPriceDraft"
 import { PriceSyncDialog } from "./PriceSyncDialog"
 import { refreshOutcome } from "./refreshOutcome"
 
@@ -134,6 +136,7 @@ export function HostedProviderModelsPanel({
   const [editingId, setEditingId] = useState("")
   // The region whose price of the edited model is open, or empty for the provider's.
   const [editingRegionSlug, setEditingRegionSlug] = useState("")
+  const [isComparingRegions, setIsComparingRegions] = useState(false)
   // A column per region wherever the provider has one: a lone region left by a
   // removal may still carry a price of its own.
   const regions = orderedRegions(provider)
@@ -156,6 +159,13 @@ export function HostedProviderModelsPanel({
 
   const isEstimate = provider.provider === "otari"
   const rows = models.data?.data ?? []
+  // A region gets a column once some model has a price of its own there, or
+  // every region does while they are being compared.
+  const shownRegions = isComparingRegions
+    ? regions
+    : regions.filter((region) =>
+        rows.some((row) => regionRatesOf(row, region.slug) !== undefined),
+      )
   const vendors = models.data?.vendors ?? []
   const editing = rows.find((row) => row.id === editingId)
   const refreshed = refresh.data ? refreshOutcome(refresh.data) : ""
@@ -225,7 +235,8 @@ export function HostedProviderModelsPanel({
         clearOutcome()
         update.mutate({ modelId: row.id, body: { enabled } })
       }}
-      regions={regions}
+      regions={shownRegions}
+      hasRegions={regions.length > 0}
       onEdit={(row) => {
         setIsAdding(false)
         setEditingRegionSlug("")
@@ -329,6 +340,16 @@ export function HostedProviderModelsPanel({
           resetPrices.error
         }
       />
+      {regions.length > 0 && !isEmptyCatalog ? (
+        <span className="flex items-center gap-2 self-start text-caption">
+          Compare regions
+          <Toggle
+            isSelected={isComparingRegions}
+            label="Compare regions: a price column for every region"
+            onChange={setIsComparingRegions}
+          />
+        </span>
+      ) : null}
       {status ? (
         <p className="text-caption" role="status">
           {status}

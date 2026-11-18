@@ -64,7 +64,7 @@ describe("HostedProvidersPage", () => {
         hostedProvider({
           data_location: "CN",
           regions: [
-            hostedRegion({ slug: "cn", position: 0 }),
+            hostedRegion({ slug: "cn", position: 0, data_location: "CN" }),
             hostedRegion({ slug: "sg", position: 1, data_location: "SG" }),
             hostedRegion({ slug: "us", position: 2, data_location: "US" }),
           ],
@@ -73,6 +73,10 @@ describe("HostedProvidersPage", () => {
           id: "22222222-2222-4222-8222-222222222222",
           provider: "mistral",
           data_location: "EU",
+        }),
+        hostedProvider({
+          id: "33333333-3333-4333-8333-333333333333",
+          provider: "anthropic",
         }),
       ],
     })
@@ -90,6 +94,9 @@ describe("HostedProvidersPage", () => {
       within(row("mistral")).getByText("Data: European Union"),
     ).toBeInTheDocument()
     expect(within(row("mistral")).queryByText(/regions$/)).toBeNull()
+    expect(
+      within(row("anthropic")).getByText("Data: not declared"),
+    ).toBeInTheDocument()
   })
 
   it("refuses a caller who does not operate the deployment without asking for the list", async () => {
@@ -390,6 +397,40 @@ describe("HostedProvidersPage", () => {
         name: "Available to requests from",
       }),
     ).toHaveValue("")
+  })
+
+  it("refuses a countries file whose entries are not all codes, keeping the draft", async () => {
+    mockApi({ providers: [] })
+    const user = userEvent.setup()
+    await renderPage()
+
+    await user.click(
+      (await screen.findAllByRole("button", { name: "Add provider" }))[0],
+    )
+    const dialog = await screen.findByRole("dialog")
+    const field = within(dialog).getByRole("textbox", {
+      name: "Available to requests from",
+    })
+    await user.type(field, "GB")
+    // An empty entry would vanish from the text and read as every country.
+    await user.upload(
+      countriesFileInput(),
+      new File(['[""]'], "countries.json", { type: "application/json" }),
+    )
+    expect(
+      await within(dialog).findByText(
+        'The file holds entries that are not two-letter country codes: ""',
+      ),
+    ).toBeInTheDocument()
+    expect(field).toHaveValue("GB")
+
+    await user.upload(
+      countriesFileInput(),
+      new File(['["US","DE"]'], "countries.json", {
+        type: "application/json",
+      }),
+    )
+    await waitFor(() => expect(field).toHaveValue("US, DE"))
   })
 
   it("holds back a country that is not a two-letter code", async () => {

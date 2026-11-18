@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import { hostedProvider } from "@/tests/hostedProviders"
 
 import {
+  admitsLocation,
   DATA_LOCATION_OPTIONS,
   dataLocationLabel,
   matchDataLocations,
@@ -10,6 +11,8 @@ import {
   primarySlugFor,
   providerDataLocations,
   REGION_SLUG_PATTERN,
+  refusesProvider,
+  slugFromLabel,
 } from "./dataLocations"
 
 const region = (slug: string, position: number, dataLocation?: string) => ({
@@ -47,17 +50,18 @@ describe("dataLocations", () => {
     expect(matchDataLocations("", 10, "GLOBAL")).toHaveLength(10)
   })
 
-  it("lists every distinct effective location, a region inheriting the provider's", () => {
+  it("lists every distinct place a provider serves from, each region's own", () => {
     const provider = hostedProvider({
       data_location: "CN",
       regions: [
         region("us", 2, "US"),
-        region("cn", 0),
+        region("cn", 0, "CN"),
         region("sg", 1, "SG"),
-        region("cn2", 3),
+        // Its own null is not declared, never the provider's location.
+        region("x", 3),
       ],
     })
-    expect(providerDataLocations(provider)).toEqual(["CN", "SG", "US"])
+    expect(providerDataLocations(provider)).toEqual(["CN", "SG", "US", null])
     // A switched-off region serves nothing, so its location is not listed.
     const withSgOff = {
       ...provider,
@@ -65,11 +69,31 @@ describe("dataLocations", () => {
         row.slug === "sg" ? { ...row, enabled: false } : row,
       ),
     }
-    expect(providerDataLocations(withSgOff)).toEqual(["CN", "US"])
-    expect(providerDataLocations(hostedProvider())).toEqual([])
+    expect(providerDataLocations(withSgOff)).toEqual(["CN", "US", null])
+    expect(providerDataLocations(hostedProvider())).toEqual([null])
     expect(
       providerDataLocations(hostedProvider({ data_location: "EU" })),
     ).toEqual(["EU"])
+  })
+
+  it("admits a location as the gateway does", () => {
+    expect(admitsLocation(null, null)).toBe(true)
+    expect(admitsLocation(["EU"], "FR")).toBe(true)
+    expect(admitsLocation(["EU"], "US")).toBe(false)
+    expect(admitsLocation(["GLOBAL"], "US")).toBe(false)
+    expect(admitsLocation(["US"], "GLOBAL")).toBe(false)
+    expect(admitsLocation(["US"], null)).toBe(false)
+    expect(refusesProvider(["EU"], ["US", "DE"])).toBe(false)
+    expect(refusesProvider(["EU"], ["US", null])).toBe(true)
+    expect(refusesProvider(["EU"], [])).toBe(true)
+    expect(refusesProvider(null, [])).toBe(false)
+  })
+
+  it("derives a region id from a name", () => {
+    expect(slugFromLabel("Southeast Asia")).toBe("southeast-asia")
+    expect(slugFromLabel("  São Paulo! ")).toBe("sao-paulo")
+    expect(slugFromLabel("a".repeat(40))).toHaveLength(32)
+    expect(slugFromLabel("---")).toBe("")
   })
 
   it("names the current connection after the provider's location", () => {

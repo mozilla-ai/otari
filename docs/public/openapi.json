@@ -12183,7 +12183,7 @@
         "type": "object"
       },
       "HostedProviderRegionCreateRequest": {
-        "description": "Add a region a hosted provider serves from.\n\nOnly what differs from the provider is given; every field left out is the\nprovider's. ``slug`` pins the region in a selector\n(``<provider>@<slug>:<model>``) and names it in every route. ``api_key``\nleft out uses the provider's key, which a region on another origin than\nthe provider's endpoint may not: it needs a key of its own there.\n``client_args`` are merged over the provider's on the provider's origin, so\na Bedrock region gives its ``region_name`` alone; a region on another\norigin takes its own alone. An ``api_base`` that carries a key must be https.\n``data_location`` declares where the region keeps request data.\n\nA request is served by the first enabled region whose countries admit it\nand whose data location the workspace accepts; a pinned region is held to\nthe same filters. A provider with no regions yet serves from its own connection. Adding its\nfirst region keeps that connection as a region of its own, ahead of the new\none, under ``primary_slug`` and ``primary_label``: by default the\nprovider's data location, or ``primary``.",
+        "description": "Add a region a hosted provider serves from.\n\nOnly what differs from the provider is given; every field left out is the\nprovider's. ``slug`` pins the region in a selector\n(``<provider>@<slug>:<model>``) and names it in every route. ``api_key``\nleft out uses the provider's key, which a region on another origin than\nthe provider's endpoint may not: it needs a key of its own there.\n``client_args`` are merged over the provider's on the provider's origin, so\na Bedrock region gives its ``region_name`` alone; a region on another\norigin takes its own alone. An ``api_base`` that carries a key must be https.\n``data_location`` declares where the region keeps request data. Left out, it\ncopies the provider's declaration as it stands; null declares nothing. It is\nthe region's own from then on: a later change to the provider's does not\nmove it.\n\nA request is served by the first enabled region whose countries admit it\nand whose data location the workspace accepts; a pinned region is held to\nthe same filters. A provider with no regions yet serves from its own connection. Adding its\nfirst region keeps that connection as a region of its own, ahead of the new\none, under ``primary_slug`` and ``primary_label``: by default the\nprovider's data location, or ``primary``.",
         "example": {
           "api_base": "https://tokenhub-intl.example.com/v1",
           "api_key": "<the region's key>",
@@ -12308,7 +12308,7 @@
         "type": "object"
       },
       "HostedProviderRegionPublic": {
-        "description": "One region of a hosted provider, as stored: null wherever it uses the provider's value.\n\n``selector`` is what pins it in a request (``tokenhub@sg``). ``has_api_key``\nis true for a region with a key of its own, known by its last four\ncharacters; ``client_args`` holds only the region's own extras, masked as\nthe provider's are. ``decryptable`` is false for a region whose own key or\nextras no configured ``OTARI_SECRET_KEY`` reads, which serves nothing until\nre-entered.",
+        "description": "One region of a hosted provider, as stored: null wherever it uses the provider's value.\n\n``data_location`` is the exception: it is the region's own, and null there\nmeans nothing is declared.\n\n``selector`` is what pins it in a request (``tokenhub@sg``). ``has_api_key``\nis true for a region with a key of its own, known by its last four\ncharacters; ``client_args`` holds only the region's own extras, masked as\nthe provider's are. ``decryptable`` is false for a region whose own key or\nextras no configured ``OTARI_SECRET_KEY`` reads, which serves nothing until\nre-entered.",
         "properties": {
           "api_base": {
             "anyOf": [
@@ -12435,7 +12435,7 @@
         "type": "object"
       },
       "HostedProviderRegionUpdateRequest": {
-        "description": "Change one region. A field left out is left alone.\n\nNull puts a field the region inherits back on the provider's value:\n``api_key`` null returns the region to the provider's key, an empty\n``api_base`` or null to the provider's endpoint, and so on for\n``client_args``, ``data_location`` and ``supported_countries``. Null on\n``label``, ``enabled`` or ``position``, which nothing inherits, changes\nnothing. ``client_args`` echoed\nback with masked entries keeps the stored values. ``position`` moves the\nregion to that place in the order regions are tried, counted from 0.",
+        "description": "Change one region. A field left out is left alone.\n\nNull puts a field the region inherits back on the provider's value:\n``api_key`` null returns the region to the provider's key, an empty\n``api_base`` or null to the provider's endpoint, and so on for\n``client_args`` and ``supported_countries``. ``data_location`` is the\nregion's own, so null declares nothing. Null on ``label``, ``enabled`` or\n``position`` changes nothing. ``client_args`` echoed\nback with masked entries keeps the stored values. ``position`` moves the\nregion to that place in the order regions are tried, counted from 0.",
         "example": {
           "enabled": false
         },
@@ -29464,6 +29464,18 @@
             "title": "Counts Toward Budget",
             "type": "boolean"
           },
+          "data_location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the hosted provider or region that served the request declared it keeps request data when the row was written: an ISO 3166-1 alpha-2 code, EU or GLOBAL. Null where the deployment did not serve it or nothing was declared.",
+            "title": "Data Location"
+          },
           "endpoint": {
             "title": "Endpoint",
             "type": "string"
@@ -31786,6 +31798,21 @@
             "description": "Whether this workspace stores a departure from full inheritance.",
             "title": "Customized",
             "type": "boolean"
+          },
+          "data_locations": {
+            "description": "Where each region the provider serves from declares it keeps request data (one entry for a provider with no regions), null where nothing is declared. A workspace listing allowed data locations is refused the provider when none of these is on its list.",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Data Locations",
+            "type": "array"
           },
           "enabled": {
             "title": "Enabled",

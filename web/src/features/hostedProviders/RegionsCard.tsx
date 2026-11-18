@@ -14,18 +14,46 @@ import {
   useUpdateHostedProviderRegion,
 } from "@/shared/api/hostedProviders"
 
-import {
-  dataLocationLabel,
-  effectiveDataLocation,
-  orderedRegions,
-} from "./dataLocations"
+import { dataLocationLabel, orderedRegions } from "./dataLocations"
 import { RegionFormDialog } from "./RegionFormDialog"
+import { formatCountries } from "./supportedCountries"
+
+/** Who may call a connection: its list, or every country where it has none. */
+function countriesText(countries: readonly string[] | null | undefined) {
+  if (countries == null) return "Every country"
+  return countries.length === 0 ? "None" : formatCountries([...countries])
+}
 
 /**
- * The regions a hosted provider serves from, in the order requests try them.
- * A request goes to the first enabled region its workspace allows, with no
- * failover to the next; `provider@slug:model` pins one. A provider defined in
- * config.yml lists its regions read-only.
+ * Where a switched-off region's requests go: the next serving region in
+ * order, since a request reaches the first one that admits it.
+ */
+export function switchOffConsequence(
+  regions: readonly HostedProviderRegion[],
+  region: HostedProviderRegion,
+  providerName: string,
+): string {
+  const others = regions.filter(
+    (other) => other.enabled && other.slug !== region.slug,
+  )
+  const next = regions
+    .slice(regions.indexOf(region) + 1)
+    .find((other) => other.enabled)
+  const pinned = `A request that pins ${region.selector} is refused.`
+  if (others.length === 0) {
+    return `No region serves ${providerName} then, so every request to it is refused.`
+  }
+  return next
+    ? `Its requests go to ${next.label} next, the next serving region in order. ${pinned}`
+    : `Requests the other regions do not admit will be refused. ${pinned}`
+}
+
+/**
+ * The regions a hosted provider serves from, numbered in the order requests
+ * try them. A request goes to the first serving region its workspace allows,
+ * with no failover to the next; `provider@slug:model` pins one. What a region
+ * does not set of its own (key, endpoint, countries) it shares with the
+ * provider. A provider defined in config.yml lists its regions read-only.
  */
 export function RegionsCard({
   provider,
@@ -39,17 +67,29 @@ export function RegionsCard({
   const [editingSlug, setEditingSlug] = useState("")
   const [editOpening, setEditOpening] = useState(0)
   const [removingSlug, setRemovingSlug] = useState("")
+  const [switchingOffSlug, setSwitchingOffSlug] = useState("")
 
   const regions = orderedRegions(provider)
-  const primarySlug = regions.find((region) => region.enabled)?.slug ?? ""
   const editing = regions.find((region) => region.slug === editingSlug)
   const removing = regions.find((region) => region.slug === removingSlug)
+  const switchingOff = regions.find(
+    (region) => region.slug === switchingOffSlug,
+  )
   const example = regions[1]?.selector ?? regions[0]?.selector ?? ""
 
   const move = (slug: string, position: number) =>
     update.mutate({ slug, body: { position } })
 
   const columns: DataTableColumn<HostedProviderRegion>[] = [
+    {
+      id: "order",
+      header: "Order",
+      cell: (row) => (
+        <span className="text-mono-caption tabular-nums text-muted">
+          {regions.indexOf(row) + 1}
+        </span>
+      ),
+    },
     {
       id: "region",
       header: "Region",
@@ -58,9 +98,6 @@ export function RegionsCard({
         <span className="flex flex-col gap-0.5">
           <span className="flex flex-wrap items-center gap-2">
             <span className="font-medium text-foreground">{row.label}</span>
-            {row.slug === primarySlug ? (
-              <Badge tone="muted">primary</Badge>
-            ) : null}
             {row.decryptable ? null : <Badge tone="warn">Key unreadable</Badge>}
           </span>
           <span className="flex items-center gap-1">
@@ -80,16 +117,12 @@ export function RegionsCard({
     {
       id: "location",
       header: "Data hosted in",
-      cell: (row) => {
-        const location = effectiveDataLocation(row, provider)
-        return location ? (
-          <span className={row.data_location ? undefined : "text-muted"}>
-            {dataLocationLabel(location)}
-          </span>
+      cell: (row) =>
+        row.data_location ? (
+          dataLocationLabel(row.data_location)
         ) : (
           <span className="text-muted">Not declared</span>
-        )
-      },
+        ),
     },
     {
       id: "key",
@@ -98,7 +131,7 @@ export function RegionsCard({
         row.has_api_key ? (
           <code className="text-muted">Own ••{row.api_key_last4 ?? "••"}</code>
         ) : (
-          <span className="text-muted">Provider's key</span>
+          <span className="text-muted">Shared key</span>
         ),
     },
     {
@@ -108,7 +141,20 @@ export function RegionsCard({
         row.api_base ? (
           <span className="break-all">{row.api_base}</span>
         ) : (
-          <span className="text-muted">Provider's endpoint</span>
+          <span className="text-muted">Shared endpoint</span>
+        ),
+    },
+    {
+      id: "countries",
+      header: "Requests from",
+      cell: (row) =>
+        row.supported_countries == null ? (
+          // The provider's list, shared by every region without its own.
+          <span className="text-muted">
+            {countriesText(provider.supported_countries)}
+          </span>
+        ) : (
+          countriesText(row.supported_countries)
         ),
     },
     {
@@ -122,9 +168,15 @@ export function RegionsCard({
             (update.isPending && update.variables?.slug === row.slug)
           }
           label={`Serve traffic from ${row.label}`}
-          onChange={(enabled) =>
-            update.mutate({ slug: row.slug, body: { enabled } })
-          }
+          // Switching off moves traffic elsewhere, so it is confirmed first.
+          onChange={(enabled) => {
+            if (enabled) {
+              update.mutate({ slug: row.slug, body: { enabled } })
+              return
+            }
+            update.reset()
+            setSwitchingOffSlug(row.slug)
+          }}
         />
       ),
     },
@@ -188,10 +240,11 @@ export function RegionsCard({
       <div className="flex min-w-0 flex-col">
         <h2 className="text-title">Regions</h2>
         <p className="text-caption">
-          {`Requests go to the first region the workspace allows; ${example || `${provider.name}@<id>`}:model pins one.`}
+          {`Tried in this order: requests go to the first serving region the workspace allows; ${example || `${provider.name}@<id>`}:model pins one.`}
         </p>
       </div>
-      <ErrorBanner error={update.error} />
+      {/* A refused switch-off is shown in its own dialog. */}
+      <ErrorBanner error={switchingOff ? null : update.error} />
       <DataTable
         ariaLabel={`Regions of ${provider.name}`}
         mobileLayout="cards"
@@ -208,6 +261,27 @@ export function RegionsCard({
           onClose={() => setEditingSlug("")}
         />
       ) : null}
+      <ConfirmDialog
+        isOpen={switchingOff !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setSwitchingOffSlug("")
+        }}
+        heading={`Stop serving from ${switchingOff?.label ?? "this region"}?`}
+        body={
+          switchingOff
+            ? switchOffConsequence(regions, switchingOff, provider.name)
+            : ""
+        }
+        confirmLabel="Switch off"
+        isPending={update.isPending}
+        error={update.error}
+        onConfirm={() =>
+          update.mutate(
+            { slug: switchingOffSlug, body: { enabled: false } },
+            { onSuccess: () => setSwitchingOffSlug("") },
+          )
+        }
+      />
       <ConfirmDialog
         isOpen={removing !== undefined}
         onOpenChange={(open) => {

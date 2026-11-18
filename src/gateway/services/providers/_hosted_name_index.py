@@ -69,10 +69,17 @@ def hosted_region_parent(name: str) -> str | None:
     return base if separator and slug and base in _providers else None
 
 
+def hosted_data_location(name: str) -> str | None:
+    """Where the hosted provider or region ``name`` serves a request from, when that is one declared place."""
+    locations = _locations.get(name, ())
+    return locations[0] if len(locations) == 1 else None
+
+
 class HostedRegionIndex:
-    """The region lookup the composition root registers where a name is priced or re-keyed."""
+    """The region lookups the composition root registers where a name is priced, re-keyed or recorded."""
 
     parent_of = staticmethod(hosted_region_parent)
+    data_location_of = staticmethod(hosted_data_location)
 
 
 def hosted_zero_data_retention(name: str) -> bool:
@@ -145,18 +152,21 @@ async def refresh_hosted_name_index(uow: UnitOfWork, config: GatewayConfig) -> N
             declared.discard(row.name)
         own = regions.get(row.id, [])
         locations[row.name] = (
-            tuple(region.data_location or row.data_location for region in own if region.enabled)
-            if own
-            else (row.data_location,)
+            tuple(region.data_location for region in own if region.enabled) if own else (row.data_location,)
         )
-        for region in own:
+    providers = frozenset(entries) | frozenset(row.name for row in rows)
+    for row in rows:
+        for region in regions.get(row.id, []):
+            instance = region_instance(row.name, region.slug)
+            if instance in providers:
+                # A provider of that whole name wins, as it does at dispatch.
+                continue
             # A region name is never its implementation's, so it always needs an entry.
-            names[region_instance(row.name, region.slug)] = row.provider
-            locations[region_instance(row.name, region.slug)] = (region.data_location or row.data_location,)
-            parents[region_instance(row.name, region.slug)] = row.name
+            names[instance] = row.provider
+            locations[instance] = (region.data_location,)
+            parents[instance] = row.name
     if number < _published_refresh:
         return
-    providers = frozenset(entries) | frozenset(row.name for row in rows)
     fresh = {name: implementation for name, implementation in names.items() if name != implementation}
     newer = {name: write for name, write in _recent_writes.items() if write[0] > read_from}
     for name, (_, implementation) in newer.items():

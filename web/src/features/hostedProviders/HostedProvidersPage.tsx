@@ -260,21 +260,24 @@ function ModelsSummaryCell({
 
 /**
  * How many regions a provider serves from, where it has several, and every
- * place they keep data: a region's own location, else the provider's. A
- * switched-off region serves nothing, so it counts toward neither.
+ * place they keep data, each region's own. A switched-off region serves
+ * nothing, so it counts toward neither. Nothing declared says so, since a
+ * workspace limited to certain locations refuses such a provider.
  */
 function DataLocationBadges({ provider }: { provider: HostedProvider }) {
   const regionCount = servingRegions(provider).length
   const locations = providerDataLocations(provider)
+  const names = [
+    ...locations.filter((location) => location !== null).map(dataLocationLabel),
+    ...(locations.includes(null) ? ["not declared"] : []),
+  ]
   return (
     <>
       {regionCount >= 2 ? (
         <Badge tone="muted">{`${regionCount} regions`}</Badge>
       ) : null}
-      {locations.length > 0 ? (
-        <Badge tone="muted">
-          {`Data: ${locations.map(dataLocationLabel).join(", ")}`}
-        </Badge>
+      {names.length > 0 ? (
+        <Badge tone="muted">{`Data: ${names.join(", ")}`}</Badge>
       ) : null}
     </>
   )

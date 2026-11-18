@@ -16,7 +16,7 @@ const MAX_OPTIONS = 60
 export function DataLocationField({
   value,
   onChange,
-  description = "Optional. Where this upstream keeps request data. A workspace that accepts only some locations is served only from one of them; an undeclared location matches none.",
+  description = "Optional. Where this upstream keeps request data. A workspace limited to certain locations refuses a provider with no declared location.",
   placeholder = "Not declared",
 }: {
   /** A location code, or empty for undeclared. */

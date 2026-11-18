@@ -3,8 +3,9 @@
 ``hosted_provider_regions`` holds the regions of a provider that serves from
 more than one; a provider with none serves from its own connection, as before.
 ``hosted_providers.data_location`` and the regions' own column declare where
-the upstream keeps request data, and ``workspace_provider_policies``
-gains the list of locations a workspace accepts. All nullable, so existing
+the upstream keeps request data, ``workspace_provider_policies`` gains the list
+of locations a workspace accepts, and ``usage_logs`` records the location a
+request was served from. All nullable, so existing
 rows read as undeclared and unrestricted.
 
 Revision ID: d5a7c9e1b3f4
@@ -28,6 +29,8 @@ def upgrade() -> None:
         batch_op.add_column(sa.Column("data_location", sa.String(length=16), nullable=True))
     with op.batch_alter_table("workspace_provider_policies") as batch_op:
         batch_op.add_column(sa.Column("allowed_data_locations", sa.JSON(), nullable=True))
+    with op.batch_alter_table("usage_logs") as batch_op:
+        batch_op.add_column(sa.Column("data_location", sa.String(length=16), nullable=True))
     op.create_table(
         "hosted_provider_regions",
         sa.Column("id", sa.Uuid(), nullable=False),
@@ -52,6 +55,16 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # The release before this one serves a provider from its own connection
+    # alone, so a region's own endpoint, key and country limits would be lost
+    # and its traffic sent where none of them say.
+    regions = op.get_bind().execute(sa.text("SELECT COUNT(*) FROM hosted_provider_regions")).scalar()
+    if regions:
+        msg = (
+            f"{regions} hosted provider region(s) exist, which the previous release cannot serve. Remove the regions "
+            "(or the providers that have them) before downgrading."
+        )
+        raise RuntimeError(msg)
     # The release before this one cannot enforce a workspace's data locations,
     # so dropping them would quietly serve those workspaces from anywhere.
     restricted = (
@@ -72,6 +85,8 @@ def downgrade() -> None:
         raise RuntimeError(msg)
     op.drop_index("ix_hosted_provider_regions_hosted_provider_id", table_name="hosted_provider_regions")
     op.drop_table("hosted_provider_regions")
+    with op.batch_alter_table("usage_logs") as batch_op:
+        batch_op.drop_column("data_location")
     with op.batch_alter_table("workspace_provider_policies") as batch_op:
         batch_op.drop_column("allowed_data_locations")
     with op.batch_alter_table("hosted_providers") as batch_op:

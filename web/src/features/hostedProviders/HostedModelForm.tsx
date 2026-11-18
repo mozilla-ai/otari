@@ -85,6 +85,21 @@ export function HostedModelForm({
     region && editing ? regionRatesOf(editing, region.slug) : undefined
   const regionKey =
     region && editing ? `${provider.name}@${region.slug}:${editing.model}` : ""
+  // The same override may be stored under the older `provider@slug/model`
+  // spelling, which the listing reads too, so a clear removes both.
+  const legacyRegionKey =
+    region && editing ? `${provider.name}@${region.slug}/${editing.model}` : ""
+  const clearRegion = async () => {
+    try {
+      // A 404 on either is a key already gone, which the hook resolves.
+      for (const modelKey of [regionKey, legacyRegionKey]) {
+        await clearRegionPrice.mutateAsync({ kind: "model", modelKey })
+      }
+      saved()
+    } catch {
+      // The refusal is the mutation's error, shown in the dialog.
+    }
+  }
   const [draft, setDraft] = useState<PriceDraft>(() =>
     editing ? draftFrom({ ...editing, ...regionRates }) : EMPTY_DRAFT,
   )
@@ -211,12 +226,7 @@ export function HostedModelForm({
             // Not while a save is in flight: a clear landing first would be
             // undone by the save behind it.
             isDisabled={setRegionPrice.isPending || clearRegionPrice.isPending}
-            onPress={() =>
-              clearRegionPrice.mutate(
-                { kind: "model", modelKey: regionKey },
-                { onSuccess: saved },
-              )
-            }
+            onPress={() => void clearRegion()}
           >
             Use provider price
           </Button>

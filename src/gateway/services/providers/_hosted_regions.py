@@ -231,7 +231,11 @@ class HostedProviderRegions:
             _ensure_servable(row, encrypted_api_key=encrypted_key, api_base=api_base)
             if not regions:
                 await self._insert(
-                    row, slug=new_slugs[1], label=request.primary_label or row.data_location or "Primary", position=0
+                    row,
+                    slug=new_slugs[1],
+                    label=request.primary_label or row.data_location or "Primary",
+                    position=0,
+                    data_location=row.data_location,
                 )
                 position = 1
             await self._insert(
@@ -240,7 +244,11 @@ class HostedProviderRegions:
                 label=request.label,
                 position=position,
                 enabled=request.enabled,
-                data_location=request.data_location,
+                # Copied, never inherited: a later change to the provider must
+                # not move where a region says its data is kept.
+                data_location=request.data_location
+                if "data_location" in request.model_fields_set
+                else row.data_location,
                 encrypted_api_key=encrypted_key,
                 api_key_last4=last4(request.api_key) if request.api_key is not None else None,
                 api_base=api_base,

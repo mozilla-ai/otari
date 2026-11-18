@@ -88,6 +88,7 @@ from gateway.exceptions import TenancyError
 from gateway.exceptions.tools_exceptions import DirectToolCallError
 from gateway.inflight import InFlightMiddleware, InFlightRegistry
 from gateway.log_config import log_plain, logger
+from gateway.models.usage import configure_usage_data_location
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.content_key_port import ContentKeyPort
 from gateway.ports.file_storage_port import FileStoragePort
@@ -1183,6 +1184,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         # A region of a hosted provider (``tokenhub@sg``) is priced and served as one of its provider's.
         configure_region_parents(HostedRegionIndex.parent_of)
         configure_kwargs_region_parents(HostedRegionIndex.parent_of)
+        configure_usage_data_location(HostedRegionIndex.data_location_of)
         log_writer: LogWriter
         workers: list[tuple[asyncio.Task[None], _LifespanWorker]] = []
         feature_workers: list[tuple[asyncio.Task[None], str]] = []

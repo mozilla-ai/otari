@@ -928,6 +928,7 @@ export function workspaceHostedProvider(
     served_models: ["gemini-2.5-flash", "gemini-2.5-pro"],
     served_by_own_key: false,
     zero_data_retention: false,
+    data_locations: [null],
     ...overrides,
   }
 }

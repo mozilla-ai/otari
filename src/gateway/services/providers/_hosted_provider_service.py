@@ -312,9 +312,13 @@ class HostedProviderService:
             )
         remember_hosted_name(name, implementation)
         remember_hosted_zero_data_retention(name, row.zero_data_retention)
-        if row.data_location is not None:
-            # Where the provider keeps data, for a workspace that accepts only some locations.
+        # Where the provider keeps data, for a workspace that accepts only some locations.
+        try:
             await refresh_hosted_name_index(self.uow, self.config)
+        except Exception:
+            logger.warning(
+                "Hosted provider name refresh after a create failed; the next refresh will retry", exc_info=True
+            )
         return public
 
     async def update_provider(self, provider: str, request: HostedProviderUpdateRequest) -> HostedProviderPublic:
@@ -390,7 +394,10 @@ class HostedProviderService:
                 row.terms_url = request.terms_url
             if "privacy_url" in request.model_fields_set:
                 row.privacy_url = request.privacy_url
-            ensure_regions_follow(row, source.regions, moved=moved)
+            await self.providers.lock(row.id)
+            # Read under the lock, so a region added since is checked too.
+            regions = await self.regions.list_for_provider(row.id, fresh=True)
+            ensure_regions_follow(row, regions, moved=moved)
             await self.providers.save(row)
             public = self._public(source)
         remember_hosted_zero_data_retention(row.name, row.zero_data_retention)
@@ -427,8 +434,11 @@ class HostedProviderService:
         return await self._public_by_name(await self.region_changes.remove(provider, slug))
 
     async def _taken(self, name: str) -> bool:
-        """Whether a hosted provider, stored or configured, goes by exactly ``name``."""
-        return await self.sources.get(name) is not None
+        """Whether a hosted provider or a ``providers:`` instance goes by exactly ``name``.
+
+        Either would answer a selector of that name ahead of a region.
+        """
+        return name in self.config.providers or await self.sources.get(name) is not None
 
     async def _public_by_name(self, name: str) -> HostedProviderPublic:
         async with self.uow:

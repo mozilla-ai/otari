@@ -53,6 +53,8 @@ function mockApi(
     allowedDataLocations?: string[] | null
     /** How many policy writes are refused before one is stored. */
     policyWriteRefusals?: number
+    /** A change another manager stores right after the page first reads the policy. */
+    policyChangedAfterRead?: { require_zero_data_retention: boolean }
     /** A refusal for the workspace's provider policy. */
     policyRefusal?: { status: number; detail: string }
   } = {},
@@ -120,7 +122,11 @@ function mockApi(
           opts.policyRefusal.status,
         )
       }
-      return jsonResponse(policy)
+      const answer = jsonResponse(policy)
+      if (opts.policyChangedAfterRead) {
+        policy = { ...policy, ...opts.policyChangedAfterRead }
+      }
+      return answer
     }
     if (url.includes("/hosted-providers")) {
       if (method !== "GET") return jsonResponse(hosted[0] ?? {})
@@ -859,11 +865,40 @@ describe("InferenceAccessSection: allowed data locations", () => {
     )
     const put = requests.find((request) => request.method === "PUT")
     expect(put?.url).toBe(`${API_ROOT}/workspaces/${WORKSPACE}/provider-policy`)
-    // The zero data retention requirement rides along unchanged.
-    expect(put?.body).toEqual({
-      require_zero_data_retention: true,
-      allowed_data_locations: ["EU"],
+    // The retention requirement is left out, so the stored one stands.
+    expect(put?.body).toEqual({ allowed_data_locations: ["EU"] })
+  })
+
+  it("leaves a retention requirement stored since the page read it", async () => {
+    const requests = mockApi({
+      requireZeroRetention: false,
+      policyChangedAfterRead: { require_zero_data_retention: true },
     })
+    const user = userEvent.setup()
+    renderSection()
+
+    // The page read "not required"; another manager has since required it.
+    expect(
+      await screen.findByRole("switch", {
+        name: "Require zero data retention",
+      }),
+    ).not.toBeChecked()
+    await user.click(
+      screen.getByRole("button", { name: "Change allowed data locations" }),
+    )
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("radio", { name: "No location" }))
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    const put = requests.find((request) => request.method === "PUT")
+    expect(put?.body).not.toHaveProperty("require_zero_data_retention")
+    // The answer is the stored policy, requirement included.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("switch", { name: "Require zero data retention" }),
+      ).toBeChecked(),
+    )
   })
 
   it("shows the saved list, and keeps a refused draft to try again", async () => {
@@ -918,10 +953,83 @@ describe("InferenceAccessSection: allowed data locations", () => {
       expect(requests.some((request) => request.method === "PUT")).toBe(true),
     )
     expect(requests.find((request) => request.method === "PUT")?.body).toEqual({
-      require_zero_data_retention: false,
       allowed_data_locations: [],
     })
     expect(await screen.findByText(/^No location\./)).toBeInTheDocument()
+  })
+
+  it("names the providers a chosen list would refuse before it is saved", async () => {
+    mockApi({
+      hosted: [
+        workspaceHostedProvider({
+          provider: "anthropic",
+          data_locations: [null],
+        }),
+        workspaceHostedProvider({
+          provider: "tokenhub",
+          data_locations: ["US", "SG", "CN"],
+        }),
+        workspaceHostedProvider({
+          provider: "mistral",
+          data_locations: ["FR"],
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderSection()
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Change allowed data locations",
+      }),
+    )
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).queryByText(/will be refused/)).toBeNull()
+    await user.click(
+      within(dialog).getByRole("radio", { name: "Only these locations" }),
+    )
+    await user.type(
+      within(dialog).getByRole("combobox", { name: "Locations" }),
+      "European",
+    )
+    await user.click(
+      await screen.findByRole("option", { name: /European Union/ }),
+    )
+    // The EU admits France, so mistral stays.
+    expect(within(dialog).getByText(/will be refused/)).toHaveTextContent(
+      "These providers will be refused: anthropic (not declared), tokenhub (US, SG, CN).",
+    )
+  })
+
+  it("marks a hosted provider the stored list refuses", async () => {
+    mockApi({
+      allowedDataLocations: ["EU"],
+      overrides: [],
+      hosted: [
+        workspaceHostedProvider({
+          provider: "anthropic",
+          data_locations: [null],
+        }),
+        workspaceHostedProvider({
+          provider: "tokenhub",
+          data_locations: ["US", "SG"],
+        }),
+        workspaceHostedProvider({
+          provider: "mistral",
+          data_locations: ["FR"],
+        }),
+      ],
+    })
+    renderSection()
+
+    expect(
+      await screen.findByText(/Refused: location not declared/),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/Refused: data kept in United States, Singapore/),
+    ).toBeInTheDocument()
+    // mistral keeps data in France, which the EU admits.
+    expect(screen.getAllByText(/Refused:/)).toHaveLength(2)
   })
 
   it("says the list is unknown while the policy cannot be read", async () => {
@@ -959,7 +1067,6 @@ describe("InferenceAccessSection: allowed data locations", () => {
       expect(requests.some((request) => request.method === "PUT")).toBe(true),
     )
     expect(requests.find((request) => request.method === "PUT")?.body).toEqual({
-      require_zero_data_retention: false,
       allowed_data_locations: null,
     })
   })

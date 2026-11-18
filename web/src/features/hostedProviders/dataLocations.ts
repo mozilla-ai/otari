@@ -85,14 +85,6 @@ export function matchDataLocations(
   ).slice(0, limit)
 }
 
-/** Where a region keeps data: its own declaration, else the provider's; "" when neither declared one. */
-export function effectiveDataLocation(
-  region: Pick<HostedProviderRegion, "data_location">,
-  provider: Pick<HostedProvider, "data_location">,
-): string {
-  return region.data_location ?? provider.data_location ?? ""
-}
-
 /** A provider's regions in the order requests try them. */
 export function orderedRegions(
   provider: Pick<HostedProvider, "regions">,
@@ -108,26 +100,90 @@ export function servingRegions(
 }
 
 /**
- * Every distinct place a provider serves from, in region order: its serving
- * regions' effective locations, or its own when it has no regions. Nothing
- * for a provider nobody declared a location for.
+ * Every distinct place a provider serves from, in region order: each serving
+ * region's own location, or the provider's when it has no regions. Null
+ * stands for a connection that declares none, which no allowed list admits.
  */
-export function providerDataLocations(provider: HostedProvider): string[] {
+export function providerDataLocations(
+  provider: HostedProvider,
+): (string | null)[] {
   const locations =
     (provider.regions ?? []).length === 0
-      ? [provider.data_location ?? ""]
-      : servingRegions(provider).map((region) =>
-          effectiveDataLocation(region, provider),
-        )
-  return [...new Set(locations.filter(Boolean))]
+      ? [provider.data_location ?? null]
+      : servingRegions(provider).map((region) => region.data_location ?? null)
+  return [...new Set(locations)]
+}
+
+/** EU member states, which an allowed list naming `EU` admits as well. */
+const EU_MEMBER_STATES = new Set(
+  (
+    "AT BE BG CY CZ DE DK EE ES FI FR GR HR HU IE IT LT LU LV MT NL PL PT RO " +
+    "SE SI SK"
+  ).split(" "),
+)
+
+/**
+ * Whether a workspace's allowed list admits a location, as the gateway reads
+ * it: no list admits everything, `EU` also admits each member state, `GLOBAL`
+ * admits only `GLOBAL`, and an undeclared location matches nothing.
+ */
+export function admitsLocation(
+  allowed: readonly string[] | null,
+  location: string | null,
+): boolean {
+  if (allowed === null) return true
+  if (location === null) return false
+  return (
+    allowed.includes(location) ||
+    (allowed.includes(EU) && EU_MEMBER_STATES.has(location))
+  )
+}
+
+/**
+ * Whether a list refuses a provider: none of the places it serves from is on
+ * it. A provider listing no location at all declares none.
+ */
+export function refusesProvider(
+  allowed: readonly string[] | null,
+  locations: readonly (string | null)[],
+): boolean {
+  const declared = locations.length === 0 ? [null] : locations
+  return !declared.some((location) => admitsLocation(allowed, location))
+}
+
+/** Locations as a short list of codes, an undeclared one as "not declared". */
+export function formatLocationCodes(
+  locations: readonly (string | null)[],
+): string {
+  const declared = locations.filter((location) => location !== null)
+  return declared.length === 0 ? "not declared" : declared.join(", ")
 }
 
 /** A region slug as the API accepts it: what pins it in `provider@slug:model`. */
 export const REGION_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/
 
-/** The slug a provider's current connection is offered as when it becomes a region. */
+/**
+ * The slug a provider's current connection takes when it becomes a region,
+ * as the server defaults it: its data location, else `primary`.
+ */
 export function primarySlugFor(provider: HostedProvider): string {
-  return provider.data_location?.toLowerCase() || "primary"
+  const slug = provider.data_location?.toLowerCase() ?? ""
+  return REGION_SLUG_PATTERN.test(slug) ? slug : "primary"
+}
+
+/**
+ * A region id derived from its name: lower case, a hyphen for every run of
+ * anything else, at most 32 characters. Empty when nothing usable is left.
+ */
+export function slugFromLabel(label: string): string {
+  return label
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+/, "")
+    .slice(0, 32)
+    .replace(/-+$/, "")
 }
 
 /** The name that connection is offered under. */

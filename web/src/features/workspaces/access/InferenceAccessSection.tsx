@@ -14,6 +14,10 @@ import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { DisclosureRow } from "@/design-system/navigation/DisclosureRow"
 import { Segmented } from "@/design-system/navigation/Segmented"
 import {
+  dataLocationLabel,
+  refusesProvider,
+} from "@/features/hostedProviders/dataLocations"
+import {
   AccessRow,
   modelsScopeLabel,
 } from "@/features/workspaces/access/AccessRow"
@@ -183,10 +187,17 @@ export function InferenceAccessSection({
   const openKeyRecord = openKey
     ? byId.get(openKey.org_provider_key_id)
     : undefined
+  // A hosted provider none of whose locations the workspace allows is refused
+  // as one not declared zero data retention is.
+  const isLocationRefused = (row: WorkspaceHostedProvider) =>
+    refusesProvider(allowedLocations, row.data_locations ?? [])
   const openHosted =
     open?.kind === "hosted" && isOpenHere
       ? hostedRows.find(
-          (row) => row.provider === open.provider && isUsable(row),
+          (row) =>
+            row.provider === open.provider &&
+            isUsable(row) &&
+            !isLocationRefused(row),
         )
       : undefined
 
@@ -223,7 +234,9 @@ export function InferenceAccessSection({
         name: row.provider,
         isCustomized: row.customized,
         isOff:
-          !row.enabled || (requiresZeroRetention && !row.zero_data_retention),
+          !row.enabled ||
+          (requiresZeroRetention && !row.zero_data_retention) ||
+          isLocationRefused(row),
       }),
     ),
   ]
@@ -267,6 +280,7 @@ export function InferenceAccessSection({
       <HostedRow
         key={entry.id}
         row={entry.row}
+        allowedLocations={allowedLocations}
         isNested={isNested}
         hasChevronGutter={hasGroups}
         requiresZeroRetention={requiresZeroRetention}
@@ -331,7 +345,7 @@ export function InferenceAccessSection({
           label="Allowed data locations"
           help={
             policy.data
-              ? `${describeAllowedDataLocations(allowedLocations)}. Hosted providers serve this workspace only from a region that declares one of these locations.`
+              ? `${describeAllowedDataLocations(allowedLocations)}. Hosted providers serve this workspace only where they declare one of these locations.`
               : policy.isPending
                 ? "Loading…"
                 : "Unknown until this workspace's provider policy can be read."
@@ -357,19 +371,14 @@ export function InferenceAccessSection({
         <AllowedDataLocationsDialog
           key={`${workspaceId}:${locationsOpening}`}
           allowed={allowedLocations}
+          providers={hostedRows}
           isOpen={isEditingLocations}
           onClose={() => setLocationsOpenFor("")}
           isPending={setLocations.isPending}
           error={setLocations.error}
-          // The retention flag is sent as last read, since the API takes the
-          // two together; the read is refreshed by every successful write.
           onSave={(allowed) =>
             setLocations.mutate(
-              {
-                workspaceId,
-                requireZeroDataRetention: requiresZeroRetention,
-                allowedDataLocations: allowed,
-              },
+              { workspaceId, allowedDataLocations: allowed },
               { onSuccess: () => setLocationsOpenFor("") },
             )
           }
@@ -594,10 +603,23 @@ function KeyRow({
   )
 }
 
+/** Why the workspace's location list refuses a provider, or empty where it does not. */
+function locationRefusalNote(
+  allowed: readonly string[] | null,
+  locations: readonly (string | null)[],
+): string {
+  if (!refusesProvider(allowed, locations)) return ""
+  const declared = locations.filter((location) => location !== null)
+  return declared.length === 0
+    ? "Refused: location not declared"
+    : `Refused: data kept in ${declared.map(dataLocationLabel).join(", ")}`
+}
+
 function HostedRow({
   row,
   isNested,
   hasChevronGutter,
+  allowedLocations,
   requiresZeroRetention,
   isDisabled,
   onToggle,
@@ -607,13 +629,20 @@ function HostedRow({
   row: WorkspaceHostedProvider
   isNested: boolean
   hasChevronGutter: boolean
+  /** The data locations the workspace accepts; null for any. */
+  allowedLocations: readonly string[] | null
   requiresZeroRetention: boolean
   isDisabled: boolean
   onToggle: (next: boolean) => void
   onOpenScope: () => void
   onReset: () => void
 }) {
-  const isBlocked = requiresZeroRetention && !row.zero_data_retention
+  const locationNote = locationRefusalNote(
+    allowedLocations,
+    row.data_locations ?? [],
+  )
+  const isBlocked =
+    (requiresZeroRetention && !row.zero_data_retention) || locationNote !== ""
   return (
     <AccessRow
       name={row.provider}
@@ -631,7 +660,11 @@ function HostedRow({
       // could serve, so this row decides nothing until that key goes.
       note={[
         row.served_by_own_key ? "Not used, your key serves this provider" : "",
-        retentionNote(row.zero_data_retention, isBlocked),
+        retentionNote(
+          row.zero_data_retention,
+          requiresZeroRetention && !row.zero_data_retention,
+        ),
+        locationNote,
       ]
         .filter(Boolean)
         .join(" · ")}

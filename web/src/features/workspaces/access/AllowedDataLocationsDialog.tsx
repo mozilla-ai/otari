@@ -1,12 +1,15 @@
 import { useState } from "react"
-
+import type { WorkspaceHostedProvider } from "@/client"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { MultiSelect } from "@/design-system/forms/MultiSelect"
 import { RadioGroup } from "@/design-system/forms/RadioGroup"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import {
   DATA_LOCATION_OPTIONS,
   dataLocationLabel,
+  formatLocationCodes,
+  refusesProvider,
 } from "@/features/hostedProviders/dataLocations"
 
 const LOCATION_OPTIONS = DATA_LOCATION_OPTIONS.map((option) => ({
@@ -45,6 +48,7 @@ export function describeAllowedDataLocations(
  */
 export function AllowedDataLocationsDialog({
   allowed,
+  providers,
   isOpen,
   onClose,
   onSave,
@@ -53,6 +57,11 @@ export function AllowedDataLocationsDialog({
 }: {
   /** The stored list; null accepts any location. */
   allowed: readonly string[] | null
+  /** The hosted providers this workspace sees, with where each keeps data. */
+  providers: readonly Pick<
+    WorkspaceHostedProvider,
+    "provider" | "data_locations"
+  >[]
   isOpen: boolean
   onClose: () => void
   onSave: (allowed: string[] | null) => void
@@ -65,6 +74,12 @@ export function AllowedDataLocationsDialog({
   }))
   const { isDirty } = useDirtySnapshot(draft)
   const canSubmit = draft.scope !== "only" || draft.locations.length > 0
+  const chosen =
+    draft.scope === "any" ? null : draft.scope === "none" ? [] : draft.locations
+  // What the choice would refuse, said before it is saved.
+  const refused = providers.filter((row) =>
+    refusesProvider(chosen, row.data_locations ?? []),
+  )
   // Held while the save is in flight: an edit made then would be dropped when
   // the save that does not carry it closes the dialog.
   const edit = (next: typeof draft) => {
@@ -78,17 +93,11 @@ export function AllowedDataLocationsDialog({
         if (!open) onClose()
       }}
       title="Allowed data locations"
-      description="Hosted providers serve this workspace only from a region whose declared data location is on the list. A region nobody declared a location for never matches one."
+      description="Hosted providers serve this workspace only where they declare keeping data in a location on the list. A provider that declares no location never matches one."
       submitLabel="Save"
       onSubmit={() => {
         if (!canSubmit) return
-        onSave(
-          draft.scope === "any"
-            ? null
-            : draft.scope === "none"
-              ? []
-              : draft.locations,
-        )
+        onSave(chosen)
       }}
       isPending={isPending}
       isSubmitDisabled={!canSubmit}
@@ -112,7 +121,7 @@ export function AllowedDataLocationsDialog({
       {draft.scope === "only" ? (
         <MultiSelect
           label="Locations"
-          description="European Union admits each member state. Global matches a region declared global, not every region."
+          description="European Union admits each member state. Global matches a provider declared global, not every provider."
           options={LOCATION_OPTIONS}
           value={draft.locations}
           onChange={(locations) => edit({ ...draft, locations })}
@@ -123,6 +132,18 @@ export function AllowedDataLocationsDialog({
             draft.locations.length === 0 ? "Pick at least one." : undefined
           }
         />
+      ) : null}
+      {canSubmit && refused.length > 0 ? (
+        <InfoBanner tone="warning">
+          <p role="status">
+            {`These providers will be refused: ${refused
+              .map(
+                (row) =>
+                  `${row.provider} (${formatLocationCodes(row.data_locations ?? [])})`,
+              )
+              .join(", ")}.`}
+          </p>
+        </InfoBanner>
       ) : null}
     </FormDialog>
   )

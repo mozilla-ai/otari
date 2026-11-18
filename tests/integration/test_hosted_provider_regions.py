@@ -123,7 +123,8 @@ def test_the_first_region_keeps_the_provider_connection_ahead_of_it(client: Test
     regions = [(each["slug"], each["label"], each["selector"], each["position"]) for each in provider["regions"]]
     assert regions == [("us", "US", "tokenhub@us", 0), ("sg", "Southeast Asia", "tokenhub@sg", 1)]
     us, sg = provider["regions"]
-    assert (us["has_api_key"], us["api_base"], us["data_location"]) == (False, None, None), "the first inherits all"
+    assert (us["has_api_key"], us["api_base"]) == (False, None), "the first uses the provider's connection"
+    assert us["data_location"] == "US", "the provider's location is copied onto it"
     assert (sg["has_api_key"], sg["api_key_last4"], sg["data_location"]) == (True, "k-sg", "SG")
 
 
@@ -136,6 +137,7 @@ def test_a_request_is_served_by_the_first_region_and_settles_under_it(client: Te
     assert sent["api_key"] == "sk-us"
     usage = _last_usage(client)
     assert usage["provider"] == "tokenhub@us"
+    assert usage["data_location"] == "US"
     assert float(usage["cost"]) == pytest.approx(10 * 2.5e-6 + 5 * 10e-6), "a region with no price is the provider's"
 
 
@@ -305,3 +307,23 @@ def test_a_region_endpoint_carrying_a_key_must_be_https(client: TestClient) -> N
     response = _add_singapore(client, api_base="http://sg.tokenhub.example/v1")
 
     assert response.status_code == 400, response.text
+
+
+def test_a_region_keeps_its_data_location_when_the_provider_changes(client: TestClient) -> None:
+    _ok(_add_singapore(client, data_location=None))
+
+    _ok(client.patch(_PROVIDER, json={"data_location": "DE"}, headers=HEADERS))
+    provider = _ok(client.get(f"{API_ROOT}/hosted-providers", headers=HEADERS))["data"][0]
+    _chat(client, "tokenhub@sg:gpt-4o")
+
+    us, sg = provider["regions"]
+    assert (us["data_location"], sg["data_location"]) == ("US", None), "copied, never inherited"
+    assert _last_usage(client)["data_location"] is None, "a region declaring nothing records nothing"
+
+
+def test_a_region_left_without_a_location_copies_the_provider_one(client: TestClient) -> None:
+    body = {"slug": "sg", "label": "Southeast Asia", "api_key": "sk-sg", "api_base": "https://sg.tokenhub.example/v1"}
+
+    provider = _ok(client.post(f"{_PROVIDER}/regions", json=body, headers=HEADERS))
+
+    assert provider["regions"][1]["data_location"] == "US"

@@ -15099,7 +15099,10 @@ export interface components {
          *     ``client_args`` are merged over the provider's on the provider's origin, so
          *     a Bedrock region gives its ``region_name`` alone; a region on another
          *     origin takes its own alone. An ``api_base`` that carries a key must be https.
-         *     ``data_location`` declares where the region keeps request data.
+         *     ``data_location`` declares where the region keeps request data. Left out, it
+         *     copies the provider's declaration as it stands; null declares nothing. It is
+         *     the region's own from then on: a later change to the provider's does not
+         *     move it.
          *
          *     A request is served by the first enabled region whose countries admit it
          *     and whose data location the workspace accepts; a pinned region is held to
@@ -15145,6 +15148,9 @@ export interface components {
         /**
          * HostedProviderRegionPublic
          * @description One region of a hosted provider, as stored: null wherever it uses the provider's value.
+         *
+         *     ``data_location`` is the exception: it is the region's own, and null there
+         *     means nothing is declared.
          *
          *     ``selector`` is what pins it in a request (``tokenhub@sg``). ``has_api_key``
          *     is true for a region with a key of its own, known by its last four
@@ -15198,9 +15204,9 @@ export interface components {
          *     Null puts a field the region inherits back on the provider's value:
          *     ``api_key`` null returns the region to the provider's key, an empty
          *     ``api_base`` or null to the provider's endpoint, and so on for
-         *     ``client_args``, ``data_location`` and ``supported_countries``. Null on
-         *     ``label``, ``enabled`` or ``position``, which nothing inherits, changes
-         *     nothing. ``client_args`` echoed
+         *     ``client_args`` and ``supported_countries``. ``data_location`` is the
+         *     region's own, so null declares nothing. Null on ``label``, ``enabled`` or
+         *     ``position`` changes nothing. ``client_args`` echoed
          *     back with masked entries keeps the stored values. ``position`` moves the
          *     region to that place in the order regions are tried, counted from 0.
          * @example {
@@ -23058,6 +23064,11 @@ export interface components {
             cost: number | null;
             /** Counts Toward Budget */
             counts_toward_budget: boolean;
+            /**
+             * Data Location
+             * @description Where the hosted provider or region that served the request declared it keeps request data when the row was written: an ISO 3166-1 alpha-2 code, EU or GLOBAL. Null where the deployment did not serve it or nothing was declared.
+             */
+            data_location?: string | null;
             /** Endpoint */
             endpoint: string;
             /** Error Message */
@@ -23939,6 +23950,11 @@ export interface components {
              * @description Whether this workspace stores a departure from full inheritance.
              */
             customized: boolean;
+            /**
+             * Data Locations
+             * @description Where each region the provider serves from declares it keeps request data (one entry for a provider with no regions), null where nothing is declared. A workspace listing allowed data locations is refused the provider when none of these is on its list.
+             */
+            data_locations?: (string | null)[];
             /** Enabled */
             enabled: boolean;
             /**

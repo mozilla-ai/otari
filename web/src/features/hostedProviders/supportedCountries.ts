@@ -6,10 +6,15 @@ export type ParsedCountries =
   | { ok: true; value: string[] | null }
   | { ok: false; invalid: string[] }
 
+/** One two-letter country code, in either case: what each entry must be. */
+export function isCountryCode(text: string): boolean {
+  return /^[A-Za-z]{2}$/.test(text)
+}
+
 export function parseCountries(text: string): ParsedCountries {
   const tokens = text.split(/[\s,]+/).filter(Boolean)
   if (tokens.length === 0) return { ok: true, value: null }
-  const invalid = tokens.filter((token) => !/^[A-Za-z]{2}$/.test(token))
+  const invalid = tokens.filter((token) => !isCountryCode(token))
   if (invalid.length > 0) return { ok: false, invalid }
   return { ok: true, value: [...new Set(tokens.map((t) => t.toUpperCase()))] }
 }

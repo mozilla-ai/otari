@@ -288,7 +288,8 @@ def region_credential_of(
         if region.supported_countries is not None
         else provider.supported_countries,
         region=region.slug,
-        data_location=region.data_location if region.data_location is not None else provider.data_location,
+        # A region's own declaration, never the provider's: it is copied when the region is created.
+        data_location=region.data_location,
     )
 
 
