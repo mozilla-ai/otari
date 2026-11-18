@@ -9,13 +9,9 @@ import { Segmented } from "@/design-system/navigation/Segmented"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
 
-import { HarnessMark, ProviderMark } from "@/shared/components/marks/BrandMark"
+import { HarnessMark } from "@/shared/components/marks/BrandMark"
 import { PeekPanel, ResizeHandle } from "@/shared/components/PeekPanel"
-import {
-  hasHarnessMark,
-  hasLanguageMark,
-  hasProviderMark,
-} from "@/shared/helpers/brandMarkKeys"
+import { hasHarnessMark, hasLanguageMark } from "@/shared/helpers/brandMarkKeys"
 import {
   formatCost,
   formatNumber,
@@ -212,19 +208,16 @@ function Attributes({
 }
 
 /**
- * What a session's header draws: its agent's mark, the mark of the SDK that
- * called (`openai`, `anthropic`), the client's language, and otherwise the
- * trace glyph.
+ * What a session's header draws: the mark the Sessions list gives it (its
+ * agent's, else its client's language), and otherwise the trace glyph.
  */
 function ClientIcon({ trace, type }: { trace: Trace; type: TypeKey }) {
   const { harness, clientLanguage } = trace
-  if (harness && hasHarnessMark(harness)) {
-    return <HarnessMark harness={harness} />
-  }
-  if (harness && hasProviderMark(harness)) {
-    return <ProviderMark providerId={harness} />
-  }
-  if (harness && clientLanguage && hasLanguageMark(clientLanguage)) {
+  if (
+    harness &&
+    (hasHarnessMark(harness) ||
+      (clientLanguage && hasLanguageMark(clientLanguage)))
+  ) {
     return <HarnessMark harness={harness} language={clientLanguage} />
   }
   return <TypeMark type={type} className="size-5" />
