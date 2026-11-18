@@ -26,6 +26,9 @@ from gateway.services.tenancy.org_provider_key_service import reset_org_provider
 
 from .conftest import shared_test_config
 
+pytestmark = pytest.mark.usefixtures("public_dns")
+
+
 _MASTER_HEADER = {API_KEY_HEADER: "Bearer test-master-key"}
 _KEYS = f"{API_ROOT}/organizations/me/provider-keys"
 _SLUG = "acme-ds"

@@ -27,7 +27,10 @@ Five call sites with overlapping but not identical threat models:
   home-lab / self-hosted use case depends on private-network endpoints
   (``localhost``, RFC 1918), so the check is off unless an operator opts in via
   ``OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=false``, at which point it blocks the
-  same private/link-local/reserved ranges as the web-search path.
+  same private/link-local/reserved ranges as the web-search path. An
+  ``api_base`` a tenant chose (an organization's provider or search key, an
+  owned endpoint) is never checked here: it is held to public addresses and
+  dialed through the pinned client in ``services/providers/_owned_endpoint_network.py``.
 
 * **Workload identity discovery and JWKS** (:func:`validate_federation_url`):
   the issuer is operator-configured and its signing-key location comes from

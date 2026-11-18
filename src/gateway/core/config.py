@@ -1537,7 +1537,9 @@ class GatewayConfig(
             f"credential write path (POST {API_ROOT}/hosted-providers and PATCH "
             f"{API_ROOT}/hosted-providers/{{provider}}) refuse an internal api_base. "
             "Chat dispatch (which dials the endpoint on every request) is not gated, so this is not a "
-            "general egress control. Also settable via OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS."
+            "general egress control. It governs operator-supplied endpoints only: an organization's "
+            "provider key, an owned provider endpoint and an organization's search key are always held "
+            "to public addresses. Also settable via OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS."
         ),
     )
     provider_endpoints_enabled: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(

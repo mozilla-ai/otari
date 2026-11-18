@@ -260,6 +260,16 @@ budgets and dials them only through the pinned, no-redirect client in
 `_owned_endpoint_network.py`. Their `api_base` is a tenant's, so it is held to
 public addresses whatever `provider_allow_private_hosts` says.
 
+An organization's provider key (`services/tenancy/org_provider_key_service.py`)
+is held the same way. Its `api_base` is refused at write unless it reaches
+public addresses and its provider is in `TENANT_ENDPOINT_PROVIDERS`
+(`core/provider_params.py`), the SDKs that take an injected client;
+`get_provider_kwargs` then hands that SDK the pinned client on every dispatch,
+and the key's model discovery dials through it too. Its `client_args` are held
+to `tenant_client_args_allowed`, refused at write and dropped from a row
+stored before, because other names reach the SDK constructor and can choose
+the destination, the transport, the headers or an ambient credential.
+
 Provider resolution asks `ModelProviderPort` for a deployment-owned credential
 only after local and tenant BYO sources fail. The core adapter answers from the
 deployment's hosted providers (`services/providers`, the `hosted_providers`

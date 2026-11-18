@@ -24,6 +24,7 @@ import httpx
 import httpx2
 from any_llm import LLMProvider
 
+from gateway.core.provider_params import TENANT_ENDPOINT_HTTPX2_PROVIDERS
 from gateway.services.web_retrieval_network import (
     PINNED_TARGET_EXTENSION,
     NoCookieJar,
@@ -92,14 +93,26 @@ class OwnedEndpointTransport(PinnedAsyncHTTPTransport):
 _clients: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, httpx.AsyncClient]" = weakref.WeakKeyDictionary()
 
 
+def _new_http_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        transport=OwnedEndpointTransport(), follow_redirects=False, timeout=_TIMEOUT, cookies=NoCookieJar()
+    )
+
+
 def owned_endpoint_http_client() -> httpx.AsyncClient:
-    """The HTTP client an owned endpoint's provider SDK must use. Call from a running loop."""
-    loop = asyncio.get_running_loop()
+    """The HTTP client an owned endpoint's provider SDK must use.
+
+    Outside a running loop the client is a new one, not shared: kwargs are
+    sometimes resolved where nothing dials, and whatever dials them later
+    still goes through the pinned transport.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return _new_http_client()
     client = _clients.get(loop)
     if client is None or client.is_closed:
-        client = httpx.AsyncClient(
-            transport=OwnedEndpointTransport(), follow_redirects=False, timeout=_TIMEOUT, cookies=NoCookieJar()
-        )
+        client = _new_http_client()
         _clients[loop] = client
     return client
 
@@ -179,22 +192,32 @@ _httpx2_clients: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, httpx2.As
 )
 
 
+def _new_httpx2_client() -> httpx2.AsyncClient:
+    return httpx2.AsyncClient(
+        transport=_Httpx2Bridge(OwnedEndpointTransport()),
+        follow_redirects=False,
+        timeout=_HTTPX2_TIMEOUT,
+        cookies=NoCookieJar(),
+    )
+
+
 def _owned_endpoint_httpx2_client() -> httpx2.AsyncClient:
-    loop = asyncio.get_running_loop()
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return _new_httpx2_client()
     client = _httpx2_clients.get(loop)
     if client is None or client.is_closed:
-        client = httpx2.AsyncClient(
-            transport=_Httpx2Bridge(OwnedEndpointTransport()),
-            follow_redirects=False,
-            timeout=_HTTPX2_TIMEOUT,
-            cookies=NoCookieJar(),
-        )
+        client = _new_httpx2_client()
         _httpx2_clients[loop] = client
     return client
 
 
 def owned_endpoint_sdk_client(provider: LLMProvider) -> httpx.AsyncClient | httpx2.AsyncClient:
-    """The client ``provider``'s SDK dials an owned endpoint through. Call from a running loop."""
-    if provider is LLMProvider.ANTHROPIC:
+    """The client ``provider``'s SDK dials an endpoint a tenant chose through.
+
+    Only a provider in ``TENANT_ENDPOINT_PROVIDERS`` takes one; see ``core/provider_params.py``.
+    """
+    if provider.value in TENANT_ENDPOINT_HTTPX2_PROVIDERS:
         return _owned_endpoint_httpx2_client()
     return owned_endpoint_http_client()
