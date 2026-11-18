@@ -161,9 +161,11 @@ async def apply_deployment_provider_migration(
     versions it was shown them.
     """
     reviewed = None if body.rows is None else {row.instance: row.updated_at for row in body.rows}
-    moved = await service.migrate_deployment_providers(apply=True, reviewed=reviewed)
-    await reindex()
-    return moved
+    # A move that fails leaves the moves before it committed, so they are indexed either way.
+    try:
+        return await service.migrate_deployment_providers(apply=True, reviewed=reviewed)
+    finally:
+        await reindex()
 
 
 @router.delete("/migration/{instance}", status_code=status.HTTP_204_NO_CONTENT)
@@ -199,9 +201,11 @@ async def update_catalog(
     names the pending prices answers 409 and changes nothing. ``cleanup``
     removes the prices of models no provider serves, with their history.
     """
-    applied = await catalog.apply(digest=body.digest, cleanup=body.cleanup)
-    await reindex()
-    return applied
+    # The approved prices commit before the sweep, so they are indexed even when the cleanup fails.
+    try:
+        return await catalog.apply(digest=body.digest, cleanup=body.cleanup)
+    finally:
+        await reindex()
 
 
 @router.patch("/{provider}")

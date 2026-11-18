@@ -125,9 +125,7 @@ def test_a_model_a_refresh_switches_on_is_reachable_by_its_catalog_id_at_once(
     _assert_served(client, headers)
 
 
-def test_switching_a_model_off_and_on_moves_its_catalog_id_at_once(
-    client: TestClient, headers: dict[str, str]
-) -> None:
+def test_switching_a_model_off_and_on_moves_its_catalog_id_at_once(client: TestClient, headers: dict[str, str]) -> None:
     assert client.post(f"{PATH}/otari-ai/models/refresh", headers=headers).status_code == 200
     row = _row(client, headers)
 

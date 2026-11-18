@@ -190,7 +190,7 @@ from gateway.api.deps.traces import (
     workspaces_keeping_content_for,
 )
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.core.database import get_db
+from gateway.core.database import DATABASE_ERRORS, describe_database_error, get_db
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.log_config import logger
 from gateway.models.tenancy import MANAGEMENT_ROLES
@@ -729,6 +729,11 @@ def get_selector_reindex(
     async def reindex() -> None:
         try:
             await rebuild_selector_index(db, config, model_provider=model_provider)
+        except DATABASE_ERRORS as exc:
+            logger.warning(
+                "catalog selector index rebuild after a write failed (%s); the next tick retries",
+                describe_database_error(exc),
+            )
         except Exception:
             logger.warning("catalog selector index rebuild after a write failed; the next tick retries", exc_info=True)
 
