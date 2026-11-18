@@ -50,6 +50,7 @@ export function forgetMcpConnectionNotice(): void {
 }
 
 const CALLBACK_PATH = "/mcp-connections/callback"
+const DASHBOARD_ORIGIN = "http://dashboard.invalid"
 
 /**
  * A dashboard path to land on after a sign-in, and nothing that could leave the
@@ -59,9 +60,19 @@ const CALLBACK_PATH = "/mcp-connections/callback"
 export function pickDashboardPath(
   path: string | null | undefined,
 ): string | undefined {
-  if (!path?.startsWith("/") || path.startsWith("//")) return undefined
+  // A backslash reads as a slash in a URL, so "/\\host" would leave the dashboard.
+  if (!path?.startsWith("/") || path.startsWith("//") || path.includes("\\")) {
+    return undefined
+  }
   // Resolved as the router would read it: dot segments, case, a trailing slash.
-  const { pathname } = new URL(path, "http://dashboard.invalid")
+  let resolved: URL
+  try {
+    resolved = new URL(path, DASHBOARD_ORIGIN)
+  } catch {
+    return undefined
+  }
+  if (resolved.origin !== DASHBOARD_ORIGIN) return undefined
+  const { pathname } = resolved
   const isCallback =
     pathname.replace(/\/+$/, "").toLowerCase() === CALLBACK_PATH
   return isCallback ? undefined : path
