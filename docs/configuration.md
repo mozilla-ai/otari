@@ -683,8 +683,10 @@ How the request is translated:
 - `stop_sequences` is refused with a 400 (no Responses equivalent); `top_k`,
   `cache_control` and `metadata` are dropped.
 - With no `prompt_cache_key`, the request's session (`Otari-Conversation-Id`,
-  or the session id Claude Code sends) keys the provider's prompt cache, scoped
-  to the caller, so the session id itself never reaches the provider.
+  or the session id a recognized harness sends, as
+  [What makes a session](sessions-reference.md#what-makes-a-session) lists) keys
+  the provider's prompt cache, scoped to the caller, so the session id itself
+  never reaches the provider.
 - Anthropic's server tools are not forwarded: Otari's own web search, web fetch
   and code execution serve them where configured (see [Built-in tools](tools.md)),
   and one Otari does not serve is dropped.
