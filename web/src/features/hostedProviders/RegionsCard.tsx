@@ -64,11 +64,15 @@ export function RegionsCard({
             {row.decryptable ? null : <Badge tone="warn">Key unreadable</Badge>}
           </span>
           <span className="flex items-center gap-1">
-            <code className="text-caption">{row.selector}</code>
-            <CopyButton
-              value={row.selector}
-              label={`Copy ${row.label}'s selector`}
-            />
+            <code className="min-w-0 text-caption break-all">
+              {row.selector}
+            </code>
+            <span className="shrink-0">
+              <CopyButton
+                value={row.selector}
+                label={`Copy ${row.label}'s selector`}
+              />
+            </span>
           </span>
         </span>
       ),

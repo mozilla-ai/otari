@@ -37,6 +37,14 @@ describe("dataLocations", () => {
     ])
     expect(matchDataLocations("germ").map((o) => o.value)).toEqual(["DE"])
     expect(matchDataLocations("sg").map((o) => o.value)).toEqual(["SG"])
+    expect(matchDataLocations("xk").map((o) => o.label)).toEqual(["Kosovo"])
+  })
+
+  it("keeps the selected location in a capped list", () => {
+    const shown = matchDataLocations("", 10, "ZW")
+    expect(shown).toHaveLength(11)
+    expect(shown[0].value).toBe("ZW")
+    expect(matchDataLocations("", 10, "GLOBAL")).toHaveLength(10)
   })
 
   it("lists every distinct effective location, a region inheriting the provider's", () => {
@@ -50,6 +58,14 @@ describe("dataLocations", () => {
       ],
     })
     expect(providerDataLocations(provider)).toEqual(["CN", "SG", "US"])
+    // A switched-off region serves nothing, so its location is not listed.
+    const withSgOff = {
+      ...provider,
+      regions: provider.regions?.map((row) =>
+        row.slug === "sg" ? { ...row, enabled: false } : row,
+      ),
+    }
+    expect(providerDataLocations(withSgOff)).toEqual(["CN", "US"])
     expect(providerDataLocations(hostedProvider())).toEqual([])
     expect(
       providerDataLocations(hostedProvider({ data_location: "EU" })),

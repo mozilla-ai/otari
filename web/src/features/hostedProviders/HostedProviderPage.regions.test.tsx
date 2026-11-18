@@ -216,6 +216,21 @@ describe("HostedProviderPage: regions", () => {
       url: `${API_ROOT}/hosted-providers/openai/regions/cn`,
       body: { position: 1 },
     })
+    // The answer is the provider in its new order, shown before any reread.
+    const regionRow = (label: string) =>
+      within(table)
+        .getAllByRole("row")
+        .find((row) => within(row).queryByText(label) !== null) as HTMLElement
+    await waitFor(() =>
+      expect(
+        within(within(table).getAllByRole("row")[1]).getByText(
+          "Southeast Asia",
+        ),
+      ).toBeInTheDocument(),
+    )
+    expect(
+      within(regionRow("Southeast Asia")).getByText("primary"),
+    ).toBeInTheDocument()
 
     await user.click(
       within(table).getByRole("switch", {
@@ -230,11 +245,7 @@ describe("HostedProviderPage: regions", () => {
       body: { enabled: false },
     })
 
-    await pressRowAction(
-      user,
-      "Remove…",
-      within(table).getAllByRole("row")[2] as HTMLElement,
-    )
+    await pressRowAction(user, "Remove…", regionRow("Southeast Asia"))
     const confirm = await screen.findByRole("alertdialog")
     await user.click(
       within(confirm).getByRole("button", { name: "Remove region" }),
@@ -337,6 +348,21 @@ describe("HostedProviderPage: region prices", () => {
     expect(
       screen.queryByRole("button", { name: /^Edit gpt-4o price in / }),
     ).toBeNull()
+  })
+
+  it("keeps a lone region's price column, so its own price stays editable", async () => {
+    const [, asia] = twoRegions().regions ?? []
+    mockApi({
+      providers: [hostedProvider({ regions: [{ ...asia, position: 0 }] })],
+      models: pricedModels(),
+    })
+    await renderProviderPage()
+
+    expect(
+      await screen.findByRole("button", {
+        name: "Edit gpt-4o price in Southeast Asia: $3.00 in / $12.00 out",
+      }),
+    ).toBeInTheDocument()
   })
 
   it("prices a model in one region under that region's key", async () => {

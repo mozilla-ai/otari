@@ -57,7 +57,6 @@ from gateway.core.config import (
     USAGE_UNITS_HEADER,
     X_API_KEY_HEADER,
     GatewayConfig,
-    split_region,
 )
 from gateway.core.database import (
     DATABASE_ERRORS,
@@ -157,15 +156,19 @@ from gateway.services.pricing_refresh_service import (
 )
 from gateway.services.pricing_service import (
     configure_default_pricing,
-    configure_hosted_regions,
     configure_provider_types,
+    configure_region_parents,
 )
 from gateway.services.provider_kwargs import (
     configure_hosted_names,
     settle_configured_providers,
     warn_about_ignored_provider_variables,
 )
+from gateway.services.provider_kwargs import (
+    configure_region_parents as configure_kwargs_region_parents,
+)
 from gateway.services.providers import (
+    HostedRegionIndex,
     hosted_implementation,
     load_hosted_names_at_startup,
     load_provider_endpoints_at_startup,
@@ -1177,14 +1180,9 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             lambda name: config.provider_pricing_implementation(name) or hosted_implementation(name)
         )
         configure_hosted_names(hosted_implementation)
-        # A hosted provider's name never holds the separator, so a hosted name that does is a region of one.
-        configure_hosted_regions(
-            lambda name: (
-                split_region(name)[1] is not None
-                and name not in config.providers
-                and hosted_implementation(name) is not None
-            )
-        )
+        # A region of a hosted provider (``tokenhub@sg``) is priced and served as one of its provider's.
+        configure_region_parents(HostedRegionIndex.parent_of)
+        configure_kwargs_region_parents(HostedRegionIndex.parent_of)
         log_writer: LogWriter
         workers: list[tuple[asyncio.Task[None], _LifespanWorker]] = []
         feature_workers: list[tuple[asyncio.Task[None], str]] = []

@@ -100,6 +100,10 @@ export function RegionFormDialog({
   const [draft, setDraft] = useState<RegionDraft>(() =>
     draftFrom(provider, region),
   )
+  // The region as the dialog opened on it. The save is built against this,
+  // so a refresh landing while the dialog is open is not undone by a save
+  // that never touched the field it changed.
+  const [opened] = useState(region)
   const { isDirty } = useDirtySnapshot(draft)
 
   const isEditing = region !== undefined
@@ -206,8 +210,8 @@ export function RegionFormDialog({
 
   const submit = () => {
     if (!canSubmit) return
-    if (region) {
-      const body = updateBody(region)
+    if (region && opened) {
+      const body = updateBody(opened)
       if (body)
         update.mutate({ slug: region.slug, body }, { onSuccess: onClose })
       return
@@ -341,7 +345,7 @@ export function RegionFormDialog({
             parsed={countries}
             placeholder="The provider's countries"
             onChange={(supportedCountries) =>
-              setDraft({ ...draft, supportedCountries })
+              setDraft((current) => ({ ...current, supportedCountries }))
             }
           />
         </div>

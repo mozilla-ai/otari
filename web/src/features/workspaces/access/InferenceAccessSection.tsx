@@ -119,9 +119,16 @@ export function InferenceAccessSection({
   const setPolicy = useSetWorkspaceProviderPolicy()
   const requiresZeroRetention =
     policy.data?.require_zero_data_retention ?? false
+  // Its own mutation, so a failed retention write is not shown in the
+  // locations dialog, nor a failed locations save beside the switch.
+  const setLocations = useSetWorkspaceProviderPolicy()
+  const isPolicyWriting = setPolicy.isPending || setLocations.isPending
   const allowedLocations = policy.data?.allowed_data_locations ?? null
   const [locationsOpening, setLocationsOpening] = useState(0)
-  const [isEditingLocations, setIsEditingLocations] = useState(false)
+  // The workspace the locations dialog was opened in, so it never reopens
+  // over another workspace after a switch.
+  const [locationsOpenFor, setLocationsOpenFor] = useState("")
+  const isEditingLocations = locationsOpenFor === workspaceId
   const [open, setOpen] = useState<OpenScope>()
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   const [query, setQuery] = useState("")
@@ -310,7 +317,7 @@ export function InferenceAccessSection({
             <Toggle
               label="Require zero data retention"
               isSelected={requiresZeroRetention}
-              isDisabled={!canManage || !policy.data || setPolicy.isPending}
+              isDisabled={!canManage || !policy.data || isPolicyWriting}
               onChange={(next) =>
                 setPolicy.mutate({
                   workspaceId,
@@ -322,16 +329,23 @@ export function InferenceAccessSection({
         />
         <SettingRow
           label="Allowed data locations"
-          help={`${describeAllowedDataLocations(allowedLocations)}. Hosted providers serve this workspace only from a region that declares one of these locations.`}
+          help={
+            policy.data
+              ? `${describeAllowedDataLocations(allowedLocations)}. Hosted providers serve this workspace only from a region that declares one of these locations.`
+              : policy.isPending
+                ? "Loading…"
+                : "Unknown until this workspace's provider policy can be read."
+          }
           control={
             <Button
               size="sm"
               className="min-h-11 md:min-h-9"
               aria-label="Change allowed data locations"
-              isDisabled={!canManage || !policy.data || setPolicy.isPending}
+              isDisabled={!canManage || !policy.data || isPolicyWriting}
               onPress={() => {
+                setLocations.reset()
                 setLocationsOpening((n) => n + 1)
-                setIsEditingLocations(true)
+                setLocationsOpenFor(workspaceId)
               }}
             >
               Change
@@ -344,17 +358,19 @@ export function InferenceAccessSection({
           key={`${workspaceId}:${locationsOpening}`}
           allowed={allowedLocations}
           isOpen={isEditingLocations}
-          onClose={() => setIsEditingLocations(false)}
-          isPending={setPolicy.isPending}
-          error={isEditingLocations ? setPolicy.error : null}
+          onClose={() => setLocationsOpenFor("")}
+          isPending={setLocations.isPending}
+          error={setLocations.error}
+          // The retention flag is sent as last read, since the API takes the
+          // two together; the read is refreshed by every successful write.
           onSave={(allowed) =>
-            setPolicy.mutate(
+            setLocations.mutate(
               {
                 workspaceId,
                 requireZeroDataRetention: requiresZeroRetention,
                 allowedDataLocations: allowed,
               },
-              { onSuccess: () => setIsEditingLocations(false) },
+              { onSuccess: () => setLocationsOpenFor("") },
             )
           }
         />

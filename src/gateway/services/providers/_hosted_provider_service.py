@@ -45,6 +45,7 @@ from gateway.exceptions.providers_exceptions import (
     HostedVendorNotFoundError,
 )
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
+from gateway.log_config import logger
 from gateway.models.providers import DISABLED_UNAVAILABLE, DISABLED_UNPRICED, HostedProvider, HostedProviderModel
 from gateway.models.secret_fields import carries_redaction, restore_redacted_values
 from gateway.repositories.providers import (
@@ -198,7 +199,13 @@ class HostedProviderService:
         self.sources = sources
         self.regions = regions
         self.region_changes = HostedProviderRegions(
-            uow, config=config, regions=regions, stored=self._stored_or_raise, validate_api_base=self._validate_api_base
+            uow,
+            config=config,
+            regions=regions,
+            stored=self._stored_or_raise,
+            lock=providers.lock,
+            taken=self._taken,
+            validate_api_base=self._validate_api_base,
         )
         self.offers = HostedOffers(models, pricing)
         self.runtime = HostedProviderRuntime(uow, sources=self.sources, models=models, vendors=vendors)
@@ -340,12 +347,13 @@ class HostedProviderService:
 
         async with self.uow:
             row, source = await self._stored_or_raise(provider)
-            previous_origin = origin_of(row.api_base)
+            moved = False
             if request.api_base is not None:
                 if api_base is not None:
                     api_base = unmask_api_base(api_base, row.api_base)
                 new_origin = origin_of(api_base)
                 moves = new_origin is not None and new_origin != origin_of(row.api_base)
+                moved = new_origin != origin_of(row.api_base)
                 if moves and encrypted is None and row.encrypted_api_key is not None and not removes_key:
                     # The stored key would otherwise be sent to an endpoint the
                     # operator chose without ever having to know the key.
@@ -382,7 +390,7 @@ class HostedProviderService:
                 row.terms_url = request.terms_url
             if "privacy_url" in request.model_fields_set:
                 row.privacy_url = request.privacy_url
-            ensure_regions_follow(row, source.regions, previous_origin=previous_origin)
+            ensure_regions_follow(row, source.regions, moved=moved)
             await self.providers.save(row)
             public = self._public(source)
         remember_hosted_zero_data_retention(row.name, row.zero_data_retention)
@@ -418,6 +426,10 @@ class HostedProviderService:
         """
         return await self._public_by_name(await self.region_changes.remove(provider, slug))
 
+    async def _taken(self, name: str) -> bool:
+        """Whether a hosted provider, stored or configured, goes by exactly ``name``."""
+        return await self.sources.get(name) is not None
+
     async def _public_by_name(self, name: str) -> HostedProviderPublic:
         async with self.uow:
             return self._public(await self._provider_or_raise(name))
@@ -444,8 +456,14 @@ class HostedProviderService:
             self.metadata_overrides.forget_provider(name)
         forget_hosted_name(name)
         remember_hosted_zero_data_retention(name, False)
-        # Its regions' names and every declared location go with it.
-        await refresh_hosted_name_index(self.uow, self.config)
+        # Its regions' names and every declared location go with it. The delete
+        # is committed, so a failed refresh is left to the periodic one.
+        try:
+            await refresh_hosted_name_index(self.uow, self.config)
+        except Exception:
+            logger.warning(
+                "Hosted provider name refresh after a delete failed; the next refresh will retry", exc_info=True
+            )
         if source.shadows_config:
             # The configuration entry of the same name serves again, as its own implementation.
             entry = self.sources.entries()[name]
@@ -484,7 +502,6 @@ class HostedProviderService:
         kinds = _kinds(source, names)
         vendors = vendors_of(source.implementation, names)
         rates = await self.offers.current_rates(source.name, rows, implementation=source.implementation)
-        regional = await self.offers.region_rates(source.name, [region.slug for region in source.regions], rows)
         defaults = await self._differing_defaults(source, rows)
 
         def served(row: HostedProviderModel) -> bool:
@@ -501,6 +518,7 @@ class HostedProviderService:
         if enabled is not None:
             narrowed = [row for row in narrowed if served(row) is enabled]
         page = page_by_kind(narrowed, kinds, "model", model_type=model_type, skip=skip, limit=limit)
+        regional = await self.offers.region_rates(source.name, [region.slug for region in source.regions], page.rows)
         return HostedModelsPublic(
             data=[
                 HostedModelPublic.from_row(
@@ -721,7 +739,10 @@ class HostedProviderService:
                     provider, [name], defaults, serves_unlisted=source.serves_unlisted_models
                 )
         rates = await self.offers.current_rates(provider, [model], implementation=implementation)
-        return HostedModelPublic.from_row(model, rates=rates.get(name), model_type=_kinds(source, [name]).get(name))
+        regional = await self.offers.region_rates(provider, [region.slug for region in source.regions], [model])
+        return HostedModelPublic.from_row(
+            model, rates=rates.get(name), model_type=_kinds(source, [name]).get(name), region_rates=regional.get(name)
+        )
 
     async def update_model(
         self, provider: str, model_id: uuid.UUID, request: HostedModelUpdateRequest

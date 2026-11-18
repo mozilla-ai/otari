@@ -52,6 +52,24 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # The release before this one cannot enforce a workspace's data locations,
+    # so dropping them would quietly serve those workspaces from anywhere.
+    restricted = (
+        op.get_bind()
+        .execute(
+            sa.text(
+                "SELECT COUNT(*) FROM workspace_provider_policies "
+                "WHERE allowed_data_locations IS NOT NULL AND CAST(allowed_data_locations AS TEXT) != 'null'"
+            )
+        )
+        .scalar()
+    )
+    if restricted:
+        msg = (
+            f"{restricted} workspace(s) limit hosted providers to some data locations, which the previous release "
+            "cannot enforce. Clear those limits (or switch the affected providers off) before downgrading."
+        )
+        raise RuntimeError(msg)
     op.drop_index("ix_hosted_provider_regions_hosted_provider_id", table_name="hosted_provider_regions")
     op.drop_table("hosted_provider_regions")
     with op.batch_alter_table("workspace_provider_policies") as batch_op:

@@ -32,7 +32,7 @@ export function DataLocationField({
       value={value}
       onChange={onChange}
       onQueryChange={setQuery}
-      options={matchDataLocations(query).slice(0, MAX_OPTIONS)}
+      options={matchDataLocations(query, MAX_OPTIONS, value)}
       placeholder={placeholder}
       shouldSelectOnFocus
       noMatchesMessage="No country or region matches what you typed."

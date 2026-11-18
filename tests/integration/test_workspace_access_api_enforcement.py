@@ -298,6 +298,7 @@ def test_allowed_data_locations_serve_from_the_region_that_keeps_data_there(
     )
     refused_status, refused = _chat(client, headers, "openai:gpt-4o")
     kept = _ok(client.put(url, json={"require_zero_data_retention": True}, headers=master_key_header))
+    cleared = _ok(client.put(url, json={"allowed_data_locations": None}, headers=master_key_header))
 
     assert policy == {"require_zero_data_retention": False, "allowed_data_locations": ["EU"]}
     assert served.get("api_key") == "sk-hosted-eu", (
@@ -306,6 +307,9 @@ def test_allowed_data_locations_serve_from_the_region_that_keeps_data_there(
     assert refused_status == 403
     assert not refused, "a region keeping data elsewhere must never be called"
     assert kept["allowed_data_locations"] == ["JP"], "omitting the list keeps the stored one"
+    assert cleared == {"require_zero_data_retention": True, "allowed_data_locations": None}, (
+        "omitting zero data retention keeps it"
+    )
 
 
 def test_requiring_zero_data_retention_refuses_an_organization_key_until_it_is_declared(

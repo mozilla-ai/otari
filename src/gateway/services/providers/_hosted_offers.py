@@ -325,17 +325,28 @@ class HostedOffers:
     ) -> dict[str, dict[str, HostedModelRates]]:
         """The rates each region sets of its own, keyed by model name and then by region slug.
 
-        Only a version stored under the region's key (``tokenhub@sg:model``)
-        counts: a region with none settles at the provider's rate, so it is absent.
+        Only a version stored under the region's own key counts, canonical
+        (``tokenhub@sg:model``) ahead of the legacy ``tokenhub@sg/model``, as
+        settlement reads them: a region with neither settles at the provider's
+        rate, so it is absent.
         """
         if not rows or not regions:
             return {}
         now = normalize_effective_at(None)
-        keys = {_key(region_instance(provider, slug), row.model): (row.model, slug) for slug in regions for row in rows}
+        keys: dict[str, tuple[str, str, int]] = {}
+        for slug in regions:
+            instance = region_instance(provider, slug)
+            for row in rows:
+                keys[_key(instance, row.model)] = (row.model, slug, 0)
+                keys[f"{instance}/{row.model}"] = (row.model, slug, 1)
         versions = await self.pricing.current_versions(keys, now)
-        rates: dict[str, dict[str, HostedModelRates]] = {}
+        chosen: dict[tuple[str, str], tuple[int, ModelPricing]] = {}
         for key, version in versions.items():
-            model, slug = keys[key]
+            model, slug, rank = keys[key]
+            if (model, slug) not in chosen or rank < chosen[(model, slug)][0]:
+                chosen[(model, slug)] = (rank, version)
+        rates: dict[str, dict[str, HostedModelRates]] = {}
+        for (model, slug), (_, version) in chosen.items():
             rates.setdefault(model, {})[slug] = HostedModelRates.from_version(
                 version, _SOURCES.get(version.origin, "deployment")
             )

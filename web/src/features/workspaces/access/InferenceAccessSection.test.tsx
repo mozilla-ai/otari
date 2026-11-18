@@ -51,6 +51,8 @@ function mockApi(
     requireZeroRetention?: boolean
     /** The data locations the workspace accepts; null for any. */
     allowedDataLocations?: string[] | null
+    /** How many policy writes are refused before one is stored. */
+    policyWriteRefusals?: number
     /** A refusal for the workspace's provider policy. */
     policyRefusal?: { status: number; detail: string }
   } = {},
@@ -60,15 +62,17 @@ function mockApi(
   const hosted = opts.hosted ?? []
   const catalog = opts.catalog ?? []
   const requests: Request[] = []
+  let policy = {
+    require_zero_data_retention: opts.requireZeroRetention ?? false,
+    allowed_data_locations: opts.allowedDataLocations ?? null,
+  }
+  let policyWriteRefusals = opts.policyWriteRefusals ?? 0
 
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
     const method = (init?.method ?? "GET").toUpperCase()
-    requests.push({
-      url,
-      method,
-      body: init?.body ? JSON.parse(String(init.body)) : undefined,
-    })
+    const body = init?.body ? JSON.parse(String(init.body)) : undefined
+    requests.push({ url, method, body })
 
     if (opts.writeRefusal && method === opts.writeRefusal.method) {
       return jsonResponse(
@@ -101,18 +105,22 @@ function mockApi(
       })
     }
     if (url.includes("/provider-policy")) {
-      if (method !== "GET")
-        return jsonResponse(init?.body ? JSON.parse(String(init.body)) : {})
+      if (method !== "GET") {
+        if (policyWriteRefusals > 0) {
+          policyWriteRefusals -= 1
+          return jsonResponse({ detail: "Policy write refused" }, 400)
+        }
+        // Stored as the server stores it: an omitted list keeps the old one.
+        policy = { ...policy, ...(body as Partial<typeof policy>) }
+        return jsonResponse(policy)
+      }
       if (opts.policyRefusal) {
         return jsonResponse(
           { detail: opts.policyRefusal.detail },
           opts.policyRefusal.status,
         )
       }
-      return jsonResponse({
-        require_zero_data_retention: opts.requireZeroRetention ?? false,
-        allowed_data_locations: opts.allowedDataLocations ?? null,
-      })
+      return jsonResponse(policy)
     }
     if (url.includes("/hosted-providers")) {
       if (method !== "GET") return jsonResponse(hosted[0] ?? {})
@@ -856,6 +864,78 @@ describe("InferenceAccessSection: allowed data locations", () => {
       require_zero_data_retention: true,
       allowed_data_locations: ["EU"],
     })
+  })
+
+  it("shows the saved list, and keeps a refused draft to try again", async () => {
+    const requests = mockApi({ policyWriteRefusals: 1 })
+    const user = userEvent.setup()
+    renderSection()
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Change allowed data locations",
+      }),
+    )
+    const dialog = await screen.findByRole("dialog")
+    await user.click(
+      within(dialog).getByRole("radio", { name: "Only these locations" }),
+    )
+    await user.type(
+      within(dialog).getByRole("combobox", { name: "Locations" }),
+      "Germ",
+    )
+    await user.click(await screen.findByRole("option", { name: /Germany/ }))
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+    expect(
+      await within(dialog).findByText("Policy write refused"),
+    ).toBeInTheDocument()
+    expect(within(dialog).getByText("Germany")).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    expect(requests.filter((request) => request.method === "PUT")).toHaveLength(
+      2,
+    )
+    expect(await screen.findByText(/^Germany\./)).toBeInTheDocument()
+  })
+
+  it("refuses every location with No location", async () => {
+    const requests = mockApi()
+    const user = userEvent.setup()
+    renderSection()
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Change allowed data locations",
+      }),
+    )
+    const dialog = await screen.findByRole("dialog")
+    await user.click(within(dialog).getByRole("radio", { name: "No location" }))
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+    await waitFor(() =>
+      expect(requests.some((request) => request.method === "PUT")).toBe(true),
+    )
+    expect(requests.find((request) => request.method === "PUT")?.body).toEqual({
+      require_zero_data_retention: false,
+      allowed_data_locations: [],
+    })
+    expect(await screen.findByText(/^No location\./)).toBeInTheDocument()
+  })
+
+  it("says the list is unknown while the policy cannot be read", async () => {
+    mockApi({ policyRefusal: { status: 500, detail: "Policy unavailable" } })
+    renderSection()
+
+    expect(
+      await screen.findByText(
+        "Unknown until this workspace's provider policy can be read.",
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Change allowed data locations" }),
+    ).toBeDisabled()
   })
 
   it("goes back to any location", async () => {

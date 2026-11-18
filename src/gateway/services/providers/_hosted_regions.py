@@ -6,9 +6,11 @@ a region never changes what a request already served is served on. Every field
 a region leaves unset is the provider's (``HostedProviderRegion``).
 """
 
+import uuid
 from collections.abc import Awaitable, Callable, Sequence
 
 from gateway.core.config import GatewayConfig, hosted_key_optional, region_instance, region_slug_problem
+from gateway.core.settings.providers import https_or_loopback_problem
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.providers_exceptions import (
     HostedProviderApiKeyMissingError,
@@ -19,7 +21,9 @@ from gateway.exceptions.providers_exceptions import (
     HostedProviderRegionAlreadyExistsError,
     HostedProviderRegionKeyRequiredError,
     HostedProviderRegionNotFoundError,
+    HostedProviderUnsafeApiBaseError,
 )
+from gateway.log_config import logger
 from gateway.models.providers import HostedProvider, HostedProviderRegion
 from gateway.models.secret_fields import carries_redaction, redact_secret_like_values, restore_redacted_values
 from gateway.repositories.providers import HostedProviderRegionRepository, HostedRegionConflict
@@ -84,16 +88,33 @@ def _primary_slug(row: HostedProvider) -> str:
     return PRIMARY_REGION_SLUG
 
 
+def _safe_origin(api_base: str | None) -> object:
+    """``origin_of`` that reads a stored endpoint it cannot parse as an origin of its own, rather than failing."""
+    try:
+        return origin_of(api_base)
+    except ValueError:
+        return ("unparsed", api_base)
+
+
 def _ensure_servable(row: HostedProvider, *, encrypted_api_key: str | None, api_base: str | None) -> None:
-    """Refuse a region left with no key where its provider needs one, or one sending the provider's key elsewhere.
+    """Refuse a region the provider's key would follow to another endpoint, or one left with no key it needs.
 
     Raises:
         HostedProviderKeyRequiredError: the region points the provider's key at another origin.
         HostedProviderApiKeyMissingError: neither the region nor the provider holds a key the endpoint needs.
+        HostedProviderUnsafeApiBaseError: the region's own endpoint would carry a key over plain http.
     """
+    has_key = encrypted_api_key is not None or row.encrypted_api_key is not None
+    if api_base is not None and has_key and (problem := https_or_loopback_problem(api_base)) is not None:
+        # A key travels to it, so it is held to what a configured provider's endpoint is.
+        raise HostedProviderUnsafeApiBaseError(f"Region endpoint {problem}")
     if encrypted_api_key is not None:
         return
-    if row.encrypted_api_key is not None and api_base is not None and origin_of(api_base) != origin_of(row.api_base):
+    if (
+        row.encrypted_api_key is not None
+        and api_base is not None
+        and _safe_origin(api_base) != _safe_origin(row.api_base)
+    ):
         # The provider's key would otherwise reach an endpoint chosen without
         # ever having to know the key, as an update refuses.
         raise HostedProviderKeyRequiredError
@@ -102,32 +123,50 @@ def _ensure_servable(row: HostedProvider, *, encrypted_api_key: str | None, api_
         raise HostedProviderApiKeyMissingError(row.provider)
 
 
-def ensure_regions_follow(
-    row: HostedProvider, regions: Sequence[HostedProviderRegion], *, previous_origin: object
-) -> None:
+def ensure_regions_follow(row: HostedProvider, regions: Sequence[HostedProviderRegion], *, moved: bool) -> None:
     """Refuse a change to the provider that its regions cannot follow.
 
-    A region with a key of its own on the provider's endpoint must not have that
-    key carried to a new origin, and a region using the provider's key must
-    still have one where its endpoint needs it.
+    ``moved`` is whether the change points the provider at another origin. A
+    region with a key of its own on the provider's endpoint must not have that
+    key carried there, a region using the provider's key on an endpoint of its
+    own must not be sent a key meant for another origin, and a region using the
+    provider's key must still have one where its endpoint needs it.
 
     Raises:
-        HostedProviderRegionKeyRequiredError: the provider's endpoint moves under a region with a key of its own.
+        HostedProviderRegionKeyRequiredError: a region's key would reach an endpoint it was not entered for.
         HostedProviderApiKeyMissingError: a region is left with no key where one is needed.
     """
-    moved = origin_of(row.api_base) != previous_origin
     for region in regions:
         if region.encrypted_api_key is not None:
             if moved and region.api_base is None:
                 raise HostedProviderRegionKeyRequiredError(region.slug)
             continue
+        if moved and region.api_base is not None and row.encrypted_api_key is not None:
+            raise HostedProviderRegionKeyRequiredError(region.slug)
         api_base = region.api_base if region.api_base is not None else row.api_base
         if row.encrypted_api_key is None and not hosted_key_optional(row.provider, api_base):
             raise HostedProviderApiKeyMissingError(row.provider)
 
 
+def _region(regions: Sequence[HostedProviderRegion], provider: str, slug: str) -> HostedProviderRegion:
+    """The region of that slug.
+
+    Raises:
+        HostedProviderRegionNotFoundError: the provider has no region of that slug.
+    """
+    for region in regions:
+        if region.slug == slug:
+            return region
+    raise HostedProviderRegionNotFoundError(provider, slug)
+
+
 class HostedProviderRegions:
-    """Change the regions of a stored hosted provider. A provider defined in configuration has none."""
+    """Change the regions of a stored hosted provider. A provider defined in configuration has none.
+
+    Every change locks the provider's row first and reads its regions after
+    the lock, so two changes to one provider's regions run one after the other:
+    neither can, say, switch off the last region the other left switched on.
+    """
 
     def __init__(
         self,
@@ -136,18 +175,25 @@ class HostedProviderRegions:
         config: GatewayConfig,
         regions: HostedProviderRegionRepository,
         stored: Callable[[str], Awaitable[tuple[HostedProvider, HostedSource]]],
+        lock: Callable[[uuid.UUID], Awaitable[None]],
+        taken: Callable[[str], Awaitable[bool]],
         validate_api_base: Callable[[str | None], Awaitable[None]],
     ) -> None:
         """Bind the unit of work, the regions table, and the provider lookups the service owns.
 
         ``stored`` answers a provider's row and its merged view, refusing one
-        defined in configuration; ``validate_api_base`` is the SSRF gate an
-        endpoint passes before it is stored.
+        defined in configuration; ``lock`` locks a provider's row for the rest
+        of the transaction; ``taken`` answers whether a hosted provider is
+        configured under a whole name, which a region's selector must not
+        shadow; ``validate_api_base`` is the SSRF gate an endpoint passes
+        before it is stored.
         """
         self.uow = uow
         self.config = config
         self.regions = regions
         self.stored = stored
+        self.lock = lock
+        self.taken = taken
         self.validate_api_base = validate_api_base
 
     async def add(self, provider: str, request: HostedProviderRegionCreateRequest) -> str:
@@ -157,8 +203,9 @@ class HostedProviderRegions:
             HostedProviderNotFoundError: no such provider.
             HostedProviderReadOnlyError: the provider is defined in configuration.
             HostedProviderInvalidRegionSlugError: a slug a selector could not pin.
-            HostedProviderRegionAlreadyExistsError: the provider already has a region of that slug.
-            HostedProviderUnsafeApiBaseError: ``api_base`` is refused by the SSRF gate.
+            HostedProviderRegionAlreadyExistsError: the provider has a region of that slug, or a provider is
+                configured under the selector it would take.
+            HostedProviderUnsafeApiBaseError: ``api_base`` is refused by the SSRF gate, or carries a key over http.
             HostedProviderKeyRequiredError: the region points the provider's key at another origin.
             HostedProviderApiKeyMissingError: the region is left with no key where one is needed.
             SecretBoxUnavailableTenancyError: no usable ``OTARI_SECRET_KEY``.
@@ -170,20 +217,23 @@ class HostedProviderRegions:
         encrypted_client_args = encrypt_client_args(request.client_args)
 
         async with self.uow:
-            row, source = await self.stored(provider)
-            position = max((region.position for region in source.regions), default=-1) + 1
-            if not source.regions:
+            row, regions = await self._locked(provider)
+            position = max((region.position for region in regions), default=-1) + 1
+            new_slugs = [slug]
+            if not regions:
                 primary = _slug(request.primary_slug or _primary_slug(row))
                 if primary == slug:
                     raise HostedProviderRegionAlreadyExistsError(row.name, slug)
+                new_slugs.append(primary)
+            for each in new_slugs:
+                if await self.taken(region_instance(row.name, each)):
+                    raise HostedProviderRegionAlreadyExistsError(row.name, each)
+            _ensure_servable(row, encrypted_api_key=encrypted_key, api_base=api_base)
+            if not regions:
                 await self._insert(
-                    row,
-                    slug=primary,
-                    label=request.primary_label or row.data_location or "Primary",
-                    position=0,
+                    row, slug=new_slugs[1], label=request.primary_label or row.data_location or "Primary", position=0
                 )
                 position = 1
-            _ensure_servable(row, encrypted_api_key=encrypted_key, api_base=api_base)
             await self._insert(
                 row,
                 slug=slug,
@@ -208,11 +258,13 @@ class HostedProviderRegions:
             HostedProviderNotFoundError: no such provider.
             HostedProviderReadOnlyError: the provider is defined in configuration.
             HostedProviderRegionNotFoundError: the provider has no region of that slug.
-            HostedProviderUnsafeApiBaseError: ``api_base`` is refused by the SSRF gate.
+            HostedProviderUnsafeApiBaseError: ``api_base`` is refused by the SSRF gate, or carries a key over http.
             HostedProviderApiBaseMaskedError: ``api_base`` carries the mask but is not the stored one echoed back.
-            HostedProviderKeyRequiredError: the region points the provider's key at another origin.
+            HostedProviderKeyRequiredError: the region's endpoint moves to another origin and no key came
+                with it, or it points the provider's key at another origin.
             HostedProviderApiKeyMissingError: the region is left with no key where one is needed.
             HostedProviderClientArgsUnreadableError: a masked entry has nothing stored to keep.
+            HostedProviderLastRegionError: the change leaves no region switched on.
             SecretBoxUnavailableTenancyError: no usable ``OTARI_SECRET_KEY``.
         """
         fields = request.model_fields_set
@@ -222,14 +274,18 @@ class HostedProviderRegions:
         encrypted_key = encrypt_key(request.api_key) if request.api_key is not None else None
 
         async with self.uow:
-            row, source = await self.stored(provider)
-            region = source.region(slug)
-            if region is None:
-                raise HostedProviderRegionNotFoundError(row.name, slug)
+            row, regions = await self._locked(provider)
+            region = _region(regions, row.name, slug)
             if request.label is not None:
                 region.label = request.label
             if "api_base" in fields:
+                before = _safe_origin(region.api_base if region.api_base is not None else row.api_base)
                 region.api_base = None if api_base is None else unmask_api_base(api_base, region.api_base)
+                after = _safe_origin(region.api_base if region.api_base is not None else row.api_base)
+                if region.encrypted_api_key is not None and "api_key" not in fields and before != after:
+                    # The region's own key would otherwise reach an endpoint
+                    # chosen without ever having to know it.
+                    raise HostedProviderKeyRequiredError
             if "api_key" in fields:
                 region.encrypted_api_key = encrypted_key
                 region.api_key_last4 = last4(request.api_key) if request.api_key is not None else None
@@ -244,18 +300,17 @@ class HostedProviderRegions:
                 region.supported_countries = request.supported_countries
             if request.enabled is not None:
                 region.enabled = request.enabled
-            if not any(each.enabled for each in source.regions):
+            if not any(each.enabled for each in regions):
                 raise HostedProviderLastRegionError
             _ensure_servable(row, encrypted_api_key=region.encrypted_api_key, api_base=region.api_base)
-            ordered = [other for other in source.regions if other is not region]
-            if request.position is not None:
-                ordered.insert(min(request.position, len(ordered)), region)
-            else:
-                ordered.insert(source.regions.index(region), region)
+            ordered = [other for other in regions if other is not region]
+            ordered.insert(
+                min(request.position, len(ordered)) if request.position is not None else regions.index(region),
+                region,
+            )
             for position, each in enumerate(ordered):
-                if each is region or each.position != position:
-                    each.position = position
-                    await self.regions.save(each)
+                each.position = position
+            await self.regions.flush()
             name = row.name
         await self._written(name)
         return name
@@ -269,19 +324,24 @@ class HostedProviderRegions:
             HostedProviderNotFoundError: no such provider.
             HostedProviderReadOnlyError: the provider is defined in configuration.
             HostedProviderRegionNotFoundError: the provider has no region of that slug.
+            HostedProviderLastRegionError: the regions left would have none switched on.
         """
         async with self.uow:
-            row, source = await self.stored(provider)
-            region = source.region(slug)
-            if region is None:
-                raise HostedProviderRegionNotFoundError(row.name, slug)
-            remaining = [other for other in source.regions if other is not region]
+            row, regions = await self._locked(provider)
+            region = _region(regions, row.name, slug)
+            remaining = [other for other in regions if other is not region]
             if remaining and not any(other.enabled for other in remaining):
                 raise HostedProviderLastRegionError
             await self.regions.delete_row(region)
             name = row.name
         await self._written(name)
         return name
+
+    async def _locked(self, provider: str) -> tuple[HostedProvider, list[HostedProviderRegion]]:
+        """The provider's row, locked, and its regions as they stand once it is."""
+        row, _ = await self.stored(provider)
+        await self.lock(row.id)
+        return row, await self.regions.list_for_provider(row.id, fresh=True)
 
     async def _insert(self, row: HostedProvider, **fields: object) -> None:
         try:
@@ -290,6 +350,15 @@ class HostedProviderRegions:
             raise HostedProviderRegionAlreadyExistsError(row.name, conflict.slug) from conflict
 
     async def _written(self, name: str) -> None:
-        """Bring this worker's name index and model listing up to the regions just stored."""
-        await refresh_hosted_name_index(self.uow, self.config)
+        """Bring this worker's name index and model listing up to the regions just stored.
+
+        The regions are committed by now, so a failed refresh is logged rather
+        than raised: the periodic refresh brings the index up within its TTL.
+        """
         get_model_cache().clear(name)
+        try:
+            await refresh_hosted_name_index(self.uow, self.config)
+        except Exception:
+            logger.warning(
+                "Hosted provider name refresh after a region change failed; the next refresh will retry", exc_info=True
+            )

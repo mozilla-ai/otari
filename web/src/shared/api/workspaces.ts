@@ -560,7 +560,13 @@ export function useSetWorkspaceProviderPolicy() {
           } satisfies SetWorkspaceProviderPolicyRequest),
         },
       ),
-    onSuccess: (_data, { workspaceId }) => {
+    onSuccess: (policy, { workspaceId }) => {
+      // The answer is the stored policy, so the page shows it at once rather
+      // than offering an edit built on the one before it.
+      queryClient.setQueryData(
+        [WORKSPACES, workspaceId, "provider-policy"],
+        policy,
+      )
       void queryClient.invalidateQueries({
         queryKey: [WORKSPACES, workspaceId, "provider-policy"],
       })

@@ -415,7 +415,8 @@ class WorkspaceProviderPolicy(Base):
     require_zero_data_retention: Mapped[bool] = mapped_column(default=False, server_default=false())
     # The data locations a hosted provider region must declare to serve the
     # workspace, or None for any. An undeclared region never matches a list.
-    allowed_data_locations: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    # SQL NULL rather than JSON null when cleared, so the cache query filters it out.
+    allowed_data_locations: Mapped[list[str] | None] = mapped_column(JSON(none_as_null=True), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)

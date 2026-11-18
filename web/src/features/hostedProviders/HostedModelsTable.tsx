@@ -1,14 +1,19 @@
 import { FiEdit2, FiRotateCcw } from "react-icons/fi"
 
 import type { HostedModel, HostedProviderRegion } from "@/client"
-import { Button } from "@/design-system/actions/Button"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { Toggle } from "@/design-system/forms/Toggle"
 import { Badge } from "@/design-system/indicators/Badge"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { offeredPriceColumns } from "@/features/models/offeredPriceColumns"
-import { formatOfferingPrice } from "@/features/models/pricingUnit"
+import {
+  formatOfferingPrice,
+  pricingUnitOf,
+} from "@/features/models/pricingUnit"
+import { formatRate } from "@/shared/helpers/format"
+
+import { regionRatesOf } from "./modelPriceDraft"
 
 /**
  * Where a model's rate comes from. `provider` is the price the provider's own
@@ -31,10 +36,27 @@ function PriceSourceBadge({
   return <Badge tone="warn">Unpriced</Badge>
 }
 
+/** A price as the lines a narrow cell stacks: input over output for tokens, else its own unit. */
+function priceLines(
+  rates: {
+    input_price_per_million: number
+    output_price_per_million: number
+    unit?: string | null
+  } | null,
+): string[] {
+  if (rates === null) return ["Unpriced"]
+  if (pricingUnitOf(rates.unit) !== "token") return [formatOfferingPrice(rates)]
+  return [
+    formatRate(rates.input_price_per_million),
+    formatRate(rates.output_price_per_million),
+  ]
+}
+
 /**
- * One region's price of a model. A price the region sets of its own is shown
- * in the body ink; one it does not set is the provider's, which is what the
- * region charges, so it is shown muted. Pressing it opens that region's editor.
+ * One region's price of a model, input over output. A price the region sets
+ * of its own is in the body ink; one it does not set is the provider's, which
+ * is what the region charges, so it is muted and italic. The whole cell opens
+ * that region's editor.
  */
 function RegionPriceCell({
   row,
@@ -45,7 +67,7 @@ function RegionPriceCell({
   region: HostedProviderRegion
   onEdit: () => void
 }) {
-  const own = row.region_rates?.[region.slug]
+  const own = regionRatesOf(row, region.slug)
   const inherited =
     row.input_price_per_million == null || row.output_price_per_million == null
       ? null
@@ -54,19 +76,24 @@ function RegionPriceCell({
           output_price_per_million: row.output_price_per_million,
           unit: row.unit,
         }
+  const lines = priceLines(own ?? inherited)
   const price = formatOfferingPrice(own ?? inherited)
   return (
-    <Button
-      size="sm"
+    // A bare button rather than `Button`: the whole cell is the target, and a
+    // bordered button per region would neither fit nor let the ink say whose
+    // price it is.
+    <button
+      type="button"
       aria-label={`Edit ${row.model} price in ${region.label}: ${price}${own ? "" : ", the provider's price"}`}
-      onPress={onEdit}
+      title={
+        own ? undefined : "The provider's price, which this region charges"
+      }
+      onClick={onEdit}
+      className={`flex min-h-11 w-full cursor-pointer flex-col items-end justify-center px-1 text-right text-mono-caption whitespace-nowrap tabular-nums outline-none hover:bg-surface-alt focus-visible:otari-focus-ring ${own ? "font-medium text-foreground" : "text-subtle italic"}`}
     >
-      <span
-        className={`text-mono-caption tabular-nums ${own ? "font-medium text-foreground" : "text-muted"}`}
-      >
-        {price}
-      </span>
-    </Button>
+      <span>{lines[0]}</span>
+      {lines[1] ? <span>{lines[1]}</span> : null}
+    </button>
   )
 }
 
@@ -121,7 +148,13 @@ export function HostedModelsTable({
         </span>
       ),
     },
-    ...offeredPriceColumns<HostedModel>(),
+    // Beside region columns the provider's cache rates give way, so a row
+    // still fits a desktop width; the price editor carries them.
+    ...offeredPriceColumns<HostedModel>().filter(
+      (column) =>
+        regions.length === 0 ||
+        (column.id !== "cache_read" && column.id !== "cache_write"),
+    ),
     {
       id: "source",
       header: "Rate",
@@ -194,7 +227,9 @@ export function HostedModelsTable({
     },
   ]
   return (
-    <TableScrollFrame className="otari-offered-models-table">
+    <TableScrollFrame
+      className={`otari-offered-models-table${regions.length > 0 ? " otari-offered-models-table--regions" : ""}`}
+    >
       <DataTable
         ariaLabel={ariaLabel}
         mobileLayout="cards"

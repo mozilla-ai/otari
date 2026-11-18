@@ -36,6 +36,7 @@ import {
   type PriceKey,
   readDraft,
   regionPriceBody,
+  regionRatesOf,
   repriceBody,
 } from "./modelPriceDraft"
 
@@ -81,7 +82,7 @@ export function HostedModelForm({
   const setRegionPrice = useSetPricing()
   const clearRegionPrice = useDeletePricing()
   const regionRates =
-    region && editing ? editing.region_rates?.[region.slug] : undefined
+    region && editing ? regionRatesOf(editing, region.slug) : undefined
   const regionKey =
     region && editing ? `${provider.name}@${region.slug}:${editing.model}` : ""
   const [draft, setDraft] = useState<PriceDraft>(() =>
@@ -99,8 +100,11 @@ export function HostedModelForm({
   // This form sends rate columns, which the gateway stores per second on audio
   // input, so a model priced per second of video is not repriced here: the
   // save would move its price off the slot video billing reads.
+  // The unit of the price this editor opened on: the region's own where it
+  // sets one.
   const pricedPerSecond =
-    editing !== undefined && pricingUnitOf(editing.unit) === "second"
+    editing !== undefined &&
+    pricingUnitOf((regionRates ?? editing).unit) === "second"
   const canSubmit =
     !pricedPerSecond && canSubmitDraft(draft, editing !== undefined)
 
@@ -204,7 +208,9 @@ export function HostedModelForm({
       footerStart={
         regionRates ? (
           <Button
-            isDisabled={clearRegionPrice.isPending}
+            // Not while a save is in flight: a clear landing first would be
+            // undone by the save behind it.
+            isDisabled={setRegionPrice.isPending || clearRegionPrice.isPending}
             onPress={() =>
               clearRegionPrice.mutate(
                 { kind: "model", modelKey: regionKey },

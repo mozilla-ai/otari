@@ -269,7 +269,7 @@ export function AddHostedProviderForm({
         value={draft.supportedCountries}
         parsed={countries}
         onChange={(supportedCountries) =>
-          setDraft({ ...draft, supportedCountries })
+          setDraft((current) => ({ ...current, supportedCountries }))
         }
       />
       <PolicyUrlFields

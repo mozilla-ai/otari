@@ -13,7 +13,7 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Literal
 
-from gateway.core.config import GatewayConfig, split_region
+from gateway.core.config import REGION_SEPARATOR, GatewayConfig
 from gateway.core.settings.providers import HostedProviderEntry
 from gateway.models.providers import HostedProvider, HostedProviderRegion
 from gateway.repositories.providers import HostedProviderRegionRepository, HostedProviderRepository
@@ -224,21 +224,34 @@ class HostedSources:
     async def get(self, name: str) -> HostedSource | None:
         """One hosted provider by name, with the accepted aliases folded, or None.
 
-        A name pinning a region (``tokenhub@sg``) answers its provider, unless a
-        provider is stored under that whole name, which names made before
-        regions could be.
+        Exact: what the operator API changes is the provider of that whole name.
         """
         name = lookup_name(name)
         entries = self.entries()
         row = await self.providers.get_by_name(name)
-        if row is None and name not in entries and split_region(name)[1] is not None:
-            name = split_region(name)[0]
-            row = await self.providers.get_by_name(name)
         if row is not None:
             regions = await self.regions.list_for_provider(row.id)
             return HostedSource(row=row, shadows_config=name in entries, regions=tuple(regions))
         entry = entries.get(name)
         return None if entry is None else HostedSource(entry=entry)
+
+    async def get_serving(self, name: str) -> tuple[HostedSource, str | None] | None:
+        """The provider a request for ``name`` is served by, and the region ``name`` pins, or None.
+
+        A provider of that whole name wins, even one whose name holds the
+        separator. Otherwise ``tokenhub@sg`` is the region ``sg`` of
+        ``tokenhub``, and only a region the provider has.
+        """
+        source = await self.get(name)
+        if source is not None:
+            return source, None
+        base, separator, slug = name.rpartition(REGION_SEPARATOR)
+        if not separator or not slug:
+            return None
+        source = await self.get(base)
+        if source is None or source.region(slug) is None:
+            return None
+        return source, slug
 
 
 async def refuse_unsafe_configured_endpoints(config: GatewayConfig) -> None:

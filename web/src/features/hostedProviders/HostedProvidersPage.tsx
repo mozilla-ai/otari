@@ -47,7 +47,11 @@ import { useDeployment } from "@/shared/hooks/useDeployment"
 
 import { AddHostedProviderForm } from "./AddHostedProviderForm"
 import { DeploymentProviderMigration } from "./DeploymentProviderMigration"
-import { dataLocationLabel, providerDataLocations } from "./dataLocations"
+import {
+  dataLocationLabel,
+  providerDataLocations,
+  servingRegions,
+} from "./dataLocations"
 import {
   catalogPreviewOutcome,
   catalogRefreshFailures,
@@ -256,10 +260,11 @@ function ModelsSummaryCell({
 
 /**
  * How many regions a provider serves from, where it has several, and every
- * place it keeps data: a region's own location, else the provider's.
+ * place they keep data: a region's own location, else the provider's. A
+ * switched-off region serves nothing, so it counts toward neither.
  */
 function DataLocationBadges({ provider }: { provider: HostedProvider }) {
-  const regionCount = provider.regions?.length ?? 0
+  const regionCount = servingRegions(provider).length
   const locations = providerDataLocations(provider)
   return (
     <>

@@ -134,12 +134,20 @@ export function HostedProviderModelsPanel({
   const [editingId, setEditingId] = useState("")
   // The region whose price of the edited model is open, or empty for the provider's.
   const [editingRegionSlug, setEditingRegionSlug] = useState("")
-  // A column per region only where there is a choice of region to price.
+  // A column per region wherever the provider has one: a lone region left by a
+  // removal may still carry a price of its own.
   const regions = orderedRegions(provider)
-  const priceRegions = regions.length >= 2 ? regions : []
   const editingRegion = regions.find(
     (region) => region.slug === editingRegionSlug,
   )
+  // A region editor whose region was removed under it is closed, never turned
+  // into the provider's editor, whose save would reprice every region.
+  const isEditorTargetGone =
+    editingRegionSlug !== "" && editingRegion === undefined
+  if (isEditorTargetGone) {
+    setEditingRegionSlug("")
+    setEditingId("")
+  }
   // Counts the sync dialog's openings, so each opening asks for a fresh preview.
   const [syncOpening, setSyncOpening] = useState(0)
   const [isSyncOpen, setIsSyncOpen] = useState(false)
@@ -217,7 +225,7 @@ export function HostedProviderModelsPanel({
         clearOutcome()
         update.mutate({ modelId: row.id, body: { enabled } })
       }}
-      regions={priceRegions}
+      regions={regions}
       onEdit={(row) => {
         setIsAdding(false)
         setEditingRegionSlug("")
@@ -433,7 +441,7 @@ export function HostedProviderModelsPanel({
         onClose={() => setIsAdding(false)}
         onSaved={clearOutcome}
       />
-      {editing ? (
+      {editing && !isEditorTargetGone ? (
         // Remounted per row, so a second row's editor cannot open with the
         // first one's draft.
         <HostedModelForm

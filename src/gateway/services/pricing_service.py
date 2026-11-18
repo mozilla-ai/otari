@@ -10,7 +10,7 @@ from typing import NamedTuple
 from sqlalchemy import ColumnElement, case, distinct, func, inspect, not_, or_, select, true, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.config import API_ROOT, GatewayConfig, split_region
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.metered_pricing import priced_per_request
 from gateway.log_config import logger
 from gateway.models.pricing import (
@@ -99,16 +99,17 @@ def default_pricing_enabled() -> bool:
 _provider_type_resolver: Callable[[str], str | None] | None = None
 
 
-# Whether an instance name is one region of a hosted provider (``tokenhub@sg``),
-# whose price falls back to its provider's. Registered at startup, as above.
-_hosted_region: Callable[[str], bool] | None = None
+# The hosted provider an instance name is a region of (``tokenhub@sg`` ->
+# ``tokenhub``), whose price a region with none of its own settles at.
+# Registered at startup, as above.
+_region_parent: Callable[[str], str | None] | None = None
 
 
-def configure_hosted_regions(predicate: Callable[[str], bool] | None) -> None:
-    """Register the lookup that tells a hosted provider region's name from any other instance's."""
+def configure_region_parents(resolver: Callable[[str], str | None] | None) -> None:
+    """Register the lookup from a hosted provider region's name to its provider's."""
 
-    global _hosted_region
-    _hosted_region = predicate
+    global _region_parent
+    _region_parent = resolver
 
 
 def configure_provider_types(resolver: Callable[[str], str | None] | None) -> None:
@@ -463,9 +464,9 @@ def pricing_key_forms(model_key: str) -> list[str]:
     if not separator:
         return [model_key]
     forms = [model_key, f"{instance}/{model}"]
-    base, region = split_region(instance)
-    if region is not None and _hosted_region is not None and _hosted_region(instance):
-        forms += [f"{base}:{model}", f"{base}/{model}"]
+    parent = _region_parent(instance) if _region_parent is not None else None
+    if parent is not None:
+        forms += [f"{parent}:{model}", f"{parent}/{model}"]
     return forms
 
 

@@ -26,7 +26,6 @@ import uuid
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, replace
 
-from gateway.core.config import split_region
 from gateway.core.settings.inference import data_location_admitted
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.exceptions.providers_exceptions import (
@@ -45,7 +44,11 @@ from gateway.schemas.providers import (
     WorkspaceProviderPolicyPublic,
     WorkspaceProviderPolicyRequest,
 )
-from gateway.services.providers._hosted_name_index import hosted_data_locations, hosted_zero_data_retention
+from gateway.services.providers._hosted_name_index import (
+    hosted_data_locations,
+    hosted_region_parent,
+    hosted_zero_data_retention,
+)
 from gateway.services.tenancy.authorization import WorkspaceAccess
 
 WORKSPACE_HOSTED_ACCESS_CACHE_TTL_SECONDS = 30.0
@@ -85,14 +88,16 @@ def workspace_allowed_data_locations(workspace_id: uuid.UUID | None) -> frozense
 
 
 def narrow_to_workspace_locations(
-    credential: HostedCredential, workspace_id: uuid.UUID | None, provider: str
+    credential: HostedCredential, allowed: frozenset[str] | None, workspace_id: uuid.UUID | None, provider: str
 ) -> HostedCredential:
-    """``credential`` and its alternates kept to the regions whose data location the workspace accepts.
+    """``credential`` and its alternates kept to the regions whose data location is in ``allowed``.
+
+    ``allowed`` is the workspace's list as read before the credential was
+    resolved (:func:`workspace_allowed_data_locations`), None for any location.
 
     Raises:
         WorkspaceHostedAccessDeniedError: no region of the provider keeps data where the workspace accepts.
     """
-    allowed = workspace_allowed_data_locations(workspace_id)
     if allowed is None:
         return credential
     kept = [
@@ -124,8 +129,7 @@ def ensure_workspace_may_use_hosted(workspace_id: uuid.UUID | None, provider: st
     if workspace_id is None:
         return
     # A name pinning a region is ruled by its provider's row.
-    if provider not in _rules.get(workspace_id, {}):
-        provider = split_region(provider)[0]
+    provider = hosted_region_parent(provider) or provider
     if workspace_requires_zero_data_retention(workspace_id) and not hosted_zero_data_retention(provider):
         raise WorkspaceHostedAccessDeniedError(
             f"Hosted provider '{provider}' is not declared zero data retention, which this workspace requires",
@@ -206,9 +210,8 @@ async def refresh_workspace_hosted_access_cache(uow: UnitOfWork) -> None:
     number = _refresh_count
     async with uow:
         rows = await WorkspaceHostedAccessRepository(uow).list_all()
-        policies = WorkspaceProviderPolicyRepository(uow)
-        zero_retention = await policies.zero_data_retention_workspaces()
-        allowed_locations = await policies.allowed_data_locations()
+        # One read, so both requirements of a workspace come from the same version of its row.
+        zero_retention, allowed_locations = await WorkspaceProviderPolicyRepository(uow).requirements()
     if number < _applied_refresh:
         return
     rules: dict[uuid.UUID, dict[str, WorkspaceHostedRule]] = {}
@@ -370,16 +373,11 @@ class WorkspaceHostedAccessService:
         workspace = await self.access.resolve_visible_workspace(user=user, workspace_id=workspace_id)
         await self.access.require_workspace_management_access(user=user, workspace=workspace)
         async with self.uow:
-            current = await self.policies.get_for(workspace.id)
-            locations = (
-                request.allowed_data_locations
-                if "allowed_data_locations" in request.model_fields_set
-                else (current.allowed_data_locations if current is not None else None)
-            )
             policy = await self.policies.put(
                 workspace.id,
                 require_zero_data_retention=request.require_zero_data_retention,
-                allowed_data_locations=locations,
+                allowed_data_locations=request.allowed_data_locations,
+                set_locations="allowed_data_locations" in request.model_fields_set,
             )
         await self.refresh_cache()
         return WorkspaceProviderPolicyPublic(

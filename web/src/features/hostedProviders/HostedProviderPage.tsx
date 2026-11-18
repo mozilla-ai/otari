@@ -100,7 +100,15 @@ function ProviderSettings({ provider }: { provider: HostedProvider }) {
           <span className="text-muted">Every organization</span>
         )}
       </Setting>
-      <Setting label="Data hosted in">
+      {/* With regions, each one that declares no location of its own uses
+          this one, so it is a default rather than where data is. */}
+      <Setting
+        label={
+          (provider.regions?.length ?? 0) > 0
+            ? "Default data location"
+            : "Data hosted in"
+        }
+      >
         {provider.data_location ? (
           dataLocationLabel(provider.data_location)
         ) : (

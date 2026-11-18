@@ -16,6 +16,8 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.providers import HostedProviderRegion
 from gateway.repositories.base_repository import BaseRepository
 
+_SLUG_CONSTRAINT = "uq_hosted_provider_regions_provider_slug"
+
 
 class HostedRegionConflict(Exception):
     """The unique constraint refused a slug the provider already has a region under.
@@ -35,9 +37,21 @@ class HostedProviderRegionRepository(BaseRepository[HostedProviderRegion, Never,
     def __init__(self, uow: UnitOfWork):
         super().__init__(uow, HostedProviderRegion)
 
-    async def list_for_provider(self, provider_id: uuid.UUID) -> list[HostedProviderRegion]:
-        """One provider's regions, in the order they are tried."""
-        return (await self.list_for_providers([provider_id])).get(provider_id, [])
+    async def list_for_provider(self, provider_id: uuid.UUID, *, fresh: bool = False) -> list[HostedProviderRegion]:
+        """One provider's regions, in the order they are tried.
+
+        ``fresh`` overwrites what this session already holds of them, for a
+        caller that just locked the provider and must see what committed since.
+        """
+        statement = (
+            select(HostedProviderRegion)
+            .where(HostedProviderRegion.hosted_provider_id == provider_id)
+            .order_by(HostedProviderRegion.position, HostedProviderRegion.slug)
+        )
+        if fresh:
+            statement = statement.execution_options(populate_existing=True)
+        result = await self.db.execute(statement)
+        return list(result.scalars().all())
 
     async def list_for_providers(
         self, provider_ids: Collection[uuid.UUID]
@@ -108,6 +122,8 @@ class HostedProviderRegionRepository(BaseRepository[HostedProviderRegion, Never,
         try:
             await self.db.flush()
         except IntegrityError as exc:
+            if _SLUG_CONSTRAINT not in str(exc.orig):
+                raise
             raise HostedRegionConflict(row.slug) from exc
         await self.db.refresh(row)
         return row
@@ -118,6 +134,10 @@ class HostedProviderRegionRepository(BaseRepository[HostedProviderRegion, Never,
         await self.db.flush()
         await self.db.refresh(row)
         return row
+
+    async def flush(self) -> None:
+        """Write what the caller changed on rows this session holds, in one flush."""
+        await self.db.flush()
 
     async def delete_row(self, row: HostedProviderRegion) -> None:
         await self.db.delete(row)

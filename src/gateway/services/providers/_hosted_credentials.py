@@ -12,7 +12,7 @@ from urllib.parse import parse_qsl, urlsplit
 
 from any_llm import LLMProvider
 
-from gateway.core.config import PROVIDER_TYPE_ALIASES, hosted_provider_name_problem
+from gateway.core.config import PROVIDER_TYPE_ALIASES, REGION_SEPARATOR, hosted_provider_name_problem
 from gateway.exceptions.providers_exceptions import (
     HostedProviderApiBaseMaskedError,
     HostedProviderInvalidNameError,
@@ -148,6 +148,9 @@ def normalize_name(name: str | None, implementation: str) -> str:
     name = implementation if name is None else name
     if (problem := hosted_provider_name_problem(name, implementation)) is not None:
         raise HostedProviderInvalidNameError(name, problem)
+    if REGION_SEPARATOR in name:
+        # It would read as a region of another provider in a selector.
+        raise HostedProviderInvalidNameError(name, f"must not contain '{REGION_SEPARATOR}'")
     return name
 
 
@@ -230,6 +233,13 @@ def credential_of(row: HostedProvider, *, quiet: bool = False) -> ResolvedHosted
     )
 
 
+def _same_origin(api_base: str, other: str | None) -> bool:
+    try:
+        return origin_of(api_base) == origin_of(other)
+    except ValueError:
+        return False
+
+
 def region_credential_of(
     provider: ResolvedHostedProvider, region: HostedProviderRegion, *, quiet: bool = False
 ) -> ResolvedHostedProvider | None:
@@ -253,7 +263,16 @@ def region_credential_of(
                 provider.name,
             )
         return None
-    same_origin = region.api_base is None or origin_of(region.api_base) == origin_of(provider.api_base)
+    same_origin = region.api_base is None or _same_origin(region.api_base, provider.api_base)
+    if not same_origin and region.encrypted_api_key is None and provider.api_key is not None:
+        # The provider's key was entered for the provider's endpoint, not this one.
+        if not quiet:
+            logger.error(
+                "Region %r of hosted provider %r uses the provider's key on another endpoint; treating it as unserved.",
+                region.slug,
+                provider.name,
+            )
+        return None
     merged = (
         {**provider.client_args, **(client_args or {})}
         if same_origin and provider.client_args is not None

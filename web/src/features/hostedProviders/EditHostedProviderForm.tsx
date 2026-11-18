@@ -93,6 +93,9 @@ export function EditHostedProviderForm({
   const update = useUpdateHostedProvider()
   const test = useTestHostedProvider()
   const [draft, setDraft] = useState<EditDraft>(() => draftFrom(provider))
+  // What the dialog opened on, so a refresh that lands while it is open is not
+  // read as the operator's edit and written back over.
+  const [opened] = useState(() => draftFrom(provider))
 
   const spec = credentialSpecFor(provider.provider)
   const identity =
@@ -171,7 +174,7 @@ export function EditHostedProviderForm({
             : { zero_data_retention: draft.zeroDataRetention }),
           ...(countriesChanged ? { supported_countries: countries.value } : {}),
           // Sent only when changed; cleared is null, undeclared.
-          ...(draft.dataLocation === (provider.data_location ?? "")
+          ...(draft.dataLocation === opened.dataLocation
             ? {}
             : { data_location: draft.dataLocation || null }),
           // Sent only when changed; blank clears the link.
@@ -249,7 +252,7 @@ export function EditHostedProviderForm({
         value={draft.supportedCountries}
         parsed={countries}
         onChange={(supportedCountries) =>
-          setDraft({ ...draft, supportedCountries })
+          setDraft((current) => ({ ...current, supportedCountries }))
         }
       />
       <PolicyUrlFields

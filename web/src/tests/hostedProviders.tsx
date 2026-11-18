@@ -238,7 +238,7 @@ export function mockApi(
   } = {},
 ) {
   const granted = opts.granted ?? true
-  const providers = opts.providers ?? [hostedProvider()]
+  const providers = [...(opts.providers ?? [hostedProvider()])]
   const models = opts.models ?? [hostedModel()]
   const sweep = opts.sweep ?? EMPTY_SWEEP
   const previews = [...(opts.previews ?? [])]
@@ -397,6 +397,32 @@ export function mockApi(
         type_counts: typeCounts,
         vendors: vendorFacets(models, opts.vendorsOff ?? []),
       })
+    }
+    const regionWrite = url.match(
+      /\/hosted-providers\/([^/]+)\/regions\/([^/?]+)/,
+    )
+    if (regionWrite && method === "PATCH") {
+      // A move is applied and kept, as the server does, so the next read of
+      // the list shows the new order.
+      const [, name, slug] = regionWrite.map(decodeURIComponent)
+      const index = providers.findIndex((row) => row.name === name)
+      const regions = [...(providers[index]?.regions ?? [])].sort(
+        (a, b) => a.position - b.position,
+      )
+      const sent = body as { position?: number }
+      const from = regions.findIndex((region) => region.slug === slug)
+      if (index >= 0 && from >= 0 && sent.position !== undefined) {
+        const [moved] = regions.splice(from, 1)
+        regions.splice(sent.position, 0, moved)
+        providers[index] = {
+          ...providers[index],
+          regions: regions.map((region, position) => ({
+            ...region,
+            position,
+          })),
+        }
+      }
+      return jsonResponse(providers[index] ?? {})
     }
     if (url.includes(hosted)) {
       if (method === "GET") {

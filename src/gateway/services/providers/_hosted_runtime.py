@@ -5,7 +5,7 @@ from typing import Any
 
 from any_llm import LLMProvider
 
-from gateway.core.config import GatewayConfig, split_region
+from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.ports.model_provider_port import NO_ORGANIZATION, HostedCredential, HostedModels, ModelProviderPort
 from gateway.repositories.providers import HostedProviderModelRepository, HostedProviderVendorRepository
@@ -16,12 +16,13 @@ from gateway.services.provider_kwargs import (
     missing_declared_credential,
 )
 from gateway.services.providers._country_gate import CountryGate, ensure_hosted_country
-from gateway.services.providers._hosted_credentials import ResolvedHostedProvider, lookup_name
+from gateway.services.providers._hosted_credentials import ResolvedHostedProvider
 from gateway.services.providers._hosted_sources import HostedSources
 from gateway.services.providers._hosted_vendors import vendor_of
 from gateway.services.providers._workspace_hosted_access import (
     ensure_workspace_may_use_hosted,
     narrow_to_workspace_locations,
+    workspace_allowed_data_locations,
 )
 
 
@@ -57,14 +58,16 @@ async def hosted_credential_for(
     Raises:
         HostedAccessDeniedError: the workspace or the organization may not use the upstream.
     """
+    # Read before the port is awaited, so the rule and the locations come from one cache snapshot.
     ensure_workspace_may_use_hosted(workspace_id, provider, model)
+    allowed = workspace_allowed_data_locations(workspace_id)
     credential = await port.resolve_hosted_credential(
         organization_id=organization_to_serve(organization_id),
         workspace_id=workspace_id,
         provider=provider,
         model=model,
     )
-    return None if credential is None else narrow_to_workspace_locations(credential, workspace_id, provider)
+    return None if credential is None else narrow_to_workspace_locations(credential, allowed, workspace_id, provider)
 
 
 class UnknownHostedUpstreamError(ValueError):
@@ -204,8 +207,11 @@ class HostedProviderRuntime:
         vendor the provider has switched off is refused whatever its own row says.
         """
         async with self.uow:
-            source = await self.sources.get(name)
-            if source is None or not source.enabled or source.withheld_from(organization_id):
+            found = await self.sources.get_serving(name)
+            if found is None:
+                return []
+            source, pinned = found
+            if not source.enabled or source.withheld_from(organization_id):
                 return []
             if model is not None:
                 offered = await self.models.get_by_model(source.name, model)
@@ -216,5 +222,4 @@ class HostedProviderRuntime:
                 disabled = await self.vendors.disabled_for(source.name)
                 if disabled and vendor_of(source.implementation, model) in disabled:
                     return []
-            pinned = None if source.name == lookup_name(name) else split_region(name)[1]
             return source.region_credentials(slug=pinned)

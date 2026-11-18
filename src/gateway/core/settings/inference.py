@@ -45,7 +45,8 @@ def data_location(value: object) -> str:
     code = str(value).strip().upper()
     if code in DATA_LOCATION_ZONES or code in COUNTRY_CODES:
         return code
-    msg = f"{value!r} is not a data location: give an ISO 3166-1 alpha-2 country code, EU or GLOBAL"
+    # The value is left out: it may be anything pasted into the field, a credential included.
+    msg = "not a data location: give an ISO 3166-1 alpha-2 country code, EU or GLOBAL"
     raise ValueError(msg)
 
 

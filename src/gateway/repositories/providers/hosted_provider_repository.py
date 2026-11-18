@@ -131,6 +131,13 @@ class HostedProviderRepository(BaseRepository[HostedProvider, Never, Never]):
         await self.db.refresh(row)
         return row
 
+    async def lock(self, row_id: uuid.UUID) -> None:
+        """Lock one provider's row until the transaction ends, so changes to its regions run one at a time.
+
+        A no-op on SQLite, which has no row locks and serializes writers anyway.
+        """
+        await self.db.execute(select(HostedProvider.id).where(HostedProvider.id == row_id).with_for_update())
+
     async def save(self, row: HostedProvider) -> HostedProvider:
         """Flush a changed row and read back what the database filled in."""
         self.db.add(row)

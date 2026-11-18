@@ -33,7 +33,13 @@ export function SupportedCountriesField({
 
   const load = async (file: File) => {
     const loaded = countriesFromJson(await file.text())
-    if (loaded.ok) {
+    if (loaded.ok && loaded.value.length === 0) {
+      // Blank means "no list" here, while an empty list admits no country,
+      // so a file of none is refused rather than read as no restriction.
+      setFileError(
+        "The file lists no country. To refuse every country, set an empty list through the API.",
+      )
+    } else if (loaded.ok) {
       setFileError(null)
       onChange(formatCountries(loaded.value))
     } else {

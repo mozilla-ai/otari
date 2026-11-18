@@ -18,7 +18,17 @@ const LOCATION_OPTIONS = DATA_LOCATION_OPTIONS.map((option) => ({
 const SCOPE_OPTIONS = [
   { value: "any", label: "Any location" },
   { value: "only", label: "Only these locations" },
+  {
+    value: "none",
+    label: "No location",
+    description: "No hosted provider serves this workspace.",
+  },
 ] as const
+
+type Scope = (typeof SCOPE_OPTIONS)[number]["value"]
+
+const scopeOf = (allowed: readonly string[] | null): Scope =>
+  allowed === null ? "any" : allowed.length === 0 ? "none" : "only"
 
 /** What a workspace's list reads as in a sentence: "Any location", or the names. */
 export function describeAllowedDataLocations(
@@ -50,11 +60,16 @@ export function AllowedDataLocationsDialog({
   error: unknown
 }) {
   const [draft, setDraft] = useState(() => ({
-    scope: allowed === null ? "any" : "only",
+    scope: scopeOf(allowed),
     locations: [...(allowed ?? [])],
   }))
   const { isDirty } = useDirtySnapshot(draft)
-  const canSubmit = draft.scope === "any" || draft.locations.length > 0
+  const canSubmit = draft.scope !== "only" || draft.locations.length > 0
+  // Held while the save is in flight: an edit made then would be dropped when
+  // the save that does not carry it closes the dialog.
+  const edit = (next: typeof draft) => {
+    if (!isPending) setDraft(next)
+  }
 
   return (
     <FormDialog
@@ -67,7 +82,13 @@ export function AllowedDataLocationsDialog({
       submitLabel="Save"
       onSubmit={() => {
         if (!canSubmit) return
-        onSave(draft.scope === "any" ? null : draft.locations)
+        onSave(
+          draft.scope === "any"
+            ? null
+            : draft.scope === "none"
+              ? []
+              : draft.locations,
+        )
       }}
       isPending={isPending}
       isSubmitDisabled={!canSubmit}
@@ -77,8 +98,16 @@ export function AllowedDataLocationsDialog({
       <RadioGroup
         label="Data may be kept in"
         value={draft.scope}
-        onChange={(scope) => setDraft({ ...draft, scope })}
+        onChange={(value) =>
+          edit({
+            ...draft,
+            scope:
+              SCOPE_OPTIONS.find((option) => option.value === value)?.value ??
+              "any",
+          })
+        }
         options={SCOPE_OPTIONS}
+        isDisabled={isPending}
       />
       {draft.scope === "only" ? (
         <MultiSelect
@@ -86,7 +115,7 @@ export function AllowedDataLocationsDialog({
           description="European Union admits each member state. Global matches a region declared global, not every region."
           options={LOCATION_OPTIONS}
           value={draft.locations}
-          onChange={(locations) => setDraft({ ...draft, locations })}
+          onChange={(locations) => edit({ ...draft, locations })}
           searchPlaceholder="Search countries…"
           countNoun={{ one: "location", other: "locations" }}
           isInvalid={draft.locations.length === 0}

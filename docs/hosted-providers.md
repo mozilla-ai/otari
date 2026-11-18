@@ -81,9 +81,11 @@ which says where requests may come *from*. A workspace can list the data
 locations it accepts (**Allowed data locations** on its Providers tab, or
 `allowed_data_locations` on `/api/v1/workspaces/{workspace_id}/provider-policy`):
 
-- A region is used only when its location is on the list. `EU` admits each EU
-  member state as well as `EU` itself; `GLOBAL` admits only `GLOBAL`.
-- A region that declares no location never matches a list.
+- A region is used only when its location is on the list: its own, or its
+  provider's where it declares none. `EU` admits each EU member state as well
+  as `EU` itself; `GLOBAL` admits only `GLOBAL`.
+- A region whose location is unknown, neither declared nor inherited, never
+  matches a list.
 - A hosted provider with no region left is refused with `403` and left out of
   the workspace's model lists.
 - Leaving the list unset accepts every location.
@@ -115,9 +117,10 @@ own.
 A provider that serves from more than one region, often with a key and an
 endpoint for each, is one hosted provider with several **regions** rather than
 one hosted provider per region. A region gives only what differs from its
-provider: its own endpoint, key, SDK `client_args` (merged over the
-provider's, so a Bedrock region names its `region_name` alone), supported
-countries and data location. Everything else stays the provider's: the name,
+provider: its own endpoint, key, SDK `client_args`, supported countries and
+data location. On the provider's own origin, its `client_args` are merged over
+the provider's, so a Bedrock region names its `region_name` alone; a region on
+another origin takes none of the provider's and gives every one it needs. Everything else stays the provider's: the name,
 the roster and its switches, workspace access, zero data retention, and the
 policy links.
 
@@ -129,13 +132,19 @@ served changes.
 - `tokenhub:model` is served by the first enabled region, in order, whose
   supported countries admit the request and whose data location the
   workspace accepts. There is no failover between regions: an upstream error
-  is returned as it is.
+  is returned as any other upstream error is, without trying another region.
 - `tokenhub@sg:model` pins the region `sg` and is served by it alone.
 - Usage records the region that served a request (`tokenhub@sg`), and its
   price is the region's own where one is set under `tokenhub@sg:model`, and
   the provider's `tokenhub:model` price otherwise.
 - A region that points the provider's key at another endpoint is refused; give
-  it its own key, as repointing a provider's endpoint requires.
+  it its own key, as repointing a provider's endpoint requires. A region that
+  holds a key needs an `https` endpoint (or `http` on this machine), and
+  moving its endpoint to another origin needs its key again. Moving the
+  provider's endpoint is refused while a region would be sent a key for an
+  endpoint it was not entered for.
+- A stored provider may not be named with `@`, which would read as a region; one
+  configured in `config.yml` under such a name keeps working under it.
 - Removing every region returns the provider to its own connection.
 
 Regions are managed on the provider's page or through

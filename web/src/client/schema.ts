@@ -14707,7 +14707,7 @@ export interface components {
          *     own listing) would price a model an operator priced, where it prices it
          *     and the two differ; None otherwise. ``region_rates`` holds, by region slug,
          *     the rates a region of the provider sets of its own (stored under
-         *     ``<provider>@<slug>:<model>`` through ``POST /api/v1/pricing``); a region
+         *     ``<provider>@<slug>:<model>`` through the pricing endpoint); a region
          *     absent from it settles at the provider's rate.
          */
         HostedModelPublic: {
@@ -15094,11 +15094,16 @@ export interface components {
          *     Only what differs from the provider is given; every field left out is the
          *     provider's. ``slug`` pins the region in a selector
          *     (``<provider>@<slug>:<model>``) and names it in every route. ``api_key``
-         *     left out uses the provider's key; ``client_args`` are merged over the
-         *     provider's, so a Bedrock region gives its ``region_name`` alone.
+         *     left out uses the provider's key, which a region on another origin than
+         *     the provider's endpoint may not: it needs a key of its own there.
+         *     ``client_args`` are merged over the provider's on the provider's origin, so
+         *     a Bedrock region gives its ``region_name`` alone; a region on another
+         *     origin takes its own alone. An ``api_base`` that carries a key must be https.
          *     ``data_location`` declares where the region keeps request data.
          *
-         *     A provider with no regions yet serves from its own connection. Adding its
+         *     A request is served by the first enabled region whose countries admit it
+         *     and whose data location the workspace accepts; a pinned region is held to
+         *     the same filters. A provider with no regions yet serves from its own connection. Adding its
          *     first region keeps that connection as a region of its own, ahead of the new
          *     one, under ``primary_slug`` and ``primary_label``: by default the
          *     provider's data location, or ``primary``.
@@ -15188,10 +15193,14 @@ export interface components {
         };
         /**
          * HostedProviderRegionUpdateRequest
-         * @description Change one region. A field left out is left alone; null puts it back on the provider's value.
+         * @description Change one region. A field left out is left alone.
          *
-         *     ``api_key`` null returns the region to the provider's key, and an empty
-         *     ``api_base`` or null to the provider's endpoint. ``client_args`` echoed
+         *     Null puts a field the region inherits back on the provider's value:
+         *     ``api_key`` null returns the region to the provider's key, an empty
+         *     ``api_base`` or null to the provider's endpoint, and so on for
+         *     ``client_args``, ``data_location`` and ``supported_countries``. Null on
+         *     ``label``, ``enabled`` or ``position``, which nothing inherits, changes
+         *     nothing. ``client_args`` echoed
          *     back with masked entries keeps the stored values. ``position`` moves the
          *     region to that place in the order regions are tried, counted from 0.
          * @example {
@@ -24682,9 +24691,9 @@ export interface components {
             allowed_data_locations?: string[] | null;
             /**
              * Require Zero Data Retention
-             * @description Refuse every provider not declared zero data retention: an organization key or a hosted provider nobody declared, and every provider configured in config.yml or endpoint the workspace owns.
+             * @description Refuse every provider not declared zero data retention: an organization key or a hosted provider nobody declared, and every provider configured in config.yml or endpoint the workspace owns. Omitted keeps the stored setting.
              */
-            require_zero_data_retention: boolean;
+            require_zero_data_retention?: boolean | null;
         };
         /** WorkspacePublic */
         WorkspacePublic: {

@@ -180,11 +180,12 @@ def test_a_region_switched_off_is_skipped_and_cannot_be_pinned(client: TestClien
     _ok(client.patch(f"{_PROVIDER}/regions/us", json={"enabled": False}, headers=HEADERS))
 
     unpinned, sent = _chat(client, "tokenhub:gpt-4o")
-    pinned, _ = _chat(client, "tokenhub@us:gpt-4o")
+    pinned, pinned_sent = _chat(client, "tokenhub@us:gpt-4o")
 
     assert unpinned.status_code == 200, unpinned.text
     assert sent["api_key"] == "sk-sg"
-    assert pinned.status_code >= 400
+    assert pinned.status_code == 424, pinned.text
+    assert not pinned_sent, "a region switched off is never called"
 
 
 def test_moving_a_region_changes_which_one_serves_first(client: TestClient) -> None:
@@ -276,3 +277,31 @@ def test_a_region_on_another_endpoint_does_not_take_the_provider_extras(client: 
 
     assert sent_us["client_args"] == {"default_headers": {"X-Team": "a"}}
     assert sent_sg["client_args"] == {"timeout": 5}
+
+
+def test_a_stored_provider_may_not_take_a_name_that_reads_as_a_region(client: TestClient) -> None:
+    created = client.post(
+        f"{API_ROOT}/hosted-providers",
+        json={"provider": "openai", "name": "tokenhub@jp", "api_key": "sk-jp"},
+        headers=HEADERS,
+    )
+
+    assert created.status_code == 400, "a stored provider is refused the separator"
+
+
+def test_a_region_endpoint_moved_without_its_key_is_refused(client: TestClient) -> None:
+    _ok(_add_singapore(client))
+
+    moved = client.patch(f"{_PROVIDER}/regions/sg", json={"api_base": "https://elsewhere.example/v1"}, headers=HEADERS)
+    same_origin = client.patch(
+        f"{_PROVIDER}/regions/sg", json={"api_base": "https://sg.tokenhub.example/v2"}, headers=HEADERS
+    )
+
+    assert moved.status_code == 400, moved.text
+    assert same_origin.status_code == 200, same_origin.text
+
+
+def test_a_region_endpoint_carrying_a_key_must_be_https(client: TestClient) -> None:
+    response = _add_singapore(client, api_base="http://sg.tokenhub.example/v1")
+
+    assert response.status_code == 400, response.text

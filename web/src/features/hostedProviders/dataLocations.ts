@@ -8,7 +8,10 @@ import type { HostedProvider, HostedProviderRegion } from "@/client"
 export const GLOBAL = "GLOBAL"
 export const EU = "EU"
 
-/** Every ISO 3166-1 alpha-2 code: the countries a data location may name. */
+/**
+ * Every ISO 3166-1 alpha-2 code, and Kosovo's user-assigned `XK`, which the
+ * gateway accepts too: the countries a data location may name.
+ */
 const COUNTRY_CODES = (
   "AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ " +
   "BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR " +
@@ -19,7 +22,7 @@ const COUNTRY_CODES = (
   "MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF " +
   "PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI " +
   "SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR " +
-  "TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW"
+  "TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS XK YE YT ZA ZM ZW"
 ).split(" ")
 
 const regionNames = new Intl.DisplayNames("en-US", {
@@ -57,15 +60,29 @@ export const DATA_LOCATION_OPTIONS: readonly DataLocationOption[] = [
   })).sort((a, b) => a.label.localeCompare(b.label)),
 ]
 
-/** The options whose name or code contains `query`, ignoring case. */
-export function matchDataLocations(query: string): DataLocationOption[] {
+/**
+ * The options whose name or code contains `query`, ignoring case, capped at
+ * `limit`. With no query, `selected` is kept in the list even past the cap, so
+ * a picked country far down the alphabet still shows by name.
+ */
+export function matchDataLocations(
+  query: string,
+  limit: number = Number.POSITIVE_INFINITY,
+  selected = "",
+): DataLocationOption[] {
   const term = query.trim().toLowerCase()
-  if (term === "") return [...DATA_LOCATION_OPTIONS]
+  if (term === "") {
+    const shown = DATA_LOCATION_OPTIONS.slice(0, limit)
+    const picked = DATA_LOCATION_OPTIONS.find(
+      (option) => option.value === selected,
+    )
+    return picked && !shown.includes(picked) ? [picked, ...shown] : shown
+  }
   return DATA_LOCATION_OPTIONS.filter(
     (option) =>
       option.label.toLowerCase().includes(term) ||
       option.value.toLowerCase() === term,
-  )
+  ).slice(0, limit)
 }
 
 /** Where a region keeps data: its own declaration, else the provider's; "" when neither declared one. */
@@ -83,17 +100,25 @@ export function orderedRegions(
   return [...(provider.regions ?? [])].sort((a, b) => a.position - b.position)
 }
 
+/** The regions requests can reach: the enabled ones, in order. */
+export function servingRegions(
+  provider: Pick<HostedProvider, "regions">,
+): HostedProviderRegion[] {
+  return orderedRegions(provider).filter((region) => region.enabled)
+}
+
 /**
- * Every distinct place a provider keeps data, in region order: its regions'
- * effective locations, or its own when it serves from one connection. Nothing
+ * Every distinct place a provider serves from, in region order: its serving
+ * regions' effective locations, or its own when it has no regions. Nothing
  * for a provider nobody declared a location for.
  */
 export function providerDataLocations(provider: HostedProvider): string[] {
-  const regions = orderedRegions(provider)
   const locations =
-    regions.length === 0
+    (provider.regions ?? []).length === 0
       ? [provider.data_location ?? ""]
-      : regions.map((region) => effectiveDataLocation(region, provider))
+      : servingRegions(provider).map((region) =>
+          effectiveDataLocation(region, provider),
+        )
   return [...new Set(locations.filter(Boolean))]
 }
 

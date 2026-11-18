@@ -275,10 +275,13 @@ answers the port with its first enabled region and the rest as the
 credential's `alternates`. The gateway side narrows them, in order, to the
 workspace's data locations (`narrow_to_workspace_locations` in
 `hosted_credential_for`) and then to the request's country
-(`ensure_hosted_country`), so an overlay adapter that returns no alternates
-keeps its behavior. A region is addressed as `<name>@<slug>`: it is a name in
-the hosted name index, the instance a request settles under, and a pricing key
-that falls back to its provider's (`pricing_key_forms`).
+(`ensure_hosted_country`). An overlay adapter that returns no alternates keeps
+its behavior while the workspace lists no data locations; for a workspace that
+does, its credential must declare a `data_location` on the list or it is
+refused. A region is addressed as `<name>@<slug>`, resolved from the region
+rows and never by splitting a name (`get_serving`, `HostedRegionIndex`), since
+a provider named before regions may hold `@`: it is the instance a request
+settles under, and a pricing key that falls back to its provider's.
 
 A provider's own SDK variable (`OPENAI_API_KEY`) is never a credential: a key
 reaches a call only from the kwargs `get_provider_kwargs` builds (an entry's

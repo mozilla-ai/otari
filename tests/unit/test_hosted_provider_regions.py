@@ -6,12 +6,14 @@ from dataclasses import replace
 
 import pytest
 
-from gateway.core.config import hosted_provider_name_problem, region_instance, region_slug_problem, split_region
+from gateway.core.config import hosted_provider_name_problem, region_instance, region_slug_problem
 from gateway.core.settings.inference import data_location, data_location_admitted, data_locations
+from gateway.exceptions.providers_exceptions import HostedProviderInvalidNameError
 from gateway.ports.model_provider_port import HostedCredential
-from gateway.services.pricing_service import configure_hosted_regions, pricing_key_forms
+from gateway.services.pricing_service import configure_region_parents, pricing_key_forms
 from gateway.services.providers import CountryGate, CountryNotServedError, ensure_hosted_country
-from gateway.services.providers import _workspace_hosted_access as access
+from gateway.services.providers import _hosted_name_index as index
+from gateway.services.providers._hosted_credentials import normalize_name
 from gateway.services.providers._workspace_hosted_access import (
     WorkspaceHostedAccessDeniedError,
     narrow_to_workspace_locations,
@@ -76,15 +78,14 @@ def test_a_region_slug_a_selector_could_not_pin(slug: str) -> None:
     assert region_slug_problem(slug) is not None
 
 
-def test_a_provider_name_may_not_hold_the_region_separator() -> None:
-    assert hosted_provider_name_problem("token@hub", "openai") is not None
+def test_a_configured_name_holding_the_region_separator_still_loads() -> None:
+    """Configured before regions existed, it keeps loading; a stored provider is refused it at create."""
+    assert hosted_provider_name_problem("token@hub", "openai") is None
 
 
-@pytest.mark.parametrize(
-    ("name", "split"), [("tokenhub@sg", ("tokenhub", "sg")), ("tokenhub", ("tokenhub", None)), ("x@", ("x@", None))]
-)
-def test_a_name_splits_into_its_provider_and_the_region_it_pins(name: str, split: tuple[str, str | None]) -> None:
-    assert split_region(name) == split
+def test_a_stored_provider_name_may_not_hold_the_region_separator() -> None:
+    with pytest.raises(HostedProviderInvalidNameError):
+        normalize_name("token@hub", "openai")
 
 
 def test_a_region_instance_joins_the_name_and_the_slug() -> None:
@@ -93,9 +94,9 @@ def test_a_region_instance_joins_the_name_and_the_slug() -> None:
 
 @pytest.fixture
 def _hosted_regions() -> Iterator[None]:
-    configure_hosted_regions(lambda name: name == "tokenhub@sg")
+    configure_region_parents({"tokenhub@sg": "tokenhub", "edge@eu@west": "edge@eu"}.get)
     yield
-    configure_hosted_regions(None)
+    configure_region_parents(None)
 
 
 @pytest.mark.usefixtures("_hosted_regions")
@@ -107,6 +108,11 @@ def test_a_region_price_key_falls_back_to_its_provider() -> None:
         "tokenhub/gpt-4o",
     ]
     assert pricing_key_forms("tokenhub:gpt-4o") == ["tokenhub:gpt-4o", "tokenhub/gpt-4o"]
+
+
+@pytest.mark.usefixtures("_hosted_regions")
+def test_a_region_of_a_provider_whose_name_holds_the_separator_falls_back_to_that_provider() -> None:
+    assert pricing_key_forms("edge@eu@west:m")[2:] == ["edge@eu:m", "edge@eu/m"]
 
 
 @pytest.mark.usefixtures("_hosted_regions")
@@ -131,16 +137,14 @@ def test_a_request_no_region_admits_is_refused() -> None:
 
 
 @pytest.fixture
-def _workspace(monkeypatch: pytest.MonkeyPatch) -> uuid.UUID:
-    workspace_id = uuid.uuid4()
-    monkeypatch.setattr(access, "_allowed_locations", {workspace_id: frozenset({"EU"})})
-    return workspace_id
+def _workspace() -> uuid.UUID:
+    return uuid.uuid4()
 
 
 def test_a_workspace_keeps_the_regions_holding_data_where_it_allows(_workspace: uuid.UUID) -> None:
     provider = _provider(_region("us", location="US"), _region("de", location="DE"), _region("fr", location="FR"))
 
-    narrowed = narrow_to_workspace_locations(provider, _workspace, "tokenhub")
+    narrowed = narrow_to_workspace_locations(provider, frozenset({"EU"}), _workspace, "tokenhub")
 
     assert [candidate.response_provider for candidate in narrowed.candidates()] == ["de", "fr"]
 
@@ -149,10 +153,21 @@ def test_a_workspace_with_no_region_where_it_allows_is_refused(_workspace: uuid.
     provider = _provider(_region("us", location="US"), _region("undeclared"))
 
     with pytest.raises(WorkspaceHostedAccessDeniedError, match="keeps data where this workspace allows"):
-        narrow_to_workspace_locations(provider, _workspace, "tokenhub")
+        narrow_to_workspace_locations(provider, frozenset({"EU"}), _workspace, "tokenhub")
 
 
 def test_a_workspace_listing_no_locations_keeps_every_region() -> None:
     provider = _provider(_region("us", location="US"), _region("undeclared"))
 
-    assert narrow_to_workspace_locations(provider, uuid.uuid4(), "tokenhub") is provider
+    assert narrow_to_workspace_locations(provider, None, uuid.uuid4(), "tokenhub") is provider
+
+
+def test_a_region_name_is_known_by_its_provider_and_a_provider_name_never_is(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A provider named before regions with the separator in it stays a provider of its own."""
+    monkeypatch.setattr(index, "_region_parents", {"tokenhub@sg": "tokenhub"})
+    monkeypatch.setattr(index, "_providers", frozenset({"tokenhub", "team", "team@eu"}))
+
+    assert index.hosted_region_parent("tokenhub@sg") == "tokenhub"
+    assert index.hosted_region_parent("tokenhub@jp") == "tokenhub", "a region another worker just added"
+    assert index.hosted_region_parent("team@eu") is None
+    assert index.hosted_region_parent("nobody@eu") is None

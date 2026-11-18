@@ -11280,7 +11280,7 @@
         "type": "object"
       },
       "HostedModelPublic": {
-        "description": "One offered model, with the price the deployment currently serves it at.\n\n``price_source`` says which rung of the deployment's ladder answered:\n``deployment`` for a rate an operator set, ``provider`` for the rate the\nprovider's own listing named, ``defaults`` for the community-maintained\nrate, whether this surface stored it or the fallback supplies it, and None\nwhen nothing prices the model yet. ``unit`` says what\nthe rates are per, so a per-request rate is not read as a per-token one.\n``enabled`` is the serving switch; a model offered without a discoverable\nprice starts off. ``disabled_reason`` says why a model is off: ``unpriced``\nwhile it waits for a rate, ``operator`` when an operator switched it off,\n``unavailable`` when its provider refused to serve it. ``type`` is the\nkind of model, from models.dev, and None when it does not know.\n``vendor`` is who makes the model, ``Other`` when nothing names one.\n``default_rates`` is what the default rung (models.dev, or the provider's\nown listing) would price a model an operator priced, where it prices it\nand the two differ; None otherwise. ``region_rates`` holds, by region slug,\nthe rates a region of the provider sets of its own (stored under\n``<provider>@<slug>:<model>`` through ``POST /api/v1/pricing``); a region\nabsent from it settles at the provider's rate.",
+        "description": "One offered model, with the price the deployment currently serves it at.\n\n``price_source`` says which rung of the deployment's ladder answered:\n``deployment`` for a rate an operator set, ``provider`` for the rate the\nprovider's own listing named, ``defaults`` for the community-maintained\nrate, whether this surface stored it or the fallback supplies it, and None\nwhen nothing prices the model yet. ``unit`` says what\nthe rates are per, so a per-request rate is not read as a per-token one.\n``enabled`` is the serving switch; a model offered without a discoverable\nprice starts off. ``disabled_reason`` says why a model is off: ``unpriced``\nwhile it waits for a rate, ``operator`` when an operator switched it off,\n``unavailable`` when its provider refused to serve it. ``type`` is the\nkind of model, from models.dev, and None when it does not know.\n``vendor`` is who makes the model, ``Other`` when nothing names one.\n``default_rates`` is what the default rung (models.dev, or the provider's\nown listing) would price a model an operator priced, where it prices it\nand the two differ; None otherwise. ``region_rates`` holds, by region slug,\nthe rates a region of the provider sets of its own (stored under\n``<provider>@<slug>:<model>`` through the pricing endpoint); a region\nabsent from it settles at the provider's rate.",
         "properties": {
           "cache_read_price_per_million": {
             "anyOf": [
@@ -12183,7 +12183,7 @@
         "type": "object"
       },
       "HostedProviderRegionCreateRequest": {
-        "description": "Add a region a hosted provider serves from.\n\nOnly what differs from the provider is given; every field left out is the\nprovider's. ``slug`` pins the region in a selector\n(``<provider>@<slug>:<model>``) and names it in every route. ``api_key``\nleft out uses the provider's key; ``client_args`` are merged over the\nprovider's, so a Bedrock region gives its ``region_name`` alone.\n``data_location`` declares where the region keeps request data.\n\nA provider with no regions yet serves from its own connection. Adding its\nfirst region keeps that connection as a region of its own, ahead of the new\none, under ``primary_slug`` and ``primary_label``: by default the\nprovider's data location, or ``primary``.",
+        "description": "Add a region a hosted provider serves from.\n\nOnly what differs from the provider is given; every field left out is the\nprovider's. ``slug`` pins the region in a selector\n(``<provider>@<slug>:<model>``) and names it in every route. ``api_key``\nleft out uses the provider's key, which a region on another origin than\nthe provider's endpoint may not: it needs a key of its own there.\n``client_args`` are merged over the provider's on the provider's origin, so\na Bedrock region gives its ``region_name`` alone; a region on another\norigin takes its own alone. An ``api_base`` that carries a key must be https.\n``data_location`` declares where the region keeps request data.\n\nA request is served by the first enabled region whose countries admit it\nand whose data location the workspace accepts; a pinned region is held to\nthe same filters. A provider with no regions yet serves from its own connection. Adding its\nfirst region keeps that connection as a region of its own, ahead of the new\none, under ``primary_slug`` and ``primary_label``: by default the\nprovider's data location, or ``primary``.",
         "example": {
           "api_base": "https://tokenhub-intl.example.com/v1",
           "api_key": "<the region's key>",
@@ -12435,7 +12435,7 @@
         "type": "object"
       },
       "HostedProviderRegionUpdateRequest": {
-        "description": "Change one region. A field left out is left alone; null puts it back on the provider's value.\n\n``api_key`` null returns the region to the provider's key, and an empty\n``api_base`` or null to the provider's endpoint. ``client_args`` echoed\nback with masked entries keeps the stored values. ``position`` moves the\nregion to that place in the order regions are tried, counted from 0.",
+        "description": "Change one region. A field left out is left alone.\n\nNull puts a field the region inherits back on the provider's value:\n``api_key`` null returns the region to the provider's key, an empty\n``api_base`` or null to the provider's endpoint, and so on for\n``client_args``, ``data_location`` and ``supported_countries``. Null on\n``label``, ``enabled`` or ``position``, which nothing inherits, changes\nnothing. ``client_args`` echoed\nback with masked entries keeps the stored values. ``position`` moves the\nregion to that place in the order regions are tried, counted from 0.",
         "example": {
           "enabled": false
         },
@@ -33385,14 +33385,18 @@
             "title": "Allowed Data Locations"
           },
           "require_zero_data_retention": {
-            "description": "Refuse every provider not declared zero data retention: an organization key or a hosted provider nobody declared, and every provider configured in config.yml or endpoint the workspace owns.",
-            "title": "Require Zero Data Retention",
-            "type": "boolean"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Refuse every provider not declared zero data retention: an organization key or a hosted provider nobody declared, and every provider configured in config.yml or endpoint the workspace owns. Omitted keeps the stored setting.",
+            "title": "Require Zero Data Retention"
           }
         },
-        "required": [
-          "require_zero_data_retention"
-        ],
         "title": "WorkspaceProviderPolicyRequest",
         "type": "object"
       },

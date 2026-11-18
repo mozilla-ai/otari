@@ -15,6 +15,7 @@
 import type {
   CreateHostedModelRequest,
   HostedModel,
+  HostedModelRates,
   SetPricingRequest,
   UpdateHostedModelRequest,
 } from "@/client"
@@ -201,4 +202,17 @@ export function regionPriceBody(
   modelKey: string,
 ): SetPricingRequest {
   return { model_key: modelKey, ...priceFields(draft) }
+}
+
+/**
+ * The price a region sets of its own for a model, if it sets one. Read as an
+ * own property, since a slug such as `constructor` would otherwise find one on
+ * the object's prototype.
+ */
+export function regionRatesOf(
+  model: Pick<HostedModel, "region_rates">,
+  slug: string,
+): HostedModelRates | undefined {
+  const rates = model.region_rates
+  return rates && Object.hasOwn(rates, slug) ? rates[slug] : undefined
 }

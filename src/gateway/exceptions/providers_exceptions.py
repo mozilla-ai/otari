@@ -382,16 +382,17 @@ class HostedProviderInvalidRegionSlugError(TenancyValidationError):
 
 
 class HostedProviderRegionKeyRequiredError(TenancyValidationError):
-    """The provider's endpoint would move under a region that holds a key of its own and follows that endpoint.
+    """Moving the provider's endpoint would send a region a key meant for another endpoint.
 
-    The region's key would otherwise be sent to an endpoint chosen without
-    ever having to know it.
+    A region with a key of its own that follows the provider's endpoint would
+    carry it to the new one, and a region on an endpoint of its own using the
+    provider's key would be sent the key for the new one.
     """
 
     def __init__(self, slug: str) -> None:
         super().__init__(
-            f"Region '{slug}' has a key of its own and uses the provider's endpoint; give it an endpoint of its "
-            "own, or its key again, before moving the provider's"
+            f"Region '{slug}' would be sent a key for an endpoint it was not entered for; give the region its own "
+            "endpoint and key before moving the provider's endpoint"
         )
 
 
