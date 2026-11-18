@@ -719,8 +719,9 @@ async def collect_revocations(
     user_ids: Collection[str] | None = None,
     shared: bool = False,
     limit: int | None = None,
-) -> tuple[list[McpRevocation], int]:
-    """What revoking the connections a removal is about to delete sends, and how many it leaves unread.
+) -> tuple[list[McpRevocation], int, int]:
+    """What revoking the connections a removal is about to delete sends, how many it leaves unread, and how many
+    it read.
 
     Read before the rows go, while their servers still hold the clients the tokens were issued to.
     With ``shared`` the shared accounts of ``server_ids`` are revoked too, for a removal that takes
@@ -751,7 +752,7 @@ async def collect_revocations(
             + [account for account in accounts if account.server_id == server.id],
         )
     ]
-    return revocations, total - len(rows) - len(accounts)
+    return revocations, total - len(rows) - len(accounts), len(rows) + len(accounts)
 
 
 # Bounds on revocations sent after a bulk removal, which nothing waits on.
@@ -1396,7 +1397,11 @@ class McpConnectionService:
             elif (
                 current.workspace_id is None
                 and workspace_id is not None
-                and not await self._views.reaches(workspace_id, current)
+                and (
+                    # A workspace deleted during the exchange holds no lock and reads as reaching every server.
+                    await self._eligibility.organization_of(workspace_id) != current.organization_id
+                    or not await self._views.reaches(workspace_id, current)
+                )
             ):
                 refusal = "This server is no longer available in your workspace."
             elif pending.for_check:
@@ -1521,7 +1526,7 @@ class McpConnectionService:
         read while the servers still hold the clients the tokens were issued to.
         """
         async with self._uow:
-            revocations, unread = await collect_revocations(self._connections, self._servers, user_id=user_id)
+            revocations, unread, _ = await collect_revocations(self._connections, self._servers, user_id=user_id)
             await self._connections.remove_for_user(user_id)
             await self._flows.remove_for_user(user_id)
         revoke_in_background(revocations, unread=unread)
