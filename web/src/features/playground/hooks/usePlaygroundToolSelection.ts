@@ -91,14 +91,17 @@ export function usePlaygroundToolSelection(
     setSelectedMcpIds((prev) => keepAttachableMcpIds(prev, attachable))
   }, [tools, isWebSearchOn, isWebFetchOn, isCodeExecutionOn])
 
+  // What a message declares is what the current workspace's read allows, so a
+  // choice made in another workspace is not sent while this one's read loads.
   const selection = useMemo<ToolSelection>(
     () => ({
-      isWebSearchOn,
-      isWebFetchOn,
-      isCodeExecutionOn,
-      mcpServerIds: selectedMcpIds,
+      isWebSearchOn: isWebSearchOn && (tools?.web_search.enabled ?? false),
+      isWebFetchOn: isWebFetchOn && (tools?.web_fetch.enabled ?? false),
+      isCodeExecutionOn:
+        isCodeExecutionOn && (tools?.code_execution.enabled ?? false),
+      mcpServerIds: tools ? selectedMcpIds : [],
     }),
-    [isWebSearchOn, isWebFetchOn, isCodeExecutionOn, selectedMcpIds],
+    [tools, isWebSearchOn, isWebFetchOn, isCodeExecutionOn, selectedMcpIds],
   )
 
   return {

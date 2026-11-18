@@ -144,7 +144,10 @@ class PlaygroundToolStatus(BaseModel):
     fail at request time (otari-ai#1419).
     """
 
-    configured: bool = Field(description="Whether this deployment has a backend for the tool at all.")
+    configured: bool = Field(
+        description="Whether the tool has something to run on for the caller's workspace: the deployment's "
+        "backend, or for web search, the workspace's own organization search key."
+    )
     enabled: bool = Field(description="Whether the caller's workspace may attach it.")
     reason: str | None = Field(
         default=None,

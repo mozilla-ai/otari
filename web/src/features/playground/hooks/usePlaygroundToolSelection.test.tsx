@@ -153,6 +153,26 @@ describe("usePlaygroundToolSelection", () => {
     expect(result.current.isWebFetchOn).toBe(false)
   })
 
+  it("declares nothing while the current workspace's tools are unknown", () => {
+    // A workspace switch clears the read until the new workspace answers, and a
+    // choice made in the old one must not ride a message sent meanwhile.
+    const { result, rerender } = renderHook(
+      ({ available }: { available: PlaygroundTools | undefined }) =>
+        usePlaygroundToolSelection(available),
+      { initialProps: { available: tools() as PlaygroundTools | undefined } },
+    )
+    act(() => result.current.toggleWebFetch(true))
+    act(() => result.current.toggleMcpServer("srv-1", true))
+
+    rerender({ available: undefined })
+    expect(result.current.selection).toEqual({
+      isWebSearchOn: false,
+      isWebFetchOn: false,
+      isCodeExecutionOn: false,
+      mcpServerIds: [],
+    })
+  })
+
   it("drops an MCP server that is deleted while the page is open", () => {
     const { result, rerender } = renderHook(
       ({ available }: { available: PlaygroundTools }) =>

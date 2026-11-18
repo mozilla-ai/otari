@@ -21154,7 +21154,7 @@
         "description": "Whether one gateway-run tool can be attached right now, and why not.\n\nThree states from two fields, which is what the composer's menu draws: a\ntool the deployment never configured is not offered, one the deployment\nconfigured and this workspace turned off is shown disabled with the reason,\nand an available one is a plain checkbox. A single boolean would collapse\nthe first two, which is how a checkbox comes to look attachable and then\nfail at request time (otari-ai#1419).",
         "properties": {
           "configured": {
-            "description": "Whether this deployment has a backend for the tool at all.",
+            "description": "Whether the tool has something to run on for the caller's workspace: the deployment's backend, or for web search, the workspace's own organization search key.",
             "title": "Configured",
             "type": "boolean"
           },

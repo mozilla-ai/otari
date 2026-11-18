@@ -19449,7 +19449,7 @@ export interface components {
         PlaygroundToolStatus: {
             /**
              * Configured
-             * @description Whether this deployment has a backend for the tool at all.
+             * @description Whether the tool has something to run on for the caller's workspace: the deployment's backend, or for web search, the workspace's own organization search key.
              */
             configured: boolean;
             /**

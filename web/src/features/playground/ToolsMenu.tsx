@@ -206,6 +206,8 @@ function ToolRow({
   return (
     <div className="flex flex-col gap-0.5">
       <Checkbox
+        hasTouchTarget
+        className="md:min-h-0 md:min-w-0"
         isSelected={isSelected}
         isDisabled={isDisabled}
         onChange={onChange}

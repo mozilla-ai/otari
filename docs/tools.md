@@ -1050,12 +1050,12 @@ the pin, and any other member sees the list read-only.
 
 A workspace with a usable search key serves an explicit `otari_web_search`
 declaration even where the deployment has no search of its own, and the
-workspace's web-access policy still applies. Three things stay with the
-deployment's own configuration: `GET /api/v1/tools` and the Playground report
-web search only when the deployment can search, and a provider-native search
-declaration or the `Otari-Web-Search` header is handed to Otari only then, since
-that is decided before the workspace's policy is read. Elsewhere such a
-declaration goes to the model's provider.
+workspace's web-access policy still applies. `GET /api/v1/tools`, for an API
+key, and the Playground's tools menu report web search as available on that
+key. A provider-native search declaration or the `Otari-Web-Search` header is
+handed to Otari only where the deployment can search, since that is decided
+before the workspace's policy is read. Elsewhere such a declaration goes to the
+model's provider.
 
 A key's calls are labeled `org:<provider>` and priced under `otari:web_search`
 or `otari:web_fetch`, at the cost the provider reported when it reports one (see

@@ -44,11 +44,13 @@ from sqlalchemy.orm import Session
 from gateway.adapters.file_storage_adapter import LocalDirFileStore
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import release_session
+from gateway.exceptions.tools_exceptions import SearchToolMisconfiguredError
 from gateway.models.budgets import SCOPE_WORKSPACE, Budget, ScopedBudget
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.tools import McpCredentialMode, OrgWebSearchKey, WorkspaceMcpServer, WorkspaceWebSearchConfig
 from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT, SERVED_HERE_SLUG, UsageLog
 from gateway.models.users import User as BillingUser
+from gateway.services import playground_service
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.file_extractors import ExtractionResult
 from gateway.services.inference import upstream_user_identifier
@@ -851,6 +853,8 @@ def test_a_stored_policy_that_cannot_be_read_refuses_both_web_tools(
 ) -> None:
     """The request path refuses every web declaration on such a row, so the menu offers neither tool."""
     monkeypatch.setattr(test_config, "web_fetch_enabled", True)
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _add_org_search_key(db_session_factory, world)
     session = db_session_factory()
     try:
         session.add(
@@ -867,10 +871,66 @@ def test_a_stored_policy_that_cannot_be_read_refuses_both_web_tools(
     code, body = _request(client, world, "member", "GET", f"{_PREFIX}/tools", params=_ws(world))
 
     assert code == status.HTTP_200_OK
-    assert body["web_fetch"] == {
+    unreadable = {
         "configured": True,
         "enabled": False,
         "reason": "This workspace's web search settings hold a domain rule that cannot be read.",
+    }
+    assert body["web_search"] == unreadable
+    assert body["web_fetch"] == unreadable
+
+
+def test_a_search_tool_admission_finds_misconfigured_is_reported_as_nothing_to_search_with(
+    client: TestClient,
+    world: _World,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The tools read still answers, so fetch, code execution and the MCP servers stay listed."""
+
+    def misconfigured(*_args: object, **_kwargs: object) -> bool:
+        raise SearchToolMisconfiguredError("searxng")
+
+    monkeypatch.setattr(playground_service, "search_resolves", misconfigured)
+
+    code, body = _request(client, world, "member", "GET", f"{_PREFIX}/tools", params=_ws(world))
+
+    assert code == status.HTTP_200_OK
+    assert body["web_search"]["configured"] is False
+
+
+def test_an_organization_fetch_key_that_cannot_be_used_shows_web_fetch_disabled_with_why(
+    client: TestClient,
+    world: _World,
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """Admission refuses a fetch on that key, and the built-in fetcher does not stand in for it."""
+    monkeypatch.setattr(test_config, "web_fetch_enabled", True)
+    session = db_session_factory()
+    try:
+        # A key stored before the write checks required a secret.
+        session.add(
+            OrgWebSearchKey(
+                organization_id=world.alpha,
+                kind="fetch",
+                provider="tabstack",
+                name="pages",
+                encrypted_api_key=None,
+                is_org_default=True,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    code, body = _request(client, world, "member", "GET", f"{_PREFIX}/tools", params=_ws(world))
+
+    assert code == status.HTTP_200_OK
+    assert body["web_fetch"] == {
+        "configured": True,
+        "enabled": False,
+        "reason": "The organization's web fetch key for this workspace cannot be used.",
     }
 
 

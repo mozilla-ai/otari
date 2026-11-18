@@ -27,6 +27,7 @@ from sqlmodel import col
 from gateway.core.config import GatewayConfig
 from gateway.exceptions import TenancyConflictError, TenancyForbiddenError
 from gateway.exceptions.organizations_exceptions import WorkspaceNotFoundError
+from gateway.exceptions.tools_exceptions import SearchToolMisconfiguredError
 from gateway.models.playground import (
     MAX_FAVORITE_MODELS,
     MAX_SAVED_COMPARISONS,
@@ -239,6 +240,7 @@ _NOT_CONFIGURED = "No backend is configured on this deployment."
 _FILES_OFF = "File uploads are turned off on this deployment."
 _FETCH_OFF = "Web fetch is turned off on this deployment."
 _WEB_POLICY_UNREADABLE = "This workspace's web search settings hold a domain rule that cannot be read."
+_FETCH_KEY_UNUSABLE = "The organization's web fetch key for this workspace cannot be used."
 # Fetch is turned on and off with web search, so its reasons point there.
 _FETCH_WORKSPACE_DISABLED = "Turned off for this workspace, with web search."
 _FETCH_WORKSPACE_NOT_ENABLED = "Not turned on for this workspace. Turning on web search turns it on."
@@ -335,7 +337,7 @@ async def resolve_tool_availability(
 
     return PlaygroundToolAvailability(
         web_search=_web_availability(
-            search_resolves(config, web_policy),
+            _search_resolves(config, web_policy),
             web_allowed,
             web_search_row,
             not_configured_reason=_NOT_CONFIGURED,
@@ -343,12 +345,14 @@ async def resolve_tool_availability(
             not_enabled_reason=_WORKSPACE_NOT_ENABLED,
         ),
         web_fetch=_web_availability(
-            config.web_fetch_enabled and fetch_resolves(config, web_policy),
+            config.web_fetch_enabled,
             web_allowed,
             web_search_row,
-            not_configured_reason=_NOT_CONFIGURED if config.web_fetch_enabled else _FETCH_OFF,
+            not_configured_reason=_FETCH_OFF,
             disabled_reason=_FETCH_WORKSPACE_DISABLED,
             not_enabled_reason=_FETCH_WORKSPACE_NOT_ENABLED,
+            # Fetch always has the built-in fetcher, so only the organization's own key can fail to resolve.
+            unresolved_reason=None if fetch_resolves(config, web_policy) else _FETCH_KEY_UNUSABLE,
         ),
         code_execution=offer.code_execution(code_execution_row),
         files=offer.files(),
@@ -376,22 +380,39 @@ def _web_availability(
     not_configured_reason: str,
     disabled_reason: str,
     not_enabled_reason: str,
+    unresolved_reason: str | None = None,
 ) -> ToolAvailability:
     """One web tool, from whether it resolves and whether the workspace's web access allows it.
 
     ``web_search_row`` is the workspace's stored switch, ``None`` without a row,
     and says which reason a refusal carries. Fetch has no switch of its own: the
-    request path refuses it whenever that row refuses search.
+    request path refuses it whenever that row refuses search. ``unresolved_reason``
+    is set where the tool exists but the workspace's own key cannot run it, which
+    admission checks after the workspace's web access.
     """
     if not configured:
         return ToolAvailability(configured=False, enabled=False, reason=not_configured_reason)
     if allowed:
+        if unresolved_reason is not None:
+            return ToolAvailability(configured=True, enabled=False, reason=unresolved_reason)
         return ToolAvailability(configured=True, enabled=True)
     if web_search_row is None:
         return ToolAvailability(configured=True, enabled=False, reason=not_enabled_reason)
     if web_search_row is False:
         return ToolAvailability(configured=True, enabled=False, reason=disabled_reason)
     return ToolAvailability(configured=True, enabled=False, reason=_WEB_POLICY_UNREADABLE)
+
+
+def _search_resolves(config: GatewayConfig, policy: ResolvedWebSearchConfig) -> bool:
+    """Whether a declared search finds something to run on.
+
+    A search instance admission refuses as misconfigured counts as nothing to
+    run on, so one bad instance leaves the rest of the menu readable.
+    """
+    try:
+        return search_resolves(config, policy)
+    except SearchToolMisconfiguredError:
+        return False
 
 
 def _tool_availability(
