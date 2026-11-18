@@ -48,9 +48,7 @@ class TraceSummaryPublic(BaseModel):
         description="The language the client was written in, from its SDK's headers or its HTTP library's "
         "User-Agent. `javascript` covers TypeScript.",
     )
-    client_version: str | None = Field(
-        default=None, description="The client's version, from its User-Agent or its SDK's headers."
-    )
+    client_version: str | None = Field(default=None, description="The client's version, from its own User-Agent.")
     name: str | None
     started_at: datetime
     last_activity_at: datetime

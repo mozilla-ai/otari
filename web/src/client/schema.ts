@@ -22188,7 +22188,7 @@ export interface components {
             client_language?: ("python" | "javascript" | "go" | "java" | "rust" | "ruby") | null;
             /**
              * Client Version
-             * @description The client's version, from its User-Agent or its SDK's headers.
+             * @description The client's version, from its own User-Agent.
              */
             client_version?: string | null;
             /**

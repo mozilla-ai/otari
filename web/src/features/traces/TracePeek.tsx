@@ -214,11 +214,10 @@ function Attributes({
 function ClientIcon({ trace, type }: { trace: Trace; type: TypeKey }) {
   const { harness, clientLanguage } = trace
   if (
-    harness &&
-    (hasHarnessMark(harness) ||
-      (clientLanguage && hasLanguageMark(clientLanguage)))
+    (harness && hasHarnessMark(harness)) ||
+    (clientLanguage && hasLanguageMark(clientLanguage))
   ) {
-    return <HarnessMark harness={harness} language={clientLanguage} />
+    return <HarnessMark harness={harness ?? null} language={clientLanguage} />
   }
   return <TypeMark type={type} className="size-5" />
 }

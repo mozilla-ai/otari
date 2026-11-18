@@ -136,9 +136,22 @@ _LANGUAGE_NAMES: Mapping[str, ClientLanguage] = {
 # others) and Fern's (Cohere).
 _LANGUAGE_HEADERS = ("x-stainless-lang", "x-fern-language")
 
-# ``User-Agent`` products whose version is not the client's: Go's is the HTTP version, and
-# aiohttp's leading ``Python/3.12`` is the interpreter's.
-_VERSIONLESS_PRODUCTS = frozenset({"go-http-client", "python"})
+# A Stainless SDK's client classes that are one SDK, by class name less any ``Async``:
+# the cloud variants of the OpenAI and Anthropic clients.
+_SDK_CLIENT_CLASSES: Mapping[str, str] = {
+    "azureopenai": "openai",
+    "anthropicaws": "anthropic",
+    "anthropicbedrock": "anthropic",
+    "anthropicbedrockmantle": "anthropic",
+    "anthropicfoundry": "anthropic",
+    "anthropicgooglecloud": "anthropic",
+    "anthropicvertex": "anthropic",
+}
+
+# ``User-Agent`` products whose version is not the client's: Go's is the HTTP version,
+# aiohttp's leading ``Python/3.12`` is the interpreter's, and a browser's ``Mozilla/5.0``
+# is a compatibility token.
+_VERSIONLESS_PRODUCTS = frozenset({"go-http-client", "python", "mozilla"})
 
 _MAX_KEY_LENGTH = 512
 
@@ -237,6 +250,11 @@ def harness_of(headers: Mapping[str, str]) -> str | None:
     for header, harness in HARNESS_SESSION_HEADERS.items():
         if headers.get(header):
             return harness
+    return _user_agent_product(headers)
+
+
+def _user_agent_product(headers: Mapping[str, str]) -> str | None:
+    """The client the ``User-Agent`` names by its first product, under the name it is shown by."""
     tokens = (headers.get("user-agent") or "").split()
     if not tokens:
         return None
@@ -247,14 +265,23 @@ def harness_of(headers: Mapping[str, str]) -> str | None:
         product = tokens[-1].lower()
     elif len(segments) > 1 and segments[1].lower() in _LANGUAGE_NAMES:
         # A Stainless SDK names itself by its client class, ``AsyncOpenAI/Python 1.99``, so
-        # the async twin and the cloud variants (``AzureOpenAI``, ``AnthropicBedrock``) are one SDK.
+        # the async twin and the cloud variants are one SDK.
         product = product.removeprefix("async")
-        if product.startswith("anthropic"):
-            product = "anthropic"
-        elif product.endswith("openai"):
-            product = "openai"
+        product = _SDK_CLIENT_CLASSES.get(product, product)
     product = _HARNESS_PRODUCTS.get(product, product)
     return product if is_identifier(product) and len(product) <= 64 else None
+
+
+def _user_agent_names(headers: Mapping[str, str], harness: str) -> bool:
+    """Whether the ``User-Agent`` is the harness's own, so a version it gives is the harness's."""
+    if _user_agent_product(headers) == harness:
+        return True
+    agent = (headers.get("user-agent") or "").strip().lower()
+    return any(
+        marked.harness == harness and header == "user-agent" and agent.startswith(prefix)
+        for marked in _MARKED_HARNESSES
+        for header, prefix in marked.markers
+    )
 
 
 def _client_language_of(headers: Mapping[str, str]) -> ClientLanguage | None:
@@ -276,22 +303,19 @@ def _client_language_of(headers: Mapping[str, str]) -> ClientLanguage | None:
 
 
 def _client_version_of(headers: Mapping[str, str]) -> str | None:
-    """The version of the client that sent the request, from its ``User-Agent``, or None.
+    """The version the ``User-Agent`` gives its client, or None.
 
     The version follows the product (``claude-cli/2.1.291``, ``OpenAPI-Generator/1.0.0/python``)
-    or is the next word (``OpenAI/Python 1.99.0``). A Stainless SDK's package-version
-    header is the fallback, after the ``User-Agent``, since a harness built on an SDK
-    sends the SDK's version there and its own in the ``User-Agent``.
+    or is the next word (``OpenAI/Python 1.99.0``). An SDK's package-version header is
+    not read: on a harness built on the SDK it is the SDK's version, not the harness's.
     """
-    candidates: list[str] = []
     tokens = (headers.get("user-agent") or "").split()
-    if tokens:
-        product, *rest = tokens[0].split("/")
-        if product.lower() not in _VERSIONLESS_PRODUCTS:
-            candidates.extend(rest)
-            candidates.extend(tokens[1:2])
-    candidates.append(headers.get("x-stainless-package-version") or "")
-    for candidate in candidates:
+    if not tokens:
+        return None
+    product, *rest = tokens[0].split("/")
+    if product.lower() in _VERSIONLESS_PRODUCTS:
+        return None
+    for candidate in (*rest, *tokens[1:2]):
         version = candidate.strip().removeprefix("v")
         if is_client_version(version):
             return version
@@ -308,4 +332,11 @@ class RequestClient:
 
     @classmethod
     def of(cls, headers: Mapping[str, str]) -> "RequestClient":
-        return cls(harness_of(headers), _client_language_of(headers), _client_version_of(headers))
+        """Read the client off a request's headers.
+
+        The version is kept only when the ``User-Agent`` is the harness's own, so a
+        proxy's version never lands on the harness its session header names.
+        """
+        harness = harness_of(headers)
+        version = _client_version_of(headers) if harness and _user_agent_names(headers, harness) else None
+        return cls(harness, _client_language_of(headers), version)

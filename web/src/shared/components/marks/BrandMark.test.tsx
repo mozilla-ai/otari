@@ -1,11 +1,14 @@
 import { render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import {
+  anyHarnessMark,
   anyMakerMark,
   anyProviderMark,
+  HarnessMark,
   MakerMark,
   ProviderMark,
 } from "@/shared/components/marks/BrandMark"
+import { languageMark } from "@/shared/helpers/brandMarks"
 
 /**
  * The rendered `<svg>`, once the lazy geometry chunk has resolved.
@@ -161,5 +164,36 @@ describe("anyMakerMark", () => {
   it("is false when none does", () => {
     expect(anyMakerMark(["amazon", "openbmb"])).toBe(false)
     expect(anyMakerMark([])).toBe(false)
+  })
+})
+
+describe("HarnessMark", () => {
+  it("draws an SDK's language, since it has no mark of its own", async () => {
+    const { container } = render(
+      <HarnessMark harness="openai" language="python" />,
+    )
+
+    await glyphOf(container)
+    expect(container.querySelector("path")?.getAttribute("d")).toBe(
+      languageMark("python")?.shapes[0].d,
+    )
+  })
+
+  it("draws the language of a session that names no harness", async () => {
+    const { container } = render(<HarnessMark harness={null} language="go" />)
+
+    await glyphOf(container)
+    expect(anyHarnessMark([{ harness: null, client_language: "go" }])).toBe(
+      true,
+    )
+  })
+
+  it("tiles a client with no mark and no language, and keeps a slot for no client", () => {
+    render(<HarnessMark harness="my-agent" />)
+    expect(screen.getByText("m")).toBeInTheDocument()
+
+    const empty = render(<HarnessMark harness={null} />)
+    expect(empty.container.querySelector("svg")).toBeNull()
+    expect(empty.container.textContent).toBe("")
   })
 })

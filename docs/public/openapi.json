@@ -26966,7 +26966,7 @@
                 "type": "null"
               }
             ],
-            "description": "The client's version, from its User-Agent or its SDK's headers.",
+            "description": "The client's version, from its own User-Agent.",
             "title": "Client Version"
           },
           "cost": {

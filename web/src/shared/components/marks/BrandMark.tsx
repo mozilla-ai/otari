@@ -194,25 +194,30 @@ export function anyMakerMark(vendorSlugs: readonly string[]): boolean {
  *
  * An SDK or an HTTP library (`openai`, `python-httpx`) is no harness, and what
  * tells two of them apart at a glance is their language, so the list draws that.
+ * A session with neither a harness nor a known language keeps an empty slot.
  */
 export function HarnessMark({
   harness,
   language,
   step = 16,
 }: {
-  harness: string
+  harness: string | null
   /** The session's `client_language`, drawn when the harness has no mark. */
   language?: string | null
   step?: BrandMarkStep
 }) {
   const box = BOX[step]
-  if (hasHarnessMark(harness)) {
+  if (harness && hasHarnessMark(harness)) {
     return <Glyph markKey={harness} kind="harness" box={box} />
   }
   if (language && hasLanguageMark(language)) {
     return <Glyph markKey={language} kind="language" box={box} />
   }
-  return <Lettermark label={harness} box={box} />
+  return harness ? (
+    <Lettermark label={harness} box={box} />
+  ) : (
+    <Reserved box={box} />
+  )
 }
 
 /** Whether any of these sessions' clients has a mark, which decides if a list reserves the slot. */
@@ -227,9 +232,4 @@ export function anyHarnessMark(
       (harness !== null && hasHarnessMark(harness)) ||
       (client_language != null && hasLanguageMark(client_language)),
   )
-}
-
-/** The empty slot a row without a harness keeps, so names stay aligned. */
-export function NoHarnessMark({ step = 16 }: { step?: BrandMarkStep }) {
-  return <Reserved box={BOX[step]} />
 }

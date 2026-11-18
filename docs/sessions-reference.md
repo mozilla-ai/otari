@@ -50,9 +50,12 @@ Otari never guesses from content.
   language it names (`OpenAI/Python`, `OpenAPI-Generator/1.0.0/python`,
   `node/24.11.0`) or an HTTP library that implies one (`python-httpx`,
   `python-requests`, `aiohttp`, `node`, `axios`, `Go-http-client`, `okhttp`).
-  JavaScript covers TypeScript, which no header tells apart. The version is the
-  one the `User-Agent` gives the client. `curl` and a client that names neither
-  have no language.
+  JavaScript covers TypeScript, which no header tells apart. A `User-Agent` that
+  implies no language, such as `curl/8.7.1`, leaves it to the SDK header, and a
+  request with neither has no language. The version is the one the `User-Agent`
+  gives the client, kept only when the `User-Agent` is the harness's own: a
+  proxy's version never lands on a harness its session header names, and an
+  SDK's package-version header is not read.
 - When a request carries more than one signal, the first row in the table wins.
 - An exported span that names no session joins its nearest ancestor's session,
   then the session another span in its OTel trace names (within the same export),

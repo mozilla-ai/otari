@@ -74,8 +74,13 @@ SESSION_SOURCES: tuple[SessionSource, ...] = ("client", "harness", "otlp", "none
 # its HTTP library's ``User-Agent``. JavaScript covers TypeScript, which no header tells apart.
 ClientLanguage = Literal["python", "javascript", "go", "java", "rust", "ruby"]
 CLIENT_LANGUAGES: tuple[ClientLanguage, ...] = ("python", "javascript", "go", "java", "rust", "ruby")
-# A client's version as its User-Agent spells it: digits and dots, with an optional suffix.
-CLIENT_VERSION_PATTERN = re.compile(r"\d+(?:\.\d+){0,3}(?:[-+][0-9A-Za-z.]{1,16})?")
+# A client's version as its User-Agent spells it: digits and dots, then a PEP 440 pre, post or
+# dev release (``rc1``, ``.dev3``) or a SemVer prerelease (``-rc.1``), and SemVer build metadata.
+CLIENT_VERSION_PATTERN = re.compile(
+    r"\d+(?:\.\d+){0,3}"
+    r"(?:[-.]?(?:a|b|c|rc|alpha|beta|pre|preview|post|dev)\.?\d*|-[0-9A-Za-z.-]{1,24})?"
+    r"(?:\+[0-9A-Za-z.-]{1,24})?"
+)
 CLIENT_VERSION_MAX_LENGTH = 32
 
 # The shape every name a client could have chosen must have before it is stored:
