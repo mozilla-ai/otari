@@ -35,8 +35,8 @@ export function TopModelCell({
       }
     >
       <span
-        className={`text-mono-caption text-foreground ${isInline ? "[overflow-wrap:anywhere]" : "max-w-[8.375rem] truncate"}`}
-        title={top.name}
+        className={`text-foreground [overflow-wrap:anywhere] ${isInline ? "" : "line-clamp-1"}`}
+        title={top.spellings.join("\n") || top.name}
       >
         {top.name}
       </span>
