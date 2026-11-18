@@ -25,8 +25,8 @@ routing:
 ```
 
 Callers send `model: fast`. If the first provider fails before any response is
-sent, Otari tries the fallback. The response keeps the policy name; the Overview's Requests
-and Usage tabs record the models that were attempted.
+sent, Otari tries the fallback. The response keeps the policy name; the Requests
+view of Sessions records the models that were attempted.
 
 ![Otari tries OpenAI first and moves to Anthropic when OpenAI returns a retryable error.](assets/routing-fallback-flow.webp)
 
@@ -165,7 +165,7 @@ routing:
         - mistral:mistral-small
 ```
 
-- A full candidate is skipped without being called. The Overview's Requests tab
+- A full candidate is skipped without being called. The Requests view of Sessions
   shows it in the request's routing plan as skipped, naming the limit that was
   full, and Prometheus counts it in `gateway_rate_limit_model_full{rule, model}`.
 - The limit lives on the model, not on the policy, so the model is skipped the

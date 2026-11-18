@@ -10,35 +10,42 @@ accepted headers are in [Base URL](https://docs.otari.ai/reference#base-url) and
 
 ## Create a key
 
-1. Open the workspace's **API keys** page and click **Create key**.
-2. Enter a **Name** and, optionally, an expiry under **Expires (optional)**.
+1. Open the **API keys** page and click **Create API key**.
+2. Enter a **Name** and, optionally, an expiry under **Expires**.
 3. Optionally, click **More options** to narrow the models and tools the key can
    use. By default a key inherits your model access, and it can never exceed
-   it.
-4. Click **Create key**, then copy the key. It is shown once, so store it
+   it. A deployment operator also picks the key's owner there; it is the
+   operator unless they pick someone else.
+4. Click **Create API key**, then copy the key. It is shown once, so store it
    before you close the dialog.
 
-**Access** sets what the key may call: one checkbox per scope, grouped by
-area. Models and Tools are shown; Files, Batches, MCP, Coding agents, Usage,
-and End users on a service key are under **Advanced scopes**, which opens by
-itself on a key that holds one of them. A group's own box checks or clears the
-whole group. A new key starts with **Call models** alone, the `inference:run`
-scope; the Claude Code plugin's hooks, routing and telemetry need the
-**Coding agents** group too. See [Scopes](#scopes). Edit a key to change its
-access later.
+The key is made in the workspace selected in the top-left corner.
 
-![The New key dialog, with a name and an owner filled in.](assets/screenshots/api-keys-create.png)
+**Access**, under **More options**, sets what the key may call: one checkbox
+per scope, grouped by area. Models and Tools are shown; Files, Batches, MCP,
+Coding agents, Usage, and End users on a service key are under **Advanced
+scopes**, which opens by itself on a key that holds one of them. A group's own
+box checks or clears the whole group. A new key starts with **Call models**
+alone, the `inference:run` scope; the Claude Code plugin's hooks, routing and
+telemetry need the **Coding agents** group too. See [Scopes](#scopes). Edit a
+key to change its access later.
+
+![The Create API key dialog, with a name filled in.](assets/screenshots/api-keys-create.png)
 
 ## Cap a key's spend
 
 An organization owner or admin, or a deployment operator, can give a key a
-budget of its own. In the key's create or edit form, either:
+budget of its own:
 
-- pick an existing budget under **Budget (optional)**, or
-- set a **Limit (USD)** and how often it **Resets**.
+- When creating it, set a **Spend limit, in dollars** and how often it resets,
+  or pick an existing budget under **Budget** in **More options**.
+- On an existing key, choose **Edit…** from its row's menu and pick a budget
+  under **Budget (optional)**, or **Custom amount…** with a **Limit (USD)** and
+  how often it **Resets**.
 
 The key's owner's budget still applies too. The page's **Budget** column shows
-each key's spend this period against its limit. See [Budgets](budgets.md).
+each key's own limit and how often it resets, and the key's row menu shows its
+spend this period against it. See [Budgets](budgets.md).
 
 ## Mismatched `user` fields
 
@@ -72,12 +79,31 @@ Through the API, this is the key's `reject_user_mismatch` field (`null`,
 
 ## Regenerate, disable or delete a key
 
-Each key's row has an actions menu:
+The **API keys** page lists every key you can manage, in every workspace, with
+its state, when it was last used, when it expires, and what it spent this
+month. It opens on active keys; the **State** filter above the list shows
+disabled or expired keys, or every key. A deployment operator sees every key
+on the deployment, with an **Owner** column.
 
+Each key's row has an actions menu, the three dots at its end. The menu first
+names the key: its whole fingerprint, where it was made, and the models it may
+reach. Then it offers what you may do to it:
+
+- **Edit…** changes its name, expiry, budget, model and tool access, scopes and
+  MCP access.
+- **Disable** switches the key off; callers get `401` until you **Enable** it
+  again. A key an operator switched off can be switched back on only by an
+  operator, and a revoked key never.
 - **Regenerate…** issues a new secret and keeps the key. The old secret stops
   working immediately. The new one is shown once.
-- **Disable** switches the key off; callers get `401` until you enable it again.
-- **Delete…** removes the key permanently.
+- **See its sessions** opens Sessions on the key's workspace, filtered to the
+  key, from the start of this month.
+- **Delete…** removes the key permanently, once it is disabled.
+
+A service key's menu also has **End users…** (see [End users](end-users.md)).
+Where the deployment lets organizations manage workload identity, an owner's,
+an admin's and the operator's menus have **Workload identity…** (see
+[Workload identity](https://docs.otari.ai/self-hosting/operations/workload-identity)).
 
 A key declared in a self-hosted deployment's config.yml behaves differently;
 see [What config.yml owns](https://docs.otari.ai/self-hosting/configuration#what-configyml-owns).
@@ -128,7 +154,7 @@ Membership changes switch keys off:
 - Keys made before Otari recorded who made them are left alone on a demotion.
   When you demote someone to viewer, check the keys billed to them.
 
-The key routes are in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.50.0/docs/public/openapi.json).
+The key routes are in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.51.0/docs/public/openapi.json).
 
 ### Model and search tool access
 
@@ -228,7 +254,7 @@ answer rather than the caller's. A call that attaches a stored file by its
 container, because the container still holds what earlier runs staged into it.
 A key without `files:read` can still open a fresh container; only resuming an
 existing one is refused. The master key holds
-every scope. Each operation in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.50.0/docs/public/openapi.json)
+every scope. Each operation in the [OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.51.0/docs/public/openapi.json)
 lists the scope it asks of every caller in `x-otari-key-scopes`, empty where
 every key may call it. A scope a request needs only for something it asked for,
 such as `files:read` for a `file_id` or a container, is named in this page

@@ -2,7 +2,7 @@
 
 In this tutorial you run Otari on your own machine with Docker Compose, connect
 it to OpenAI, and send your first request through it. For a throwaway container
-with no clone, see the [README quickstart](https://github.com/mozilla-ai/otari/blob/v0.50.0/README.md#quickstart) instead.
+with no clone, see the [README quickstart](https://github.com/mozilla-ai/otari/blob/v0.51.0/README.md#quickstart) instead.
 
 You need:
 
@@ -114,7 +114,7 @@ The answer is an OpenAI-style chat completion, with the model's reply in
 ## 7. See it in the dashboard
 
 Open <http://localhost:8000/> and sign in with your master key (`echo
-$OTARI_MASTER_KEY` prints it). On the **Overview**, open the **Requests** tab to
+$OTARI_MASTER_KEY` prints it). Open **Sessions**, then its **Requests** view, to
 see your request with its model, tokens and cost. The OpenAI provider is under
 **Deployment**, **Hosted providers**, in the account menu.
 

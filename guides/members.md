@@ -19,13 +19,14 @@ each one, whether its email went out or, where one is shown, the link to share.
 
 ## Manage existing members
 
-Admins and Owners can also manage existing members. On **Members & roles**:
+Admins and Owners can also manage existing members. On **Members & roles**,
+the **Role** column changes a member's organization role, and the menu at the
+end of a member's row offers:
 
-- the **Role** column changes a member's organization role;
 - **Edit** changes which workspaces they can use and their role in each;
 - **Remove** takes them out of the organization.
 
-An invited row shows when its invitation has expired, and offers:
+An invited row shows when its invitation has expired, and its menu offers:
 
 - **Reissue**, which sends a new accept link (or shows it, when no email goes
   out and links are shown). The old link stops working. Use this to recover a lost link, or instead
@@ -71,7 +72,7 @@ limits under [Mail](https://docs.otari.ai/self-hosting/configuration#invitations
 
 - Invitations waiting for you are listed under **Invitations**, reached from the
   organization switcher. Someone signed in who belongs to no organization is
-  taken there when an invitation is waiting; otherwise Overview says how to get
+  taken there when an invitation is waiting; otherwise Home says how to get
   in. Creating an organization is offered only where signup is open.
 - Opening an invitation link while signed in as a different address says who the
   invitation is for and offers to sign out, because accepting always adds the
