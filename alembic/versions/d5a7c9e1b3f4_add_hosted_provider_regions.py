@@ -31,6 +31,8 @@ def upgrade() -> None:
         batch_op.add_column(sa.Column("allowed_data_locations", sa.JSON(), nullable=True))
     with op.batch_alter_table("usage_logs") as batch_op:
         batch_op.add_column(sa.Column("data_location", sa.String(length=16), nullable=True))
+    with op.batch_alter_table("batches") as batch_op:
+        batch_op.add_column(sa.Column("data_location", sa.String(length=16), nullable=True))
     op.create_table(
         "hosted_provider_regions",
         sa.Column("id", sa.Uuid(), nullable=False),
@@ -86,6 +88,8 @@ def downgrade() -> None:
         raise RuntimeError(msg)
     op.drop_index("ix_hosted_provider_regions_hosted_provider_id", table_name="hosted_provider_regions")
     op.drop_table("hosted_provider_regions")
+    with op.batch_alter_table("batches") as batch_op:
+        batch_op.drop_column("data_location")
     with op.batch_alter_table("usage_logs") as batch_op:
         batch_op.drop_column("data_location")
     with op.batch_alter_table("workspace_provider_policies") as batch_op:

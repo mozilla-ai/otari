@@ -17,6 +17,7 @@ from gateway.exceptions.providers_exceptions import (
     HostedProviderInvalidRegionSlugError,
     HostedProviderKeyRequiredError,
     HostedProviderLastRegionError,
+    HostedProviderNotFoundError,
     HostedProviderRegionAlreadyExistsError,
     HostedProviderRegionKeyRequiredError,
     HostedProviderRegionNotFoundError,
@@ -179,7 +180,7 @@ class HostedProviderRegions:
         config: GatewayConfig,
         regions: HostedProviderRegionRepository,
         stored: Callable[[str], Awaitable[tuple[HostedProvider, HostedSource]]],
-        lock: Callable[[HostedProvider], Awaitable[None]],
+        lock: Callable[[HostedProvider], Awaitable[bool]],
         taken: Callable[[str], Awaitable[bool]],
         validate_api_base: Callable[[str | None], Awaitable[None]],
     ) -> None:
@@ -187,7 +188,8 @@ class HostedProviderRegions:
 
         ``stored`` answers a provider's row and its merged view, refusing one
         defined in configuration; ``lock`` locks a provider's row for the rest
-        of the transaction and reads it again under the lock; ``taken`` answers whether a hosted provider is
+        of the transaction and reads it again under the lock, false when it
+        was deleted first; ``taken`` answers whether a hosted provider is
         configured under a whole name, which a region's selector must not
         shadow; ``validate_api_base`` is the SSRF gate an endpoint passes
         before it is stored.
@@ -352,7 +354,8 @@ class HostedProviderRegions:
     async def _locked(self, provider: str) -> tuple[HostedProvider, list[HostedProviderRegion]]:
         """The provider's row, locked, and its regions as they stand once it is."""
         row, _ = await self.stored(provider)
-        await self.lock(row)
+        if not await self.lock(row):
+            raise HostedProviderNotFoundError(provider)
         return row, await self.regions.list_for_provider(row.id, fresh=True)
 
     async def _insert(self, row: HostedProvider, **fields: object) -> None:

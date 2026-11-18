@@ -169,16 +169,23 @@ async def refresh_hosted_name_index(uow: UnitOfWork, config: GatewayConfig) -> N
     declared = {name for name, entry in entries.items() if entry.zero_data_retention}
     locations: dict[str, tuple[str | None, ...]] = {name: (entry.data_location,) for name, entry in entries.items()}
     parents: dict[str, str] = {}
+    providers = frozenset(entries) | frozenset(row.name for row in rows)
     for row in rows:
         if row.zero_data_retention:
             declared.add(row.name)
         else:
             declared.discard(row.name)
         own = regions.get(row.id, [])
+        # A region a provider of its whole name shadows does not serve, so it is not where data may go.
         locations[row.name] = (
-            tuple(region.data_location for region in own if region.enabled) if own else (row.data_location,)
+            tuple(
+                region.data_location
+                for region in own
+                if region.enabled and region_instance(row.name, region.slug) not in providers
+            )
+            if own
+            else (row.data_location,)
         )
-    providers = frozenset(entries) | frozenset(row.name for row in rows)
     for row in rows:
         for region in regions.get(row.id, []):
             instance = region_instance(row.name, region.slug)

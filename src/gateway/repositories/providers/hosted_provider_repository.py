@@ -138,10 +138,16 @@ class HostedProviderRepository(BaseRepository[HostedProvider, Never, Never]):
         """
         await self.db.execute(select(HostedProvider.id).where(HostedProvider.id == row_id).with_for_update())
 
-    async def lock_and_reload(self, row: HostedProvider) -> None:
-        """Lock ``row`` until the transaction ends and read it again, so what it says is what committed before."""
-        await self.lock(row.id)
+    async def lock_and_reload(self, row: HostedProvider) -> bool:
+        """Lock ``row`` until the transaction ends and read it again, so what it says is what committed before.
+
+        False when the row was deleted before the lock was taken.
+        """
+        locked = await self.db.execute(select(HostedProvider.id).where(HostedProvider.id == row.id).with_for_update())
+        if locked.scalar_one_or_none() is None:
+            return False
         await self.db.refresh(row)
+        return True
 
     async def save(self, row: HostedProvider) -> HostedProvider:
         """Flush a changed row and read back what the database filled in."""
