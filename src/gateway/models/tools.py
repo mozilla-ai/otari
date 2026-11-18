@@ -207,6 +207,9 @@ class WorkspaceMcpServer(Base):
     # publishes; null until either has happened, and cleared when the URL, the
     # token or the allow-list changes, since it described the old ones.
     health: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    # Advanced each time a manager ends the shared account, so a shared sign-in started before
+    # that cannot store its account when it finishes.
+    shared_account_generation: Mapped[int] = mapped_column(default=0, server_default=text("0"), nullable=False)
     # ``UtcDateTime`` for the same reason ``WorkspaceBudgetDefault``'s are: these
     # go over the wire and a naive SQLite round-trip would drop the offset.
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
@@ -484,6 +487,8 @@ class McpOAuthFlow(Base):
     return_to: Mapped[str | None] = mapped_column(Text, default=None)
     for_check: Mapped[bool] = mapped_column(default=False, server_default=false(), nullable=False)
     for_shared: Mapped[bool] = mapped_column(default=False, server_default=false(), nullable=False)
+    # The server's ``shared_account_generation`` a shared sign-in started at.
+    shared_account_generation: Mapped[int | None] = mapped_column(default=None)
     expires_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
 
