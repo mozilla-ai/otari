@@ -57,7 +57,9 @@ the old shape.
 - The package root of `api/deps/` carries a capped count of the definitions it
   holds. Flag a builder added there: it goes in the module of the domain whose
   work it does, which the root re-exports. The cap says nothing about which
-  module that is.
+  module that is. Flag a change that moves a builder out without lowering the
+  cap to the count that is left, because the room made is otherwise free for
+  the next builder to take.
 - A service package that is not a domain `DOMAINS.md` gives a section carries a
   capped count of imports reaching below its root. Flag a new import below the
   root of `services/tenancy/` or another such package: it has to come down, not

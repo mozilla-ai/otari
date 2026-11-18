@@ -102,9 +102,14 @@ Enforces:
 28. Composition root size: the package root of api/deps/ carries a count of the
     definitions it holds, and that count may only fall. The root is where a
     builder lands when nothing says otherwise, so it refills as fast as it is
-    emptied. This says nothing about which module a builder belongs in, which is
-    a judgement no check can make; it says only that the root is full, so the
-    next builder goes where a reader of that domain will look.
+    emptied. The count rising fails, and the count falling fails until the
+    baseline is lowered, so the room a split makes cannot be spent again. A
+    definition under a module-level if or try counts, and an unpacking
+    assignment counts each name it binds; one nested in a function or a class
+    body does not, because it binds no name the root exports. This says nothing
+    about which module a builder belongs in, which is a judgement no check can
+    make; it says only that the root is full, so the next builder goes where a
+    reader of that domain will look.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -117,7 +122,7 @@ Exit codes:
 import ast
 import re
 import sys
-from collections.abc import Callable, Container, Iterator
+from collections.abc import Callable, Container, Iterable, Iterator
 from pathlib import Path
 from typing import TypedDict
 
@@ -1427,29 +1432,53 @@ COMPOSITION_ROOT_MODULE = "gateway/api/deps/__init__.py"
 COMPOSITION_ROOT_SIZE_BASELINE = 89
 
 
+def _target_names(target: ast.expr) -> Iterator[str]:
+    """Yield each name an assignment target binds, descending through tuple, list and starred targets."""
+    if isinstance(target, ast.Name):
+        yield target.id
+    elif isinstance(target, ast.Tuple | ast.List):
+        for element in target.elts:
+            yield from _target_names(element)
+    elif isinstance(target, ast.Starred):
+        yield from _target_names(target.value)
+
+
+def _module_scope_statements(body: Iterable[ast.stmt]) -> Iterator[ast.stmt]:
+    """Yield each statement that runs at module scope, descending through control flow but not into a new scope."""
+    for node in body:
+        yield node
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            continue
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ExceptHandler | ast.match_case):
+                yield from _module_scope_statements(child.body)
+            elif isinstance(child, ast.stmt):
+                yield from _module_scope_statements([child])
+
+
 def _module_definitions(tree: ast.Module) -> int:
     """How many names a module binds at its own scope, not counting its public surface list."""
     definitions = 0
-    for node in tree.body:
+    for node in _module_scope_statements(tree.body):
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
             definitions += 1
         elif isinstance(node, ast.Assign):
-            definitions += sum(1 for target in node.targets if isinstance(target, ast.Name) and target.id != "__all__")
-        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            definitions += node.target.id != "__all__"
+            definitions += sum(1 for target in node.targets for name in _target_names(target) if name != "__all__")
+        elif isinstance(node, ast.AnnAssign):
+            definitions += sum(1 for name in _target_names(node.target) if name != "__all__")
     return definitions
 
 
 def check_composition_root_size(src_root: Path) -> list[str]:
     """Check the composition root's definition count against its baseline."""
     module = src_root / COMPOSITION_ROOT_MODULE
-    if not module.is_file():
-        return []
-    try:
-        tree = ast.parse(module.read_text(encoding="utf-8"))
-    except SyntaxError:
-        return []
-    counted = _module_definitions(tree)
+    counted = 0
+    if module.is_file():
+        try:
+            tree = ast.parse(module.read_text(encoding="utf-8"))
+        except SyntaxError:
+            return []
+        counted = _module_definitions(tree)
     if counted > COMPOSITION_ROOT_SIZE_BASELINE:
         return [
             f"{COMPOSITION_ROOT_MODULE} holds {counted} definitions, above its baseline of "

@@ -2515,7 +2515,38 @@ def test_a_definition_removed_must_be_recorded(tmp_path: Path, monkeypatch: pyte
 def test_an_annotated_alias_counts_as_a_definition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 1)
     _root_with(tmp_path, "def get_one() -> None: ...\n\n\nOneDep = Annotated[object, Depends(get_one)]\n")
-    assert len(check.check_composition_root_size(tmp_path)) == 1
+    assert check.check_composition_root_size(tmp_path) == [
+        f"{check.COMPOSITION_ROOT_MODULE} holds 2 definitions, above its baseline of 1; put the new one "
+        "in the module of the domain whose work it does, which the root re-exports"
+    ]
+
+
+def test_an_unpacking_assignment_counts_every_name_it_binds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 1)
+    _root_with(tmp_path, "def get_one() -> None: ...\n\n\nFIRST, SECOND = (1, 2)\n")
+    assert check.check_composition_root_size(tmp_path) == [
+        f"{check.COMPOSITION_ROOT_MODULE} holds 3 definitions, above its baseline of 1; put the new one "
+        "in the module of the domain whose work it does, which the root re-exports"
+    ]
+
+
+def test_a_definition_under_module_level_control_flow_counts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 1)
+    _root_with(tmp_path, "def get_one() -> None: ...\n\n\nif True:\n    def get_two() -> None: ...\n")
+    assert check.check_composition_root_size(tmp_path) == [
+        f"{check.COMPOSITION_ROOT_MODULE} holds 2 definitions, above its baseline of 1; put the new one "
+        "in the module of the domain whose work it does, which the root re-exports"
+    ]
+
+
+def test_a_composition_root_that_is_gone_must_lower_the_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "COMPOSITION_ROOT_SIZE_BASELINE", 5)
+    assert check.check_composition_root_size(tmp_path) == [
+        f"{check.COMPOSITION_ROOT_MODULE} holds 0 definitions, under its baseline of 5; lower the "
+        "baseline to that, so the room made cannot be spent again"
+    ]
 
 
 def test_the_public_surface_list_is_not_a_definition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
