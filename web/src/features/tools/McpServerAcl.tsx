@@ -27,6 +27,7 @@ import { checkedTools } from "@/features/tools/mcpServerHealth"
 import {
   isOrganizationServer,
   isSamePolicy,
+  UNCONFIRMED_SETTINGS,
 } from "@/features/tools/mcpWorkspaceView"
 import { useMcpServerCheck } from "@/features/tools/useMcpServerCheck"
 import { useKeys } from "@/shared/api/apiKeys"
@@ -39,6 +40,7 @@ import {
   useSetWorkspaceMcpServerOverride,
   useUpdateMcpServer,
   useUpdateWorkspaceMcpServerGrant,
+  useWorkspaceMcpServer,
   useWorkspaceMcpServerAccess,
   useWorkspaceMcpServerOverridePending,
 } from "@/shared/api/tools"
@@ -90,10 +92,20 @@ export function McpServerAcl({
   const setOverride = useSetWorkspaceMcpServerOverride()
   const isOrganizations = isOrganizationServer(server)
   const defaultWrite = isOrganizations ? setOverride : updateServer
-  // The workspace's settings card above writes the same override.
+  // The workspace's settings card above writes the same override, and holds
+  // it the same way: while a write or a re-read is in flight, and after a
+  // failed write whose re-read failed too.
   const isOverrideWriting =
     useWorkspaceMcpServerOverridePending(workspaceId, server.id) &&
     isOrganizations
+  const isUnconfirmed =
+    useWorkspaceMcpServer(workspaceId, server.id).isRefetchError &&
+    isOrganizations
+  const defaultHeld = isUnconfirmed
+    ? "Refresh the settings first"
+    : isOverrideWriting
+      ? "Saving another change first"
+      : ""
   const addGrants = useAddWorkspaceMcpServerGrants()
   const updateGrant = useUpdateWorkspaceMcpServerGrant()
   const removeGrant = useDeleteWorkspaceMcpServerGrant()
@@ -108,6 +120,8 @@ export function McpServerAcl({
   const [openCount, setOpenCount] = useState(0)
   const [editing, setEditing] = useState<WorkspaceMcpServerGrant>()
   const [isEditingDefault, setEditingDefault] = useState(false)
+  // The policy the default's editor opened on; see `isSamePolicy`.
+  const [openedWith, setOpenedWith] = useState<readonly string[]>([])
   const [removing, setRemoving] = useState<WorkspaceMcpServerGrant>()
   const [presetUserId, setPresetUserId] = useState("")
   const section = useRef<HTMLDivElement>(null)
@@ -190,8 +204,9 @@ export function McpServerAcl({
     setEditing(grant)
   }
   const openEditDefault = () => {
-    if (isOverrideWriting) return
+    if (defaultHeld) return
     defaultWrite.reset()
+    setOpenedWith(server.everyone_tools)
     setOpenCount((count) => count + 1)
     setEditingDefault(true)
   }
@@ -256,7 +271,7 @@ export function McpServerAcl({
             showRules={!isRefused}
             onEdit={openEdit}
             onEditDefault={openEditDefault}
-            isDefaultBusy={isOverrideWriting}
+            defaultHeld={defaultHeld}
             onRemove={(grant) => {
               removeGrant.reset()
               setRemoving(grant)
@@ -343,15 +358,18 @@ export function McpServerAcl({
           editing={{ name: "the default policy", tools: server.everyone_tools }}
           {...pickerProps}
           readTools={server.read_tools}
-          isPending={defaultWrite.isPending}
-          error={defaultWrite.error}
+          isPending={defaultWrite.isPending || isOverrideWriting}
+          error={
+            defaultWrite.error ??
+            (isUnconfirmed ? new Error(UNCONFIRMED_SETTINGS) : null)
+          }
           onSubmit={(draft) => {
             const onSuccess = () => setEditingDefault(false)
             if (isOrganizations) {
-              if (setOverride.isPending) return
+              if (defaultHeld) return
               // Unchanged: saving it would store the inherited policy as the
               // workspace's own, which would stop following the organization's.
-              if (isSamePolicy(draft.tools, server.everyone_tools)) {
+              if (isSamePolicy(draft.tools, openedWith)) {
                 onSuccess()
                 return
               }

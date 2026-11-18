@@ -121,7 +121,7 @@ class WorkspaceMcpServerOverrideRepository(BaseRepository[WorkspaceMcpServerOver
                         index_elements=[WorkspaceMcpServerOverride.workspace_id, WorkspaceMcpServerOverride.server_id]
                     )
                 )
-                override = await self._current(workspace_id, server.id)
+                override = await self.current(workspace_id, server.id)
                 if getattr(inserted, "rowcount", 0) == 1:
                     return override
                 continue
@@ -135,10 +135,10 @@ class WorkspaceMcpServerOverrideRepository(BaseRepository[WorkspaceMcpServerOver
                         .execution_options(synchronize_session=False)
                     )
                     if getattr(updated, "rowcount", 0) != 1:
-                        override = await self._current(workspace_id, server.id)
+                        override = await self.current(workspace_id, server.id)
                         continue
                 # Read back, so the caller holds what is stored, another writer's settings included.
-                return await self._current(workspace_id, server.id)
+                return await self.current(workspace_id, server.id)
             # Removed only while the settings this caller left alone are still the defaults it read.
             kept: list[ColumnElement[bool]] = [_is_default(name) for name in _DEFAULTS if name not in changed]
             removed = await self.db.execute(
@@ -149,12 +149,12 @@ class WorkspaceMcpServerOverrideRepository(BaseRepository[WorkspaceMcpServerOver
             if getattr(removed, "rowcount", 0) == 1:
                 self.db.expunge(override)
                 return None
-            override = await self._current(workspace_id, server.id)
+            override = await self.current(workspace_id, server.id)
             if override is None:
                 return None
         raise RuntimeError("the MCP server override kept changing under this write")
 
-    async def _current(self, workspace_id: uuid.UUID, server_id: uuid.UUID) -> WorkspaceMcpServerOverride | None:
+    async def current(self, workspace_id: uuid.UUID, server_id: uuid.UUID) -> WorkspaceMcpServerOverride | None:
         """The override as stored now, replacing what this session last read of it."""
         found = await self.db.execute(
             select(WorkspaceMcpServerOverride)

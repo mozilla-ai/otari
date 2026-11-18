@@ -267,8 +267,9 @@ def _is_recent(checked_at: str, interval_s: float) -> bool:
     return datetime.now(UTC) - at < timedelta(seconds=interval_s)
 
 
-# A server's throttle entry: its id and the URL a contact reached, so an edited URL starts afresh.
-_Key = tuple[uuid.UUID, str]
+# A server's throttle entry: its id, the URL a contact reached and the credential mode it used, so an edited URL
+# or a switch between personal and shared accounts starts afresh rather than folding into the old one.
+_Key = tuple[uuid.UUID, str, str | None]
 
 
 class McpServerContacts:
@@ -356,7 +357,7 @@ class McpServerContacts:
             )
 
     def _record(self, contact: McpServerContact) -> None:
-        key = (contact.server_id, contact.url)
+        key = (contact.server_id, contact.url, contact.credential_mode)
         ok = contact.failure is None
         listed = contact.listing is not None
         now = self._clock()
@@ -393,7 +394,7 @@ class McpServerContacts:
 
     async def _write(self, contact: McpServerContact, handed: tuple[CheckFailure | None, bool]) -> None:
         """Hand ``contact`` to :meth:`_store`, and set the throttle from what it decided."""
-        key = (contact.server_id, contact.url)
+        key = (contact.server_id, contact.url, contact.credential_mode)
         try:
             outcome = await self._store(contact)
         except DATABASE_ERRORS as exc:

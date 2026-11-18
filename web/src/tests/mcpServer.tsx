@@ -215,7 +215,7 @@ export function renderMcpServerPage(
     defaultOptions: { queries: { retry: false } },
   })
   const url = `/tools/mcp-servers/${serverId}${search}`
-  return render(
+  const rendered = render(
     <DeploymentProvider value={bootstrap()}>
       <QueryClientProvider client={client}>
         <SelectedWorkspaceProvider>
@@ -230,4 +230,6 @@ export function renderMcpServerPage(
       }),
     },
   )
+  // The query client too, so a test can move what the page reads while it is open.
+  return { ...rendered, client }
 }

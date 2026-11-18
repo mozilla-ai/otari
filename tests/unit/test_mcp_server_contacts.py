@@ -275,6 +275,21 @@ async def test_an_identical_contact_in_flight_is_not_handed_to_a_second_write() 
 
 
 @pytest.mark.asyncio
+async def test_a_contact_under_the_other_credential_mode_is_not_folded_into_one_in_flight() -> None:
+    """A personal contact in flight when the server switches to shared is found stale; the shared one still lands."""
+    gate = asyncio.Event()
+    recorder = _Recorder(gate=gate, interval_s=900, clock=lambda: 0.0)
+
+    recorder.reached(SERVER, URL, LISTING, credential_mode="per_user")
+    recorder.reached(SERVER, URL, LISTING, credential_mode="shared")
+    recorder.reached(SERVER, URL, LISTING, credential_mode="shared")
+    gate.set()
+    await recorder.drain()
+
+    assert [contact.credential_mode for contact in recorder.written] == ["per_user", "shared"]
+
+
+@pytest.mark.asyncio
 async def test_a_new_url_is_not_held_back_by_the_old_one_s_throttle() -> None:
     recorder = _Recorder(interval_s=900, clock=lambda: 0.0)
     moved = "https://93.184.216.35/mcp"

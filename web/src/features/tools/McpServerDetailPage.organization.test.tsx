@@ -1,8 +1,9 @@
-import { screen, waitFor, within } from "@testing-library/react"
+import { act, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { McpServerWorkspaceSettings } from "@/client"
+import { mcpServerKey, workspaceMcpScope } from "@/shared/api/mcpServerScope"
 import {
   apiKey,
   workspaceMcpServerGrant as grant,
@@ -86,9 +87,25 @@ function holdFirstOverrideWrite(): (outcome: "save" | "refuse") => void {
 }
 
 async function openPage(serverId: string) {
-  renderMcpServerPage(serverId)
+  const { client } = renderMcpServerPage(serverId)
   await screen.findByRole("heading", { level: 1, name: "hub" })
+  return client
 }
+
+/** From now on, every read of the server itself fails. */
+function failServerReads(serverId: string) {
+  const answer = vi.mocked(globalThis.fetch).getMockImplementation()
+  vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+    const isRead = (init?.method ?? "GET").toUpperCase() === "GET"
+    if (isRead && String(input).endsWith(`/mcp-servers/${serverId}`)) {
+      return Response.json({ detail: "Unavailable" }, { status: 503 })
+    }
+    return answer?.(input, init) as Promise<Response>
+  })
+}
+
+const serverKey = (serverId: string) =>
+  mcpServerKey(workspaceMcpScope(WORKSPACE), serverId)
 
 describe("McpServerDetailPage, an organization's server", () => {
   afterEach(() => {
@@ -304,6 +321,105 @@ describe("McpServerDetailPage, an organization's server", () => {
         screen.getByRole("button", { name: /Availability/ }),
       ).toHaveTextContent("Off"),
     )
+  })
+
+  it("compares the default policy with the one the editor opened on", async () => {
+    const server = organizationServer()
+    const calls = mockMcpServerApi({ server, row: asRead(server) })
+    const user = userEvent.setup()
+    const client = await openPage(server.id)
+    const moved = asRead({ ...server, everyone_tools: ["@read"] })
+    const open = async () => {
+      await user.click(
+        screen.getByRole("button", {
+          name: "Edit the default policy for this workspace",
+        }),
+      )
+      return screen.findByRole("dialog", { name: "Edit the default policy" })
+    }
+
+    // The organization's default moves while the editor is open, untouched.
+    let dialog = await open()
+    act(() => client.setQueryData(serverKey(server.id), moved))
+    await user.click(within(dialog).getByRole("button", { name: "Save rule" }))
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Edit the default policy" }),
+      ).toBeNull(),
+    )
+    expect(mcpWrites(calls)).toEqual([])
+
+    // An edit is the admin's own choice, even when it equals the moved default.
+    act(() => client.setQueryData(serverKey(server.id), asRead(server)))
+    dialog = await open()
+    act(() => client.setQueryData(serverKey(server.id), moved))
+    await user.click(
+      within(dialog).getByRole("radio", { name: "Read tools only" }),
+    )
+    await user.click(within(dialog).getByRole("button", { name: "Save rule" }))
+    await waitFor(() =>
+      expect(mcpWrites(calls)).toEqual([
+        expect.objectContaining({
+          method: "PATCH",
+          body: { everyone_tools: ["@read"] },
+        }),
+      ]),
+    )
+  })
+
+  it("holds every write of the settings after a failed write whose re-read fails too", async () => {
+    const server = organizationServer()
+    const calls = mockMcpServerApi({ server, row: asRead(server) })
+    const release = holdFirstOverrideWrite()
+    const user = userEvent.setup()
+    await openPage(server.id)
+
+    // The write fails from a dialog still open, and the read after it fails too.
+    await user.click(
+      screen.getByRole("button", {
+        name: "Edit the default policy for this workspace",
+      }),
+    )
+    const dialog = await screen.findByRole("dialog", {
+      name: "Edit the default policy",
+    })
+    await user.click(within(dialog).getByRole("radio", { name: "Deny" }))
+    await user.click(within(dialog).getByRole("button", { name: "Save rule" }))
+    failServerReads(server.id)
+    release("refuse")
+    expect(await within(dialog).findByText("Write refused")).toBeVisible()
+    await waitFor(() =>
+      expect(screen.getByText(/could not be read again/)).toBeInTheDocument(),
+    )
+
+    // Saving again from the open dialog sends nothing: the refused write is the only one.
+    await user.click(within(dialog).getByRole("button", { name: "Save rule" }))
+    const sent = vi
+      .mocked(globalThis.fetch)
+      .mock.calls.filter(
+        ([input, init]) =>
+          String(input).endsWith("/override") && init?.method === "PATCH",
+      )
+    expect(sent).toHaveLength(1)
+    expect(mcpWrites(calls)).toEqual([])
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }))
+    await user.click(await screen.findByRole("button", { name: "Discard" }))
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Edit the default policy" }),
+      ).toBeNull(),
+    )
+
+    // The settings card and the access rules both wait for a refresh.
+    expect(
+      screen.getByRole("button", {
+        name: "Edit the default policy for this workspace",
+      }),
+    ).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeVisible()
+    const held = await getRowMenuItem(user, /^Edit…/)
+    expect(held).toHaveAttribute("aria-disabled", "true")
+    expect(held).toHaveTextContent("Refresh the settings first")
   })
 
   it("clears the workspace's own settings back to the organization's", async () => {

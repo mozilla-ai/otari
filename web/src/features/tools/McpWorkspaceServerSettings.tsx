@@ -18,6 +18,7 @@ import {
   isSamePolicy,
   organizationLimitLabel,
   organizationOffReason,
+  UNCONFIRMED_SETTINGS,
   workspaceAvailability,
 } from "@/features/tools/mcpWorkspaceView"
 import {
@@ -50,6 +51,9 @@ export function McpWorkspaceServerSettings({
   // Bumped on each open and used as the dialog's key, so a draft never
   // survives into the next one.
   const [openCount, setOpenCount] = useState(0)
+  // The policy the editor opened on: a draft left as it was saves nothing,
+  // whatever a refetch moved the live value to meanwhile.
+  const [openedWith, setOpenedWith] = useState<readonly string[]>([])
   const own = server.in_workspace
   const ids = { workspaceId, serverId: server.id }
   const limit = organizationLimitLabel(own?.organization_tools)
@@ -96,8 +100,7 @@ export function McpWorkspaceServerSettings({
           {isUnconfirmed ? (
             <InfoBanner>
               <span className="flex flex-wrap items-center gap-3">
-                These settings could not be read again, so they may not be what
-                is saved.
+                {UNCONFIRMED_SETTINGS}
                 <Button
                   onPress={() => void read.refetch()}
                   className="min-h-11 md:min-h-0"
@@ -126,6 +129,7 @@ export function McpWorkspaceServerSettings({
               onPress={() => {
                 if (isHeld) return
                 set.reset()
+                setOpenedWith(defaultTools)
                 setOpenCount((count) => count + 1)
                 setEditingDefault(true)
               }}
@@ -169,13 +173,16 @@ export function McpWorkspaceServerSettings({
           descriptions={picker.descriptions}
           isKnown={picker.isKnown}
           readTools={server.read_tools}
-          isPending={set.isPending}
-          error={set.error}
+          isPending={set.isPending || isWriting}
+          error={
+            set.error ??
+            (isUnconfirmed ? new Error(UNCONFIRMED_SETTINGS) : null)
+          }
           onSubmit={(draft) => {
-            if (set.isPending) return
+            if (isHeld) return
             // Unchanged: saving it would store the inherited policy as the
             // workspace's own, which would stop following the organization's.
-            if (isSamePolicy(draft.tools, defaultTools)) {
+            if (isSamePolicy(draft.tools, openedWith)) {
               setEditingDefault(false)
               return
             }
