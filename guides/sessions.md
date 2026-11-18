@@ -14,6 +14,9 @@ it serves, so you can see what an agent did, not only what one call did.
 
    ![A session open in its side panel, with the agent's turn and its search_docs tool call.](assets/screenshots/sessions-panel.png)
 
+Where Otari has a logo for the agent that ran a session, it shows it beside the
+session's name, in the list and at the top of its panel.
+
 The tab shares the Overview's time range and its user, API key, model and status
 filters. A session opens on **At a glance**, which splits its time and cost, and
 shows what filled the model's context window. Pick a span to see its details, or

@@ -224,11 +224,75 @@ Adding a provider offers every model its key lists:
 Refreshing a provider's models:
 
 - moves an unchanged seeded rate to the current default, and leaves an
-  operator-set rate alone
+  operator-set rate alone (to put one back on the default, see
+  [Going back to the default price](#going-back-to-the-default-price))
 - never switches on a model the operator switched off
 - keeps on a model switched on without a price on purpose (one a moved or
   copied provider lists, one an operator switched on unpriced, and every model
   of a provider that serves unlisted models)
+
+### Vendors
+
+A provider that routes to others (Together, OpenRouter, otari.ai) serves models
+from many vendors. Each model on the roster is listed under its vendor, taken
+from, in order:
+
+1. the maker models.dev names for the model
+2. the part of the model's id before `/` (`black-forest-labs` for
+   `black-forest-labs/FLUX.1-schnell`)
+3. the vendor whose own provider this is (OpenAI for `openai`)
+
+A model none of these names is listed under **Other**.
+
+Each vendor has a switch of its own, per hosted provider:
+
+- Off withholds every model of that vendor on that provider, at dispatch
+  (`424`) and in the catalog, including models a later refresh offers.
+- Each model keeps its own switch, which applies again once the vendor is
+  switched back on.
+- A model's price can still be set while its vendor is off.
+
+Through the API:
+
+| Route | Does |
+| --- | --- |
+| `GET /api/v1/hosted-providers/{provider}/models` | Lists each model's `vendor`, and in `vendors` counts each vendor's models across the whole provider with the vendor's switch. Takes `vendor` to list one vendor's models; `search` matches a model's name or its vendor. |
+| `PATCH /api/v1/hosted-providers/{provider}/vendors` | Switches one vendor on or off: `{"vendor": "Alibaba", "enabled": false}`. |
+| `POST /api/v1/hosted-providers/{provider}/models/switch` | Sets every model's own switch for one vendor at once. Switching on serves the models that have a price and leaves the rest off, as it does a model the provider refused to serve (`skipped_unavailable`); `only_unpriced` with switching off withholds only the models served without a price. |
+
+A vendor switched off is stored under its name. If no offered model goes by
+that name any more (models.dev renamed the vendor, or its models were
+removed), the vendor is still listed, with no models, so it can be switched
+back on.
+
+### Going back to the default price
+
+A rate an operator set stays until someone changes it, so a model priced by
+hand while models.dev had no price for it keeps that price after models.dev
+lists one. To put it back on the default:
+
+- The model list shows the default beside an operator's rate wherever the two
+  differ (`default_rates`), and each vendor counts those models
+  (`custom_differs`).
+- `POST /api/v1/hosted-providers/{provider}/models/reset-prices` puts the
+  models named in `models`, or every operator-priced model (of one `vendor`,
+  when given), back on the default. With `dry_run` it returns what it would
+  change and writes nothing.
+
+The default is the models.dev rate, or for a provider of the `otari`
+implementation the price its listing names (see
+[Connecting otari.ai](#connecting-otariai)). A reset stores it as a new
+version, so later refreshes keep it current and requests already billed keep
+the cost they were billed at. A model the default does not price keeps its
+rate and is listed in `skipped_no_default`. Two kinds of rate are never reset:
+one the `pricing:` block of `config.yml` stored, since the next start writes it
+again, and a tiered rate, which a default would flatten. For an `otari`
+provider, the reset asks the provider for its listing, so the default is the
+price it lists, never the models.dev estimate: a model the listing does not
+price, or every model while the listing cannot be read, keeps its rate. Its
+model list does not show that default beside each rate; only the reset's
+preview does. With `default_pricing` off, only an
+`otari` provider has a default to go back to.
 
 ### Workspace access
 
@@ -453,48 +517,31 @@ steps of moving a deployment, see [Upgrading](#upgrading).
 ## The Hosted providers page
 
 The Hosted providers page is in the deployment view, opened from the account
-menu, and is listed only for a deployment operator.
+menu, and is listed only for a deployment operator. It lists the providers;
+each provider's settings and models are on a page of its own.
 
+### The list
+
+- Each row shows the provider, its **Status**, its **Models** ("12 of 18
+  serving", with a badge for vendors switched off and models without a price)
+  and its **Serving** switch, which stops the provider without opening it.
+  Select a provider's name to open its page.
 - **Adding a provider** takes an optional name, which defaults to its
   implementation. The key is optional for a provider that needs none and for
   one pointed at an endpoint of its own. Adding is disabled, with a banner
   saying why, while the server has no `OTARI_SECRET_KEY`. Adding a provider of
   the same name as a `config.yml` one overrides it, which the form warns about.
-- **Test connection**, in the add and edit dialogs, asks the provider what it
-  lists on the dialog's values without saving them, the stored key standing in
-  for a blank key box. **Test** on a provider's row asks the same of what it
-  stores.
-- **Serve models not on its list**, in both dialogs, sets
-  `serves_unlisted_models`.
-- **Zero data retention**, in both dialogs, sets `zero_data_retention`, and a
-  provider declared so carries a badge saying it. The same box is on each
-  key's dialog on the organization's Providers page. See
-  [Zero data retention](#zero-data-retention).
-- **Models** carry a serving switch and a price, set in any unit on
-  [Entering a rate](#entering-a-rate) (a per-second video price
-  goes through `POST /api/v1/pricing` instead); an unpriced model arrives
-  switched off. Tabs show one kind of model at a time (the kind comes from
-  models.dev; `GET /api/v1/hosted-providers/{provider}/models` takes it as
-  `type`), and the search box beside them finds models by name (`search`).
-  See [Who is shown which models](https://docs.otari.ai/reference/gateway/models#who-is-shown-which-models).
-- **Refresh models** asks one provider again. **Update catalog** fetches the
-  latest models.dev prices and every provider's listing, and shows the price
-  changes and new models before applying them (see
-  [Keeping the defaults current](configuration.md#keeping-the-defaults-current)).
+  Once added, the provider's page opens.
+- **Update catalog** fetches the latest models.dev prices and every provider's
+  listing, and shows the price changes and new models before applying them
+  (see [Keeping the defaults current](configuration.md#keeping-the-defaults-current)).
   Its optional cleanup removes priced models nothing serves and the model
   lists of providers no longer configured, listing them first.
-- A provider kept to one organization shows which. That restriction is set
-  through `/api/v1/hosted-providers`.
-- The **Countries** column shows the countries a provider serves: two-letter
-  codes, typed in the dialogs or loaded from a JSON file (a list, or one under
-  `supported_countries`); blank serves every country (see
-  [Supported countries](configuration.md#supported-countries)).
-- A provider's name opens Models filtered to it. Above the table, a summary
-  counts the providers reachable, with **Re-check all** to ask them again.
+- Above the table, a summary counts the providers reachable, with
+  **Re-check all** to ask them again.
 - The table also lists the `providers:` instances of `config.yml`, marked
-  config.yml and read-only, with their reachability. A `hosted_providers:` entry
-  carries a `config.yml` badge and cannot be edited, switched or removed here,
-  while its models can.
+  config.yml and read-only, with their reachability. They have no page of
+  their own.
 - With no provider yet, the page walks through adding the first one, and offers
   to enable default pricing when pricing is required and nothing sets it.
 - **Connect otari.ai** is offered beside adding a provider, on the first-run
@@ -503,6 +550,57 @@ menu, and is listed only for a deployment operator.
 - Providers that could not be moved from the retired Deployment providers page
   are listed in a banner with the reason; see
   [From the Deployment providers page](#from-the-deployment-providers-page).
+
+### A provider's page
+
+- The header carries the provider's **Serving** switch, **Test**, which asks
+  the provider what it lists on what it stores, **Edit** and **Remove**.
+- **Test connection**, in the add and edit dialogs, asks the provider what it
+  lists on the dialog's values without saving them, the stored key standing in
+  for a blank key box.
+- **Serve models not on its list**, in both dialogs, sets
+  `serves_unlisted_models`.
+- **Zero data retention**, in both dialogs, sets `zero_data_retention`. The
+  same box is on each key's dialog on the organization's Providers page. See
+  [Zero data retention](#zero-data-retention).
+- Below the header, the provider's settings: **API key**, **Endpoint**,
+  **Serves** (every organization, or the one it is kept to, which is set
+  through `/api/v1/hosted-providers`), **Countries** (two-letter codes, typed
+  in the dialogs or loaded from a JSON file, a list or one under
+  `supported_countries`; blank serves every country, see
+  [Supported countries](configuration.md#supported-countries)), **Zero data
+  retention** and **Models not on its list**.
+- A `hosted_providers:` entry carries a `config.yml` badge, and its settings
+  cannot be edited, switched or removed here, while its models can.
+
+**Models** are listed under their vendors (see [Vendors](#vendors)). A summary
+counts the models, vendors, models serving, models without a price, operator
+prices that differ from the default, and vendors switched off. Each vendor's
+row shows how many of its models it serves, and:
+
+- its own switch, **Serve X models**, which withholds every model of the
+  vendor while keeping each model's own switch
+- a menu with **Serve all models**, **Withhold all models**, **Withhold
+  unpriced models** and **Reset custom prices to default…**
+
+Open a vendor to see its models, each with a serving switch and a price, set
+in any unit on [Entering a rate](#entering-a-rate) with **Edit price** (a
+per-second video price goes through `POST /api/v1/pricing` instead); an
+unpriced model arrives switched off. A provider with one vendor shows that
+vendor already open. Tabs show one kind of model at a time (the kind
+comes from models.dev; `GET /api/v1/hosted-providers/{provider}/models` takes
+it as `type`), and the search box finds models by name or vendor (`search`).
+See [Who is shown which models](https://docs.otari.ai/reference/gateway/models#who-is-shown-which-models).
+
+Where an operator's price differs from the default, the default is shown under
+the model's rate, and **Use default price** puts the model back on it. **Sync
+prices…** lists every such model with both prices, ticked, and the models
+whose price already matches the default, unticked; **Use default price for N**
+resets the ticked ones. See
+[Going back to the default price](#going-back-to-the-default-price).
+
+**Refresh models** asks the provider again, and **Add model** offers a model
+it does not list.
 
 ## Deployment-paid credentials
 
