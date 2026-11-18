@@ -475,7 +475,7 @@ def _response(output: list[Any]) -> Response:
         tools=[],
         usage=ResponseUsage(
             input_tokens=1,
-            input_tokens_details=InputTokensDetails(cached_tokens=0),
+            input_tokens_details=InputTokensDetails(cached_tokens=0, cache_write_tokens=0),
             output_tokens=1,
             output_tokens_details=OutputTokensDetails(reasoning_tokens=0),
             total_tokens=2,
@@ -542,7 +542,6 @@ async def test_responses_stream_runs_every_backend_and_announces_the_builtins(mo
                 type="response.function_call_arguments.done",
                 item_id=f"fc_{index}",
                 output_index=index,
-                name=name,
                 arguments=item.arguments,
                 sequence_number=0,
             ),

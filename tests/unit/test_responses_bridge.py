@@ -918,3 +918,25 @@ async def test_otari_provider_stream_of_raw_event_dicts_is_typed() -> None:
     assert events[-1].response.usage.input_tokens == 11
     assert all(_ADAPTER.format_chunk(event).startswith(f"event: {event.type}\n") for event in events)
     assert closed
+
+
+@pytest.mark.asyncio
+async def test_otari_provider_usage_without_cache_writes_is_typed() -> None:
+    """An Otari on an older openai SDK reports usage without ``cache_write_tokens``, which reads as none."""
+    bridged = await _stream({}, [_chunk({"content": "Hi"}, finish_reason="stop"), _chunk(None, usage=_USAGE)])
+    raw = [event.model_dump(mode="json", exclude_none=True) for event in bridged]
+    del raw[-1]["response"]["usage"]["input_tokens_details"]["cache_write_tokens"]
+
+    async def raw_events() -> AsyncIterator[dict[str, Any]]:
+        for event in raw:
+            yield event
+
+    async def native(**_: Any) -> Any:
+        return raw_events()
+
+    stream = await call_responses(
+        native, {"provider": LLMProvider.OTARI, "model": "deepinfra:m", "input_data": "hi", "stream": True}
+    )
+    events = [event async for event in stream]
+
+    assert events[-1].response.usage.input_tokens_details.cache_write_tokens == 0

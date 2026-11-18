@@ -1,0 +1,55 @@
+{
+  "status": 200,
+  "body": {
+    "results": {
+      "web": [
+        {
+          "url": "https://blog.python.org/2026/10/python-3150-final-is-here/",
+          "contents": {
+            "highlights": [
+              "# Python 3.15.0 (final) is here!\n\nHugo van Kemenade/October 9, 2026\n\nreleases",
+              "## Python 3.15.0 is now available\n\n## This is the stable release of Python 3.15.0\n\nPython 3.15.0 is the newest major release of the Python programming language, and it contains many new features and optimisations compared to Python 3.14, in 5,643 commits from 1,012 contributors.",
+              "## Major new features of the 3.15 series, compared to 3.14\nSome of the major new features and changes in Python 3.15 are:",
+              "### Interpreter improvements\n- PEP 829: Package startup configuration files\n- The experimental JIT compiler has been significantly upgraded, with 7-8% geometric mean performance improvement on x86-64 Linux over the standard interpreter, and 11-12% speedup on AArch64 macOS over the tail-calling interpreter\n- Improved error messages",
+              "experimental JIT compiler Improved error messages More color PEP 803, 820, 793 use the tail-calling interpreter What’s new in Python 3.15 Online documentation\n\nRepositories\n\nGitHub Sponsors\n\npy-release\n\npython.org/downloads/release/python-3150/\n\ngh-issue\n\n#158053"
+            ]
+          },
+          "title": "Python 3.15.0 (final) is here!",
+          "description": "A brand new Python here for you to enjoy!",
+          "thumbnail_url": "https://blog.python.org/og/python-3150-final-is-here.png",
+          "original_thumbnail_url": "https://blog.python.org/og/python-3150-final-is-here.png",
+          "page_age": "2026-10-09T00:00:00",
+          "favicon_url": "https://you.com/favicon?domain=blog.python.org&size=128"
+        },
+        {
+          "url": "https://www.liquidweb.com/blog/latest-python-version/",
+          "contents": {
+            "highlights": [
+              "Python 3.14 is the latest release, packed with features like free-threaded mode, JIT compiler, lazy annotations, and a modern colorized REPL.",
+              "# The latest Python version: Python 3.14\nPython continues to evolve, bringing powerful new features, enhanced security, and performance improvements with every release.\n\nThe latest major version, **Python 3.14** was officially released on October 7, 2025.\n\nLet’s explore the key features of Python’s current version, how to download and install it, and what this release means for developers.",
+              "## What’s the latest Python version?\n**The latest stable version of Python is 3.14**\n\nPython 3.14 was released on October 7, 2025 with several improvements:",
+              "## Key features of the latest Python release\nPython 3.14 introduces several enhancements that developers can leverage.",
+              "- **Support for subinterpreters** allows isolated execution within one process, offering new concurrency models.\n- **Template string literals** offer inline variable interpolation with ${var} syntax for cleaner f-strings and templating.\n- **Safe external debugger interface** provides a secure, stable API for debuggers and profilers.",
+              "## Python version history\nPython version · Release date · Key features\n3\\.14.0 · October 7, 2025 · Deferred annotation, multiple interpreters, template string literals, Zstandard compression, colorized REPL and tracebacks.\n3\\.13.3 · April 8, 2025 · New interactive shell, free-threading, JIT preview, mimalloc, platform upgrades",
+              "Python 3.13.2 · February 4, 2025 · Free-threaded mode (experimental), Just-In-Time (JIT) compiler, enhanced interactive interpreter, colorized tracebacks\nPython 3.12 · October 2, 2023 · Old module deprecations, performance improvements, improved f-string features\nPython 3.11 · October 24, 2022 · Exception groups, better error messages, 10-60% performance boost",
+              "## Frequently asked questions\n### Is Python 3.14 stable?\nYes, Python 3.14 is the latest stable release. We recommend testing this version in a staging or development environment before deploying in order to identify any refactoring required.",
+              "{\"headline\":\"The latest Python version: Python 3.14\"}",
+              "{\"itemListElement\":[{\"name\":\"The latest Python version: Python 3.14\"}]}"
+            ]
+          },
+          "title": "Latest Python Version (2025)",
+          "description": "Python 3.14 is the latest release, packed with features like free-threaded mode, JIT compiler, lazy annotations, and a modern colorized REPL. Learn more about what’s new and why upgrading matters.",
+          "thumbnail_url": "https://res.cloudinary.com/lwcom/images/f_auto,q_auto/v1776926892/prod/python-logo-3/python-logo-3.png?_i=AA",
+          "original_thumbnail_url": "https://res.cloudinary.com/lwcom/images/f_auto,q_auto/v1776926892/prod/python-logo-3/python-logo-3.png?_i=AA",
+          "page_age": "2026-01-14T21:46:37",
+          "favicon_url": "https://you.com/favicon?domain=www.liquidweb.com&size=128"
+        }
+      ]
+    },
+    "metadata": {
+      "query": "latest stable python release",
+      "search_uuid": "442e3980-28b7-4f36-a1a5-3da43e98eb7d",
+      "latency": 0.5571257409173995
+    }
+  }
+}
