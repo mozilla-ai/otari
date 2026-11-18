@@ -22,7 +22,7 @@ from gateway.models.tenancy import (
 )
 from gateway.models.users import User as BillingUser
 from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository, WorkspaceMemberRepository
-from gateway.services.organizations import MembershipAdmission
+from gateway.services.organizations import AdmittedMember, MembershipAdmission
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.membership_listener import MembershipListener
 
@@ -43,7 +43,7 @@ class _RecordingListener:
 
     def __init__(self, inner: MembershipListener) -> None:
         self._inner = inner
-        self.changed: list[tuple[uuid.UUID, int]] = []
+        self.changed: list[tuple[uuid.UUID, str, int]] = []
         self.role_changed: list[tuple[uuid.UUID, str]] = []
 
     async def member_joined(self, member: WorkspaceMember) -> None:
@@ -59,7 +59,7 @@ class _RecordingListener:
     async def organization_member_changed(
         self, membership: OrganizationMember, workspace_ids: Sequence[uuid.UUID]
     ) -> None:
-        self.changed.append((membership.id, len(workspace_ids)))
+        self.changed.append((membership.id, membership.role, len(workspace_ids)))
         await self._inner.organization_member_changed(membership, workspace_ids)
 
     async def workspace_deleted(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
@@ -87,9 +87,8 @@ async def test_admitting_a_new_member_gives_them_the_ceiling_a_workspace_policy_
     elsewhere = await create_organization(async_db, slug="admit-ceiling-other")
     owner = await create_member(async_db, organization, role="owner", full_name="Owner")
     workspace = await create_workspace(async_db, organization, name="Engineering", owner=owner)
-    async_db.add(
-        WorkspaceBudgetDefault(workspace_id=workspace.id, budget_id=await create_budget(async_db, max_budget=25.0))
-    )
+    budget_id = await create_budget(async_db, max_budget=25.0)
+    async_db.add(WorkspaceBudgetDefault(workspace_id=workspace.id, budget_id=budget_id))
     await async_db.flush()
     invitee = await _invitee(async_db, active_organization_id=elsewhere.id, email="ada@example.com")
     service = OrganizationService(async_db, **writes)
@@ -105,7 +104,7 @@ async def test_admitting_a_new_member_gives_them_the_ceiling_a_workspace_policy_
     assert admitted.created is True
     membership = await WorkspaceMemberRepository(async_db).get_by_workspace_and_user(workspace.id, invitee.id)
     assert membership is not None
-    assert await _ceilings_for(async_db, membership.id) != []
+    assert await _ceilings_for(async_db, membership.id) == [budget_id]
 
 
 async def test_admitting_a_suspended_member_revives_them_with_the_offered_role(async_db: AsyncSession) -> None:
@@ -210,8 +209,8 @@ async def test_admitting_an_active_member_announces_the_role_it_applied(async_db
         admitted = await service.admit(organization_id=organization.id, role="viewer", user_id=active.id, workspaces=[])
 
     assert admitted.created is False
-    assert [member_id for member_id, _ in listener.changed] == [admitted.member_id]
-    assert listener.changed[0][1] >= 1
+    assert [(member_id, role) for member_id, role, _ in listener.changed] == [(admitted.member_id, "viewer")]
+    assert listener.changed[0][2] >= 1
 
 
 async def test_admitting_announces_a_workspace_role_the_invitation_changes(async_db: AsyncSession) -> None:
@@ -269,22 +268,27 @@ async def test_a_refused_offer_leaves_no_membership_behind(async_db: AsyncSessio
     owner = await create_member(async_db, organization, role="owner", full_name="Only Owner")
     workspace = await create_workspace(async_db, organization, name="Engineering", owner=owner)
     invitee = await _invitee(async_db, active_organization_id=elsewhere.id, email="rolled@example.com")
+    # Committed before the block under test, so the rollback cannot take the fixtures with it.
+    await async_db.commit()
+    organization_id, owner_id, invitee_id, workspace_id = organization.id, owner.id, invitee.id, workspace.id
     service = OrganizationService(async_db, **writes)
 
+    admitted: AdmittedMember | None = None
     with pytest.raises(MembershipUpdateError):
         async with writes["uow"]:
-            await service.admit(
-                organization_id=organization.id,
+            admitted = await service.admit(
+                organization_id=organization_id,
                 role="member",
-                user_id=invitee.id,
-                workspaces=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role="member")],
+                user_id=invitee_id,
+                workspaces=[WorkspaceAssignmentRequest(workspace_id=workspace_id, role="member")],
             )
             # The refusal below is what the test is about: it must take the membership above with it.
-            await service.admit(organization_id=organization.id, role="member", user_id=owner.id, workspaces=[])
+            await service.admit(organization_id=organization_id, role="member", user_id=owner_id, workspaces=[])
 
-    assert (
-        await OrganizationMemberRepository(async_db).get_by_organization_and_user(organization.id, invitee.id) is None
-    )
+    assert admitted is not None, "the refusal under test must follow a membership that was created"
+    members = OrganizationMemberRepository(async_db)
+    assert await members.get_by_organization_and_user(organization_id, invitee_id) is None
+    assert await members.get_by_organization_and_user(organization_id, owner_id) is not None
 
 
 # The service is the collaborator acceptance holds, checked by mypy rather than by a call.
