@@ -433,13 +433,13 @@ default off. Highlights share 8,192 tokens across the results, so few results co
 ```python
 await engine.search(query, extraction={"extraction_mode": "highlights", "highlights": {"total_max_tokens": 1024}})
 await engine.search(query, extraction={"extraction_mode": "full_page"})  # Markdown, billed per page crawled live
-await engine.search(query, extraction=None)  # each result's description as its snippet
+await engine.search(query, extraction=None)  # each result's joined snippets, or its description
 ```
 
 | `SearchHit` | From You.com |
 |---|---|
 | `url`, `title` | `url`, `title`; a result without an http or https `url` is dropped |
-| `snippet` | `contents.highlights`, joined; `description` when there are none |
+| `snippet` | `contents.highlights`, joined; then joined `snippets`, then `description` when the preceding fields have no nonblank text |
 | `text` | `contents.markdown`, only when `extraction_mode` is `full_page`; `markdown` is added to the `full_page.extraction_formats` array by default and an HTML copy, when listed there, is available in `raw` |
 | `published` | `page_age` when it is ISO 8601, taken as UTC; another form stays in `raw` |
 
@@ -447,14 +447,15 @@ You.com reports no cost. `max_results` becomes `count`, 10 when unset, at most 1
 under highlights. `time_range` becomes `freshness` and wins over that option. The other native
 options are `offset`, `country`, `safesearch`, `include_domains`, `exclude_domains`,
 `boost_domains`, `strict_operators` and `crawl_timeout`; `--describe youdotcom` lists them.
-Knowledge results and the snippets of a search without highlights stay in `raw`.
+Knowledge results stay in `raw`.
 
 Any status from 400 raises `ProviderError`: `unauthorized`, `forbidden` (a refused key) and
 `invalid_request` by status, since those bodies are not a code. A 402 takes the code in `error`,
 else `payment_required`. Any other status is `http_error`.
 
-`results` must be an object, and `web` a list when present. Each item read must have `url` and
-`page_age` as a string or null, `title` and `description` as strings, and, when present,
+`results` must be an object when present; without it there are no hits. `web` must be a list
+when present. Each item read must have `url` and `page_age` as a string or null, `title` and
+`description` as strings, `snippets` as a list of strings when present, and, when present,
 `contents` whose `highlights` is a list of strings and whose `markdown` is a string. A `page_age`
 that looks like ISO 8601 but does not parse fails too. Anything else raises `ProviderError` with
 the tag `unexpected_response`. Unread fields are ignored.

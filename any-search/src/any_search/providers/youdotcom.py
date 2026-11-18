@@ -6,7 +6,8 @@ native options passed. ``None`` is not sent, which turns those defaults off.
 ``count`` is ``max_results`` (10 when unset), at most 100, and at most 50 under
 highlights. ``time_range`` becomes ``freshness`` and wins over that option.
 
-Joined highlights are the snippet, or ``description`` when there are none.
+Joined highlights are the snippet, falling back to joined ``snippets``, then
+``description`` when neither has nonblank text.
 ``contents.markdown``, only under ``full_page``, is the text, so ``markdown`` is
 added to ``full_page.extraction_formats`` when they lack it. ``page_age`` is
 the date when it parses as ISO 8601, taken as UTC; another form stays in
@@ -17,9 +18,11 @@ the date when it parses as ISO 8601, taken as UTC; another form stays in
 A 402 is tagged from its ``error``, else ``payment_required``. Any other status
 is ``http_error``.
 
-``results`` must be an object, and ``web`` a list when present. Each item read
+``results`` must be an object when present; without it there are no hits.
+``web`` must be a list when present. Each item read
 must have ``url`` and ``page_age`` as a string or null, ``title`` and
-``description`` as strings, and, when present, ``contents`` as an object whose
+``description`` as strings, ``snippets`` as a list of strings when present,
+and, when present, ``contents`` as an object whose
 ``highlights`` is a list of strings and whose ``markdown`` is a string. A
 ``page_age`` that looks like ISO 8601 but does not parse is refused. A result
 without an http or https URL is dropped. Anything else raises
@@ -221,7 +224,7 @@ class YouDotComProvider(AnySearch):
         endpoint = f"{(self._api_base or '').rstrip('/')}/v1/search"
         response = await self._http.request("POST", endpoint, json=payload, headers={"X-API-Key": self._api_key or ""})
         body = _body(response)
-        results = body.get("results")
+        results = body.get("results", {})
         if not isinstance(results, dict):
             raise _unexpected(response)
         web = results.get("web", [])
@@ -291,10 +294,17 @@ def _hit(item: Any, response: httpx.Response) -> SearchHit | None:
         raise _unexpected(response)
     if not isinstance(markdown, str):
         raise _unexpected(response)
+    snippets = item.get("snippets", [])
+    if not isinstance(snippets, list) or not all(isinstance(part, str) for part in snippets):
+        raise _unexpected(response)
     published = _published(item.get("page_age"), response)
     if url is None or not is_web_url(url):
         return None
-    snippet = " ".join(part.strip() for part in highlights if part.strip()) or description
+    snippet = (
+        " ".join(part.strip() for part in highlights if part.strip())
+        or " ".join(part.strip() for part in snippets if part.strip())
+        or description
+    )
     return SearchHit(url=url, title=title, snippet=snippet, text=markdown or None, published=published, raw=item)
 
 

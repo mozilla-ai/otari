@@ -462,7 +462,7 @@ The first provider that sends defaults on options that have a list of values.
 - A mode can lower the result cap. Under highlights a `count` above 50 is a 422, while one above
   100 is answered with no results, so the adapter caps the count by mode.
 - An empty answer can drop the list rather than empty it: a search with no results answered
-  `results: {}`, with no `web`. `web` is optional, `results` required.
+  `results: {}`, with no `web`. Both `results` and `web` are optional in the API contract.
 - You.com accepts values it does not apply: a `freshness` of `decade`, a `country` or `language`
   of `XX`, and an `offset` of 10, past the documented 9, are each answered 200.
 - Fixture recipes: `normal` with `--max-results 2` and `extraction` set to

@@ -202,7 +202,7 @@ async def test_reads_the_recorded_answer() -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_full_page_is_the_text_and_the_description_the_snippet_without_highlights() -> None:
+async def test_the_full_page_is_the_text_and_snippets_precede_the_description_without_highlights() -> None:
     without_contents = _item("plain", snippets=["kept in raw"])
     del without_contents["contents"]
     body = {
@@ -218,7 +218,32 @@ async def test_the_full_page_is_the_text_and_the_description_the_snippet_without
     page, blank, plain = result.hits
     assert (page.snippet, page.text) == ("about PAGE " + SENTINEL, "# The page")
     assert (blank.snippet, blank.text) == ("about BLANK " + SENTINEL, None)
-    assert (plain.snippet, plain.raw["snippets"]) == ("about PLAIN " + SENTINEL, ["kept in raw"])
+    assert (plain.snippet, plain.raw["snippets"]) == ("kept in raw", ["kept in raw"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("fields", "expected"),
+    [
+        ({"snippets": [" first ", "", " \n", "second "]}, "first second"),
+        ({"snippets": ["answer"], "description": ""}, "answer"),
+        ({"snippets": ["answer"], "description": "description"}, "answer"),
+        ({"contents": {"highlights": [" ", ""]}, "snippets": ["answer"]}, "answer"),
+        ({"contents": {"highlights": ["highlight"]}, "snippets": ["answer"]}, "highlight"),
+        ({"snippets": ["", " "], "description": "description"}, "description"),
+        ({"snippets": []}, ""),
+    ],
+)
+@pytest.mark.parametrize("extraction", [None, {"extraction_mode": "full_page"}])
+async def test_snippet_fallback_preserves_query_relevant_text(
+    fields: dict[str, Any], expected: str, extraction: dict[str, str] | None
+) -> None:
+    item = {"url": "https://example.com/", **fields}
+    body = {"results": {"web": [item]}}
+    result, _ = await _search(httpx.Response(200, json=body), extraction=extraction)
+    [hit] = result.hits
+    assert hit.snippet == expected
+    assert hit.raw == item
 
 
 @pytest.mark.asyncio
@@ -270,11 +295,19 @@ async def test_a_page_age_may_be_absent_null_zoned_or_in_another_form() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "body", [_recorded("empty").json(), {"results": {"web": []}}, {"results": {"news": [_item("news")]}}]
+    "body",
+    [
+        _recorded("empty").json(),
+        {"results": {"web": []}},
+        {"results": {"news": [_item("news")]}},
+        {},
+        {"metadata": {"query": QUERY}},
+    ],
 )
 async def test_an_empty_answer_has_no_hits_and_no_error(body: dict[str, Any]) -> None:
     result, _ = await _search(httpx.Response(200, json=body))
     assert (result.hits, result.error) == ([], None)
+    assert result.raw == body
 
 
 @pytest.mark.asyncio
@@ -359,7 +392,6 @@ ITEM = ("results", "web", 0)
 @pytest.mark.parametrize(
     "change",
     [
-        pytest.param(_without("results"), id="results-missing"),
         pytest.param(_setting([], "results"), id="results-not-an-object"),
         pytest.param(_setting(None, "results"), id="results-null"),
         pytest.param(_setting({}, "results", "web"), id="web-not-a-list"),
@@ -368,6 +400,9 @@ ITEM = ("results", "web", 0)
         pytest.param(_setting(7, *ITEM, "url"), id="url-not-a-string"),
         pytest.param(_setting(None, *ITEM, "title"), id="title-null"),
         pytest.param(_setting(["text"], *ITEM, "description"), id="description-not-a-string"),
+        pytest.param(_setting(None, *ITEM, "snippets"), id="snippets-null"),
+        pytest.param(_setting("text", *ITEM, "snippets"), id="snippets-not-a-list"),
+        pytest.param(_setting([7], *ITEM, "snippets"), id="snippet-not-a-string"),
         pytest.param(_setting(None, *ITEM, "contents"), id="contents-null"),
         pytest.param(_setting("text", *ITEM, "contents"), id="contents-not-an-object"),
         pytest.param(_setting("text", *ITEM, "contents", "highlights"), id="highlights-not-a-list"),
