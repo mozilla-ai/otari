@@ -62,6 +62,9 @@ EXPECTED: dict[str, Expected] = {
     "synthetic": Expected(dated={}),
     # Tavily returns a snippet, and page text only on request; it dates every hit on topic news.
     "tavily": Expected(dated={"topic": "news"}, snippets=True),
+    # You.com returns highlights, the snippet, by default and page text only on request; it dates the hits it
+    # knows a page age for.
+    "youdotcom": Expected(dated={}, snippets=True),
 }
 
 

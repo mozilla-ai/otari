@@ -1,0 +1,17 @@
+{
+  "status": 200,
+  "body": {
+    "url": "https://httpbin.org/base64/PGh0bWw+PGhlYWQ+PHRpdGxlPlQ8L3RpdGxlPjwvaGVhZD48Ym9keT48L2JvZHk+PC9odG1sPg==",
+    "extraction_source": "fetch",
+    "contents": {
+      "full_page": {
+        "markdown": ""
+      }
+    },
+    "title": "T",
+    "metadata": {
+      "site_name": null,
+      "favicon_url": "https://api.ydc-index.io/favicon?domain=httpbin.org&size=128"
+    }
+  }
+}
