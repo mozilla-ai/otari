@@ -244,6 +244,7 @@ from gateway.repositories.tools import (
     McpServerRequestRepository,
     McpSignInLinkUseRepository,
     McpUserConnectionRepository,
+    WorkspaceMcpServerGrantRepository,
     WorkspaceMcpServerLogoRepository,
     WorkspaceMcpServerOverrideRepository,
     WorkspaceMcpServerRepository,
@@ -312,6 +313,7 @@ from gateway.services.tenancy.workspace_mcp_server_service import (
 from gateway.services.tenancy.workspace_service import WorkspaceService
 from gateway.services.tools import (
     McpConnectionService,
+    McpServerFold,
     McpServerLogoService,
     McpServerRequestService,
     McpSignedInServers,
@@ -917,6 +919,19 @@ def get_mcp_server_request_service(
 McpServerRequestServiceDep = Annotated[McpServerRequestService, Depends(get_mcp_server_request_service)]
 
 
+def build_mcp_server_fold(db: AsyncSession) -> McpServerFold:
+    """Build the fold of workspaces' copies into an organization's MCP server, on the caller's session."""
+    return McpServerFold(
+        servers=WorkspaceMcpServerRepository(db),
+        grants=WorkspaceMcpServerGrantRepository(db),
+        overrides=WorkspaceMcpServerOverrideRepository(db),
+        aliases=McpServerAliasRepository(db),
+        connections=McpUserConnectionRepository(db),
+        flows=McpOAuthFlowRepository(db),
+        requests=McpServerRequestRepository(db),
+    )
+
+
 def get_workspace_mcp_server_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     api_keys: ApiKeyServiceDep,
@@ -925,7 +940,9 @@ def get_workspace_mcp_server_service(
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> WorkspaceMcpServerService:
     """Build the service on the request's session, with the keys its access lists name and the sign-ins it starts."""
-    return WorkspaceMcpServerService(db, api_keys, connections=connections, requests=requests, config=config)
+    return WorkspaceMcpServerService(
+        db, api_keys, connections=connections, requests=requests, fold=build_mcp_server_fold(db), config=config
+    )
 
 
 WorkspaceMcpServerServiceDep = Annotated[WorkspaceMcpServerService, Depends(get_workspace_mcp_server_service)]

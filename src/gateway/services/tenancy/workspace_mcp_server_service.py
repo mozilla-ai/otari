@@ -97,7 +97,6 @@ from gateway.repositories.tenancy import (
 from gateway.repositories.tools import (
     McpOAuthFlowRepository,
     McpServerAliasRepository,
-    McpServerRequestRepository,
     McpUserConnectionRepository,
     WorkspaceMcpServerGrantRepository,
     WorkspaceMcpServerOverrideRepository,
@@ -1506,6 +1505,7 @@ class WorkspaceMcpServerService:
         *,
         connections: McpConnectionService | None = None,
         requests: McpServerRequestService | None = None,
+        fold: McpServerFold | None = None,
         config: GatewayConfig | None = None,
     ):
         self.db = db
@@ -1516,6 +1516,8 @@ class WorkspaceMcpServerService:
         self.connections = connections
         # Approves the members' requests a new server answers, in the transaction that stores it.
         self.requests = requests
+        # Folds workspaces' copies of a server into their organization's.
+        self.fold = fold
         self.config = config
         self._tokens = McpUserTokens(McpUserConnectionRepository(db))
 
@@ -2125,15 +2127,9 @@ class WorkspaceMcpServerService:
             raise McpServerNameTakenError(name)
 
     def _fold(self) -> McpServerFold:
-        return McpServerFold(
-            servers=WorkspaceMcpServerRepository(self.db),
-            grants=WorkspaceMcpServerGrantRepository(self.db),
-            overrides=WorkspaceMcpServerOverrideRepository(self.db),
-            aliases=McpServerAliasRepository(self.db),
-            connections=McpUserConnectionRepository(self.db),
-            flows=McpOAuthFlowRepository(self.db),
-            requests=McpServerRequestRepository(self.db),
-        )
+        if self.fold is None:
+            raise RuntimeError("WorkspaceMcpServerService was built without the fold a server's copies need")
+        return self.fold
 
     async def _copies_to_fold(
         self, scope: _Scope, url: str, server_ids: Sequence[uuid.UUID], *, except_id: uuid.UUID | None = None

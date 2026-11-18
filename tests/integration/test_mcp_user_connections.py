@@ -22,6 +22,7 @@ from sqlalchemy import delete, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import col
 
+from gateway.api.deps import build_mcp_server_fold
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions import TenancyError
@@ -281,7 +282,9 @@ def _reach(uow: UnitOfWork) -> OrganizationReach:
 
 
 def _service(db: AsyncSession, config: GatewayConfig) -> WorkspaceMcpServerService:
-    return WorkspaceMcpServerService(db, connections=_connections(db, config), config=config)
+    return WorkspaceMcpServerService(
+        db, connections=_connections(db, config), fold=build_mcp_server_fold(db), config=config
+    )
 
 
 async def _organization(db: AsyncSession) -> Organization:
