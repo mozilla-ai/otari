@@ -262,10 +262,14 @@ async def test_a_manager_who_lost_the_workspace_while_signing_in_stores_no_accou
     assert wire.revoked == ["refresh-1"], "tokens nothing will hold are ended at the authorization server"
 
 
+@pytest.mark.parametrize("promoted", ["before_the_callback", "during_the_exchange"])
 async def test_a_workspace_manager_s_shared_sign_in_finishing_after_a_promotion_stores_no_account(
-    async_db: AsyncSession, config: GatewayConfig
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, monkeypatch: pytest.MonkeyPatch, promoted: str
 ) -> None:
-    """The server became the organization's during the exchange, and its account is the organization's to set."""
+    """The server became the organization's while the sign-in was out, and its account is the organization's to set.
+
+    During the exchange, the callback has already read the server as the workspace's: what decides is the row as
+    it is read again under its lock."""
     world = await _shared_world(async_db, config)
     organization = await async_db.get(Organization, world.workspace.organization_id)
     assert organization is not None
@@ -276,18 +280,63 @@ async def test_a_workspace_manager_s_shared_sign_in_finishing_after_a_promotion_
     started = await service.start_shared_sign_in(
         user=admin, workspace_id=world.workspace.id, server_id=world.server.id, return_to=None
     )
-    await async_db.execute(
-        update(WorkspaceMcpServer)
-        .where(WorkspaceMcpServer.id == world.server.id)
-        .values(workspace_id=None)
-        .execution_options(synchronize_session=False)
-    )
-    await async_db.commit()
+    server_id = world.server.id
+
+    async def promote(db: AsyncSession) -> None:
+        await db.execute(
+            update(WorkspaceMcpServer)
+            .where(WorkspaceMcpServer.id == server_id)
+            .values(workspace_id=None)
+            .execution_options(synchronize_session=False)
+        )
+        await db.commit()
+
+    if promoted == "before_the_callback":
+        await promote(async_db)
+    else:
+        exchange = wire.exchange_code
+
+        async def promoted_during_the_exchange(*args: object, **kwargs: object) -> McpOAuthTokens:
+            # The organization's admins, on a session of their own, while this sign-in waits on its code.
+            async with AsyncSession(async_db.bind, expire_on_commit=False) as other:
+                await promote(other)
+            return await exchange(*args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(_mcp_oauth, "exchange_code", promoted_during_the_exchange)
 
     with pytest.raises(McpConnectionFlowError, match="no longer manage"):
         await service.complete_connection(user=admin, state=_state(started.authorization_url), code="code")
 
     assert await _account(async_db, world) is None
+
+
+async def test_ending_the_account_of_a_server_promoted_meanwhile_answers_as_the_workspace_sees_it(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    """Promoted, and its URL given a key, while the old account was revoked upstream: the workspace's manager is
+    answered as the workspace sees an organization's server, its URL masked."""
+    world = await _shared_world(async_db, config)
+    await _sign_in_for_everyone(async_db, config, world)
+    service = _service(async_db, config)
+    connections = service._connection_service()
+    disconnect = connections.disconnect_shared
+    server_id = world.server.id
+
+    async def promoted_while_revoking(**named: object) -> None:
+        await disconnect(**named)  # type: ignore[arg-type]
+        async with AsyncSession(async_db.bind, expire_on_commit=False) as other:
+            await other.execute(
+                update(WorkspaceMcpServer)
+                .where(WorkspaceMcpServer.id == server_id)
+                .values(workspace_id=None, url=f"{base.PUBLIC_URL}?key=secret")
+            )
+            await other.commit()
+
+    connections.disconnect_shared = promoted_while_revoking  # type: ignore[method-assign]
+    answered = await service.disconnect_shared(user=world.owner, workspace_id=world.workspace.id, server_id=server_id)
+
+    assert answered.scope == "organization"
+    assert "secret" not in answered.url
 
 
 async def test_another_persons_shared_sign_in_cannot_be_finished(async_db: AsyncSession, config: GatewayConfig) -> None:

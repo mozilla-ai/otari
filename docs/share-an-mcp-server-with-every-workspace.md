@@ -68,7 +68,8 @@ for each one:
 - A person's own sign-in is kept when the organization's server also uses
   **Personal accounts**, has exactly the URL the sign-in was made for, and uses
   the same OAuth client, which can still renew it: the sign-in must hold a
-  refresh token.
+  refresh token, and where the client sent a secret when the person signed in,
+  the organization's server must hold that secret too.
 - A person who already has a sign-in on the organization's server keeps using
   that one. It may be a different account upstream from the one they used on
   the copy, so these people are counted separately.

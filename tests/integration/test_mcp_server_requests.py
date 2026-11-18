@@ -779,8 +779,8 @@ async def test_a_failed_approval_stores_no_server(async_db: AsyncSession, monkey
     async def refuse(*args: object, **kwargs: object) -> None:
         raise RuntimeError("approval failed")
 
-    monkeypatch.setattr(McpServerRequestRepository, "acknowledge_declined_at_urls", refuse)
-    with pytest.raises(RuntimeError):
+    monkeypatch.setattr(McpServerRequestRepository, "acknowledge_declined_at_url", refuse)
+    with pytest.raises(RuntimeError, match="approval failed"):
         await world.servers.create_server(
             user=team.owner, workspace_id=None, request=WorkspaceMcpServerCreate(name="Sentry", url=SENTRY[2])
         )
@@ -828,6 +828,37 @@ async def test_a_failed_read_of_whom_to_mail_still_answers_the_add_it_follows(
         assert promoted.scope == "organization"
     assert [status for _, status, _ in await _statuses(async_db)] == [McpServerRequestStatus.APPROVED]
     assert await world.sent() == []
+
+
+@pytest.mark.asyncio
+async def test_an_add_answers_requests_at_its_url_as_a_stored_server_matches_it(async_db: AsyncSession) -> None:
+    """The path's trailing slashes aside, however many, and the query kept whole."""
+    team = await _team(async_db)
+    doubled = ("io.example/doubled", "Doubled", "https://93.184.216.36/mcp//?target=alpha")
+    other_query = ("io.example/beta", "Beta", "https://93.184.216.36/mcp?target=alpha/")
+    await _list_in_catalog(async_db, doubled, other_query)
+    world = _World(async_db)
+    await world.requests.create(user=team.ada, workspace_id=team.workspace.id, request=_ask(doubled[0]))
+    await world.requests.decline(
+        user=team.admin, workspace_id=team.workspace.id, request=McpServerRequestDecline(catalog_name=doubled[0])
+    )
+    await world.requests.create(user=team.grace, workspace_id=team.workspace.id, request=_ask(doubled[0]))
+    await world.requests.create(user=team.ada, workspace_id=team.workspace.id, request=_ask(other_query[0]))
+
+    server = await world.servers.create_server(
+        user=team.owner,
+        workspace_id=None,
+        request=WorkspaceMcpServerCreate(name="Doubled", url="https://93.184.216.36/mcp?target=alpha"),
+    )
+
+    rows = (await async_db.execute(select(McpServerRequest).order_by(McpServerRequest.created_at))).scalars().all()
+    answered = [(row.url, McpServerRequestStatus(row.status), row.acknowledged_at is not None) for row in rows]
+    assert answered == [
+        (doubled[2], McpServerRequestStatus.DECLINED, True),
+        (doubled[2], McpServerRequestStatus.APPROVED, False),
+        (other_query[2], McpServerRequestStatus.PENDING, False),
+    ]
+    assert rows[1].server_id == server.id
 
 
 @pytest.mark.asyncio

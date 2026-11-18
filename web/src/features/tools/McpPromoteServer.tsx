@@ -12,6 +12,7 @@ import {
   SettingsGroup,
 } from "@/design-system/layout/SettingsGroup"
 import { McpFoldChoices } from "@/features/tools/McpFoldChoices"
+import { isUnconfirmed } from "@/features/tools/mcpCatalog"
 import {
   defaultFoldIds,
   foldableIds,
@@ -19,7 +20,9 @@ import {
 } from "@/features/tools/mcpFold"
 import {
   useMcpServerCopies,
+  useOrganizationMcpServer,
   usePromoteWorkspaceMcpServer,
+  useRefreshAfterOrganizationServer,
 } from "@/shared/api/organizationMcpServers"
 
 const PROMOTE_LABEL = "Make it an organization server"
@@ -27,7 +30,7 @@ const PROMOTE_LABEL = "Make it an organization server"
 /**
  * The confirm step: the other workspaces' own copies of the server, offered
  * to fold into it, then the promote. Mounted only while open, so each opening
- * reads the copies afresh and starts from their default ticks.
+ * reads the copies afresh and starts from the default ticks of that read.
  */
 function PromoteDialog({
   workspaceId,
@@ -39,29 +42,45 @@ function PromoteDialog({
   onClose: () => void
 }) {
   const navigate = useNavigate()
-  const copies = useMcpServerCopies({ serverId: server.id }, true)
+  const copies = useMcpServerCopies(server.id, true)
   // A copy read before this opening may have changed since, so only a read
   // that answered after it counts. Counted by the query rather than by the
   // clock, which ties with a read cached in the same millisecond.
   const isFresh = copies.isSuccess && copies.isFetchedAfterMount
   const promote = usePromoteWorkspaceMcpServer()
-  // The copies ticked by hand, undefined until a box is touched so the default
-  // ticks follow the read.
-  const [touched, setTouched] = useState<McpServerFoldCandidate[]>()
+  const refreshAfterUnconfirmed = useRefreshAfterOrganizationServer()
+  // No answer came back, so whether it was promoted is read from the
+  // organization's servers, by the id it keeps either way.
+  const isUnanswered = promote.isError && isUnconfirmed(promote.error)
+  const promoted = useOrganizationMcpServer(server.id, isUnanswered)
+  const wasPromoted = isUnanswered && promoted.isSuccess
   const candidates = isFresh ? copies.data : []
+  // The ticked copies: the defaults of the first read this opening answered,
+  // then the admin's. A copy a later read adds was never reviewed, so it starts
+  // unticked.
+  const [touched, setTouched] = useState<McpServerFoldCandidate[]>()
+  if (isFresh && touched === undefined) {
+    const defaults = defaultFoldIds(candidates, server.enabled)
+    setTouched(
+      candidates.filter((candidate) => defaults.includes(candidate.server_id)),
+    )
+  }
   const present = new Set(candidates.map((candidate) => candidate.server_id))
   // A ticked copy another admin removed since: no longer offered or sent.
   const gone = isFresh
     ? (touched ?? []).filter((copy) => !present.has(copy.server_id))
     : []
-  const selected = touched
-    ? foldableIds(
-        candidates,
-        touched.map((copy) => copy.server_id),
-        server.enabled,
-      )
-    : defaultFoldIds(candidates, server.enabled)
+  const selected = foldableIds(
+    candidates,
+    (touched ?? []).map((copy) => copy.server_id),
+    server.enabled,
+  )
   const isOverLimit = selected.length > MAX_FOLD_COPIES
+  const openPromoted = () =>
+    void navigate({
+      to: "/organization/mcp-servers/$serverId",
+      params: { serverId: server.id },
+    })
 
   return (
     <Dialog
@@ -72,7 +91,11 @@ function PromoteDialog({
       isDismissable={!promote.isPending}
       size="lg"
       title={`Make ${server.name} an organization server`}
-      description="Every workspace in your organization can use it. It keeps its id, its settings and everyone's sign-in, and this workspace's access rules stay its own."
+      description={`${
+        server.enabled
+          ? "Every workspace in your organization can use it."
+          : "It stays off, so no workspace can use it until you turn it on."
+      } It keeps its id, its settings and everyone's sign-in, and this workspace's access rules stay its own.`}
       actions={
         <>
           <Button isDisabled={promote.isPending} onPress={onClose}>
@@ -86,34 +109,52 @@ function PromoteDialog({
               Retry
             </Button>
           ) : null}
-          <Button
-            variant="primary"
-            isDisabled={!isFresh || isOverLimit}
-            isPending={promote.isPending}
-            onPress={() =>
-              promote.mutate(
-                {
-                  workspaceId,
-                  serverId: server.id,
-                  body: { fold_server_ids: selected },
-                },
-                {
-                  onSuccess: () =>
-                    void navigate({
-                      to: "/organization/mcp-servers/$serverId",
-                      params: { serverId: server.id },
-                    }),
-                },
-              )
-            }
-          >
-            {PROMOTE_LABEL}
-          </Button>
+          {wasPromoted ? (
+            <Button variant="primary" onPress={openPromoted}>
+              Open it
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              // Held while a read is out too: a copy it drops is refused if sent.
+              isDisabled={
+                !isFresh ||
+                copies.isFetching ||
+                isOverLimit ||
+                (isUnanswered && !promoted.isError)
+              }
+              isPending={promote.isPending}
+              onPress={() =>
+                promote.mutate(
+                  {
+                    workspaceId,
+                    serverId: server.id,
+                    body: { fold_server_ids: selected },
+                  },
+                  {
+                    onSuccess: openPromoted,
+                    onError: (error) => {
+                      if (isUnconfirmed(error)) refreshAfterUnconfirmed()
+                    },
+                  },
+                )
+              }
+            >
+              {PROMOTE_LABEL}
+            </Button>
+          )}
         </>
       }
     >
       <DialogSection>
-        <ErrorBanner error={promote.error ?? copies.error} />
+        {wasPromoted ? (
+          <InfoBanner>
+            It was made an organization server, though the answer was lost on
+            the way.
+          </InfoBanner>
+        ) : (
+          <ErrorBanner error={promote.error ?? copies.error} />
+        )}
         {gone.length > 0 ? (
           <InfoBanner tone="warning">
             {`No longer there, so no longer folded: ${gone
@@ -132,6 +173,7 @@ function PromoteDialog({
             candidates={candidates}
             selected={selected}
             targetEnabled={server.enabled}
+            targetMode={server.credential_mode}
             isDisabled={promote.isPending}
             onChange={(ids) =>
               setTouched(
@@ -170,7 +212,8 @@ export function McpPromoteServer({
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-body">
               Share this server with every workspace in your organization. It
-              keeps its id, its settings and everyone&rsquo;s sign-in.
+              keeps its id, its settings and everyone&rsquo;s sign-in
+              {server.enabled ? "." : ", and stays off until you turn it on."}
             </p>
             <Button
               className="min-h-11 shrink-0 md:min-h-9"

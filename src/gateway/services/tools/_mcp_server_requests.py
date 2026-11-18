@@ -14,7 +14,6 @@ from datetime import UTC, datetime, timedelta
 from typing import ClassVar, Protocol
 
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
-from gateway.core.endpoint_urls import url_spellings
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.tools_exceptions import (
     McpCatalogServerNotListedError,
@@ -396,13 +395,12 @@ class McpServerRequestService:
         transaction that stores the server and commits it, approvals and all, and mails once that has
         committed. Returns how many requests it approved.
         """
-        urls = url_spellings(url)
         ids = list(workspaces)
         answered: list[tuple[str, uuid.UUID, str]] = []
         async with self._uow:
             for start in range(0, len(ids), _WORKSPACES_PER_QUERY):
                 batch = ids[start : start + _WORKSPACES_PER_QUERY]
-                rows = await self._requests.pending_at_urls(batch, urls)
+                rows = await self._requests.pending_at_url(batch, url)
                 approved = self._answer(rows, McpServerRequestStatus.APPROVED, decided_by=added_by, server_id=server_id)
                 answered += [
                     (workspaces[row.workspace_id], requester, title)
@@ -411,7 +409,7 @@ class McpServerRequestService:
                 if rows:
                     await self._requests.save()
                 # The server is here now, so an earlier decline of it no longer says anything true.
-                await self._requests.acknowledge_declined_at_urls(batch, urls, at=self._clock())
+                await self._requests.acknowledge_declined_at_url(batch, url, at=self._clock())
         if answered:
             logger.info("MCP server requests approved server_id=%s count=%d", server_id, len(answered))
             await self._mail_requesters(answered, approved=True, reason=None, decided_by=added_by)

@@ -331,14 +331,14 @@ async def test_a_sign_in_to_an_organization_server_lasts_while_any_workspace_sti
     assert await held() == ([], [])
 
 
-async def test_a_hidden_server_an_old_id_names_is_refused_under_the_id_the_caller_sent(
+async def test_a_server_an_old_id_names_that_grants_nothing_is_refused_under_the_id_the_caller_sent(
     async_db: AsyncSession, config: GatewayConfig
 ) -> None:
-    """Hidden by the organization's limit, which leaves the workspace nothing; one only turned off there is skipped
-    under an old id, as the copy it names was (``test_organization_mcp_server_fold.py``)."""
+    """One turned off for the workspace is skipped under an old id instead, as the copy it names was
+    (``test_organization_mcp_server_fold.py``)."""
     world = await _world(async_db, config)
     jira = await _shared(async_db, world.workspace.organization_id)
-    await _override(async_db, world.workspace, jira, organization_tools=[])
+    await _override(async_db, world.workspace, jira, everyone_tools=[])
     old_id = uuid.uuid4()
     async_db.add(
         McpServerAlias(
@@ -545,7 +545,7 @@ async def test_a_workspace_s_own_setting_attaches_an_organization_server_there_a
     assert await servers.any_attached(sales.id, organization_id)
     assert not await servers.any_attached(world.workspace.id, organization_id)
     # The request then reads the server as the workspace sees it, and attaches it.
-    views, _ = await McpWorkspaceServers(
+    views, _, _ = await McpWorkspaceServers(
         WorkspaceMcpServerRepository(async_db),
         WorkspaceMcpServerOverrideRepository(async_db),
         McpServerAliasRepository(async_db),

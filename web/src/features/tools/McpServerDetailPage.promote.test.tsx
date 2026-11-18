@@ -237,6 +237,9 @@ describe("McpServerDetailPage, making a server the organization's", () => {
     expect(copy).not.toBeChecked()
     expect(copy).toBeDisabled()
     expect(
+      within(dialog).getByText(/It stays off, so no workspace can use it/),
+    ).toBeVisible()
+    expect(
       within(dialog).getByText(
         "It is on, and an organization server that is off cannot take its place.",
       ),
@@ -292,5 +295,85 @@ describe("McpServerDetailPage, making a server the organization's", () => {
         mcpWrites(calls).find((call) => call.url.endsWith("/promote"))?.body,
       ).toEqual({ fold_server_ids: [KEEPS.server_id] }),
     )
+  })
+
+  it("leaves a copy that appears after the first read unticked", async () => {
+    const server = workspaceMcpServer({ workspace_id: WORKSPACE })
+    const calls = mockMcpServerApi({ server, copies: [] })
+    const answer = vi.mocked(globalThis.fetch).getMockImplementation()
+    let added = false
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      if (added && String(input).includes("/same-url")) {
+        return Response.json({ data: [KEEPS] })
+      }
+      return answer?.(input, init) as Promise<Response>
+    })
+    const user = userEvent.setup()
+    await openPage(server.id)
+
+    await user.click(screen.getByRole("button", { name: PROMOTE }))
+    const dialog = await screen.findByRole("dialog", {
+      name: "Make github an organization server",
+    })
+    await within(dialog).findByText(
+      "No other workspace has its own server at this URL.",
+    )
+
+    // Another admin's workspace adds a copy, which a refetch finds.
+    added = true
+    act(() => {
+      focusManager.setFocused(false)
+      focusManager.setFocused(true)
+    })
+    const copy = await within(dialog).findByRole("checkbox", {
+      name: "Beta: github",
+    })
+    expect(copy).not.toBeChecked()
+    await waitFor(() =>
+      expect(
+        within(dialog).getByRole("button", { name: PROMOTE }),
+      ).toBeEnabled(),
+    )
+    await user.click(within(dialog).getByRole("button", { name: PROMOTE }))
+    await waitFor(() =>
+      expect(
+        mcpWrites(calls).find((call) => call.url.endsWith("/promote"))?.body,
+      ).toEqual({ fold_server_ids: [] }),
+    )
+  })
+
+  it("finds out whether a promote whose answer was lost went through, and offers to open it", async () => {
+    const server = workspaceMcpServer({ workspace_id: WORKSPACE })
+    mockMcpServerApi({ server })
+    const answer = vi.mocked(globalThis.fetch).getMockImplementation()
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      const url = String(input)
+      if (url.endsWith("/promote")) throw new TypeError("Failed to fetch")
+      if (url === `/api/v1/organizations/me/mcp-servers/${server.id}`) {
+        return Response.json({ ...server, workspace_id: null })
+      }
+      return answer?.(input, init) as Promise<Response>
+    })
+    const user = userEvent.setup()
+    await openPage(server.id)
+
+    await user.click(screen.getByRole("button", { name: PROMOTE }))
+    const dialog = await screen.findByRole("dialog", {
+      name: "Make github an organization server",
+    })
+    await within(dialog).findByText(
+      "No other workspace has its own server at this URL.",
+    )
+    await user.click(within(dialog).getByRole("button", { name: PROMOTE }))
+
+    expect(
+      await within(dialog).findByText(
+        /It was made an organization server, though the answer was lost/,
+      ),
+    ).toBeVisible()
+    await user.click(within(dialog).getByRole("button", { name: "Open it" }))
+    expect(
+      await screen.findByText(`Organization server page ${server.id}`),
+    ).toBeInTheDocument()
   })
 })

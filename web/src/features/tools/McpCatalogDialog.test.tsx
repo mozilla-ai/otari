@@ -809,6 +809,7 @@ describe("McpCatalogDialog", () => {
     })
     const ownToken = mcpServerFoldCandidate({
       server_id: "aaaaaaaa-0000-0000-0000-000000000002",
+      workspace_id: "bbbbbbbb-0000-0000-0000-000000000002",
       workspace_name: "Gamma",
       name: "errors",
       credential_mode: "shared",
@@ -1006,6 +1007,49 @@ describe("McpCatalogDialog", () => {
     expect(rows[0]).toHaveTextContent(/may have been added anyway/)
     expect(rows[1]).toHaveTextContent("NOT ADDED")
     expect(rows[1]).toHaveTextContent("Name in use.")
+    // Neither is counted as added: one was refused, and the other is not known to be stored.
+    expect(
+      screen.getByRole("heading", {
+        name: "0 of 2 added to your organization",
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it("keeps a batch going to the workspace when organization access arrives mid-review", async () => {
+    const calls = mockApi()
+    const user = userEvent.setup()
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const dialog = (canAddForOrganization: boolean) => (
+      <QueryClientProvider client={client}>
+        <McpCatalogDialog
+          isOpen
+          onOpenChange={() => {}}
+          workspaceId={WORKSPACE}
+          workspaceName="Alpha"
+          existing={[]}
+          canAddForOrganization={canAddForOrganization}
+        />
+      </QueryClientProvider>
+    )
+    const { rerender } = render(dialog(false))
+
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Select Sentry" }),
+    )
+    await user.click(screen.getByRole("button", { name: "Add" }))
+    rerender(dialog(true))
+
+    expect(screen.getByRole("radio", { name: /This workspace/ })).toBeChecked()
+    await user.click(screen.getByRole("button", { name: "Confirm" }))
+    await screen.findByRole("heading", { name: "1 of 1 added to Alpha" })
+    expect(creates(calls)).toEqual([
+      expect.objectContaining({
+        url: `/api/v1/workspaces/${WORKSPACE}/mcp-servers`,
+      }),
+    ])
+    expect(calls.some((call) => call.url === LOOKUP)).toBe(false)
   })
 
   it("keeps a batch reviewed for the organization there once that access ends, until the admin picks the workspace", async () => {

@@ -162,7 +162,11 @@ export function McpServerDialog({
   const [clientId, setClientId] = useState("")
   const [clientSecret, setClientSecret] = useState("")
   const offersTarget = canAddForOrganization && givenScope.kind === "workspace"
-  const [target, setTarget] = useState<McpAddTarget>("organization")
+  // The organization is preselected only where the choice is there from the
+  // start: access granted while the draft is open leaves it where it was going.
+  const [target, setTarget] = useState<McpAddTarget>(
+    offersTarget ? "organization" : "workspace",
+  )
   // Once the choice was offered, the draft keeps the destination picked, even
   // if organization access ends: it is then refused rather than added to the
   // workspace, until the admin picks the workspace themselves.
@@ -204,10 +208,15 @@ export function McpServerDialog({
   })
 
   const tokenField = typedToken ? token.trim() : undefined
-  // A test answers for the URL and token it was run with, and stops answering
-  // once either changes. The allow-list is left out on purpose: the picker below
+  // A test answers for the URL, token and destination it was run with, and
+  // stops answering once any changes. The allow-list is left out on purpose: the picker below
   // edits it, and the catalog a test listed does not depend on it.
-  const connection = JSON.stringify([url.trim(), tokenField ?? null])
+  const connection = JSON.stringify([
+    url.trim(),
+    tokenField ?? null,
+    scope.kind,
+    scope.kind === "workspace" ? scope.workspaceId : null,
+  ])
   const copy = SCOPE_COPY[scope.kind]
   const test = useTestMcpServerConnection()
   const [testedConnection, setTestedConnection] = useState<string>()
@@ -321,6 +330,7 @@ export function McpServerDialog({
           candidates={fold.candidates}
           selected={selected}
           targetEnabled={fold.draft.enabled}
+          targetMode={fold.draft.credential_mode}
           isDisabled={isPending || lostOrganization}
           onChange={(selected) => setFold({ ...fold, selected })}
         />

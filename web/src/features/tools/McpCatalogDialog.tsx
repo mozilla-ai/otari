@@ -97,6 +97,8 @@ interface Fold {
   title: string
   /** Whether the organization's server will be on. */
   enabled: boolean
+  /** How the organization's server will sign in. */
+  mode: McpCredentialMode
   candidates: McpServerFoldCandidate[]
   selected: string[]
 }
@@ -161,7 +163,11 @@ export function McpCatalogDialog({
   const createForOrganization = useCreateOrganizationMcpServer()
   const readCopies = useReadMcpServerCopies()
   const refreshAfterUnconfirmed = useRefreshAfterOrganizationServer()
-  const [target, setTarget] = useState<McpAddTarget>("organization")
+  // The organization is preselected only where the choice is there from the
+  // start: access granted while the batch is open leaves it where it was going.
+  const [target, setTarget] = useState<McpAddTarget>(
+    canAddForOrganization ? "organization" : "workspace",
+  )
   // Once the choice was offered, the batch keeps the destination picked, even
   // if organization access ends: it is then refused rather than added to the
   // workspace, until the admin picks the workspace themselves.
@@ -356,17 +362,20 @@ export function McpCatalogDialog({
       )
       return
     }
-    const found = offerEachCopyOnce(read)
+    const enabled = drafts.map(
+      (draft) => availabilityFields(draft.availability).enabled,
+    )
+    const found = offerEachCopyOnce(read, enabled)
     const withCopies = drafts.flatMap((draft, index) => {
-      const { enabled } = availabilityFields(draft.availability)
       return found[index].length > 0
         ? [
             {
               pickName: draft.pick.name,
               title: reads[index].title,
-              enabled,
+              enabled: enabled[index],
+              mode: modes[index],
               candidates: found[index],
-              selected: defaultFoldIds(found[index], enabled),
+              selected: defaultFoldIds(found[index], enabled[index]),
             },
           ]
         : []
@@ -385,9 +394,7 @@ export function McpCatalogDialog({
       ? `Add ${drafts[0].pick.title} to ${targetName}`
       : `Add ${drafts.length} servers to ${targetName}`
 
-  const addedCount = results.filter(
-    (result) => result.outcome.tone !== "danger",
-  ).length
+  const addedCount = results.filter((result) => result.outcome.isStored).length
 
   if (step === "results") {
     return (
@@ -489,6 +496,7 @@ export function McpCatalogDialog({
                 candidates={fold.candidates}
                 selected={foldIds[fold.pickName]}
                 targetEnabled={fold.enabled}
+                targetMode={fold.mode}
                 isDisabled={isAdding || lostOrganization}
                 onChange={(selected) =>
                   setFolds((current) =>

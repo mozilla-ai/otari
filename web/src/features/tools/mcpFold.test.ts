@@ -36,6 +36,20 @@ describe("defaultFoldIds", () => {
     ])
   })
 
+  it("ticks none of a workspace's copies when it could fold another, even one that changes an account", () => {
+    const quiet = mcpServerFoldCandidate({ server_id: "quiet" })
+    const ownToken = mcpServerFoldCandidate({
+      server_id: "own-token",
+      same_credential: false,
+      replaces_shared_credential: true,
+    })
+    expect(defaultFoldIds([quiet, ownToken], true)).toEqual([])
+    // A copy the server cannot replace is no choice to make.
+    const onCopy = { ...ownToken, enabled: true }
+    const offQuiet = { ...quiet, enabled: false }
+    expect(defaultFoldIds([offQuiet, onCopy], false)).toEqual(["quiet"])
+  })
+
   it("ticks none of a workspace's copies when it has several, for the admin to pick", () => {
     const first = mcpServerFoldCandidate({ server_id: "first" })
     const second = mcpServerFoldCandidate({ server_id: "second" })
@@ -84,12 +98,12 @@ describe("foldEffects", () => {
       signed_in: 0,
       keep_sign_in: 0,
     })
-    expect(foldEffects(keyless)).toEqual([
+    expect(foldEffects(keyless, "shared")).toEqual([
       "The account its calls use will change.",
     ])
-    expect(foldEffects({ ...keyless, same_credential: true })).toEqual([
-      "No one's sign-in changes.",
-    ])
+    expect(
+      foldEffects({ ...keyless, same_credential: true }, "shared"),
+    ).toEqual(["No one's sign-in changes."])
   })
 })
 
@@ -103,10 +117,24 @@ describe("foldEffects, people already signed in to the organization's server", (
       switch_account: 2,
       sign_in_again: 1,
     })
-    expect(foldEffects(personal)).toEqual([
+    expect(foldEffects(personal, "per_user")).toEqual([
       "1 person will keep their sign-in.",
       "2 people will use the account they already signed in with on the organization's server.",
       "1 person will need to sign in again.",
+    ])
+  })
+
+  it("asks nobody to sign in again on a shared server, whose credential serves them", () => {
+    const personal = mcpServerFoldCandidate({
+      credential_mode: "per_user",
+      same_credential: false,
+      signed_in: 2,
+      keep_sign_in: 0,
+      sign_in_again: 2,
+    })
+    expect(foldEffects(personal, "shared")).toEqual([
+      "2 people will stop using their own sign-in, and use the organization's account instead.",
+      "The account its calls use will change.",
     ])
   })
 })
@@ -115,7 +143,26 @@ describe("offerEachCopyOnce", () => {
   it("keeps a copy under the first list that found it", () => {
     const a = mcpServerFoldCandidate({ server_id: "a" })
     const b = mcpServerFoldCandidate({ server_id: "b" })
-    expect(offerEachCopyOnce([[a], [a, b], []])).toEqual([[a], [b], []])
+    expect(offerEachCopyOnce([[a], [a, b], []], [true, true, true])).toEqual([
+      [a],
+      [b],
+      [],
+    ])
+  })
+
+  it("offers a copy under the first pick that can fold it, else the first that found it", () => {
+    const on = mcpServerFoldCandidate({ server_id: "on" })
+    const off = mcpServerFoldCandidate({ server_id: "off", enabled: false })
+    expect(
+      offerEachCopyOnce(
+        [
+          [on, off],
+          [on, off],
+        ],
+        [false, true],
+      ),
+    ).toEqual([[off], [on]])
+    expect(offerEachCopyOnce([[on], [on]], [false, false])).toEqual([[on], []])
   })
 })
 

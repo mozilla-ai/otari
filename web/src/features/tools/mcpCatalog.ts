@@ -117,6 +117,8 @@ export type AddTone = "success" | "warning" | "danger"
 
 export interface AddOutcome {
   tone: AddTone
+  /** Whether the gateway confirmed it stored the server, its connection check aside. */
+  isStored: boolean
   /** A word or two for the row's status. */
   label: string
   /** One sentence saying what happened and what to do next, if anything. */
@@ -129,6 +131,7 @@ export function describeAdded(server: WorkspaceMcpServer): AddOutcome {
   if (server.credential_mode === "per_user" && !health) {
     return {
       tone: "success",
+      isStored: true,
       label: "Added",
       detail: "Added. Each member connects their own account on its page.",
     }
@@ -136,16 +139,23 @@ export function describeAdded(server: WorkspaceMcpServer): AddOutcome {
   if (!health) {
     return {
       tone: "success",
+      isStored: true,
       label: "Added",
       detail: "Added. Its connection has not been checked yet.",
     }
   }
   if (!health.error) {
-    return { tone: "success", label: "Connected", detail: healthDetail(health) }
+    return {
+      tone: "success",
+      isStored: true,
+      label: "Connected",
+      detail: healthDetail(health),
+    }
   }
   if (health.error === "unauthorized" || health.error === "forbidden") {
     return {
       tone: "warning",
+      isStored: true,
       label:
         server.credential_mode === "shared" ? "Needs setup" : "Needs sign-in",
       detail:
@@ -156,6 +166,7 @@ export function describeAdded(server: WorkspaceMcpServer): AddOutcome {
   }
   return {
     tone: "warning",
+    isStored: true,
     label: "Check failed",
     detail: `Added, but its connection check failed. ${healthDetail(health)}`,
   }
@@ -163,7 +174,12 @@ export function describeAdded(server: WorkspaceMcpServer): AddOutcome {
 
 /** What a refused add came to. `message` is the gateway's own reason. */
 export function describeRefusal(message: string): AddOutcome {
-  return { tone: "danger", label: "Not added", detail: message }
+  return {
+    tone: "danger",
+    isStored: false,
+    label: "Not added",
+    detail: message,
+  }
 }
 
 /**
@@ -181,7 +197,8 @@ export function isUnconfirmed(error: unknown): boolean {
 export function describeUnconfirmed(message: string): AddOutcome {
   return {
     tone: "warning",
+    isStored: false,
     label: "Not confirmed",
-    detail: `${message} It may have been added anyway. The server lists were read again: check them before adding it again.`,
+    detail: `${message} It may have been added anyway. Refresh the server list and check that it is not there before adding it again.`,
   }
 }

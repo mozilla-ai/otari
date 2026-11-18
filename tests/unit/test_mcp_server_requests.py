@@ -10,7 +10,7 @@ from typing import Any, cast
 import pytest
 from sqlalchemy.exc import OperationalError
 
-from gateway.core.endpoint_urls import url_spellings
+from gateway.core.endpoint_urls import bare_url, url_spellings
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tenancy import User
 from gateway.models.tools import McpServerRequest, McpServerRequestStatus
@@ -115,15 +115,11 @@ class _Requests:
         self.rows = rows
         self.asked: list[dict[str, Any]] = []
 
-    async def pending_at_urls(
-        self, workspace_ids: Collection[uuid.UUID], urls: Collection[str]
-    ) -> list[McpServerRequest]:
-        self.asked.append({"workspace_ids": list(workspace_ids), "urls": tuple(urls)})
-        return [row for row in self.rows if row.workspace_id in workspace_ids and row.url in urls]
+    async def pending_at_url(self, workspace_ids: Collection[uuid.UUID], url: str) -> list[McpServerRequest]:
+        self.asked.append({"workspace_ids": list(workspace_ids), "url": url})
+        return [row for row in self.rows if row.workspace_id in workspace_ids and bare_url(row.url) == bare_url(url)]
 
-    async def acknowledge_declined_at_urls(
-        self, workspace_ids: Collection[uuid.UUID], urls: Collection[str], **named: Any
-    ) -> None:
+    async def acknowledge_declined_at_url(self, workspace_ids: Collection[uuid.UUID], url: str, **named: Any) -> None:
         pass
 
     async def save(self) -> None:
@@ -209,7 +205,7 @@ async def test_adding_a_server_approves_its_requests_and_mails_only_those_who_ca
     )
 
     assert approved == 4
-    assert requests.asked[0]["urls"] == ("https://mcp.sentry.dev/mcp", "https://mcp.sentry.dev/mcp/")
+    assert requests.asked[0]["url"] == "https://mcp.sentry.dev/mcp/"
     assert {(row.status, row.server_id, row.decided_by) for row in rows} == {
         (McpServerRequestStatus.APPROVED, server_id, admin.id)
     }

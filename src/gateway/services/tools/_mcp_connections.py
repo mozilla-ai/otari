@@ -209,10 +209,13 @@ def _endpoint_approved(pinned: str | None, recorded: str | None, *, has_secret: 
 
 
 def renews_through(server: WorkspaceMcpServer, connection: McpUserConnection) -> bool:
-    """Whether ``server`` can renew ``connection``: it holds a refresh token, ``server``'s client issued it, and
-    :func:`_approved` admits the endpoint."""
+    """Whether ``server`` can renew ``connection``: it holds a refresh token, ``server``'s client issued it and can
+    authenticate the renewal as the sign-in did, a secret where it sent one, and :func:`_approved` admits the
+    endpoint."""
     stored = stored_oauth_client(server)
     if connection.encrypted_refresh_token is None or stored is None or stored.client_id != connection.client_id:
+        return False
+    if connection.client_auth_method != _mcp_oauth.AUTH_METHOD_NONE and not stored.encrypted_secret:
         return False
     return _endpoint_approved(
         server.oauth_client_token_endpoint, connection.token_endpoint, has_secret=bool(stored.encrypted_secret)

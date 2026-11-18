@@ -480,6 +480,42 @@ describe("McpServerDialog", () => {
     )
   })
 
+  it("keeps a draft going to the workspace when organization access arrives while it is open", async () => {
+    const asked = mockCopies([KEEPS])
+    const user = userEvent.setup()
+    const onSubmit = renderDialog({ canAddForOrganization: false })
+
+    onSubmit.rerender(true)
+    expect(screen.getByRole("radio", { name: /This workspace/ })).toBeChecked()
+    await fillAndSubmit(user)
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "github" }),
+      workspaceMcpScope(WORKSPACE),
+    )
+    expect(asked.some((call) => call.url === LOOKUP)).toBe(false)
+  })
+
+  it("stops showing a test's answer once the destination changes", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input).endsWith("/check")
+        ? Response.json(
+            { detail: "Not for this organization." },
+            { status: 403 },
+          )
+        : Response.json({}),
+    )
+    const user = userEvent.setup()
+    renderDialog()
+
+    await user.type(screen.getByLabelText("URL"), "https://mcp.example.com/gh")
+    await user.click(screen.getByRole("button", { name: "Test connection" }))
+    expect(await screen.findByText("Not for this organization.")).toBeVisible()
+
+    await user.click(screen.getByRole("radio", { name: /This workspace/ }))
+    expect(screen.queryByText("Not for this organization.")).toBeNull()
+  })
+
   it("keeps a draft for the organization there once that access ends, until the admin picks the workspace", async () => {
     const asked = mockCopies([])
     const user = userEvent.setup()

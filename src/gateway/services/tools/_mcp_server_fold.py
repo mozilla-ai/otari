@@ -8,7 +8,8 @@ What happens to the people signed in to it:
 - A personal sign-in is carried across where the organization server is personal too, sits at the very URL the
   sign-in was made for, and can renew it: the sign-in holds a refresh token, the same OAuth client issued it
   (the same ``client_id``, which the gateway's client metadata document gives every server it signs in to
-  through it), and that client may send its credentials to the token endpoint the sign-in recorded.
+  through it), the organization server holds the secret the sign-in was made with if it sent one, and that client
+  may send its credentials to the token endpoint the sign-in recorded.
 - Any other sign-in is revoked once the fold commits: its client is the copy's, which goes with it. So is a
   carried sign-in's twin, where the person already holds one on the organization server: they go on through
   that one, which may be another upstream account, and the fold step counts them apart so nobody is moved
@@ -25,7 +26,7 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel, Field
 
-from gateway.models.tools import McpCredentialMode, McpUserConnection, WorkspaceMcpServer
+from gateway.models.tools import McpCredentialMode, McpSharedConnection, McpUserConnection, WorkspaceMcpServer
 from gateway.repositories.tools import (
     McpOAuthFlowRepository,
     McpServerAliasRepository,
@@ -37,7 +38,12 @@ from gateway.repositories.tools import (
 )
 from gateway.services.mcp_stateless import reads_as_pattern
 from gateway.services.model_access import clip_mcp_tool_patterns, expand_mcp_tool_patterns, mcp_read_tools
-from gateway.services.tools._mcp_connections import McpRevocation, renews_through, revocations_for
+from gateway.services.tools._mcp_connections import (
+    MAX_BACKGROUND_REVOCATIONS,
+    McpRevocation,
+    renews_through,
+    revocations_for,
+)
 
 
 class McpServerFoldCandidate(BaseModel):
@@ -84,11 +90,15 @@ class _Plan:
 
 @dataclass(frozen=True, slots=True)
 class McpServerFoldOutcome:
-    """What a fold left to do once it commits, and what it did."""
+    """What a fold left to do once it commits, and what it did.
+
+    ``unread`` counts the ended sign-ins past what one background revocation sends, which are not prepared.
+    """
 
     revocations: list[McpRevocation]
     carried: int
     revoked: int
+    unread: int = 0
 
 
 class McpServerFold:
@@ -182,7 +192,7 @@ class McpServerFold:
         """
         signed_in_there = await self._signed_in(target)
         revocations: list[McpRevocation] = []
-        carried = revoked = 0
+        carried = revoked = unread = 0
         for copy in copies:
             workspace_id = copy.workspace_id
             if (
@@ -194,11 +204,14 @@ class McpServerFold:
             # Locked and read again, so a renewal in flight stores its token first and that is the one revoked.
             plan = _plan(await self._connections.every_for_server(copy.id, lock=True), target, signed_in_there)
             account = await self._connections.find_shared(copy.id, lock=True)
-            # Read while the copy still holds the client its tokens were issued to.
-            revocations += revocations_for(copy, [*plan.revoked, *([account] if account is not None else [])])
-            for connection in plan.carried:
-                await self._connections.move(connection, target.id)
-                signed_in_there.add(connection.user_id)
+            # Read while the copy still holds the client its tokens were issued to, up to what one background
+            # revocation sends.
+            ending: list[McpUserConnection | McpSharedConnection] = [*plan.revoked, *([account] if account else [])]
+            room = max(MAX_BACKGROUND_REVOCATIONS - len(revocations), 0)
+            revocations += revocations_for(copy, ending[:room])
+            unread += len(ending[room:])
+            await self._connections.move([connection.id for connection in plan.carried], target.id)
+            signed_in_there |= {connection.user_id for connection in plan.carried}
             carried += len(plan.carried)
             revoked += len(plan.revoked)
             await self._move_rules(copy, target, workspace_id)
@@ -209,7 +222,7 @@ class McpServerFold:
             await self._connections.remove_shared_for_server(copy.id)
             await self._flows.remove_for_server(copy.id)
             await self._servers.delete(copy)
-        return McpServerFoldOutcome(revocations=revocations, carried=carried, revoked=revoked)
+        return McpServerFoldOutcome(revocations=revocations, carried=carried, revoked=revoked, unread=unread)
 
     async def _move_rules(self, copy: WorkspaceMcpServer, target: WorkspaceMcpServer, workspace_id: uuid.UUID) -> None:
         """The copy's rules become its workspace's settings and grants on the target.

@@ -1,4 +1,6 @@
-import type { McpServerFoldCandidate } from "@/client"
+import { useId } from "react"
+
+import type { McpCredentialMode, McpServerFoldCandidate } from "@/client"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
 import {
@@ -20,6 +22,7 @@ export function McpFoldChoices({
   selected,
   onChange,
   targetEnabled,
+  targetMode,
   label = "Workspace copies",
   isDisabled = false,
 }: {
@@ -29,10 +32,20 @@ export function McpFoldChoices({
   onChange: (selected: string[]) => void
   /** Whether the organization's server is on. */
   targetEnabled: boolean
+  /** How the organization's server signs in. */
+  targetMode: McpCredentialMode
   /** The list's accessible name, apart per server where a step lists several. */
   label?: string
   isDisabled?: boolean
 }) {
+  const idBase = useId()
+  const perWorkspace = new Map<string, number>()
+  for (const candidate of candidates) {
+    perWorkspace.set(
+      candidate.workspace_id,
+      (perWorkspace.get(candidate.workspace_id) ?? 0) + 1,
+    )
+  }
   const workspaceOf = new Map(
     candidates.map((candidate) => [
       candidate.server_id,
@@ -70,14 +83,14 @@ export function McpFoldChoices({
       <ul aria-label={label} className="flex flex-col gap-3">
         {candidates.map((candidate) => {
           const blocker = foldBlocker(candidate, targetEnabled)
-          const isShared =
-            candidates.filter(
-              (other) => other.workspace_id === candidate.workspace_id,
-            ).length > 1
+          const isShared = (perWorkspace.get(candidate.workspace_id) ?? 0) > 1
+          const effectsId = `${idBase}-${candidate.server_id}`
           return (
             <li key={candidate.server_id}>
               <Checkbox
                 ariaLabel={`${candidate.workspace_name}: ${candidate.name}`}
+                // What folding it does is read with its name, not only seen.
+                ariaDescribedBy={effectsId}
                 isSelected={
                   blocker === "" && selected.includes(candidate.server_id)
                 }
@@ -93,20 +106,24 @@ export function McpFoldChoices({
                     </span>
                     : {candidate.name}
                   </span>
-                  {blocker ? (
-                    <span className="text-caption text-warning">{blocker}</span>
-                  ) : null}
-                  {isShared ? (
-                    <span className="text-caption">
-                      Its workspace has another copy here. Only one of them can
-                      be folded.
-                    </span>
-                  ) : null}
-                  {foldEffects(candidate).map((line) => (
-                    <span key={line} className="text-caption">
-                      {line}
-                    </span>
-                  ))}
+                  <span id={effectsId} className="flex flex-col gap-1">
+                    {blocker ? (
+                      <span className="text-caption text-warning">
+                        {blocker}
+                      </span>
+                    ) : null}
+                    {isShared ? (
+                      <span className="text-caption">
+                        Its workspace has another copy here. Only one of them
+                        can be folded.
+                      </span>
+                    ) : null}
+                    {foldEffects(candidate, targetMode).map((line) => (
+                      <span key={line} className="text-caption">
+                        {line}
+                      </span>
+                    ))}
+                  </span>
                 </span>
               </Checkbox>
             </li>

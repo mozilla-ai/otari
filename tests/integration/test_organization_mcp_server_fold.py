@@ -11,6 +11,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
+from gateway.exceptions.organizations_exceptions import NotAuthorizedError
 from gateway.exceptions.tools_exceptions import (
     McpServerFoldError,
     McpServerIsOrganizationsError,
@@ -19,7 +20,7 @@ from gateway.exceptions.tools_exceptions import (
     WorkspaceMcpServerLimitReachedError,
     WorkspaceMcpServerNotFoundError,
 )
-from gateway.models.tenancy import User, Workspace
+from gateway.models.tenancy import OrganizationMember, User, Workspace
 from gateway.models.tools import (
     McpCredentialMode,
     McpServerAlias,
@@ -207,21 +208,31 @@ async def test_a_sign_in_made_at_another_spelling_of_the_url_is_not_carried(
 
 
 @pytest.mark.parametrize(
-    ("mode", "secret", "carried"),
+    ("mode", "secret", "public", "carried"),
     [
         # A shared server never sends a person's own token.
-        (McpCredentialMode.SHARED, None, 0),
+        (McpCredentialMode.SHARED, None, True, 0),
         # A new server's client is pinned to no token endpoint yet, so its secret goes nowhere a renewal needs it.
-        (McpCredentialMode.PER_USER, "my-secret", 0),
-        (McpCredentialMode.PER_USER, None, 1),
+        (McpCredentialMode.PER_USER, "my-secret", False, 0),
+        # The sign-in's client sent a secret, which the new server does not hold to send again.
+        (McpCredentialMode.PER_USER, None, False, 0),
+        (McpCredentialMode.PER_USER, None, True, 1),
     ],
 )
 async def test_a_sign_in_is_carried_only_where_the_new_server_can_renew_it(
-    async_db: AsyncSession, config: GatewayConfig, mode: McpCredentialMode, secret: str | None, carried: int
+    async_db: AsyncSession,
+    config: GatewayConfig,
+    mode: McpCredentialMode,
+    secret: str | None,
+    public: bool,
+    carried: int,
 ) -> None:
     world = await _world(async_db, config)
     await _sign_in(async_db, config, world, world.member)
     client_id = (await async_db.execute(select(McpUserConnection.client_id))).scalar_one()
+    if public:
+        await async_db.execute(update(McpUserConnection).values(client_auth_method="none"))
+        await async_db.commit()
 
     created = await _service(async_db, config).create_server(
         user=world.owner,
@@ -245,7 +256,8 @@ async def test_a_sign_in_without_a_refresh_token_is_not_carried(async_db: AsyncS
     world = await _world(async_db, config)
     await _sign_in(async_db, config, world, world.member)
     client_id = (await async_db.execute(select(McpUserConnection.client_id))).scalar_one()
-    await async_db.execute(update(McpUserConnection).values(encrypted_refresh_token=None))
+    # Through a public client, which the new server can renew for but for the missing refresh token.
+    await async_db.execute(update(McpUserConnection).values(encrypted_refresh_token=None, client_auth_method="none"))
     await async_db.commit()
 
     await _service(async_db, config).create_server(
@@ -472,9 +484,10 @@ async def test_a_folded_copy_s_id_opens_the_organization_s_server_in_its_workspa
 async def test_a_request_naming_a_folded_copy_that_was_off_still_skips_it(
     async_db: AsyncSession, config: GatewayConfig
 ) -> None:
-    """As it skipped the copy before the fold. The organization's server, off for the workspace, stays unknown by
-    its own id there."""
-    world = await _world(async_db, config, enabled=False)
+    """As it skipped the copy before the fold, before any rule is read: the copy's empty allow-list is the
+    workspace's limit now. The organization's server, off for the workspace, stays unknown by its own id there,
+    named beside the old id too."""
+    world = await _world(async_db, config, enabled=False, allowed_tools=[])
     member = str(world.member.id)
     created = await _service(async_db, config).create_server(
         user=world.owner,
@@ -488,10 +501,105 @@ async def test_a_request_naming_a_folded_copy_that_was_off_still_skips_it(
         async_db, workspace_id=world.workspace.id, server_ids=[world.server.id], access=McpAccess(user_id=member)
     )
     assert skipped == []
+    with pytest.raises(WorkspaceMcpServerNotFoundError) as refused:
+        await resolve_workspace_mcp_servers(
+            async_db,
+            workspace_id=world.workspace.id,
+            server_ids=[world.server.id, created.id],
+            access=McpAccess(user_id=member),
+        )
+    assert str(created.id) in str(refused.value)
+    assert str(world.server.id) not in str(refused.value)
+
+
+async def test_a_request_naming_a_promoted_server_that_is_off_still_skips_it_in_its_own_workspace(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    """There it skipped the server while it was the workspace's own and off. Elsewhere its id names nothing."""
+    world = await _world(async_db, config, enabled=False)
+    sales, _ = await _sales(async_db, config, world, world.member, url="https://93.184.216.99/other")
+    member = str(world.member.id)
+    await _service(async_db, config).promote(
+        user=world.owner, workspace_id=world.workspace.id, server_id=world.server.id, request=McpServerPromote()
+    )
+
+    skipped = await resolve_workspace_mcp_servers(
+        async_db, workspace_id=world.workspace.id, server_ids=[world.server.id], access=McpAccess(user_id=member)
+    )
+    assert skipped == []
     with pytest.raises(WorkspaceMcpServerNotFoundError):
         await resolve_workspace_mcp_servers(
-            async_db, workspace_id=world.workspace.id, server_ids=[created.id], access=McpAccess(user_id=member)
+            async_db, workspace_id=sales.id, server_ids=[world.server.id], access=McpAccess(user_id=member)
         )
+
+
+async def test_a_promotion_by_an_admin_demoted_before_it_locked_the_workspaces_is_refused(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    """The role is read again under the locks, as stored, not as this session loaded it when it authorized."""
+    world = await _world(async_db, config)
+    organization_id = world.workspace.organization_id
+    service = _service(async_db, config)
+    authorized = await service._managed(world.owner, None)
+    held = (
+        await async_db.execute(select(OrganizationMember).where(OrganizationMember.user_id == world.owner.id))  # type: ignore[arg-type]
+    ).scalar_one()
+    await async_db.execute(
+        update(OrganizationMember)
+        .where(OrganizationMember.user_id == world.owner.id)  # type: ignore[arg-type]
+        .values(role="member")
+        .execution_options(synchronize_session=False)
+    )
+    await async_db.commit()
+    assert held.role == "owner", "this session still holds the role it read"
+    service._managed = AsyncMock(return_value=authorized)  # type: ignore[method-assign]
+
+    with pytest.raises(NotAuthorizedError):
+        await service.promote(
+            user=world.owner, workspace_id=world.workspace.id, server_id=world.server.id, request=McpServerPromote()
+        )
+    row = await async_db.get(WorkspaceMcpServer, world.server.id, populate_existing=True)
+    assert row is not None and (row.organization_id, row.workspace_id) == (organization_id, world.workspace.id)
+
+
+async def test_a_workspace_create_whose_copy_is_folded_while_its_check_runs_still_answers(
+    async_db: AsyncSession, config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The create committed; its id names the organization's server in the workspace by the time it answers."""
+    world = await _world(async_db, config)
+    sales = await WorkspaceRepository(async_db).create_workspace(
+        name="Sales", organization_id=world.workspace.organization_id, created_by_user_id=world.owner.id
+    )
+    await async_db.commit()
+    service = _service(async_db, config)
+    record_check = service._record_check
+    folded_into: list[uuid.UUID] = []
+
+    async def folded_meanwhile(server: WorkspaceMcpServer, **named: object) -> bool:
+        if server.workspace_id == sales.id and not folded_into:
+            # The organization's admins, on a session of their own, while the check waits on the server.
+            async with AsyncSession(async_db.bind, expire_on_commit=False) as other:
+                owner = await other.get(User, world.owner.id)
+                assert owner is not None
+                created = await _service(other, config).create_server(
+                    user=owner,
+                    workspace_id=None,
+                    request=WorkspaceMcpServerCreate(
+                        name="drive-org", url=f"{PUBLIC_URL}/sales", fold_server_ids=[server.id]
+                    ),
+                )
+                folded_into.append(created.id)
+        return await record_check(server, **named)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(service, "_record_check", folded_meanwhile)
+    answered = await service.create_server(
+        user=world.owner,
+        workspace_id=sales.id,
+        request=WorkspaceMcpServerCreate(name="drive-sales", url=f"{PUBLIC_URL}/sales"),
+    )
+
+    assert answered.id == folded_into[0]
+    assert answered.scope == "organization"
 
 
 @pytest.mark.parametrize("removal", ["shared_account", "connection"])

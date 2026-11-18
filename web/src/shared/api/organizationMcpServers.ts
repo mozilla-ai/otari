@@ -117,7 +117,10 @@ export type McpServerCopiesOf =
   | { url: string; credentialMode: McpCredentialMode; withToken: boolean }
   | { serverId: string }
 
-function copiesQuery(of: McpServerCopiesOf) {
+function readCopies(
+  of: McpServerCopiesOf,
+  signal?: AbortSignal,
+): Promise<McpServerFoldCandidate[]> {
   const body =
     "serverId" in of
       ? { server_id: of.serverId }
@@ -126,33 +129,42 @@ function copiesQuery(of: McpServerCopiesOf) {
           credential_mode: of.credentialMode,
           with_token: of.withToken,
         }
-  return {
-    queryKey: [ORGANIZATION_MCP_SERVERS, "same-url", body],
-    queryFn: ({ signal }: { signal: AbortSignal }) =>
-      apiFetch<McpServerFoldCandidates>(`${mcpServersPath(SCOPE)}/same-url`, {
-        method: "POST",
-        body: JSON.stringify(body),
-        signal: withRequestDeadline(signal),
-      }).then((answer) => answer.data),
-    // Read as the step opens: another admin's write changes it at any time.
-    staleTime: 0,
-  }
+  return apiFetch<McpServerFoldCandidates>(
+    `${mcpServersPath(SCOPE)}/same-url`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+      // apiFetch's own deadline where none is given.
+      ...(signal ? { signal } : {}),
+    },
+  ).then((answer) => answer.data)
 }
 
 /**
- * The workspaces' own servers at a URL, which an organization server can take
- * the place of, and what folding each would do.
+ * The workspaces' own copies of a server about to be promoted, which it can
+ * take the place of, and what folding each would do. Keyed by the server's id
+ * alone, which names one organization's server.
  */
-export function useMcpServerCopies(of: McpServerCopiesOf, enabled: boolean) {
-  return useQuery({ ...copiesQuery(of), enabled })
+export function useMcpServerCopies(serverId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: [ORGANIZATION_MCP_SERVERS, "same-url", serverId],
+    queryFn: ({ signal }) =>
+      readCopies({ serverId }, withRequestDeadline(signal)),
+    enabled,
+    // Read as the step opens: another admin's write changes it at any time.
+    staleTime: 0,
+  })
 }
 
-/** The same read, for a form that asks at the moment it is submitted. */
+/**
+ * The same read, for a form that asks at the moment it is submitted. Not
+ * cached, so the URL, which may carry a credential, is kept nowhere once it
+ * answers, and sent at once rather than held until the browser is online.
+ */
 export function useReadMcpServerCopies(): (
   of: McpServerCopiesOf,
 ) => Promise<McpServerFoldCandidate[]> {
-  const queryClient = useQueryClient()
-  return (of) => queryClient.fetchQuery(copiesQuery(of))
+  return (of) => readCopies(of)
 }
 
 /**

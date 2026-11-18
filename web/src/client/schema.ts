@@ -24607,7 +24607,7 @@ export interface components {
             everyone_tools?: string[];
             /**
              * Fold Server Ids
-             * @description On an organization's server: workspaces' own servers at the same URL to fold into it. Each one's rules become its workspace's settings on the new server, its id keeps working there, and it is deleted. Sign-ins made through the new server's client are kept, and the rest end
+             * @description On an organization's server: workspaces' own servers at the same URL to fold into it. Each one's rules become its workspace's settings on the new server, its id keeps working there, and it is deleted. A personal sign-in is kept where the new server is personal at its very URL and can renew it: the sign-in holds a refresh token and was made through the new server's client. The rest end
              */
             fold_server_ids?: string[];
             /**
