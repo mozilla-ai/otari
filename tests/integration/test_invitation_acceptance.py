@@ -227,10 +227,10 @@ async def test_an_accept_racing_a_cancel_finds_the_link_gone(
                     assert await repositories.invitations.delete_in_organization(rows[0].id, organization.id)
                 released.set()
 
-            accept_task = asyncio.create_task(accept())
-            cancel_task = asyncio.create_task(cancel_once_the_accept_is_waiting())
-            outcome = await asyncio.wait_for(accept_task, timeout=10.0)
-            await cancel_task
+            async with asyncio.TaskGroup() as actors:
+                accept_task = actors.create_task(asyncio.wait_for(accept(), timeout=10.0))
+                actors.create_task(cancel_once_the_accept_is_waiting())
+            outcome = accept_task.result()
     finally:
         await engine.dispose()
 
@@ -349,10 +349,12 @@ async def test_an_accept_racing_a_workspace_deletion_joins_without_it(
                     await WorkspaceRepository(uow).delete_workspace(workspace)
                 released.set()
 
-            accept_task = asyncio.create_task(_acceptance(accepting).accept(_TOKEN, by=by))
-            deleter = asyncio.create_task(delete_the_workspace_once_the_accept_is_waiting())
-            accepted = await asyncio.wait_for(accept_task, timeout=10.0)
-            await deleter
+            async with asyncio.TaskGroup() as actors:
+                accept_task = actors.create_task(
+                    asyncio.wait_for(_acceptance(accepting).accept(_TOKEN, by=by), timeout=10.0)
+                )
+                actors.create_task(delete_the_workspace_once_the_accept_is_waiting())
+            accepted = accept_task.result()
 
         async with sessions() as check:
             placements = (
@@ -431,10 +433,10 @@ async def test_an_accept_racing_a_resend_cannot_use_the_old_link(
                     assert result.sent
                 released.set()
 
-            accept_task = asyncio.create_task(accept())
-            resender = asyncio.create_task(resend_once_the_accept_is_waiting())
-            outcome = await asyncio.wait_for(accept_task, timeout=10.0)
-            await resender
+            async with asyncio.TaskGroup() as actors:
+                accept_task = actors.create_task(asyncio.wait_for(accept(), timeout=10.0))
+                actors.create_task(resend_once_the_accept_is_waiting())
+            outcome = accept_task.result()
 
         monkeypatch.undo()
         async with sessions() as second_try:
