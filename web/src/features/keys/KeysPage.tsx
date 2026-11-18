@@ -137,7 +137,7 @@ function KeyName({ apiKey, isActive }: { apiKey: ApiKey; isActive: boolean }) {
         {name}
       </span>
       {apiKey.key_suffix || apiKey.is_service_key ? (
-        <span className="otari-key-meta flex min-w-0 items-baseline gap-2.5">
+        <span className="otari-key-meta flex min-w-0 items-baseline gap-2.5 overflow-hidden">
           {apiKey.key_suffix ? (
             <span className="shrink-0 text-mono-caption text-subtle">
               …{apiKey.key_suffix}

@@ -3179,9 +3179,8 @@ body {
 }
 /* The API keys table: one row per key, on the Sessions table's terms (rules
    above and below, no side rules, cells that never wrap). Rows are 44px at
-   every width rather than Sessions' 28px on a desk, because each carries a
-   pressable menu trigger. Key takes the width the fixed lanes leave, and holds
-   the name over its last four so the name has all of it. */
+   every width, as each carries a menu trigger. Key takes what the fixed lanes
+   leave. */
 .otari-keys-table .otari-table.table-root {
   border-top: 1px solid var(--color-border);
   border-bottom: 1px solid var(--color-border);
@@ -3249,8 +3248,8 @@ body {
   padding-inline-start: 0.5rem;
 }
 /* The phone's cards (`DataTable` with `mobileLayout="cards"`): the name over
-   its last four over its kind, and each field's label in sentence case in a
-   120px lane, rather than the table header's overline. */
+   its last four, and each field's label in sentence case in a 120px lane,
+   rather than the table header's overline. */
 .otari-keys-table li {
   padding-bottom: 0.875rem;
 }

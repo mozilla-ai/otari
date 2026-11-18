@@ -184,10 +184,11 @@ export function MemberHome({
   const slot = (graphic: ReactNode) =>
     graphic ?? (hasGraphicRow ? <span aria-hidden /> : undefined)
   const isFirstRun = isMemberFirstRun({
-    keys: keys.isLoading ? undefined : (keys.data ?? []),
+    keys: keys.data,
     hasSessions,
     sessionCount,
-    requestCount: usage === "ready" ? requestCount : undefined,
+    requestCount:
+      usage === "ready" && !spend.isPlaceholder ? requestCount : undefined,
     now,
   })
   const mySessions = {

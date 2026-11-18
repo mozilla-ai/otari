@@ -270,6 +270,8 @@ export interface Spend {
    * none for anyone not shown limits.
    */
   reads: { usage: ReadState; roster: ReadState; limits: ReadState }
+  /** The figures are the previous window's, kept on screen while this one loads. */
+  isPlaceholder: boolean
   isLoading: boolean
   error: unknown
 }
@@ -387,6 +389,7 @@ export function useSpend(
     },
     ceilings: ceilingList,
     reads,
+    isPlaceholder: current.isPlaceholderData,
     isLoading:
       current.isLoading ||
       previous.isLoading ||

@@ -460,19 +460,26 @@ describe("isMemberFirstRun", () => {
     expect(ran({ requestCount: 3 })).toBe(false)
   })
 
-  it("reads sessions where the deployment records them", () => {
-    expect(ran({ hasSessions: true, sessionCount: 0, requestCount: 3 })).toBe(
+  it("needs no session too where the deployment records them", () => {
+    expect(ran({ hasSessions: true, sessionCount: 0, requestCount: 0 })).toBe(
       true,
     )
     expect(ran({ hasSessions: true, sessionCount: 2, requestCount: 0 })).toBe(
       false,
     )
+    // A request that left no session still ran.
+    expect(ran({ hasSessions: true, sessionCount: 0, requestCount: 3 })).toBe(
+      false,
+    )
   })
 
-  it("waits for the keys and the count rather than guessing", () => {
+  it("waits for the keys and the counts rather than guessing", () => {
     expect(ran({ keys: undefined })).toBe(false)
     expect(ran({ requestCount: undefined })).toBe(false)
     expect(ran({ hasSessions: true, sessionCount: undefined })).toBe(false)
+    expect(
+      ran({ hasSessions: true, sessionCount: 0, requestCount: undefined }),
+    ).toBe(false)
   })
 
   it("is not a first run while a key works", () => {

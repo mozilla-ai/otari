@@ -67,9 +67,9 @@ export function hasActiveKey(
 
 /**
  * Whether a member's Home opens on the first run: none of their keys works and
- * nothing of theirs ran in the window. What ran is their sessions where the
- * deployment records them and their requests where it does not. An unread
- * count is no answer yet, so the band waits for it rather than flashing.
+ * nothing of theirs ran in the window, no request and, where the deployment
+ * records them, no session. An unread count is no answer yet, so the band
+ * waits for it rather than flashing.
  */
 export function isMemberFirstRun({
   keys,
@@ -86,7 +86,7 @@ export function isMemberFirstRun({
   now: number
 }): boolean {
   if (keys === undefined || hasActiveKey(keys, now)) return false
-  return (hasSessions ? sessionCount : requestCount) === 0
+  return requestCount === 0 && (!hasSessions || sessionCount === 0)
 }
 
 /**
