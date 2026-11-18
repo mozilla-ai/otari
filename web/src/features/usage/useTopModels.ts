@@ -47,7 +47,7 @@ export function useTopModels({
         : null,
     ),
     window.start,
-    { workspaceId, userId },
+    { workspaceId, userId, end: window.end },
   )
 
   const states = new Map<string, TopModelState>()

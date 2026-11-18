@@ -100,8 +100,9 @@ const LAPTOP = apiKey({
 })
 
 /**
- * Wei's Home on this month, refused over spend just now. The month's summary
- * says `windowCost`; one read from any other start says `periodCost`.
+ * Wei's Home on the default window, refused over spend just now. The window's
+ * summary says `windowCost`; one read from any other start says `periodCost`.
+ * Returns every URL the page asked.
  */
 async function renderMemberHome({
   windowCost,
@@ -110,7 +111,7 @@ async function renderMemberHome({
   defaults = [WEEKLY],
   refusalMessage = "Member has $0.01 of budget remaining, less than this request's estimated cost",
   hasTraces = false,
-  url,
+  url = "/",
 }: {
   windowCost: number
   periodCost: number
@@ -120,7 +121,8 @@ async function renderMemberHome({
   /** Whether the deployment captures sessions, as its bootstrap says. */
   hasTraces?: boolean
   url?: string
-}) {
+}): Promise<URL[]> {
+  const asked: URL[] = []
   const refusal: Partial<UsageEntry> = {
     id: "r-1",
     timestamp: new Date().toISOString(),
@@ -128,6 +130,7 @@ async function renderMemberHome({
     error_message: refusalMessage,
   }
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    asked.push(new URL(String(input), "http://test"))
     const [path = "", search] = String(input).slice(API_ROOT.length).split("?")
     const query = new URLSearchParams(search)
     switch (path) {
@@ -217,6 +220,7 @@ async function renderMemberHome({
       ),
     },
   )
+  return asked
 }
 
 /** Where a row's press landed, with the search it carried. */
@@ -268,7 +272,7 @@ describe("MemberHome, a limit set on the member alone", () => {
     })
     expect(
       await screen.findByText(
-        "A limit set on you refused requests this month.",
+        "A limit set on you refused requests in the last 30 days.",
       ),
     ).toBeVisible()
     expect(screen.getByText("Your limit")).toBeVisible()
@@ -395,5 +399,47 @@ describe("MemberHome, by provider", () => {
     expect(search.get("provider")).toBe("anthropic")
     expect(search.get("user_id")).toBe("user-wei")
     expect(search.get("start_date")).toBeTruthy()
+  })
+})
+
+describe("MemberHome, the window", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  it("ends every read of yesterday at midnight, refusals and sessions included", async () => {
+    const asked = await renderMemberHome({
+      windowCost: 41,
+      periodCost: 41,
+      member: WEI_LIMITED_ALONE,
+      defaults: [],
+      refusalMessage: "Member has exceeded budget limit",
+      hasTraces: true,
+      url: "/?period=yesterday",
+    })
+    expect(
+      await screen.findByText("A limit set on you refused requests yesterday."),
+    ).toBeVisible()
+    expect(screen.getByText("Spent yesterday")).toBeVisible()
+    expect(screen.getByText("yesterday in Platform")).toBeVisible()
+    const reads = asked.filter(
+      (url) =>
+        url.searchParams.has("start_date") || url.searchParams.has("start"),
+    )
+    // The window, the one before it, the refusals and the session count.
+    expect(reads.length).toBeGreaterThanOrEqual(4)
+    for (const url of reads) {
+      expect(
+        url.searchParams.get("end_date") ?? url.searchParams.get("end"),
+        String(url),
+      ).toBeTruthy()
+    }
+  })
+
+  it("labels its figures over three months, not over a count of days", async () => {
+    await renderMemberHome({ windowCost: 2, periodCost: 2, url: "/?period=3m" })
+    expect(await screen.findByText("Spent, 3 months")).toBeVisible()
+    expect(screen.getByText("Tokens, 3 months")).toBeVisible()
   })
 })

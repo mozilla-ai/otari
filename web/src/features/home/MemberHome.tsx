@@ -30,13 +30,16 @@ import { useCanCreateKey } from "@/features/organization/access"
 import { useCurrentOwner } from "@/features/organization/attribution"
 import { wholePct } from "@/features/spend/limits"
 import {
-  isPeriodKey,
-  PERIODS,
-  type PeriodKey,
+  comparedWith,
+  DEFAULT_PERIOD,
+  figureLabel,
+  periodFromUrl,
   sessionsSearchFor,
   windowOf,
+  windowSpan,
   windowWords,
 } from "@/features/spend/period"
+import { SpendPeriodPicker } from "@/features/spend/SpendPeriodPicker"
 import {
   type ReadState,
   readState,
@@ -81,7 +84,7 @@ const CUTS: {
   },
 ]
 
-const URL_DEFAULTS = { period: "month", by: "" }
+const URL_DEFAULTS = { period: DEFAULT_PERIOD, by: "" }
 
 /**
  * Home for someone who uses the team rather than runs it: the owner's Home,
@@ -109,8 +112,7 @@ export function MemberHome({
   const me = owner.ownerId || undefined
   const canCreateKey = useCanCreateKey()
 
-  const rawPeriod = get("period")
-  const period: PeriodKey = isPeriodKey(rawPeriod) ? rawPeriod : "month"
+  const period = periodFromUrl(get("period"))
   const window = windowOf(period, now)
   const cut = CUTS.find((one) => one.value === get("by")) ?? CUTS[0]
 
@@ -134,6 +136,7 @@ export function MemberHome({
     {
       workspaceId,
       start: window.start,
+      end: window.end || undefined,
       q: "",
       userIds: me ? [me] : undefined,
     },
@@ -201,7 +204,7 @@ export function MemberHome({
       : usage === "loading"
         ? "Loading"
         : undefined
-  const words = windowWords(period, window)
+  const words = windowWords(window)
   // A cell with no graphic still holds the row, or its figure drops off the
   // baseline of the cells beside it that have one.
   const hasGraphicRow = spend.series.length > 1 || Boolean(sessionCount)
@@ -241,6 +244,7 @@ export function MemberHome({
     refusedSince,
     100,
     me !== undefined && refusedSince !== "",
+    limit?.kind === "unseen" ? window.end : "",
   )
   const spendRefusals =
     limit?.kind === "default"
@@ -420,23 +424,19 @@ export function MemberHome({
     },
   ]
 
-  const nothingYet =
-    period === "month"
-      ? "Nothing spent this month yet."
-      : `Nothing spent in the last ${window.days} days.`
+  // Only a window still under way can be spent in "yet".
+  const nothingYet = `Nothing spent ${words}${
+    period === "today" || period === "month" ? " yet" : ""
+  }.`
 
   return (
     <div className="flex flex-col gap-6">
       <PageIntro
         title="Home"
         action={
-          <Segmented
-            label="Window"
-            size="md"
-            options={PERIODS}
+          <SpendPeriodPicker
             value={period}
             onChange={(next) => patch({ period: next })}
-            isFullWidth={isMobile}
           />
         }
       />
@@ -449,18 +449,14 @@ export function MemberHome({
       ) : null}
       <KpiStrip isEmpty={false} columns={4}>
         <KpiCell
-          label={
-            period === "month"
-              ? "Spent this month"
-              : `Spent, ${window.days} days`
-          }
+          label={figureLabel("Spent", window)}
           value={spend.totals ? formatUsd(total) : "—"}
           delta={
             delta !== null ? (
               <TrendChip
                 fraction={delta}
                 polarity="neutral"
-                caption={`vs prior ${window.days} days`}
+                caption={comparedWith(window)}
               />
             ) : undefined
           }
@@ -477,7 +473,7 @@ export function MemberHome({
             spend.series.length > 1 ? (
               <Sparkline
                 values={spend.series.map((point) => point.cost)}
-                ariaLabel="Your spend per day over the window"
+                ariaLabel={`Your spend per ${window.bucket} over the window`}
                 height={40}
               />
             ) : undefined,
@@ -519,11 +515,7 @@ export function MemberHome({
           }
         />
         <KpiCell
-          label={
-            period === "month"
-              ? "Tokens this month"
-              : `Tokens, ${window.days} days`
-          }
+          label={figureLabel("Tokens", window)}
           value={
             spend.totals
               ? formatTokens(billedTokenTotal(spend.totals) ?? 0)
@@ -544,7 +536,7 @@ export function MemberHome({
                 values={spend.series.map(
                   (point) => point.input_tokens + point.output_tokens,
                 )}
-                ariaLabel="Your billed tokens per day over the window"
+                ariaLabel={`Your billed tokens per ${window.bucket} over the window`}
                 height={40}
               />
             ) : undefined,
@@ -559,9 +551,7 @@ export function MemberHome({
             subline={
               sessionsFailed
                 ? "Could not load"
-                : period === "month"
-                  ? `this month in ${workspace}`
-                  : `${window.days} days in ${workspace}`
+                : `${windowSpan(window)} in ${workspace}`
             }
             graphic={slot(
               sessionCount ? (
