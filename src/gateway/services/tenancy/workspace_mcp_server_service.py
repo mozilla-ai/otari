@@ -2491,6 +2491,8 @@ class WorkspaceMcpServerService:
             attach_by_default=attach_by_default,
         )
         await self.db.commit()
+        # The workspace's own setting may attach the server here alone.
+        await AttachedMcpServerIndex.refresh_after_write()
         server = await self._reached(resolved_workspace_id, server_id, all_states=True)
         logger.info(
             "MCP organization server settings saved workspace_id=%s server_id=%s stored=%s",
