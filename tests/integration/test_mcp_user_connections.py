@@ -83,6 +83,7 @@ from gateway.services.tenancy.workspace_mcp_server_service import (
     WorkspaceMcpServerUpdate,
 )
 from gateway.services.tools import (
+    AttachedMcpServerIndex,
     McpConnectionService,
     McpGrantMembershipListener,
     McpSignInReason,
@@ -2771,6 +2772,37 @@ async def test_a_request_gets_the_attached_servers_after_the_named_ones_and_neve
     # A named one it may not reach still answers as unknown, as it always has.
     with pytest.raises(WorkspaceMcpServerNotFoundError):
         await servers.resolve_for_request(world.workspace.id, [uuid.uuid4()], member, attach=True)
+
+
+@pytest.mark.asyncio
+async def test_whether_a_workspace_has_an_attached_server_follows_each_write_without_a_read_per_request(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    AttachedMcpServerIndex.reset()
+    world = await _world(async_db, config)
+    service = _service(async_db, config)
+    servers = WorkspaceMcpServers(async_db)
+    ids = {"workspace_id": world.workspace.id, "server_id": world.server.id}
+
+    assert await servers.any_attached(world.workspace.id) is False
+    await service.update_server(user=world.owner, request=WorkspaceMcpServerUpdate(attach_by_default=True), **ids)
+    assert await servers.any_attached(world.workspace.id) is True
+    await service.update_server(user=world.owner, request=WorkspaceMcpServerUpdate(enabled=False), **ids)
+    assert await servers.any_attached(world.workspace.id) is False
+    await service.update_server(user=world.owner, request=WorkspaceMcpServerUpdate(enabled=True), **ids)
+    assert await servers.any_attached(world.workspace.id) is True
+    await service.delete_server(user=world.owner, **ids)
+    assert await servers.any_attached(world.workspace.id) is False
+    # Another worker's write arrives with the next refresh, not before.
+    await _service(async_db, config).create_server(
+        user=world.owner,
+        workspace_id=world.workspace.id,
+        request=WorkspaceMcpServerCreate(name="jira", url=PUBLIC_URL, attach_by_default=True),
+    )
+    AttachedMcpServerIndex.reset()
+    assert await servers.any_attached(world.workspace.id) is False
+    await AttachedMcpServerIndex.refresh(WorkspaceMcpServerRepository(async_db))
+    assert await servers.any_attached(world.workspace.id) is True
 
 
 async def test_an_attached_server_that_keeps_failing_is_left_out_until_its_cooldown_ends(

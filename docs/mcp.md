@@ -183,6 +183,9 @@ In the dashboard it is the **Every request** choice of **Availability**, on the
 server's page and in the form that adds one; the server's row under
 **Tools → MCP servers** shows it.
 
+- **It takes effect within 30 seconds.** Attaching, detaching, switching off or
+  deleting a server applies at once on the replica that served the change and
+  within 30 seconds on the others.
 - **The key needs the `mcp:execute` scope.** A key without it gets no attached
   server and is served as if none were attached. A new key holds `inference:run`
   alone unless its creator names more; see [Scopes](api-keys.md#scopes).

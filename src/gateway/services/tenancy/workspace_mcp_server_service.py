@@ -128,6 +128,7 @@ from gateway.services.secret_box import (
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.tools import (
+    AttachedMcpServerIndex,
     CompletedConnection,
     LinkSignIn,
     McpConnectionService,
@@ -1310,8 +1311,8 @@ class WorkspaceMcpServers:
         )
 
     async def any_attached(self, workspace_id: uuid.UUID) -> bool:
-        """Whether the workspace has an enabled server marked ``attach_by_default``, in one indexed read."""
-        return await WorkspaceMcpServerRepository(self._db).any_attached(workspace_id)
+        """Whether the workspace has an enabled server marked ``attach_by_default``, as this worker last read it."""
+        return AttachedMcpServerIndex.has_attached(workspace_id)
 
     async def list_reachable(self, workspace_id: uuid.UUID, access: McpAccess) -> list[McpServerSummary]:
         """See :func:`list_reachable_mcp_servers`."""
@@ -1693,6 +1694,7 @@ class WorkspaceMcpServerService:
                 added_by=user.id,
             )
         await self.db.commit()
+        await AttachedMcpServerIndex.refresh(WorkspaceMcpServerRepository(self.db))
         # After the commit, so a server that fails its check is still stored:
         # it may be registered before it is up, and `health` says what failed.
         await self._record_check(server)
@@ -1820,6 +1822,7 @@ class WorkspaceMcpServerService:
             await self._end_connections(server)
 
         await self.db.commit()
+        await AttachedMcpServerIndex.refresh(WorkspaceMcpServerRepository(self.db))
         McpConnectionService.revoke_in_background(revocations, unread=unread)
         if connection_changed:
             await self._record_check(server)
@@ -2156,6 +2159,7 @@ class WorkspaceMcpServerService:
         await McpOAuthFlowRepository(self.db).remove_for_server(server.id)
         await self.db.delete(server)
         await self.db.commit()
+        await AttachedMcpServerIndex.refresh(WorkspaceMcpServerRepository(self.db))
         McpConnectionService.revoke_in_background(revocations, unread=unread)
 
     async def my_tools(self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID) -> WorkspaceMcpServerMyTools:
