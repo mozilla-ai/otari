@@ -4,6 +4,16 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.51.0](https://github.com/mozilla-ai/otari/releases/tag/v0.51.0) - 2026-11-18
+
+
+
+### Features
+
+- **web:** Reorganize the dashboard around Home, Sessions, People and Rules in [#3375](https://github.com/mozilla-ai/otari/pull/3375) by [@jigjigjig](https://github.com/jigjigjig) ([`a4455ab`](https://github.com/mozilla-ai/otari/commit/a4455abdfb3448a5c9914c07238a5a152c1950a4))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.50.0...v0.51.0
 ## [0.50.0](https://github.com/mozilla-ai/otari/releases/tag/v0.50.0) - 2026-11-18
 
 
