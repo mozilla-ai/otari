@@ -114,12 +114,10 @@ def test_existing_servers_and_grants_take_their_organization_and_workspace(
 
     command.upgrade(config, _REVISION)
 
-    assert uuid.UUID(_scalar(engine, "SELECT organization_id FROM workspace_mcp_servers")) == uuid.UUID(
-        organization_id
-    )
-    assert uuid.UUID(_scalar(engine, "SELECT workspace_id FROM workspace_mcp_server_grants")) == uuid.UUID(
-        workspace_id
-    )
+    server_organization = _scalar(engine, "SELECT organization_id FROM workspace_mcp_servers")
+    grant_workspace = _scalar(engine, "SELECT workspace_id FROM workspace_mcp_server_grants")
+    assert uuid.UUID(server_organization) == uuid.UUID(organization_id)
+    assert uuid.UUID(grant_workspace) == uuid.UUID(workspace_id)
     servers = {column["name"]: column for column in inspect(engine).get_columns("workspace_mcp_servers")}
     assert servers["workspace_id"]["nullable"] is True
     assert servers["organization_id"]["nullable"] is False
