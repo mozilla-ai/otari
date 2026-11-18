@@ -26937,6 +26937,38 @@
             ],
             "title": "Api Key Id"
           },
+          "client_language": {
+            "anyOf": [
+              {
+                "enum": [
+                  "python",
+                  "javascript",
+                  "go",
+                  "java",
+                  "rust",
+                  "ruby"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The language the client was written in, from its SDK's headers or its HTTP library's User-Agent. `javascript` covers TypeScript.",
+            "title": "Client Language"
+          },
+          "client_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The client's version, from its User-Agent or its SDK's headers.",
+            "title": "Client Version"
+          },
           "cost": {
             "description": "USD, a snapshot of the usage rows' cost. Usage stays the billing record.",
             "title": "Cost",

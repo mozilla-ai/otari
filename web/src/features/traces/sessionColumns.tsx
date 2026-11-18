@@ -81,7 +81,10 @@ export function columns(
         <span className="flex min-w-0 items-center gap-2">
           {withMarks ? (
             session.harness ? (
-              <HarnessMark harness={session.harness} />
+              <HarnessMark
+                harness={session.harness}
+                language={session.client_language}
+              />
             ) : (
               <NoHarnessMark />
             )

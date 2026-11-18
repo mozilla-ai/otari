@@ -15,7 +15,10 @@ it serves, so you can see what an agent did, not only what one call did.
    ![A session open in its side panel, with the agent's turn and its search_docs tool call.](assets/screenshots/sessions-panel.png)
 
 Where Otari has a logo for the agent that ran a session, it shows it beside the
-session's name, in the list and at the top of its panel.
+session's name, in the list and at the top of its panel. A session sent by an SDK
+or a plain HTTP library instead shows the logo of the language it was written in
+(Python, JavaScript, Go, Java, Rust or Ruby) in the list, and its panel names the
+client with its version, such as `openai 2.30.0`.
 
 The **Sessions** and **Requests** views share one time range and the user, API
 key, model and status filters. A session opens on **At a glance**, which splits

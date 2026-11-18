@@ -1,8 +1,10 @@
 import { lazy, Suspense } from "react"
 
 import { ProductMark } from "@/design-system/ProductMark"
+import type { MarkKind } from "@/shared/components/marks/BrandMarkGlyph"
 import {
   hasHarnessMark,
+  hasLanguageMark,
   hasMakerMark,
   hasProviderMark,
   isProductMarkProvider,
@@ -52,7 +54,7 @@ function Glyph({
   box,
 }: {
   markKey: string
-  kind: "provider" | "maker" | "harness"
+  kind: MarkKind
   box: string
 }) {
   return (
@@ -187,28 +189,43 @@ export function anyMakerMark(vendorSlugs: readonly string[]): boolean {
 }
 
 /**
- * An agent harness's mark, keyed on the name a session shows it under, or a
- * lettermark tile when it has none.
+ * The mark of the client that sent a session: an agent harness's own mark, else
+ * the language the client was written in, else a lettermark tile of its name.
+ *
+ * An SDK or an HTTP library (`openai`, `python-httpx`) is no harness, and what
+ * tells two of them apart at a glance is their language, so the list draws that.
  */
 export function HarnessMark({
   harness,
+  language,
   step = 16,
 }: {
   harness: string
+  /** The session's `client_language`, drawn when the harness has no mark. */
+  language?: string | null
   step?: BrandMarkStep
 }) {
   const box = BOX[step]
-  return hasHarnessMark(harness) ? (
-    <Glyph markKey={harness} kind="harness" box={box} />
-  ) : (
-    <Lettermark label={harness} box={box} />
-  )
+  if (hasHarnessMark(harness)) {
+    return <Glyph markKey={harness} kind="harness" box={box} />
+  }
+  if (language && hasLanguageMark(language)) {
+    return <Glyph markKey={language} kind="language" box={box} />
+  }
+  return <Lettermark label={harness} box={box} />
 }
 
-/** Whether any of these harnesses has a mark, which decides if a list reserves the slot. */
-export function anyHarnessMark(harnesses: readonly (string | null)[]): boolean {
-  return harnesses.some(
-    (harness) => harness !== null && hasHarnessMark(harness),
+/** Whether any of these sessions' clients has a mark, which decides if a list reserves the slot. */
+export function anyHarnessMark(
+  sessions: readonly {
+    harness: string | null
+    client_language?: string | null
+  }[],
+): boolean {
+  return sessions.some(
+    ({ harness, client_language }) =>
+      (harness !== null && hasHarnessMark(harness)) ||
+      (client_language != null && hasLanguageMark(client_language)),
   )
 }
 

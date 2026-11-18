@@ -504,6 +504,8 @@ export function toTrace(summary: TraceSummary, detail?: TraceDetail): Trace {
     id: summary.trace_id,
     name: sessionName(summary),
     harness: summary.harness,
+    clientLanguage: summary.client_language,
+    clientVersion: summary.client_version,
     timestamp: summary.started_at,
     observations,
     gateway: detail

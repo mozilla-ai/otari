@@ -12,15 +12,16 @@ import pytest
 
 from gateway.services.traces import (
     AnsweredCall,
+    RequestClient,
     RequestTrace,
     SessionRef,
     TurnFacts,
-    harness_of,
     is_subagent,
     read_turn,
 )
 from gateway.services.traces import resolve_session as resolve
 from gateway.services.traces._collector import call_id_digest, client_tool_span_id
+from gateway.services.traces._identity import harness_of
 
 _WORKSPACE = uuid.uuid4()
 _CLAUDE_CODE = {"user-agent": "claude-cli/2.1.291 (external, sdk-cli)", "x-claude-code-session-id": "b57732d4"}
@@ -248,11 +249,77 @@ def test_only_an_identifier_shaped_key_the_client_chose_names_the_session(ref: S
         ({"user-agent": "Zed/0.215.3 (macos; aarch64)"}, "zed"),
         ({"user-agent": "curl/8.7.1"}, "curl"),
         ({"user-agent": "OpenAI/Python 1.99"}, "openai"),
+        ({"user-agent": "AsyncOpenAI/Python 2.30.0"}, "openai"),
+        ({"user-agent": "AsyncAzureOpenAI/Python 2.30.0"}, "openai"),
+        ({"user-agent": "AsyncAnthropicBedrock/Python 1.17.0"}, "anthropic"),
+        ({"user-agent": "Anthropic/JS 0.71.0"}, "anthropic"),
+        ({"user-agent": "AsyncGroq/Python 1.1.2"}, "groq"),
+        ({"user-agent": "speakeasy-sdk/python 3.1.0 2.935.1 1.0.0 mistralai"}, "mistralai"),
+        ({"user-agent": "google-genai-sdk/2.25.0 gl-python/3.13.1"}, "google-genai"),
+        ({"user-agent": "OpenAPI-Generator/1.0.0/python"}, "openapi-generator"),
+        ({"user-agent": "python-httpx/0.28.1"}, "python-httpx"),
         ({}, None),
     ],
 )
 def test_the_harness_comes_from_the_user_agents_product_name(headers: dict[str, str], expected: str | None) -> None:
     assert harness_of(headers) == expected
+
+
+@pytest.mark.parametrize(
+    ("headers", "language"),
+    [
+        ({"user-agent": "AsyncOpenAI/Python 2.30.0", "x-stainless-lang": "python"}, "python"),
+        ({"user-agent": "OpenAI/JS 6.1.0", "x-stainless-lang": "js"}, "javascript"),
+        ({"user-agent": "my-app/1.0", "x-stainless-lang": "go"}, "go"),
+        ({"user-agent": "cohere/7.2.0", "x-fern-language": "Python"}, "python"),
+        ({"user-agent": "OpenAPI-Generator/1.0.0/python"}, "python"),
+        ({"user-agent": "OpenAPI-Generator/1.0.0/go"}, "go"),
+        ({"user-agent": "speakeasy-sdk/python 3.1.0 2.935.1 1.0.0 mistralai"}, "python"),
+        ({"user-agent": "google-genai-sdk/2.25.0 gl-python/3.13.1"}, "python"),
+        ({"user-agent": "ollama-python/0.6.1 (arm64 darwin) Python/3.13.1"}, "python"),
+        ({"user-agent": "python-httpx/0.28.1"}, "python"),
+        ({"user-agent": "python-requests/2.32.3"}, "python"),
+        ({"user-agent": "Python/3.12 aiohttp/3.11.0"}, "python"),
+        ({"user-agent": "node"}, "javascript"),
+        ({"user-agent": "axios/1.7.9"}, "javascript"),
+        ({"user-agent": "Bun/1.2.0"}, "javascript"),
+        ({"user-agent": "Go-http-client/2.0"}, "go"),
+        ({"user-agent": "okhttp/4.12.0"}, "java"),
+        ({"user-agent": "Java-http-client/21.0.2"}, "java"),
+        ({"user-agent": "Ruby"}, "ruby"),
+        (_PI, "javascript"),
+        ({"user-agent": "curl/8.7.1"}, None),
+        ({"user-agent": "claude-cli/2.1.291 (external, sdk-cli)"}, None),
+        ({"user-agent": "my-agent/1.4.0", "x-stainless-lang": "cobol"}, None),
+        ({}, None),
+    ],
+)
+def test_the_clients_language_comes_from_its_sdk_or_its_http_library(
+    headers: dict[str, str], language: str | None
+) -> None:
+    assert RequestClient.of(headers).language == language
+
+
+@pytest.mark.parametrize(
+    ("headers", "version"),
+    [
+        ({"user-agent": "AsyncOpenAI/Python 2.30.0"}, "2.30.0"),
+        ({"user-agent": "OpenAPI-Generator/1.0.0/python"}, "1.0.0"),
+        ({"user-agent": "claude-cli/2.1.291 (external, sdk-cli)", "x-stainless-package-version": "0.71.0"}, "2.1.291"),
+        ({"user-agent": "mistral-client-python/Mistral-Vibe/2.14.0"}, "2.14.0"),
+        ({"user-agent": "speakeasy-sdk/python 3.1.0 2.935.1 1.0.0 mistralai"}, "3.1.0"),
+        ({"user-agent": "python-httpx/0.28.1"}, "0.28.1"),
+        ({"user-agent": "my-app", "x-stainless-package-version": "v4.2.0"}, "4.2.0"),
+        ({"user-agent": "my-agent/1.4.0-beta.2"}, "1.4.0-beta.2"),
+        ({"user-agent": "Go-http-client/1.1"}, None),
+        ({"user-agent": "Python/3.12 aiohttp/3.11.0"}, None),
+        ({"user-agent": "node"}, None),
+        ({"user-agent": "my-agent/latest"}, None),
+        ({}, None),
+    ],
+)
+def test_the_clients_version_comes_from_its_user_agent(headers: dict[str, str], version: str | None) -> None:
+    assert RequestClient.of(headers).version == version
 
 
 def test_a_claude_code_subagent_is_marked_by_its_agent_header() -> None:

@@ -22182,6 +22182,16 @@ export interface components {
             /** Api Key Id */
             api_key_id: string | null;
             /**
+             * Client Language
+             * @description The language the client was written in, from its SDK's headers or its HTTP library's User-Agent. `javascript` covers TypeScript.
+             */
+            client_language?: ("python" | "javascript" | "go" | "java" | "rust" | "ruby") | null;
+            /**
+             * Client Version
+             * @description The client's version, from its User-Agent or its SDK's headers.
+             */
+            client_version?: string | null;
+            /**
              * Cost
              * @description USD, a snapshot of the usage rows' cost. Usage stays the billing record.
              */

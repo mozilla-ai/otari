@@ -438,11 +438,11 @@ from gateway.services.tools import (
 )
 from gateway.services.traces import (
     ContextWeights,
+    RequestClient,
     RequestTrace,
     SessionRef,
     TurnFacts,
     context_of,
-    harness_of,
     is_subagent,
     read_turn_content,
     resolve_session,
@@ -3247,9 +3247,12 @@ async def resolve_request_context(
     # trace middleware once the response is sent.
     trace: RequestTrace | None = None
     if config.trace_capture_enabled:
+        sender = RequestClient.of(raw_request.headers)
         trace = RequestTrace(
             session=session,
-            harness=harness_of(raw_request.headers),
+            harness=sender.harness,
+            client_language=sender.language,
+            client_version=sender.version,
             turn=turn,
             context=context_of(context),
             content=content,
