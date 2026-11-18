@@ -51,6 +51,7 @@ from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
 from gateway.core.sql import utc_iso
 from gateway.exceptions.organizations_exceptions import (
+    SetupKeyAlreadyIssuedError,
     WorkspaceActivationUnavailableError,
     WorkspaceAlreadyActivatedError,
 )
@@ -286,6 +287,7 @@ class WorkspaceActivationService:
         *,
         user: User,
         workspace_id: uuid.UUID,
+        replace: bool = True,
         growth: GrowthSignalPort | None = None,
         background_tasks: BackgroundTasks | None = None,
     ) -> ActivationApiKeyPublic:
@@ -293,6 +295,11 @@ class WorkspaceActivationService:
 
         One row per workspace, rotated in place, so a second press or a second
         manager leaves one key on the Keys page rather than two.
+
+        With ``replace`` false, a key that still authenticates is refused rather
+        than rotated (``SetupKeyAlreadyIssuedError``), whoever holds it. The sheet
+        asks this way as it opens, and the check runs under the row lock, so two
+        tabs or two managers opening it at once leave the first key working.
 
         Refuses once the workspace has activated or the guide was dismissed: a
         retired flow does not get to keep handing out credentials, and a stale
@@ -328,6 +335,8 @@ class WorkspaceActivationService:
             alias=user.full_name or user.email,
         )
         record = await self._existing_key(state)
+        if not replace and record is not None and key_refusal(record, datetime.now(UTC)) is None:
+            raise SetupKeyAlreadyIssuedError
         inserted = record is None
         if record is None:
             record = APIKey(

@@ -8109,7 +8109,8 @@ export interface paths {
          *     Workspace owners and admins only, like every other action that changes a
          *     workspace. The plaintext is returned once and never stored, so a reopened
          *     guide rotates the same key row rather than collecting a second one, and
-         *     answers 409 once the workspace has activated or the guide was dismissed.
+         *     answers 409 once the workspace has activated or the guide was dismissed, or,
+         *     with ``replace`` false, while a setup key still authenticates.
          */
         post: operations["workspace-activation-create_workspace_activation_key"];
         delete?: never;
@@ -38311,7 +38312,10 @@ export interface operations {
     };
     "workspace-activation-create_workspace_activation_key": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Whether to rotate a setup key that still authenticates. False answers 409 (`setup_key_already_issued`) instead, which is how the guide asks as it opens. */
+                replace?: boolean;
+            };
             header?: never;
             path: {
                 workspace_id: string;

@@ -62,7 +62,7 @@ test.describe("dashboard core flows", () => {
     // and concealed there until they ask for it (otari-ai#2111).
     const mintedKey = page.waitForResponse(
       (response) =>
-        response.url().endsWith("/activation/key") &&
+        new URL(response.url()).pathname.endsWith("/activation/key") &&
         response.request().method() === "POST" &&
         response.ok(),
     )
