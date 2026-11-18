@@ -99,7 +99,15 @@ class McpOAuthFlowRepository(BaseRepository[McpOAuthFlow, Never, Never]):
 
     async def remove_for_user(self, user_id: str, server_ids: Collection[uuid.UUID] | None = None) -> None:
         """Stage the removal of a user's pending sign-ins, on these servers or on every one."""
-        query = delete(McpOAuthFlow).where(McpOAuthFlow.user_id == user_id)
+        await self.remove_for_users([user_id], server_ids)
+
+    async def remove_for_users(
+        self, user_ids: Collection[str], server_ids: Collection[uuid.UUID] | None = None
+    ) -> None:
+        """Stage the removal of these users' pending sign-ins, on these servers or on every one, in one statement."""
+        if not user_ids:
+            return
+        query = delete(McpOAuthFlow).where(McpOAuthFlow.user_id.in_(list(user_ids)))
         if server_ids is not None:
             if not server_ids:
                 return

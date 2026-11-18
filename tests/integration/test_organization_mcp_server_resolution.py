@@ -413,7 +413,7 @@ async def test_deleting_a_member_s_last_workspace_ends_their_organization_server
 
 
 async def test_a_sign_in_finishing_after_its_workspace_turned_the_server_off_stores_nothing(
-    async_db: AsyncSession, config: GatewayConfig
+    async_db: AsyncSession, config: GatewayConfig, wire: base._Wire
 ) -> None:
     world = await _world(async_db, config)
     jira = await _per_user_shared(async_db, world)
@@ -427,3 +427,5 @@ async def test_a_sign_in_finishing_after_its_workspace_turned_the_server_off_sto
         await _service(async_db, config).complete_connection(user=member, state=_state(url), code="code")
 
     assert (await async_db.execute(select(McpUserConnection.id))).scalars().all() == []
+    await base._drain_revocations()
+    assert wire.revoked == ["refresh-1"], "the token the exchange issued is ended upstream"
