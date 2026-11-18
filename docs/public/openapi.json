@@ -32535,7 +32535,7 @@
             "type": "boolean"
           },
           "scope": {
-            "description": "Whose the server is: one workspace's own, or its organization's, which every workspace reaches",
+            "description": "Who owns the server: one workspace, or its organization",
             "enum": [
               "workspace",
               "organization"
@@ -47153,6 +47153,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationRefusal"
+                }
+              }
+            },
+            "description": "Another server of the organization, its own or a workspace's, already has this name."
           },
           "422": {
             "content": {

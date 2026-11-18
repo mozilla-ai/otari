@@ -282,6 +282,39 @@ describe("McpConnectionCallbackPage", () => {
     expect(await screen.findByText("Organization server page")).toBeVisible()
   })
 
+  it.each([
+    "/mcp-connections/callback",
+    "/MCP-Connections/callback/?error=access_denied",
+    "/tools/../mcp-connections/callback#top",
+  ])(
+    "never goes back to this page for a cancel naming %s, using the noted origin instead",
+    async (returnTo) => {
+      window.sessionStorage.setItem(
+        "otari.mcp-sign-in.origin",
+        `/tools/mcp-servers/${SERVER_ID}`,
+      )
+      mockComplete(() => Response.json({}))
+      renderCallback({
+        error: "access_denied",
+        state: "s",
+        return_to: returnTo,
+      })
+
+      expect(await screen.findByText("Server page")).toBeVisible()
+    },
+  )
+
+  it("goes to the list for a cancel naming this page with no origin noted", async () => {
+    mockComplete(() => Response.json({}))
+    renderCallback({
+      error: "access_denied",
+      state: "s",
+      return_to: "/mcp-connections/callback",
+    })
+
+    expect(await screen.findByText("Server list")).toBeVisible()
+  })
+
   it("ignores a noted origin that would leave the dashboard", async () => {
     window.sessionStorage.setItem("otari.mcp-sign-in.origin", "//evil.example/")
     mockComplete(() => Response.json({}))

@@ -429,6 +429,33 @@ async def test_deleting_a_member_s_last_workspace_ends_their_organization_server
     assert connections == [], "the member reached the organization only through that workspace"
 
 
+async def test_a_member_removes_their_own_connection_to_an_organization_server(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    world = await _world(async_db, config)
+    jira = await _per_user_shared(async_db, world)
+    member_id, workspace_id = world.member.id, world.workspace.id
+    url = await _start(async_db, config, jira, member_id, workspace_id)
+    member = await async_db.get(User, member_id)
+    assert member is not None
+    service = _service(async_db, config)
+    await service.complete_connection(user=member, state=_state(url), code="code")
+    foreign = await _foreign_workspace(async_db)
+    stranger_organization = await OrganizationRepository(async_db).get(foreign.organization_id)
+    assert stranger_organization is not None
+    stranger = await base._member(async_db, stranger_organization, role="owner", name="Stranger")
+    await WorkspaceMemberRepository(async_db).create(workspace_id=foreign.id, user_id=stranger.id, role="owner")
+    await async_db.commit()
+
+    with pytest.raises(WorkspaceMcpServerNotFoundError):
+        await service.disconnect(user=stranger, workspace_id=foreign.id, server_id=jira)
+    assert (await async_db.execute(select(McpUserConnection.server_id))).scalars().all() == [jira]
+
+    await service.disconnect(user=member, workspace_id=workspace_id, server_id=jira)
+
+    assert (await async_db.execute(select(McpUserConnection.id))).scalars().all() == []
+
+
 async def test_a_sign_in_finishing_after_its_workspace_turned_the_server_off_stores_nothing(
     async_db: AsyncSession, config: GatewayConfig, wire: base._Wire
 ) -> None:

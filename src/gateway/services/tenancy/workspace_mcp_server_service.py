@@ -444,7 +444,7 @@ class WorkspaceMcpServerPublic(BaseModel):
     id: uuid.UUID
     workspace_id: uuid.UUID | None = Field(description="The workspace that owns the server; null for an organization's")
     scope: Literal["workspace", "organization"] = Field(
-        description="Whose the server is: one workspace's own, or its organization's, which every workspace reaches"
+        description="Who owns the server: one workspace, or its organization"
     )
     name: str
     url: str
@@ -2836,7 +2836,7 @@ class WorkspaceMcpServerService:
         )
 
     async def disconnect(self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID) -> None:
-        """End the caller's own connection to a server.
+        """End the caller's own connection to a server the workspace reaches, its own or its organization's.
 
         Raises:
             McpConnectionNotFoundError: the caller has no connection to it.

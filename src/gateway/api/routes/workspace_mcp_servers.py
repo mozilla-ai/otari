@@ -27,6 +27,7 @@ from gateway.api.deps import (
 from gateway.api.routes._helpers import bounded_body
 from gateway.api.routes._logo_response import LOGO_RESPONSES, logo_response
 from gateway.api.routes.organizations import Message
+from gateway.schemas.organizations import OrganizationRefusal
 from gateway.schemas.tools import (
     McpConnectionStart,
     McpConnectionStarted,
@@ -564,7 +565,16 @@ async def list_organization_mcp_servers(
     return await service.list_organization_servers(user=current_identity, skip=skip, limit=limit)
 
 
-@organization_router.post("", status_code=status.HTTP_201_CREATED)
+@organization_router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        status.HTTP_409_CONFLICT: {
+            "model": OrganizationRefusal,
+            "description": "Another server of the organization, its own or a workspace's, already has this name.",
+        }
+    },
+)
 async def create_organization_mcp_server(
     service: WorkspaceMcpServerServiceDep,
     current_identity: CurrentIdentity,

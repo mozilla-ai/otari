@@ -67,18 +67,23 @@ function mockApi({
   lift,
   limit,
   reread,
+  workspaces,
   role = "admin",
 }: {
   server?: WorkspaceMcpServer
-  /** Answers a lift in place of the stock row, to hold it or refuse it. */
+  /** Runs before a lift is answered, to hold it or refuse it. */
   lift?: () => Promise<unknown>
-  /** Holds a limit's PUT until it settles, then answers with the stock row. */
+  /** Holds a limit's PUT until it settles. */
   limit?: Promise<void>
   /** Holds every read of the table after the first. */
   reread?: Promise<void>
+  /** Runs before every read of the table, to refuse it. */
+  workspaces?: () => Promise<unknown>
   role?: "owner" | "admin" | "member"
 } = {}): Call[] {
   const calls: Call[] = []
+  // Each workspace's row as the server holds it, so a reread answers with what was saved.
+  const rows = [{ ...ALPHA }, { ...BETA }]
   vi.spyOn(apiClient, "apiFetch").mockImplementation(async (path, init) => {
     const method = (init?.method ?? "GET").toUpperCase()
     const body =
@@ -86,21 +91,23 @@ function mockApi({
         ? (JSON.parse(init.body) as Record<string, unknown>)
         : undefined
     calls.push({ path, method, body })
-    if (method === "DELETE" && lift) return (await lift()) as never
+    if (method === "DELETE" && lift) await lift()
     if (method === "PUT" && limit) await limit
     if (path.startsWith(`${PATH}/workspaces/`)) {
-      const row = path.endsWith(ALPHA.workspace_id) ? ALPHA : BETA
-      return {
-        ...row,
-        organization_tools: method === "PUT" ? body?.tools : null,
-      } as never
+      const row = rows.find((each) => path.endsWith(each.workspace_id))
+      if (!row) throw new apiClient.ApiError(404, `Not mocked: ${path}`)
+      const tools = method === "PUT" ? (body?.tools as string[]) : null
+      row.organization_tools = tools
+      row.reached = row.workspace_enabled && tools?.length !== 0
+      return { ...row } as never
     }
     if (path === `${PATH}/workspaces`) {
-      if (reread && reads(calls, path) > 1) {
-        await reread
-        return { data: [ALPHA, { ...BETA, organization_tools: null }] } as never
-      }
-      return { data: [ALPHA, BETA], count: 2 } as never
+      if (workspaces) await workspaces()
+      if (reread && reads(calls, path) > 1) await reread
+      return {
+        data: rows.map((row) => ({ ...row })),
+        count: rows.length,
+      } as never
     }
     if (path === PATH) return server as never
     if (path === "/organizations/me") {
@@ -211,6 +218,10 @@ describe("OrganizationMcpServerDetailPage", () => {
       expect(
         screen.queryByRole("dialog", { name: "Limit for Alpha" }),
       ).toBeNull(),
+    )
+    // The dialog closes once the table was read again, which kept the saved limit.
+    expect(within(table).getByRole("row", { name: /Alpha/ })).toHaveTextContent(
+      "Read tools",
     )
   })
 
@@ -383,16 +394,26 @@ describe("OrganizationMcpServerDetailPage", () => {
     )
   })
 
+  it("shows the error and no empty table when the workspaces cannot be read", async () => {
+    mockApi({
+      workspaces: () =>
+        Promise.reject(new apiClient.ApiError(500, "Read refused")),
+    })
+    renderPage()
+
+    expect(await screen.findByText("Read refused")).toBeVisible()
+    expect(
+      screen.queryByText("This organization has no workspaces yet."),
+    ).toBeNull()
+  })
+
   it("keeps holding a row whose lift is in flight when another row's limit is opened and closed", async () => {
     let settleLift = () => {}
     const lifted = new Promise<void>((resolve) => {
       settleLift = resolve
     })
     mockApi({
-      lift: async () => {
-        await lifted
-        return { ...BETA, organization_tools: null }
-      },
+      lift: () => lifted,
       reread: Promise.resolve(),
     })
     const user = userEvent.setup()
