@@ -80,3 +80,25 @@ export const SIGN_IN_MODES: RadioOption[] = (
   label: CREDENTIAL_MODE_COPY[value].longLabel,
   description: CREDENTIAL_MODE_COPY[value].help,
 }))
+
+/** Whose server an organization owner or admin adds from a workspace's page. */
+export type McpAddTarget = "organization" | "workspace"
+
+/** The label of the control that picks it. */
+export const ADD_TARGET_LABEL = "Add to"
+
+/** The two targets, the organization first since it is the default. */
+export function addTargetOptions(workspaceName: string): RadioOption[] {
+  return [
+    {
+      value: "organization",
+      label: "Whole organization",
+      description: "Every workspace in your organization can use it.",
+    },
+    {
+      value: "workspace",
+      label: "This workspace",
+      description: `Only ${workspaceName} can use it.`,
+    },
+  ]
+}

@@ -1,10 +1,19 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  type QueryClient,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 
 import type {
   CreateWorkspaceMcpServerRequest,
+  McpCredentialMode,
+  McpServerFoldCandidate,
+  McpServerFoldCandidates,
   OrganizationMcpServerLimitRequest,
   OrganizationMcpServerWorkspace,
   OrganizationMcpServerWorkspaces,
+  PromoteMcpServerRequest,
   WorkspaceMcpServer,
   WorkspaceMcpServers,
 } from "@/client"
@@ -17,7 +26,14 @@ import {
   mcpServersKey,
   mcpServersPath,
   ORGANIZATION_MCP_SCOPE,
+  workspaceMcpScope,
 } from "@/shared/api/mcpServerScope"
+import {
+  MCP_CATALOG,
+  MCP_SERVER_REQUESTS,
+  ORGANIZATION_MCP_SERVERS,
+  WORKSPACES,
+} from "@/shared/api/queryKeys"
 
 // The organization's own MCP servers, under `/organizations/me/mcp-servers`,
 // for its owners and admins. The writes they share with a workspace's servers
@@ -53,6 +69,24 @@ export function useOrganizationMcpServer(serverId: string, enabled = true) {
   })
 }
 
+/**
+ * What a new organization server moves beyond its own list: every workspace
+ * reaches it, the copies it folded are gone from theirs, the gateway approves
+ * every workspace's waiting requests for it, and each workspace's catalog
+ * leaves it out.
+ */
+function invalidateAfterOrganizationServer(queryClient: QueryClient) {
+  invalidateMcpServers(queryClient, SCOPE)
+  void queryClient.invalidateQueries({
+    predicate: ({ queryKey }) =>
+      queryKey[0] === WORKSPACES && queryKey[2] === MCP_SERVER_REQUESTS,
+  })
+  void queryClient.invalidateQueries({
+    predicate: ({ queryKey }) =>
+      queryKey[0] === MCP_CATALOG && queryKey[1] !== "sync",
+  })
+}
+
 export function useCreateOrganizationMcpServer() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -61,7 +95,68 @@ export function useCreateOrganizationMcpServer() {
         method: "POST",
         body: JSON.stringify(body),
       }),
-    onSuccess: () => invalidateMcpServers(queryClient, SCOPE),
+    onSuccess: () => invalidateAfterOrganizationServer(queryClient),
+  })
+}
+
+/** Which copies to look for: those of a server about to be added, or of one about to be promoted. */
+export type McpServerCopiesOf =
+  | { url: string; credentialMode: McpCredentialMode }
+  | { url: string; serverId: string }
+
+function copiesQuery(of: McpServerCopiesOf) {
+  const params = new URLSearchParams({ url: of.url })
+  if ("serverId" in of) params.set("server_id", of.serverId)
+  else params.set("credential_mode", of.credentialMode)
+  return {
+    queryKey: [ORGANIZATION_MCP_SERVERS, "same-url", params.toString()],
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
+      apiFetch<McpServerFoldCandidates>(
+        `${mcpServersPath(SCOPE)}/same-url?${params}`,
+        { signal },
+      ).then((answer) => answer.data),
+    // Read as the step opens: another admin's write changes it at any time.
+    staleTime: 0,
+  }
+}
+
+/**
+ * The workspaces' own servers at a URL, which an organization server can take
+ * the place of, and what folding each would do.
+ */
+export function useMcpServerCopies(of: McpServerCopiesOf, enabled: boolean) {
+  return useQuery({ ...copiesQuery(of), enabled })
+}
+
+/** The same read, for a form that asks at the moment it is submitted. */
+export function useReadMcpServerCopies(): (
+  of: McpServerCopiesOf,
+) => Promise<McpServerFoldCandidate[]> {
+  const queryClient = useQueryClient()
+  return (of) => queryClient.fetchQuery(copiesQuery(of))
+}
+
+/**
+ * Makes a workspace's own server its organization's, in place: it keeps its
+ * id, settings and sign-ins, and folds the copies named.
+ */
+export function usePromoteWorkspaceMcpServer() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      serverId,
+      body,
+    }: {
+      workspaceId: string
+      serverId: string
+      body: PromoteMcpServerRequest
+    }) =>
+      apiFetch<WorkspaceMcpServer>(
+        `${mcpServerPath(workspaceMcpScope(workspaceId), serverId)}/promote`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+    onSuccess: () => invalidateAfterOrganizationServer(queryClient),
   })
 }
 

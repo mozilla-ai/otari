@@ -5,6 +5,7 @@ import { vi } from "vitest"
 import type {
   ApiKey,
   McpServerConnection,
+  McpServerFoldCandidate,
   OrganizationContext,
   OrganizationMember,
   WorkspaceMcpServer,
@@ -51,6 +52,7 @@ export function mockMcpServerApi({
   otherWorkspaces = [],
   connections = [],
   myTools,
+  copies = [],
 }: {
   server?: WorkspaceMcpServer
   /**
@@ -79,6 +81,8 @@ export function mockMcpServerApi({
   connections?: McpServerConnection[]
   /** What the caller may use on the server; unknown, under everyone's rule, when left out. */
   myTools?: WorkspaceMcpServerMyTools
+  /** Other workspaces' own copies of the server, as promoting it reads them. */
+  copies?: McpServerFoldCandidate[]
 } = {}): McpCall[] {
   const calls: McpCall[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -127,6 +131,9 @@ export function mockMcpServerApi({
     // The caller's own sign-ins: none.
     if (url.includes("/mcp-connections")) {
       return Response.json({ data: [], count: 0 })
+    }
+    if (url.includes("/mcp-servers/same-url")) {
+      return Response.json({ data: copies })
     }
     if (url.includes("/mcp-servers/")) {
       // Read from any other workspace, the server is not there.
@@ -213,7 +220,13 @@ export function renderMcpServerPage(
     {
       wrapper: withRouter({
         url,
-        routes: [{ path: "/tools/mcp-servers", element: <p>Server list</p> }],
+        routes: [
+          { path: "/tools/mcp-servers", element: <p>Server list</p> },
+          {
+            path: "/organization/mcp-servers/$serverId",
+            element: <p>Organization server page</p>,
+          },
+        ],
       }),
     },
   )

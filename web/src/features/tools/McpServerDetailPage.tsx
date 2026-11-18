@@ -11,6 +11,7 @@ import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { Select } from "@/design-system/forms/Select"
 import { Chip } from "@/design-system/indicators/Chip"
 import { PageIntro } from "@/design-system/layout/PageIntro"
+import { useIsOrganizationManager } from "@/features/organization/access"
 import { canManageWorkspace } from "@/features/organization/roles"
 import { McpConnectionNoticeBanner } from "@/features/tools/McpConnectionNoticeBanner"
 import { McpExposedTools } from "@/features/tools/McpExposedTools"
@@ -23,6 +24,7 @@ import {
   McpOwnAccountNotes,
   useOwnMcpAccount,
 } from "@/features/tools/McpOwnAccount"
+import { McpPromoteServer } from "@/features/tools/McpPromoteServer"
 import { McpReadTools } from "@/features/tools/McpReadTools"
 import {
   McpServerAcl,
@@ -75,7 +77,9 @@ import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
  * the organization's definition read-only: no Settings, check, shared-account
  * setup, logo or delete, which are the organization's. Its managers get the
  * workspace's own settings on it instead (`McpWorkspaceServerSettings`), and
- * keep the access rules, which belong to the workspace.
+ * keep the access rules, which belong to the workspace. An organization owner
+ * or admin may make a workspace's own server the organization's, at the foot
+ * of the page (`McpPromoteServer`).
  *
  * The server is read from `workspaceId` when a link names one (a trace names
  * the workspace its call ran in), else from the selected workspace.
@@ -107,6 +111,7 @@ export function McpServerDetailPage({
       )
     : selected
   const canManage = canManageWorkspace(context.data, membership?.role)
+  const managesOrganization = useIsOrganizationManager()
   const query = useWorkspaceMcpServer(workspaceId, serverId)
   const update = useUpdateMcpServer()
   const remove = useDeleteWorkspaceMcpServer()
@@ -381,6 +386,9 @@ export function McpServerDetailPage({
                 canEditDefinition ? () => openSettings() : undefined
               }
             />
+            {managesOrganization && canEditDefinition ? (
+              <McpPromoteServer workspaceId={workspaceId} server={server} />
+            ) : null}
           </>
         ) : null}
       </div>

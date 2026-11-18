@@ -98,6 +98,10 @@ describe("McpServerDetailPage, an organization's server", () => {
     expect(
       screen.queryByRole("button", { name: "Sign in for everyone" }),
     ).toBeNull()
+    // It is the organization's already.
+    expect(
+      screen.queryByRole("button", { name: "Make it an organization server" }),
+    ).toBeNull()
     // Still read: how Otari reaches it.
     expect(screen.getByText("https://mcp.example.com/***")).toBeVisible()
   })

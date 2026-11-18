@@ -45,7 +45,9 @@ function mockApi({
   tested,
   writeStatus,
   writeDetail,
-  role = "owner",
+  // A workspace's admin who is a member of the organization, and so adds to
+  // the workspace alone; a test about an organization owner or admin says so.
+  role = "member",
   workspaceStatus,
   connectedIds = [],
   requests = [],
@@ -60,7 +62,7 @@ function mockApi({
   tested?: WorkspaceMcpServerHealth
   writeStatus?: number
   writeDetail?: string
-  // The caller's organization role; a member-view test lowers it.
+  // The caller's organization role.
   role?: OrganizationContext["role"]
   // Refuses the read of the workspace's own row with this status.
   workspaceStatus?: number
@@ -128,6 +130,11 @@ function mockApi({
           "https://auth.example.com/authorize?state=check-state",
       })
     }
+    // No workspace has its own copy of a server being added for the organization.
+    if (url.includes("/mcp-servers/same-url")) {
+      calls.push({ url, method, body: undefined })
+      return Response.json({ data: [] })
+    }
     if (url.includes("/mcp-servers")) {
       calls.push({
         url,
@@ -186,6 +193,11 @@ function ServerPageProbe() {
   return <p>Server page {serverId}</p>
 }
 
+function OrganizationServerPageProbe() {
+  const { serverId } = useParams({ strict: false })
+  return <p>Organization server page {serverId}</p>
+}
+
 function renderCard(
   surfaces?: string[],
   client = new QueryClient({
@@ -209,6 +221,10 @@ function renderCard(
           {
             path: "/tools/mcp-servers/$serverId",
             element: <ServerPageProbe />,
+          },
+          {
+            path: "/organization/mcp-servers/$serverId",
+            element: <OrganizationServerPageProbe />,
           },
         ],
       }),
@@ -1460,5 +1476,95 @@ describe("WorkspaceMcpServersCard", () => {
     expect(await findRowMenuItem(user, "Delete…", row)).toBeNull()
     expect(await findRowMenuItem(user, "Check hub", row)).toBeNull()
     expect(await findRowMenuItem(user, "Manage hub", row)).not.toBeNull()
+  })
+  it("offers an organization admin the whole organization in the add form, and opens its page there", async () => {
+    const added = workspaceMcpServer({
+      id: "99999999-9999-9999-9999-999999999999",
+      scope: "organization",
+      workspace_id: null,
+    })
+    const calls = mockApi({ role: "admin", written: added })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.click(screen.getByRole("button", { name: "Add MCP server" }))
+    const choice = screen.getByRole("radiogroup", { name: "Add to" })
+    expect(
+      within(choice).getByRole("radio", { name: /Whole organization/ }),
+    ).toBeChecked()
+    await user.type(screen.getByLabelText("Name"), "github")
+    await user.type(
+      screen.getByLabelText("URL"),
+      "https://mcp.example.com/github",
+    )
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Add MCP server",
+      }),
+    )
+
+    expect(
+      await screen.findByText(`Organization server page ${added.id}`),
+    ).toBeInTheDocument()
+    expect(writes(calls).find((call) => call.method === "POST")?.url).toBe(
+      "/api/v1/organizations/me/mcp-servers",
+    )
+  })
+
+  it("asks a workspace's own admin nothing about the organization", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.click(screen.getByRole("button", { name: "Add MCP server" }))
+
+    expect(screen.getByLabelText("Name")).toBeInTheDocument()
+    expect(screen.queryByRole("radiogroup", { name: "Add to" })).toBeNull()
+  })
+
+  it("lets an organization admin approve a request for the whole organization", async () => {
+    const sentry = mcpCatalogServer()
+    const calls = mockApi({
+      role: "owner",
+      requests: [
+        {
+          catalog_name: sentry.name,
+          title: sentry.title,
+          url: sentry.url,
+          catalog_server: sentry,
+          requesters: [],
+          requester_count: 1,
+          first_requested_at: "2026-11-10T09:00:00+00:00",
+        },
+      ],
+    })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.click(await screen.findByRole("button", { name: "Add Sentry" }))
+    const dialog = await screen.findByRole("dialog", {
+      name: "Add Sentry to your organization",
+    })
+    expect(
+      within(dialog).getByRole("radio", { name: /Whole organization/ }),
+    ).toBeChecked()
+    const requestReads = () =>
+      calls.filter(
+        (call) =>
+          call.method === "GET" && call.url.includes("/mcp-server-requests?"),
+      ).length
+    const readsBefore = requestReads()
+    await user.click(within(dialog).getByRole("button", { name: "Confirm" }))
+
+    await screen.findByRole("heading", {
+      name: "1 of 1 added to your organization",
+    })
+    expect(
+      writes(calls)
+        .filter((call) => call.url.endsWith("/mcp-servers"))
+        .map((call) => call.url),
+    ).toEqual(["/api/v1/organizations/me/mcp-servers"])
+    // Adding it answers the members who asked, so their requests are read again.
+    await waitFor(() => expect(requestReads()).toBeGreaterThan(readsBefore))
   })
 })

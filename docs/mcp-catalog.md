@@ -23,7 +23,14 @@ a server whose vendor moves it drops off until Otari's list is updated. Typing
 in **Search the catalog** searches every server the catalog holds, a page at a
 time.
 
-Servers the workspace already has are not shown, on Popular or in a search.
+Servers the workspace already has are not shown, on Popular or in a search,
+including ones it reaches because its organization added them for every
+workspace.
+
+An owner or admin of the organization chooses where a server goes: the whole
+organization, which is the default, or this workspace only. A server for the
+whole organization is shared with every workspace, as described in
+[Share an MCP server with every workspace](share-an-mcp-server-with-every-workspace.md).
 What you tick moves to **Selected**, above both, and stays there when you
 change or clear the search; untick it there to put it back. A ticked server
 leaves the search's pages and its count, so the range under the results counts

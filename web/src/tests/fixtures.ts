@@ -17,6 +17,7 @@ import type {
   DeploymentUser,
   McpCatalogServer,
   McpCatalogSyncStatus,
+  McpServerFoldCandidate,
   OidcConnection,
   OidcConnectionDomain,
   Organization,
@@ -1020,6 +1021,28 @@ export function workspaceMcpServer(
     health: null,
     created_at: "2026-08-01T00:00:00+00:00",
     updated_at: "2026-08-01T00:00:00+00:00",
+    ...overrides,
+  }
+}
+
+/**
+ * A workspace's own copy of a server, as the fold step reads it: a Personal
+ * server in Beta with one person who keeps their sign-in.
+ */
+export function mcpServerFoldCandidate(
+  overrides: Partial<McpServerFoldCandidate> = {},
+): McpServerFoldCandidate {
+  return {
+    server_id: "88888888-8888-8888-8888-888888888888",
+    workspace_id: "77777777-7777-7777-7777-777777777777",
+    workspace_name: "Beta",
+    name: "github",
+    credential_mode: "per_user",
+    same_credential: true,
+    signed_in: 1,
+    keep_sign_in: 1,
+    sign_in_again: 0,
+    replaces_shared_credential: false,
     ...overrides,
   }
 }

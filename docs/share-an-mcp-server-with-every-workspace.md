@@ -37,6 +37,40 @@ A shared account, or a token, serves every workspace. A server in personal mode
 takes each person's own sign-in, and one sign-in works in every workspace that
 reaches the server.
 
+## Replace workspaces' own copies
+
+Workspaces may already have added the same server on their own. When you add a
+server for the organization, or make a workspace's server the organization's,
+Otari lists the workspaces' servers at the same URL and offers to fold them in.
+A copy you fold:
+
+- gives its access rules, availability and on or off state to its workspace's
+  settings on the organization's server, so nothing changes for that workspace's
+  keys and members, apart from the credential;
+- keeps its id working in its workspace, so agents and links that name it still
+  reach the server;
+- is then deleted.
+
+What happens to the people signed in to a copy is counted before you confirm,
+for each one:
+
+- A person's own sign-in made through the same OAuth client as the
+  organization's server is kept, unless they already have one on it.
+- Every other sign-in ends, and the person signs in again the next time they
+  use the server. Nothing breaks meanwhile: they are handed the usual sign-in
+  link.
+- A copy's own token or shared account is replaced by the organization
+  server's credential, which may be a different account upstream.
+
+Copies that sign in the same way as the organization's server, and hold no
+token or shared account of their own, are ticked by default. The others are
+listed but not ticked. A copy you leave unticked stays its workspace's own.
+
+To make a workspace's own server the organization's, open it under **Tools** →
+**MCP servers** as an organization owner or admin and choose to make it an
+organization server. It keeps its id, its settings and every sign-in to it,
+which then work in every workspace.
+
 ## Limit what one workspace reaches
 
 The server's page lists every workspace of the organization under **Workspaces**,
