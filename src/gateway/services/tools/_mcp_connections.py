@@ -950,7 +950,13 @@ class McpConnectionService:
             server = await self._reachable_in_mode(
                 server_id, mode, started_in, managing=for_check or for_shared, lock=True
             )
-            if started_in is not None and not await self._eligibility.may_connect(started_in, user_id):
+            # On an organization's server the workspace is the one way in, so someone who left it during
+            # discovery is refused now. A workspace's own server leaves that to completion, as it always has.
+            if (
+                started_in is not None
+                and server.workspace_id is None
+                and not await self._eligibility.may_connect(started_in, user_id)
+            ):
                 raise McpConnectionFlowError("You no longer have access to this server's workspace.")
             current = stored_oauth_client(server)
             if server.url != url or current is None or current.client_id != client.client_id:

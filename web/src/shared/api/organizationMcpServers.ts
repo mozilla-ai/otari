@@ -109,7 +109,8 @@ function workspaceLimitPath(serverId: string, workspaceId: string) {
 }
 
 // A limit moves the one workspace's row here, and what that workspace's keys,
-// members and Playground reach on the server.
+// members and Playground reach on the server. The write stays pending until
+// the table is read again, so a row is never acted on from what it said before.
 function useLimitWrite<Variables extends { serverId: string }>(
   request: (variables: Variables) => Promise<OrganizationMcpServerWorkspace>,
 ) {
@@ -117,8 +118,10 @@ function useLimitWrite<Variables extends { serverId: string }>(
   return useMutation({
     mutationFn: request,
     onSuccess: (_row, { serverId }) => {
-      void queryClient.invalidateQueries({ queryKey: workspacesKey(serverId) })
       invalidateEveryWorkspaceMcpView(queryClient)
+      return queryClient.invalidateQueries({
+        queryKey: workspacesKey(serverId),
+      })
     },
   })
 }

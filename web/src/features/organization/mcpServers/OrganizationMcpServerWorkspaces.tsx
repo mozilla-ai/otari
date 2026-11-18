@@ -174,30 +174,37 @@ export function OrganizationMcpServerWorkspaces({
     {
       id: "actions",
       header: "",
-      cell: (row) => (
-        <RowActionRow>
-          <RowAction
-            icon={FiSliders}
-            label="Set limit…"
-            ariaLabel={`Set the limit for ${row.name}`}
-            onPress={() => openLimit(row)}
-          />
-          {row.organization_tools === null ? null : (
+      cell: (row) => {
+        // A limit drafted while its lift is in flight would start from the
+        // limit being lifted, and could land before or after it.
+        const isLifting =
+          lift.isPending && lift.variables?.workspaceId === row.workspace_id
+        return (
+          <RowActionRow>
             <RowAction
-              icon={FiRotateCcw}
-              label="Lift limit"
-              ariaLabel={`Lift the limit for ${row.name}`}
-              isDisabled={lift.isPending}
-              onPress={() =>
-                lift.mutate({
-                  serverId: server.id,
-                  workspaceId: row.workspace_id,
-                })
-              }
+              icon={FiSliders}
+              label="Set limit…"
+              ariaLabel={`Set the limit for ${row.name}${isLifting ? " (its limit is being lifted)" : ""}`}
+              isDisabled={isLifting}
+              onPress={() => openLimit(row)}
             />
-          )}
-        </RowActionRow>
-      ),
+            {row.organization_tools === null ? null : (
+              <RowAction
+                icon={FiRotateCcw}
+                label="Lift limit"
+                ariaLabel={`Lift the limit for ${row.name}`}
+                isDisabled={lift.isPending}
+                onPress={() =>
+                  lift.mutate({
+                    serverId: server.id,
+                    workspaceId: row.workspace_id,
+                  })
+                }
+              />
+            )}
+          </RowActionRow>
+        )
+      },
     },
   ]
 

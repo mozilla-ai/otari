@@ -43,6 +43,10 @@ function renderCallback(search: McpConnectionCallbackSearch) {
         routes: [
           { path: "/tools/mcp-servers/$serverId", element: <p>Server page</p> },
           { path: "/tools/mcp-servers", element: <p>Server list</p> },
+          {
+            path: "/organization/mcp-servers/$serverId",
+            element: <p>Organization server page</p>,
+          },
           { path: "/playground", element: <p>Playground</p> },
         ],
       }),
@@ -179,6 +183,37 @@ describe("McpConnectionCallbackPage", () => {
     renderCallback({ state: "s", code: "c" })
 
     expect(await screen.findByText("Server page")).toBeVisible()
+  })
+
+  it("lands an organization owner's sign-in on the organization's server page when it named nowhere", async () => {
+    mockComplete(() =>
+      Response.json({
+        server_id: SERVER_ID,
+        workspace_id: null,
+        server_name: "drive",
+        return_to: null,
+        checked: true,
+      }),
+    )
+    renderCallback({ state: "s", code: "c" })
+
+    expect(await screen.findByText("Organization server page")).toBeVisible()
+    expect(screen.queryByText("Server page")).toBeNull()
+  })
+
+  it("lands an organization owner's sign-in on the page that started it", async () => {
+    mockComplete(() =>
+      Response.json({
+        server_id: SERVER_ID,
+        workspace_id: null,
+        server_name: "drive",
+        return_to: "/playground",
+        shared: true,
+      }),
+    )
+    renderCallback({ state: "s", code: "c" })
+
+    expect(await screen.findByText("Playground")).toBeVisible()
   })
 
   it("shows a refusal and offers the way back, without retrying", async () => {

@@ -3,7 +3,10 @@ import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { OrganizationMcpServerWorkspace } from "@/client"
+import type {
+  OrganizationMcpServerWorkspace,
+  WorkspaceMcpServer,
+} from "@/client"
 import { OrganizationMcpServerDetailPage } from "@/features/organization/mcpServers/OrganizationMcpServerDetailPage"
 import * as apiClient from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
@@ -14,7 +17,12 @@ import {
   workspaceMcpServerHealth,
 } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
-import { pressRowAction, rowMenuItemNames } from "@/tests/rowMenu"
+import {
+  getRowMenuItem,
+  pressRowAction,
+  rowMenuItemNames,
+} from "@/tests/rowMenu"
+import { pickOption, selectTrigger } from "@/tests/select"
 
 const SERVER = workspaceMcpServer({
   scope: "organization",
@@ -47,7 +55,20 @@ interface Call {
   body: Record<string, unknown> | undefined
 }
 
-function mockApi(): Call[] {
+const reads = (calls: Call[], path: string) =>
+  calls.filter((call) => call.method === "GET" && call.path === path).length
+
+function mockApi({
+  server = SERVER,
+  lift,
+  reread,
+}: {
+  server?: WorkspaceMcpServer
+  /** Answers a lift in place of the stock row, to hold it or refuse it. */
+  lift?: () => Promise<unknown>
+  /** Holds every read of the table after the first. */
+  reread?: Promise<void>
+} = {}): Call[] {
   const calls: Call[] = []
   vi.spyOn(apiClient, "apiFetch").mockImplementation(async (path, init) => {
     const method = (init?.method ?? "GET").toUpperCase()
@@ -56,6 +77,7 @@ function mockApi(): Call[] {
         ? (JSON.parse(init.body) as Record<string, unknown>)
         : undefined
     calls.push({ path, method, body })
+    if (method === "DELETE" && lift) return (await lift()) as never
     if (path.startsWith(`${PATH}/workspaces/`)) {
       const row = path.endsWith(ALPHA.workspace_id) ? ALPHA : BETA
       return {
@@ -64,9 +86,13 @@ function mockApi(): Call[] {
       } as never
     }
     if (path === `${PATH}/workspaces`) {
+      if (reread && reads(calls, path) > 1) {
+        await reread
+        return { data: [ALPHA, { ...BETA, organization_tools: null }] } as never
+      }
       return { data: [ALPHA, BETA], count: 2 } as never
     }
-    if (path === PATH) return SERVER as never
+    if (path === PATH) return server as never
     if (path === "/organizations/me") {
       return organizationContext({ role: "admin" }) as never
     }
@@ -98,9 +124,6 @@ async function workspacesTable() {
   await within(table).findByText("Alpha")
   return table
 }
-
-const reads = (calls: Call[], path: string) =>
-  calls.filter((call) => call.method === "GET" && call.path === path).length
 
 describe("OrganizationMcpServerDetailPage", () => {
   afterEach(() => {
@@ -218,6 +241,81 @@ describe("OrganizationMcpServerDetailPage", () => {
       ]),
     )
     await waitFor(() => expect(reads(calls, `${PATH}/workspaces`)).toBe(2))
+  })
+
+  it("holds a row's Set limit while its lift is in flight, until the table is read again", async () => {
+    let settleReread = () => {}
+    const reread = new Promise<void>((resolve) => {
+      settleReread = resolve
+    })
+    const calls = mockApi({ reread })
+    const user = userEvent.setup()
+    renderPage()
+    const table = await workspacesTable()
+
+    await pressRowAction(user, "Lift the limit for Beta", table)
+    await waitFor(() => expect(reads(calls, `${PATH}/workspaces`)).toBe(2))
+
+    // The lift answered, but the table has not been read again yet.
+    const beta = within(table).getByRole("row", { name: /Beta/ })
+    expect(
+      await getRowMenuItem(user, /its limit is being lifted/, beta),
+    ).toHaveAttribute("aria-disabled", "true")
+    await user.keyboard("{Escape}")
+    // Only the row being lifted is held.
+    const alpha = within(table).getByRole("row", { name: /Alpha/ })
+    expect(
+      await getRowMenuItem(user, "Set the limit for Alpha", alpha),
+    ).not.toHaveAttribute("aria-disabled")
+    await user.keyboard("{Escape}")
+
+    settleReread()
+    await waitFor(() =>
+      expect(within(beta).getByText("No limit")).toBeVisible(),
+    )
+    expect(
+      await getRowMenuItem(user, "Set the limit for Beta", beta),
+    ).not.toHaveAttribute("aria-disabled")
+  })
+
+  it("keeps a row's Set limit after its lift fails", async () => {
+    mockApi({
+      lift: () => Promise.reject(new apiClient.ApiError(500, "Lift refused")),
+    })
+    const user = userEvent.setup()
+    renderPage()
+    const table = await workspacesTable()
+
+    await pressRowAction(user, "Lift the limit for Beta", table)
+
+    expect(await screen.findByText("Lift refused")).toBeVisible()
+    const beta = within(table).getByRole("row", { name: /Beta/ })
+    expect(
+      await getRowMenuItem(user, "Set the limit for Beta", beta),
+    ).not.toHaveAttribute("aria-disabled")
+  })
+
+  it("turns a server created as Off on from its Availability choice", async () => {
+    const calls = mockApi({
+      server: { ...SERVER, enabled: false, attach_by_default: false },
+    })
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByRole("heading", { level: 1, name: SERVER.name })
+
+    expect(selectTrigger("Availability")).toHaveTextContent("Off")
+    expect(screen.getByText("Nobody can use it.")).toBeVisible()
+    await pickOption(user, selectTrigger("Availability"), /^On request/)
+
+    await waitFor(() =>
+      expect(calls.filter((call) => call.method === "PATCH")).toEqual([
+        {
+          path: PATH,
+          method: "PATCH",
+          body: { enabled: true, attach_by_default: false },
+        },
+      ]),
+    )
   })
 
   it("offers no lift where no limit is set", async () => {

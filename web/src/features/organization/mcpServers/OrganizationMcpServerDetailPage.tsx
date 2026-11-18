@@ -12,6 +12,7 @@ import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { canManage } from "@/features/organization/roles"
+import { McpAvailabilitySelect } from "@/features/tools/McpAvailabilitySelect"
 import { McpConnectionNoticeBanner } from "@/features/tools/McpConnectionNoticeBanner"
 import { McpExposedTools } from "@/features/tools/McpExposedTools"
 import { McpModeLabel } from "@/features/tools/McpModeLabel"
@@ -24,6 +25,11 @@ import {
 } from "@/features/tools/McpServerSettingsDialog"
 import { McpServerSignIn } from "@/features/tools/McpServerSignIn"
 import { McpSharedAccount } from "@/features/tools/McpSharedAccount"
+import {
+  AVAILABILITY,
+  availabilityFields,
+  availabilityOf,
+} from "@/features/tools/mcpAvailability"
 import { healthDetail } from "@/features/tools/mcpServerHealth"
 import { ORGANIZATION_MCP_SCOPE } from "@/shared/api/mcpServerScope"
 import {
@@ -31,6 +37,7 @@ import {
   useOrganizationMcpServer,
 } from "@/shared/api/organizationMcpServers"
 import { useOrganizationContext } from "@/shared/api/organizations"
+import { useUpdateMcpServer } from "@/shared/api/tools"
 import { useBreadcrumbLeaf } from "@/shared/hooks/BreadcrumbLeaf"
 
 import { OrganizationMcpServerWorkspaces } from "./OrganizationMcpServerWorkspaces"
@@ -65,6 +72,7 @@ export function OrganizationMcpServerDetailPage({
   const context = useOrganizationContext()
   const canEdit = canManage(context.data)
   const query = useOrganizationMcpServer(serverId, canEdit)
+  const update = useUpdateMcpServer()
   const remove = useDeleteOrganizationMcpServer()
   const [isDeleting, setDeleting] = useState(false)
   // Settings is remounted on each opening, so `count` is its key.
@@ -125,6 +133,7 @@ export function OrganizationMcpServerDetailPage({
     setDeleting(true)
   }
   const addClient = () => openSettings("client_id")
+  const availability = availabilityOf(server)
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -133,13 +142,27 @@ export function OrganizationMcpServerDetailPage({
         title={server.name}
         leading={<McpServerLogo name={server.name} logoUrl={null} size="lg" />}
         action={
-          <Button
-            onPress={() => openSettings()}
-            className="h-(--field-height) min-h-(--field-height) shrink-0"
-          >
-            <FiSettings aria-hidden className="size-4 shrink-0" />
-            Settings
-          </Button>
+          // Bottom edges together, as on a workspace's server page.
+          <div className="flex flex-wrap items-end gap-3">
+            <McpAvailabilitySelect
+              value={availability}
+              onChange={(next) =>
+                update.mutate({
+                  scope: SCOPE,
+                  serverId: server.id,
+                  body: availabilityFields(next),
+                })
+              }
+              isDisabled={update.isPending}
+            />
+            <Button
+              onPress={() => openSettings()}
+              className="mb-1 h-(--field-height) min-h-(--field-height) shrink-0"
+            >
+              <FiSettings aria-hidden className="size-4 shrink-0" />
+              Settings
+            </Button>
+          </div>
         }
         detail={
           <>
@@ -150,8 +173,9 @@ export function OrganizationMcpServerDetailPage({
               <span className="block break-words">{server.purpose_hint}</span>
             ) : null}
             <span className="mt-1 block text-caption">
-              Every workspace in your organization can use it, within the limits
-              below.
+              {availability === "off"
+                ? AVAILABILITY.off.help
+                : `${AVAILABILITY[availability].help} Every workspace in your organization can use it, within the limits below.`}
             </span>
             {/* One line at every width, as on a workspace's server page. */}
             <span className="mt-2 flex w-0 min-w-full items-center gap-x-2 text-caption whitespace-nowrap">
@@ -164,9 +188,16 @@ export function OrganizationMcpServerDetailPage({
                 <code className="font-mono text-sm">{server.id}</code>
               </CopyableValue>
             </span>
+            {availability === "on_request" ? (
+              <span className="block text-caption">
+                Add this id to <code className="font-mono">mcp_server_ids</code>{" "}
+                in your request.
+              </span>
+            ) : null}
           </>
         }
       />
+      <ErrorBanner error={update.error} />
       {unchecked ? (
         <McpNotice
           message={
