@@ -77,6 +77,7 @@ from gateway.services.model_access import (
     model_not_allowed_detail,
     organization_key_refusal,
     resolve_request_allowlist,
+    unresolvable_selector_detail,
 )
 from gateway.services.pricing import PriceFacts, apply_rules
 from gateway.services.pricing_service import find_model_pricing
@@ -390,7 +391,8 @@ async def create_batch(
     try:
         resolved = resolve_provider_selector(config, request.model, user_id, workspace_id=workspace_id)
     except (ValueError, AnyLLMError) as exc:
-        _raise_for_unresolvable_model(request.model, exc)
+        detail = unresolvable_selector_detail(config, request.model, user_id, workspace_id=workspace_id)
+        _raise_for_unresolvable_model(request.model, exc, detail=detail)
     provider, model = resolved.provider, resolved.model
 
     # Model access control (per-key). Runs before the reservation, so nothing to

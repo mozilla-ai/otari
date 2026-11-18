@@ -1034,6 +1034,22 @@ def test_a_dynamic_policy_is_not_a_model_name_outside_the_completion_routes(clie
     )
 
 
+def test_a_dynamic_policy_is_refused_as_a_batch_model_with_its_own_reason(client: TestClient) -> None:
+    _create_user(client)
+    resp = client.post(
+        f"{API_ROOT}/batches",
+        json={
+            "model": "thrifty",
+            "user": "test-user",
+            "requests": [{"custom_id": "req-1", "body": {"messages": [{"role": "user", "content": "hi"}]}}],
+        },
+        headers=HEADERS,
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"].startswith("'thrifty' is a routing policy that chooses its model per request")
+
+
 # ---------------------------------------------------------------------------
 # Stored policies: the management API the dashboard drives
 # ---------------------------------------------------------------------------
