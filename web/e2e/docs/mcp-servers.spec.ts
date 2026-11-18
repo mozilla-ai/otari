@@ -45,15 +45,6 @@ async function cleanUp(page: Page): Promise<void> {
       await call(page, "DELETE", `${base}/${server.id}`)
     }
   }
-  const shared = "/organizations/me/mcp-servers"
-  for (const server of await listed<{ id: string; name: string }>(
-    page,
-    shared,
-  )) {
-    if (server.name === SERVER) {
-      await call(page, "DELETE", `${shared}/${server.id}`)
-    }
-  }
 }
 
 // docs/mcp-servers.md: "Connect a server", then each step of "Control

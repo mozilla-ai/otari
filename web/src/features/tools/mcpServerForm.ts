@@ -93,7 +93,8 @@ export function addTargetOptions(workspaceName: string): RadioOption[] {
     {
       value: "organization",
       label: "Whole organization",
-      description: "Every workspace in your organization can use it.",
+      description:
+        "Added for the whole organization; its access rules decide who can use it.",
     },
     {
       value: "workspace",

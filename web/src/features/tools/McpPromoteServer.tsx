@@ -1,17 +1,18 @@
 import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 
-import type { WorkspaceMcpServer } from "@/client"
+import type { McpServerFoldCandidate, WorkspaceMcpServer } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { Dialog, DialogSection } from "@/design-system/feedback/Dialog"
 import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import {
   SettingsBlock,
   SettingsGroup,
 } from "@/design-system/layout/SettingsGroup"
 import { McpFoldChoices } from "@/features/tools/McpFoldChoices"
-import { defaultFoldIds } from "@/features/tools/mcpFold"
+import { defaultFoldIds, MAX_FOLD_COPIES } from "@/features/tools/mcpFold"
 import {
   useMcpServerCopies,
   usePromoteWorkspaceMcpServer,
@@ -34,15 +35,27 @@ function PromoteDialog({
   onClose: () => void
 }) {
   const navigate = useNavigate()
-  const copies = useMcpServerCopies(
-    { url: server.url, serverId: server.id },
-    true,
-  )
+  // A copy read before this opening may have changed since, so only a read
+  // that answered after it counts.
+  const [openedAt] = useState(Date.now)
+  const copies = useMcpServerCopies({ serverId: server.id }, true)
+  const isFresh = copies.isSuccess && copies.dataUpdatedAt >= openedAt
   const promote = usePromoteWorkspaceMcpServer()
-  // Undefined until a box is touched, so the default ticks follow the read.
-  const [touched, setTouched] = useState<string[]>()
-  const candidates = copies.data ?? []
-  const selected = touched ?? defaultFoldIds(candidates)
+  // The copies ticked by hand, undefined until a box is touched so the default
+  // ticks follow the read.
+  const [touched, setTouched] = useState<McpServerFoldCandidate[]>()
+  const candidates = isFresh ? copies.data : []
+  const present = new Set(candidates.map((candidate) => candidate.server_id))
+  // A ticked copy another admin removed since: no longer offered or sent.
+  const gone = isFresh
+    ? (touched ?? []).filter((copy) => !present.has(copy.server_id))
+    : []
+  const selected = touched
+    ? touched
+        .map((copy) => copy.server_id)
+        .filter((serverId) => present.has(serverId))
+    : defaultFoldIds(candidates)
+  const isOverLimit = selected.length > MAX_FOLD_COPIES
 
   return (
     <Dialog
@@ -59,9 +72,17 @@ function PromoteDialog({
           <Button isDisabled={promote.isPending} onPress={onClose}>
             Cancel
           </Button>
+          {copies.isError ? (
+            <Button
+              isPending={copies.isFetching}
+              onPress={() => void copies.refetch()}
+            >
+              Retry
+            </Button>
+          ) : null}
           <Button
             variant="primary"
-            isDisabled={copies.data === undefined}
+            isDisabled={!isFresh || isOverLimit}
             isPending={promote.isPending}
             onPress={() =>
               promote.mutate(
@@ -87,22 +108,37 @@ function PromoteDialog({
     >
       <DialogSection>
         <ErrorBanner error={promote.error ?? copies.error} />
-        {copies.isPending ? (
-          <EmptyMessage>
-            Looking for copies of it in other workspaces.
-          </EmptyMessage>
+        {gone.length > 0 ? (
+          <InfoBanner tone="warning">
+            {`No longer there, so no longer folded: ${gone
+              .map((copy) => `${copy.workspace_name}: ${copy.name}`)
+              .join(", ")}.`}
+          </InfoBanner>
+        ) : null}
+        {!isFresh ? (
+          copies.isError ? null : (
+            <EmptyMessage>
+              Looking for copies of it in other workspaces.
+            </EmptyMessage>
+          )
         ) : candidates.length > 0 ? (
           <McpFoldChoices
             candidates={candidates}
             selected={selected}
             isDisabled={promote.isPending}
-            onChange={setTouched}
+            onChange={(ids) =>
+              setTouched(
+                candidates.filter((candidate) =>
+                  ids.includes(candidate.server_id),
+                ),
+              )
+            }
           />
-        ) : copies.data ? (
+        ) : (
           <p className="text-sm text-muted">
             No other workspace has its own server at this URL.
           </p>
-        ) : null}
+        )}
       </DialogSection>
     </Dialog>
   )

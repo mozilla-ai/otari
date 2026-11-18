@@ -131,8 +131,15 @@ function mockApi({
       })
     }
     // No workspace has its own copy of a server being added for the organization.
-    if (url.includes("/mcp-servers/same-url")) {
-      calls.push({ url, method, body: undefined })
+    if (
+      method === "POST" &&
+      url === "/api/v1/organizations/me/mcp-servers/same-url"
+    ) {
+      calls.push({
+        url,
+        method,
+        body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+      })
       return Response.json({ data: [] })
     }
     if (url.includes("/mcp-servers")) {
@@ -1506,9 +1513,51 @@ describe("WorkspaceMcpServersCard", () => {
     expect(
       await screen.findByText(`Organization server page ${added.id}`),
     ).toBeInTheDocument()
-    expect(writes(calls).find((call) => call.method === "POST")?.url).toBe(
+    const posts = writes(calls).filter((call) => call.method === "POST")
+    expect(posts.map((call) => call.url)).toEqual([
+      "/api/v1/organizations/me/mcp-servers/same-url",
       "/api/v1/organizations/me/mcp-servers",
+    ])
+    expect(posts[0].body).toEqual({
+      url: "https://mcp.example.com/github",
+      credential_mode: "shared",
+      with_token: false,
+    })
+  })
+
+  it("shows only the latest add attempt's refusal when the admin switches target", async () => {
+    mockApi({ role: "admin" })
+    const answer = vi.mocked(globalThis.fetch).getMockImplementation()
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      const url = String(input)
+      if (init?.method === "POST" && url.endsWith("/mcp-servers")) {
+        const detail = url.includes("/organizations/me/")
+          ? "Taken in the organization."
+          : "Taken in this workspace."
+        return Response.json({ detail }, { status: 409 })
+      }
+      return answer?.(input, init) as Promise<Response>
+    })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.click(screen.getByRole("button", { name: "Add MCP server" }))
+    await user.click(screen.getByRole("radio", { name: /This workspace/ }))
+    await user.type(screen.getByLabelText("Name"), "github")
+    await user.type(
+      screen.getByLabelText("URL"),
+      "https://mcp.example.com/github",
     )
+    const add = within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Add MCP server",
+    })
+    await user.click(add)
+    expect(await screen.findByText("Taken in this workspace.")).toBeVisible()
+
+    await user.click(screen.getByRole("radio", { name: /Whole organization/ }))
+    await user.click(add)
+    expect(await screen.findByText("Taken in the organization.")).toBeVisible()
+    expect(screen.queryByText("Taken in this workspace.")).toBeNull()
   })
 
   it("asks a workspace's own admin nothing about the organization", async () => {

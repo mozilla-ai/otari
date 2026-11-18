@@ -1042,6 +1042,7 @@ export function mcpServerFoldCandidate(
     signed_in: 1,
     keep_sign_in: 1,
     sign_in_again: 0,
+    switch_account: 0,
     replaces_shared_credential: false,
     ...overrides,
   }

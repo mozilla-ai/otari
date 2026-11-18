@@ -1,4 +1,5 @@
-import { screen, waitFor, within } from "@testing-library/react"
+import { focusManager } from "@tanstack/react-query"
+import { act, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -39,6 +40,7 @@ async function openPage(serverId: string) {
 
 describe("McpServerDetailPage, making a server the organization's", () => {
   afterEach(() => {
+    focusManager.setFocused(undefined)
     vi.restoreAllMocks()
     window.localStorage.clear()
   })
@@ -93,10 +95,14 @@ describe("McpServerDetailPage, making a server the organization's", () => {
     expect(
       within(copies).getByRole("checkbox", { name: "Gamma: gh" }),
     ).not.toBeChecked()
-    const read = calls.find((call) => call.url.includes("same-url"))
-    const params = new URL(String(read?.url), "http://localhost").searchParams
-    expect(params.get("url")).toBe(server.url)
-    expect(params.get("server_id")).toBe(server.id)
+    // By the server's id alone: its stored URL, which may carry a credential, is never sent.
+    expect(calls.filter((call) => call.url.includes("same-url"))).toEqual([
+      {
+        url: "/api/v1/organizations/me/mcp-servers/same-url",
+        method: "POST",
+        body: { server_id: server.id },
+      },
+    ])
 
     await user.click(
       within(copies).getByRole("checkbox", { name: "Gamma: gh" }),
@@ -115,7 +121,7 @@ describe("McpServerDetailPage, making a server the organization's", () => {
       }),
     )
     expect(
-      await screen.findByText("Organization server page"),
+      await screen.findByText(`Organization server page ${server.id}`),
     ).toBeInTheDocument()
   })
 
@@ -140,6 +146,95 @@ describe("McpServerDetailPage, making a server the organization's", () => {
       expect(
         mcpWrites(calls).find((call) => call.url.endsWith("/promote"))?.body,
       ).toEqual({ fold_server_ids: [] }),
+    )
+  })
+
+  it("holds the promote until this opening's read answers, and offers Retry when it fails", async () => {
+    const server = workspaceMcpServer({ workspace_id: WORKSPACE })
+    const calls = mockMcpServerApi({ server, copies: [KEEPS] })
+    const answer = vi.mocked(globalThis.fetch).getMockImplementation()
+    let fails = false
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      if (fails && String(input).includes("/same-url")) {
+        return Response.json({ detail: "unavailable" }, { status: 503 })
+      }
+      return answer?.(input, init) as Promise<Response>
+    })
+    const user = userEvent.setup()
+    await openPage(server.id)
+
+    // A first opening reads the copies, which stay cached once it closes.
+    await user.click(screen.getByRole("button", { name: PROMOTE }))
+    let dialog = await screen.findByRole("dialog", {
+      name: "Make github an organization server",
+    })
+    await within(dialog).findByRole("list", { name: "Workspace copies" })
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+
+    fails = true
+    await user.click(screen.getByRole("button", { name: PROMOTE }))
+    dialog = await screen.findByRole("dialog", {
+      name: "Make github an organization server",
+    })
+    const retry = await within(dialog).findByRole("button", { name: "Retry" })
+    expect(within(dialog).getByRole("button", { name: PROMOTE })).toBeDisabled()
+    expect(
+      within(dialog).queryByRole("list", { name: "Workspace copies" }),
+    ).toBeNull()
+
+    fails = false
+    await user.click(retry)
+    await within(dialog).findByRole("list", { name: "Workspace copies" })
+    await user.click(within(dialog).getByRole("button", { name: PROMOTE }))
+    await waitFor(() =>
+      expect(
+        mcpWrites(calls).find((call) => call.url.endsWith("/promote"))?.body,
+      ).toEqual({ fold_server_ids: [KEEPS.server_id] }),
+    )
+  })
+
+  it("drops a ticked copy that is gone after a refresh, and says so", async () => {
+    const server = workspaceMcpServer({ workspace_id: WORKSPACE })
+    const calls = mockMcpServerApi({ server, copies: [KEEPS, SIGNS_AGAIN] })
+    const answer = vi.mocked(globalThis.fetch).getMockImplementation()
+    let onlyKeeps = false
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      if (onlyKeeps && String(input).includes("/same-url")) {
+        return Response.json({ data: [KEEPS] })
+      }
+      return answer?.(input, init) as Promise<Response>
+    })
+    const user = userEvent.setup()
+    await openPage(server.id)
+
+    await user.click(screen.getByRole("button", { name: PROMOTE }))
+    const dialog = await screen.findByRole("dialog", {
+      name: "Make github an organization server",
+    })
+    await user.click(
+      await within(dialog).findByRole("checkbox", { name: "Gamma: gh" }),
+    )
+
+    onlyKeeps = true
+    act(() => {
+      focusManager.setFocused(false)
+      focusManager.setFocused(true)
+    })
+
+    expect(
+      await within(dialog).findByText(
+        "No longer there, so no longer folded: Gamma: gh.",
+      ),
+    ).toBeVisible()
+    expect(
+      within(dialog).queryByRole("checkbox", { name: "Gamma: gh" }),
+    ).toBeNull()
+    await user.click(within(dialog).getByRole("button", { name: PROMOTE }))
+    await waitFor(() =>
+      expect(
+        mcpWrites(calls).find((call) => call.url.endsWith("/promote"))?.body,
+      ).toEqual({ fold_server_ids: [KEEPS.server_id] }),
     )
   })
 })

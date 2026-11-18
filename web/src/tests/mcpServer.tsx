@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { useParams } from "@tanstack/react-router"
 import { render } from "@testing-library/react"
 import { vi } from "vitest"
 
@@ -132,7 +133,10 @@ export function mockMcpServerApi({
     if (url.includes("/mcp-connections")) {
       return Response.json({ data: [], count: 0 })
     }
-    if (url.includes("/mcp-servers/same-url")) {
+    if (
+      method === "POST" &&
+      url === "/api/v1/organizations/me/mcp-servers/same-url"
+    ) {
       return Response.json({ data: copies })
     }
     if (url.includes("/mcp-servers/")) {
@@ -200,6 +204,12 @@ export function mcpWrites(calls: McpCall[]): McpCall[] {
   return calls.filter((call) => call.method !== "GET")
 }
 
+/** Names the server it was opened for, so a test can tell which one. */
+function OrganizationServerPageProbe() {
+  const { serverId } = useParams({ strict: false })
+  return <p>Organization server page {serverId}</p>
+}
+
 export function renderMcpServerPage(
   serverId: string,
   search = "",
@@ -224,7 +234,7 @@ export function renderMcpServerPage(
           { path: "/tools/mcp-servers", element: <p>Server list</p> },
           {
             path: "/organization/mcp-servers/$serverId",
-            element: <p>Organization server page</p>,
+            element: <OrganizationServerPageProbe />,
           },
         ],
       }),

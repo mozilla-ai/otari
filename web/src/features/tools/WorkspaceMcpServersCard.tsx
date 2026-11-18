@@ -250,8 +250,10 @@ export function WorkspaceMcpServersCard() {
   // A new server opens on its own page, where its connection check, its
   // access list and every later change live: the organization's page for one
   // added for the whole organization.
+  // The form shows one error, so the other target's earlier refusal is cleared first.
   const submit = (draft: McpServerDraft, scope: McpServerScope) => {
     if (scope.kind === "organization") {
+      create.reset()
       createForOrganization.mutate(draft, {
         onSuccess: (server) =>
           void navigate({
@@ -261,6 +263,7 @@ export function WorkspaceMcpServersCard() {
       })
       return
     }
+    createForOrganization.reset()
     create.mutate(
       { workspaceId: selected.workspace_id, body: draft },
       { onSuccess: (server) => openServer(server.id) },

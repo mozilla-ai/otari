@@ -17,7 +17,7 @@ import type {
   WorkspaceMcpServer,
   WorkspaceMcpServers,
 } from "@/client"
-import { apiFetch } from "@/shared/api/client"
+import { apiFetch, withRequestDeadline } from "@/shared/api/client"
 import {
   invalidateEveryWorkspaceMcpView,
   invalidateMcpServers,
@@ -99,22 +99,32 @@ export function useCreateOrganizationMcpServer() {
   })
 }
 
-/** Which copies to look for: those of a server about to be added, or of one about to be promoted. */
+/**
+ * Which copies to look for: those of a server about to be added, or of one
+ * about to be promoted, which is named by its id alone. Sent in a body, so no
+ * URL, which may carry a credential, travels in a request line.
+ */
 export type McpServerCopiesOf =
-  | { url: string; credentialMode: McpCredentialMode }
-  | { url: string; serverId: string }
+  | { url: string; credentialMode: McpCredentialMode; withToken: boolean }
+  | { serverId: string }
 
 function copiesQuery(of: McpServerCopiesOf) {
-  const params = new URLSearchParams({ url: of.url })
-  if ("serverId" in of) params.set("server_id", of.serverId)
-  else params.set("credential_mode", of.credentialMode)
+  const body =
+    "serverId" in of
+      ? { server_id: of.serverId }
+      : {
+          url: of.url,
+          credential_mode: of.credentialMode,
+          with_token: of.withToken,
+        }
   return {
-    queryKey: [ORGANIZATION_MCP_SERVERS, "same-url", params.toString()],
+    queryKey: [ORGANIZATION_MCP_SERVERS, "same-url", body],
     queryFn: ({ signal }: { signal: AbortSignal }) =>
-      apiFetch<McpServerFoldCandidates>(
-        `${mcpServersPath(SCOPE)}/same-url?${params}`,
-        { signal },
-      ).then((answer) => answer.data),
+      apiFetch<McpServerFoldCandidates>(`${mcpServersPath(SCOPE)}/same-url`, {
+        method: "POST",
+        body: JSON.stringify(body),
+        signal: withRequestDeadline(signal),
+      }).then((answer) => answer.data),
     // Read as the step opens: another admin's write changes it at any time.
     staleTime: 0,
   }

@@ -13,13 +13,17 @@ import { mcpServerFoldCandidate } from "@/tests/fixtures"
 
 const WORKSPACE = "11111111-1111-1111-1111-111111111111"
 
+// As the gateway answers for a new shared server with no token: a shared copy
+// with no credential of its own is on the same account, and nobody is signed
+// in to a shared copy with their own.
 const KEEPS = mcpServerFoldCandidate({
   server_id: "aaaaaaaa-0000-0000-0000-000000000001",
   workspace_name: "Beta",
   name: "github",
+  credential_mode: "shared",
   same_credential: true,
-  signed_in: 3,
-  keep_sign_in: 3,
+  signed_in: 0,
+  keep_sign_in: 0,
   sign_in_again: 0,
 })
 const OWN_TOKEN = mcpServerFoldCandidate({
@@ -28,52 +32,86 @@ const OWN_TOKEN = mcpServerFoldCandidate({
   name: "gh",
   credential_mode: "shared",
   same_credential: false,
-  signed_in: 2,
+  signed_in: 0,
   keep_sign_in: 0,
-  sign_in_again: 2,
+  sign_in_again: 0,
   replaces_shared_credential: true,
 })
 
-/** Answers the read of the copies at a URL, and records the URLs asked. */
-function mockCopies(copies: McpServerFoldCandidate[]): string[] {
-  const asked: string[] = []
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+const LOOKUP = "/api/v1/organizations/me/mcp-servers/same-url"
+
+interface Asked {
+  url: string
+  method: string
+  body: unknown
+}
+
+/**
+ * Answers the read of the copies at a URL, and records every request. A
+ * function answer stands for one that is still being read, or refused.
+ */
+function mockCopies(
+  copies: McpServerFoldCandidate[] | (() => Promise<Response>),
+): Asked[] {
+  const asked: Asked[] = []
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
-    asked.push(url)
-    if (url.includes("/mcp-servers/same-url")) {
-      return Response.json({ data: copies })
+    const method = (init?.method ?? "GET").toUpperCase()
+    asked.push({
+      url,
+      method,
+      body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
+    })
+    if (method === "POST" && url === LOOKUP) {
+      return typeof copies === "function"
+        ? copies()
+        : Response.json({ data: copies })
     }
     return Response.json({})
   })
   return asked
 }
 
+/** The body of the one copy lookup made. */
+function lookupBody(asked: Asked[]): unknown {
+  const lookups = asked.filter((call) => call.url === LOOKUP)
+  expect(lookups).toHaveLength(1)
+  expect(lookups[0].method).toBe("POST")
+  return lookups[0].body
+}
+
 function renderDialog({
   scope = workspaceMcpScope(WORKSPACE),
   canAddForOrganization = true,
+  error = null,
 }: {
   scope?: McpServerScope
   canAddForOrganization?: boolean
+  error?: unknown
 } = {}) {
   const onSubmit = vi.fn()
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  render(
+  const dialog = (canAdd: boolean, shown: unknown) => (
     <QueryClientProvider client={client}>
       <McpServerDialog
         isOpen
         onOpenChange={() => {}}
         scope={scope}
-        canAddForOrganization={canAddForOrganization}
+        canAddForOrganization={canAdd}
         workspaceName="Alpha"
         isPending={false}
-        error={null}
+        error={shown}
         onSubmit={onSubmit}
       />
-    </QueryClientProvider>,
+    </QueryClientProvider>
   )
-  return onSubmit
+  const { rerender } = render(dialog(canAddForOrganization, error))
+  return Object.assign(onSubmit, {
+    rerender: (canAdd: boolean, shown: unknown = error) =>
+      rerender(dialog(canAdd, shown)),
+  })
 }
 
 async function fillAndSubmit(user: ReturnType<typeof userEvent.setup>) {
@@ -116,7 +154,7 @@ describe("McpServerDialog", () => {
       expect.not.objectContaining({ fold_server_ids: expect.anything() }),
       { kind: "workspace", workspaceId: WORKSPACE },
     )
-    expect(asked.some((url) => url.includes("same-url"))).toBe(false)
+    expect(asked.some((call) => call.url === LOOKUP)).toBe(false)
   })
 
   it("skips the fold step when no workspace has a copy", async () => {
@@ -132,10 +170,11 @@ describe("McpServerDialog", () => {
       name: "github",
       url: "https://mcp.example.com/gh",
     })
-    const read = asked.find((url) => url.includes("same-url"))
-    const params = new URL(String(read), "http://localhost").searchParams
-    expect(params.get("url")).toBe("https://mcp.example.com/gh")
-    expect(params.get("credential_mode")).toBe("shared")
+    expect(lookupBody(asked)).toEqual({
+      url: "https://mcp.example.com/gh",
+      credential_mode: "shared",
+      with_token: false,
+    })
   })
 
   it("shows each copy with what folding it does, ticking only those on the same account", async () => {
@@ -148,12 +187,7 @@ describe("McpServerDialog", () => {
     const copies = await screen.findByRole("list", {
       name: "Workspace copies",
     })
-    expect(
-      within(copies).getByText("3 people will keep their sign-in."),
-    ).toBeVisible()
-    expect(
-      within(copies).getByText("2 people will need to sign in again."),
-    ).toBeVisible()
+    expect(within(copies).getByText("No one's sign-in changes.")).toBeVisible()
     expect(
       within(copies).getByText(
         "Its shared account or token will be replaced by the organization's.",
@@ -212,6 +246,158 @@ describe("McpServerDialog", () => {
       kind: "workspace",
       workspaceId: WORKSPACE,
     })
-    expect(asked.some((url) => url.includes("same-url"))).toBe(false)
+    expect(asked.some((call) => call.url === LOOKUP)).toBe(false)
+  })
+
+  it("weighs a personal server's copies by who must sign in again", async () => {
+    // A server not stored yet has no client of its own, so nobody keeps a sign-in.
+    const personal = mcpServerFoldCandidate({
+      server_id: "aaaaaaaa-0000-0000-0000-000000000003",
+      workspace_name: "Delta",
+      name: "github",
+      credential_mode: "per_user",
+      same_credential: true,
+      signed_in: 2,
+      keep_sign_in: 0,
+      sign_in_again: 2,
+    })
+    const asked = mockCopies([personal])
+    const user = userEvent.setup()
+    const onSubmit = renderDialog()
+
+    await user.click(screen.getByRole("radio", { name: /Personal accounts/ }))
+    await fillAndSubmit(user)
+
+    const copies = await screen.findByRole("list", { name: "Workspace copies" })
+    expect(
+      within(copies).getByText("2 people will need to sign in again."),
+    ).toBeVisible()
+    expect(
+      within(copies).getByRole("checkbox", { name: "Delta: github" }),
+    ).toBeChecked()
+    expect(lookupBody(asked)).toEqual({
+      url: "https://mcp.example.com/gh",
+      credential_mode: "per_user",
+      with_token: false,
+    })
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it("says a token of its own changes a keyless copy's account, and leaves it unticked", async () => {
+    // The gateway's answer once told the new server brings a token.
+    const keyless = { ...KEEPS, same_credential: false }
+    const asked = mockCopies([keyless])
+    const user = userEvent.setup()
+    renderDialog()
+
+    await user.type(screen.getByLabelText("Authorization token"), "secret")
+    await fillAndSubmit(user)
+
+    const copies = await screen.findByRole("list", { name: "Workspace copies" })
+    expect(
+      within(copies).getByText("The account its calls use will change."),
+    ).toBeVisible()
+    expect(
+      within(copies).getByRole("checkbox", { name: "Beta: github" }),
+    ).not.toBeChecked()
+    expect(lookupBody(asked)).toEqual({
+      url: "https://mcp.example.com/gh",
+      credential_mode: "shared",
+      with_token: true,
+    })
+  })
+
+  it("freezes the form while it looks for copies", async () => {
+    let answer: (response: Response) => void = () => {}
+    mockCopies(
+      () =>
+        new Promise<Response>((resolve) => {
+          answer = resolve
+        }),
+    )
+    const user = userEvent.setup()
+    const onSubmit = renderDialog()
+
+    await fillAndSubmit(user)
+
+    await waitFor(() => expect(screen.getByLabelText("URL")).toBeDisabled())
+    expect(screen.getByLabelText("Name")).toBeDisabled()
+    answer(Response.json({ data: [] }))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled())
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({
+      url: "https://mcp.example.com/gh",
+    })
+  })
+
+  it("does not add to the workspace a server reviewed for the organization once that access ends", async () => {
+    mockCopies([KEEPS])
+    const user = userEvent.setup()
+    const onSubmit = renderDialog()
+
+    await fillAndSubmit(user)
+    await screen.findByRole("list", { name: "Workspace copies" })
+    onSubmit.rerender(false)
+
+    expect(
+      screen.getByText(
+        /You can no longer add servers for the whole organization/,
+      ),
+    ).toBeVisible()
+    expect(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Add MCP server",
+      }),
+    ).toBeDisabled()
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it("clears a failed look for copies once the admin adds to the workspace instead", async () => {
+    mockCopies(async () =>
+      Response.json({ detail: "Copies unavailable" }, { status: 503 }),
+    )
+    const user = userEvent.setup()
+    const onSubmit = renderDialog()
+
+    await fillAndSubmit(user)
+    expect(await screen.findByText("Copies unavailable")).toBeVisible()
+
+    await user.click(screen.getByRole("radio", { name: /This workspace/ }))
+    expect(screen.queryByText("Copies unavailable")).toBeNull()
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Add MCP server",
+      }),
+    )
+    onSubmit.rerender(true, new Error("Name in use"))
+    expect(await screen.findByText("Name in use")).toBeVisible()
+  })
+
+  it("shows the fold limit, and holds the add while more copies than it are ticked", async () => {
+    const many = Array.from({ length: 51 }, (_, index) =>
+      mcpServerFoldCandidate({
+        ...KEEPS,
+        server_id: `aaaaaaaa-0000-0000-0000-${String(index).padStart(12, "0")}`,
+        workspace_name: `Workspace ${index}`,
+      }),
+    )
+    mockCopies(many)
+    const user = userEvent.setup()
+    renderDialog()
+
+    await fillAndSubmit(user)
+
+    expect(
+      await screen.findByText(
+        "Up to 50 copies can be folded at a time, and 51 are ticked. Untick some to continue.",
+      ),
+    ).toBeVisible()
+    const add = within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Add MCP server",
+    })
+    expect(add).toBeDisabled()
+    await user.click(
+      screen.getByRole("checkbox", { name: "Workspace 0: github" }),
+    )
+    expect(add).toBeEnabled()
   })
 })
