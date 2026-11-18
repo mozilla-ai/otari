@@ -54,7 +54,7 @@ from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions import TenancyError
-from gateway.exceptions.organizations_exceptions import WorkspaceNotFoundError
+from gateway.exceptions.organizations_exceptions import NotAuthorizedError, WorkspaceNotFoundError
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.exceptions.tools_exceptions import (
     McpCheckSignInRequiredError,
@@ -1804,8 +1804,18 @@ class WorkspaceMcpServerService:
         await OrganizationRepository(self.db).lock_settings(organization_id)
         if scope.workspace_id is not None:
             await workspaces.lock(scope.workspace_id)
-            if await workspaces.get_organization_id(scope.workspace_id) is None:
+            workspace = await workspaces.get(scope.workspace_id)
+            if workspace is None:
                 raise WorkspaceNotFoundError(workspace_id)
+            still_manages = await authorization.has_workspace_management_access(
+                self.db, user=user, workspace=workspace, organizations=self.organizations
+            )
+        else:
+            membership = await self.organizations.members.get_active_by_organization_and_user(organization_id, user.id)
+            still_manages = membership is not None and membership.role in MANAGEMENT_ROLES
+        # Asked again under the locks: a removal from the organization that held them has committed by now.
+        if not still_manages:
+            raise NotAuthorizedError
         await self._refuse_taken_name(scope, request.name, except_id=None)
 
         owner = (
@@ -2120,8 +2130,15 @@ class WorkspaceMcpServerService:
             unknown = [key_id for key_id in request.api_key_ids if key_id not in found]
             if unknown:
                 raise WorkspaceMcpServerGrantSubjectError(f"Key '{unknown[0]}' is not a key of this workspace")
+        # The key reads end in commits, so the workspace is locked after them and before anything is written:
+        # a member minting their own attribution row takes the same lock first. The server is locked after it,
+        # in the order a workspace's deletion takes them, since a grant's insert checks its workspace key.
+        owners = await keys.owners_in_workspace(resolved_workspace_id, request.user_ids) if request.user_ids else set()
+        workspaces = WorkspaceRepository(self.db)
+        await workspaces.lock(resolved_workspace_id)
+        if await workspaces.get_organization_id(resolved_workspace_id) is None:
+            raise WorkspaceNotFoundError(workspace_id)
         if request.user_ids:
-            owners = await keys.owners_in_workspace(resolved_workspace_id, request.user_ids)
             members = await self._members_by_attribution(
                 resolved_workspace_id, [user_id for user_id in request.user_ids if user_id not in owners]
             )
@@ -2131,13 +2148,7 @@ class WorkspaceMcpServerService:
                     f"'{strangers[0]}' is not a member of this workspace and owns no key in it"
                 )
         repository = WorkspaceMcpServerGrantRepository(self.db)
-        # The key reads above end in commits. The workspace is locked before the server, in the order its
-        # deletion takes them, since a grant's insert checks its workspace key. The server is read again
-        # here, locked, so two concurrent adds cannot both pass the cap.
-        workspaces = WorkspaceRepository(self.db)
-        await workspaces.lock(resolved_workspace_id)
-        if await workspaces.get_organization_id(resolved_workspace_id) is None:
-            raise WorkspaceNotFoundError(workspace_id)
+        # Read again, locked, so two concurrent adds cannot both pass the cap.
         server = await self.db.get(WorkspaceMcpServer, server_id, with_for_update=True)
         if server is None:
             raise WorkspaceMcpServerNotFoundError(server_id)
