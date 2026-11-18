@@ -73,6 +73,8 @@ A row you changed is marked Customized, and Reset in its menu returns it to the 
 
 **Require zero data retention**, at the top of the tab, limits the workspace to providers declared to keep no prompts or completions; see [Zero data retention](https://docs.otari.ai/self-hosting/providers/hosted-providers#zero-data-retention). Other providers are then refused, and the workspace's model lists show only declared ones.
 
+**Allowed data locations**, beside it, limits the workspace's hosted providers to regions declared to keep data in the countries or zones you choose; see [Data location](https://docs.otari.ai/self-hosting/providers/hosted-providers#data-location). A request is then served by the first enabled region that keeps data there and serves the request's country, and a hosted provider with no such region is refused and left out of the workspace's model lists. It applies to the deployment's hosted providers only, not to your organization's own keys.
+
 ## Rotate a provider key
 
 Rotate a provider key by adding its replacement first. Keep the existing key active until requests succeed with the new credential. Provider keys are resolved at request time, so your application's API keys do not need changes during rotation.
