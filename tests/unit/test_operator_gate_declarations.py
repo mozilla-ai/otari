@@ -233,13 +233,13 @@ def test_each_deployment_wide_router_declares_the_gate_itself(name: str, router:
     assert any(dependency.dependency is require_deployment_operator for dependency in router.dependencies), name
 
 
-@pytest.mark.parametrize("route", _routes(_DEPLOYMENT_WIDE_ROUTERS))
+@pytest.mark.parametrize("route", list(_routes(_DEPLOYMENT_WIDE_ROUTERS)))
 def test_every_route_on_a_deployment_wide_router_resolves_the_gate(route: APIRoute) -> None:
     """The declaration above, read back per route as FastAPI resolves it."""
     assert _resolves(route.dependant, require_deployment_operator)
 
 
-@pytest.mark.parametrize(("route", "gate"), _non_operator_routes())
+@pytest.mark.parametrize(("route", "gate"), list(_non_operator_routes()))
 def test_the_non_operator_routers_admit_their_own_caller_instead(route: APIRoute, gate: Callable[..., Any]) -> None:
     """Both directions: the route keeps the dependency it takes, and gains no operator gate."""
     assert _resolves(route.dependant, gate)
