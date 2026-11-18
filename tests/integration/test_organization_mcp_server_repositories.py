@@ -141,6 +141,66 @@ async def test_settings_left_at_their_defaults_are_no_override(async_db: AsyncSe
     assert await overrides.find(workspace_id=marcomms.id, server_id=drive.id) is None
 
 
+_DEFAULTS: dict[str, Any] = {
+    "organization_tools": None,
+    "enabled": True,
+    "everyone_tools": None,
+    "attach_by_default": None,
+}
+
+
+async def test_clearing_a_workspace_s_settings_keeps_a_limit_stored_since_they_were_read(
+    async_db: AsyncSession,
+) -> None:
+    """A row lock does not order the two writers on SQLite, so the removal itself checks the limit."""
+    acme = await _organization(async_db)
+    marcomms = await _workspace(async_db, acme, "Marcomms")
+    drive = await _server(async_db, acme)
+    read = await WorkspaceMcpServerOverrideRepository(async_db).save(
+        None, workspace_id=marcomms.id, server=drive, **{**_DEFAULTS, "enabled": False}
+    )
+    await async_db.commit()
+    assert read is not None
+
+    async with AsyncSession(async_db.bind, expire_on_commit=False) as other:
+        overrides = WorkspaceMcpServerOverrideRepository(other)
+        theirs = await overrides.find(workspace_id=marcomms.id, server_id=drive.id)
+        await overrides.save(
+            theirs, workspace_id=marcomms.id, server=drive, **{**_DEFAULTS, "enabled": False, "organization_tools": []}
+        )
+        await other.commit()
+
+    kept = await WorkspaceMcpServerOverrideRepository(async_db).save(
+        read, workspace_id=marcomms.id, server=drive, **_DEFAULTS
+    )
+    await async_db.commit()
+
+    assert kept is not None
+    assert (kept.organization_tools, kept.enabled) == ([], True)
+
+
+async def test_a_first_override_stored_since_it_was_read_takes_this_write_too(async_db: AsyncSession) -> None:
+    """Two writers that each read no override both insert one; the second changes the first's instead of failing."""
+    acme = await _organization(async_db)
+    marcomms = await _workspace(async_db, acme, "Marcomms")
+    drive = await _server(async_db, acme)
+    await async_db.commit()
+
+    async with AsyncSession(async_db.bind, expire_on_commit=False) as other:
+        await WorkspaceMcpServerOverrideRepository(other).save(
+            None, workspace_id=marcomms.id, server=drive, **{**_DEFAULTS, "organization_tools": ["@read"]}
+        )
+        await other.commit()
+
+    saved = await WorkspaceMcpServerOverrideRepository(async_db).save(
+        None, workspace_id=marcomms.id, server=drive, **{**_DEFAULTS, "enabled": False}
+    )
+    await async_db.commit()
+
+    assert saved is not None
+    assert (saved.organization_tools, saved.enabled) == (["@read"], False)
+
+
 async def test_an_override_is_changed_only_for_its_own_workspace_and_server(async_db: AsyncSession) -> None:
     acme = await _organization(async_db)
     marcomms = await _workspace(async_db, acme, "Marcomms")

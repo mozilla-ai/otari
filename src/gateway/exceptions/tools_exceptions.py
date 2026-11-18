@@ -247,11 +247,16 @@ class McpOAuthIssuerChangedError(McpConnectionSetupError):
 
     error_code = MCP_OAUTH_ISSUER_CHANGED
 
-    def __init__(self) -> None:
+    def __init__(self, *, organization: bool = False) -> None:
+        who = (
+            "An organization owner or admin must save the OAuth client again, under Settings on the server's "
+            "page in Organization > MCP servers,"
+            if organization
+            else "A workspace admin must save the OAuth client again, under Settings on the server's page,"
+        )
         super().__init__(
             "This server now sends sign-ins to a different authorization server than the one its OAuth client "
-            "was saved for. A workspace admin must save the OAuth client again, under Settings on the server's "
-            "page, to approve the new sign-in server."
+            f"was saved for. {who} to approve the new sign-in server."
         )
 
 

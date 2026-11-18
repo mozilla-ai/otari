@@ -867,7 +867,7 @@ async def test_a_managers_client_is_never_sent_to_another_authorization_server_u
     with pytest.raises(McpOAuthIssuerChangedError) as refused:
         await service.start_connection(user=world.owner, return_to=None, **ids)
     assert refused.value.error_code == "mcp_oauth_issuer_changed"
-    assert "save the OAuth client again" in str(refused.value)
+    assert "A workspace admin must save the OAuth client again" in str(refused.value)
     assert len(wire.exchanges) == 1
     assert (await _row(async_db, world.server.id)).oauth_client_issuer == ISSUER
 
@@ -879,6 +879,27 @@ async def test_a_managers_client_is_never_sent_to_another_authorization_server_u
     await _sign_in(async_db, config, world, world.owner)
     assert (await _row(async_db, world.server.id)).oauth_client_issuer == moved
     assert wire.registrations == []
+
+
+async def test_a_moved_organization_server_sends_its_members_to_the_organizations_admins(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire
+) -> None:
+    """A workspace admin cannot save an organization's server, so the refusal names who can."""
+    world = await _world(async_db, config, oauth_client_id="my-client", oauth_client_secret="my-secret")
+    await _sign_in(async_db, config, world, world.member)
+    row = await _row(async_db, world.server.id)
+    row.workspace_id = None
+    await async_db.commit()
+
+    moved = "https://93.184.216.37"
+    wire.metadata = dataclasses.replace(wire.metadata, issuer=moved, token_endpoint=f"{moved}/token")
+    with pytest.raises(McpOAuthIssuerChangedError) as refused:
+        await _service(async_db, config).start_connection(
+            user=world.member, workspace_id=world.workspace.id, server_id=world.server.id, return_to=None
+        )
+    assert "An organization owner or admin" in str(refused.value)
+    assert "Organization > MCP servers" in str(refused.value)
+    assert "workspace admin" not in str(refused.value)
 
 
 async def test_a_managers_client_is_never_sent_to_a_moved_token_endpoint_under_the_same_issuer(

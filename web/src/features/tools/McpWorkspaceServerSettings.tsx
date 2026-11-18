@@ -30,6 +30,7 @@ import {
 import {
   useClearWorkspaceMcpServerOverride,
   useSetWorkspaceMcpServerOverride,
+  useWorkspaceMcpServerOverridePending,
 } from "@/shared/api/tools"
 
 /**
@@ -60,13 +61,17 @@ export function McpWorkspaceServerSettings({
   const limit = organizationLimitLabel(own?.organization_tools)
   const offReason = organizationOffReason(server)
   const defaultTools = own?.everyone_tools ?? server.everyone_tools
-  const isPending = set.isPending || clear.isPending
+  // Any write here, or the access rules' default policy below, sends every
+  // setting from the row as read, so none starts while another is in flight.
+  // Resetting a write in flight would also lose its refusal.
+  const isWriting = useWorkspaceMcpServerOverridePending(workspaceId, server.id)
   const picker = checkedTools(server, { withinAllowList: true })
   const tools = picker.isKnown
     ? picker.tools
     : (server.allowed_tools ?? []).filter(isLiteralToolName)
 
   const write = (body: Parameters<typeof set.mutate>[0]["body"]) => {
+    if (isWriting) return
     clear.reset()
     set.mutate({ ...ids, body })
   }
@@ -108,7 +113,7 @@ export function McpWorkspaceServerSettings({
                 ))}
               </McpInfoHint>
             }
-            isDisabled={isPending}
+            isDisabled={isWriting}
             shouldReserveMessage={false}
             className="w-44"
           />
@@ -124,10 +129,12 @@ export function McpWorkspaceServerSettings({
             </p>
             <Button
               onPress={() => {
+                if (isWriting) return
                 set.reset()
                 setOpenCount((count) => count + 1)
                 setEditingDefault(true)
               }}
+              isDisabled={isWriting}
               aria-label="Edit the default policy for this workspace"
               className="min-h-11 shrink-0 md:min-h-0"
             >
@@ -141,11 +148,12 @@ export function McpWorkspaceServerSettings({
           <div>
             <Button
               onPress={() => {
+                if (isWriting) return
                 set.reset()
                 clear.mutate(ids)
               }}
               isPending={clear.isPending}
-              isDisabled={!hasWorkspaceSettings(server) || set.isPending}
+              isDisabled={!hasWorkspaceSettings(server) || isWriting}
               className="min-h-11 md:min-h-0"
             >
               Use organization defaults
@@ -168,7 +176,8 @@ export function McpWorkspaceServerSettings({
           readTools={server.read_tools}
           isPending={set.isPending}
           error={set.error}
-          onSubmit={(draft) =>
+          onSubmit={(draft) => {
+            if (isWriting) return
             set.mutate(
               {
                 ...ids,
@@ -176,7 +185,7 @@ export function McpWorkspaceServerSettings({
               },
               { onSuccess: () => setEditingDefault(false) },
             )
-          }
+          }}
         />
       ) : null}
     </SettingsGroup>

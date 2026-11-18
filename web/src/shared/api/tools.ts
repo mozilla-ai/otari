@@ -1,4 +1,5 @@
 import {
+  useIsMutating,
   useMutation,
   useQueries,
   useQuery,
@@ -851,6 +852,31 @@ export function useUpdateMcpServer() {
   })
 }
 
+// Both writes of a workspace's own settings on its organization's server.
+const OVERRIDE_WRITE = [WORKSPACES, "mcp-server-override"]
+
+/**
+ * Whether a write of the workspace's own settings on this server is in flight,
+ * from any control on the page. The PUT replaces every setting with what the
+ * page last read, so a second write started before the first settles could
+ * send back a value the first changed.
+ */
+export function useWorkspaceMcpServerOverridePending(
+  workspaceId: string,
+  serverId: string,
+): boolean {
+  const writing = useIsMutating({
+    mutationKey: OVERRIDE_WRITE,
+    predicate: (mutation) => {
+      const ids = mutation.state.variables as
+        | { workspaceId: string; serverId: string }
+        | undefined
+      return ids?.workspaceId === workspaceId && ids.serverId === serverId
+    },
+  })
+  return writing > 0
+}
+
 /**
  * What a write to a workspace's own settings on its organization's server
  * moves: the server as the workspace reads it (seeded from the answer), every
@@ -863,6 +889,7 @@ function useWorkspaceMcpServerOverrideWrite<
 >(request: (variables: Variables) => Promise<WorkspaceMcpServer>) {
   const queryClient = useQueryClient()
   return useMutation({
+    mutationKey: OVERRIDE_WRITE,
     mutationFn: request,
     onSuccess: (server, { workspaceId, serverId }) => {
       const scope = workspaceMcpScope(workspaceId)
