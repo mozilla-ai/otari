@@ -36,11 +36,12 @@ certain, as otari's domain policy, checks the results itself.
    read the response into the envelope, and write the date parser, the error reader and the cost
    reader. The rules:
    - Send with `self._http.request`, which uses the host's client and the provider's timeout,
-     never follows a redirect, names the library in the request's `User-Agent`
-     (`any-search/<version>` or `any-fetch/<version>`), turns a transport failure into a
-     `ProviderError` without its text, and raises `http_error` for any answer below 400 that is
-     not a success. An adapter sets no `User-Agent` of its own, even where the provider's SDK
-     names itself: that header is one of two exceptions to the next rule.
+     follows no redirect from the provider's API (a fetched page's redirects are the provider's
+     to follow), names the library in the request's `User-Agent` (`any-search/<version>` or
+     `any-fetch/<version>`), turns a transport failure into a `ProviderError` without its text,
+     and raises `http_error` for any answer below 400 that is not a success. An adapter sets no
+     `User-Agent` of its own, even where the provider's SDK names itself: that header is one of
+     two exceptions to the next rule.
    - By default, send what the provider's own SDK sends, so moving from the SDK changes nothing.
      A caller who wants less passes the native option. What the envelope needs is always asked
      for, and no option turns it off: Exa's page text, Tabstack's metadata, which holds the title.

@@ -24,9 +24,11 @@ class ProviderHttp:
     defaults and the provider's timeout is opened on the first request and
     closed by ``aclose``.
 
-    No request follows a redirect, whatever the client is set to: httpx drops
-    ``Authorization`` on a redirect to another host but keeps every other
-    header, so a key sent as ``X-API-Key`` would reach that host.
+    No request to the provider's API follows a redirect, whatever the client is
+    set to: httpx drops ``Authorization`` on a redirect to another host but
+    keeps every other header, so a key sent as ``X-API-Key`` would reach that
+    host. A page a provider fetches follows its own redirects on the
+    provider's side.
 
     Each request names the library in its ``User-Agent``, so a provider can
     tell whose traffic it is, unless the host's client carries one of its own:

@@ -29,10 +29,10 @@ AnyFetch.get_provider_metadata("fake")
 - `api_base`: overrides the provider's endpoint, which is how a test or a proxy redirects it. When
   it is not passed, the variable `env_api_base` names is read, then the provider's default.
 - `timeout`: seconds per request, 15 by default.
-- `client`: an `httpx.AsyncClient` you own. The provider sends every request through it with its own
-  timeout and without following redirects, and never closes it or changes its settings. Without
-  one, the provider opens a client with httpx's defaults and closes it in `aclose()`, which
-  `async with` calls.
+- `client`: an `httpx.AsyncClient` you own. The provider sends every request to its API through it,
+  with its own timeout and without following a redirect, and never closes it or changes its
+  settings. Without one, the provider opens a client with httpx's defaults and closes it in
+  `aclose()`, which `async with` calls.
 
 Every request a provider sends carries `User-Agent: any-fetch/<version>`, the library's own
 version (`any_fetch.__version__`, which a change to the library bumps in the same PR), so a
@@ -55,13 +55,14 @@ A `FetchedPage`: the `url` asked for, the `final_url` after redirects, the `titl
 text hit its own, and the provider's own response as `raw`, which is left out of `repr`.
 
 A failed call raises `ProviderError` with the provider's name, a `tag` and the HTTP `status` when
-there is one. Apart from `builtin`'s, no request follows a redirect, whatever `client` is set to, so
+there is one. A request to the provider's API follows no redirect, whatever `client` is set to, so
 a key sent in a header never reaches another host: a redirect, or any other answer below 400 that
-is not a success, raises it with the tag `http_error`. A successful answer that lacks a field the
-provider documents, or carries one of the wrong type, raises it with the tag `unexpected_response`,
-so a change on the provider's side fails the call rather than degrading it. A missing key raises
-`MissingCredentialError`. All errors derive from `AnyFetchError`, and none carries a response
-body, a URL or a key.
+is not a success, raises it with the tag `http_error`. The page itself still follows its redirects:
+a provider follows them on its side, and `builtin` is the host's own fetcher. A successful answer
+that lacks a field the provider documents, or carries one of the wrong type, raises it with the tag
+`unexpected_response`, so a change on the provider's side fails the call rather than degrading it.
+A missing key raises `MissingCredentialError`. All errors derive from `AnyFetchError`, and none
+carries a response body, a URL or a key.
 
 `ProviderMetadata` says what a host needs before calling: where the key comes from, the provider's
 `tier` (`production` or `test`), `max_urls_per_call`, whether it `renders_javascript`, whether it
