@@ -36,9 +36,22 @@ async function cleanUp(page: Page): Promise<void> {
   const workspace = workspaces.find((w) => w.name === "Default workspace")
   if (!workspace) return
   const base = `/workspaces/${workspace.id}/mcp-servers`
-  for (const server of await listed<{ id: string; name: string }>(page, base)) {
-    if (server.name === SERVER) {
+  for (const server of await listed<{
+    id: string
+    name: string
+    scope?: string
+  }>(page, base)) {
+    if (server.name === SERVER && server.scope !== "organization") {
       await call(page, "DELETE", `${base}/${server.id}`)
+    }
+  }
+  const shared = "/organizations/me/mcp-servers"
+  for (const server of await listed<{ id: string; name: string }>(
+    page,
+    shared,
+  )) {
+    if (server.name === SERVER) {
+      await call(page, "DELETE", `${shared}/${server.id}`)
     }
   }
 }
@@ -56,6 +69,15 @@ test("configure an MCP server", async ({ page }) => {
     await page.getByRole("button", { name: "Add MCP server" }).click()
 
     const dialog = page.getByRole("dialog")
+    // The admin is the organization's owner, so the dialog asks whose server it is.
+    const target = dialog.getByRole("radiogroup", { name: "Add to" })
+    await expect(
+      target.getByRole("radio", { name: /^Whole organization/ }),
+    ).toBeChecked()
+    await target.getByText("This workspace", { exact: true }).click()
+    await expect(
+      target.getByRole("radio", { name: /^This workspace/ }),
+    ).toBeChecked()
     await dialog.getByLabel("Name").fill(SERVER)
     await dialog.getByLabel("URL").fill("https://example.com/mcp")
     const account = dialog.getByRole("radiogroup", { name: "Sign-in mode" })

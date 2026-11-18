@@ -11,18 +11,19 @@ There are two ways in: add a server by its URL, or pick servers from the catalog
 1. Select the workspace in the top-left corner.
 2. Go to **Tools** → **MCP servers**.
 3. Click **Add MCP server**.
-4. Enter a **Name** for the server. This must be unique within the workspace and is used to identify the server’s tools.
-5. Enter the MCP server **URL**. The endpoint must be reachable from the Otari gateway. If the server is on a private network, see [Connect an MCP server on a private network](connect-a-private-mcp-server.md).
-6. Under **Sign-in mode**, keep **Shared account** to use one account for the whole workspace, or choose **Personal accounts** to have every member connect their own account. The second is described in [Connect your account to an MCP server](connect-your-account-to-an-mcp-server.md).
-7. With **Shared account**, enter an **Authorization token** if the server takes one. If it only offers a sign-in, leave the field blank: you sign in for everyone on the server's page once it is added. See [Set up a Shared server's account](#set-up-a-shared-servers-account).
-8. Optionally, add a **Purpose hint** describing when the model should use this server, for example, “Use for repository and issue lookups.”
-9. Under **Allowed tools**, specify which tools from the MCP server the model can access. Enter the tool names separated by commas, or leave the field blank to make all tools offered by the server available. With **Shared account**, you can test the connection first and pick them from the tools the server offers instead.
-10. Under **Availability**, choose who gets the server:
+4. If you are an owner or admin of the organization, choose under **Add to** whether the server is for **This workspace** only or the **Whole organization**, which is preselected. These steps add it to the workspace; a server for the whole organization is described in [Share an MCP server with every workspace](share-an-mcp-server-with-every-workspace.md).
+5. Enter a **Name** for the server. This must be unique within the workspace and is used to identify the server’s tools.
+6. Enter the MCP server **URL**. The endpoint must be reachable from the Otari gateway. If the server is on a private network, see [Connect an MCP server on a private network](connect-a-private-mcp-server.md).
+7. Under **Sign-in mode**, keep **Shared account** to use one account for the whole workspace, or choose **Personal accounts** to have every member connect their own account. The second is described in [Connect your account to an MCP server](connect-your-account-to-an-mcp-server.md).
+8. With **Shared account**, enter an **Authorization token** if the server takes one. If it only offers a sign-in, leave the field blank: you sign in for everyone on the server's page once it is added. See [Set up a Shared server's account](#set-up-a-shared-servers-account).
+9. Optionally, add a **Purpose hint** describing when the model should use this server, for example, “Use for repository and issue lookups.”
+10. Under **Allowed tools**, specify which tools from the MCP server the model can access. Enter the tool names separated by commas, or leave the field blank to make all tools offered by the server available. With **Shared account**, you can test the connection first and pick them from the tools the server offers instead.
+11. Under **Availability**, choose who gets the server:
     - **Off**: nobody can use it. You can turn it on later without setting it up again.
     - **On request**: available to people building things, invisible to coding agents. Only requests that ask for it by its id get it; the **Server ID** is at the top of the server's page, and goes in `mcp_server_ids`.
     - **Every request**: available everywhere. It is added to every model request made with a workspace key that holds the `mcp:execute` scope, including coding agents such as Claude Code that never name a server. See [Attached to every request](mcp.md#attached-to-every-request).
-11. Under **Default policy**, choose **Allow** to let every key in the workspace use the server, or **Deny** to let none use it until you add rules for them.
-12. Click **Add MCP server** to save it.
+12. Under **Default policy**, choose **Allow** to let every key in the workspace use the server, or **Deny** to let none use it until you add rules for them.
+13. Click **Add MCP server** to save it.
 
 ![The New MCP server dialog, with a name, URL, token, purpose hint and allowed tools filled in.](assets/screenshots/mcp-servers.png)
 
