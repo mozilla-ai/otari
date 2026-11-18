@@ -6,7 +6,7 @@ No route makes an organization server yet, so each one here is written directly.
 import uuid
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
@@ -17,7 +17,7 @@ from gateway.exceptions.tools_exceptions import (
     WorkspaceMcpServerAccessDeniedError,
     WorkspaceMcpServerNotFoundError,
 )
-from gateway.models.tenancy import Organization, User, Workspace
+from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace
 from gateway.models.tools import (
     McpCredentialMode,
     McpOAuthFlow,
@@ -429,3 +429,24 @@ async def test_a_sign_in_finishing_after_its_workspace_turned_the_server_off_sto
     assert (await async_db.execute(select(McpUserConnection.id))).scalars().all() == []
     await base._drain_revocations()
     assert wire.revoked == ["refresh-1"], "the token the exchange issued is ended upstream"
+
+
+async def test_a_sign_in_finishing_after_its_member_was_suspended_from_the_organization_stores_nothing(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    world = await _world(async_db, config)
+    jira = await _per_user_shared(async_db, world)
+    member_id = world.member.id
+    url = await _start(async_db, config, jira, member_id, world.workspace.id)
+    # Suspension leaves the workspace's own membership row as it was.
+    await async_db.execute(
+        update(OrganizationMember).where(OrganizationMember.user_id == member_id).values(status="suspended")
+    )
+    await async_db.commit()
+    member = await async_db.get(User, member_id)
+    assert member is not None
+
+    with pytest.raises(McpConnectionFlowError, match="no longer have access"):
+        await _service(async_db, config).complete_connection(user=member, state=_state(url), code="code")
+
+    assert (await async_db.execute(select(McpUserConnection.id))).scalars().all() == []
