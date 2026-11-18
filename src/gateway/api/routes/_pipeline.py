@@ -6546,14 +6546,25 @@ def _without_unused_reasoning(attempt: Attempt, call_kwargs: dict[str, Any]) -> 
     The caller of a routing policy did not pick the candidate, and the hint has
     nothing to tune on such a model, so it is sent the request without it rather
     than counted as failed for it. That covers a Responses ``include`` asking for
-    encrypted reasoning too. A model models.dev does not describe is sent the
-    fields as asked. The model is looked up under the provider it is dispatched
-    to, because an instance's name (a hosted provider's, an owned endpoint's)
-    need not name one.
+    encrypted reasoning and a Messages ``output_config.effort`` (carried as
+    ``output_format``) too; the rest of either is kept. A model models.dev does
+    not describe is sent the fields as asked. The model is looked up under the
+    provider it is dispatched to, because an instance's name (a hosted
+    provider's, an owned endpoint's) need not name one.
     """
     include = call_kwargs.get("include")
     kept_include = [item for item in include if item != _ENCRYPTED_REASONING] if isinstance(include, list) else include
-    if kept_include == include and all(call_kwargs.get(field) is None for field in _REASONING_FIELDS):
+    output_format = call_kwargs.get("output_format")
+    kept_output_format = (
+        {key: value for key, value in output_format.items() if key != "effort"}
+        if isinstance(output_format, dict)
+        else output_format
+    )
+    if (
+        kept_include == include
+        and kept_output_format == output_format
+        and all(call_kwargs.get(field) is None for field in _REASONING_FIELDS)
+    ):
         return call_kwargs
     entry = metadata_entry(cached_models_dev_catalog(), attempt.provider.value, attempt.model)
     if entry is None or entry.reasoning:
@@ -6563,9 +6574,13 @@ def _without_unused_reasoning(attempt: Attempt, call_kwargs: dict[str, Any]) -> 
         attempt.instance,
         attempt.model,
     )
-    sent = {key: value for key, value in call_kwargs.items() if key not in (*_REASONING_FIELDS, "include")}
+    sent = {
+        key: value for key, value in call_kwargs.items() if key not in (*_REASONING_FIELDS, "include", "output_format")
+    }
     if kept_include:
         sent["include"] = kept_include
+    if kept_output_format:
+        sent["output_format"] = kept_output_format
     return sent
 
 

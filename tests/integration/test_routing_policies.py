@@ -1908,10 +1908,11 @@ _REASONING_HINTS: dict[str, tuple[dict[str, Any], str]] = {
     "chat": ({"reasoning_effort": "low"}, "reasoning_effort"),
     "responses": ({"reasoning": {"effort": "low"}}, "reasoning"),
     "messages": ({"thinking": {"type": "enabled", "budget_tokens": 2048}}, "thinking"),
+    "messages-effort": ({"output_config": {"effort": "low"}}, "output_format"),
 }
 
 
-@pytest.mark.parametrize("endpoint", ["chat", "responses", "messages"])
+@pytest.mark.parametrize("endpoint", list(_REASONING_HINTS))
 def test_a_fallback_that_does_not_reason_is_sent_no_reasoning_hint(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, endpoint: str
 ) -> None:
@@ -1934,7 +1935,7 @@ def test_a_fallback_that_does_not_reason_is_sent_no_reasoning_hint(
         sent.append(kwargs)
         if kwargs["model"] in ("openai:gpt-5-mini", "gpt-5-mini"):
             raise _http_error(503)
-        if endpoint == "messages":
+        if endpoint.startswith("messages"):
             return _message_response()
         if endpoint == "responses":
             from any_llm.types.responses import Response as ProviderResponse
@@ -1944,7 +1945,7 @@ def test_a_fallback_that_does_not_reason_is_sent_no_reasoning_hint(
             )
         return _completion("claude-haiku-4-5")
 
-    if endpoint == "messages":
+    if endpoint.startswith("messages"):
         body = {
             "max_tokens": 4096,
             "messages": [{"role": "user", "content": "hi"}],

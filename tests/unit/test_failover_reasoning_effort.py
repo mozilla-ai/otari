@@ -108,3 +108,20 @@ def test_a_reasoning_model_keeps_the_messages_thinking() -> None:
     thinking = {"type": "enabled", "budget_tokens": 2048}
 
     assert _sent("openai/gpt-oss-20b", thinking=thinking)["thinking"] == thinking
+
+
+def test_a_messages_effort_is_left_off_a_model_that_does_not_reason() -> None:
+    """``output_config.effort`` goes, and the ``format`` beside it stays."""
+    fmt = {"type": "json_schema", "schema": {"type": "object"}}
+
+    sent = _sent("llama-3.3-70b-versatile", output_format={"effort": "low", "format": fmt})
+
+    assert sent == {"model": "llama-3.3-70b-versatile", "output_format": {"format": fmt}}
+
+
+def test_an_output_config_holding_only_effort_is_left_off() -> None:
+    assert _sent("llama-3.3-70b-versatile", output_format={"effort": "low"}) == {"model": "llama-3.3-70b-versatile"}
+
+
+def test_a_reasoning_model_keeps_the_messages_effort() -> None:
+    assert _sent("openai/gpt-oss-20b", output_format={"effort": "low"})["output_format"] == {"effort": "low"}
