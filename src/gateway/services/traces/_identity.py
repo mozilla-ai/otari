@@ -153,6 +153,11 @@ _SDK_CLIENT_CLASSES: Mapping[str, str] = {
 # is a compatibility token.
 _VERSIONLESS_PRODUCTS = frozenset({"go-http-client", "python", "mozilla"})
 
+# A Speakeasy SDK's User-Agent is ``speakeasy-sdk/<language> <sdk version> <generator
+# version> <document version> <package>``: the field each is read from.
+_SPEAKEASY_VERSION = 1
+_SPEAKEASY_PACKAGE = 4
+
 _MAX_KEY_LENGTH = 512
 
 
@@ -260,16 +265,21 @@ def _user_agent_product(headers: Mapping[str, str]) -> str | None:
         return None
     segments = tokens[0].split("/")
     product = segments[0].lower()
-    if product == "speakeasy-sdk" and len(tokens) > 1:
-        # A Speakeasy SDK ends its User-Agent with its own name, ``... mistralai``.
-        product = tokens[-1].lower()
-    elif len(segments) > 1 and segments[1].lower() in _LANGUAGE_NAMES:
+    if product == "speakeasy-sdk" and len(tokens) > _SPEAKEASY_PACKAGE:
+        # A Speakeasy SDK names its package in the fifth field, ``... 1.0.0 mistralai``.
+        product = tokens[_SPEAKEASY_PACKAGE].lower()
+    elif _is_stainless(segments):
         # A Stainless SDK names itself by its client class, ``AsyncOpenAI/Python 1.99``, so
         # the async twin and the cloud variants are one SDK.
         product = product.removeprefix("async")
         product = _SDK_CLIENT_CLASSES.get(product, product)
     product = _HARNESS_PRODUCTS.get(product, product)
     return product if is_identifier(product) and len(product) <= 64 else None
+
+
+def _is_stainless(segments: list[str]) -> bool:
+    """Whether a ``User-Agent``'s first product is a Stainless SDK's ``Class/Language``."""
+    return len(segments) > 1 and segments[1].lower() in _LANGUAGE_NAMES
 
 
 def _user_agent_names(headers: Mapping[str, str], harness: str) -> bool:
@@ -305,17 +315,26 @@ def _client_language_of(headers: Mapping[str, str]) -> ClientLanguage | None:
 def _client_version_of(headers: Mapping[str, str]) -> str | None:
     """The version the ``User-Agent`` gives its client, or None.
 
-    The version follows the product (``claude-cli/2.1.291``, ``OpenAPI-Generator/1.0.0/python``)
-    or is the next word (``OpenAI/Python 1.99.0``). An SDK's package-version header is
-    not read: on a harness built on the SDK it is the SDK's version, not the harness's.
+    The version follows the product (``claude-cli/2.1.291``, ``OpenAPI-Generator/1.0.0/python``).
+    Only the SDK formats that put it in a word of its own are read there (``OpenAI/Python
+    1.99.0``, Speakeasy's), since elsewhere the next word is another product. An SDK's
+    package-version header is not read: on a harness built on the SDK it is the SDK's
+    version, not the harness's.
     """
     tokens = (headers.get("user-agent") or "").split()
     if not tokens:
         return None
-    product, *rest = tokens[0].split("/")
-    if product.lower() in _VERSIONLESS_PRODUCTS:
+    segments = tokens[0].split("/")
+    product = segments[0].lower()
+    if product in _VERSIONLESS_PRODUCTS:
         return None
-    for candidate in (*rest, *tokens[1:2]):
+    if product == "speakeasy-sdk":
+        candidates = tokens[_SPEAKEASY_VERSION : _SPEAKEASY_VERSION + 1]
+    elif _is_stainless(segments):
+        candidates = tokens[1:2]
+    else:
+        candidates = segments[1:]
+    for candidate in candidates:
         version = candidate.strip().removeprefix("v")
         if is_client_version(version):
             return version

@@ -257,6 +257,7 @@ def test_only_an_identifier_shaped_key_the_client_chose_names_the_session(ref: S
         ({"user-agent": "AsyncAnthropicVertex/Python 1.17.0"}, "anthropic"),
         ({"user-agent": "AcmeOpenAI/Python 1.2.3"}, "acmeopenai"),
         ({"user-agent": "speakeasy-sdk/python 3.1.0 2.935.1 1.0.0 mistralai"}, "mistralai"),
+        ({"user-agent": "speakeasy-sdk/python 3.1.0 2.935.1 1.0.0 mistralai (integration)"}, "mistralai"),
         ({"user-agent": "google-genai-sdk/2.25.0 gl-python/3.13.1"}, "google-genai"),
         ({"user-agent": "OpenAPI-Generator/1.0.0/python"}, "openapi-generator"),
         ({"user-agent": "python-httpx/0.28.1"}, "python-httpx"),
@@ -325,6 +326,9 @@ def test_the_clients_language_comes_from_its_sdk_or_its_http_library(
         ({"user-agent": "Python/3.12 aiohttp/3.11.0"}, None),
         ({"user-agent": "node"}, None),
         ({"user-agent": "my-agent/latest"}, None),
+        # A second product is not the first one's version.
+        ({"user-agent": "my-app 2026"}, None),
+        ({"user-agent": "speakeasy-sdk/python 3.1.0 2.935.1 1.0.0 mistralai (integration)"}, "3.1.0"),
         ({}, None),
     ],
 )

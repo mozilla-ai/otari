@@ -8,6 +8,7 @@ import {
   hasMakerMark,
   hasProviderMark,
   isProductMarkProvider,
+  languageLabel,
 } from "@/shared/helpers/brandMarkKeys"
 import { providerDisplayName } from "@/shared/helpers/providers"
 
@@ -211,7 +212,14 @@ export function HarnessMark({
     return <Glyph markKey={harness} kind="harness" box={box} />
   }
   if (language && hasLanguageMark(language)) {
-    return <Glyph markKey={language} kind="language" box={box} />
+    // Unlike an agent's mark, the language is not in the name beside it, so it is
+    // read out. The text is out of flow, so the slot keeps the mark's width.
+    return (
+      <>
+        <Glyph markKey={language} kind="language" box={box} />
+        <span className="sr-only">{`Client language: ${languageLabel(language)}`}</span>
+      </>
+    )
   }
   return harness ? (
     <Lettermark label={harness} box={box} />

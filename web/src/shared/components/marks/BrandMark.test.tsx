@@ -188,12 +188,28 @@ describe("HarnessMark", () => {
     )
   })
 
-  it("tiles a client with no mark and no language, and keeps a slot for no client", () => {
+  it("tiles a client with no mark and no language", () => {
     render(<HarnessMark harness="my-agent" />)
-    expect(screen.getByText("m")).toBeInTheDocument()
 
-    const empty = render(<HarnessMark harness={null} />)
-    expect(empty.container.querySelector("svg")).toBeNull()
-    expect(empty.container.textContent).toBe("")
+    expect(screen.getByText("m")).toBeInTheDocument()
+  })
+
+  it("keeps an empty, silent slot for a session with no client", () => {
+    // The slot keeps the session's name aligned with the rows that have a mark.
+    const { container } = render(<HarnessMark harness={null} />)
+
+    const slot = container.firstElementChild
+    expect(slot?.tagName).toBe("SPAN")
+    expect(slot?.getAttribute("aria-hidden")).toBe("true")
+    expect(slot?.className).toContain("size-4")
+    expect(slot?.className).toContain("shrink-0")
+    expect(slot?.childElementCount).toBe(0)
+    expect(container.textContent).toBe("")
+  })
+
+  it("names the language for a screen reader, since the mark is decorative", () => {
+    render(<HarnessMark harness={null} language="go" />)
+
+    expect(screen.getByText("Client language: Go")).toHaveClass("sr-only")
   })
 })
