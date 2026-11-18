@@ -14727,6 +14727,88 @@
         "title": "McpServerConnectionsPublic",
         "type": "object"
       },
+      "McpServerFoldCandidate": {
+        "description": "A workspace's own copy of a server, and what folding it into the organization's would do.",
+        "properties": {
+          "credential_mode": {
+            "$ref": "#/components/schemas/McpCredentialMode"
+          },
+          "keep_sign_in": {
+            "description": "Of those, how many keep their sign-in on the organization's server",
+            "title": "Keep Sign In",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "replaces_shared_credential": {
+            "description": "It holds a token or a shared account, which the organization server's credential replaces",
+            "title": "Replaces Shared Credential",
+            "type": "boolean"
+          },
+          "same_credential": {
+            "description": "It signs in the way the organization's server does and holds no token or shared account of its own, so folding it changes no account its calls use. A fold step ticks these by default",
+            "title": "Same Credential",
+            "type": "boolean"
+          },
+          "server_id": {
+            "format": "uuid",
+            "title": "Server Id",
+            "type": "string"
+          },
+          "sign_in_again": {
+            "description": "Of those, how many must sign in again",
+            "title": "Sign In Again",
+            "type": "integer"
+          },
+          "signed_in": {
+            "description": "People signed in to it with their own account",
+            "title": "Signed In",
+            "type": "integer"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          },
+          "workspace_name": {
+            "title": "Workspace Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "server_id",
+          "workspace_id",
+          "workspace_name",
+          "name",
+          "credential_mode",
+          "same_credential",
+          "signed_in",
+          "keep_sign_in",
+          "sign_in_again",
+          "replaces_shared_credential"
+        ],
+        "title": "McpServerFoldCandidate",
+        "type": "object"
+      },
+      "McpServerFoldCandidates": {
+        "description": "The workspaces' own servers an organization's server could take the place of, and what that would do.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/McpServerFoldCandidate"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "McpServerFoldCandidates",
+        "type": "object"
+      },
       "McpServerLeftOut": {
         "description": "A server the key's access list grants and that is still not listed, and why.",
         "properties": {
@@ -14758,6 +14840,23 @@
           "detail"
         ],
         "title": "McpServerLeftOut",
+        "type": "object"
+      },
+      "McpServerPromote": {
+        "description": "Making a workspace's own server its organization's.",
+        "properties": {
+          "fold_server_ids": {
+            "description": "Other workspaces' own servers at the same URL to fold into it, as for a new organization server",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Fold Server Ids",
+            "type": "array"
+          }
+        },
+        "title": "McpServerPromote",
         "type": "object"
       },
       "McpServerRequestCreate": {
@@ -31777,6 +31876,16 @@
             "title": "Everyone Tools",
             "type": "array"
           },
+          "fold_server_ids": {
+            "description": "On an organization's server: workspaces' own servers at the same URL to fold into it. Each one's rules become its workspace's settings on the new server, its id keeps working there, and it is deleted. Sign-ins made through the new server's client are kept, and the rest end",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Fold Server Ids",
+            "type": "array"
+          },
           "name": {
             "description": "Label for the server, unique within the workspace",
             "maxLength": 128,
@@ -47180,6 +47289,91 @@
           }
         ],
         "summary": "Check Organization Mcp Server Connection",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/mcp-servers/same-url": {
+      "get": {
+        "description": "The workspaces' own servers at a URL, which a new organization server can take the place of.\n\nOrganization owners and admins only. For each one: how many people signed in to it keep their sign-in, how\nmany must sign in again, and whether a token or shared account of its own would be replaced. Fold them by\nnaming them in `fold_server_ids` when adding the server, or when promoting one.",
+        "operationId": "mcp-servers-list_organization_mcp_server_copies",
+        "parameters": [
+          {
+            "description": "The URL of the server to add or promote",
+            "in": "query",
+            "name": "url",
+            "required": true,
+            "schema": {
+              "description": "The URL of the server to add or promote",
+              "maxLength": 2048,
+              "minLength": 1,
+              "title": "Url",
+              "type": "string"
+            }
+          },
+          {
+            "description": "How the new server signs in, when no server_id is given",
+            "in": "query",
+            "name": "credential_mode",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/McpCredentialMode",
+              "default": "shared",
+              "description": "How the new server signs in, when no server_id is given"
+            }
+          },
+          {
+            "description": "The workspace server about to be made the organization's, if any",
+            "in": "query",
+            "name": "server_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The workspace server about to be made the organization's, if any",
+              "title": "Server Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerFoldCandidates"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Organization Mcp Server Copies",
         "tags": [
           "mcp-servers"
         ]
@@ -65520,6 +65714,78 @@
           }
         ],
         "summary": "Set Workspace Mcp Server Override",
+        "tags": [
+          "mcp-servers"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/promote": {
+      "post": {
+        "description": "Make this workspace's server its organization's, for every workspace. Organization owners and admins only.\n\nIt keeps its id, its settings and every sign-in to it, and its grants stay this workspace's. Other workspaces'\nservers at the same URL named in `fold_server_ids` are folded into it.",
+        "operationId": "mcp-servers-promote_workspace_mcp_server",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "server_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Server Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpServerPromote"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMcpServerPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Promote Workspace Mcp Server",
         "tags": [
           "mcp-servers"
         ]
