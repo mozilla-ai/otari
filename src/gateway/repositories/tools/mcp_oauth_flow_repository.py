@@ -28,7 +28,7 @@ class McpOAuthFlowRepository(BaseRepository[McpOAuthFlow, Never, Never]):
         *,
         state_hash: str,
         server_id: uuid.UUID,
-        workspace_id: uuid.UUID,
+        workspace_id: uuid.UUID | None,
         user_id: str,
         identity_id: uuid.UUID | None,
         encrypted_code_verifier: str,

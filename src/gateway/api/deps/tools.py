@@ -54,6 +54,8 @@ from gateway.repositories.tools import (
     OrgWebSearchKeyRepository,
     SearchToolRepository,
     WorkspaceCodeExecutionPolicyRepository,
+    WorkspaceMcpServerOverrideRepository,
+    WorkspaceMcpServerRepository,
     WorkspaceWebSearchKeyOverrideRepository,
 )
 from gateway.repositories.usage_and_telemetry import (
@@ -103,6 +105,7 @@ from gateway.services.tools import (
     DirectToolService,
     DirectToolUsage,
     McpUserTokens,
+    OrganizationMcpServerWorkspaceService,
     SearchCatalogCaller,
     SearchToolService,
     ToolRateInForce,
@@ -248,6 +251,25 @@ def get_web_search_key_service(
 
 
 WebSearchKeyServiceDep = Annotated[WebSearchKeyService, Depends(get_web_search_key_service)]
+
+
+def get_organization_mcp_server_workspaces(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> OrganizationMcpServerWorkspaceService:
+    """Build the service showing an organization's MCP server across its workspaces, on the request's Unit of Work."""
+    return OrganizationMcpServerWorkspaceService(
+        uow,
+        servers=WorkspaceMcpServerRepository(uow),
+        overrides=WorkspaceMcpServerOverrideRepository(uow),
+        organizations=OrganizationService(db, membership_listener=None),
+        lock_workspace=WorkspaceRepository(db).lock,
+    )
+
+
+OrganizationMcpServerWorkspacesDep = Annotated[
+    OrganizationMcpServerWorkspaceService, Depends(get_organization_mcp_server_workspaces)
+]
 
 
 def get_workspace_search_keys(db: Annotated[AsyncSession, Depends(get_db)]) -> WorkspaceSearchKeys:

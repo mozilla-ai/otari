@@ -595,7 +595,8 @@ class CompletedConnection:
     """
 
     server_id: uuid.UUID
-    workspace_id: uuid.UUID
+    # The workspace the sign-in started from; ``None`` for an owner's sign-in to their organization's own server.
+    workspace_id: uuid.UUID | None
     server_name: str
     return_to: str | None
     # The server URL the sign-in was approved for. Its token is never sent anywhere else.
@@ -659,6 +660,10 @@ class McpConnectionEligibility(Protocol):
 
     async def organization_of(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
         """The organization a workspace belongs to, or ``None`` for one that does not exist."""
+        ...
+
+    async def may_manage_organization(self, organization_id: uuid.UUID, identity_id: uuid.UUID) -> bool:
+        """Whether a dashboard identity is still an owner or admin of the organization, locking what it read."""
         ...
 
 
@@ -897,7 +902,7 @@ class McpConnectionService:
         return_to = checked_return_to(return_to)
         async with self._uow:
             server = await self._server_in_mode(server_id, mode)
-            started_in = await self._started_in(server, workspace_id)
+            started_in = await self._started_in(server, workspace_id, managing=for_check or for_shared)
             url, stored, pinned = server.url, stored_oauth_client(server), _Pin.of(server)
         try:
             metadata = await _mcp_oauth.discover(url)
@@ -1033,14 +1038,21 @@ class McpConnectionService:
             return LinkSignIn(url=url)
         return LinkSignIn(url=url, state=_link_flow_state(browser_token), browser_token=browser_token)
 
-    async def _started_in(self, server: WorkspaceMcpServer, workspace_id: uuid.UUID | None) -> uuid.UUID:
+    async def _started_in(
+        self, server: WorkspaceMcpServer, workspace_id: uuid.UUID | None, *, managing: bool
+    ) -> uuid.UUID | None:
         """The workspace a sign-in to ``server`` starts from: its own, or one that reaches an organization's server.
+
+        A manager's sign-in (``managing``) to an organization's server from no workspace is the organization's
+        owners' and admins', and starts from none.
 
         Raises:
             WorkspaceMcpServerNotFoundError: the server is an organization's and ``workspace_id`` does not reach it.
         """
         if server.workspace_id is not None:
             return server.workspace_id
+        if managing and workspace_id is None:
+            return None
         if (
             workspace_id is None
             or await self._eligibility.organization_of(workspace_id) != server.organization_id
@@ -1282,8 +1294,8 @@ class McpConnectionService:
             logger.warning("MCP sign-in refused reason=token_endpoint_changed server_id=%s", pending.server_id)
             raise McpConnectionFlowError("The server changed while you were signing in. Start it again.")
         workspace_id = server.workspace_id or pending.workspace_id
-        if workspace_id is None:
-            # An organization's server names no workspace, and a sign-in to one always records where it started.
+        if workspace_id is None and not (pending.for_check or pending.for_shared):
+            # A person's own sign-in to an organization's server always records the workspace it started from.
             raise McpConnectionFlowError("This sign-in can no longer be finished. Start it again.")
         # Copied now: the row is read again below into this same object.
         url_before = server.url
@@ -1306,7 +1318,8 @@ class McpConnectionService:
             # workspace's deletion), then the server row (its edit or deletion), then the user
             # (their deletion, inside ``may_connect``). Whichever of the two commits second sees
             # the other.
-            await self._eligibility.hold(workspace_id)
+            if workspace_id is not None:
+                await self._eligibility.hold(workspace_id)
             # The exchange took seconds. Tokens issued for the server as it was are not stored
             # against the server as a manager has since made it.
             current = await self._servers.find(pending.server_id, lock=True)
@@ -1323,8 +1336,10 @@ class McpConnectionService:
                 # A check stores nothing here: its token is handed back below, used once, and dropped.
                 pass
             elif pending.for_shared:
-                if pending.identity_id is None or not await self._eligibility.may_manage(
-                    workspace_id, pending.identity_id
+                if pending.identity_id is None or not (
+                    await self._eligibility.may_manage(workspace_id, pending.identity_id)
+                    if workspace_id is not None
+                    else await self._eligibility.may_manage_organization(current.organization_id, pending.identity_id)
                 ):
                     logger.info("MCP shared sign-in refused reason=no_longer_manager server_id=%s", pending.server_id)
                     refusal = "You can no longer manage this server's workspace."
@@ -1347,7 +1362,7 @@ class McpConnectionService:
                     # the health recorded with it.
                     current.encrypted_token = None
                     current.health = None
-            elif not await self._eligibility.may_connect(workspace_id, pending.user_id):
+            elif workspace_id is None or not await self._eligibility.may_connect(workspace_id, pending.user_id):
                 logger.info("MCP sign-in refused reason=no_longer_eligible server_id=%s", pending.server_id)
                 refusal = "You no longer have access to this server's workspace."
             else:

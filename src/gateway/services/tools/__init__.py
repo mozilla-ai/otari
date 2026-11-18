@@ -13,6 +13,8 @@ the last into ``AdmittedWebTools``,
 ``McpGrantMembershipListener`` removes a member's MCP grants and connections as they leave a workspace,
 ``WorkspaceMcpServerUrls`` says where a workspace's stored MCP servers are, ``McpWorkspaceServers`` reads the
 ones a workspace reaches, its organization's included, as ``McpServerInWorkspace``,
+``OrganizationMcpServerWorkspaceService`` shows an organization's server across its workspaces and sets the
+organization's limit in one,
 ``McpConnectionService`` runs a user's own sign-in to a per-user MCP server and ends a connection,
 ``McpServerLogoService`` reads each stored server's logo and sets or removes an admin's own,
 ``McpServerRequestService`` takes a member's request for a catalog server and records a manager's answer, within
@@ -164,6 +166,12 @@ from gateway.services.tools._native import (
     NativeCall,
     NativeRendering,
     Refusal,
+)
+from gateway.services.tools._organization_mcp_servers import (
+    OrganizationMcpServerLimit,
+    OrganizationMcpServerWorkspace,
+    OrganizationMcpServerWorkspaces,
+    OrganizationMcpServerWorkspaceService,
 )
 from gateway.services.tools._provider_tools import provider_tools
 from gateway.services.tools._registry import BUILTIN_TOOLS, native_rendering
@@ -357,6 +365,10 @@ __all__ = [
     "McpSignedInServers",
     "McpServerInWorkspace",
     "McpWorkspaceServers",
+    "OrganizationMcpServerLimit",
+    "OrganizationMcpServerWorkspace",
+    "OrganizationMcpServerWorkspaceService",
+    "OrganizationMcpServerWorkspaces",
     "McpServerContact",
     "McpServerContacts",
     "McpServerLogoService",
