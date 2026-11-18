@@ -21,18 +21,27 @@ picked beside the window when there is more than one:
   many sessions ran. **See the sessions** opens them.
 
 **Where it went** then breaks the window's spend down by **People**,
-**API keys**, **Models** or **Workspaces** (offered when there is more than one
-workspace). Each row shows what it spent, its tokens and its share of the total;
-outside **Models**, it also shows its top model and the spend limit it works
-under. The five largest rows show first, and **Show all** lists the rest. A row
-opens its sessions over the same window, and a workspace's row narrows the table
-to that workspace's people. A row's menu sets or changes its spend limit, and a
-key's row can be opened in **API keys**.
+**API keys**, **Models**, **Providers** or **Workspaces** (offered when there is
+more than one workspace). Each row shows what it spent, its tokens and its share
+of the total; outside **Models**, it also shows its top model, and outside
+**Models** and **Providers** the spend limit it works under. The five largest
+rows show first, and **Show all** lists the rest. A row opens its sessions over
+the same window, a provider's row its requests, and a workspace's row narrows
+the table to that workspace's people. A row's menu sets or changes its spend
+limit, and a key's row can be opened in **API keys**.
+
+**Providers** names the provider each request went to, or the instance an
+operator named, which is the figure to match against each provider's own bill
+when your organization brings its own provider keys. Requests that recorded no
+provider, such as imported usage that did not name one or requests refused
+before a provider was picked, share one **Unknown provider** row, so the rows
+still add up to the total.
 
 Anyone else sees only their own requests in the selected workspace: what they
 spent, the spend limit on them there, their tokens and their sessions.
-**Where it went** breaks their spend down by **API keys** or **Models**, and a
-row opens its sessions. Someone with no active key and no session yet is offered
+**Where it went** breaks their spend down by **API keys**, **Models** or
+**Providers**, and a row opens its sessions, or a provider's row its requests.
+Someone with no active key and no session yet is offered
 **Create API key**; someone who may not create keys is told whom to ask.
 
 ### Get started
@@ -47,8 +56,9 @@ to ask an owner or admin.
 Open **Sessions** and pick **Requests** for the per-request log. The two views
 share one time range and the model, user, API key and status filters, which
 stay in place when you switch views and are kept in the URL. **Status** narrows
-Requests, and Sessions for errors and successes. On Requests, dragging across
-the chart narrows the range. Both views show everyone's requests in the workspace; pick
+Requests, and Sessions for errors and successes. **Provider** narrows Requests
+only, so it stays behind when you switch to Sessions. On Requests, dragging
+across the chart narrows the range. Both views show everyone's requests in the workspace; pick
 yourself under **User** to see only yours.
 
 ## Find one request
