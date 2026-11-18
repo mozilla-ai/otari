@@ -97,6 +97,9 @@ SIGN_IN_LINK_PATH = "/mcp-connections/sign-in"
 # How long a sign-in link handed to a conversation can be clicked. Nothing is stored until its Continue
 # starts a sign-in, which spends it.
 SIGN_IN_LINK_LIFETIME = timedelta(minutes=30)
+# The longest ticket a sign-in link carries: a server, a user and a workspace, sealed. A user id of the most
+# characters its column holds still fits.
+SIGN_IN_TICKET_MAX = 2048
 _LINK_INVALID = "This sign-in link is not valid or has expired. Ask again for a new one."
 _SIGN_IN_LINK_PURPOSE = "mcp-sign-in"
 _LINK_FLOW_STATE_PURPOSE = b"otari-mcp-link-flow:"
@@ -361,7 +364,7 @@ class SignInLinkTicket:
 
 def read_sign_in_link(ticket: str) -> SignInLinkTicket | None:
     """What a sign-in link's ticket names, or ``None`` for one that is forged, altered or old."""
-    if not ticket or len(ticket) > 1024:
+    if not ticket or len(ticket) > SIGN_IN_TICKET_MAX:
         return None
     try:
         sealed = (ticket + "=" * (-len(ticket) % 4)).encode()
@@ -809,6 +812,7 @@ class McpConnectionService:
     sign_in_link = staticmethod(sign_in_link)
     sign_in_link_is_for = staticmethod(sign_in_link_is_for)
     sign_in_link_prefix = staticmethod(sign_in_link_prefix)
+    sign_in_ticket_max = SIGN_IN_TICKET_MAX
     sign_in_problem = staticmethod(sign_in_problem)
     sign_in_unavailable = staticmethod(sign_in_unavailable)
     stored_oauth_client = staticmethod(stored_oauth_client)
@@ -896,9 +900,10 @@ class McpConnectionService:
         redirect_uri = callback_url(self._config)
         return_to = checked_return_to(return_to)
         async with self._uow:
-            server = await self._server_in_mode(server_id, mode)
-            started_in = await self._started_in(server, workspace_id)
-            of_organization = server.workspace_id is None
+            server = await self._reachable_in_mode(server_id, mode, workspace_id)
+            started_in = server.workspace_id or workspace_id
+            if started_in is None:
+                raise WorkspaceMcpServerNotFoundError(server_id)
             url, stored, pinned = server.url, stored_oauth_client(server), _Pin.of(server)
         try:
             metadata = await _mcp_oauth.discover(url)
@@ -932,15 +937,14 @@ class McpConnectionService:
                 # made by then proves nothing. Raising here rolls back the purge and the claim.
                 if datetime.now(UTC) >= link.good_until:
                     raise McpConnectionFlowError(_LINK_INVALID)
-            # Discovery took seconds. The row is locked and read again, so a sign-in found for the
-            # server as it was cannot be stored against the server as a manager has since made it.
-            # An organization's server is checked again against the workspace the sign-in starts from,
-            # locked first, in the order completion takes the two.
-            if of_organization:
-                await self._eligibility.hold(started_in)
-            server = await self._server_in_mode(server_id, mode, lock=True)
-            if of_organization:
-                await self._started_in(server, started_in)
+            # Discovery took seconds. The workspace the sign-in starts from is locked, then the server row,
+            # in the order completion and a workspace's deletion take them, and both are read again: a
+            # sign-in found for the server as it was cannot be stored against it as a manager has since
+            # made it, nor for someone who has since left the workspace.
+            await self._eligibility.hold(started_in)
+            server = await self._reachable_in_mode(server_id, mode, started_in, lock=True)
+            if not await self._eligibility.may_connect(started_in, user_id):
+                raise McpConnectionFlowError("You no longer have access to this server's workspace.")
             current = stored_oauth_client(server)
             if server.url != url or current is None or current.client_id != client.client_id:
                 raise McpConnectionFlowError("The server changed while the sign-in was starting. Start it again.")
@@ -990,9 +994,10 @@ class McpConnectionService:
         async with self._uow:
             if await self._link_uses.used(link.ticket_hash):
                 raise McpSignInLinkUsedError
-            server = await self._server_in_mode(await self._linked_server(link), McpCredentialMode.PER_USER)
             # An organization's server the link's workspace no longer reaches is not shown, as starting it refuses.
-            await self._started_in(server, link.workspace_id)
+            server = await self._reachable_in_mode(
+                await self._linked_server(link), McpCredentialMode.PER_USER, link.workspace_id
+            )
             alias = (await self._users.aliases([link.user_id])).get(link.user_id)
             return SignInLinkTarget(
                 server_id=server.id,
@@ -1041,6 +1046,25 @@ class McpConnectionService:
         if browser_token is None:
             return LinkSignIn(url=url)
         return LinkSignIn(url=url, state=_link_flow_state(browser_token), browser_token=browser_token)
+
+    async def _reachable_in_mode(
+        self, server_id: uuid.UUID, mode: McpCredentialMode, workspace_id: uuid.UUID | None, *, lock: bool = False
+    ) -> WorkspaceMcpServer:
+        """A server the workspace reaches, in the mode a sign-in is for.
+
+        Whether the workspace reaches it is asked first, so a server it does not reach says nothing of its mode.
+
+        Raises:
+            WorkspaceMcpServerNotFoundError: no such server, or an organization's ``workspace_id`` does not reach.
+            McpConnectionModeError: the server is not in the mode this sign-in is for.
+        """
+        server = await self._servers.find(server_id, lock=lock)
+        if server is None:
+            raise WorkspaceMcpServerNotFoundError(server_id)
+        await self._started_in(server, workspace_id)
+        if server.credential_mode != mode:
+            raise McpConnectionModeError(server_id, mode=McpCredentialMode(server.credential_mode))
+        return server
 
     async def _started_in(self, server: WorkspaceMcpServer, workspace_id: uuid.UUID | None) -> uuid.UUID:
         """The workspace a sign-in to ``server`` starts from: its own, or one that reaches an organization's server.
@@ -1328,6 +1352,8 @@ class McpConnectionService:
                 or client_now.client_id != pending.client_id
             ):
                 refusal = "The server changed while you were signing in. Start it again."
+            elif current.workspace_id is None and not await self._views.reaches(workspace_id, current):
+                refusal = "This server is no longer available in your workspace."
             elif pending.for_check:
                 # A check stores nothing here: its token is handed back below, used once, and dropped.
                 pass
