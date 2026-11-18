@@ -48,6 +48,9 @@ from .tenancy_helpers import (
 pytestmark = pytest.mark.asyncio
 
 _NOW = datetime(2026, 7, 1, 12, tzinfo=UTC)
+# Bounds a whole race, so an actor whose checkpoint is never reached fails the
+# test rather than hanging it. Generous, because a cold connection is slow.
+_RACE_DEADLINE = 10.0
 _TOKEN = "an-invitation-token"
 
 
@@ -227,8 +230,8 @@ async def test_an_accept_racing_a_cancel_finds_the_link_gone(
                     assert await repositories.invitations.delete_in_organization(rows[0].id, organization.id)
                 released.set()
 
-            async with asyncio.TaskGroup() as actors:
-                accept_task = actors.create_task(asyncio.wait_for(accept(), timeout=10.0))
+            async with asyncio.timeout(_RACE_DEADLINE), asyncio.TaskGroup() as actors:
+                accept_task = actors.create_task(accept())
                 actors.create_task(cancel_once_the_accept_is_waiting())
             outcome = accept_task.result()
     finally:
@@ -283,8 +286,8 @@ async def test_an_accept_racing_a_decline_is_refused(postgres_url: str, monkeypa
                     assert declined is not None
                 released.set()
 
-            async with asyncio.TaskGroup() as actors:
-                accept_task = actors.create_task(asyncio.wait_for(accept(), timeout=10.0))
+            async with asyncio.timeout(_RACE_DEADLINE), asyncio.TaskGroup() as actors:
+                accept_task = actors.create_task(accept())
                 actors.create_task(decline_once_the_accept_is_waiting())
             outcome = accept_task.result()
 
@@ -358,10 +361,8 @@ async def test_an_accept_racing_a_workspace_deletion_joins_without_it(
                     await WorkspaceRepository(uow).delete_workspace(workspace)
                 released.set()
 
-            async with asyncio.TaskGroup() as actors:
-                accept_task = actors.create_task(
-                    asyncio.wait_for(_acceptance(accepting).accept(_TOKEN, by=by), timeout=10.0)
-                )
+            async with asyncio.timeout(_RACE_DEADLINE), asyncio.TaskGroup() as actors:
+                accept_task = actors.create_task(_acceptance(accepting).accept(_TOKEN, by=by))
                 actors.create_task(delete_the_workspace_once_the_accept_is_waiting())
             accepted = accept_task.result()
 
@@ -442,8 +443,8 @@ async def test_an_accept_racing_a_resend_cannot_use_the_old_link(
                     assert result.sent
                 released.set()
 
-            async with asyncio.TaskGroup() as actors:
-                accept_task = actors.create_task(asyncio.wait_for(accept(), timeout=10.0))
+            async with asyncio.timeout(_RACE_DEADLINE), asyncio.TaskGroup() as actors:
+                accept_task = actors.create_task(accept())
                 actors.create_task(resend_once_the_accept_is_waiting())
             outcome = accept_task.result()
 
