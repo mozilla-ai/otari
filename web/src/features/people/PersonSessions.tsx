@@ -44,9 +44,7 @@ export function PersonSessions({
     SHOWN,
   )
   // Each run's harness logo, as the Sessions list draws it, once any run has one.
-  const withMarks = anyHarnessMark(
-    (traces.data?.items ?? []).map((session) => session.harness),
-  )
+  const withMarks = anyHarnessMark(traces.data?.items ?? [])
   const tableColumns = useMemo(
     () =>
       columns("", withMarks)

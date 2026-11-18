@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest"
 import {
   hasHarnessMark,
+  hasLanguageMark,
   hasProviderMark,
   isProductMarkProvider,
 } from "@/shared/helpers/brandMarkKeys"
 import {
   harnessMark,
+  languageMark,
   makerMark,
   providerMark,
 } from "@/shared/helpers/brandMarks"
@@ -280,5 +282,27 @@ describe("harnessMark", () => {
     expect(hasHarnessMark("my-agent")).toBe(false)
     expect(harnessMark("constructor")).toBeUndefined()
     expect(hasHarnessMark("toString")).toBe(false)
+  })
+})
+
+describe("languageMark", () => {
+  it("draws each language a client's headers can name", () => {
+    for (const language of [
+      "python",
+      "javascript",
+      "go",
+      "java",
+      "rust",
+      "ruby",
+    ]) {
+      expect(languageMark(language)?.shapes.length).toBeGreaterThan(0)
+      expect(hasLanguageMark(language)).toBe(true)
+    }
+    expect(languageMark(" Python ")).toEqual(languageMark("python"))
+  })
+
+  it("has no mark for a language it does not know, or a prototype key", () => {
+    expect(languageMark("cobol")).toBeUndefined()
+    expect(hasLanguageMark("constructor")).toBe(false)
   })
 })

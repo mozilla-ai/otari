@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import assert_never
 
 from gateway.core.config import CONVERSATION_HEADER
-from gateway.types.traces import SessionSource, is_identifier
+from gateway.types.traces import ClientLanguage, SessionSource, is_client_version, is_identifier
 
 # The request tag a client can name its session with.
 SESSION_TAG = "session_id"
@@ -92,7 +92,76 @@ _HARNESS_PRODUCTS: Mapping[str, str] = {
     "hermesagent": "hermes-agent",
     "kimi-code-cli": "kimi-code",
     "qwencode": "qwen-code",
+    "google-genai-sdk": "google-genai",
+    "mistralai-azure": "mistralai",
+    "mistralai-gcp": "mistralai",
+    "ollama-python": "ollama",
 }
+
+# The names a language goes by in an SDK's headers or a ``User-Agent``, and the HTTP
+# libraries whose default ``User-Agent`` names no language but implies one.
+_LANGUAGE_NAMES: Mapping[str, ClientLanguage] = {
+    "python": "python",
+    "cpython": "python",
+    "gl-python": "python",
+    "python-httpx": "python",
+    "python-requests": "python",
+    "python-urllib": "python",
+    "python-urllib3": "python",
+    "aiohttp": "python",
+    "js": "javascript",
+    "javascript": "javascript",
+    "typescript": "javascript",
+    "node": "javascript",
+    "gl-node": "javascript",
+    "undici": "javascript",
+    "node-fetch": "javascript",
+    "axios": "javascript",
+    "got": "javascript",
+    "deno": "javascript",
+    "bun": "javascript",
+    "go": "go",
+    "golang": "go",
+    "go-http-client": "go",
+    "java": "java",
+    "java-http-client": "java",
+    "okhttp": "java",
+    "apache-httpclient": "java",
+    "rust": "rust",
+    "ruby": "ruby",
+    "faraday": "ruby",
+}
+
+# Headers in which an SDK names its own language: Stainless's (OpenAI, Anthropic, Groq and
+# others) and Fern's (Cohere).
+_LANGUAGE_HEADERS = ("x-stainless-lang", "x-fern-language")
+
+# The languages a Stainless SDK names after its client class, ``OpenAI/Python 1.99``. Only
+# languages, never the HTTP libraries ``_LANGUAGE_NAMES`` also holds: ``my-app/okhttp`` is
+# no SDK, and the word after it is another product, not a version.
+_STAINLESS_LANGUAGES = frozenset({"python", "js", "node", "typescript", "go", "java", "kotlin", "ruby"})
+
+# A Stainless SDK's client classes that are one SDK, by class name less any ``Async``:
+# the cloud variants of the OpenAI and Anthropic clients.
+_SDK_CLIENT_CLASSES: Mapping[str, str] = {
+    "azureopenai": "openai",
+    "anthropicaws": "anthropic",
+    "anthropicbedrock": "anthropic",
+    "anthropicbedrockmantle": "anthropic",
+    "anthropicfoundry": "anthropic",
+    "anthropicgooglecloud": "anthropic",
+    "anthropicvertex": "anthropic",
+}
+
+# ``User-Agent`` products whose version is not the client's: Go's is the HTTP version,
+# aiohttp's leading ``Python/3.12`` is the interpreter's, and a browser's ``Mozilla/5.0``
+# is a compatibility token.
+_VERSIONLESS_PRODUCTS = frozenset({"go-http-client", "python", "mozilla"})
+
+# A Speakeasy SDK's User-Agent is ``speakeasy-sdk/<language> <sdk version> <generator
+# version> <document version> <package>``: the field each is read from.
+_SPEAKEASY_VERSION = 1
+_SPEAKEASY_PACKAGE = 4
 
 _MAX_KEY_LENGTH = 512
 
@@ -191,9 +260,107 @@ def harness_of(headers: Mapping[str, str]) -> str | None:
     for header, harness in HARNESS_SESSION_HEADERS.items():
         if headers.get(header):
             return harness
-    agent = (headers.get("user-agent") or "").strip()
-    if not agent:
+    return _user_agent_product(headers)
+
+
+def _user_agent_product(headers: Mapping[str, str]) -> str | None:
+    """The client the ``User-Agent`` names by its first product, under the name it is shown by."""
+    tokens = (headers.get("user-agent") or "").split()
+    if not tokens:
         return None
-    product = agent.split()[0].split("/")[0].lower()
+    segments = tokens[0].split("/")
+    product = segments[0].lower()
+    if product == "speakeasy-sdk" and len(tokens) > _SPEAKEASY_PACKAGE:
+        # A Speakeasy SDK names its package in the fifth field, ``... 1.0.0 mistralai``.
+        product = tokens[_SPEAKEASY_PACKAGE].lower()
+    elif _is_stainless(segments):
+        # A Stainless SDK names itself by its client class, ``AsyncOpenAI/Python 1.99``, so
+        # the async twin and the cloud variants are one SDK.
+        product = product.removeprefix("async")
+        product = _SDK_CLIENT_CLASSES.get(product, product)
     product = _HARNESS_PRODUCTS.get(product, product)
     return product if is_identifier(product) and len(product) <= 64 else None
+
+
+def _is_stainless(segments: list[str]) -> bool:
+    """Whether a ``User-Agent``'s first product is a Stainless SDK's ``Class/Language``."""
+    return len(segments) > 1 and segments[1].lower() in _STAINLESS_LANGUAGES
+
+
+def _user_agent_names(headers: Mapping[str, str], harness: str) -> bool:
+    """Whether the ``User-Agent`` is the harness's own, so a version it gives is the harness's."""
+    if _user_agent_product(headers) == harness:
+        return True
+    agent = (headers.get("user-agent") or "").strip().lower()
+    return any(
+        marked.harness == harness and header == "user-agent" and agent.startswith(prefix)
+        for marked in _MARKED_HARNESSES
+        for header, prefix in marked.markers
+    )
+
+
+def _client_language_of(headers: Mapping[str, str]) -> ClientLanguage | None:
+    """The language the client was written in, or None when nothing says.
+
+    An SDK's own language header comes first. Otherwise the ``User-Agent`` is read
+    word by word, each split at ``/``, for a language's name (``OpenAI/Python``,
+    ``OpenAPI-Generator/1.0.0/python``, ``node/24.11.0``) or an HTTP library that
+    implies one (``python-httpx``, ``Go-http-client``).
+    """
+    for header in _LANGUAGE_HEADERS:
+        if (language := _LANGUAGE_NAMES.get((headers.get(header) or "").strip().lower())) is not None:
+            return language
+    for token in (headers.get("user-agent") or "").split():
+        for segment in token.strip("();,").split("/"):
+            if (language := _LANGUAGE_NAMES.get(segment.lower())) is not None:
+                return language
+    return None
+
+
+def _client_version_of(headers: Mapping[str, str]) -> str | None:
+    """The version the ``User-Agent`` gives its client, or None.
+
+    The version follows the product (``claude-cli/2.1.291``, ``OpenAPI-Generator/1.0.0/python``).
+    Only the SDK formats that put it in a word of its own are read there (``OpenAI/Python
+    1.99.0``, Speakeasy's), since elsewhere the next word is another product. An SDK's
+    package-version header is not read: on a harness built on the SDK it is the SDK's
+    version, not the harness's.
+    """
+    tokens = (headers.get("user-agent") or "").split()
+    if not tokens:
+        return None
+    segments = tokens[0].split("/")
+    product = segments[0].lower()
+    if product in _VERSIONLESS_PRODUCTS:
+        return None
+    if product == "speakeasy-sdk":
+        candidates = tokens[_SPEAKEASY_VERSION : _SPEAKEASY_VERSION + 1]
+    elif _is_stainless(segments):
+        candidates = tokens[1:2]
+    else:
+        candidates = segments[1:]
+    for candidate in candidates:
+        version = candidate.strip().removeprefix("v")
+        if is_client_version(version):
+            return version
+    return None
+
+
+@dataclass(frozen=True)
+class RequestClient:
+    """The client that sent a request, as its headers name it: its harness, language and version."""
+
+    harness: str | None
+    language: ClientLanguage | None
+    version: str | None
+
+    @classmethod
+    def of(cls, headers: Mapping[str, str]) -> "RequestClient":
+        """Read the client off a request's headers.
+
+        The version is kept only when the ``User-Agent`` is the harness's own, so a
+        proxy's version never lands on the harness its session header names.
+        """
+        harness = harness_of(headers)
+        version = _client_version_of(headers) if harness and _user_agent_names(headers, harness) else None
+        return cls(harness, _client_language_of(headers), version)

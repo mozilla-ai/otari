@@ -143,6 +143,8 @@ class RequestTrace:
     max_spans: int
     session: SessionRef | None = None
     harness: str | None = None
+    client_language: str | None = None
+    client_version: str | None = None
     turn: TurnFacts | None = None
     context: ContextWeights | None = None
     subagent: bool = False
@@ -398,6 +400,8 @@ class RequestTrace:
             api_key_id=self.api_key_id,
             session_source=self.session.source if self.session else "none",
             harness=self.harness,
+            client_language=self.client_language,
+            client_version=self.client_version,
             name=self.session.name if self.session else None,
             spans=(step, *self._client_tool_spans(), *self.spans),
             # When the request came in, so one that outlasts an erasure of its user is not stored.
