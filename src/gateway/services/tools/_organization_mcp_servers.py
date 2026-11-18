@@ -131,24 +131,16 @@ class OrganizationMcpServerWorkspaceService:
         async with self.uow:
             await self.lock_workspace(workspace_id)
             override = await self.overrides.find(workspace_id=workspace_id, server_id=server.id)
-            enabled = True if override is None else override.enabled
-            everyone = None if override is None else override.everyone_tools
-            attach = None if override is None else override.attach_by_default
-            if tools is None and enabled and everyone is None and attach is None:
-                # A row left with only defaults is no row: the workspace inherits everything.
-                if override is not None:
-                    await self.overrides.remove(override)
-                override = None
-            else:
-                override = await self.overrides.save(
-                    override,
-                    workspace_id=workspace_id,
-                    server=server,
-                    organization_tools=tools,
-                    enabled=enabled,
-                    everyone_tools=everyone,
-                    attach_by_default=attach,
-                )
+            # The workspace's own settings stay as its admins left them; only the limit changes.
+            override = await self.overrides.save(
+                override,
+                workspace_id=workspace_id,
+                server=server,
+                organization_tools=tools,
+                enabled=True if override is None else override.enabled,
+                everyone_tools=None if override is None else override.everyone_tools,
+                attach_by_default=None if override is None else override.attach_by_default,
+            )
             return OrganizationMcpServerWorkspace.of(workspace_id, names[workspace_id], server, override)
 
     async def _organization_server(self, user: User, server_id: uuid.UUID) -> WorkspaceMcpServer:
