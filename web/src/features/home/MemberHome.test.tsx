@@ -1,8 +1,9 @@
 import { Outlet } from "@tanstack/react-router"
-import { screen, within } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type {
+  ApiKey,
   OrganizationMember,
   UsageEntry,
   UsageSummary,
@@ -13,6 +14,7 @@ import {
   LOWER_LIMIT_NOTE,
   UNSEEN_LIMIT_NOTE,
 } from "@/features/home/memberHomeModel"
+import { windowOf } from "@/features/spend/period"
 import { API_ROOT } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
@@ -70,13 +72,13 @@ const WEEKLY = workspaceBudgetDefault({
   reset_alignment: "calendar_week",
 })
 
-function summary(start: string, cost: number): UsageSummary {
+function summary(start: string, cost: number, requestCount = 1): UsageSummary {
   return {
     // As the server writes it back, not as it was asked.
     start_date: new Date(start).toISOString().replace(".000Z", "+00:00"),
     end_date: new Date().toISOString(),
     bucket: "day",
-    totals: usageTotals({ cost, request_count: 1 }),
+    totals: usageTotals({ cost, request_count: requestCount }),
     series: [],
     by_api_key: [],
     by_endpoint: [],
@@ -110,6 +112,11 @@ async function renderMemberHome({
   defaults = [WEEKLY],
   refusalMessage = "Member has $0.01 of budget remaining, less than this request's estimated cost",
   hasTraces = false,
+  keys = [LAPTOP],
+  requestCount = 1,
+  sessionCount = 3,
+  holdSummary,
+  holdSessions,
 }: {
   windowCost: number
   periodCost: number
@@ -118,6 +125,15 @@ async function renderMemberHome({
   refusalMessage?: string
   /** Whether the deployment captures sessions, as its bootstrap says. */
   hasTraces?: boolean
+  /** The caller's keys, or "failed" for a read the server refused. */
+  keys?: ApiKey[] | "failed"
+  /** The member's requests in every summary read. */
+  requestCount?: number
+  sessionCount?: number
+  /** Holds a summary read from any other start until the promise settles. */
+  holdSummary?: { unless: string; until: Promise<void> }
+  /** Holds a session count from any other start until the promise settles. */
+  holdSessions?: { unless: string; until: Promise<void> }
 }) {
   const refusal: Partial<UsageEntry> = {
     id: "r-1",
@@ -136,18 +152,27 @@ async function renderMemberHome({
       case `/workspaces/${PLATFORM}/member-budget-policies`:
         return Response.json({ data: defaults, count: defaults.length })
       case "/organizations/me/keys":
-        return Response.json([LAPTOP])
+        return keys === "failed"
+          ? // A refusal, which is not retried.
+            Response.json({ detail: "Refused" }, { status: 403 })
+          : Response.json(keys)
       case "/organizations/me/usage":
         return Response.json([refusal])
       case "/organizations/me/traces/count":
-        return Response.json({ count: 3 })
+        if (holdSessions && query.get("start") !== holdSessions.unless) {
+          await holdSessions.until
+        }
+        return Response.json({ count: sessionCount })
       case "/organizations/me/usage/summary": {
         const start = query.get("start_date") ?? ""
+        if (holdSummary && start !== holdSummary.unless) {
+          await holdSummary.until
+        }
         const isWindow =
           query.has("end_date") ||
           query.getAll("dimensions").some((one) => one !== "none")
         return Response.json({
-          ...summary(start, isWindow ? windowCost : periodCost),
+          ...summary(start, isWindow ? windowCost : periodCost, requestCount),
           by_api_key: [
             {
               key: LAPTOP.id,
@@ -294,5 +319,131 @@ describe("MemberHome, sessions", () => {
       await findRowMenuItem(user, /See its sessions/, table),
     ).not.toBeNull()
     expect(screen.queryByText("Failures")).toBeNull()
+  })
+})
+
+describe("MemberHome, a first run", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  // The band in either form: a first key for who may make one, what a viewer
+  // may do instead. This harness's caller has no workspace selected, so the second.
+  const FIRST_RUN = /through Platform/
+
+  /** Wei's one key, past its expiry: read, and no longer working. */
+  const EXPIRED = apiKey({
+    ...LAPTOP,
+    expires_at: new Date(Date.now() - 86_400_000).toISOString(),
+  })
+
+  it("opens on it with no key and no requests where the deployment records no sessions", async () => {
+    await renderMemberHome({
+      windowCost: 0,
+      periodCost: 0,
+      keys: [],
+      requestCount: 0,
+    })
+    expect(await screen.findByText(FIRST_RUN)).toBeVisible()
+  })
+
+  it("does not open on it once a request has run", async () => {
+    await renderMemberHome({ windowCost: 2, periodCost: 2, keys: [EXPIRED] })
+    // The expired key is read, so its row says when it was last used.
+    expect(await screen.findByText("Never used")).toBeVisible()
+    expect(screen.queryByText(FIRST_RUN)).toBeNull()
+  })
+
+  it("does not open on it when the keys could not be read", async () => {
+    await renderMemberHome({
+      windowCost: 0,
+      periodCost: 0,
+      keys: "failed",
+      requestCount: 0,
+    })
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(globalThis.fetch)
+          .mock.calls.some(([input]) =>
+            String(input).includes("/organizations/me/keys?"),
+          ),
+      ).toBe(true),
+    )
+    // Long enough for the refusal to settle and the band to show if it took
+    // a failed read for no keys.
+    await expect(
+      screen.findByText(FIRST_RUN, {}, { timeout: 1000 }),
+    ).rejects.toThrow()
+  })
+
+  it("does not decide on the last window's count while the next one loads", async () => {
+    const user = userEvent.setup()
+    let release = () => {}
+    const until = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await renderMemberHome({
+      windowCost: 0,
+      periodCost: 0,
+      keys: [],
+      requestCount: 0,
+      holdSummary: { unless: windowOf("month", Date.now()).start, until },
+    })
+    expect(await screen.findByText(FIRST_RUN)).toBeVisible()
+    await user.click(screen.getByRole("radio", { name: "90 days" }))
+    expect(screen.queryByText(FIRST_RUN)).toBeNull()
+    release()
+  })
+
+  it("does not decide on the last window's session count while the next one loads", async () => {
+    const user = userEvent.setup()
+    let release = () => {}
+    const until = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await renderMemberHome({
+      windowCost: 0,
+      periodCost: 0,
+      keys: [],
+      requestCount: 0,
+      sessionCount: 0,
+      hasTraces: true,
+      holdSessions: { unless: windowOf("month", Date.now()).start, until },
+    })
+    expect(await screen.findByText(FIRST_RUN)).toBeVisible()
+    await user.click(screen.getByRole("radio", { name: "90 days" }))
+    // The 90 days' requests arrive; their sessions do not.
+    await expect(
+      screen.findByText(FIRST_RUN, {}, { timeout: 1000 }),
+    ).rejects.toThrow()
+    release()
+  })
+
+  it("opens on it with no key, no requests and no sessions where the deployment records them", async () => {
+    await renderMemberHome({
+      windowCost: 0,
+      periodCost: 0,
+      keys: [],
+      requestCount: 0,
+      sessionCount: 0,
+      hasTraces: true,
+    })
+    expect(await screen.findByText(FIRST_RUN)).toBeVisible()
+  })
+
+  it("does not open on it while a session is recorded, even with no requests", async () => {
+    await renderMemberHome({
+      windowCost: 0,
+      periodCost: 0,
+      keys: [EXPIRED],
+      requestCount: 0,
+      sessionCount: 3,
+      hasTraces: true,
+    })
+    expect(await screen.findByText("Never used")).toBeVisible()
+    expect(await screen.findByText("3")).toBeVisible()
+    expect(screen.queryByText(FIRST_RUN)).toBeNull()
   })
 })

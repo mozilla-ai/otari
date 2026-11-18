@@ -125,24 +125,29 @@ function unread(read: Read, width: string) {
   return read === "pending" ? placeholder(width) : UNKNOWN
 }
 
+/** The name on a line of its own, over its last four and its kind. */
 function KeyName({ apiKey, isActive }: { apiKey: ApiKey; isActive: boolean }) {
   const name = keyLabel(apiKey)
   return (
-    <span className="otari-key-cell flex min-w-0 items-baseline gap-2.5">
+    <span className="otari-key-cell flex min-w-0 flex-col">
       <span
         className={`otari-key-name truncate text-body ${isActive ? "" : "text-muted"}`}
         title={name}
       >
         {name}
       </span>
-      {apiKey.key_suffix ? (
-        <span className="shrink-0 text-mono-caption text-subtle">
-          …{apiKey.key_suffix}
-        </span>
-      ) : null}
-      {apiKey.is_service_key ? (
-        <span className="shrink-0 text-mono-overline text-muted">
-          Service key
+      {apiKey.key_suffix || apiKey.is_service_key ? (
+        <span className="otari-key-meta flex min-w-0 items-baseline gap-2.5 overflow-hidden">
+          {apiKey.key_suffix ? (
+            <span className="shrink-0 text-mono-caption text-subtle">
+              …{apiKey.key_suffix}
+            </span>
+          ) : null}
+          {apiKey.is_service_key ? (
+            <span className="shrink-0 text-mono-overline text-muted">
+              Service key
+            </span>
+          ) : null}
         </span>
       ) : null}
     </span>

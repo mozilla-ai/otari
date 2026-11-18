@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   hasActiveKey,
+  isMemberFirstRun,
   isMemberLimitRefusal,
   isSpendRefusal,
   LOWER_LIMIT_NOTE,
@@ -439,6 +440,50 @@ describe("hasActiveKey", () => {
         NOW,
       ),
     ).toBe(false)
+  })
+})
+
+describe("isMemberFirstRun", () => {
+  const ACTIVE = { is_active: true, expires_at: null }
+  const ran = (over: Partial<Parameters<typeof isMemberFirstRun>[0]>) =>
+    isMemberFirstRun({
+      keys: [],
+      hasSessions: false,
+      sessionCount: undefined,
+      requestCount: 0,
+      now: NOW,
+      ...over,
+    })
+
+  it("reads requests where the deployment records no sessions", () => {
+    expect(ran({})).toBe(true)
+    expect(ran({ requestCount: 3 })).toBe(false)
+  })
+
+  it("needs no session too where the deployment records them", () => {
+    expect(ran({ hasSessions: true, sessionCount: 0, requestCount: 0 })).toBe(
+      true,
+    )
+    expect(ran({ hasSessions: true, sessionCount: 2, requestCount: 0 })).toBe(
+      false,
+    )
+    // A request that left no session still ran.
+    expect(ran({ hasSessions: true, sessionCount: 0, requestCount: 3 })).toBe(
+      false,
+    )
+  })
+
+  it("waits for the keys and the counts rather than guessing", () => {
+    expect(ran({ keys: undefined })).toBe(false)
+    expect(ran({ requestCount: undefined })).toBe(false)
+    expect(ran({ hasSessions: true, sessionCount: undefined })).toBe(false)
+    expect(
+      ran({ hasSessions: true, sessionCount: 0, requestCount: undefined }),
+    ).toBe(false)
+  })
+
+  it("is not a first run while a key works", () => {
+    expect(ran({ keys: [ACTIVE] })).toBe(false)
   })
 })
 

@@ -16,7 +16,7 @@ import { Segmented } from "@/design-system/navigation/Segmented"
 import { canOpenInKeys } from "@/features/home/keyAccess"
 import { MemberFirstRun } from "@/features/home/MemberFirstRun"
 import {
-  hasActiveKey,
+  isMemberFirstRun,
   isSpendRefusal,
   lowerLimitNote,
   memberLimit,
@@ -183,8 +183,16 @@ export function MemberHome({
   const hasGraphicRow = spend.series.length > 1 || Boolean(sessionCount)
   const slot = (graphic: ReactNode) =>
     graphic ?? (hasGraphicRow ? <span aria-hidden /> : undefined)
-  const isFirstRun =
-    !keys.isLoading && !hasActiveKey(keys.data ?? [], now) && sessionCount === 0
+  // The figures keep the last window's counts while the next loads; the band
+  // waits for this window's.
+  const isFirstRun = isMemberFirstRun({
+    keys: keys.data,
+    hasSessions,
+    sessionCount: sessions.isPlaceholderData ? undefined : sessionCount,
+    requestCount:
+      usage === "ready" && !spend.isPlaceholder ? requestCount : undefined,
+    now,
+  })
   const mySessions = {
     ...sessionsSearchFor(window),
     ...(me ? { user_id: me } : {}),

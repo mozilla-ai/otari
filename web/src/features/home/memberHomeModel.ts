@@ -66,6 +66,30 @@ export function hasActiveKey(
 }
 
 /**
+ * Whether a member's Home opens on the first run: none of their keys works and
+ * nothing of theirs ran in the window, no request and, where the deployment
+ * records them, no session. An unread count is no answer yet, so the band
+ * waits for it rather than flashing.
+ */
+export function isMemberFirstRun({
+  keys,
+  hasSessions,
+  sessionCount,
+  requestCount,
+  now,
+}: {
+  /** The caller's keys; undefined while they load. */
+  keys: readonly Pick<ApiKey, "is_active" | "expires_at">[] | undefined
+  hasSessions: boolean
+  sessionCount: number | undefined
+  requestCount: number | undefined
+  now: number
+}): boolean {
+  if (keys === undefined || hasActiveKey(keys, now)) return false
+  return requestCount === 0 && (!hasSessions || sessionCount === 0)
+}
+
+/**
  * What the figure on a member's Home is. A ceiling set on the person in this
  * workspace is theirs; anything else is the workspace's amount for each
  * person, which is not a claim about the limit that binds them.

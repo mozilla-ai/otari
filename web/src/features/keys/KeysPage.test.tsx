@@ -407,6 +407,28 @@ describe("KeysPage", () => {
       expect(screen.getByText("No models")).toBeInTheDocument()
     })
 
+    it("gives a key's name a line of its own, with its last four and its kind under it", async () => {
+      mockApi({
+        keys: [
+          apiKey({
+            id: "k1",
+            key_name: "lena-research-agent",
+            is_service_key: true,
+          }),
+        ],
+      })
+      await renderPage()
+
+      const row = await rowOf("lena-research-agent")
+      const name = within(row).getByText("lena-research-agent")
+      const lastFour = within(row).getByText("…7xKp")
+      // Nothing shares the name's line, so a long name is not cut to make room.
+      expect(name.parentElement).not.toBe(lastFour.parentElement)
+      expect(within(row).getByText("Service key").parentElement).toBe(
+        lastFour.parentElement,
+      )
+    })
+
     it("marks a service key in its row", async () => {
       mockApi({
         keys: [apiKey({ id: "k1", key_name: "mlpa", is_service_key: true })],
