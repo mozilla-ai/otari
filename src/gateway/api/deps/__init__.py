@@ -60,6 +60,7 @@ from gateway.api.deps.budgets import (
     build_budget_service,
     get_budget_service,
 )
+from gateway.api.deps.catalog import SelectorReindexDep
 from gateway.api.deps.identity import (
     CurrentIdentity,
     DeploymentAdministrationAccessDep,
@@ -190,7 +191,7 @@ from gateway.api.deps.traces import (
     workspaces_keeping_content_for,
 )
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.core.database import DATABASE_ERRORS, describe_database_error, get_db
+from gateway.core.database import get_db
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.log_config import logger
 from gateway.models.tenancy import MANAGEMENT_ROLES
@@ -294,7 +295,6 @@ from gateway.services.routing import (
     AutomaticRouter,
     RoutingService,
 )
-from gateway.services.selector_index_service import rebuild_selector_index
 from gateway.services.tenancy import OrganizationService, organization_guardrail_runner
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess
@@ -711,36 +711,6 @@ def get_hosted_provider_service(
 
 
 HostedProviderServiceDep = Annotated[HostedProviderService, Depends(get_hosted_provider_service)]
-
-
-def get_selector_reindex(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-    model_provider: RequestSessionModelProviderPortDep,
-) -> Callable[[], Awaitable[None]]:
-    """Rebuild the catalog selector index on the request's session, for a route to call once its write commits.
-
-    Without it a model a write switches on is listed by ``GET /models`` at once
-    but answers ``invalid_model`` by its catalog id until the refresher's next
-    tick. A failed rebuild is logged rather than raised: the write has already
-    committed, and the next tick retries it.
-    """
-
-    async def reindex() -> None:
-        try:
-            await rebuild_selector_index(db, config, model_provider=model_provider)
-        except DATABASE_ERRORS as exc:
-            logger.warning(
-                "catalog selector index rebuild after a write failed (%s); the next tick retries",
-                describe_database_error(exc),
-            )
-        except Exception:
-            logger.warning("catalog selector index rebuild after a write failed; the next tick retries", exc_info=True)
-
-    return reindex
-
-
-SelectorReindexDep = Annotated[Callable[[], Awaitable[None]], Depends(get_selector_reindex)]
 
 
 def get_platform_client(config: Annotated[GatewayConfig, Depends(get_config)]) -> PlatformClient:
