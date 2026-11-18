@@ -12,6 +12,7 @@ from sqlalchemy import ColumnElement, Select, and_, case, false, func, null, or_
 from gateway.core.metered_pricing import ChargeLine
 from gateway.core.sql import bucket_expr, canonical_bucket, dialect_name, match_any, utc_bound
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.core.usage import MIN_THROUGHPUT_TOKENS
 from gateway.models.usage import SERVED_HERE_SLUG, UsageLog
 from gateway.repositories.base_repository import BaseRepository
 from gateway.schemas.usage_and_telemetry import (
@@ -138,6 +139,21 @@ class ServedTraffic:
     api_key_id: str | None
     requests: int
     fell_back: int
+
+
+@dataclass(frozen=True)
+class SpeedSample:
+    """One served request's timings, read to describe how fast an offering answers.
+
+    ``model`` is the provider's own id, or a whole selector on a row written before
+    ``provider`` was recorded. ``ttft_ms`` is null on a request that did not stream.
+    """
+
+    provider: str | None
+    model: str
+    ttft_ms: int | None
+    latency_ms: int
+    completion_tokens: int | None
 
 
 @dataclass(frozen=True)
@@ -492,6 +508,72 @@ class UsageLogRepository(BaseRepository[UsageLog, Never, Never]):
                 api_key_id=row.api_key_id,
                 requests=int(row.requests),
                 fell_back=int(row.fell_back),
+            )
+            for row in (await self.db.execute(stmt)).all()
+        ]
+
+    async def speed_samples(
+        self,
+        *,
+        workspace_ids: Collection[uuid.UUID],
+        offerings: Collection[tuple[str, str, str]],
+        since: datetime,
+        per_offering: int,
+    ) -> list[SpeedSample]:
+        """The latest timings these workspaces' requests got from each offering, at most ``per_offering`` each.
+
+        ``offerings`` holds ``(selector, instance, model id)``: a row matches on the
+        instance and the model id, or carries the whole selector in ``model``.
+
+        Only a request a routing plan's first candidate served counts, because its
+        timings start when the request arrived and a fallback's include the
+        attempts before it. So does only a request that ran no gateway tool, whose
+        duration would include the tools' time, and only one with a timing to read:
+        a first token, or a response long enough to measure a rate on.
+        """
+        if not workspace_ids or not offerings:
+            return []
+        matches = [
+            (UsageLog.provider == instance) & (UsageLog.model == model_id) | (UsageLog.model == selector)
+            for selector, instance, model_id in offerings
+        ]
+        rank = (
+            func.row_number()
+            .over(partition_by=(UsageLog.provider, UsageLog.model), order_by=UsageLog.timestamp.desc())
+            .label("rank")
+        )
+        ranked = (
+            select(
+                UsageLog.provider,
+                UsageLog.model,
+                UsageLog.ttft_ms,
+                UsageLog.latency_ms,
+                UsageLog.completion_tokens,
+                rank,
+            )
+            .where(
+                UsageLog.workspace_id.in_(sorted(workspace_ids)),
+                UsageLog.source == SERVED_HERE_SLUG,
+                UsageLog.status == "success",
+                UsageLog.timestamp >= since,
+                UsageLog.latency_ms.is_not(None),
+                or_(UsageLog.attempt_position.is_(None), UsageLog.attempt_position == 1),
+                UsageLog.billing_meters[TOOL_METER_NAMESPACE].as_string().is_(None),
+                or_(UsageLog.ttft_ms.is_not(None), UsageLog.completion_tokens >= MIN_THROUGHPUT_TOKENS),
+                or_(*matches),
+            )
+            .subquery()
+        )
+        stmt = select(
+            ranked.c.provider, ranked.c.model, ranked.c.ttft_ms, ranked.c.latency_ms, ranked.c.completion_tokens
+        ).where(ranked.c.rank <= per_offering)
+        return [
+            SpeedSample(
+                provider=row.provider,
+                model=row.model,
+                ttft_ms=row.ttft_ms,
+                latency_ms=row.latency_ms,
+                completion_tokens=row.completion_tokens,
             )
             for row in (await self.db.execute(stmt)).all()
         ]

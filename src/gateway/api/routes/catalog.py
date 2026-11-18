@@ -38,8 +38,10 @@ from sqlmodel import col
 
 from gateway.api.deps import (
     HostedProviderServiceDep,
+    OrganizationServiceDep,
     OrgProviderKeyServiceDep,
     RequestSessionModelProviderPortDep,
+    UsageServiceDep,
     get_config,
     get_db,
     get_session_identity,
@@ -107,7 +109,8 @@ from gateway.services.selector_index_service import (
     real_offerings,
     rebuild_selector_index,
 )
-from gateway.services.tenancy import OrgProviderKeyService
+from gateway.services.tenancy import OrganizationService, OrgProviderKeyService
+from gateway.services.usage_and_telemetry import OfferingSpeed, UsageService
 from gateway.types.model_endpoint import ModelEndpoint
 from gateway.types.models_dev import ModelsDevCatalog, models_dev_provider_id
 
@@ -163,6 +166,45 @@ class OfferingUsage(BaseModel):
     effective_price_per_million: float | None = Field(
         description="Spend over every token served, per million. Null when no tokens were served."
     )
+
+
+class OfferingSpeedInfo(BaseModel):
+    """How fast one offering answered the viewer's organization over the last 7 days.
+
+    Read from the organization's own requests, so it describes that traffic rather
+    than the provider in general: an offering that served the long prompts looks
+    slower. Only a request a routing plan's first candidate served counts, and
+    only one that ran no gateway tool.
+    """
+
+    ttft_samples: int = Field(description="Streamed requests the time to first token is read from.")
+    ttft_ms_p50: int | None = Field(
+        description="Median milliseconds to the first token. Null on fewer than 20 streamed requests."
+    )
+    ttft_ms_p95: int | None = Field(description="Milliseconds to the first token that 95% of requests beat.")
+    throughput_samples: int = Field(
+        description="Requests the throughput is read from: those with 20 or more output tokens."
+    )
+    output_tokens_per_second_p50: float | None = Field(
+        description=(
+            "Median output tokens per second over the whole request, time to first token included, as "
+            "OpenRouter measures it. Null on fewer than 20 measured requests."
+        )
+    )
+    output_tokens_per_second_p95: float | None = Field(
+        description="Output tokens per second that 95% of requests reached or beat: the slow tail."
+    )
+
+    @classmethod
+    def of(cls, speed: OfferingSpeed) -> "OfferingSpeedInfo":
+        return cls(
+            ttft_samples=speed.ttft_samples,
+            ttft_ms_p50=speed.ttft_ms_p50,
+            ttft_ms_p95=speed.ttft_ms_p95,
+            throughput_samples=speed.throughput_samples,
+            output_tokens_per_second_p50=speed.output_tokens_per_second_p50,
+            output_tokens_per_second_p95=speed.output_tokens_per_second_p95,
+        )
 
 
 def _metadata_override(
@@ -245,6 +287,7 @@ class CatalogOffering(BaseModel):
         ),
     )
     usage_30d: OfferingUsage | None = None
+    speed_7d: OfferingSpeedInfo | None = None
 
 
 class CatalogElsewhere(BaseModel):
@@ -474,9 +517,15 @@ async def _group(
 
 
 async def _with_usage(
-    db: AsyncSession, grouped: _Grouped, members: list[_Offering], caller: CatalogCaller
+    db: AsyncSession,
+    grouped: _Grouped,
+    members: list[_Offering],
+    caller: CatalogCaller,
+    *,
+    usage_service: UsageService,
+    organizations: OrganizationService,
 ) -> list[CatalogOffering]:
-    """One model's offerings with the viewer's 30-day usage of each.
+    """One model's offerings with the viewer's 30-day usage of each, and how fast each answered it lately.
 
     Queried for these selectors alone rather than the whole catalog's: a usage
     row is matched on two unindexed columns, and a detail read asks about one
@@ -485,12 +534,21 @@ async def _with_usage(
     """
     if grouped.organization_id is None or not viewer_reads_usage(caller):
         return [member.wire for member in members]
-    usage = await _usage_by_selector(
-        db,
-        grouped.organization_id,
-        ((member.wire.selector, member.wire.provider, member.model_id) for member in members),
+    offerings = [(member.wire.selector, member.wire.provider, member.model_id) for member in members]
+    usage = await _usage_by_selector(db, grouped.organization_id, offerings)
+    speed = await usage_service.offering_speed(
+        workspace_ids=await organizations.get_workspace_ids_in_organization(grouped.organization_id),
+        offerings=offerings,
     )
-    return [member.wire.model_copy(update={"usage_30d": usage.get(member.wire.selector)}) for member in members]
+    return [
+        member.wire.model_copy(
+            update={
+                "usage_30d": usage.get(member.wire.selector),
+                "speed_7d": OfferingSpeedInfo.of(found) if (found := speed.get(member.wire.selector)) else None,
+            }
+        )
+        for member in members
+    ]
 
 
 def _get_credential(config: GatewayConfig, instance: str, *, hosted: bool) -> CatalogCredential:
@@ -696,6 +754,8 @@ async def get_catalog_model(
     model_provider: RequestSessionModelProviderPortDep,
     hosted_providers: HostedProviderServiceDep,
     org_provider_keys: OrgProviderKeyServiceDep,
+    usage_service: UsageServiceDep,
+    organizations: OrganizationServiceDep,
     workspace_id: Annotated[
         uuid.UUID | None,
         Query(description="For a signed-in caller, only the offerings a request billed to this workspace may call."),
@@ -712,7 +772,8 @@ async def get_catalog_model(
     A model the caller may not see answers 404, the same as one that does not
     exist, so the route cannot be used to probe the catalog behind an allow-list.
     A signed-in caller's offerings also carry their organization's own usage of
-    each over the last 30 days, and so do an API key's when it holds ``usage:read``.
+    each over the last 30 days, and how fast each answered it over the last 7, and
+    so do an API key's when it holds ``usage:read``.
     """
     merged = await _merged_for(db, config, caller, session_identity, model_provider, workspace_id)
     grouped = await _group(
@@ -733,7 +794,7 @@ async def get_catalog_model(
     # The cheapest offering first, unpriced ones last, so the comparison the
     # page exists for is the order the rows arrive in.
     offerings = sorted(
-        await _with_usage(db, grouped, members, caller),
+        await _with_usage(db, grouped, members, caller, usage_service=usage_service, organizations=organizations),
         key=lambda o: (o.pricing is None, o.pricing.input_price_per_million if o.pricing else 0.0, o.selector),
     )
     return CatalogModelDetail(

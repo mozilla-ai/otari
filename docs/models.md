@@ -491,6 +491,20 @@ caller, the organization's last thirty days on that offering: requests, cache
 hit rate, and the effective price per million tokens after cache reads and
 tiers.
 
+For the same caller, each offering carries how fast it answered the
+organization over the last seven days, in `speed_7d`: the time to first token
+and the output tokens per second, each at the median (p50) and the 95th
+percentile, and how many requests each was read from. Throughput counts the
+whole request, time to first token included, as OpenRouter measures it, so the
+two compare. Only a request a routing policy's first candidate served counts,
+because a fallback's timings include the attempts before it, and so does only a
+request that ran no gateway tool. A value is null on fewer than 20 measured
+requests: the time to first token needs streamed requests, and throughput needs
+responses of 20 output tokens or more. These are the organization's own
+requests, so an offering that served the longer prompts reads slower. The
+model's page shows them as the Latency and Throughput columns, with a switch
+between the two percentiles.
+
 Each offering also lists the Otari routes its models.dev protocols map to, in
 `endpoints`. A route is a path below the API base, so `/embeddings` is called at
 `/api/v1/embeddings`. The list comes from the protocols in models.dev's v2

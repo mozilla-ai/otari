@@ -62,7 +62,14 @@ def test_record_attempt_counts_a_success_and_its_timings() -> None:
     ttft_before = _sample("gateway_time_to_first_token_seconds_count", {"provider": "att-prov", "model": "att-model"})
 
     record_attempt(
-        "att-prov", "att-model", failed=False, status_code=None, fallback=False, latency_ms=1500, ttft_ms=300
+        "att-prov",
+        "att-model",
+        failed=False,
+        status_code=None,
+        fallback=False,
+        latency_ms=1500,
+        ttft_ms=300,
+        completion_tokens=None,
     )
 
     assert _sample("gateway_upstream_attempts_total", {**labels, "fallback": "false"}) - before == 1.0
@@ -87,7 +94,14 @@ def test_record_attempt_counts_a_failure_by_status(status_code: int | None, labe
     before = _sample("gateway_upstream_attempts_total", labels)
 
     record_attempt(
-        "fail-prov", "fail-model", failed=True, status_code=status_code, fallback=True, latency_ms=None, ttft_ms=None
+        "fail-prov",
+        "fail-model",
+        failed=True,
+        status_code=status_code,
+        fallback=True,
+        latency_ms=None,
+        ttft_ms=None,
+        completion_tokens=None,
     )
 
     assert _sample("gateway_upstream_attempts_total", labels) - before == 1.0
@@ -97,6 +111,56 @@ def test_record_attempt_skips_timings_for_a_fallback() -> None:
     duration = {"provider": "fb-prov", "model": "fb-model", "outcome": "success"}
     before = _sample("gateway_attempt_duration_seconds_count", duration)
 
-    record_attempt("fb-prov", "fb-model", failed=False, status_code=None, fallback=True, latency_ms=900, ttft_ms=200)
+    record_attempt(
+        "fb-prov",
+        "fb-model",
+        failed=False,
+        status_code=None,
+        fallback=True,
+        latency_ms=900,
+        ttft_ms=200,
+        completion_tokens=500,
+    )
 
     assert _sample("gateway_attempt_duration_seconds_count", duration) - before == 0.0
+    assert _sample("gateway_output_tokens_per_second_count", {"provider": "fb-prov", "model": "fb-model"}) == 0.0
+
+
+def test_record_attempt_observes_throughput_for_a_success() -> None:
+    labels = {"provider": "tps-prov", "model": "tps-model"}
+    before_count = _sample("gateway_output_tokens_per_second_count", labels)
+    before_sum = _sample("gateway_output_tokens_per_second_sum", labels)
+
+    record_attempt(
+        "tps-prov",
+        "tps-model",
+        failed=False,
+        status_code=None,
+        fallback=False,
+        latency_ms=2000,
+        ttft_ms=400,
+        completion_tokens=300,
+    )
+
+    assert _sample("gateway_output_tokens_per_second_count", labels) - before_count == 1.0
+    # Time to first token is part of the duration, as OpenRouter counts it.
+    assert _sample("gateway_output_tokens_per_second_sum", labels) - before_sum == pytest.approx(150.0)
+
+
+@pytest.mark.parametrize(("failed", "completion_tokens"), [(True, 300), (False, 5), (False, None)])
+def test_record_attempt_skips_throughput(failed: bool, completion_tokens: int | None) -> None:
+    labels = {"provider": "no-tps-prov", "model": "no-tps-model"}
+    before = _sample("gateway_output_tokens_per_second_count", labels)
+
+    record_attempt(
+        "no-tps-prov",
+        "no-tps-model",
+        failed=failed,
+        status_code=503 if failed else None,
+        fallback=False,
+        latency_ms=2000,
+        ttft_ms=None,
+        completion_tokens=completion_tokens,
+    )
+
+    assert _sample("gateway_output_tokens_per_second_count", labels) - before == 0.0
