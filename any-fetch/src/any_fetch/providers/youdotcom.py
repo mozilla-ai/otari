@@ -6,8 +6,9 @@ URL. ``full_page`` is sent as given, with ``markdown`` added when its formats
 lack it. ``extraction_source`` and ``timeout`` are sent as given; ``None``
 counts as not passed. You.com has no length cap, so ``max_chars`` cuts the text.
 
-``final_url`` is the URL as asked, even after a redirect. You.com reports
-neither a content type, a publish date, nor a cost.
+``final_url`` is the ``url`` You.com answered for, which is the URL as asked
+even after a redirect. You.com reports neither a content type, a publish date,
+nor a cost.
 
 401 and 403 are tagged by status (``unauthorized``, ``forbidden``): those
 bodies are the gateway's. Any other status is tagged with ``error.code`` when it

@@ -227,7 +227,8 @@ You.com has no length cap, so `max_chars` cuts the text and sets `text_truncated
 fetcher a longer one. `blend` can serve a cached copy that differs from the live page, so pass
 `extraction_source="fetch"` where the page as it is now matters.
 
-`final_url` is the URL as asked, even after a redirect, so `reports_final_url` is false.
+`final_url` is the `url` You.com answered for, which is the URL as asked even after a redirect, so
+`reports_final_url` is false.
 `content_type` is empty, `published` is `None`, and You.com reports no cost.
 
 A body without `contents` is `FetchedPage.error`: `not_cached` when the fetch asked for the cache

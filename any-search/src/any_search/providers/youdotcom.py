@@ -2,7 +2,8 @@
 
 Sends what You.com's SDK (``youdotcom`` 3.6.0) sends: the query, ``count``,
 ``language`` ``EN``, ``knowledge`` ``core``, highlights extraction, and the
-native options passed. ``None`` is not sent, which turns those defaults off.
+native options passed. ``None`` is not sent, so ``knowledge=None`` or
+``extraction=None`` turns that default off.
 ``count`` is ``max_results`` (10 when unset), at most 100, and at most 50 under
 highlights. ``time_range`` becomes ``freshness`` and wins over that option.
 
@@ -120,7 +121,9 @@ class YouDotComProvider(AnySearch):
                 name="offset",
                 type="integer",
                 default=0,
-                description="Result page, in pages of max_results, from 0 to 9.",
+                description=(
+                    "Result page, in pages of max_results (at most 50 under highlights, 100 otherwise), from 0 to 9."
+                ),
             ),
             OptionSpec(
                 name="country",
