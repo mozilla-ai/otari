@@ -214,6 +214,38 @@ describe("usePlaygroundToolSelection", () => {
     expect(result.current.selectedMcpIds).toEqual([])
   })
 
+  it("never sends an MCP server the latest read no longer offers, even before it reconciles", () => {
+    // Send can run on the render a refreshed read arrives in, before the
+    // reconciliation effect commits, so every render's selection is checked.
+    const sent: string[][] = []
+    const { result, rerender } = renderHook(
+      ({ available }: { available: PlaygroundTools }) => {
+        const state = usePlaygroundToolSelection(available)
+        sent.push(state.selection.mcpServerIds)
+        return state
+      },
+      { initialProps: { available: tools() } },
+    )
+    act(() => result.current.toggleMcpServer("srv-2", true))
+    sent.length = 0
+
+    rerender({
+      available: tools({
+        mcp_servers: [
+          {
+            id: "srv-1",
+            name: "Docs",
+            purpose_hint: null,
+            enabled: true,
+            sign_in_required: false,
+          },
+        ],
+      }),
+    })
+    expect(sent.length).toBeGreaterThan(0)
+    expect(sent.every((ids) => ids.length === 0)).toBe(true)
+  })
+
   it("drops an MCP server the caller is disconnected from while the page is open", () => {
     const { result, rerender } = renderHook(
       ({ available }: { available: PlaygroundTools }) =>

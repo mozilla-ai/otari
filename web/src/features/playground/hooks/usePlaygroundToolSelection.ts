@@ -23,6 +23,16 @@ export function keepAttachableMcpIds(
   return next.length === selected.length ? selected : next
 }
 
+/** The MCP servers a message may attach: on for the workspace, and signed in where the server needs it. */
+function attachableMcpIds(tools: PlaygroundTools): Set<string> {
+  return new Set(
+    tools.mcp_servers
+      // One the caller is no longer signed in to would refuse the message.
+      .filter((server) => server.enabled && !server.sign_in_required)
+      .map((server) => server.id),
+  )
+}
+
 export interface PlaygroundToolSelection {
   isWebSearchOn: boolean
   isWebFetchOn: boolean
@@ -82,12 +92,7 @@ export function usePlaygroundToolSelection(
     if (isCodeExecutionOn && !tools.code_execution.enabled) {
       setCodeExecutionOn(false)
     }
-    const attachable = new Set(
-      tools.mcp_servers
-        // One the caller is no longer signed in to would refuse the message.
-        .filter((server) => server.enabled && !server.sign_in_required)
-        .map((tool) => tool.id),
-    )
+    const attachable = attachableMcpIds(tools)
     setSelectedMcpIds((prev) => keepAttachableMcpIds(prev, attachable))
   }, [tools, isWebSearchOn, isWebFetchOn, isCodeExecutionOn])
 
@@ -101,7 +106,10 @@ export function usePlaygroundToolSelection(
   const effectiveCodeExecution =
     isCodeExecutionOn && (tools?.code_execution.enabled ?? false)
   const effectiveMcpIds = useMemo(
-    () => (tools ? selectedMcpIds : []),
+    () =>
+      tools
+        ? keepAttachableMcpIds(selectedMcpIds, attachableMcpIds(tools))
+        : [],
     [tools, selectedMcpIds],
   )
   const selection = useMemo<ToolSelection>(
