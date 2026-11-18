@@ -44,9 +44,18 @@ class KeyScope(StrEnum):
     END_USERS_DELETE = "end-users:delete"
 
 
-# What a key is given when its creator names no scopes: calling models, which is
-# what most keys are for.
-DEFAULT_KEY_SCOPES: tuple[KeyScope, ...] = (KeyScope.INFERENCE_RUN,)
+# What a key is given when its creator names no scopes: calling models and the
+# tools a model call may declare, which is what most keys are for. An MCP server
+# still has to be attached to the workspace, and signed in to, before it does
+# anything.
+DEFAULT_KEY_SCOPES: tuple[KeyScope, ...] = (
+    KeyScope.INFERENCE_RUN,
+    KeyScope.WEB_SEARCH,
+    KeyScope.WEB_FETCH,
+    KeyScope.CODE_EXECUTE,
+    KeyScope.MCP_READ,
+    KeyScope.MCP_EXECUTE,
+)
 
 # Only a service key has end users, so only a service key may hold these.
 END_USER_SCOPES: frozenset[KeyScope] = frozenset(

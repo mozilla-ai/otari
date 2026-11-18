@@ -184,8 +184,8 @@ server's page and in the form that adds one; the server's row under
 **Tools → MCP servers** shows it.
 
 - **The key needs the `mcp:execute` scope.** A key without it gets no attached
-  server and is served as if none were attached. A new key holds `inference:run`
-  alone unless its creator names more; see [Scopes](api-keys.md#scopes).
+  server and is served as if none were attached. A new key holds it unless its
+  creator names scopes without it; see [Scopes](api-keys.md#scopes).
 - **The access list still decides.** An attached server joins only the requests
   whose key it grants something, with the tools that key holds and under the
   server's `allowed_tools`. A key it denies is left without it, silently. To keep

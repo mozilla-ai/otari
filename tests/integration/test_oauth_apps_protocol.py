@@ -69,7 +69,7 @@ def test_client_metadata_accepts_registered_ids_with_slashes(client: TestClient,
         "name": "Team app",
         "redirect_uri": REDIRECT,
         "issuer": "http://testserver",
-        "scopes": ["inference:run"],
+        "scopes": ["inference:run", "web:search", "web:fetch", "code:execute", "mcp:read", "mcp:execute"],
     }
 
 

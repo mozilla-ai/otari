@@ -363,14 +363,21 @@ describe("what a new key carries", () => {
     })
   })
 
-  it("sends the default scope and the deployment's user setting when left alone", async () => {
+  it("sends the default scopes and the deployment's user setting when left alone", async () => {
     const writes = mockApi({ role: "owner", isOperator: false })
     const { user, dialog } = await openDialog()
     await createKey(user, dialog)
 
     await screen.findByRole("dialog", { name: "API key created" })
     expect(posted(writes).body).toMatchObject({
-      scopes: ["inference:run"],
+      scopes: [
+        "inference:run",
+        "web:search",
+        "web:fetch",
+        "code:execute",
+        "mcp:read",
+        "mcp:execute",
+      ],
       reject_user_mismatch: null,
       allowed_models: null,
       allowed_tools: null,
@@ -394,6 +401,11 @@ describe("what a new key carries", () => {
     await screen.findByRole("dialog", { name: "API key created" })
     expect(posted(writes).body.scopes).toEqual([
       "inference:run",
+      "web:search",
+      "web:fetch",
+      "code:execute",
+      "mcp:read",
+      "mcp:execute",
       "telemetry:write",
       "agents:write",
     ])
