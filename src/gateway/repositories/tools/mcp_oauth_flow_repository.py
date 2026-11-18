@@ -9,7 +9,7 @@ from collections.abc import Collection
 from datetime import datetime
 from typing import Never
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
@@ -116,12 +116,17 @@ class McpOAuthFlowRepository(BaseRepository[McpOAuthFlow, Never, Never]):
             )
         )
 
-    async def remove_unbound(self, server_id: uuid.UUID, user_id: str) -> None:
-        """Stage the removal of a user's pending sign-ins to a server that no dashboard session started."""
+    async def remove_unbound(self, server_id: uuid.UUID, user_id: str, workspace_id: uuid.UUID | None) -> None:
+        """Stage the removal of a user's pending sign-ins to a server that no dashboard session started.
+
+        Only those started from ``workspace_id``, or recording no workspace: a sign-in to an organization's
+        server started from another workspace is that workspace's to finish.
+        """
         await self.db.execute(
             delete(McpOAuthFlow).where(
                 McpOAuthFlow.server_id == server_id,
                 McpOAuthFlow.user_id == user_id,
                 McpOAuthFlow.identity_id.is_(None),
+                or_(McpOAuthFlow.workspace_id == workspace_id, McpOAuthFlow.workspace_id.is_(None)),
             )
         )

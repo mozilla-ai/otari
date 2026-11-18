@@ -11,7 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.exceptions.tools_exceptions import McpServerNameTakenError, WorkspaceMcpServerNotFoundError
+from gateway.exceptions.tools_exceptions import (
+    McpServerNameTakenError,
+    WorkspaceMcpServerAccessDeniedError,
+    WorkspaceMcpServerNotFoundError,
+)
 from gateway.models.tenancy import Organization, User, Workspace
 from gateway.models.tools import (
     McpCredentialMode,
@@ -32,7 +36,7 @@ from gateway.services.tenancy.workspace_mcp_server_service import (
     WorkspaceMcpServerUpdate,
     resolve_workspace_mcp_servers,
 )
-from gateway.services.tools import McpGrantMembershipListener
+from gateway.services.tools import McpConnectionService, McpGrantMembershipListener
 
 from . import test_mcp_user_connections as base
 from .test_mcp_user_connections import PUBLIC_URL, _connections, _reach, _service, _state, _World, _world
@@ -307,3 +311,101 @@ async def test_a_sign_in_to_an_organization_server_lasts_while_any_workspace_sti
     assert await held() == ([sales.id], [jira])
     await leave(sales)
     assert await held() == ([], [])
+
+
+async def test_a_hidden_server_an_old_id_names_is_refused_under_the_id_the_caller_sent(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    world = await _world(async_db, config)
+    jira = await _shared(async_db, world.workspace.organization_id)
+    await _override(async_db, world.workspace, jira, enabled=False)
+    old_id = uuid.uuid4()
+    async_db.add(
+        McpServerAlias(
+            old_id=old_id,
+            organization_id=world.workspace.organization_id,
+            workspace_id=world.workspace.id,
+            server_id=jira,
+        )
+    )
+    await async_db.commit()
+
+    with pytest.raises(WorkspaceMcpServerNotFoundError) as refused:
+        await resolve_workspace_mcp_servers(
+            async_db, workspace_id=world.workspace.id, server_ids=[old_id], access=McpAccess()
+        )
+
+    assert str(old_id) in str(refused.value)
+    assert str(jira) not in str(refused.value)
+
+
+async def test_a_refusal_the_organization_s_limit_causes_is_the_organization_s(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    world = await _world(async_db, config)
+    jira = await _shared(async_db, world.workspace.organization_id)
+    await _override(async_db, world.workspace, jira, organization_tools=["list_issues"])
+    granted = McpAccess(user_id="ada", key_grants={jira: ("delete_issue",)})
+    denied = McpAccess(user_id="ada", key_grants={jira: ()})
+    servers = WorkspaceMcpServers(async_db)
+
+    with pytest.raises(WorkspaceMcpServerAccessDeniedError) as by_limit:
+        await servers.resolve_one(world.workspace.id, jira, granted)
+    with pytest.raises(WorkspaceMcpServerAccessDeniedError) as by_key:
+        await servers.resolve_one(world.workspace.id, jira, denied)
+
+    assert (by_limit.value.decided_by, by_key.value.decided_by) == ("mcp_organization", "mcp_key")
+
+
+async def test_a_link_s_page_hides_a_server_its_workspace_no_longer_reaches(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    world = await _world(async_db, config)
+    jira = await _per_user_shared(async_db, world)
+    member = str(world.member.id)
+    await provision_attribution_users(async_db, [member])
+    await async_db.commit()
+    link = McpConnectionService.sign_in_link(config, server_id=jira, user_id=member, workspace_id=world.workspace.id)
+    ticket = link.split("ticket=")[1]
+    connections = _connections(async_db, config)
+    assert (await connections.read_link(ticket)).server_id == jira
+
+    await _override(async_db, world.workspace, jira, enabled=False)
+
+    with pytest.raises(WorkspaceMcpServerNotFoundError):
+        await connections.read_link(ticket)
+
+
+async def test_a_sign_in_started_from_one_workspace_leaves_another_s_pending(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    world = await _world(async_db, config)
+    jira = await _per_user_shared(async_db, world)
+    sales = await _another_workspace(async_db, world, world.member)
+    member = str(world.member.id)
+    await provision_attribution_users(async_db, [member])
+    await async_db.commit()
+    connections = _connections(async_db, config)
+
+    for n, workspace_id in enumerate((world.workspace.id, sales.id, sales.id)):
+        await connections.start(server_id=jira, user_id=member, browser_token=f"browser-{n}", workspace_id=workspace_id)
+
+    flows = (await async_db.execute(select(McpOAuthFlow.workspace_id))).scalars().all()
+    assert sorted(map(str, flows)) == sorted(map(str, [world.workspace.id, sales.id])), "one per workspace"
+
+
+async def test_deleting_a_member_s_last_workspace_ends_their_organization_server_sign_in(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    world = await _world(async_db, config)
+    jira = await _per_user_shared(async_db, world)
+    url = await _start(async_db, config, jira, world.member.id, world.workspace.id)
+    await _service(async_db, config).complete_connection(user=world.member, state=_state(url), code="code")
+    workspace_id = world.workspace.id
+    member_ids = await WorkspaceMemberRepository(async_db).ids_for_workspace(workspace_id)
+
+    async with UnitOfWork(async_db) as uow:
+        await McpGrantMembershipListener(uow, _reach(uow)).workspace_deleted(workspace_id, member_ids)
+
+    connections = (await async_db.execute(select(McpUserConnection.user_id))).scalars().all()
+    assert connections == [], "the member reached the organization only through that workspace"

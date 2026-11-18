@@ -67,6 +67,20 @@ class OrganizationMemberRepository(
         )
         return result.scalars().first()
 
+    async def lock_for_user(self, organization_id: uuid.UUID, user_id: uuid.UUID) -> None:
+        """Lock the person's membership of the organization, whatever its status, until the transaction ends.
+
+        Serializes two decisions about what the person keeps in the organization (PostgreSQL only).
+        """
+        await self.db.execute(
+            select(col(OrganizationMember.id))
+            .where(
+                col(OrganizationMember.organization_id) == organization_id,
+                col(OrganizationMember.user_id) == user_id,
+            )
+            .with_for_update()
+        )
+
     async def active_role(self, organization_id: uuid.UUID, user_id: uuid.UUID) -> OrganizationMemberRole | None:
         """Return the role of the active membership joining a user to an organization, read from the row.
 

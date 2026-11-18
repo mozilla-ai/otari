@@ -58,6 +58,7 @@ from gateway.api.deps import (
     CurrentIdentity,
     FileServiceDep,
     McpSignedInServersDep,
+    McpWorkspaceServersDep,
     PlaygroundToolOfferDep,
     RequestSessionBillingPortDep,
     RequestSessionModelProviderPortDep,
@@ -241,6 +242,7 @@ async def read_playground_tools(
     offer: PlaygroundToolOfferDep,
     code_execution_policies: WorkspaceCodeExecutionPoliciesDep,
     signed_in: McpSignedInServersDep,
+    mcp_servers: McpWorkspaceServersDep,
     workspace_id: Annotated[uuid.UUID | None, _WORKSPACE_QUERY] = None,
 ) -> PlaygroundToolsResponse:
     """The gateway-run tools the caller's workspace may attach to a message.
@@ -259,6 +261,7 @@ async def read_playground_tools(
         offer=offer,
         code_execution_policies=code_execution_policies,
         signed_in=signed_in,
+        mcp_servers=mcp_servers,
         workspace_id=resolved,
         user_id=str(identity.id),
     )

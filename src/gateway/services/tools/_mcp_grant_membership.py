@@ -23,8 +23,12 @@ class McpOrganizationReach(Protocol):
     Implemented where workspaces and their members are known, inside the caller's Unit of Work.
     """
 
-    async def organization_of(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
-        """The organization a workspace belongs to, or ``None`` for one that does not exist."""
+    async def organizations_of(self, workspace_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
+        """The organizations these workspaces belong to."""
+        ...
+
+    async def people_of(self, member_ids: Collection[uuid.UUID]) -> list[uuid.UUID]:
+        """The dashboard accounts these workspace memberships join."""
         ...
 
     async def still_reaches(
@@ -69,11 +73,8 @@ class McpGrantMembershipListener:
         self, user_id: uuid.UUID, workspace_ids: Sequence[uuid.UUID]
     ) -> list[uuid.UUID]:
         """The organization servers a person stops reaching as they lose these workspaces."""
-        organizations = {await self._reach.organization_of(workspace_id) for workspace_id in workspace_ids}
         lost: list[uuid.UUID] = []
-        for organization_id in organizations:
-            if organization_id is None:
-                continue
+        for organization_id in await self._reach.organizations_of(workspace_ids):
             shared = await self._servers.ids_of_organization(organization_id)
             if shared and not await self._reach.still_reaches(organization_id, user_id, losing=workspace_ids):
                 lost += shared
@@ -111,8 +112,17 @@ class McpGrantMembershipListener:
         """Nothing here: the workspaces a person lost are what ends their grants."""
 
     async def workspace_deleted(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
-        """The workspace's servers go with it, and every token they hold is revoked once it commits."""
+        """The workspace's servers go with it, and every token they hold is revoked once it commits.
+
+        A member it was the last way into the organization for loses their sign-ins to the organization's own
+        servers too.
+        """
         await self._revoke_after_commit(server_ids=await self._servers.ids_in_workspaces([workspace_id]), shared=True)
+        for user_id in await self._reach.people_of(member_ids):
+            lost = await self._organization_servers_lost(user_id, [workspace_id])
+            await self._revoke_after_commit(server_ids=lost, user_id=str(user_id))
+            await self._connections.remove_for_user_on_servers(str(user_id), lost)
+            await self._flows.remove_for_user(str(user_id), lost)
 
     async def member_lost_workspaces(self, user_id: uuid.UUID, workspace_ids: Sequence[uuid.UUID]) -> None:
         """Remove the person's grants on, and connections to, these workspaces' servers."""

@@ -951,21 +951,21 @@ async def _resolve_for_request(
         if server_ids:
             raise WorkspaceMcpServerNotFoundError(server_ids[0])
         return RequestMcpServers()
-    views = _mcp_views(db)
-    named = await views.swap_aliases(workspace_id, server_ids) if server_ids else []
-    seen = await views.for_request(workspace_id, organization_id, named, attached=attach)
+    seen, names = await _mcp_views(db).for_request(workspace_id, organization_id, server_ids, attached=attach)
     by_id = {view.id: view.row for view in seen}
     in_workspace = {view.id: view for view in seen}
 
     patterns = {view.id: view.patterns_for(access) for view in seen}
-    # Only a deferring caller is told a per-user server needs a user it does not have; the others answer 404.
+    # Only a deferring caller is told a per-user server needs a user it does not have; the others answer 404,
+    # naming the id the caller sent rather than the server an old id names.
     missing = [
-        server_id
-        for server_id in named
+        given
+        for given, server_id in names.items()
         if server_id not in by_id or not patterns[server_id] or (not defer and _needs_a_user(by_id[server_id], access))
     ]
     if missing:
         raise WorkspaceMcpServerNotFoundError(missing[0])
+    named = list(dict.fromkeys(names.values()))
     attached = [
         view.id
         for view in seen
@@ -1184,7 +1184,7 @@ async def resolve_workspace_mcp_server(
     organization_id = await WorkspaceRepository(db).get_organization_id(workspace_id)
     if organization_id is None:
         return None
-    seen = await _mcp_views(db).for_request(workspace_id, organization_id, [server_id], attached=False)
+    seen, _ = await _mcp_views(db).for_request(workspace_id, organization_id, [server_id], attached=False)
     if not seen:
         return None
     view = seen[0]
@@ -1193,8 +1193,9 @@ async def resolve_workspace_mcp_server(
         if not view.enabled:
             return None
         if not view.patterns_for(access):
-            source, _ = access.decide(row.id, view.everyone_tools)
-            raise WorkspaceMcpServerAccessDeniedError(row.id, name=row.name, decided_by=f"mcp_{source}")
+            raise WorkspaceMcpServerAccessDeniedError(
+                row.id, name=row.name, decided_by=f"mcp_{view.refused_by(access)}"
+            )
     if _needs_a_user(row, access):
         return None
     per_user = row.credential_mode == McpCredentialMode.PER_USER
@@ -1350,7 +1351,9 @@ class WorkspaceMcpServers:
         if await WorkspaceMcpServerRepository(self._db).any_attached(workspace_id):
             return True
         organization_id = await WorkspaceRepository(self._db).get_organization_id(workspace_id)
-        return organization_id is not None and await _mcp_views(self._db).any_attached(workspace_id, organization_id)
+        return organization_id is not None and await _mcp_views(self._db).any_organization_server_attached(
+            workspace_id, organization_id
+        )
 
     async def list_reachable(self, workspace_id: uuid.UUID, access: McpAccess) -> list[McpServerSummary]:
         """See :func:`list_reachable_mcp_servers`."""
@@ -2409,7 +2412,10 @@ class WorkspaceMcpServerService:
         failed listing included. Nothing here fails the sign-in, which is already stored.
         """
         try:
-            server = await self._get_or_404(done.workspace_id, done.server_id)
+            # The server the sign-in was just stored against, whether the workspace's own or its organization's.
+            server = await self.db.get(WorkspaceMcpServer, done.server_id)
+            if server is None:
+                raise WorkspaceMcpServerNotFoundError(done.server_id)
             if server.url != done.server_url:
                 # Edited since the sign-in: that edit ended the sign-in and runs its own check.
                 return

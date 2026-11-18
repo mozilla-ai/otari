@@ -49,11 +49,6 @@ from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tools import McpCredentialMode, WorkspaceWebSearchConfig
 from gateway.models.users import User
 from gateway.repositories.tenancy import WorkspaceRepository
-from gateway.repositories.tools import (
-    McpServerAliasRepository,
-    WorkspaceMcpServerOverrideRepository,
-    WorkspaceMcpServerRepository,
-)
 from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.model_access import resolve_request_mcp_access
 from gateway.services.tenancy import OrganizationService
@@ -284,6 +279,7 @@ async def resolve_tool_availability(
     offer: PlaygroundToolOffer,
     code_execution_policies: WorkspaceCodeExecutionPolicies,
     signed_in: McpSignedInServers,
+    mcp_servers: McpWorkspaceServers,
     workspace_id: uuid.UUID,
     user_id: str,
 ) -> PlaygroundToolAvailability:
@@ -307,14 +303,7 @@ async def resolve_tool_availability(
     code_execution_row = code_execution_policy.enabled if code_execution_policy is not None else None
     organization_id = await WorkspaceRepository(db).get_organization_id(workspace_id)
     servers = (
-        sorted(
-            await McpWorkspaceServers(
-                WorkspaceMcpServerRepository(db),
-                WorkspaceMcpServerOverrideRepository(db),
-                McpServerAliasRepository(db),
-            ).every(workspace_id, organization_id),
-            key=lambda view: view.row.name,
-        )
+        sorted(await mcp_servers.every(workspace_id, organization_id), key=lambda view: view.row.name)
         if organization_id is not None
         else []
     )
