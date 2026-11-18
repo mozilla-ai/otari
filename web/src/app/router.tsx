@@ -15,8 +15,8 @@ export const router = createRouter({
   // a browser opening any path it has no route for with this page
   // (`gateway/dashboard.py`), and only once every route has declined it, so a
   // dashboard path never shadows the API or the assets. A link from before
-  // path routing (`/#/keys`) is rewritten by the script at the top of
-  // `index.html`, ahead of this module.
+  // path routing (`/#/keys`) is rewritten by `legacyHashRouteOnLoad`, which
+  // `main.tsx` imports ahead of this module.
   history: createBrowserHistory(),
   basepath: BASE_PATH || "/",
   parseSearch,

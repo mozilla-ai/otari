@@ -23,49 +23,6 @@
          insets to sit out of the way. -->
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Otari</title>
-    <!-- Moves a link from before path routing (`/#/keys`, `/#/verify-email?token=…`)
-         to the path it names. The server never sees a fragment, so only the page
-         can do this. It runs here, ahead of the bundle, because the router reads
-         the address as its module loads, and again on `hashchange`, because an
-         old link opened in a tab already on the dashboard changes only the
-         fragment and loads nothing. `replaceState` rather than a navigation: a
-         mailed token goes from one fragment to another without a request
-         carrying it. A link's secret stays in the fragment, as
-         `/verify-email#token=…`, where the gateway now puts it; anything else's
-         query joins the page's own. An OAuth callback's route was renamed with
-         the move and is renamed here. `src/app/legacyHashRoute.test.ts` runs
-         this script. -->
-    <script id="legacy-hash-route">
-      (function () {
-        var base = "%BASE_URL%"
-        function moveLegacyHashRoute() {
-          var hash = window.location.hash
-          if (hash.indexOf("#/") !== 0) return
-          var route = hash.slice(2)
-          var queryAt = route.indexOf("?")
-          var path = queryAt === -1 ? route : route.slice(0, queryAt)
-          var query = queryAt === -1 ? "" : route.slice(queryAt + 1)
-          var secret = /^(setup|verify-email|reset-password|accept-invitation)$/.test(path)
-          path = path.replace(/^auth\/([^/]+)\/callback$/, "sign-in/$1/callback")
-          // The page's own query belongs to the link only where the link was
-          // written against the dashboard's root, as every old link was.
-          var atRoot = (window.location.pathname + "/").indexOf(base) === 0 &&
-            window.location.pathname.length <= base.length
-          var search = atRoot ? window.location.search.slice(1) : ""
-          if (query && !secret) search = search ? search + "&" + query : query
-          window.history.replaceState(
-            null,
-            "",
-            base +
-              path +
-              (search ? "?" + search : "") +
-              (query && secret ? "#" + query : ""),
-          )
-        }
-        moveLegacyHashRoute()
-        window.addEventListener("hashchange", moveLegacyHashRoute)
-      })()
-    </script>
     <!-- Applies the remembered theme before the first paint. `useTheme` sets the
          same three properties, but it can only do so once React has mounted,
          which is after the boot screen below has already been painted light: a
