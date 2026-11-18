@@ -51,7 +51,7 @@ Request body:
 | `device_code` | string | The secret the gateway exchanges for the key. Never shown to a person. |
 | `user_code` | string | The short code the operator checks on the approval page, such as `BCDF-GHJK`. The gateway shows it as sent and neither validates nor reformats it. |
 | `verification_uri` | string | The approval page. |
-| `verification_uri_complete` | string | The approval page with `user_code` filled in, such as `https://otari.ai/dashboard/?region=us#/connect?code=BCDF-GHJK`. The gateway opens it as sent, query and fragment included. |
+| `verification_uri_complete` | string | The approval page with `user_code` filled in, such as `https://otari.ai/dashboard/connect?region=us&code=BCDF-GHJK`. The gateway opens it as sent, query and fragment included. |
 | `expires_in` | integer, seconds | How long the codes stay valid. |
 | `interval` | integer, seconds | The shortest wait between two polls. |
 
