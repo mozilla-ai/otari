@@ -183,6 +183,10 @@ In the dashboard it is the **Every request** choice of **Availability**, on the
 server's page and in the form that adds one; the server's row under
 **Tools → MCP servers** shows it.
 
+- **Other replicas pick it up on their next refresh.** Attaching a server
+  applies at once on the replica that served the change; the others refresh
+  every 30 seconds. Detaching, switching off or deleting a server takes effect
+  everywhere at once.
 - **The key needs the `mcp:execute` scope.** A key without it gets no attached
   server and is served as if none were attached. A new key holds it unless its
   creator names scopes without it; see [Scopes](api-keys.md#scopes).
