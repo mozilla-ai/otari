@@ -27,11 +27,12 @@ import { checkedTools } from "@/features/tools/mcpServerHealth"
 import { useMcpServerCheck } from "@/features/tools/useMcpServerCheck"
 import { useKeys } from "@/shared/api/apiKeys"
 import { ApiError } from "@/shared/api/client"
+import { workspaceMcpScope } from "@/shared/api/mcpServerScope"
 import { useOrganizationMembers } from "@/shared/api/organizations"
 import {
   useAddWorkspaceMcpServerGrants,
   useDeleteWorkspaceMcpServerGrant,
-  useUpdateWorkspaceMcpServer,
+  useUpdateMcpServer,
   useUpdateWorkspaceMcpServerGrant,
   useWorkspaceMcpServerAccess,
 } from "@/shared/api/tools"
@@ -74,7 +75,7 @@ export function McpServerAcl({
   const linkedTool = useUrlValue("tool")
   const linkedCall =
     linkedKey && linkedTool ? { keyId: linkedKey, tool: linkedTool } : undefined
-  const updateServer = useUpdateWorkspaceMcpServer()
+  const updateServer = useUpdateMcpServer()
   const addGrants = useAddWorkspaceMcpServerGrants()
   const updateGrant = useUpdateWorkspaceMcpServerGrant()
   const removeGrant = useDeleteWorkspaceMcpServerGrant()
@@ -105,7 +106,7 @@ export function McpServerAcl({
     ? picker.tools
     : (server.allowed_tools ?? []).filter(isLiteralToolName)
   const check = useMcpServerCheck({
-    workspaceId,
+    scope: workspaceMcpScope(workspaceId),
     returnTo: `/tools/mcp-servers/${server.id}`,
   })
   const pickerProps = {
@@ -320,7 +321,11 @@ export function McpServerAcl({
           error={updateServer.error}
           onSubmit={(draft) =>
             updateServer.mutate(
-              { ...ids, body: { everyone_tools: draft.tools } },
+              {
+                scope: workspaceMcpScope(workspaceId),
+                serverId: server.id,
+                body: { everyone_tools: draft.tools },
+              },
               { onSuccess: () => setEditingDefault(false) },
             )
           }

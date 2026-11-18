@@ -992,6 +992,7 @@ export function workspaceMcpServer(
   return {
     id: "55555555-5555-5555-5555-555555555555",
     workspace_id: "44444444-4444-4444-4444-444444444444",
+    scope: "workspace",
     name: "github",
     url: "https://mcp.example.com/github",
     purpose_hint: null,

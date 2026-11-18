@@ -1,0 +1,8 @@
+import { createFileRoute, Outlet } from "@tanstack/react-router"
+
+// A layout, not a page: the list lives in organization.mcp-servers.index.tsx
+// and a server's own page in organization.mcp-servers.$serverId.tsx; this only
+// nests them.
+export const Route = createFileRoute("/organization/mcp-servers")({
+  component: Outlet,
+})

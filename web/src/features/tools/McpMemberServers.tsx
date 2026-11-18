@@ -18,6 +18,7 @@ import { McpRequestServerDialog } from "@/features/tools/McpRequestServerDialog"
 import { McpServerLogo } from "@/features/tools/McpServerLogo"
 import { availabilityOf } from "@/features/tools/mcpAvailability"
 import { useMcpSignIn } from "@/features/tools/useMcpSignIn"
+import { workspaceMcpScope } from "@/shared/api/mcpServerScope"
 import { useDisconnectMcp, useMyMcpConnections } from "@/shared/api/tools"
 import { formatDate } from "@/shared/helpers/format"
 import { useSurfaces } from "@/shared/hooks/useDeployment"
@@ -69,7 +70,7 @@ export function McpMemberServers({
   const mine = useMyMcpConnections(workspaceId)
   const disconnect = useDisconnectMcp()
   const signIn = useMcpSignIn({
-    workspaceId,
+    scope: workspaceMcpScope(workspaceId),
     returnTo: LIST,
     onLeave,
     openWindow,

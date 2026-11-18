@@ -16,6 +16,7 @@ import {
   readMcpConnectionNotice,
 } from "@/features/tools/mcpConnectionNotice"
 import { publishSignInResult } from "@/features/tools/mcpSignInWindow"
+import { workspaceMcpScope } from "@/shared/api/mcpServerScope"
 import { organizationContext, workspaceMcpServer } from "@/tests/fixtures"
 import {
   getRowMenuItem,
@@ -27,7 +28,7 @@ const SERVER = workspaceMcpServer({
   name: "drive",
   credential_mode: "per_user",
 })
-const WORKSPACE = SERVER.workspace_id
+const WORKSPACE = SERVER.workspace_id ?? ""
 const MINE: McpConnection = {
   server_id: SERVER.id,
   connected_at: "2026-11-01T10:00:00+00:00",
@@ -132,7 +133,7 @@ function Page({
       ) : null}
       <McpOwnAccountNotes own={own} />
       <McpServerSignIn
-        workspaceId={WORKSPACE}
+        scope={workspaceMcpScope(WORKSPACE)}
         server={server}
         canManage={canManage}
         own={own}
