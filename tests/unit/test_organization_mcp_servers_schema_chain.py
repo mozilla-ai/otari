@@ -83,6 +83,20 @@ def _server(connection: Connection, workspace_id: str | None, name: str, organiz
     return server_id
 
 
+def _user(connection: Connection, user_id: str) -> None:
+    """The request-plane user a grant names, which its key requires where SQLite enforces keys."""
+    _insert(
+        connection,
+        "users",
+        user_id=user_id,
+        spend=0,
+        blocked=False,
+        metadata="{}",
+        created_at="2026-11-18 00:00:00",
+        updated_at="2026-11-18 00:00:00",
+    )
+
+
 def _grant(connection: Connection, server_id: str, user_id: str, workspace_id: str | None = None) -> None:
     values: dict[str, Any] = {
         "id": uuid.uuid4().hex,
@@ -110,6 +124,7 @@ def test_existing_servers_and_grants_take_their_organization_and_workspace(
         organization_id = _organization(connection, "acme")
         workspace_id = _workspace(connection, organization_id, "Marcomms")
         server_id = _server(connection, workspace_id, "drive")
+        _user(connection, "someone")
         _grant(connection, server_id, "someone")
 
     command.upgrade(config, _REVISION)
@@ -158,6 +173,7 @@ def test_a_user_may_hold_one_grant_per_workspace_on_one_server(sqlite_before: tu
         marcomms = _workspace(connection, acme, "Marcomms")
         sales = _workspace(connection, acme, "Sales")
         server_id = _server(connection, None, "drive", organization_id=acme)
+        _user(connection, "someone")
         _grant(connection, server_id, "someone", workspace_id=marcomms)
         _grant(connection, server_id, "someone", workspace_id=sales)
 
@@ -175,6 +191,7 @@ def test_the_downgrade_drops_organization_servers_and_keeps_workspace_servers(
         workspace_id = _workspace(connection, acme, "Marcomms")
         own = _server(connection, workspace_id, "drive", organization_id=acme)
         shared = _server(connection, None, "jira", organization_id=acme)
+        _user(connection, "someone")
         _grant(connection, own, "someone", workspace_id=workspace_id)
         _grant(connection, shared, "someone", workspace_id=workspace_id)
         _insert(connection, "workspace_mcp_server_logos", server_id=shared, tile="auto", updated_at="2026-11-18")
@@ -186,7 +203,14 @@ def test_the_downgrade_drops_organization_servers_and_keeps_workspace_servers(
             organization_id=acme,
             server_id=shared,
         )
-        _insert(connection, "mcp_server_aliases", old_id=uuid.uuid4().hex, workspace_id=workspace_id, server_id=shared)
+        _insert(
+            connection,
+            "mcp_server_aliases",
+            old_id=uuid.uuid4().hex,
+            organization_id=acme,
+            workspace_id=workspace_id,
+            server_id=shared,
+        )
 
     command.downgrade(config, _BEFORE)
 

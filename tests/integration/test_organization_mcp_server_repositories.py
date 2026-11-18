@@ -69,8 +69,7 @@ async def test_an_override_is_saved_read_and_removed(async_db: AsyncSession) -> 
     saved = await overrides.save(
         None,
         workspace_id=marcomms.id,
-        organization_id=acme.id,
-        server_id=drive.id,
+        server=drive,
         organization_tools=["@read"],
         enabled=True,
         everyone_tools=None,
@@ -79,8 +78,7 @@ async def test_an_override_is_saved_read_and_removed(async_db: AsyncSession) -> 
     await overrides.save(
         None,
         workspace_id=sales.id,
-        organization_id=acme.id,
-        server_id=drive.id,
+        server=drive,
         organization_tools=[],
         enabled=True,
         everyone_tools=None,
@@ -89,8 +87,7 @@ async def test_an_override_is_saved_read_and_removed(async_db: AsyncSession) -> 
     await overrides.save(
         saved,
         workspace_id=marcomms.id,
-        organization_id=acme.id,
-        server_id=drive.id,
+        server=drive,
         organization_tools=["@read"],
         enabled=False,
         everyone_tools=["search"],
@@ -106,7 +103,11 @@ async def test_an_override_is_saved_read_and_removed(async_db: AsyncSession) -> 
         ["search"],
         True,
     )
-    assert set(await overrides.for_workspace(marcomms.id, [drive.id])) == {drive.id}
+    assert {key: value.id for key, value in (await overrides.for_workspace(marcomms.id, [drive.id])).items()} == {
+        drive.id: saved.id
+    }
+    unconfigured = await _workspace(async_db, acme, "Support")
+    assert await overrides.for_workspace(unconfigured.id, [drive.id]) == {}
     assert await overrides.for_workspace(marcomms.id, []) == {}
     assert [override.workspace_id for override in await overrides.for_server(drive.id)] == [marcomms.id, sales.id]
 
@@ -127,16 +128,79 @@ async def test_a_workspace_has_one_override_per_server(async_db: AsyncSession) -
     await async_db.rollback()
 
 
-async def test_an_override_cannot_name_another_organization_s_server(async_db: AsyncSession) -> None:
+@pytest.mark.parametrize("claimed", ["acme", "globex"])
+async def test_an_override_holds_its_workspace_and_server_to_one_organization(
+    async_db: AsyncSession, claimed: str
+) -> None:
     acme = await _organization(async_db)
     globex = await _organization(async_db, "globex")
     marcomms = await _workspace(async_db, acme, "Marcomms")
     theirs = await _server(async_db, globex)
-    async_db.add(WorkspaceMcpServerOverride(workspace_id=marcomms.id, organization_id=acme.id, server_id=theirs.id))
+    organization_id = acme.id if claimed == "acme" else globex.id
+    async_db.add(
+        WorkspaceMcpServerOverride(workspace_id=marcomms.id, organization_id=organization_id, server_id=theirs.id)
+    )
 
     with pytest.raises(IntegrityError):
         await async_db.flush()
     await async_db.rollback()
+
+
+@pytest.mark.parametrize("claimed", ["acme", "globex"])
+async def test_an_alias_holds_its_workspace_and_server_to_one_organization(
+    async_db: AsyncSession, claimed: str
+) -> None:
+    acme = await _organization(async_db)
+    globex = await _organization(async_db, "globex")
+    marcomms = await _workspace(async_db, acme, "Marcomms")
+    theirs = await _server(async_db, globex)
+    organization_id = acme.id if claimed == "acme" else globex.id
+    async_db.add(
+        McpServerAlias(
+            old_id=uuid.uuid4(), organization_id=organization_id, workspace_id=marcomms.id, server_id=theirs.id
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        await async_db.flush()
+    await async_db.rollback()
+
+
+async def test_a_workspace_server_s_organization_is_its_workspace_s(async_db: AsyncSession) -> None:
+    acme = await _organization(async_db)
+    globex = await _organization(async_db, "globex")
+    marcomms = await _workspace(async_db, acme, "Marcomms")
+    async_db.add(
+        WorkspaceMcpServer(organization_id=globex.id, workspace_id=marcomms.id, name="x", url="https://x.example/mcp")
+    )
+
+    with pytest.raises(IntegrityError):
+        await async_db.flush()
+    await async_db.rollback()
+
+
+async def test_only_an_organization_s_server_takes_overrides_and_aliases(async_db: AsyncSession) -> None:
+    acme = await _organization(async_db)
+    marcomms = await _workspace(async_db, acme, "Marcomms")
+    sales = await _workspace(async_db, acme, "Sales")
+    theirs = await _server(async_db, acme, workspace=sales)
+
+    with pytest.raises(ValueError, match="workspace's own"):
+        await WorkspaceMcpServerOverrideRepository(async_db).save(
+            None,
+            workspace_id=marcomms.id,
+            server=theirs,
+            organization_tools=None,
+            enabled=False,
+            everyone_tools=None,
+            attach_by_default=None,
+        )
+    with pytest.raises(ValueError, match="workspace's own"):
+        await McpServerAliasRepository(async_db).add(uuid.uuid4(), workspace_id=marcomms.id, server=theirs)
+    with pytest.raises(ValueError, match="its own workspace"):
+        await WorkspaceMcpServerGrantRepository(async_db).put(
+            theirs, workspace_id=marcomms.id, api_key_ids=[], user_ids=["ada"], tools=["*"]
+        )
 
 
 async def test_an_organization_server_name_is_unique_within_the_organization(async_db: AsyncSession) -> None:
@@ -163,9 +227,9 @@ async def test_a_user_holds_one_grant_per_workspace_on_an_organization_server(as
     await _billing_user(async_db)
     grants = WorkspaceMcpServerGrantRepository(async_db)
 
-    await grants.put(drive.id, workspace_id=marcomms.id, api_key_ids=[], user_ids=["ada"], tools=["*"])
-    await grants.put(drive.id, workspace_id=sales.id, api_key_ids=[], user_ids=["ada"], tools=["@read"])
-    await grants.put(drive.id, workspace_id=sales.id, api_key_ids=[], user_ids=["ada"], tools=[])
+    await grants.put(drive, workspace_id=marcomms.id, api_key_ids=[], user_ids=["ada"], tools=["*"])
+    await grants.put(drive, workspace_id=sales.id, api_key_ids=[], user_ids=["ada"], tools=["@read"])
+    await grants.put(drive, workspace_id=sales.id, api_key_ids=[], user_ids=["ada"], tools=[])
     await async_db.commit()
 
     held = {grant.workspace_id: grant.tools for grant in await grants.for_server(drive.id)}
@@ -180,7 +244,7 @@ async def test_an_alias_names_its_server_in_its_workspace_only(async_db: AsyncSe
     old_id, unknown = uuid.uuid4(), uuid.uuid4()
     aliases = McpServerAliasRepository(async_db)
 
-    await aliases.add(old_id, workspace_id=marcomms.id, server_id=drive.id)
+    await aliases.add(old_id, workspace_id=marcomms.id, server=drive)
     await async_db.commit()
 
     assert await aliases.targets(marcomms.id, [old_id, unknown, drive.id]) == {old_id: drive.id}
@@ -197,7 +261,7 @@ async def test_deleting_a_workspace_takes_its_rows_and_leaves_the_organization_s
     async_db.add_all(
         [
             WorkspaceMcpServerOverride(workspace_id=marcomms.id, organization_id=acme.id, server_id=drive.id),
-            McpServerAlias(old_id=uuid.uuid4(), workspace_id=marcomms.id, server_id=drive.id),
+            McpServerAlias(old_id=uuid.uuid4(), organization_id=acme.id, workspace_id=marcomms.id, server_id=drive.id),
             WorkspaceMcpServerGrant(server_id=drive.id, workspace_id=marcomms.id, user_id="ada", tools=["*"]),
             WorkspaceMcpServerGrant(server_id=drive.id, workspace_id=sales.id, user_id="ada", tools=["*"]),
         ]
@@ -223,7 +287,7 @@ async def test_deleting_an_organization_server_takes_its_overrides_and_aliases(a
     async_db.add_all(
         [
             WorkspaceMcpServerOverride(workspace_id=marcomms.id, organization_id=acme.id, server_id=drive.id),
-            McpServerAlias(old_id=uuid.uuid4(), workspace_id=marcomms.id, server_id=drive.id),
+            McpServerAlias(old_id=uuid.uuid4(), organization_id=acme.id, workspace_id=marcomms.id, server_id=drive.id),
         ]
     )
     await async_db.commit()

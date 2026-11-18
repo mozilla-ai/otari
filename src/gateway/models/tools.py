@@ -151,6 +151,13 @@ class WorkspaceMcpServer(Base):
         # The target of the override table's composite FK, which pins an override to a
         # server of its own organization. It also serves as the organization_id index.
         UniqueConstraint("organization_id", "id", name="uq_workspace_mcp_servers_organization_id"),
+        # A workspace server's organization is its workspace's. Not checked on an organization server.
+        ForeignKeyConstraint(
+            ["organization_id", "workspace_id"],
+            ["workspace.organization_id", "workspace.id"],
+            ondelete="CASCADE",
+            name="fk_workspace_mcp_servers_workspace_organization",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -286,13 +293,16 @@ class WorkspaceMcpServerOverride(Base):
     their off switch, and a null ``everyone_tools`` or ``attach_by_default`` takes the
     server's own. A row left with only these defaults is deleted rather than stored.
 
-    CASCADE on the workspace and, through the composite key, the server, which also holds
-    an override to a server of its own organization.
+    CASCADE on the workspace and the server, through composite keys that hold both to the
+    override's own organization.
     """
 
     __tablename__ = "workspace_mcp_server_overrides"
     __table_args__ = (
         UniqueConstraint("workspace_id", "server_id", name="uq_workspace_mcp_server_overrides_workspace_server"),
+        ForeignKeyConstraint(
+            ["organization_id", "workspace_id"], ["workspace.organization_id", "workspace.id"], ondelete="CASCADE"
+        ),
         ForeignKeyConstraint(
             ["organization_id", "server_id"],
             ["workspace_mcp_servers.organization_id", "workspace_mcp_servers.id"],
@@ -302,9 +312,7 @@ class WorkspaceMcpServerOverride(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     # The unique constraint above leads with it, so it needs no index of its own.
-    workspace_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), nullable=False
-    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
     organization_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
     server_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
     organization_tools: Mapped[list[str] | None] = mapped_column(JSON(none_as_null=True), default=None)
@@ -328,18 +336,26 @@ class McpServerAlias(Base):
     A caller in ``workspace_id`` naming ``old_id`` reaches ``server_id`` instead, so ids stored
     in agents and sign-in links handed out before the fold keep working there.
 
-    CASCADE on both: an alias means nothing without its workspace or the server it names.
+    CASCADE on both, through composite keys that hold the workspace and the server to one organization:
+    an alias means nothing without its workspace or the server it names.
     """
 
     __tablename__ = "mcp_server_aliases"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["organization_id", "workspace_id"], ["workspace.organization_id", "workspace.id"], ondelete="CASCADE"
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "server_id"],
+            ["workspace_mcp_servers.organization_id", "workspace_mcp_servers.id"],
+            ondelete="CASCADE",
+        ),
+    )
 
     old_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
-    workspace_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    server_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("workspace_mcp_servers.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    server_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
         UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
     )
