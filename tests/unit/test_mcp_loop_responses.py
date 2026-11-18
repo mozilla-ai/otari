@@ -432,6 +432,34 @@ async def test_loop_accumulates_usage_across_iterations(monkeypatch: pytest.Monk
     assert out.usage.total_tokens == 27
 
 
+@pytest.mark.asyncio
+async def test_a_single_round_keeps_its_cache_write_breakdown(monkeypatch: pytest.MonkeyPatch) -> None:
+    response = _response(output=[], input_tokens=12, output_tokens=3)
+    assert response.usage is not None
+    response.usage.input_tokens_details = InputTokensDetails.model_validate(
+        {
+            "cached_tokens": 0,
+            "cache_write_tokens": 5,
+            "cache_write_tokens_details": {"ttl_12h_tokens": 5, "ttl_30m_tokens": 0},
+        }
+    )
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        return response
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+
+    out = await responses_tool_loop(
+        completion_kwargs={"model": "fake", "input_data": "go"},
+        pool=cast(Any, _FakePool(tool_names=["fetch_url"])),
+        max_iterations=5,
+    )
+    assert out.usage is not None
+    details = out.usage.input_tokens_details.cache_write_tokens_details
+    assert details is not None
+    assert details.ttl_12h_tokens == 5
+
+
 def _provider_search(item_id: str) -> ResponseFunctionWebSearch:
     """A ``web_search_call`` OpenAI's own tool ran."""
     return ResponseFunctionWebSearch.model_validate(
