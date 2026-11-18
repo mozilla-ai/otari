@@ -363,9 +363,12 @@ def test_a_baseline_written_only_under_module_level_control_flow_is_reported() -
 
 def test_one_computed_baseline_does_not_hide_the_rest_of_a_map() -> None:
     before = 'SIZE_BASELINE = 3\nACCESS = {"a.B": {"baseline": ()}}\n'
-    after = 'SIZE_BASELINE = 3\nACCESS = {"a.B": {"baseline": ()}, "c.D": {"baseline": tuple(["new.py"])}}\n'
+    after = 'SIZE_BASELINE = 3\nACCESS = {"a.B": {"baseline": ("grew.py",)}, "c.D": {"baseline": tuple(["new.py"])}}\n'
     assert check.check_baselines(before, after) == [
-        "ACCESS['c.D']['baseline'] arrives and is not written out in full; a baseline is read without running the check"
+        "ACCESS['a.B']['baseline'] gains 'grew.py'; "
+        "a baseline records room already given up, so it may only lose entries",
+        "ACCESS['c.D']['baseline'] arrives and is not written out in full; "
+        "a baseline is read without running the check",
     ]
 
 
