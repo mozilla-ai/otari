@@ -2468,6 +2468,58 @@ export interface paths {
         patch: operations["hosted-providers-update_hosted_model"];
         trace?: never;
     };
+    "/api/v1/hosted-providers/{provider}/regions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Hosted Provider Region
+         * @description Add a region the provider serves from, after its others, and answer the provider.
+         *
+         *     The first region added keeps the provider's own connection as a region
+         *     ahead of it, so what was served keeps being served. A request to the
+         *     provider is served by the first enabled region whose countries admit it,
+         *     and ``<provider>@<slug>:<model>`` pins one. A provider defined in
+         *     configuration answers 409.
+         */
+        post: operations["hosted-providers-add_hosted_provider_region"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hosted-providers/{provider}/regions/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Hosted Provider Region
+         * @description Remove one region, and answer the provider.
+         *
+         *     Removing the last region leaves the provider serving from its own connection.
+         */
+        delete: operations["hosted-providers-remove_hosted_provider_region"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Hosted Provider Region
+         * @description Change, switch off or move one region, and answer the provider.
+         */
+        patch: operations["hosted-providers-update_hosted_provider_region"];
+        trace?: never;
+    };
     "/api/v1/hosted-providers/{provider}/vendors": {
         parameters: {
             query?: never;
@@ -14653,7 +14705,10 @@ export interface components {
          *     ``vendor`` is who makes the model, ``Other`` when nothing names one.
          *     ``default_rates`` is what the default rung (models.dev, or the provider's
          *     own listing) would price a model an operator priced, where it prices it
-         *     and the two differ; None otherwise.
+         *     and the two differ; None otherwise. ``region_rates`` holds, by region slug,
+         *     the rates a region of the provider sets of its own (stored under
+         *     ``<provider>@<slug>:<model>`` through ``POST /api/v1/pricing``); a region
+         *     absent from it settles at the provider's rate.
          */
         HostedModelPublic: {
             /** Cache Read Price Per Million */
@@ -14685,6 +14740,10 @@ export interface components {
             price_source?: ("organization" | "deployment" | "defaults" | "provider") | null;
             /** Provider */
             provider: string;
+            /** Region Rates */
+            region_rates?: {
+                [key: string]: components["schemas"]["HostedModelRates"];
+            };
             /** Type */
             type?: ("chat" | "embedding" | "image" | "speech" | "transcription" | "rerank" | "moderation" | "video" | "decision" | "realtime" | "other") | null;
             /** Unit */
@@ -14863,6 +14922,9 @@ export interface components {
          *     whether or not something prices it. ``supported_countries`` keeps the
          *     provider to requests from those ISO country codes, checked as well as
          *     ``provider_supported_countries``; null serves every country.
+         *     ``data_location`` declares where the upstream keeps request data: an ISO
+         *     3166-1 alpha-2 country code, ``EU`` or ``GLOBAL``; null leaves it undeclared.
+         *     A workspace that lists the locations it accepts is served only from one of them.
          *     ``zero_data_retention`` declares that the upstream keeps no prompt or
          *     completion data; the catalog shows it and nothing enforces it.
          *     ``terms_url`` and ``privacy_url`` link the upstream's own terms of service
@@ -14882,6 +14944,8 @@ export interface components {
             client_args?: {
                 [key: string]: unknown;
             } | null;
+            /** Data Location */
+            data_location?: string | null;
             /**
              * Enabled
              * @default true
@@ -14952,7 +15016,10 @@ export interface components {
          *     country. ``zero_data_retention`` is the operator's declaration that the
          *     upstream keeps no prompt or completion data. ``terms_url`` and
          *     ``privacy_url`` are the upstream's policies, null where none is linked.
-         *     ``models`` counts its offered models, on the list only.
+         *     ``data_location`` is where the upstream keeps request data, null where
+         *     nobody declared it. ``regions`` lists the regions it serves from, in the
+         *     order they are tried, and is empty for a provider that serves from its own
+         *     connection alone. ``models`` counts its offered models, on the list only.
          */
         HostedProviderPublic: {
             /** Api Base */
@@ -14965,6 +15032,8 @@ export interface components {
             } | null;
             /** Created At */
             created_at?: string | null;
+            /** Data Location */
+            data_location?: string | null;
             /**
              * Decryptable
              * @default true
@@ -14986,6 +15055,8 @@ export interface components {
             privacy_url?: string | null;
             /** Provider */
             provider: string;
+            /** Regions */
+            regions?: components["schemas"]["HostedProviderRegionPublic"][];
             /** Restricted To Organization Id */
             restricted_to_organization_id?: string | null;
             /**
@@ -15015,6 +15086,137 @@ export interface components {
              * @default false
              */
             zero_data_retention: boolean;
+        };
+        /**
+         * HostedProviderRegionCreateRequest
+         * @description Add a region a hosted provider serves from.
+         *
+         *     Only what differs from the provider is given; every field left out is the
+         *     provider's. ``slug`` pins the region in a selector
+         *     (``<provider>@<slug>:<model>``) and names it in every route. ``api_key``
+         *     left out uses the provider's key; ``client_args`` are merged over the
+         *     provider's, so a Bedrock region gives its ``region_name`` alone.
+         *     ``data_location`` declares where the region keeps request data.
+         *
+         *     A provider with no regions yet serves from its own connection. Adding its
+         *     first region keeps that connection as a region of its own, ahead of the new
+         *     one, under ``primary_slug`` and ``primary_label``: by default the
+         *     provider's data location, or ``primary``.
+         * @example {
+         *       "api_base": "https://tokenhub-intl.example.com/v1",
+         *       "api_key": "<the region's key>",
+         *       "data_location": "SG",
+         *       "label": "Southeast Asia",
+         *       "slug": "sg"
+         *     }
+         */
+        HostedProviderRegionCreateRequest: {
+            /** Api Base */
+            api_base?: string | null;
+            /** Api Key */
+            api_key?: string | null;
+            /** Client Args */
+            client_args?: {
+                [key: string]: unknown;
+            } | null;
+            /** Data Location */
+            data_location?: string | null;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Label */
+            label: string;
+            /** Primary Label */
+            primary_label?: string | null;
+            /** Primary Slug */
+            primary_slug?: string | null;
+            /** Slug */
+            slug: string;
+            /** Supported Countries */
+            supported_countries?: string[] | null;
+        };
+        /**
+         * HostedProviderRegionPublic
+         * @description One region of a hosted provider, as stored: null wherever it uses the provider's value.
+         *
+         *     ``selector`` is what pins it in a request (``tokenhub@sg``). ``has_api_key``
+         *     is true for a region with a key of its own, known by its last four
+         *     characters; ``client_args`` holds only the region's own extras, masked as
+         *     the provider's are. ``decryptable`` is false for a region whose own key or
+         *     extras no configured ``OTARI_SECRET_KEY`` reads, which serves nothing until
+         *     re-entered.
+         */
+        HostedProviderRegionPublic: {
+            /** Api Base */
+            api_base?: string | null;
+            /** Api Key Last4 */
+            api_key_last4?: string | null;
+            /** Client Args */
+            client_args?: {
+                [key: string]: unknown;
+            } | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Data Location */
+            data_location?: string | null;
+            /**
+             * Decryptable
+             * @default true
+             */
+            decryptable: boolean;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Has Api Key
+             * @default false
+             */
+            has_api_key: boolean;
+            /** Label */
+            label: string;
+            /** Position */
+            position: number;
+            /** Selector */
+            selector: string;
+            /** Slug */
+            slug: string;
+            /** Supported Countries */
+            supported_countries?: string[] | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * HostedProviderRegionUpdateRequest
+         * @description Change one region. A field left out is left alone; null puts it back on the provider's value.
+         *
+         *     ``api_key`` null returns the region to the provider's key, and an empty
+         *     ``api_base`` or null to the provider's endpoint. ``client_args`` echoed
+         *     back with masked entries keeps the stored values. ``position`` moves the
+         *     region to that place in the order regions are tried, counted from 0.
+         * @example {
+         *       "enabled": false
+         *     }
+         */
+        HostedProviderRegionUpdateRequest: {
+            /** Api Base */
+            api_base?: string | null;
+            /** Api Key */
+            api_key?: string | null;
+            /** Client Args */
+            client_args?: {
+                [key: string]: unknown;
+            } | null;
+            /** Data Location */
+            data_location?: string | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Label */
+            label?: string | null;
+            /** Position */
+            position?: number | null;
+            /** Supported Countries */
+            supported_countries?: string[] | null;
         };
         /**
          * HostedProviderTestPublic
@@ -15079,7 +15281,7 @@ export interface components {
          *     null clears it, and an entry echoed back as the mask keeps the stored value.
          *     ``restricted_to_organization_id`` reads the same way: omitted keeps the
          *     restriction, null lifts it, and so does ``supported_countries``, where an
-         *     empty list closes the provider to every country. ``terms_url`` and
+         *     empty list closes the provider to every country, and ``data_location``. ``terms_url`` and
          *     ``privacy_url`` omitted are left alone; null or an empty string removes the link.
          * @example {
          *       "enabled": false
@@ -15094,6 +15296,8 @@ export interface components {
             client_args?: {
                 [key: string]: unknown;
             } | null;
+            /** Data Location */
+            data_location?: string | null;
             /** Enabled */
             enabled?: boolean | null;
             /** Privacy Url */
@@ -24461,6 +24665,8 @@ export interface components {
         };
         /** WorkspaceProviderPolicyPublic */
         WorkspaceProviderPolicyPublic: {
+            /** Allowed Data Locations */
+            allowed_data_locations?: string[] | null;
             /** Require Zero Data Retention */
             require_zero_data_retention: boolean;
         };
@@ -24469,6 +24675,11 @@ export interface components {
          * @description What one workspace requires of every provider serving it.
          */
         WorkspaceProviderPolicyRequest: {
+            /**
+             * Allowed Data Locations
+             * @description The data locations a hosted provider region must declare to serve the workspace: ISO 3166-1 alpha-2 country codes, EU (which also admits each member state) or GLOBAL. Null accepts any location, and omitting the field keeps the stored list. A region whose location nobody declared never matches a list.
+             */
+            allowed_data_locations?: string[] | null;
             /**
              * Require Zero Data Retention
              * @description Refuse every provider not declared zero data retention: an organization key or a hosted provider nobody declared, and every provider configured in config.yml or endpoint the workspace owns.
@@ -28464,6 +28675,109 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HostedModelPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-add_hosted_provider_region": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostedProviderRegionCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedProviderPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-remove_hosted_provider_region": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedProviderPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-update_hosted_provider_region": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostedProviderRegionUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedProviderPublic"];
                 };
             };
             /** @description Validation Error */

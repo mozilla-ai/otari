@@ -47,6 +47,7 @@ import { useDeployment } from "@/shared/hooks/useDeployment"
 
 import { AddHostedProviderForm } from "./AddHostedProviderForm"
 import { DeploymentProviderMigration } from "./DeploymentProviderMigration"
+import { dataLocationLabel, providerDataLocations } from "./dataLocations"
 import {
   catalogPreviewOutcome,
   catalogRefreshFailures,
@@ -253,6 +254,27 @@ function ModelsSummaryCell({
   )
 }
 
+/**
+ * How many regions a provider serves from, where it has several, and every
+ * place it keeps data: a region's own location, else the provider's.
+ */
+function DataLocationBadges({ provider }: { provider: HostedProvider }) {
+  const regionCount = provider.regions?.length ?? 0
+  const locations = providerDataLocations(provider)
+  return (
+    <>
+      {regionCount >= 2 ? (
+        <Badge tone="muted">{`${regionCount} regions`}</Badge>
+      ) : null}
+      {locations.length > 0 ? (
+        <Badge tone="muted">
+          {`Data: ${locations.map(dataLocationLabel).join(", ")}`}
+        </Badge>
+      ) : null}
+    </>
+  )
+}
+
 export function HostedProvidersPage() {
   const access = useDeploymentAdminAccess()
   // Withheld until the gate answers, so a non-operator load does not put a 404
@@ -390,6 +412,7 @@ export function HostedProvidersPage() {
           {row.zero_data_retention ? (
             <Badge tone="muted">Zero data retention</Badge>
           ) : null}
+          <DataLocationBadges provider={row} />
           {row.decryptable ? null : <Badge tone="warn">Key unreadable</Badge>}
         </span>
       ),

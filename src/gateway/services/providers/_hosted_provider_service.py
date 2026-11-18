@@ -51,6 +51,7 @@ from gateway.repositories.providers import (
     HostedModelConflict,
     HostedProviderConflict,
     HostedProviderModelRepository,
+    HostedProviderRegionRepository,
     HostedProviderRepository,
     HostedProviderVendorRepository,
     ProviderEndpointRepository,
@@ -71,6 +72,8 @@ from gateway.schemas.providers import (
     HostedProviderCreateRequest,
     HostedProviderModelSummary,
     HostedProviderPublic,
+    HostedProviderRegionCreateRequest,
+    HostedProviderRegionUpdateRequest,
     HostedProvidersPublic,
     HostedProvidersReencryptPublic,
     HostedProviderTestPublic,
@@ -111,10 +114,12 @@ from gateway.services.providers._hosted_credentials import (
 )
 from gateway.services.providers._hosted_name_index import (
     forget_hosted_name,
+    refresh_hosted_name_index,
     remember_hosted_name,
     remember_hosted_zero_data_retention,
 )
 from gateway.services.providers._hosted_offers import OTARI_IMPLEMENTATION, HostedOffers
+from gateway.services.providers._hosted_regions import HostedProviderRegions, region_public
 from gateway.services.providers._hosted_runtime import HostedProviderRuntime
 from gateway.services.providers._hosted_sources import HostedProviderProfile, HostedSource, HostedSources
 from gateway.services.providers._hosted_vendors import OTHER_VENDOR, vendor_of, vendors_of
@@ -162,6 +167,7 @@ class HostedProviderService:
         *,
         config: GatewayConfig,
         providers: HostedProviderRepository,
+        regions: HostedProviderRegionRepository,
         sources: HostedSources,
         models: HostedProviderModelRepository,
         vendors: HostedProviderVendorRepository,
@@ -190,6 +196,10 @@ class HostedProviderService:
         self.vendors = vendors
         self.organization_exists = organization_exists
         self.sources = sources
+        self.regions = regions
+        self.region_changes = HostedProviderRegions(
+            uow, config=config, regions=regions, stored=self._stored_or_raise, validate_api_base=self._validate_api_base
+        )
         self.offers = HostedOffers(models, pricing)
         self.runtime = HostedProviderRuntime(uow, sources=self.sources, models=models, vendors=vendors)
         self.sweep = HostedCatalogSweep(
@@ -275,6 +285,7 @@ class HostedProviderService:
                     restricted_to_organization_id=request.restricted_to_organization_id,
                     serves_unlisted_models=request.serves_unlisted_models,
                     supported_countries=request.supported_countries,
+                    data_location=request.data_location,
                     zero_data_retention=request.zero_data_retention,
                     terms_url=request.terms_url,
                     privacy_url=request.privacy_url,
@@ -294,6 +305,9 @@ class HostedProviderService:
             )
         remember_hosted_name(name, implementation)
         remember_hosted_zero_data_retention(name, row.zero_data_retention)
+        if row.data_location is not None:
+            # Where the provider keeps data, for a workspace that accepts only some locations.
+            await refresh_hosted_name_index(self.uow, self.config)
         return public
 
     async def update_provider(self, provider: str, request: HostedProviderUpdateRequest) -> HostedProviderPublic:
@@ -361,6 +375,8 @@ class HostedProviderService:
                 row.restricted_to_organization_id = request.restricted_to_organization_id
             if "supported_countries" in request.model_fields_set:
                 row.supported_countries = request.supported_countries
+            if "data_location" in request.model_fields_set:
+                row.data_location = request.data_location
             if "terms_url" in request.model_fields_set:
                 row.terms_url = request.terms_url
             if "privacy_url" in request.model_fields_set:
@@ -368,9 +384,41 @@ class HostedProviderService:
             await self.providers.save(row)
             public = self._public(source)
         remember_hosted_zero_data_retention(row.name, row.zero_data_retention)
+        if "data_location" in request.model_fields_set:
+            await refresh_hosted_name_index(self.uow, self.config)
         # The cached listing was made on what this request may just have changed.
         get_model_cache().clear(row.name)
         return public
+
+    async def add_region(self, provider: str, request: HostedProviderRegionCreateRequest) -> HostedProviderPublic:
+        """Add a region the provider serves from, and answer the provider as it now is.
+
+        Raises:
+            The errors :meth:`HostedProviderRegions.add` names.
+        """
+        return await self._public_by_name(await self.region_changes.add(provider, request))
+
+    async def update_region(
+        self, provider: str, slug: str, request: HostedProviderRegionUpdateRequest
+    ) -> HostedProviderPublic:
+        """Change one region of the provider, and answer the provider as it now is.
+
+        Raises:
+            The errors :meth:`HostedProviderRegions.update` names.
+        """
+        return await self._public_by_name(await self.region_changes.update(provider, slug, request))
+
+    async def remove_region(self, provider: str, slug: str) -> HostedProviderPublic:
+        """Remove one region of the provider, and answer the provider as it now is.
+
+        Raises:
+            The errors :meth:`HostedProviderRegions.remove` names.
+        """
+        return await self._public_by_name(await self.region_changes.remove(provider, slug))
+
+    async def _public_by_name(self, name: str) -> HostedProviderPublic:
+        async with self.uow:
+            return self._public(await self._provider_or_raise(name))
 
     async def delete_provider(self, provider: str) -> None:
         """Remove a provider, the roster offered on it and the model details set for it. Pricing history stays.
@@ -432,6 +480,7 @@ class HostedProviderService:
         kinds = _kinds(source, names)
         vendors = vendors_of(source.implementation, names)
         rates = await self.offers.current_rates(source.name, rows, implementation=source.implementation)
+        regional = await self.offers.region_rates(source.name, [region.slug for region in source.regions], rows)
         defaults = await self._differing_defaults(source, rows)
 
         def served(row: HostedProviderModel) -> bool:
@@ -456,6 +505,7 @@ class HostedProviderService:
                     model_type=kinds.get(model.model),
                     vendor=vendors[model.model],
                     default_rates=defaults.get(model.model),
+                    region_rates=regional.get(model.model),
                 )
                 for model in page.rows
             ],
@@ -694,8 +744,12 @@ class HostedProviderService:
             if priced or request.enabled is not None:
                 await self.models.save(model)
         rates = await self.offers.current_rates(provider, [model], implementation=source.implementation)
+        regional = await self.offers.region_rates(provider, [region.slug for region in source.regions], [model])
         return HostedModelPublic.from_row(
-            model, rates=rates.get(model.model), model_type=_kinds(source, [model.model]).get(model.model)
+            model,
+            rates=rates.get(model.model),
+            model_type=_kinds(source, [model.model]).get(model.model),
+            region_rates=regional.get(model.model),
         )
 
     async def switch_off_models(self, models: Mapping[str, Collection[str]]) -> int:
@@ -860,6 +914,19 @@ class HostedProviderService:
                 except SecretBoxUnavailableError:
                     raise SecretBoxUnavailableTenancyError("hosted provider credentials") from None
                 if await self.providers.swap_ciphertexts(row.id, expected=expected, replacement=replacement):
+                    reencrypted_count += 1
+                else:
+                    skipped += 1
+            for region in await self.regions.list_encrypted():
+                expected = (region.encrypted_api_key, region.encrypted_client_args)
+                try:
+                    replacement = (reencrypted(expected[0]), reencrypted(expected[1]))
+                except SecretDecryptionError:
+                    unreadable += 1
+                    continue
+                except SecretBoxUnavailableError:
+                    raise SecretBoxUnavailableTenancyError("hosted provider credentials") from None
+                if await self.regions.swap_ciphertexts(region.id, expected=expected, replacement=replacement):
                     reencrypted_count += 1
                 else:
                     skipped += 1
@@ -1038,7 +1105,17 @@ class HostedProviderService:
     async def resolve(
         self, name: str, model: str | None = None, *, organization_id: uuid.UUID | None
     ) -> ResolvedHostedProvider | None:
-        """A usable credential for the hosted provider ``name`` on behalf of ``organization_id``, or None."""
+        """A usable credential for the hosted provider ``name`` on behalf of ``organization_id``, or None.
+
+        For a provider with regions, its first enabled one, or the one ``name`` pins.
+        """
+        regions = await self.runtime.resolve(name, model, organization_id=organization_id)
+        return regions[0] if regions else None
+
+    async def resolve_regions(
+        self, name: str, model: str | None = None, *, organization_id: uuid.UUID | None
+    ) -> list[ResolvedHostedProvider]:
+        """The usable connections of the hosted provider ``name`` for ``organization_id``, in the order tried."""
         return await self.runtime.resolve(name, model, organization_id=organization_id)
 
     async def discovery_dials(self) -> dict[str, DiscoveryDial]:
@@ -1124,13 +1201,15 @@ class HostedProviderService:
     @staticmethod
     def _public(source: HostedSource) -> HostedProviderPublic:
         if source.row is not None:
-            return HostedProviderPublic.from_row(
+            public = HostedProviderPublic.from_row(
                 source.row,
                 client_args=client_args_of(source.row),
                 api_base=public_api_base(source.row.api_base),
                 decryptable=credential_of(source.row, quiet=True) is not None,
                 shadows_config=source.shadows_config,
             )
+            public.regions = [region_public(source.row.name, region) for region in source.regions]
+            return public
         entry = source.entry
         if entry is None:  # pragma: no cover - a source holds a row or an entry
             raise HostedProviderNotFoundError(source.name)
@@ -1144,6 +1223,7 @@ class HostedProviderService:
             enabled=entry.enabled,
             restricted_to_organization_id=entry.restricted_to_organization_id,
             supported_countries=list(entry.supported_countries) if entry.supported_countries is not None else None,
+            data_location=entry.data_location,
             zero_data_retention=entry.zero_data_retention,
             terms_url=entry.terms_url,
             privacy_url=entry.privacy_url,

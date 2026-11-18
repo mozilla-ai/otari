@@ -241,9 +241,48 @@ class HostedProvider(Base):
     # The ISO country codes whose requests this provider serves, or None for
     # every country. Checked as well as ``provider_supported_countries``.
     supported_countries: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    # Where the upstream processes and stores request data, as the operator
+    # declares it: an ISO country code, ``EU``, or ``GLOBAL``. None is undeclared.
+    data_location: Mapped[str | None] = mapped_column(String(16), default=None)
     # The upstream's own policies, linked from the public Providers pages.
     terms_url: Mapped[str | None] = mapped_column(String(1024), default=None)
     privacy_url: Mapped[str | None] = mapped_column(String(1024), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)
+    )
+
+
+class HostedProviderRegion(Base):
+    """One region a hosted provider serves from, and what it changes about the provider.
+
+    A provider with no rows here serves from its own connection, as one region.
+    Once it has rows, they are its regions, tried in ``position`` order: a
+    request is served by the first enabled one whose countries admit it, and a
+    selector ``<name>@<slug>:<model>`` pins one. Every nullable column inherits
+    the provider's value: the key, the endpoint, the countries and the data
+    location, and the SDK extras are merged over the provider's. Roster,
+    switches and policies stay the provider's; prices may be set per region,
+    keyed ``<name>@<slug>:<model>``, and fall back to the provider's.
+    """
+
+    __tablename__ = "hosted_provider_regions"
+    __table_args__ = (UniqueConstraint("hosted_provider_id", "slug", name="uq_hosted_provider_regions_provider_slug"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    hosted_provider_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("hosted_providers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    slug: Mapped[str] = mapped_column(String(32))
+    label: Mapped[str] = mapped_column(String(64))
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    data_location: Mapped[str | None] = mapped_column(String(16), default=None)
+    encrypted_api_key: Mapped[str | None] = mapped_column(default=None)
+    api_key_last4: Mapped[str | None] = mapped_column(String(4), default=None)
+    api_base: Mapped[str | None] = mapped_column(String(1024), default=None)
+    encrypted_client_args: Mapped[str | None] = mapped_column(default=None)
+    supported_countries: Mapped[list[str] | None] = mapped_column(JSON, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)
@@ -374,6 +413,9 @@ class WorkspaceProviderPolicy(Base):
         Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True
     )
     require_zero_data_retention: Mapped[bool] = mapped_column(default=False, server_default=false())
+    # The data locations a hosted provider region must declare to serve the
+    # workspace, or None for any. An undeclared region never matches a list.
+    allowed_data_locations: Mapped[list[str] | None] = mapped_column(JSON, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)

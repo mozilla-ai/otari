@@ -57,6 +57,7 @@ from gateway.core.config import (
     RESERVED_PROVIDER_INSTANCE_NAMES,
     GatewayConfig,
     provider_credential_env_names,
+    split_region,
 )
 from gateway.core.error_codes import PROVIDER_NOT_CONFIGURED
 from gateway.core.provider_params import FORBIDDEN_ENDPOINT_DEFAULTS
@@ -318,8 +319,11 @@ class HostedLookup:
     own_name_only: bool
 
     def accepts(self, response_provider: str, instance: str) -> bool:
-        """Whether a hosted answer for ``response_provider`` may serve the ``instance`` candidate."""
-        return not self.own_name_only or response_provider == instance
+        """Whether a hosted answer for ``response_provider`` may serve the ``instance`` candidate.
+
+        A region of the provider (``ollama@eu``) is the provider's own name for this.
+        """
+        return not self.own_name_only or split_region(response_provider)[0] == split_region(instance)[0]
 
 
 def hosted_lookup(provider: LLMProvider) -> HostedLookup:

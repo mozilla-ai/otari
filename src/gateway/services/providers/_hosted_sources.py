@@ -13,11 +13,16 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Literal
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import GatewayConfig, split_region
 from gateway.core.settings.providers import HostedProviderEntry
-from gateway.models.providers import HostedProvider
-from gateway.repositories.providers import HostedProviderRepository
-from gateway.services.providers._hosted_credentials import ResolvedHostedProvider, credential_of, lookup_name
+from gateway.models.providers import HostedProvider, HostedProviderRegion
+from gateway.repositories.providers import HostedProviderRegionRepository, HostedProviderRepository
+from gateway.services.providers._hosted_credentials import (
+    ResolvedHostedProvider,
+    credential_of,
+    lookup_name,
+    region_credential_of,
+)
 from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
 
 HostedSourceKind = Literal["database", "config"]
@@ -43,6 +48,8 @@ class HostedSource:
     entry: HostedProviderEntry | None = None
     # Whether a configuration entry of the same name is shadowed by ``row``.
     shadows_config: bool = False
+    # The stored row's regions, in the order they are tried; none serves from the row itself.
+    regions: tuple[HostedProviderRegion, ...] = ()
 
     @property
     def source(self) -> HostedSourceKind:
@@ -97,12 +104,50 @@ class HostedSource:
         return self.row.privacy_url if self.row is not None else self._entry.privacy_url
 
     @property
+    def data_location(self) -> str | None:
+        """Where the upstream keeps request data, as the operator declares it, or None."""
+        return self.row.data_location if self.row is not None else self._entry.data_location
+
+    def region(self, slug: str) -> HostedProviderRegion | None:
+        """The region of that slug, or None."""
+        return next((region for region in self.regions if region.slug == slug), None)
+
+    @property
     def declared_models(self) -> tuple[str, ...]:
         """The model ids configuration offers when the provider cannot list them; none for a row."""
         return () if self.entry is None else self.entry.models
 
     def credential(self, *, quiet: bool = False) -> ResolvedHostedProvider | None:
-        """The connection this provider serves on, or None when a stored one cannot be decrypted."""
+        """The connection this provider serves on first, or None when there is none it can read.
+
+        For a provider with regions, the first enabled region: what discovery,
+        the health check and a request no country narrows are served on.
+        """
+        regions = self.region_credentials(quiet=quiet)
+        return regions[0] if regions else None
+
+    def region_credentials(self, *, quiet: bool = False, slug: str | None = None) -> list[ResolvedHostedProvider]:
+        """The connections this provider serves on, in the order they are tried.
+
+        One, the provider's own, for a provider with no regions. Otherwise each
+        enabled region a configured key reads, or only the one ``slug`` names.
+        A provider whose own ciphertext no key reads serves nothing.
+        """
+        own = self._own_credential(quiet=quiet)
+        if own is None:
+            return []
+        if not self.regions:
+            return [own] if slug is None else []
+        credentials: list[ResolvedHostedProvider] = []
+        for region in self.regions:
+            if not region.enabled or (slug is not None and region.slug != slug):
+                continue
+            credential = region_credential_of(own, region, quiet=quiet)
+            if credential is not None:
+                credentials.append(credential)
+        return credentials
+
+    def _own_credential(self, *, quiet: bool) -> ResolvedHostedProvider | None:
         if self.row is not None:
             return credential_of(self.row, quiet=quiet)
         entry = self._entry
@@ -113,6 +158,7 @@ class HostedSource:
             name=entry.name,
             implementation=entry.provider,
             supported_countries=entry.supported_countries,
+            data_location=entry.data_location,
         )
 
     def withheld_from(self, organization_id: uuid.UUID | None) -> bool:
@@ -134,9 +180,12 @@ class HostedSource:
 class HostedSources:
     """Read the merged view. Called inside the caller's Unit of Work, for the rows."""
 
-    def __init__(self, config: GatewayConfig, providers: HostedProviderRepository) -> None:
+    def __init__(
+        self, config: GatewayConfig, providers: HostedProviderRepository, regions: HostedProviderRegionRepository
+    ) -> None:
         self.config = config
         self.providers = providers
+        self.regions = regions
 
     def entries(self) -> dict[str, HostedProviderEntry]:
         """The hosted providers configuration declares, validated."""
@@ -145,9 +194,11 @@ class HostedSources:
     async def all(self) -> list[HostedSource]:
         """Every hosted provider by name, a row winning over an entry of the same name."""
         entries = self.entries()
+        rows = await self.providers.list_all()
+        regions = await self.regions.list_for_providers([row.id for row in rows])
         merged = {
-            row.name: HostedSource(row=row, shadows_config=row.name in entries)
-            for row in await self.providers.list_all()
+            row.name: HostedSource(row=row, shadows_config=row.name in entries, regions=tuple(regions.get(row.id, ())))
+            for row in rows
         }
         for name, entry in entries.items():
             merged.setdefault(name, HostedSource(entry=entry))
@@ -163,15 +214,24 @@ class HostedSources:
 
     async def names_limited_to_countries(self) -> list[str]:
         """The enabled hosted providers that serve only some countries, by name."""
-        return [source.name for source in await self.all() if source.enabled and source.supported_countries]
+        return [
+            source.name
+            for source in await self.all()
+            if source.enabled
+            and (source.supported_countries or any(region.supported_countries for region in source.regions))
+        ]
 
     async def get(self, name: str) -> HostedSource | None:
-        """One hosted provider by name, with the accepted aliases folded, or None."""
-        name = lookup_name(name)
+        """One hosted provider by name, with the accepted aliases folded, or None.
+
+        A name pinning a region (``tokenhub@sg``) answers its provider.
+        """
+        name = lookup_name(split_region(name)[0])
         entries = self.entries()
         row = await self.providers.get_by_name(name)
         if row is not None:
-            return HostedSource(row=row, shadows_config=name in entries)
+            regions = await self.regions.list_for_provider(row.id)
+            return HostedSource(row=row, shadows_config=name in entries, regions=tuple(regions))
         entry = entries.get(name)
         return None if entry is None else HostedSource(entry=entry)
 

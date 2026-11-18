@@ -10,6 +10,7 @@ import type {
   HostedModel,
   HostedPriceReset,
   HostedProvider,
+  HostedProviderRegion,
   HostedProviderTestResult,
   HostedVendor,
   ProviderHealth,
@@ -64,6 +65,28 @@ export function hostedProvider(
     models: { total: 1, serving: 1, unpriced: 0, vendors_off: 0 },
     created_at: "2026-10-01T00:00:00Z",
     updated_at: null,
+    ...overrides,
+  }
+}
+
+/** One region of the `openai` provider, using every value of the provider's. */
+export function hostedRegion(
+  overrides: Partial<HostedProviderRegion> = {},
+): HostedProviderRegion {
+  const slug = overrides.slug ?? "primary"
+  return {
+    slug,
+    selector: `openai@${slug}`,
+    label: slug,
+    position: 0,
+    enabled: true,
+    data_location: null,
+    has_api_key: false,
+    api_key_last4: null,
+    api_base: null,
+    client_args: null,
+    supported_countries: null,
+    decryptable: true,
     ...overrides,
   }
 }

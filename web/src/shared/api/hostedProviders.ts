@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import type {
   CreateHostedModelRequest,
+  CreateHostedProviderRegionRequest,
   CreateHostedProviderRequest,
   DeploymentProviderMigration,
   DeploymentProviderMigrationReviewedRow,
@@ -24,6 +25,7 @@ import type {
   SwitchHostedVendorModelsRequest,
   TestHostedProviderRequest,
   UpdateHostedModelRequest,
+  UpdateHostedProviderRegionRequest,
   UpdateHostedProviderRequest,
   UpdateHostedVendorRequest,
 } from "@/client"
@@ -148,6 +150,61 @@ export function useDeleteHostedProvider() {
       // Removing the connected provider is how a deployment disconnects.
       void queryClient.invalidateQueries({ queryKey: [PLATFORM_CONNECT] })
     },
+  })
+}
+
+// A provider's regions (`/hosted-providers/{provider}/regions`). Each write
+// answers the whole provider, whose list row is what every page reads, so the
+// hosted reads are invalidated rather than patched.
+
+const regionPath = (provider: string, slug: string) =>
+  `${providerPath(provider)}/regions/${encodeURIComponent(slug)}`
+
+/**
+ * Add a region after the provider's others. The first one also turns the
+ * provider's own connection into a region ahead of it, named by
+ * `primary_slug` and `primary_label`.
+ */
+export function useAddHostedProviderRegion(provider: string) {
+  const invalidate = useInvalidateHosted()
+  return useMutation({
+    mutationFn: (body: CreateHostedProviderRegionRequest) =>
+      apiFetch<HostedProvider>(`${providerPath(provider)}/regions`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: invalidate,
+  })
+}
+
+/** Change, switch or move one region; `position` is its new place, from 0. */
+export function useUpdateHostedProviderRegion(provider: string) {
+  const invalidate = useInvalidateHosted()
+  return useMutation({
+    mutationFn: ({
+      slug,
+      body,
+    }: {
+      slug: string
+      body: UpdateHostedProviderRegionRequest
+    }) =>
+      apiFetch<HostedProvider>(regionPath(provider, slug), {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: invalidate,
+  })
+}
+
+/** Remove one region. Removing the last leaves the provider on its own connection. */
+export function useRemoveHostedProviderRegion(provider: string) {
+  const invalidate = useInvalidateHosted()
+  return useMutation({
+    mutationFn: (slug: string) =>
+      apiFetch<HostedProvider>(regionPath(provider, slug), {
+        method: "DELETE",
+      }),
+    onSuccess: invalidate,
   })
 }
 

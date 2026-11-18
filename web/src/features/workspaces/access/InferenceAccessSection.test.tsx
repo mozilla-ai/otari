@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -49,6 +49,8 @@ function mockApi(
     catalogRefusal?: { status: number; detail: string }
     /** Whether the workspace requires zero data retention. */
     requireZeroRetention?: boolean
+    /** The data locations the workspace accepts; null for any. */
+    allowedDataLocations?: string[] | null
     /** A refusal for the workspace's provider policy. */
     policyRefusal?: { status: number; detail: string }
   } = {},
@@ -109,6 +111,7 @@ function mockApi(
       }
       return jsonResponse({
         require_zero_data_retention: opts.requireZeroRetention ?? false,
+        allowed_data_locations: opts.allowedDataLocations ?? null,
       })
     }
     if (url.includes("/hosted-providers")) {
@@ -818,5 +821,80 @@ describe("InferenceAccessSection: hosted providers", () => {
     expect(reset?.url).toBe(
       `${API_ROOT}/workspaces/${WORKSPACE}/hosted-providers/gemini`,
     )
+  })
+})
+
+describe("InferenceAccessSection: allowed data locations", () => {
+  it("limits the workspace to the locations picked", async () => {
+    const requests = mockApi({ requireZeroRetention: true })
+    const user = userEvent.setup()
+    renderSection()
+
+    expect(await screen.findByText(/^Any location\./)).toBeInTheDocument()
+    await user.click(
+      screen.getByRole("button", { name: "Change allowed data locations" }),
+    )
+    const dialog = await screen.findByRole("dialog")
+    await user.click(
+      within(dialog).getByRole("radio", { name: "Only these locations" }),
+    )
+    await user.click(
+      within(dialog).getByRole("combobox", { name: "Locations" }),
+    )
+    await user.click(
+      await screen.findByRole("option", { name: /European Union/ }),
+    )
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+    await waitFor(() =>
+      expect(requests.some((request) => request.method === "PUT")).toBe(true),
+    )
+    const put = requests.find((request) => request.method === "PUT")
+    expect(put?.url).toBe(`${API_ROOT}/workspaces/${WORKSPACE}/provider-policy`)
+    // The zero data retention requirement rides along unchanged.
+    expect(put?.body).toEqual({
+      require_zero_data_retention: true,
+      allowed_data_locations: ["EU"],
+    })
+  })
+
+  it("goes back to any location", async () => {
+    const requests = mockApi({ allowedDataLocations: ["EU", "US"] })
+    const user = userEvent.setup()
+    renderSection()
+
+    expect(
+      await screen.findByText(/^European Union, United States\./),
+    ).toBeInTheDocument()
+    await user.click(
+      screen.getByRole("button", { name: "Change allowed data locations" }),
+    )
+    const dialog = await screen.findByRole("dialog")
+    await user.click(
+      within(dialog).getByRole("radio", { name: "Any location" }),
+    )
+    await user.click(within(dialog).getByRole("button", { name: "Save" }))
+
+    await waitFor(() =>
+      expect(requests.some((request) => request.method === "PUT")).toBe(true),
+    )
+    expect(requests.find((request) => request.method === "PUT")?.body).toEqual({
+      require_zero_data_retention: false,
+      allowed_data_locations: null,
+    })
+  })
+
+  it("keeps the stored list when only zero data retention changes", async () => {
+    const requests = mockApi({ allowedDataLocations: ["EU"] })
+    const user = userEvent.setup()
+    renderSection()
+
+    await user.click(
+      await screen.findByRole("switch", {
+        name: "Require zero data retention",
+      }),
+    )
+    const put = requests.find((request) => request.method === "PUT")
+    expect(put?.body).toEqual({ require_zero_data_retention: true })
   })
 })

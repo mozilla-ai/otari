@@ -68,6 +68,26 @@ Each is an absolute `http` or `https` address with no username or password, and
 anything else is refused with 422. On an update, an omitted link is kept, and
 `null` or an empty string removes it.
 
+### Data location
+
+A hosted provider, and each of its [regions](#regions), can declare where its
+upstream keeps request data (`data_location`): a two-letter country code, `EU`
+or `GLOBAL` (an upstream that may process a request in any region). Otari
+cannot verify this; it records the declaration and shows it on the Hosted
+providers page. Leaving it unset declares nothing.
+
+It is not the same as [supported countries](configuration.md#supported-countries),
+which says where requests may come *from*. A workspace can list the data
+locations it accepts (**Allowed data locations** on its Providers tab, or
+`allowed_data_locations` on `/api/v1/workspaces/{workspace_id}/provider-policy`):
+
+- A region is used only when its location is on the list. `EU` admits each EU
+  member state as well as `EU` itself; `GLOBAL` admits only `GLOBAL`.
+- A region that declares no location never matches a list.
+- A hosted provider with no region left is refused with `403` and left out of
+  the workspace's model lists.
+- Leaving the list unset accepts every location.
+
 ### Hosted provider names
 
 A hosted provider is named after its provider by default. A name of its own,
@@ -89,6 +109,39 @@ The name is what pricing, budgets and usage are keyed on. A name may not
 contain `:` or `/`, may not be `otari` or `hosted`, and may not be another
 implementation's name. An `otari` provider therefore always takes a name of its
 own.
+
+### Regions
+
+A provider that serves from more than one region, often with a key and an
+endpoint for each, is one hosted provider with several **regions** rather than
+one hosted provider per region. A region gives only what differs from its
+provider: its own endpoint, key, SDK `client_args` (merged over the
+provider's, so a Bedrock region names its `region_name` alone), supported
+countries and data location. Everything else stays the provider's: the name,
+the roster and its switches, workspace access, zero data retention, and the
+policy links.
+
+A provider with no regions serves from its own connection, as before. Adding
+its first region keeps that connection as a region of its own, first in order,
+named after the provider's data location (or `primary`), so nothing that was
+served changes.
+
+- `tokenhub:model` is served by the first enabled region, in order, whose
+  supported countries admit the request and whose data location the
+  workspace accepts. There is no failover between regions: an upstream error
+  is returned as it is.
+- `tokenhub@sg:model` pins the region `sg` and is served by it alone.
+- Usage records the region that served a request (`tokenhub@sg`), and its
+  price is the region's own where one is set under `tokenhub@sg:model`, and
+  the provider's `tokenhub:model` price otherwise.
+- A region that points the provider's key at another endpoint is refused; give
+  it its own key, as repointing a provider's endpoint requires.
+- Removing every region returns the provider to its own connection.
+
+Regions are managed on the provider's page or through
+`/api/v1/hosted-providers/{provider}/regions`. A provider defined in
+`config.yml` has none, and model discovery and the health check use the first
+enabled region.
 
 ## Who manages hosted providers
 
@@ -428,6 +481,7 @@ hosted_providers:
 | `restricted_to_organization_id` | Serve one organization only, by its id. Checked at boot rather than at load, because the organizations are in the database: an id that names none is logged, and the provider then serves no organization. |
 | `models` | Model ids a refresh offers when the provider cannot list its own. |
 | `supported_countries` | The two-letter country codes whose requests it serves. Unset serves every country. See [Supported countries](configuration.md#supported-countries). |
+| `data_location` | Where the provider keeps request data: a two-letter country code, `EU` or `GLOBAL`. See [Data location](#data-location). |
 | `zero_data_retention` | `true` declares that the provider keeps no prompts or completions. Defaults to `false`. See [Zero data retention](#zero-data-retention). |
 | `terms_url`, `privacy_url` | The provider's terms of service and privacy policy, shown on the public Providers pages. See [Terms and privacy links](#terms-and-privacy-links). |
 
@@ -522,7 +576,8 @@ each provider's settings and models are on a page of its own.
 
 ### The list
 
-- Each row shows the provider, its **Status**, its **Models** ("12 of 18
+- Each row shows the provider, where it keeps data, how many regions it
+  serves from when it has several, its **Status**, its **Models** ("12 of 18
   serving", with a badge for vendors switched off and models without a price)
   and its **Serving** switch, which stops the provider without opening it.
   Select a provider's name to open its page.
@@ -565,11 +620,20 @@ each provider's settings and models are on a page of its own.
   [Zero data retention](#zero-data-retention).
 - Below the header, the provider's settings: **API key**, **Endpoint**,
   **Serves** (every organization, or the one it is kept to, which is set
-  through `/api/v1/hosted-providers`), **Countries** (two-letter codes, typed
+  through `/api/v1/hosted-providers`), **Requests from** (two-letter codes, typed
   in the dialogs or loaded from a JSON file, a list or one under
   `supported_countries`; blank serves every country, see
-  [Supported countries](configuration.md#supported-countries)), **Zero data
-  retention** and **Models not on its list**.
+  [Supported countries](configuration.md#supported-countries)), **Data hosted
+  in** (see [Data location](#data-location)), **Zero data retention** and
+  **Models not on its list**.
+- **Add region** opens a dialog for what a region changes: its name and id, its
+  endpoint, where it keeps data, the provider's key or one of its own, and
+  under **More** its `client_args` and supported countries. Adding the first
+  region also names the provider's current connection, which becomes the first
+  region. See [Regions](#regions).
+- Once the provider has regions, a **Regions** card lists them in the order
+  they are tried, each with where it keeps data, its key, its endpoint and its selector
+  (`tokenhub@sg`), a switch, and a menu to edit, move or remove it.
 - A `hosted_providers:` entry carries a `config.yml` badge, and its settings
   cannot be edited, switched or removed here, while its models can.
 
@@ -598,6 +662,11 @@ prices…** lists every such model with both prices, ticked, and the models
 whose price already matches the default, unticked; **Use default price for N**
 resets the ticked ones. See
 [Going back to the default price](#going-back-to-the-default-price).
+
+With two regions or more, the models table shows a price column per region
+beside the provider price. A region with no price of its own shows the
+provider price in muted text, which is what it is charged; selecting a cell
+sets the region's own price, and **Use provider price** removes it.
 
 **Refresh models** asks the provider again, and **Add model** offers a model
 it does not list.

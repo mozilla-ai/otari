@@ -1,6 +1,6 @@
 import { Link, useNavigate } from "@tanstack/react-router"
 import { type ReactNode, useState } from "react"
-import { FiActivity, FiEdit2, FiTrash2 } from "react-icons/fi"
+import { FiActivity, FiEdit2, FiPlus, FiTrash2 } from "react-icons/fi"
 
 import type { HostedProvider, ProviderHealth } from "@/client"
 import { Button } from "@/design-system/actions/Button"
@@ -28,8 +28,11 @@ import {
 import { useProviderHealth, useProviders } from "@/shared/api/providers"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
+import { dataLocationLabel } from "./dataLocations"
 import { EditHostedProviderForm } from "./EditHostedProviderForm"
 import { HostedProviderModelsPanel } from "./HostedProviderModelsPanel"
+import { RegionFormDialog } from "./RegionFormDialog"
+import { RegionsCard } from "./RegionsCard"
 import { formatCountries } from "./supportedCountries"
 
 // One hosted provider on a page of its own: how it is reached and who it
@@ -67,7 +70,7 @@ function ProviderSettings({ provider }: { provider: HostedProvider }) {
   return (
     <dl
       aria-label={`${provider.name} settings`}
-      className="grid grid-cols-2 border border-border sm:grid-cols-3 xl:grid-cols-6"
+      className="grid grid-cols-2 border border-border sm:grid-cols-3 xl:grid-cols-7"
     >
       <Setting label="API key">
         {!provider.decryptable ? (
@@ -97,7 +100,14 @@ function ProviderSettings({ provider }: { provider: HostedProvider }) {
           <span className="text-muted">Every organization</span>
         )}
       </Setting>
-      <Setting label="Countries">
+      <Setting label="Data hosted in">
+        {provider.data_location ? (
+          dataLocationLabel(provider.data_location)
+        ) : (
+          <span className="text-muted">Not declared</span>
+        )}
+      </Setting>
+      <Setting label="Requests from">
         {provider.supported_countries == null ? (
           <span className="text-muted">Every country</span>
         ) : provider.supported_countries.length === 0 ? (
@@ -130,6 +140,8 @@ export function HostedProviderPage({ name }: { name: string }) {
   const [isEditing, setIsEditing] = useState(false)
   const [editOpening, setEditOpening] = useState(0)
   const [isRemoving, setIsRemoving] = useState(false)
+  const [isAddingRegion, setIsAddingRegion] = useState(false)
+  const [regionOpening, setRegionOpening] = useState(0)
 
   if (access.isLoading || (isGranted && providers.isPending)) {
     return <PageLoading label="Loading hosted provider…" />
@@ -249,6 +261,17 @@ export function HostedProviderPage({ name }: { name: string }) {
                     Edit
                   </Button>
                   <Button
+                    className="min-h-11 md:min-h-9"
+                    aria-label={`Add a region to ${provider.name}`}
+                    onPress={() => {
+                      setRegionOpening((n) => n + 1)
+                      setIsAddingRegion(true)
+                    }}
+                  >
+                    <FiPlus aria-hidden className="size-4" />
+                    Add region
+                  </Button>
+                  <Button
                     variant="danger"
                     className="min-h-11 md:min-h-9"
                     aria-label={`Remove ${provider.name}`}
@@ -295,8 +318,22 @@ export function HostedProviderPage({ name }: { name: string }) {
         <ProviderSettings provider={provider} />
       </div>
 
+      {/* Shown from one region on, since a lone region left by a removal is
+          still where the provider serves from and has to stay editable. */}
+      {(provider.regions?.length ?? 0) > 0 ? (
+        <RegionsCard provider={provider} isReadOnly={isConfig} />
+      ) : null}
+
       <HostedProviderModelsPanel key={provider.name} provider={provider} />
 
+      {isConfig ? null : (
+        <RegionFormDialog
+          key={`${provider.name}:region:${regionOpening}`}
+          provider={provider}
+          isOpen={isAddingRegion}
+          onClose={() => setIsAddingRegion(false)}
+        />
+      )}
       {isConfig ? null : (
         <EditHostedProviderForm
           key={`${provider.name}:${editOpening}`}

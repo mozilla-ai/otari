@@ -1748,7 +1748,7 @@ async def _serve_from_hosted_credential(
     if credential is None or not lookup.accepts(credential.response_provider, resolved.instance):
         raise await _provider_not_configured(ctx, resolved, missing, adapter=adapter)
     try:
-        ensure_hosted_country(ctx.country_gate, credential.supported_countries)
+        credential = ensure_hosted_country(ctx.country_gate, credential)
     except CountryNotServedError as exc:
         detail = exc.gate.refusal_detail(resolved.alias or f"{resolved.instance}:{resolved.model}")
         await release_reservation(ctx)
@@ -3103,10 +3103,12 @@ async def resolve_request_context(
                 provider=gate_instance,
                 model=gate_model,
             )
-            if hosted is None or hosted.api_key is None:
+            if hosted is None:
                 return None
             # Before an attachment is uploaded on it, as dispatch would refuse it after.
-            ensure_hosted_country(country_gate, hosted.supported_countries)
+            hosted = ensure_hosted_country(country_gate, hosted)
+            if hosted.api_key is None:
+                return None
             return ResolvedCredential(
                 api_key=hosted.api_key, api_base=hosted.api_base, client_args=dict(hosted.client_args or {})
             )

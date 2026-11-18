@@ -364,6 +364,23 @@ class HostedProviderNotFoundError(TenancyNotFoundError):
         super().__init__(f"Hosted provider '{provider}' not found")
 
 
+class HostedProviderRegionNotFoundError(TenancyNotFoundError):
+    def __init__(self, provider: str, slug: str) -> None:
+        super().__init__(f"Hosted provider '{provider}' has no region '{slug}'")
+
+
+class HostedProviderRegionAlreadyExistsError(TenancyConflictError):
+    def __init__(self, provider: str, slug: str) -> None:
+        super().__init__(f"Hosted provider '{provider}' already has a region '{slug}'")
+
+
+class HostedProviderInvalidRegionSlugError(TenancyValidationError):
+    """A slug a region cannot take, because a selector could not pin it."""
+
+    def __init__(self, slug: str, problem: str) -> None:
+        super().__init__(f"The region id '{slug}' {problem}")
+
+
 class DeploymentProviderNotFoundError(TenancyNotFoundError):
     def __init__(self, instance: str) -> None:
         super().__init__(f"Deployment provider '{instance}' not found")
@@ -435,7 +452,10 @@ __all__ = [
     "HostedProviderAlreadyExistsError",
     "HostedProviderApiBaseMaskedError",
     "HostedProviderApiKeyMissingError",
+    "HostedProviderInvalidRegionSlugError",
     "HostedProviderNotFoundError",
+    "HostedProviderRegionAlreadyExistsError",
+    "HostedProviderRegionNotFoundError",
     "HostedProviderClientArgsUnreadableError",
     "HostedProviderInvalidNameError",
     "HostedProviderKeyRequiredError",

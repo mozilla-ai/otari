@@ -1,4 +1,4 @@
-// The "Supported countries" field holds ISO 3166-1 alpha-2 codes as text
+// The "Available to requests from" field holds ISO 3166-1 alpha-2 codes as text
 // ("US, DE"), and blank means every country, as null does on the wire. The
 // server checks the codes too; this only says so before the save.
 

@@ -31,6 +31,57 @@ def country_codes(values: Iterable[object]) -> list[str]:
     return codes
 
 
+# The zones a data location may name beside a country: the European Union, and
+# anywhere at all (an upstream that may process a request in any region).
+DATA_LOCATION_ZONES: frozenset[str] = frozenset({"EU", "GLOBAL"})
+
+
+def data_location(value: object) -> str:
+    """``value`` as a declared data location: an ISO 3166-1 alpha-2 code, ``EU`` or ``GLOBAL``.
+
+    Raises:
+        ValueError: ``value`` is neither a country code nor a zone.
+    """
+    code = str(value).strip().upper()
+    if code in DATA_LOCATION_ZONES or code in COUNTRY_CODES:
+        return code
+    msg = f"{value!r} is not a data location: give an ISO 3166-1 alpha-2 country code, EU or GLOBAL"
+    raise ValueError(msg)
+
+
+# The member states of the European Union, which the ``EU`` zone stands for.
+EU_COUNTRIES: frozenset[str] = frozenset(
+    "AT BE BG HR CY CZ DK EE FI FR DE GR HU IE IT LV LT LU MT NL PL PT RO SK SI ES SE".split()
+)
+
+
+def data_location_admitted(location: str | None, allowed: Iterable[str]) -> bool:
+    """Whether data kept at ``location`` is somewhere ``allowed`` names.
+
+    An undeclared location is admitted nowhere. ``EU`` in ``allowed`` admits
+    each member state as well as the zone itself; ``GLOBAL`` admits only an
+    upstream declared ``GLOBAL``, never a country.
+    """
+    if location is None:
+        return False
+    allowed = set(allowed)
+    return location in allowed or ("EU" in allowed and location in EU_COUNTRIES)
+
+
+def data_locations(values: Iterable[object]) -> list[str]:
+    """``values`` as data locations (see :func:`data_location`), in order and without repeats.
+
+    Raises:
+        ValueError: a value is no data location.
+    """
+    locations: list[str] = []
+    for value in values:
+        location = data_location(value)
+        if location not in locations:
+            locations.append(location)
+    return locations
+
+
 # Which models no open-weight plan covers; see ``is_closed_model`` in the inference domain.
 DEFAULT_CLOSED_MODEL_PROVIDERS: tuple[str, ...] = (
     "anthropic",

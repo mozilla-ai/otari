@@ -10,7 +10,7 @@ from typing import NamedTuple
 from sqlalchemy import ColumnElement, case, distinct, func, inspect, not_, or_, select, true, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig, split_region
 from gateway.core.metered_pricing import priced_per_request
 from gateway.log_config import logger
 from gateway.models.pricing import (
@@ -442,9 +442,19 @@ def pricing_key_forms(model_key: str) -> list[str]:
     ``provider/model``. Settlement, an organization override and the catalog all
     offer the same forms in the same order, so a rate one of them finds cannot be
     a rate another misses.
+
+    A key naming one region of a hosted provider (``tokenhub@sg:model``) also
+    offers its provider's forms after its own, so a region with no rate of its
+    own settles at the provider's.
     """
     instance, separator, model = model_key.partition(":")
-    return [model_key, f"{instance}/{model}"] if separator else [model_key]
+    if not separator:
+        return [model_key]
+    forms = [model_key, f"{instance}/{model}"]
+    base, region = split_region(instance)
+    if region is not None:
+        forms += [f"{base}:{model}", f"{base}/{model}"]
+    return forms
 
 
 def legacy_tool_price_keys(config: GatewayConfig) -> set[str]:

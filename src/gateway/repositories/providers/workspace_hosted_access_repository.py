@@ -98,7 +98,22 @@ class WorkspaceProviderPolicyRepository(BaseRepository[WorkspaceProviderPolicy, 
         )
         return frozenset(result.scalars().all())
 
-    async def put(self, workspace_id: uuid.UUID, *, require_zero_data_retention: bool) -> WorkspaceProviderPolicy:
+    async def allowed_data_locations(self) -> dict[uuid.UUID, frozenset[str]]:
+        """Every workspace that accepts only some data locations, with those locations, for the dispatch-path cache."""
+        result = await self.db.execute(
+            select(WorkspaceProviderPolicy.workspace_id, WorkspaceProviderPolicy.allowed_data_locations).where(
+                WorkspaceProviderPolicy.allowed_data_locations.is_not(None)
+            )
+        )
+        return {workspace_id: frozenset(locations) for workspace_id, locations in result.all() if locations is not None}
+
+    async def put(
+        self,
+        workspace_id: uuid.UUID,
+        *,
+        require_zero_data_retention: bool,
+        allowed_data_locations: list[str] | None = None,
+    ) -> WorkspaceProviderPolicy:
         """Stage the workspace's policy, creating its row when it has none.
 
         Two writers may both find no row; the primary key refuses the second,
@@ -115,6 +130,7 @@ class WorkspaceProviderPolicyRepository(BaseRepository[WorkspaceProviderPolicy, 
                 if policy is None:
                     raise  # not the race: nothing is there to have collided with
         policy.require_zero_data_retention = require_zero_data_retention
+        policy.allowed_data_locations = allowed_data_locations
         await self.db.flush()
         await self.db.refresh(policy)
         return policy

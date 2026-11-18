@@ -24,7 +24,7 @@ import {
   useSwitchHostedVendorModels,
   useUpdateHostedModel,
 } from "@/shared/api/hostedProviders"
-
+import { orderedRegions } from "./dataLocations"
 import { HostedModelForm } from "./HostedModelForm"
 import { HostedModelsTable } from "./HostedModelsTable"
 import { HostedVendorRow, type VendorBulkAction } from "./HostedVendorRow"
@@ -132,6 +132,14 @@ export function HostedProviderModelsPanel({
   const [isAdding, setIsAdding] = useState(false)
   const [addOpenCount, setAddOpenCount] = useState(0)
   const [editingId, setEditingId] = useState("")
+  // The region whose price of the edited model is open, or empty for the provider's.
+  const [editingRegionSlug, setEditingRegionSlug] = useState("")
+  // A column per region only where there is a choice of region to price.
+  const regions = orderedRegions(provider)
+  const priceRegions = regions.length >= 2 ? regions : []
+  const editingRegion = regions.find(
+    (region) => region.slug === editingRegionSlug,
+  )
   // Counts the sync dialog's openings, so each opening asks for a fresh preview.
   const [syncOpening, setSyncOpening] = useState(0)
   const [isSyncOpen, setIsSyncOpen] = useState(false)
@@ -209,8 +217,15 @@ export function HostedProviderModelsPanel({
         clearOutcome()
         update.mutate({ modelId: row.id, body: { enabled } })
       }}
+      regions={priceRegions}
       onEdit={(row) => {
         setIsAdding(false)
+        setEditingRegionSlug("")
+        setEditingId(row.id)
+      }}
+      onEditRegionPrice={(row, region) => {
+        setIsAdding(false)
+        setEditingRegionSlug(region.slug)
         setEditingId(row.id)
       }}
       onUseDefault={(row) => {
@@ -422,9 +437,10 @@ export function HostedProviderModelsPanel({
         // Remounted per row, so a second row's editor cannot open with the
         // first one's draft.
         <HostedModelForm
-          key={editing.id}
+          key={`${editing.id}:${editingRegion?.slug ?? ""}`}
           provider={provider}
           editing={editing}
+          region={editingRegion}
           isOpen
           onClose={() => setEditingId("")}
           onSaved={clearOutcome}

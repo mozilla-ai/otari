@@ -25,6 +25,7 @@ from collections.abc import Collection, Mapping, Sequence
 
 from any_llm.types.model import Model
 
+from gateway.core.config import region_instance
 from gateway.exceptions.providers_exceptions import HostedModelAlreadyOfferedError
 from gateway.models.pricing import CONFIG_ORIGIN, LISTED_ORIGIN, SEED_ORIGIN, HostedPriceSource, ModelPricing
 from gateway.models.providers import DISABLED_BY_OPERATOR, DISABLED_UNAVAILABLE, DISABLED_UNPRICED, HostedProviderModel
@@ -317,6 +318,27 @@ class HostedOffers:
         missing = [model for model in keys.values() if model not in rates]
         for model, default in (await self.defaults_for(provider, missing, implementation=implementation)).items():
             rates[model] = HostedModelRates.from_version(default, PRICE_SOURCE_DEFAULT)
+        return rates
+
+    async def region_rates(
+        self, provider: str, regions: Sequence[str], rows: Sequence[HostedProviderModel]
+    ) -> dict[str, dict[str, HostedModelRates]]:
+        """The rates each region sets of its own, keyed by model name and then by region slug.
+
+        Only a version stored under the region's key (``tokenhub@sg:model``)
+        counts: a region with none settles at the provider's rate, so it is absent.
+        """
+        if not rows or not regions:
+            return {}
+        now = normalize_effective_at(None)
+        keys = {_key(region_instance(provider, slug), row.model): (row.model, slug) for slug in regions for row in rows}
+        versions = await self.pricing.current_versions(keys, now)
+        rates: dict[str, dict[str, HostedModelRates]] = {}
+        for key, version in versions.items():
+            model, slug = keys[key]
+            rates.setdefault(model, {})[slug] = HostedModelRates.from_version(
+                version, _SOURCES.get(version.origin, "deployment")
+            )
         return rates
 
     async def reset_to_defaults(self, provider: str, defaults: Mapping[str, ModelPricing]) -> None:

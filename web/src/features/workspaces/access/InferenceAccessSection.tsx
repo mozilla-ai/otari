@@ -5,6 +5,7 @@ import type {
   WorkspaceHostedProvider,
   WorkspaceProviderKeyOverride,
 } from "@/client"
+import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { SearchField } from "@/design-system/forms/SearchField"
 import { Toggle } from "@/design-system/forms/Toggle"
@@ -16,6 +17,10 @@ import {
   AccessRow,
   modelsScopeLabel,
 } from "@/features/workspaces/access/AccessRow"
+import {
+  AllowedDataLocationsDialog,
+  describeAllowedDataLocations,
+} from "@/features/workspaces/access/AllowedDataLocationsDialog"
 import { HostedModelsDialog } from "@/features/workspaces/access/HostedModelsDialog"
 import { KeyModelsDialog } from "@/features/workspaces/access/KeyModelsDialog"
 import {
@@ -114,6 +119,9 @@ export function InferenceAccessSection({
   const setPolicy = useSetWorkspaceProviderPolicy()
   const requiresZeroRetention =
     policy.data?.require_zero_data_retention ?? false
+  const allowedLocations = policy.data?.allowed_data_locations ?? null
+  const [locationsOpening, setLocationsOpening] = useState(0)
+  const [isEditingLocations, setIsEditingLocations] = useState(false)
   const [open, setOpen] = useState<OpenScope>()
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   const [query, setQuery] = useState("")
@@ -312,7 +320,45 @@ export function InferenceAccessSection({
             />
           }
         />
+        <SettingRow
+          label="Allowed data locations"
+          help={`${describeAllowedDataLocations(allowedLocations)}. Hosted providers serve this workspace only from a region that declares one of these locations.`}
+          control={
+            <Button
+              size="sm"
+              className="min-h-11 md:min-h-9"
+              aria-label="Change allowed data locations"
+              isDisabled={!canManage || !policy.data || setPolicy.isPending}
+              onPress={() => {
+                setLocationsOpening((n) => n + 1)
+                setIsEditingLocations(true)
+              }}
+            >
+              Change
+            </Button>
+          }
+        />
       </SettingsGroup>
+      {policy.data ? (
+        <AllowedDataLocationsDialog
+          key={`${workspaceId}:${locationsOpening}`}
+          allowed={allowedLocations}
+          isOpen={isEditingLocations}
+          onClose={() => setIsEditingLocations(false)}
+          isPending={setPolicy.isPending}
+          error={isEditingLocations ? setPolicy.error : null}
+          onSave={(allowed) =>
+            setPolicy.mutate(
+              {
+                workspaceId,
+                requireZeroDataRetention: requiresZeroRetention,
+                allowedDataLocations: allowed,
+              },
+              { onSuccess: () => setIsEditingLocations(false) },
+            )
+          }
+        />
+      ) : null}
       {isLoading ? (
         <span className="text-caption">Loading…</span>
       ) : !policy.data ? (

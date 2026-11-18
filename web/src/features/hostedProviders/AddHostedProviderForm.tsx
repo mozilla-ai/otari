@@ -31,6 +31,7 @@ import {
 } from "@/shared/api/hostedProviders"
 import { useProviderDetail } from "@/shared/api/providers"
 
+import { DataLocationField } from "./DataLocationField"
 import { PolicyUrlFields } from "./PolicyUrlFields"
 import { policyUrlError, policyUrlValue } from "./policyUrls"
 import { ServesUnlistedModelsField } from "./ServesUnlistedModelsField"
@@ -59,6 +60,7 @@ interface ProviderDraft {
   clientArgs: string
   servesUnlistedModels: boolean
   supportedCountries: string
+  dataLocation: string
   zeroDataRetention: boolean
   termsUrl: string
   privacyUrl: string
@@ -73,6 +75,7 @@ const EMPTY_DRAFT: ProviderDraft = {
   clientArgs: "",
   servesUnlistedModels: false,
   supportedCountries: "",
+  dataLocation: "",
   zeroDataRetention: false,
   termsUrl: "",
   privacyUrl: "",
@@ -154,6 +157,7 @@ export function AddHostedProviderForm({
         ...(countries.value === null
           ? {}
           : { supported_countries: countries.value }),
+        ...(draft.dataLocation ? { data_location: draft.dataLocation } : {}),
         // Left out when blank, which the API stores as no link.
         ...(policyUrlValue(draft.termsUrl) === null
           ? {}
@@ -256,6 +260,10 @@ export function AddHostedProviderForm({
         onChange={(zeroDataRetention) =>
           setDraft({ ...draft, zeroDataRetention })
         }
+      />
+      <DataLocationField
+        value={draft.dataLocation}
+        onChange={(dataLocation) => setDraft({ ...draft, dataLocation })}
       />
       <SupportedCountriesField
         value={draft.supportedCountries}

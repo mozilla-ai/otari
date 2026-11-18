@@ -20,7 +20,7 @@ from gateway.exceptions.providers_exceptions import (
 )
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.log_config import logger
-from gateway.models.providers import HostedProvider
+from gateway.models.providers import HostedProvider, HostedProviderRegion
 from gateway.models.secret_fields import REDACTED_VALUE
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
@@ -51,6 +51,10 @@ class ResolvedHostedProvider:
     """The any-llm implementation serving it, for a credential read back from a source."""
     supported_countries: tuple[str, ...] | None = None
     """The countries whose requests it serves, or None for every country."""
+    region: str | None = None
+    """The slug of the region it serves from, or None for a provider with no regions."""
+    data_location: str | None = None
+    """Where the upstream keeps request data (a country code, ``EU`` or ``GLOBAL``), or None when undeclared."""
 
 
 def last4(api_key: str) -> str | None:
@@ -222,7 +226,55 @@ def credential_of(row: HostedProvider, *, quiet: bool = False) -> ResolvedHosted
         name=row.name,
         implementation=row.provider,
         supported_countries=tuple(row.supported_countries) if row.supported_countries is not None else None,
+        data_location=row.data_location,
     )
+
+
+def region_credential_of(
+    provider: ResolvedHostedProvider, region: HostedProviderRegion, *, quiet: bool = False
+) -> ResolvedHostedProvider | None:
+    """``provider``'s connection as ``region`` changes it, or None when no configured key reads the region's.
+
+    Every value the region leaves unset is the provider's, and the region's SDK
+    extras are merged over the provider's, so a Bedrock region names only its
+    ``region_name``.
+    """
+    try:
+        api_key = None if region.encrypted_api_key is None else decrypt_secret(region.encrypted_api_key)
+        client_args = _decrypt_client_args(region.encrypted_client_args)
+    except (SecretDecryptionError, SecretBoxUnavailableError):
+        if not quiet:
+            logger.error(
+                "Region %r of hosted provider %r could not be decrypted; treating it as unserved. "
+                "Was OTARI_SECRET_KEY rotated? The credential must be re-entered.",
+                region.slug,
+                provider.name,
+            )
+        return None
+    merged = client_args if provider.client_args is None else {**provider.client_args, **(client_args or {})}
+    return ResolvedHostedProvider(
+        api_key=api_key if region.encrypted_api_key is not None else provider.api_key,
+        api_base=region.api_base if region.api_base is not None else provider.api_base,
+        client_args=merged,
+        name=provider.name,
+        implementation=provider.implementation,
+        supported_countries=tuple(region.supported_countries)
+        if region.supported_countries is not None
+        else provider.supported_countries,
+        region=region.slug,
+        data_location=region.data_location if region.data_location is not None else provider.data_location,
+    )
+
+
+def region_decryptable(region: HostedProviderRegion) -> bool:
+    """Whether a configured key reads the region's own key and extras; true for a region holding neither."""
+    try:
+        if region.encrypted_api_key is not None:
+            decrypt_secret(region.encrypted_api_key)
+        _decrypt_client_args(region.encrypted_client_args)
+    except (SecretDecryptionError, SecretBoxUnavailableError):
+        return False
+    return True
 
 
 def reencrypted(ciphertext: str | None) -> str | None:
@@ -235,7 +287,7 @@ def reencrypted(ciphertext: str | None) -> str | None:
     return None if ciphertext is None else encrypt_secret(decrypt_secret(ciphertext))
 
 
-def client_args_of(row: HostedProvider) -> dict[str, Any] | None:
+def client_args_of(row: HostedProvider | HostedProviderRegion) -> dict[str, Any] | None:
     """The stored SDK client extras, or None when there are none or no configured key reads them."""
     try:
         return _decrypt_client_args(row.encrypted_client_args)

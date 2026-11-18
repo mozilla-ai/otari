@@ -296,9 +296,9 @@ def hosted_provider_name_problem(name: str, provider: str) -> str | None:
     A reserved name never may, even an implementation's own (``otari``). The
     implementation's own name otherwise always may. Any other is the prefix of a
     ``name:model`` selector, so it cannot hold the separators a selector splits
-    on, and it follows the instance-name rules. Another implementation's name
-    is refused, because a request for ``anthropic:...`` must not reach an
-    OpenAI endpoint.
+    on (``@`` pins a region, ``name@region:model``), and it follows the
+    instance-name rules. Another implementation's name is refused, because a
+    request for ``anthropic:...`` must not reach an OpenAI endpoint.
     """
     if name in RESERVED_PROVIDER_INSTANCE_NAMES:
         return "is reserved; give the provider a name of its own"
@@ -308,11 +308,38 @@ def hosted_provider_name_problem(name: str, provider: str) -> str | None:
         return "must not be blank or carry surrounding spaces"
     if len(name) > 64:
         return "must be at most 64 characters"
-    if ":" in name or "/" in name:
-        return "must not contain ':' or '/'"
+    if ":" in name or "/" in name or REGION_SEPARATOR in name:
+        return "must not contain ':', '/' or '@'"
     if name in {member.value for member in LLMProvider} or name in PROVIDER_TYPE_ALIASES:
         return "names another provider"
     return None
+
+
+# Joins a hosted provider's name and one of its regions in a selector: ``tokenhub@sg:model``.
+REGION_SEPARATOR = "@"
+_REGION_SLUG = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
+
+
+def region_slug_problem(slug: str) -> str | None:
+    """Why ``slug`` cannot name a hosted provider region, or None when it can.
+
+    It pins the region in a selector, so it keeps to lower-case letters, digits
+    and hyphens, starting with a letter or digit, at most 32 characters.
+    """
+    if _REGION_SLUG.fullmatch(slug) is None:
+        return "must be 1 to 32 lower-case letters, digits or hyphens, starting with a letter or digit"
+    return None
+
+
+def region_instance(name: str, region: str | None) -> str:
+    """The instance name a request served from ``region`` of the hosted provider ``name`` settles under."""
+    return name if region is None else f"{name}{REGION_SEPARATOR}{region}"
+
+
+def split_region(name: str) -> tuple[str, str | None]:
+    """A hosted provider name, and the region slug it pins or None: ``tokenhub@sg`` is ``("tokenhub", "sg")``."""
+    base, separator, slug = name.partition(REGION_SEPARATOR)
+    return (base, slug) if separator and slug else (name, None)
 
 
 def hosted_key_optional(provider_type: str, api_base: str | None) -> bool:

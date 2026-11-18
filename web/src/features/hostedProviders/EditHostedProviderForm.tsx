@@ -28,8 +28,8 @@ import {
   useTestHostedProvider,
   useUpdateHostedProvider,
 } from "@/shared/api/hostedProviders"
+import { DataLocationField } from "./DataLocationField"
 import { movesToAnotherOrigin } from "./endpointOrigin"
-
 import { PolicyUrlFields } from "./PolicyUrlFields"
 import { policyUrlError, policyUrlValue } from "./policyUrls"
 import { ServesUnlistedModelsField } from "./ServesUnlistedModelsField"
@@ -55,6 +55,7 @@ interface EditDraft {
   redacted: string[]
   servesUnlistedModels: boolean
   supportedCountries: string
+  dataLocation: string
   zeroDataRetention: boolean
   termsUrl: string
   privacyUrl: string
@@ -73,6 +74,7 @@ function draftFrom(provider: HostedProvider): EditDraft {
     redacted,
     servesUnlistedModels: provider.serves_unlisted_models,
     supportedCountries: formatCountries(provider.supported_countries),
+    dataLocation: provider.data_location ?? "",
     zeroDataRetention: provider.zero_data_retention,
     termsUrl: provider.terms_url ?? "",
     privacyUrl: provider.privacy_url ?? "",
@@ -168,6 +170,10 @@ export function EditHostedProviderForm({
             ? {}
             : { zero_data_retention: draft.zeroDataRetention }),
           ...(countriesChanged ? { supported_countries: countries.value } : {}),
+          // Sent only when changed; cleared is null, undeclared.
+          ...(draft.dataLocation === (provider.data_location ?? "")
+            ? {}
+            : { data_location: draft.dataLocation || null }),
           // Sent only when changed; blank clears the link.
           ...(policyUrlValue(draft.termsUrl) === (provider.terms_url ?? null)
             ? {}
@@ -234,6 +240,10 @@ export function EditHostedProviderForm({
         onChange={(zeroDataRetention) =>
           setDraft({ ...draft, zeroDataRetention })
         }
+      />
+      <DataLocationField
+        value={draft.dataLocation}
+        onChange={(dataLocation) => setDraft({ ...draft, dataLocation })}
       />
       <SupportedCountriesField
         value={draft.supportedCountries}

@@ -9,6 +9,7 @@ import type {
   CreateWorkspaceRequest,
   SetWorkspaceHostedProviderRequest,
   SetWorkspaceProviderKeyOverrideRequest,
+  SetWorkspaceProviderPolicyRequest,
   UpdateWorkspaceBudgetDefaultRequest,
   UpdateWorkspaceRequest,
   Workspace,
@@ -530,16 +531,22 @@ export function useWorkspaceProviderPolicy(workspaceId: string | null) {
   })
 }
 
-/** Require zero data retention of every provider serving the workspace, or stop requiring it. */
+/**
+ * Set what the workspace requires of every provider serving it: zero data
+ * retention, and the data locations a hosted region must declare.
+ * `allowedDataLocations` left out keeps the stored list; null accepts any.
+ */
 export function useSetWorkspaceProviderPolicy() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({
       workspaceId,
       requireZeroDataRetention,
+      allowedDataLocations,
     }: {
       workspaceId: string
       requireZeroDataRetention: boolean
+      allowedDataLocations?: string[] | null
     }) =>
       apiFetch<WorkspaceProviderPolicy>(
         `/workspaces/${encodeURIComponent(workspaceId)}/provider-policy`,
@@ -547,7 +554,10 @@ export function useSetWorkspaceProviderPolicy() {
           method: "PUT",
           body: JSON.stringify({
             require_zero_data_retention: requireZeroDataRetention,
-          }),
+            ...(allowedDataLocations === undefined
+              ? {}
+              : { allowed_data_locations: allowedDataLocations }),
+          } satisfies SetWorkspaceProviderPolicyRequest),
         },
       ),
     onSuccess: (_data, { workspaceId }) => {

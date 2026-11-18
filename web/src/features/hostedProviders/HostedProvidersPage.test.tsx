@@ -8,6 +8,7 @@ import {
   countriesFileInput,
   EMPTY_SWEEP,
   hostedProvider,
+  hostedRegion,
   hostedRequests,
   jsonResponse,
   mockApi,
@@ -55,6 +56,40 @@ describe("HostedProvidersPage", () => {
     expect(within(row("mistral")).getByText("None yet")).toBeInTheDocument()
     // The key, endpoint and scope are the provider page's.
     expect(within(table).queryByText("••••abcd")).toBeNull()
+  })
+
+  it("says where each provider keeps data, and how many regions it serves from", async () => {
+    mockApi({
+      providers: [
+        hostedProvider({
+          data_location: "CN",
+          regions: [
+            hostedRegion({ slug: "cn", position: 0 }),
+            hostedRegion({ slug: "sg", position: 1, data_location: "SG" }),
+            hostedRegion({ slug: "us", position: 2, data_location: "US" }),
+          ],
+        }),
+        hostedProvider({
+          id: "22222222-2222-4222-8222-222222222222",
+          provider: "mistral",
+          data_location: "EU",
+        }),
+      ],
+    })
+    await renderPage()
+
+    const table = await screen.findByRole("grid", { name: "Hosted providers" })
+    const row = (name: string) =>
+      within(table).getByRole("rowheader", { name: new RegExp(`^${name}`) })
+    await within(table).findByText("3 regions")
+    expect(within(row("openai")).getByText("3 regions")).toBeInTheDocument()
+    expect(
+      within(row("openai")).getByText("Data: China, Singapore, United States"),
+    ).toBeInTheDocument()
+    expect(
+      within(row("mistral")).getByText("Data: European Union"),
+    ).toBeInTheDocument()
+    expect(within(row("mistral")).queryByText(/regions$/)).toBeNull()
   })
 
   it("refuses a caller who does not operate the deployment without asking for the list", async () => {
@@ -277,7 +312,9 @@ describe("HostedProvidersPage", () => {
     await user.click(await screen.findByRole("option", { name: "Anthropic" }))
     await user.type(within(dialog).getByLabelText("API key"), "sk-ant-secret")
     await user.type(
-      within(dialog).getByRole("textbox", { name: "Supported countries" }),
+      within(dialog).getByRole("textbox", {
+        name: "Available to requests from",
+      }),
       "us, de",
     )
     await user.click(
@@ -313,7 +350,9 @@ describe("HostedProvidersPage", () => {
 
     await waitFor(() =>
       expect(
-        within(dialog).getByRole("textbox", { name: "Supported countries" }),
+        within(dialog).getByRole("textbox", {
+          name: "Available to requests from",
+        }),
       ).toHaveValue("US, DE, GB"),
     )
     await user.click(
@@ -347,7 +386,9 @@ describe("HostedProvidersPage", () => {
       ),
     ).toBeInTheDocument()
     expect(
-      within(dialog).getByRole("textbox", { name: "Supported countries" }),
+      within(dialog).getByRole("textbox", {
+        name: "Available to requests from",
+      }),
     ).toHaveValue("")
   })
 
@@ -364,7 +405,9 @@ describe("HostedProvidersPage", () => {
     await user.click(await screen.findByRole("option", { name: "Anthropic" }))
     await user.type(within(dialog).getByLabelText("API key"), "sk-ant-secret")
     await user.type(
-      within(dialog).getByRole("textbox", { name: "Supported countries" }),
+      within(dialog).getByRole("textbox", {
+        name: "Available to requests from",
+      }),
       "US, USA",
     )
 

@@ -17,11 +17,11 @@ refresh.
 
 import asyncio
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import GatewayConfig, region_instance, split_region
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.log_config import logger
-from gateway.repositories.providers import HostedProviderRepository
+from gateway.repositories.providers import HostedProviderRegionRepository, HostedProviderRepository
 
 HOSTED_NAME_INDEX_TTL_SECONDS = 30.0
 
@@ -29,6 +29,10 @@ HOSTED_NAME_INDEX_TTL_SECONDS = 30.0
 _names: dict[str, str] = {}
 # Every hosted provider name, own or not, whose upstream is declared to keep no data.
 _zero_retention: frozenset[str] = frozenset()
+# Where each hosted provider name keeps request data: for a provider, the
+# declared location of each region it may serve from (None where undeclared);
+# for a name pinning one region (``tokenhub@sg``), that region's alone.
+_locations: dict[str, tuple[str | None, ...]] = {}
 # Writes this worker made, numbered, so a refresh whose read began before one
 # replays it rather than overwriting it with an older snapshot. name ->
 # (write number, implementation, or None for a name removed).
@@ -42,8 +46,13 @@ def hosted_implementation(name: str) -> str | None:
 
 
 def hosted_zero_data_retention(name: str) -> bool:
-    """Whether the hosted provider ``name`` is declared zero data retention."""
-    return name in _zero_retention
+    """Whether the hosted provider ``name`` is declared zero data retention; a region shares its provider's."""
+    return split_region(name)[0] in _zero_retention
+
+
+def hosted_data_locations(name: str) -> tuple[str | None, ...]:
+    """Where the hosted provider (or region) ``name`` may keep request data; empty when it is unknown here."""
+    return _locations.get(name, ())
 
 
 def remember_hosted_zero_data_retention(name: str, declared: bool) -> None:
@@ -81,19 +90,32 @@ async def refresh_hosted_name_index(uow: UnitOfWork, config: GatewayConfig) -> N
     this worker made while the read was in flight is newer than what the read
     saw, so it is replayed over the snapshot rather than lost.
     """
-    global _names, _recent_writes, _zero_retention  # noqa: PLW0603
+    global _names, _recent_writes, _zero_retention, _locations  # noqa: PLW0603
 
     read_from = _write_count
     async with uow:
         rows = await HostedProviderRepository(uow).list_all()
-    names = {name: entry.provider for name, entry in config.hosted_provider_entries().items()}
+        regions = await HostedProviderRegionRepository(uow).list_for_providers([row.id for row in rows])
+    entries = config.hosted_provider_entries()
+    names = {name: entry.provider for name, entry in entries.items()}
     names.update({row.name: row.provider for row in rows})
-    declared = {name for name, entry in config.hosted_provider_entries().items() if entry.zero_data_retention}
+    declared = {name for name, entry in entries.items() if entry.zero_data_retention}
+    locations: dict[str, tuple[str | None, ...]] = {name: (entry.data_location,) for name, entry in entries.items()}
     for row in rows:
         if row.zero_data_retention:
             declared.add(row.name)
         else:
             declared.discard(row.name)
+        own = regions.get(row.id, [])
+        locations[row.name] = (
+            tuple(region.data_location or row.data_location for region in own if region.enabled)
+            if own
+            else (row.data_location,)
+        )
+        for region in own:
+            # A region name is never its implementation's, so it always needs an entry.
+            names[region_instance(row.name, region.slug)] = row.provider
+            locations[region_instance(row.name, region.slug)] = (region.data_location or row.data_location,)
     fresh = {name: implementation for name, implementation in names.items() if name != implementation}
     newer = {name: write for name, write in _recent_writes.items() if write[0] > read_from}
     for name, (_, implementation) in newer.items():
@@ -101,14 +123,14 @@ async def refresh_hosted_name_index(uow: UnitOfWork, config: GatewayConfig) -> N
             fresh.pop(name, None)
         else:
             fresh[name] = implementation
-    _names, _recent_writes, _zero_retention = fresh, newer, frozenset(declared)
+    _names, _recent_writes, _zero_retention, _locations = fresh, newer, frozenset(declared), locations
 
 
 def reset_hosted_name_index() -> None:
     """Drop the map so the next load starts clean (startup and tests)."""
-    global _names, _recent_writes, _zero_retention  # noqa: PLW0603
+    global _names, _recent_writes, _zero_retention, _locations  # noqa: PLW0603
 
-    _names, _recent_writes, _zero_retention = {}, {}, frozenset()
+    _names, _recent_writes, _zero_retention, _locations = {}, {}, frozenset(), {}
 
 
 async def _refresh_on_a_session_of_its_own(config: GatewayConfig) -> None:

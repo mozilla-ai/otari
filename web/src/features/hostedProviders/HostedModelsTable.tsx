@@ -1,6 +1,7 @@
 import { FiEdit2, FiRotateCcw } from "react-icons/fi"
 
-import type { HostedModel } from "@/client"
+import type { HostedModel, HostedProviderRegion } from "@/client"
+import { Button } from "@/design-system/actions/Button"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { Toggle } from "@/design-system/forms/Toggle"
@@ -31,6 +32,45 @@ function PriceSourceBadge({
 }
 
 /**
+ * One region's price of a model. A price the region sets of its own is shown
+ * in the body ink; one it does not set is the provider's, which is what the
+ * region charges, so it is shown muted. Pressing it opens that region's editor.
+ */
+function RegionPriceCell({
+  row,
+  region,
+  onEdit,
+}: {
+  row: HostedModel
+  region: HostedProviderRegion
+  onEdit: () => void
+}) {
+  const own = row.region_rates?.[region.slug]
+  const inherited =
+    row.input_price_per_million == null || row.output_price_per_million == null
+      ? null
+      : {
+          input_price_per_million: row.input_price_per_million,
+          output_price_per_million: row.output_price_per_million,
+          unit: row.unit,
+        }
+  const price = formatOfferingPrice(own ?? inherited)
+  return (
+    <Button
+      size="sm"
+      aria-label={`Edit ${row.model} price in ${region.label}: ${price}${own ? "" : ", the provider's price"}`}
+      onPress={onEdit}
+    >
+      <span
+        className={`text-mono-caption tabular-nums ${own ? "font-medium text-foreground" : "text-muted"}`}
+      >
+        {price}
+      </span>
+    </Button>
+  )
+}
+
+/**
  * Models in today's row shape: price, where it comes from, the serving switch
  * and Edit price. A Custom price the default rung now prices differently names
  * that default under its badge and offers to go back to it.
@@ -43,8 +83,10 @@ export function HostedModelsTable({
   isLoading,
   emptyContent,
   pendingModelId,
+  regions = [],
   onToggle,
   onEdit,
+  onEditRegionPrice,
   onUseDefault,
 }: {
   ariaLabel: string
@@ -59,6 +101,12 @@ export function HostedModelsTable({
   pendingModelId: string
   onToggle: (row: HostedModel, enabled: boolean) => void
   onEdit: (row: HostedModel) => void
+  /**
+   * The regions that get a price column each, after the provider's price. The
+   * caller passes them only for a provider with two or more.
+   */
+  regions?: readonly HostedProviderRegion[]
+  onEditRegionPrice?: (row: HostedModel, region: HostedProviderRegion) => void
   onUseDefault: (row: HostedModel) => void
 }) {
   const defaultName = isEstimate ? "Default" : "models.dev"
@@ -88,6 +136,20 @@ export function HostedModelsTable({
         </span>
       ),
     },
+    ...regions.map(
+      (region): DataTableColumn<HostedModel> => ({
+        id: `region:${region.slug}`,
+        header: region.label,
+        align: "end",
+        cell: (row) => (
+          <RegionPriceCell
+            row={row}
+            region={region}
+            onEdit={() => onEditRegionPrice?.(row, region)}
+          />
+        ),
+      }),
+    ),
     {
       id: "enabled",
       header: "Serving",
