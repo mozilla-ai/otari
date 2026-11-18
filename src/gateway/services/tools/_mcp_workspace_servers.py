@@ -129,6 +129,8 @@ class McpWorkspaceServers:
 
         Also returns the id each given id names: itself, or for an old id of a folded workspace copy the
         organization's server it was folded into. Callers check :attr:`McpServerInWorkspace.attach_by_default`.
+        A server turned off for the workspace is left out, unless an old id names it: the copy was off too, and a
+        request naming it still skips it rather than failing, as it did before the fold.
         """
         named = list(dict.fromkeys(server_ids))
         rows = await self._servers.for_request(workspace_id, organization_id, named, attached=attached)
@@ -139,7 +141,9 @@ class McpWorkspaceServers:
         if targets:
             swapped = list(dict.fromkeys(targets.get(server_id, server_id) for server_id in named))
             rows = await self._servers.for_request(workspace_id, organization_id, swapped, attached=attached)
-        return await self.seen_from(workspace_id, rows), {
+        folded_into = set(targets.values())
+        views = await self.seen_from(workspace_id, rows, include_hidden=bool(folded_into))
+        return [view for view in views if view.visible or view.id in folded_into], {
             server_id: targets.get(server_id, server_id) for server_id in named
         }
 

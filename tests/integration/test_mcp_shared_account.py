@@ -26,8 +26,15 @@ from gateway.exceptions.tools_exceptions import (
     WorkspaceMcpServerUnsafeUrlError,
 )
 from gateway.models.mcp import ResolvedMcpServer
-from gateway.models.tenancy import OrganizationMember, User, WorkspaceMember
-from gateway.models.tools import McpCredentialMode, McpOAuthFlow, McpSharedConnection, McpUserConnection
+from gateway.models.tenancy import Organization, OrganizationMember, User, WorkspaceMember
+from gateway.models.tools import (
+    McpCredentialMode,
+    McpOAuthFlow,
+    McpSharedConnection,
+    McpUserConnection,
+    WorkspaceMcpServer,
+)
+from gateway.repositories.tenancy import WorkspaceMemberRepository
 from gateway.repositories.tools import McpUserConnectionRepository, WorkspaceMcpServerRepository
 from gateway.services import mcp_stateless
 from gateway.services.mcp_stateless import CheckFailure, ServerCheck
@@ -253,6 +260,34 @@ async def test_a_manager_who_lost_the_workspace_while_signing_in_stores_no_accou
     assert await _account(async_db, world) is None
     await asyncio.sleep(0.05)
     assert wire.revoked == ["refresh-1"], "tokens nothing will hold are ended at the authorization server"
+
+
+async def test_a_workspace_manager_s_shared_sign_in_finishing_after_a_promotion_stores_no_account(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    """The server became the organization's during the exchange, and its account is the organization's to set."""
+    world = await _shared_world(async_db, config)
+    organization = await async_db.get(Organization, world.workspace.organization_id)
+    assert organization is not None
+    admin = await base._member(async_db, organization, role="member", name="Admin")
+    await WorkspaceMemberRepository(async_db).create(workspace_id=world.workspace.id, user_id=admin.id, role="admin")
+    await async_db.commit()
+    service = _service(async_db, config)
+    started = await service.start_shared_sign_in(
+        user=admin, workspace_id=world.workspace.id, server_id=world.server.id, return_to=None
+    )
+    await async_db.execute(
+        update(WorkspaceMcpServer)
+        .where(WorkspaceMcpServer.id == world.server.id)
+        .values(workspace_id=None)
+        .execution_options(synchronize_session=False)
+    )
+    await async_db.commit()
+
+    with pytest.raises(McpConnectionFlowError, match="no longer manage"):
+        await service.complete_connection(user=admin, state=_state(started.authorization_url), code="code")
+
+    assert await _account(async_db, world) is None
 
 
 async def test_another_persons_shared_sign_in_cannot_be_finished(async_db: AsyncSession, config: GatewayConfig) -> None:

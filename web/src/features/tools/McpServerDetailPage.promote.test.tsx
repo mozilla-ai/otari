@@ -17,6 +17,7 @@ const PROMOTE = "Make it an organization server"
 
 const KEEPS = mcpServerFoldCandidate({
   server_id: "aaaaaaaa-0000-0000-0000-000000000001",
+  workspace_id: "bbbbbbbb-0000-0000-0000-000000000001",
   workspace_name: "Beta",
   name: "github",
   same_credential: true,
@@ -25,6 +26,7 @@ const KEEPS = mcpServerFoldCandidate({
 })
 const SIGNS_AGAIN = mcpServerFoldCandidate({
   server_id: "aaaaaaaa-0000-0000-0000-000000000002",
+  workspace_id: "bbbbbbbb-0000-0000-0000-000000000002",
   workspace_name: "Gamma",
   name: "gh",
   same_credential: false,
@@ -153,10 +155,18 @@ describe("McpServerDetailPage, making a server the organization's", () => {
     const server = workspaceMcpServer({ workspace_id: WORKSPACE })
     const calls = mockMcpServerApi({ server, copies: [KEEPS] })
     const answer = vi.mocked(globalThis.fetch).getMockImplementation()
-    let fails = false
+    let lookup: "answer" | "hold" | "fail" = "answer"
+    let release: (response: Response) => void = () => {}
     vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
-      if (fails && String(input).includes("/same-url")) {
-        return Response.json({ detail: "unavailable" }, { status: 503 })
+      if (String(input).includes("/same-url")) {
+        if (lookup === "hold") {
+          return new Promise<Response>((resolve) => {
+            release = resolve
+          })
+        }
+        if (lookup === "fail") {
+          return Response.json({ detail: "unavailable" }, { status: 503 })
+        }
       }
       return answer?.(input, init) as Promise<Response>
     })
@@ -172,18 +182,32 @@ describe("McpServerDetailPage, making a server the organization's", () => {
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }))
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
 
-    fails = true
+    // While this opening's read is out, the cached copies are neither shown nor
+    // sent, whatever time the cache says they were read at.
+    lookup = "hold"
     await user.click(screen.getByRole("button", { name: PROMOTE }))
     dialog = await screen.findByRole("dialog", {
       name: "Make github an organization server",
     })
+    await within(dialog).findByText(
+      "Looking for copies of it in other workspaces.",
+    )
+    expect(within(dialog).getByRole("button", { name: PROMOTE })).toBeDisabled()
+    expect(
+      within(dialog).queryByRole("list", { name: "Workspace copies" }),
+    ).toBeNull()
+
+    lookup = "fail"
+    act(() =>
+      release(Response.json({ detail: "unavailable" }, { status: 503 })),
+    )
     const retry = await within(dialog).findByRole("button", { name: "Retry" })
     expect(within(dialog).getByRole("button", { name: PROMOTE })).toBeDisabled()
     expect(
       within(dialog).queryByRole("list", { name: "Workspace copies" }),
     ).toBeNull()
 
-    fails = false
+    lookup = "answer"
     await user.click(retry)
     await within(dialog).findByRole("list", { name: "Workspace copies" })
     await user.click(within(dialog).getByRole("button", { name: PROMOTE }))
@@ -191,6 +215,38 @@ describe("McpServerDetailPage, making a server the organization's", () => {
       expect(
         mcpWrites(calls).find((call) => call.url.endsWith("/promote"))?.body,
       ).toEqual({ fold_server_ids: [KEEPS.server_id] }),
+    )
+  })
+
+  it("lists a copy that is on, but does not fold it into a server that is off", async () => {
+    const server = workspaceMcpServer({
+      workspace_id: WORKSPACE,
+      enabled: false,
+    })
+    const calls = mockMcpServerApi({ server, copies: [KEEPS] })
+    const user = userEvent.setup()
+    await openPage(server.id)
+
+    await user.click(screen.getByRole("button", { name: PROMOTE }))
+    const dialog = await screen.findByRole("dialog", {
+      name: "Make github an organization server",
+    })
+    const copy = await within(dialog).findByRole("checkbox", {
+      name: "Beta: github",
+    })
+    expect(copy).not.toBeChecked()
+    expect(copy).toBeDisabled()
+    expect(
+      within(dialog).getByText(
+        "It is on, and an organization server that is off cannot take its place.",
+      ),
+    ).toBeVisible()
+
+    await user.click(within(dialog).getByRole("button", { name: PROMOTE }))
+    await waitFor(() =>
+      expect(
+        mcpWrites(calls).find((call) => call.url.endsWith("/promote"))?.body,
+      ).toEqual({ fold_server_ids: [] }),
     )
   })
 

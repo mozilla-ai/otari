@@ -6,9 +6,9 @@ into the workspace's settings on the organization's server, keeps its id working
 What happens to the people signed in to it:
 
 - A personal sign-in is carried across where the organization server is personal too, sits at the very URL the
-  sign-in was made for, and can renew it: the same OAuth client issued it (the same ``client_id``, which the
-  gateway's client metadata document gives every server it signs in to through it), and that client may send
-  its credentials to the token endpoint the sign-in recorded.
+  sign-in was made for, and can renew it: the sign-in holds a refresh token, the same OAuth client issued it
+  (the same ``client_id``, which the gateway's client metadata document gives every server it signs in to
+  through it), and that client may send its credentials to the token endpoint the sign-in recorded.
 - Any other sign-in is revoked once the fold commits: its client is the copy's, which goes with it. So is a
   carried sign-in's twin, where the person already holds one on the organization server: they go on through
   that one, which may be another upstream account, and the fold step counts them apart so nobody is moved
@@ -35,6 +35,7 @@ from gateway.repositories.tools import (
     WorkspaceMcpServerOverrideRepository,
     WorkspaceMcpServerRepository,
 )
+from gateway.services.mcp_stateless import reads_as_pattern
 from gateway.services.model_access import clip_mcp_tool_patterns, expand_mcp_tool_patterns, mcp_read_tools
 from gateway.services.tools._mcp_connections import McpRevocation, renews_through, revocations_for
 
@@ -47,9 +48,14 @@ class McpServerFoldCandidate(BaseModel):
     workspace_name: str
     name: str
     credential_mode: McpCredentialMode
+    enabled: bool = Field(
+        default=True,
+        description="Whether it is on. An organization server that is off cannot take the place of one that is on",
+    )
     same_credential: bool = Field(
         description="It signs in the way the organization's server does and holds no token or shared account of "
-        "its own, so folding it changes no account its calls use. A fold step ticks these by default"
+        "its own, so folding it changes no account its calls use. A fold step ticks these by default, unless "
+        "someone would have to sign in again or go on through another sign-in"
     )
     signed_in: int = Field(description="People signed in to it with their own account")
     keep_sign_in: int = Field(description="Of those, how many keep their sign-in on the organization's server")
@@ -156,6 +162,7 @@ class McpServerFold:
                     workspace_name=workspace_names.get(copy.workspace_id, ""),
                     name=copy.name,
                     credential_mode=McpCredentialMode(copy.credential_mode),
+                    enabled=copy.enabled,
                     same_credential=copy.credential_mode == credential_mode and not own_credential and not with_token,
                     signed_in=len(plan.carried) + len(plan.revoked),
                     keep_sign_in=len(plan.carried),
@@ -184,8 +191,9 @@ class McpServerFold:
                 or copy.organization_id != target.organization_id
             ):
                 raise ValueError(f"MCP server {copy.id} is not a workspace's copy of an organization's server")
-            plan = _plan(await self._connections.every_for_server(copy.id), target, signed_in_there)
-            account = await self._connections.find_shared(copy.id)
+            # Locked and read again, so a renewal in flight stores its token first and that is the one revoked.
+            plan = _plan(await self._connections.every_for_server(copy.id, lock=True), target, signed_in_there)
+            account = await self._connections.find_shared(copy.id, lock=True)
             # Read while the copy still holds the client its tokens were issued to.
             revocations += revocations_for(copy, [*plan.revoked, *([account] if account is not None else [])])
             for connection in plan.carried:
@@ -219,9 +227,9 @@ class McpServerFold:
             server=target,
             organization_tools=_limit(copy, target, None if override is None else override.organization_tools),
             enabled=copy.enabled,
-            # Stored even where it equals the target's default, which can change later without the workspace.
+            # Both stored even where they equal the target's defaults, which can change later without the workspace.
             everyone_tools=everyone,
-            attach_by_default=None if copy.attach_by_default == target.attach_by_default else copy.attach_by_default,
+            attach_by_default=copy.attach_by_default,
         )
         held = {(grant.api_key_id, grant.user_id) for grant in await self._grants.for_server(target.id, workspace_id)}
         for grant in await self._grants.for_server(copy.id):
@@ -244,13 +252,15 @@ class McpServerFold:
 def _limit(copy: WorkspaceMcpServer, target: WorkspaceMcpServer, held: list[str] | None) -> list[str] | None:
     """The organization's limit on the copy's workspace once folded: ``held``, narrowed to the copy's allowed tools.
 
-    An unrestricted copy adds nothing, nor does one that allows everything the target does.
+    An unrestricted copy adds nothing. A restricted one is kept even where the target allows no more today, as
+    the target's allow-list can widen later. An allowed tool is an exact name and a limit holds patterns, so a
+    name that would read as one (``list*``, ``@read``) is left out: no tool so named is ever listed or called.
     """
-    allowed = copy.allowed_tools
-    if allowed is None or (target.allowed_tools is not None and set(target.allowed_tools) <= set(allowed)):
+    if copy.allowed_tools is None:
         return held
+    allowed = [name for name in copy.allowed_tools if not reads_as_pattern(name)]
     if held is None:
-        return list(allowed)
+        return allowed
     return clip_mcp_tool_patterns(
         allowed, expand_mcp_tool_patterns(held, mcp_read_tools(target.read_tools, target.read_tools_hinted))
     )

@@ -30,6 +30,7 @@ from gateway.models.tools import (
 )
 from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRepository
 from gateway.services.model_access import McpAccess
+from gateway.services.secret_box import encrypt_secret
 from gateway.services.tenancy.workspace_mcp_server_service import (
     MAX_MCP_SERVERS_PER_WORKSPACE,
     McpServerPromote,
@@ -239,6 +240,89 @@ async def test_a_sign_in_is_carried_only_where_the_new_server_can_renew_it(
     assert held == [created.id] * carried
 
 
+async def test_a_sign_in_without_a_refresh_token_is_not_carried(async_db: AsyncSession, config: GatewayConfig) -> None:
+    """It could not be renewed on the new server, and would end at its first expiry."""
+    world = await _world(async_db, config)
+    await _sign_in(async_db, config, world, world.member)
+    client_id = (await async_db.execute(select(McpUserConnection.client_id))).scalar_one()
+    await async_db.execute(update(McpUserConnection).values(encrypted_refresh_token=None))
+    await async_db.commit()
+
+    await _service(async_db, config).create_server(
+        user=world.owner,
+        workspace_id=None,
+        request=WorkspaceMcpServerCreate(
+            name="drive",
+            url=PUBLIC_URL,
+            credential_mode=McpCredentialMode.PER_USER,
+            oauth_client_id=client_id,
+            fold_server_ids=[world.server.id],
+        ),
+    )
+
+    assert (await async_db.execute(select(McpUserConnection.id))).scalars().all() == []
+
+
+async def test_a_fold_revokes_the_token_a_renewal_stored_after_this_session_read_the_sign_in(
+    async_db: AsyncSession, config: GatewayConfig, wire: base._Wire
+) -> None:
+    world = await _world(async_db, config)
+    await _sign_in(async_db, config, world, world.member)
+    # Held for the whole test, as the fold's own session would hold it.
+    stale = (await async_db.execute(select(McpUserConnection))).scalar_one()
+    await async_db.execute(
+        update(McpUserConnection)
+        .values(encrypted_refresh_token=encrypt_secret("renewed-refresh"))
+        .execution_options(synchronize_session=False)
+    )
+    await async_db.commit()
+    assert stale.encrypted_refresh_token is not None
+
+    await _service(async_db, config).create_server(
+        user=world.owner,
+        workspace_id=None,
+        request=WorkspaceMcpServerCreate(name="drive", url=PUBLIC_URL, fold_server_ids=[world.server.id]),
+    )
+
+    await base._drain_revocations()
+    assert wire.revoked == ["renewed-refresh"]
+
+
+async def test_a_copy_s_settings_are_kept_even_where_the_new_server_s_match_them_today(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    """The organization's server can change later; the workspace keeps what its copy had. A name that reads as a
+    pattern is no tool's name, and as a limit would reach other tools, so it goes."""
+    world = await _world(async_db, config)
+    await async_db.execute(
+        update(WorkspaceMcpServer)
+        .where(WorkspaceMcpServer.id == world.server.id)
+        .values(allowed_tools=["list_files", "list*"])
+    )
+    await async_db.commit()
+
+    created = await _service(async_db, config).create_server(
+        user=world.owner,
+        workspace_id=None,
+        request=WorkspaceMcpServerCreate(
+            name="drive",
+            url=PUBLIC_URL,
+            credential_mode=McpCredentialMode.PER_USER,
+            allowed_tools=["list_files"],
+            fold_server_ids=[world.server.id],
+        ),
+    )
+
+    stored = (
+        await async_db.execute(
+            select(WorkspaceMcpServerOverride.attach_by_default, WorkspaceMcpServerOverride.organization_tools).where(
+                WorkspaceMcpServerOverride.server_id == created.id
+            )
+        )
+    ).one()
+    assert (stored.attach_by_default, stored.organization_tools) == (False, ["list_files"])
+
+
 async def test_a_copy_s_allowed_tools_stay_the_most_its_workspace_reaches(
     async_db: AsyncSession, config: GatewayConfig
 ) -> None:
@@ -329,13 +413,16 @@ async def test_a_copy_whose_url_moved_since_it_was_read_is_not_folded(
 ) -> None:
     """The copies are matched as they are once locked, not as this session last read them."""
     world = await _world(async_db, config)
-    assert await async_db.get(WorkspaceMcpServer, world.server.id) is not None
+    # Held for the whole test: the session keeps a clean row only while something references it.
+    stale = await async_db.get(WorkspaceMcpServer, world.server.id)
+    assert stale is not None
     await async_db.execute(
         update(WorkspaceMcpServer)
         .where(WorkspaceMcpServer.id == world.server.id)
         .values(url=f"{PUBLIC_URL}?project=blue")
         .execution_options(synchronize_session=False)
     )
+    assert stale.url == PUBLIC_URL, "this session still holds the URL as it read it"
 
     with pytest.raises(WorkspaceMcpServerNotFoundError):
         await _service(async_db, config).create_server(
@@ -380,6 +467,61 @@ async def test_a_folded_copy_s_id_opens_the_organization_s_server_in_its_workspa
     assert opened.id == created.id
     with pytest.raises(WorkspaceMcpServerNotFoundError):
         await service.get_server(user=world.member, workspace_id=sales.id, server_id=world.server.id)
+
+
+async def test_a_request_naming_a_folded_copy_that_was_off_still_skips_it(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    """As it skipped the copy before the fold. The organization's server, off for the workspace, stays unknown by
+    its own id there."""
+    world = await _world(async_db, config, enabled=False)
+    member = str(world.member.id)
+    created = await _service(async_db, config).create_server(
+        user=world.owner,
+        workspace_id=None,
+        request=WorkspaceMcpServerCreate(
+            name="drive", url=PUBLIC_URL, credential_mode=McpCredentialMode.PER_USER, fold_server_ids=[world.server.id]
+        ),
+    )
+
+    skipped = await resolve_workspace_mcp_servers(
+        async_db, workspace_id=world.workspace.id, server_ids=[world.server.id], access=McpAccess(user_id=member)
+    )
+    assert skipped == []
+    with pytest.raises(WorkspaceMcpServerNotFoundError):
+        await resolve_workspace_mcp_servers(
+            async_db, workspace_id=world.workspace.id, server_ids=[created.id], access=McpAccess(user_id=member)
+        )
+
+
+@pytest.mark.parametrize("removal", ["shared_account", "connection"])
+async def test_a_workspace_manager_s_removal_that_finds_the_server_promoted_once_locked_is_refused(
+    async_db: AsyncSession, config: GatewayConfig, removal: str
+) -> None:
+    """The sign-ins of the organization's server serve every workspace now, which a workspace's manager does not run."""
+    world = await _world(async_db, config)
+    await _sign_in(async_db, config, world, world.member)
+    # Read now: the refusal rolls the session back, which expires what it had loaded.
+    member = str(world.member.id)
+    service = _service(async_db, config)
+    read_before = await async_db.get(WorkspaceMcpServer, world.server.id)
+    await async_db.execute(
+        update(WorkspaceMcpServer)
+        .where(WorkspaceMcpServer.id == world.server.id)
+        .values(workspace_id=None)
+        .execution_options(synchronize_session=False)
+    )
+    await async_db.commit()
+    service._server_in = AsyncMock(return_value=read_before)  # type: ignore[method-assign]
+
+    ids = {"user": world.owner, "workspace_id": world.workspace.id, "server_id": world.server.id}
+    with pytest.raises(McpServerIsOrganizationsError):
+        if removal == "connection":
+            await service.remove_connection(**ids, user_id=member)  # type: ignore[arg-type]
+        else:
+            await service.disconnect_shared(**ids)  # type: ignore[arg-type]
+    held = (await async_db.execute(select(McpUserConnection.user_id))).scalars().all()
+    assert held == [member]
 
 
 @pytest.mark.parametrize("write", ["update", "delete"])

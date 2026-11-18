@@ -1,11 +1,80 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  defaultFoldIds,
+  foldableIds,
+  foldBlocker,
   foldEffects,
   offerEachCopyOnce,
   settleAtMost,
 } from "@/features/tools/mcpFold"
 import { mcpServerFoldCandidate } from "@/tests/fixtures"
+
+describe("defaultFoldIds", () => {
+  it("ticks only copies whose folding changes nobody's account or sign-in", () => {
+    const quiet = mcpServerFoldCandidate({
+      server_id: "quiet",
+      workspace_id: "a",
+    })
+    const switches = mcpServerFoldCandidate({
+      server_id: "switches",
+      workspace_id: "b",
+      switch_account: 1,
+    })
+    const again = mcpServerFoldCandidate({
+      server_id: "again",
+      workspace_id: "c",
+      sign_in_again: 1,
+    })
+    const other = mcpServerFoldCandidate({
+      server_id: "other",
+      workspace_id: "d",
+      same_credential: false,
+    })
+    expect(defaultFoldIds([quiet, switches, again, other], true)).toEqual([
+      "quiet",
+    ])
+  })
+
+  it("ticks none of a workspace's copies when it has several, for the admin to pick", () => {
+    const first = mcpServerFoldCandidate({ server_id: "first" })
+    const second = mcpServerFoldCandidate({ server_id: "second" })
+    const elsewhere = mcpServerFoldCandidate({
+      server_id: "elsewhere",
+      workspace_id: "other",
+    })
+    expect(defaultFoldIds([first, second, elsewhere], true)).toEqual([
+      "elsewhere",
+    ])
+  })
+
+  it("leaves a copy that is on unticked for a server that is off", () => {
+    const on = mcpServerFoldCandidate({ server_id: "on", workspace_id: "a" })
+    const off = mcpServerFoldCandidate({
+      server_id: "off",
+      workspace_id: "b",
+      enabled: false,
+    })
+    expect(defaultFoldIds([on, off], false)).toEqual(["off"])
+    expect(foldBlocker(on, false)).not.toBe("")
+    expect(foldBlocker(on, true)).toBe("")
+  })
+})
+
+describe("foldableIds", () => {
+  it("sends only ticked copies still listed and foldable into the server as it is", () => {
+    const on = mcpServerFoldCandidate({ server_id: "on", workspace_id: "a" })
+    const off = mcpServerFoldCandidate({
+      server_id: "off",
+      workspace_id: "b",
+      enabled: false,
+    })
+    expect(foldableIds([on, off], ["on", "off", "gone"], false)).toEqual([
+      "off",
+    ])
+    expect(foldableIds([on, off], ["on", "gone"], true)).toEqual(["on"])
+  })
+})
 
 describe("foldEffects", () => {
   it("says a copy with no credential of its own changes account when it is not on the same one", () => {
@@ -51,25 +120,39 @@ describe("offerEachCopyOnce", () => {
 })
 
 describe("settleAtMost", () => {
-  it("runs no more than the limit at once and reports each outcome in order", async () => {
+  it("runs no more than the limit at once and reports each outcome in input order", async () => {
     let running = 0
     let most = 0
-    const outcomes = await settleAtMost([1, 2, 3, 4, 5], 2, async (n) => {
+    const finish = new Map<number, () => void>()
+    const started: number[] = []
+    const settled = settleAtMost([1, 2, 3, 4, 5], 2, async (n) => {
       running += 1
       most = Math.max(most, running)
-      await new Promise((resolve) => setTimeout(resolve, 1))
+      started.push(n)
+      await new Promise<void>((resolve) => finish.set(n, resolve))
       running -= 1
       if (n === 3) throw new Error("three")
       return n * 10
     })
+    const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
+    await flush()
+    expect(started).toEqual([1, 2])
+    // The second finishes first, and the third starts in its place.
+    finish.get(2)?.()
+    await flush()
+    expect(started).toEqual([1, 2, 3])
+    for (const n of [3, 1, 5, 4]) {
+      await flush()
+      finish.get(n)?.()
+    }
+    const outcomes = await settled
     expect(most).toBe(2)
-    expect(outcomes.map((outcome) => outcome.status)).toEqual([
-      "fulfilled",
-      "fulfilled",
-      "rejected",
-      "fulfilled",
-      "fulfilled",
+    expect(outcomes).toEqual([
+      { status: "fulfilled", value: 10 },
+      { status: "fulfilled", value: 20 },
+      { status: "rejected", reason: new Error("three") },
+      { status: "fulfilled", value: 40 },
+      { status: "fulfilled", value: 50 },
     ])
-    expect(outcomes[4]).toEqual({ status: "fulfilled", value: 50 })
   })
 })

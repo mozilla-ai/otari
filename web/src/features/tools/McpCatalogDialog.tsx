@@ -32,11 +32,14 @@ import {
   type CatalogPick,
   describeAdded,
   describeRefusal,
+  describeUnconfirmed,
   findFreeName,
+  isUnconfirmed,
   suggestMode,
 } from "@/features/tools/mcpCatalog"
 import {
   defaultFoldIds,
+  foldableIds,
   MAX_FOLD_COPIES,
   offerEachCopyOnce,
   settleAtMost,
@@ -54,6 +57,7 @@ import {
   type McpServerCopiesOf,
   useCreateOrganizationMcpServer,
   useReadMcpServerCopies,
+  useRefreshAfterOrganizationServer,
 } from "@/shared/api/organizationMcpServers"
 import {
   useCreateWorkspaceMcpServer,
@@ -91,6 +95,8 @@ interface Result {
 interface Fold {
   pickName: string
   title: string
+  /** Whether the organization's server will be on. */
+  enabled: boolean
   candidates: McpServerFoldCandidate[]
   selected: string[]
 }
@@ -154,19 +160,21 @@ export function McpCatalogDialog({
   const create = useCreateWorkspaceMcpServer()
   const createForOrganization = useCreateOrganizationMcpServer()
   const readCopies = useReadMcpServerCopies()
+  const refreshAfterUnconfirmed = useRefreshAfterOrganizationServer()
   const [target, setTarget] = useState<McpAddTarget>("organization")
-  const forOrganization = canAddForOrganization && target === "organization"
+  // Once the choice was offered, the batch keeps the destination picked, even
+  // if organization access ends: it is then refused rather than added to the
+  // workspace, until the admin picks the workspace themselves.
+  const [wasOffered, setWasOffered] = useState(canAddForOrganization)
+  if (canAddForOrganization && !wasOffered) setWasOffered(true)
+  const forOrganization = wasOffered && target === "organization"
+  const lostOrganization = forOrganization && !canAddForOrganization
   const targetName = forOrganization ? "your organization" : workspaceName
   // Settled when the copies are read, so the fold step adds what it was shown.
   const [settledModes, setSettledModes] = useState<McpCredentialMode[]>([])
   const [folds, setFolds] = useState<Fold[]>([])
   const [isReading, setReading] = useState(false)
   const [readError, setReadError] = useState<unknown>()
-  // The copies read for each pick while another pick's read failed, so a
-  // retry reads only the failed ones. Keyed by what the read asked.
-  const [readSoFar, setReadSoFar] = useState<
-    Record<string, McpServerFoldCandidate[]>
-  >({})
   // Where the last batch went, which the results step names.
   const [addedTo, setAddedTo] = useState("")
 
@@ -210,7 +218,6 @@ export function McpCatalogDialog({
 
   const review = () => {
     setDrafts(draftsFor(picks))
-    setReadSoFar({})
     setReadError(undefined)
     setStep("review")
   }
@@ -263,6 +270,7 @@ export function McpCatalogDialog({
     setAddedTo(toOrganization ? "your organization" : workspaceName)
     setIsAdding(true)
     const outcomes: Result[] = []
+    let unconfirmed = false
     for (const [index, draft] of drafts.entries()) {
       const name = draft.name.trim()
       const mode = modes[index]
@@ -284,10 +292,19 @@ export function McpCatalogDialog({
           : await create.mutateAsync({ workspaceId, body })
         outcomes.push({ name, outcome: describeAdded(server) })
       } catch (error) {
-        outcomes.push({ name, outcome: describeRefusal(errorMessage(error)) })
+        const message = errorMessage(error)
+        // A lost answer is not a refusal: the server, and its folded copies, may be stored.
+        unconfirmed ||= isUnconfirmed(error)
+        outcomes.push({
+          name,
+          outcome: isUnconfirmed(error)
+            ? describeUnconfirmed(message)
+            : describeRefusal(message),
+        })
       }
       setResults([...outcomes])
     }
+    if (unconfirmed) refreshAfterUnconfirmed()
     setIsAdding(false)
     setStep("results")
   }
@@ -302,61 +319,58 @@ export function McpCatalogDialog({
       await addAll(modes, {}, false)
       return
     }
+    // Every pick is read again on each Confirm, the ones that answered last
+    // time too: another admin may have added a copy since.
     const reads = drafts.map((draft, index) => {
       const of: McpServerCopiesOf = {
         url: draft.pick.url,
         credentialMode: modes[index],
         withToken: modes[index] === "shared" && draft.token.trim() !== "",
       }
-      return {
-        key: JSON.stringify([draft.pick.name, of]),
-        title: draft.name.trim() || draft.pick.title,
-        of,
-      }
+      return { title: draft.name.trim() || draft.pick.title, of }
     })
-    const toRead = reads.filter((read) => !(read.key in readSoFar))
     setReadError(undefined)
     setReading(true)
-    const outcomes = await settleAtMost(toRead, COPY_READS_AT_ONCE, (read) =>
+    const outcomes = await settleAtMost(reads, COPY_READS_AT_ONCE, (read) =>
       readCopies(read.of),
     )
     setReading(false)
-    const read = { ...readSoFar }
+    const read: McpServerFoldCandidate[][] = []
     const failed: { title: string; reason: unknown }[] = []
     for (const [index, outcome] of outcomes.entries()) {
       if (outcome.status === "fulfilled") {
-        read[toRead[index].key] = outcome.value
+        read.push(outcome.value)
       } else {
-        failed.push({ title: toRead[index].title, reason: outcome.reason })
+        failed.push({ title: reads[index].title, reason: outcome.reason })
       }
     }
     if (failed.length > 0) {
-      setReadSoFar(read)
       setReadError(
         new Error(
           `Could not look for copies of ${failed
             .map((each) => each.title)
-            .join(", ")}: ${errorMessage(failed[0].reason)} Confirm tries ${
-            failed.length === 1 ? "it" : "them"
-          } again.`,
+            .join(
+              ", ",
+            )}: ${errorMessage(failed[0].reason)} Nothing was added. Confirm looks again.`,
         ),
       )
       return
     }
-    setReadSoFar({})
-    const found = offerEachCopyOnce(reads.map((each) => read[each.key]))
-    const withCopies = drafts.flatMap((draft, index) =>
-      found[index].length > 0
+    const found = offerEachCopyOnce(read)
+    const withCopies = drafts.flatMap((draft, index) => {
+      const { enabled } = availabilityFields(draft.availability)
+      return found[index].length > 0
         ? [
             {
               pickName: draft.pick.name,
               title: reads[index].title,
+              enabled,
               candidates: found[index],
-              selected: defaultFoldIds(found[index]),
+              selected: defaultFoldIds(found[index], enabled),
             },
           ]
-        : [],
-    )
+        : []
+    })
     if (withCopies.length === 0) {
       await addAll(modes, {}, true)
       return
@@ -416,10 +430,14 @@ export function McpCatalogDialog({
   }
 
   if (step === "fold") {
-    // Organization access ended while the step was open: nothing is added anywhere else instead.
-    const lostOrganization = !canAddForOrganization
-    const isOverLimit = folds.some(
-      (fold) => fold.selected.length > MAX_FOLD_COPIES,
+    const foldIds = Object.fromEntries(
+      folds.map((fold) => [
+        fold.pickName,
+        foldableIds(fold.candidates, fold.selected, fold.enabled),
+      ]),
+    )
+    const isOverLimit = Object.values(foldIds).some(
+      (ids) => ids.length > MAX_FOLD_COPIES,
     )
     return (
       <Dialog
@@ -443,21 +461,14 @@ export function McpCatalogDialog({
               variant="primary"
               isDisabled={lostOrganization || isOverLimit}
               isPending={isAdding}
-              onPress={() =>
-                void addAll(
-                  settledModes,
-                  Object.fromEntries(
-                    folds.map((fold) => [fold.pickName, fold.selected]),
-                  ),
-                  true,
-                )
-              }
+              onPress={() => void addAll(settledModes, foldIds, true)}
             >
               Confirm
             </Button>
           </>
         }
       >
+        {/* Organization access ended while the step was open: nothing is added anywhere else instead. */}
         {lostOrganization ? (
           <DialogSection>
             <InfoBanner tone="warning">
@@ -476,7 +487,8 @@ export function McpCatalogDialog({
               <McpFoldChoices
                 label={`Workspace copies of ${fold.title}`}
                 candidates={fold.candidates}
-                selected={fold.selected}
+                selected={foldIds[fold.pickName]}
+                targetEnabled={fold.enabled}
                 isDisabled={isAdding || lostOrganization}
                 onChange={(selected) =>
                   setFolds((current) =>
@@ -527,7 +539,7 @@ export function McpCatalogDialog({
             )}
             <Button
               variant="primary"
-              isDisabled={!canAdd}
+              isDisabled={!canAdd || lostOrganization}
               isPending={isBusy}
               onPress={() => void confirm()}
             >
@@ -536,10 +548,16 @@ export function McpCatalogDialog({
           </>
         }
       >
-        {canAddForOrganization || readError ? (
+        {wasOffered || readError ? (
           <DialogSection>
             <ErrorBanner error={readError} />
-            {canAddForOrganization ? (
+            {lostOrganization ? (
+              <InfoBanner tone="warning">
+                You can no longer add servers for the whole organization. Choose
+                This workspace to add them to {workspaceName} instead.
+              </InfoBanner>
+            ) : null}
+            {wasOffered ? (
               <RadioGroup
                 label={ADD_TARGET_LABEL}
                 value={target}

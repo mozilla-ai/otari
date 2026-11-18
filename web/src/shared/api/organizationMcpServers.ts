@@ -100,6 +100,15 @@ export function useCreateOrganizationMcpServer() {
 }
 
 /**
+ * Reads again what an organization server's add moves, for an add whose
+ * answer was lost: it may have been stored, and its copies folded, all the same.
+ */
+export function useRefreshAfterOrganizationServer(): () => void {
+  const queryClient = useQueryClient()
+  return () => invalidateAfterOrganizationServer(queryClient)
+}
+
+/**
  * Which copies to look for: those of a server about to be added, or of one
  * about to be promoted, which is named by its id alone. Sent in a body, so no
  * URL, which may carry a credential, travels in a request line.

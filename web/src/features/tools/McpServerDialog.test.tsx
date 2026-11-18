@@ -18,6 +18,7 @@ const WORKSPACE = "11111111-1111-1111-1111-111111111111"
 // in to a shared copy with their own.
 const KEEPS = mcpServerFoldCandidate({
   server_id: "aaaaaaaa-0000-0000-0000-000000000001",
+  workspace_id: "bbbbbbbb-0000-0000-0000-000000000001",
   workspace_name: "Beta",
   name: "github",
   credential_mode: "shared",
@@ -28,6 +29,7 @@ const KEEPS = mcpServerFoldCandidate({
 })
 const OWN_TOKEN = mcpServerFoldCandidate({
   server_id: "aaaaaaaa-0000-0000-0000-000000000002",
+  workspace_id: "bbbbbbbb-0000-0000-0000-000000000002",
   workspace_name: "Gamma",
   name: "gh",
   credential_mode: "shared",
@@ -249,7 +251,7 @@ describe("McpServerDialog", () => {
     expect(asked.some((call) => call.url === LOOKUP)).toBe(false)
   })
 
-  it("weighs a personal server's copies by who must sign in again", async () => {
+  it("weighs a personal server's copies by who must sign in again, and leaves them unticked", async () => {
     // A server not stored yet has no client of its own, so nobody keeps a sign-in.
     const personal = mcpServerFoldCandidate({
       server_id: "aaaaaaaa-0000-0000-0000-000000000003",
@@ -274,7 +276,7 @@ describe("McpServerDialog", () => {
     ).toBeVisible()
     expect(
       within(copies).getByRole("checkbox", { name: "Delta: github" }),
-    ).toBeChecked()
+    ).not.toBeChecked()
     expect(lookupBody(asked)).toEqual({
       url: "https://mcp.example.com/gh",
       credential_mode: "per_user",
@@ -368,6 +370,10 @@ describe("McpServerDialog", () => {
         name: "Add MCP server",
       }),
     )
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "github" }),
+      workspaceMcpScope(WORKSPACE),
+    )
     onSubmit.rerender(true, new Error("Name in use"))
     expect(await screen.findByText("Name in use")).toBeVisible()
   })
@@ -377,6 +383,7 @@ describe("McpServerDialog", () => {
       mcpServerFoldCandidate({
         ...KEEPS,
         server_id: `aaaaaaaa-0000-0000-0000-${String(index).padStart(12, "0")}`,
+        workspace_id: `bbbbbbbb-0000-0000-0000-${String(index).padStart(12, "0")}`,
         workspace_name: `Workspace ${index}`,
       }),
     )
@@ -399,5 +406,105 @@ describe("McpServerDialog", () => {
       screen.getByRole("checkbox", { name: "Workspace 0: github" }),
     )
     expect(add).toBeEnabled()
+  })
+
+  it("folds one copy of each workspace, which the admin picks where it has several", async () => {
+    const second = {
+      ...KEEPS,
+      server_id: "aaaaaaaa-0000-0000-0000-000000000009",
+      name: "gh-2",
+    }
+    mockCopies([KEEPS, second])
+    const user = userEvent.setup()
+    const onSubmit = renderDialog()
+
+    await fillAndSubmit(user)
+    const copies = await screen.findByRole("list", { name: "Workspace copies" })
+    const first = within(copies).getByRole("checkbox", { name: "Beta: github" })
+    const other = within(copies).getByRole("checkbox", { name: "Beta: gh-2" })
+    expect(first).not.toBeChecked()
+    expect(other).not.toBeChecked()
+
+    await user.click(first)
+    await user.click(other)
+    expect(first).not.toBeChecked()
+    expect(other).toBeChecked()
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Add MCP server",
+      }),
+    )
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ fold_server_ids: [second.server_id] }),
+      { kind: "organization" },
+    )
+  })
+
+  it("does not fold a copy that is on into a server added Off, and says why", async () => {
+    const off = {
+      ...OWN_TOKEN,
+      same_credential: true,
+      replaces_shared_credential: false,
+      enabled: false,
+    }
+    mockCopies([KEEPS, off])
+    const user = userEvent.setup()
+    const onSubmit = renderDialog()
+
+    await user.click(screen.getByRole("radio", { name: /Off/ }))
+    await fillAndSubmit(user)
+
+    const copies = await screen.findByRole("list", { name: "Workspace copies" })
+    const on = within(copies).getByRole("checkbox", { name: "Beta: github" })
+    expect(on).not.toBeChecked()
+    expect(on).toBeDisabled()
+    expect(
+      within(copies).getByText(
+        "It is on, and an organization server that is off cannot take its place.",
+      ),
+    ).toBeVisible()
+    expect(
+      within(copies).getByRole("checkbox", { name: "Gamma: gh" }),
+    ).toBeChecked()
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Add MCP server",
+      }),
+    )
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        enabled: false,
+        fold_server_ids: [off.server_id],
+      }),
+      { kind: "organization" },
+    )
+  })
+
+  it("keeps a draft for the organization there once that access ends, until the admin picks the workspace", async () => {
+    const asked = mockCopies([])
+    const user = userEvent.setup()
+    const onSubmit = renderDialog()
+
+    await user.type(screen.getByLabelText("Name"), "github")
+    await user.type(screen.getByLabelText("URL"), "https://mcp.example.com/gh")
+    onSubmit.rerender(false)
+
+    expect(
+      screen.getByText(
+        /You can no longer add servers for the whole organization/,
+      ),
+    ).toBeVisible()
+    const add = within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Add MCP server",
+    })
+    expect(add).toBeDisabled()
+
+    await user.click(screen.getByRole("radio", { name: /This workspace/ }))
+    await user.click(add)
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "github" }),
+      workspaceMcpScope(WORKSPACE),
+    )
+    expect(asked.some((call) => call.url === LOOKUP)).toBe(false)
   })
 })

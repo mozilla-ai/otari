@@ -46,7 +46,9 @@ A copy you fold:
 
 - gives its access rules, default policy, availability and on or off state to its
   workspace's settings on the organization's server, and its allowed tools become
-  the organization's limit for that workspace;
+  the organization's limit for that workspace. They are kept even where they
+  match the organization server's today, so a later change to the organization's
+  server does not change what that workspace gets;
 - keeps its id working in its workspace, so agents and links that name it still
   reach the server;
 - is then deleted.
@@ -55,15 +57,18 @@ Its workspace keeps what it reached before only within the organization server's
 own allowed tools. If the copy allowed write tools and the organization's server
 allows only read tools, the workspace loses the write tools.
 
-You can fold one copy of each workspace. An organization server that is off can
-replace only copies that are off too, since no workspace can turn it back on.
+You can fold one copy of each workspace: where a workspace has several, tick the
+one to fold. An organization server that is off can replace only copies that are
+off too, since no workspace can turn it back on, so a copy that is on is listed
+but cannot be ticked.
 
 What happens to the people signed in to a copy is counted before you confirm,
 for each one:
 
 - A person's own sign-in is kept when the organization's server also uses
   **Personal accounts**, has exactly the URL the sign-in was made for, and uses
-  the same OAuth client, which can still renew it.
+  the same OAuth client, which can still renew it: the sign-in must hold a
+  refresh token.
 - A person who already has a sign-in on the organization's server keeps using
   that one. It may be a different account upstream from the one they used on
   the copy, so these people are counted separately.
@@ -75,16 +80,21 @@ for each one:
 - A copy's own token or shared account is replaced by the organization
   server's credential, which may be a different account upstream.
 
-Copies that sign in the same way as the organization's server, and hold no
-token or shared account of their own, are ticked by default. The others are
-listed but not ticked. A copy you leave unticked stays its workspace's own.
+A copy is ticked by default when folding it changes nobody's account: it signs
+in the same way as the organization's server, neither the copy nor the
+organization's server holds a token or shared account, and nobody signed in to
+it would sign in again or switch to another sign-in. The others are listed but
+not ticked, and you can tick them yourself. A copy you leave unticked stays its
+workspace's own.
 
 To make a workspace's own server the organization's, open it under **Tools** →
 **MCP servers** as an organization owner or admin and choose to make it an
 organization server. It keeps its id, its settings and every sign-in to it,
 which then work in every workspace. Other servers in its own workspace at the
 same URL are not offered for folding and stay that workspace's own. Members who
-asked for the server in another workspace have their request approved.
+asked for the server in another workspace that now reaches it have their request
+approved; a server that is off reaches no workspace, so their requests stay
+pending.
 
 ## Limit what one workspace reaches
 
@@ -123,7 +133,9 @@ defaults again takes the workspace's own settings away and keeps the limit.
 
 A workspace's requests reach the organization's servers with its own by id, in
 `mcp_server_ids`, and attached ones join its requests as its own do. A server the
-organization or the workspace turned off for it answers as an unknown id does.
+organization or the workspace turned off for it answers as an unknown id does,
+except by the id of a folded copy that was off: a request naming that id skips
+the server, as it skipped the copy before.
 
 Each person signs in to a personal server from a workspace that reaches it. Their
 sign-in lasts while they belong to any workspace of the organization, or are one

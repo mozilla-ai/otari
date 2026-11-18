@@ -16594,6 +16594,12 @@ export interface components {
         McpServerFoldCandidate: {
             credential_mode: components["schemas"]["McpCredentialMode"];
             /**
+             * Enabled
+             * @description Whether it is on. An organization server that is off cannot take the place of one that is on
+             * @default true
+             */
+            enabled: boolean;
+            /**
              * Keep Sign In
              * @description Of those, how many keep their sign-in on the organization's server
              */
@@ -16607,7 +16613,7 @@ export interface components {
             replaces_shared_credential: boolean;
             /**
              * Same Credential
-             * @description It signs in the way the organization's server does and holds no token or shared account of its own, so folding it changes no account its calls use. A fold step ticks these by default
+             * @description It signs in the way the organization's server does and holds no token or shared account of its own, so folding it changes no account its calls use. A fold step ticks these by default, unless someone would have to sign in again or go on through another sign-in
              */
             same_credential: boolean;
             /**

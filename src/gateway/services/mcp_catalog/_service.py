@@ -219,7 +219,7 @@ def _judged(entry: McpCatalogEntry) -> McpCatalogEntry:
 
 def _popular_by_url() -> dict[str, str]:
     """Each Popular entry's name, by its URL without a trailing slash."""
-    return {entry.url.rstrip("/"): entry.name for entry in POPULAR_SERVERS}
+    return {url_spellings(entry.url)[0]: entry.name for entry in POPULAR_SERVERS}
 
 
 def _pick(rows: Sequence[McpCatalogServer], preferred_name: str | None) -> McpCatalogServer:
@@ -403,7 +403,7 @@ class McpCatalogService:
             popular = _popular_by_url()
             by_url: dict[str, list[McpCatalogServer]] = {}
             for row in rows:
-                by_url.setdefault(row.url.rstrip("/"), []).append(row)
+                by_url.setdefault(url_spellings(row.url)[0], []).append(row)
             keys: dict[str, tuple[str, str | None]] = {}
             for url in dict.fromkeys(urls):
                 bare = url_spellings(url)[0]

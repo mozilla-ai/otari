@@ -15,7 +15,11 @@ import {
   availabilityFields,
   type McpAvailability,
 } from "@/features/tools/mcpAvailability"
-import { defaultFoldIds, MAX_FOLD_COPIES } from "@/features/tools/mcpFold"
+import {
+  defaultFoldIds,
+  foldableIds,
+  MAX_FOLD_COPIES,
+} from "@/features/tools/mcpFold"
 import {
   ADD_TARGET_LABEL,
   addTargetOptions,
@@ -159,10 +163,17 @@ export function McpServerDialog({
   const [clientSecret, setClientSecret] = useState("")
   const offersTarget = canAddForOrganization && givenScope.kind === "workspace"
   const [target, setTarget] = useState<McpAddTarget>("organization")
+  // Once the choice was offered, the draft keeps the destination picked, even
+  // if organization access ends: it is then refused rather than added to the
+  // workspace, until the admin picks the workspace themselves.
+  const [wasOffered, setWasOffered] = useState(offersTarget)
+  if (offersTarget && !wasOffered) setWasOffered(true)
   const scope =
-    offersTarget && target === "organization"
+    wasOffered && target === "organization"
       ? ORGANIZATION_MCP_SCOPE
       : givenScope
+  const lostTarget =
+    scope.kind === "organization" && !offersTarget && wasOffered
   // An organization's server is checked for the workspaces' own copies of it
   // before it is stored, and the copies found are offered to fold.
   const readCopies = useReadMcpServerCopies()
@@ -236,7 +247,7 @@ export function McpServerDialog({
             draft,
             scope,
             candidates,
-            selected: defaultFoldIds(candidates),
+            selected: defaultFoldIds(candidates, draft.enabled),
           })
         }
       }, setReadError)
@@ -265,6 +276,11 @@ export function McpServerDialog({
 
   if (fold) {
     const count = fold.candidates.length
+    const selected = foldableIds(
+      fold.candidates,
+      fold.selected,
+      fold.draft.enabled,
+    )
     // Organization access ended while the step was open: it is not added anywhere else instead.
     const lostOrganization =
       fold.scope.kind === "organization" &&
@@ -283,15 +299,10 @@ export function McpServerDialog({
         }
         submitLabel="Add MCP server"
         onSubmit={() =>
-          onSubmit(
-            { ...fold.draft, fold_server_ids: fold.selected },
-            fold.scope,
-          )
+          onSubmit({ ...fold.draft, fold_server_ids: selected }, fold.scope)
         }
         isPending={isPending}
-        isSubmitDisabled={
-          lostOrganization || fold.selected.length > MAX_FOLD_COPIES
-        }
+        isSubmitDisabled={lostOrganization || selected.length > MAX_FOLD_COPIES}
         isDirty
         error={error}
         footerStart={
@@ -308,7 +319,8 @@ export function McpServerDialog({
         ) : null}
         <McpFoldChoices
           candidates={fold.candidates}
-          selected={fold.selected}
+          selected={selected}
+          targetEnabled={fold.draft.enabled}
           isDisabled={isPending || lostOrganization}
           onChange={(selected) => setFold({ ...fold, selected })}
         />
@@ -326,7 +338,7 @@ export function McpServerDialog({
       submitLabel="Add MCP server"
       onSubmit={submit}
       isPending={isPending || isReading}
-      isSubmitDisabled={isInvalid}
+      isSubmitDisabled={isInvalid || lostTarget}
       isDirty={isDirty}
       error={readError ?? error}
       footerStart={
@@ -345,7 +357,13 @@ export function McpServerDialog({
         )
       }
     >
-      {offersTarget ? (
+      {lostTarget ? (
+        <InfoBanner tone="warning">
+          You can no longer add servers for the whole organization. Choose This
+          workspace to add it to {workspaceName} instead.
+        </InfoBanner>
+      ) : null}
+      {wasOffered ? (
         <RadioGroup
           label={ADD_TARGET_LABEL}
           value={target}

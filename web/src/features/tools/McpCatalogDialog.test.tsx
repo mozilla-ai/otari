@@ -916,8 +916,8 @@ describe("McpCatalogDialog", () => {
     expect(calls.some((call) => call.url === LOOKUP)).toBe(false)
   })
 
-  it("keeps the copies read for one pick when another's read fails, and reads only that one again", async () => {
-    const keeps = mcpServerFoldCandidate({
+  it("reads every pick's copies again on each Confirm, the ones that answered before too", async () => {
+    const added = mcpServerFoldCandidate({
       server_id: "aaaaaaaa-0000-0000-0000-000000000001",
       workspace_name: "Beta",
       name: "sentry",
@@ -926,15 +926,20 @@ describe("McpCatalogDialog", () => {
       signed_in: 0,
       keep_sign_in: 0,
     })
-    const calls = mockApi({ copies: { [SENTRY.url]: [keeps] } })
+    const calls = mockApi()
     const answer = vi.mocked(globalThis.fetch).getMockImplementation()
     let linearFails = true
+    let sentryCopies: McpServerFoldCandidate[] = []
     vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
       const url = String(input)
       const body = JSON.parse(String(init?.body ?? "{}"))
-      if (linearFails && url === LOOKUP && body.url === LINEAR.url) {
+      if (url === LOOKUP && body.url === LINEAR.url && linearFails) {
         calls.push({ url, method: "POST", body })
         return Response.json({ detail: "Try later." }, { status: 503 })
+      }
+      if (url === LOOKUP && body.url === SENTRY.url) {
+        calls.push({ url, method: "POST", body })
+        return Response.json({ data: sentryCopies })
       }
       return answer?.(input, init) as Promise<Response>
     })
@@ -953,17 +958,98 @@ describe("McpCatalogDialog", () => {
 
     expect(
       await screen.findByText(
-        "Could not look for copies of Linear: Try later. Confirm tries it again.",
+        "Could not look for copies of Linear: Try later. Nothing was added. Confirm looks again.",
       ),
     ).toBeVisible()
     expect(creates(calls)).toEqual([])
 
+    // Another admin's workspace adds a copy of Sentry meanwhile.
+    sentryCopies = [added]
     linearFails = false
     await user.click(screen.getByRole("button", { name: "Confirm" }))
 
-    await screen.findByRole("list", { name: "Workspace copies of Sentry" })
-    expect(reads(SENTRY.url)).toBe(1)
+    const copies = await screen.findByRole("list", {
+      name: "Workspace copies of Sentry",
+    })
+    expect(
+      within(copies).getByRole("checkbox", { name: "Beta: sentry" }),
+    ).toBeChecked()
+    expect(reads(SENTRY.url)).toBe(2)
     expect(reads(LINEAR.url)).toBe(2)
+    expect(creates(calls)).toEqual([])
+  })
+
+  it("says an add whose answer was lost may have been made, apart from a refused one", async () => {
+    const calls = mockApi({ created: { Linear: "Name in use." } })
+    const answer = vi.mocked(globalThis.fetch).getMockImplementation()
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}"))
+      if (String(input).endsWith("/mcp-servers") && body.name === "Sentry") {
+        calls.push({ url: String(input), method: "POST", body })
+        throw new TypeError("Failed to fetch")
+      }
+      return answer?.(input, init) as Promise<Response>
+    })
+    const user = userEvent.setup()
+    renderDialog([], undefined, undefined, true)
+
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Select Sentry" }),
+    )
+    await user.click(screen.getByRole("checkbox", { name: "Select Linear" }))
+    await user.click(screen.getByRole("button", { name: "Add 2 servers" }))
+    await user.click(screen.getByRole("button", { name: "Confirm" }))
+
+    const added = await screen.findByRole("list", { name: "What was added" })
+    const rows = within(added).getAllByRole("listitem")
+    expect(rows[0]).toHaveTextContent("NOT CONFIRMED")
+    expect(rows[0]).toHaveTextContent(/may have been added anyway/)
+    expect(rows[1]).toHaveTextContent("NOT ADDED")
+    expect(rows[1]).toHaveTextContent("Name in use.")
+  })
+
+  it("keeps a batch reviewed for the organization there once that access ends, until the admin picks the workspace", async () => {
+    const calls = mockApi()
+    const user = userEvent.setup()
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const dialog = (canAddForOrganization: boolean) => (
+      <QueryClientProvider client={client}>
+        <McpCatalogDialog
+          isOpen
+          onOpenChange={() => {}}
+          workspaceId={WORKSPACE}
+          workspaceName="Alpha"
+          existing={[]}
+          canAddForOrganization={canAddForOrganization}
+        />
+      </QueryClientProvider>
+    )
+    const { rerender } = render(dialog(true))
+
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Select Sentry" }),
+    )
+    await user.click(screen.getByRole("button", { name: "Add" }))
+    rerender(dialog(false))
+
+    expect(
+      screen.getByText(
+        /You can no longer add servers for the whole organization/,
+      ),
+    ).toBeVisible()
+    expect(screen.getByRole("button", { name: "Confirm" })).toBeDisabled()
+
+    await user.click(screen.getByRole("radio", { name: /This workspace/ }))
+    await user.click(screen.getByRole("button", { name: "Confirm" }))
+    await screen.findByRole("heading", { name: "1 of 1 added to Alpha" })
+    expect(creates(calls)).toEqual([
+      expect.objectContaining({
+        url: `/api/v1/workspaces/${WORKSPACE}/mcp-servers`,
+      }),
+    ])
+    expect(calls.some((call) => call.url === LOOKUP)).toBe(false)
   })
 
   it("offers a workspace copy under only the first of two picks at its URL", async () => {

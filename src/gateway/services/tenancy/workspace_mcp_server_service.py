@@ -1973,8 +1973,12 @@ class WorkspaceMcpServerService:
             raise WorkspaceMcpServerAlreadyExistsError(workspace_id, request.name) from None
 
         revocations = (await self._fold().fold(server, folding)).revocations if folding else []
-        await self._answer_requests(server, reaching, added_by=user.id)
+        # Read before the requests are answered: a failed read of whom to mail rolls the session back once the
+        # answers have committed, and that expires every row it had loaded.
+        user_id, email = user.id, user.email
+        await self._answer_requests(server, reaching, added_by=user_id)
         await self.db.commit()
+        await self.db.refresh(server)
         McpConnectionService.revoke_in_background(revocations)
         await AttachedMcpServerIndex.refresh_after_write()
         # After the commit, so a server that fails its check is still stored:
@@ -1984,8 +1988,8 @@ class WorkspaceMcpServerService:
             await growth.record_action(
                 background_tasks=background_tasks,
                 action=GrowthAction.MCP_SERVER_CREATED,
-                user_id=user.id,
-                email=user.email,
+                user_id=user_id,
+                email=email,
                 organization_id=organization_id,
             )
         return await self._public(server)
@@ -2144,13 +2148,7 @@ class WorkspaceMcpServerService:
         Raises:
             WorkspaceMcpServerLimitReachedError: it holds ``MAX_MCP_SERVERS_PER_WORKSPACE`` already.
         """
-        owner = (
-            WorkspaceMcpServer.workspace_id == scope.workspace_id
-            if scope.workspace_id is not None
-            else (WorkspaceMcpServer.organization_id == scope.organization_id)
-            & WorkspaceMcpServer.workspace_id.is_(None)
-        )
-        count = (await self.db.execute(select(func.count()).select_from(WorkspaceMcpServer).where(owner))).scalar_one()
+        count = await WorkspaceMcpServerRepository(self.db).count_owned(scope.organization_id, scope.workspace_id)
         if count >= MAX_MCP_SERVERS_PER_WORKSPACE:
             raise WorkspaceMcpServerLimitReachedError(
                 scope.workspace_id or scope.organization_id, MAX_MCP_SERVERS_PER_WORKSPACE
@@ -2315,12 +2313,14 @@ class WorkspaceMcpServerService:
         server.workspace_id = None
         await self.db.flush()
         revocations = (await self._fold().fold(server, folding)).revocations if folding else []
+        # Nothing loaded is read again until the refresh below: a failed read of whom to mail rolls the session
+        # back once the answers have committed, which expires every row it had loaded.
         await self._answer_requests(server, reaching, added_by=user.id)
         await self.db.commit()
         McpConnectionService.revoke_in_background(revocations)
         # A server attached to every request now attaches in every workspace of the organization.
         await AttachedMcpServerIndex.refresh_after_write()
-        logger.info("MCP server made its organization's server_id=%s folded=%d", server.id, len(folding))
+        logger.info("MCP server made its organization's server_id=%s folded=%d", server_id, len(folding))
         await self.db.refresh(server)
         return await self._public(server)
 
@@ -2905,7 +2905,9 @@ class WorkspaceMcpServerService:
         """
         scope = await self._managed(user, workspace_id)
         server = await self._server_in(scope, server_id)
-        await self._connection_service().disconnect_shared(server_id=server.id)
+        await self._connection_service().disconnect_shared(
+            server_id=server.id, still_managed=lambda row: self._require_in(scope, row, server_id)
+        )
         await self.db.refresh(server)
         await self._record_check(server)
         return await self._public(server)
@@ -3137,7 +3139,9 @@ class WorkspaceMcpServerService:
         """
         scope = await self._managed(user, workspace_id)
         server = await self._server_in(scope, server_id)
-        await self._connection_service().disconnect(server_id=server.id, user_id=user_id)
+        await self._connection_service().disconnect(
+            server_id=server.id, user_id=user_id, still_managed=lambda row: self._require_in(scope, row, server_id)
+        )
 
 
 __all__ = [

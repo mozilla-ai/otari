@@ -1,18 +1,25 @@
 import type { McpServerFoldCandidate } from "@/client"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
-import { foldEffects, MAX_FOLD_COPIES } from "@/features/tools/mcpFold"
+import {
+  foldBlocker,
+  foldEffects,
+  MAX_FOLD_COPIES,
+} from "@/features/tools/mcpFold"
 
 /**
  * The workspaces' own copies of a server an organization server can take the
  * place of, one box each, with what folding it would do to the people using
- * it. Ticked copies are folded; the rest stay as they are. Past
+ * it. Ticked copies are folded; the rest stay as they are. A workspace folds
+ * one copy, so ticking one unticks the others of its workspace, and a copy the
+ * server cannot replace is listed with the reason and cannot be ticked. Past
  * `MAX_FOLD_COPIES` ticked, the step that holds it must not submit.
  */
 export function McpFoldChoices({
   candidates,
   selected,
   onChange,
+  targetEnabled,
   label = "Workspace copies",
   isDisabled = false,
 }: {
@@ -20,15 +27,28 @@ export function McpFoldChoices({
   /** The ids of the ticked copies. */
   selected: readonly string[]
   onChange: (selected: string[]) => void
+  /** Whether the organization's server is on. */
+  targetEnabled: boolean
   /** The list's accessible name, apart per server where a step lists several. */
   label?: string
   isDisabled?: boolean
 }) {
-  const toggle = (serverId: string, isSelected: boolean) =>
+  const workspaceOf = new Map(
+    candidates.map((candidate) => [
+      candidate.server_id,
+      candidate.workspace_id,
+    ]),
+  )
+  const toggle = (candidate: McpServerFoldCandidate, isSelected: boolean) =>
     onChange(
       isSelected
-        ? [...selected.filter((id) => id !== serverId), serverId]
-        : selected.filter((id) => id !== serverId),
+        ? [
+            ...selected.filter(
+              (id) => workspaceOf.get(id) !== candidate.workspace_id,
+            ),
+            candidate.server_id,
+          ]
+        : selected.filter((id) => id !== candidate.server_id),
     )
   return (
     <div className="flex flex-col gap-3">
@@ -48,32 +68,50 @@ export function McpFoldChoices({
         </InfoBanner>
       ) : null}
       <ul aria-label={label} className="flex flex-col gap-3">
-        {candidates.map((candidate) => (
-          <li key={candidate.server_id}>
-            <Checkbox
-              ariaLabel={`${candidate.workspace_name}: ${candidate.name}`}
-              isSelected={selected.includes(candidate.server_id)}
-              isDisabled={isDisabled}
-              // A 44px target, the box still beside the first line.
-              className="min-h-11"
-              onChange={(isSelected) => toggle(candidate.server_id, isSelected)}
-            >
-              <span className="flex min-w-0 flex-col gap-1">
-                <span className="break-words">
-                  <span className="font-medium">
-                    {candidate.workspace_name}
+        {candidates.map((candidate) => {
+          const blocker = foldBlocker(candidate, targetEnabled)
+          const isShared =
+            candidates.filter(
+              (other) => other.workspace_id === candidate.workspace_id,
+            ).length > 1
+          return (
+            <li key={candidate.server_id}>
+              <Checkbox
+                ariaLabel={`${candidate.workspace_name}: ${candidate.name}`}
+                isSelected={
+                  blocker === "" && selected.includes(candidate.server_id)
+                }
+                isDisabled={isDisabled || blocker !== ""}
+                // A 44px target, the box still beside the first line.
+                className="min-h-11"
+                onChange={(isSelected) => toggle(candidate, isSelected)}
+              >
+                <span className="flex min-w-0 flex-col gap-1">
+                  <span className="break-words">
+                    <span className="font-medium">
+                      {candidate.workspace_name}
+                    </span>
+                    : {candidate.name}
                   </span>
-                  : {candidate.name}
+                  {blocker ? (
+                    <span className="text-caption text-warning">{blocker}</span>
+                  ) : null}
+                  {isShared ? (
+                    <span className="text-caption">
+                      Its workspace has another copy here. Only one of them can
+                      be folded.
+                    </span>
+                  ) : null}
+                  {foldEffects(candidate).map((line) => (
+                    <span key={line} className="text-caption">
+                      {line}
+                    </span>
+                  ))}
                 </span>
-                {foldEffects(candidate).map((line) => (
-                  <span key={line} className="text-caption">
-                    {line}
-                  </span>
-                ))}
-              </span>
-            </Checkbox>
-          </li>
-        ))}
+              </Checkbox>
+            </li>
+          )
+        })}
       </ul>
     </div>
   )

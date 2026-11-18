@@ -8,25 +8,13 @@ import uuid
 from collections.abc import Collection
 from typing import Never
 
-from sqlalchemy import ColumnElement, Select, and_, or_, select, update
+from sqlalchemy import ColumnElement, Select, and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.endpoint_urls import bare_url, url_path
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tools import WorkspaceMcpServer
 from gateway.repositories.base_repository import BaseRepository
-
-
-def _path_end(url: str) -> int:
-    """Where a URL's path ends: at its query or fragment, or at its end."""
-    ends = [index for index in (url.find("?"), url.find("#")) if index >= 0]
-    return min(ends, default=len(url))
-
-
-def _bare(url: str) -> str:
-    """A URL without the whitespace around it or the trailing slashes of its path. Its query is kept as it is."""
-    url = url.strip()
-    end = _path_end(url)
-    return url[:end].rstrip("/") + url[end:]
 
 
 class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Never]):
@@ -206,18 +194,18 @@ class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Nev
         return frozenset(found.scalars())
 
     async def _at_url(self, query: Select[WorkspaceMcpServer], url: str) -> list[WorkspaceMcpServer]:
-        """The rows ``query`` finds at ``url`` as :func:`_bare` reads both, oldest first.
+        """The rows ``query`` finds at ``url`` as :func:`bare_url` reads both, oldest first.
 
         SQL narrows the rows to those whose URL holds the bare path, which every match does, and the comparison
-        itself is the one :func:`_bare` makes, so it reads alike on PostgreSQL and SQLite whatever surrounds a URL.
+        itself is the one :func:`bare_url` makes, so it reads alike on PostgreSQL and SQLite whatever surrounds a URL.
         """
-        bare = _bare(url)
-        path = bare[: _path_end(bare)]
+        bare = bare_url(url)
+        path = url_path(bare)
         query = query.where(WorkspaceMcpServer.url.contains(path, autoescape=True)).order_by(
             WorkspaceMcpServer.created_at, WorkspaceMcpServer.id
         )
         rows = (await self.db.execute(query)).scalars().all()
-        return [row for row in rows if _bare(row.url) == bare]
+        return [row for row in rows if bare_url(row.url) == bare]
 
     async def at_url(
         self, workspace_id: uuid.UUID, url: str, organization_id: uuid.UUID | None = None
@@ -254,6 +242,15 @@ class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Nev
         if lock:
             query = query.with_for_update().execution_options(populate_existing=True)
         return await self._at_url(query, url)
+
+    async def count_owned(self, organization_id: uuid.UUID, workspace_id: uuid.UUID | None) -> int:
+        """How many servers a workspace holds as its own, or with no ``workspace_id`` its organization does."""
+        owner = (
+            WorkspaceMcpServer.workspace_id == workspace_id
+            if workspace_id is not None
+            else and_(WorkspaceMcpServer.organization_id == organization_id, WorkspaceMcpServer.workspace_id.is_(None))
+        )
+        return (await self.db.execute(select(func.count()).select_from(WorkspaceMcpServer).where(owner))).scalar_one()
 
     async def url_page(self, workspace_id: uuid.UUID, *, skip: int, limit: int) -> dict[uuid.UUID, str]:
         """A page of a workspace's stored servers' URLs, by server id, oldest first as the server list pages."""

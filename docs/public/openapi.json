@@ -14743,6 +14743,12 @@
           "credential_mode": {
             "$ref": "#/components/schemas/McpCredentialMode"
           },
+          "enabled": {
+            "default": true,
+            "description": "Whether it is on. An organization server that is off cannot take the place of one that is on",
+            "title": "Enabled",
+            "type": "boolean"
+          },
           "keep_sign_in": {
             "description": "Of those, how many keep their sign-in on the organization's server",
             "title": "Keep Sign In",
@@ -14758,7 +14764,7 @@
             "type": "boolean"
           },
           "same_credential": {
-            "description": "It signs in the way the organization's server does and holds no token or shared account of its own, so folding it changes no account its calls use. A fold step ticks these by default",
+            "description": "It signs in the way the organization's server does and holds no token or shared account of its own, so folding it changes no account its calls use. A fold step ticks these by default, unless someone would have to sign in again or go on through another sign-in",
             "title": "Same Credential",
             "type": "boolean"
           },

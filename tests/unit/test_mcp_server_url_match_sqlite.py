@@ -53,6 +53,7 @@ async def test_a_stored_url_matches_whatever_whitespace_surrounds_it(db: AsyncSe
         (f"{URL}\u00a0/", URL, False),
         (f"{URL}/\u00a0", URL, True),
         ("https://93.184.216.34/m%cp", "https://93.184.216.34/m_cp", False),
+        ("https://93.184.216.34/m_cp", "https://93.184.216.34/m%cp", False),
     ],
 )
 async def test_a_url_is_matched_as_python_reads_it_with_its_query_kept_whole(

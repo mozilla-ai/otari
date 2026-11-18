@@ -9,12 +9,59 @@ import type { McpServerFoldCandidate } from "@/client"
 /** The most copies one add or promotion folds: the gateway refuses a longer list. */
 export const MAX_FOLD_COPIES = 50
 
-/** The copies a fold step ticks before anyone touches it: those whose calls would use the same account. */
+/**
+ * Why a copy cannot be folded into a server that is on or off as
+ * `targetEnabled` says, or "" where it can: no workspace can turn an
+ * organization server back on, so one that is off cannot replace a copy that
+ * is on.
+ */
+export function foldBlocker(
+  candidate: McpServerFoldCandidate,
+  targetEnabled: boolean,
+): string {
+  return candidate.enabled && !targetEnabled
+    ? "It is on, and an organization server that is off cannot take its place."
+    : ""
+}
+
+/**
+ * The copies a fold step ticks before anyone touches it: those it can fold
+ * whose calls would use the same account, with nobody signing in again or
+ * switching to another sign-in. A workspace folds one copy, so one with
+ * several such copies gets none ticked, for the admin to pick.
+ */
 export function defaultFoldIds(
   candidates: readonly McpServerFoldCandidate[],
+  targetEnabled: boolean,
+): string[] {
+  const quiet = candidates.filter(
+    (candidate) =>
+      foldBlocker(candidate, targetEnabled) === "" &&
+      candidate.same_credential &&
+      candidate.switch_account === 0 &&
+      candidate.sign_in_again === 0,
+  )
+  return quiet
+    .filter(
+      (candidate) =>
+        quiet.filter((other) => other.workspace_id === candidate.workspace_id)
+          .length === 1,
+    )
+    .map((candidate) => candidate.server_id)
+}
+
+/** Of the ticked ids, those a fold can send: still listed, and foldable into the server as it is. */
+export function foldableIds(
+  candidates: readonly McpServerFoldCandidate[],
+  selected: readonly string[],
+  targetEnabled: boolean,
 ): string[] {
   return candidates
-    .filter((candidate) => candidate.same_credential)
+    .filter(
+      (candidate) =>
+        selected.includes(candidate.server_id) &&
+        foldBlocker(candidate, targetEnabled) === "",
+    )
     .map((candidate) => candidate.server_id)
 }
 

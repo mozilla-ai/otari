@@ -85,6 +85,18 @@ def test_a_url_is_matched_with_and_without_its_trailing_slash() -> None:
     assert url_spellings(" https://mcp.example.com ") == ("https://mcp.example.com", "https://mcp.example.com/")
 
 
+def test_a_url_s_query_is_kept_as_a_stored_server_keeps_it() -> None:
+    """The slash is the path's, before the query, and a slash inside the query is part of its value."""
+    assert url_spellings("https://mcp.example.com/mcp/?target=alpha") == (
+        "https://mcp.example.com/mcp?target=alpha",
+        "https://mcp.example.com/mcp/?target=alpha",
+    )
+    assert url_spellings("https://mcp.example.com/mcp?target=alpha/") == (
+        "https://mcp.example.com/mcp?target=alpha/",
+        "https://mcp.example.com/mcp/?target=alpha/",
+    )
+
+
 class _Session:
     """What a Unit of Work needs of a session when nothing reads it."""
 

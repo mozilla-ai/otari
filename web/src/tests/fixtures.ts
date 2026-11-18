@@ -1038,6 +1038,7 @@ export function mcpServerFoldCandidate(
     workspace_name: "Beta",
     name: "github",
     credential_mode: "per_user",
+    enabled: true,
     same_credential: true,
     signed_in: 1,
     keep_sign_in: 1,

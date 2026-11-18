@@ -14,7 +14,7 @@ from typing import cast
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, event, func, select
+from sqlalchemy import Engine, event, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -787,6 +787,46 @@ async def test_a_failed_approval_stores_no_server(async_db: AsyncSession, monkey
 
     assert (await async_db.execute(select(WorkspaceMcpServer))).scalars().all() == []
     assert [status for _, status, _ in await _statuses(async_db)] == [McpServerRequestStatus.PENDING]
+    assert await world.sent() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("write", ["create", "promote"])
+async def test_a_failed_read_of_whom_to_mail_still_answers_the_add_it_follows(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch, write: str
+) -> None:
+    """The add and its approvals have committed when the read fails, and its rollback expires what was loaded."""
+    team = await _team(async_db)
+    world = _World(async_db)
+    await world.requests.create(user=team.ada, workspace_id=team.workspace.id, request=_ask())
+    await world.sent()
+    world.mail.sent.clear()
+    ops = await _workspace(async_db, team.organization, "Ops")
+    # Ops's own, which Research gains once it is promoted.
+    home = (
+        await world.servers.create_server(
+            user=team.owner, workspace_id=ops.id, request=WorkspaceMcpServerCreate(name="Sentry", url=SENTRY[2])
+        )
+        if write == "promote"
+        else None
+    )
+
+    async def unreadable(self: WorkspaceAccess, user_ids: object) -> list[User]:
+        await async_db.execute(text("SELECT * FROM no_such_table"))
+        return []
+
+    monkeypatch.setattr(WorkspaceAccess, "people", unreadable)
+    if home is None:
+        added = await world.servers.create_server(
+            user=team.owner, workspace_id=None, request=WorkspaceMcpServerCreate(name="Sentry", url=SENTRY[2])
+        )
+        assert added.url == SENTRY[2]
+    else:
+        promoted = await world.servers.promote(
+            user=team.owner, workspace_id=ops.id, server_id=home.id, request=McpServerPromote()
+        )
+        assert promoted.scope == "organization"
+    assert [status for _, status, _ in await _statuses(async_db)] == [McpServerRequestStatus.APPROVED]
     assert await world.sent() == []
 
 

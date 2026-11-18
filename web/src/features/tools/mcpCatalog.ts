@@ -5,6 +5,7 @@ import type {
   WorkspaceMcpServerHealth,
 } from "@/client"
 import { healthDetail } from "@/features/tools/mcpServerHealth"
+import { ApiError } from "@/shared/api/client"
 
 // What the Browse catalog flow needs of an entry. `name` is the catalog's own
 // identifier, which is what makes the same server on Popular and in a search
@@ -163,4 +164,24 @@ export function describeAdded(server: WorkspaceMcpServer): AddOutcome {
 /** What a refused add came to. `message` is the gateway's own reason. */
 export function describeRefusal(message: string): AddOutcome {
   return { tone: "danger", label: "Not added", detail: message }
+}
+
+/**
+ * Whether a failed add may have been stored all the same. A 4xx is the
+ * gateway refusing it. No answer at all, a reply that was not the gateway's,
+ * or a 5xx may have come after the server was stored, and its copies folded.
+ */
+export function isUnconfirmed(error: unknown): boolean {
+  return (
+    !(error instanceof ApiError) || error.status < 400 || error.status >= 500
+  )
+}
+
+/** What an add came to when no answer confirmed it either way. */
+export function describeUnconfirmed(message: string): AddOutcome {
+  return {
+    tone: "warning",
+    label: "Not confirmed",
+    detail: `${message} It may have been added anyway. The server lists were read again: check them before adding it again.`,
+  }
 }

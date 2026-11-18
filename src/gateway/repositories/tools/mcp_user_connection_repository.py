@@ -101,14 +101,16 @@ class McpUserConnectionRepository(BaseRepository[McpUserConnection, Never, Never
         )
         return list(rows.scalars().all())
 
-    async def every_for_server(self, server_id: uuid.UUID) -> list[McpUserConnection]:
-        """Every user's connection to a server, oldest first."""
-        rows = await self.db.execute(
+    async def every_for_server(self, server_id: uuid.UUID, *, lock: bool = False) -> list[McpUserConnection]:
+        """Every user's connection to a server, oldest first; ``lock`` reads and holds them as :meth:`find` does."""
+        query = (
             select(McpUserConnection)
             .where(McpUserConnection.server_id == server_id)
             .order_by(McpUserConnection.created_at, McpUserConnection.id)
         )
-        return list(rows.scalars().all())
+        if lock:
+            query = query.with_for_update().execution_options(populate_existing=True)
+        return list((await self.db.execute(query)).scalars().all())
 
     async def move(self, connection: McpUserConnection, server_id: uuid.UUID) -> None:
         """Stage a connection's move to another server, which it then belongs to as it is."""

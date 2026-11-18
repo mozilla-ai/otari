@@ -12,7 +12,11 @@ import {
   SettingsGroup,
 } from "@/design-system/layout/SettingsGroup"
 import { McpFoldChoices } from "@/features/tools/McpFoldChoices"
-import { defaultFoldIds, MAX_FOLD_COPIES } from "@/features/tools/mcpFold"
+import {
+  defaultFoldIds,
+  foldableIds,
+  MAX_FOLD_COPIES,
+} from "@/features/tools/mcpFold"
 import {
   useMcpServerCopies,
   usePromoteWorkspaceMcpServer,
@@ -35,11 +39,11 @@ function PromoteDialog({
   onClose: () => void
 }) {
   const navigate = useNavigate()
-  // A copy read before this opening may have changed since, so only a read
-  // that answered after it counts.
-  const [openedAt] = useState(Date.now)
   const copies = useMcpServerCopies({ serverId: server.id }, true)
-  const isFresh = copies.isSuccess && copies.dataUpdatedAt >= openedAt
+  // A copy read before this opening may have changed since, so only a read
+  // that answered after it counts. Counted by the query rather than by the
+  // clock, which ties with a read cached in the same millisecond.
+  const isFresh = copies.isSuccess && copies.isFetchedAfterMount
   const promote = usePromoteWorkspaceMcpServer()
   // The copies ticked by hand, undefined until a box is touched so the default
   // ticks follow the read.
@@ -51,10 +55,12 @@ function PromoteDialog({
     ? (touched ?? []).filter((copy) => !present.has(copy.server_id))
     : []
   const selected = touched
-    ? touched
-        .map((copy) => copy.server_id)
-        .filter((serverId) => present.has(serverId))
-    : defaultFoldIds(candidates)
+    ? foldableIds(
+        candidates,
+        touched.map((copy) => copy.server_id),
+        server.enabled,
+      )
+    : defaultFoldIds(candidates, server.enabled)
   const isOverLimit = selected.length > MAX_FOLD_COPIES
 
   return (
@@ -125,6 +131,7 @@ function PromoteDialog({
           <McpFoldChoices
             candidates={candidates}
             selected={selected}
+            targetEnabled={server.enabled}
             isDisabled={promote.isPending}
             onChange={(ids) =>
               setTouched(
