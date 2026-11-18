@@ -4,6 +4,7 @@ import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
+from functools import partial
 from typing import Annotated, Any, cast
 
 import httpx
@@ -95,6 +96,7 @@ from gateway.services.tool_settings_service import load_overrides, stage_overrid
 from gateway.services.tools import (
     CodeExecutionEnvironmentService,
     DirectCaller,
+    DirectToolAvailability,
     DirectToolCall,
     DirectToolLedger,
     DirectToolRate,
@@ -629,3 +631,14 @@ def get_direct_tool_service(
 
 
 DirectToolServiceDep = Annotated[DirectToolService, Depends(get_direct_tool_service)]
+
+
+def get_direct_tool_availability(
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    api_keys: Annotated[ApiKeyService, Depends(get_api_key_service)],
+) -> DirectToolAvailability:
+    """Whether the direct search and fetch would admit a caller, checked as the direct tool service checks it."""
+    return DirectToolAvailability(config, partial(api_keys.tool_refusal, config))
+
+
+DirectToolAvailabilityDep = Annotated[DirectToolAvailability, Depends(get_direct_tool_availability)]

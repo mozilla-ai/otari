@@ -16,9 +16,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
-from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.models.tools import OrgWebSearchKey, WorkspaceWebSearchConfig
 from gateway.services.secret_box import generate_secret_key
+
+from .conftest import ALL_KEY_SCOPES
 
 _SEARCH_URL = "http://127.0.0.1:9998/search"
 _SANDBOX_URL = "http://127.0.0.1:9999/sandbox"
@@ -288,3 +290,78 @@ def test_a_fetch_key_admission_refuses_takes_both_web_tools_with_it(
 
     assert status["otari_web_fetch"] == (False, "not_configured")
     assert status["otari_web_search"] == (False, "not_configured")
+
+
+def _direct(tools: dict[str, dict[str, Any]]) -> dict[str, bool | None]:
+    return {tool_id: tool["direct_available"] for tool_id, tool in tools.items()}
+
+
+def _key(client: TestClient, master_key_header: dict[str, str], **fields: Any) -> dict[str, str]:
+    created = client.post(f"{API_ROOT}/keys", json={"key_name": "direct", **fields}, headers=master_key_header)
+    assert created.status_code == 200, created.text
+    return {API_KEY_HEADER: f"Bearer {created.json()['key']}"}
+
+
+_DIRECT_BOTH = {"otari_web_fetch": True, "otari_web_search": True, "otari_code_execution": None}
+_DIRECT_NEITHER = {"otari_web_fetch": False, "otari_web_search": False, "otari_code_execution": None}
+
+
+def test_a_key_holding_the_web_scopes_may_search_and_fetch_directly(
+    client: TestClient, api_key_header: dict[str, str]
+) -> None:
+    assert _direct(_tools(client, api_key_header)) == _DIRECT_BOTH
+
+
+def test_a_key_without_the_web_scopes_may_declare_the_tools_but_not_call_them_directly(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """A model request needs no web scope, a direct call does, so the two answers part here."""
+    tools = _tools(client, _key(client, master_key_header, scopes=["inference:run"]))
+
+    assert _status(tools) == _ALL_AVAILABLE
+    assert _direct(tools) == _DIRECT_NEITHER
+
+
+def test_a_key_with_one_web_scope_may_call_that_tool_alone(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    tools = _tools(client, _key(client, master_key_header, scopes=["inference:run", "web:search"]))
+
+    assert _direct(tools) == {"otari_web_fetch": False, "otari_web_search": True, "otari_code_execution": None}
+
+
+def test_a_workspace_that_turned_web_access_off_refuses_direct_calls_too(
+    client: TestClient, api_key_header: dict[str, str], master_key_header: dict[str, str]
+) -> None:
+    _put(client, master_key_header, "web-search", {"enabled": False})
+
+    assert _direct(_tools(client, api_key_header)) == _DIRECT_NEITHER
+
+
+def test_a_key_whose_tool_list_leaves_out_what_a_direct_call_runs_on_may_not_make_one(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    tools = _tools(client, _key(client, master_key_header, scopes=ALL_KEY_SCOPES, allowed_tools=[]))
+
+    assert _direct(tools) == _DIRECT_NEITHER
+
+
+def test_the_master_key_may_call_both_directly(client: TestClient, master_key_header: dict[str, str]) -> None:
+    assert _direct(_tools(client, master_key_header)) == _DIRECT_BOTH
+
+
+def test_an_organization_search_key_serves_direct_search_where_the_deployment_has_none(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unnamed direct search falls back to the organization's key, as the search endpoint does."""
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL")
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    assert _direct(_tools(client, api_key_header))["otari_web_search"] is False
+
+    _add_org_search_key(client, master_key_header)
+
+    assert _direct(_tools(client, api_key_header))["otari_web_search"] is True
+    assert _direct(_tools(client, master_key_header))["otari_web_search"] is False

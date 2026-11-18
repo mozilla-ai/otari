@@ -130,6 +130,7 @@ from gateway.api.deps.ports import (
 )
 from gateway.api.deps.tools import (
     CodeExecutionEnvironmentServiceDep,
+    DirectToolAvailabilityDep,
     DirectToolServiceDep,
     OptionalWebProviderClientDep,
     PlaygroundToolOfferDep,
@@ -148,6 +149,7 @@ from gateway.api.deps.tools import (
     build_search_tool_refresh,
     build_search_tool_service,
     get_code_execution_environment_service,
+    get_direct_tool_availability,
     get_direct_tool_service,
     get_optional_web_provider_client,
     get_playground_tool_offer,
@@ -1182,6 +1184,7 @@ __all__ = [
     "DatabaseSessionOwners",
     "DeploymentAdministrationAccessDep",
     "DeploymentUserServiceDep",
+    "DirectToolAvailabilityDep",
     "DirectToolServiceDep",
     "EntitlementPortDep",
     "FederationTokenExchangeDep",
@@ -1278,6 +1281,7 @@ __all__ = [
     "get_db",
     "get_deployment_administration_access",
     "get_deployment_user_service",
+    "get_direct_tool_availability",
     "get_direct_tool_service",
     "get_enabled_features",
     "get_entitlement_port",

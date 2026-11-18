@@ -143,3 +143,17 @@ def test_a_configured_sandbox_advertises_the_provider_keywords_it_may_claim(tmp_
 
     assert auto == ["otari_code_execution", "code_execution", "code_interpreter", "code_execution_<date>"]
     assert provider_only == ["otari_code_execution"]
+
+
+def test_direct_availability_follows_what_the_deployment_runs(tmp_path: Path) -> None:
+    """Search and fetch say whether their direct endpoints would run; code execution has none here."""
+    with _client(tmp_path) as client:
+        unconfigured = _tools(client)
+    reset_config()
+    reset_db()
+    with _client(tmp_path, web_fetch_enabled=True, web_search_url="http://searxng:8080") as client:
+        configured = _tools(client)
+
+    assert [unconfigured[t]["direct_available"] for t in ("otari_web_search", "otari_web_fetch")] == [False, False]
+    assert [configured[t]["direct_available"] for t in ("otari_web_search", "otari_web_fetch")] == [True, True]
+    assert configured["otari_code_execution"]["direct_available"] is None

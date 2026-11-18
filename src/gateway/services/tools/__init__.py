@@ -54,7 +54,8 @@ any-fetch's ``builtin`` provider, once, at startup. ``WebSearchBackend`` runs th
 ``WebToolCallCap`` is the search and fetch calls one request may make between them.
 ``DirectToolService`` runs a direct tool call, from its billed user to its settled cost, over the
 interfaces beside it (``DirectToolAccounts``, ``DirectToolLedger``, ``DirectToolGates``,
-``WorkspaceWebPolicies``), which the request's builder implements.
+``WorkspaceWebPolicies``), which the request's builder implements, and ``DirectToolAvailability``
+says whether one naming no tool would be admitted, without running it.
 ``pick_direct_search_instance``, ``resolve_direct_search`` and ``run_direct_search`` hold the direct
 search endpoint's rules and run its call, ``unpriced_direct_search_detail`` names the row one
 ``require_pricing`` cannot bill is missing, their ``_fetch`` twins do the same for the direct fetch
@@ -108,6 +109,7 @@ from gateway.services.tools._code_execution_responses import CODE_INTERPRETER_CA
 from gateway.services.tools._code_execution_tool import TOOL as CODE_EXECUTION_TOOL
 from gateway.services.tools._combined_backend import CombinedToolBackend, owning_backend
 from gateway.services.tools._declarations import Tool
+from gateway.services.tools._direct_tool_availability import DirectToolAvailability
 from gateway.services.tools._direct_tool_call import (
     DirectCaller,
     DirectToolAccounts,
@@ -284,6 +286,7 @@ __all__ = [
     "DirectToolOutcome",
     "DirectToolRate",
     "DirectToolResult",
+    "DirectToolAvailability",
     "DirectToolService",
     "DirectToolUsage",
     "WorkspaceWebPolicies",
