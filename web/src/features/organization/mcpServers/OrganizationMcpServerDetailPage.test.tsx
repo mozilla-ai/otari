@@ -9,6 +9,10 @@ import type {
 } from "@/client"
 import { OrganizationMcpServerDetailPage } from "@/features/organization/mcpServers/OrganizationMcpServerDetailPage"
 import * as apiClient from "@/shared/api/client"
+import {
+  mcpServerKey,
+  ORGANIZATION_MCP_SCOPE,
+} from "@/shared/api/mcpServerScope"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
   bootstrap,
@@ -61,13 +65,18 @@ const reads = (calls: Call[], path: string) =>
 function mockApi({
   server = SERVER,
   lift,
+  limit,
   reread,
+  role = "admin",
 }: {
   server?: WorkspaceMcpServer
   /** Answers a lift in place of the stock row, to hold it or refuse it. */
   lift?: () => Promise<unknown>
+  /** Holds a limit's PUT until it settles, then answers with the stock row. */
+  limit?: Promise<void>
   /** Holds every read of the table after the first. */
   reread?: Promise<void>
+  role?: "owner" | "admin" | "member"
 } = {}): Call[] {
   const calls: Call[] = []
   vi.spyOn(apiClient, "apiFetch").mockImplementation(async (path, init) => {
@@ -78,6 +87,7 @@ function mockApi({
         : undefined
     calls.push({ path, method, body })
     if (method === "DELETE" && lift) return (await lift()) as never
+    if (method === "PUT" && limit) await limit
     if (path.startsWith(`${PATH}/workspaces/`)) {
       const row = path.endsWith(ALPHA.workspace_id) ? ALPHA : BETA
       return {
@@ -94,17 +104,18 @@ function mockApi({
     }
     if (path === PATH) return server as never
     if (path === "/organizations/me") {
-      return organizationContext({ role: "admin" }) as never
+      return organizationContext({ role }) as never
     }
     throw new apiClient.ApiError(404, `Not mocked: ${path}`)
   })
   return calls
 }
 
-function renderPage() {
-  const client = new QueryClient({
+function renderPage(
+  client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
-  })
+  }),
+) {
   return render(
     <DeploymentProvider value={bootstrap()}>
       <QueryClientProvider client={client}>
@@ -167,7 +178,7 @@ describe("OrganizationMcpServerDetailPage", () => {
     expect(alpha).toHaveTextContent("As set here")
     const beta = within(table).getByRole("row", { name: /Beta/ })
     expect(beta).toHaveTextContent("Turned off")
-    expect(beta).toHaveTextContent("Narrowed by its admins")
+    expect(beta).toHaveTextContent("Customized by its admins")
   })
 
   it("sets a workspace's limit through PUT and reads the table again", async () => {
@@ -270,6 +281,141 @@ describe("OrganizationMcpServerDetailPage", () => {
     await user.keyboard("{Escape}")
 
     settleReread()
+    await waitFor(() =>
+      expect(within(beta).getByText("No limit")).toBeVisible(),
+    )
+    expect(
+      await getRowMenuItem(user, "Set the limit for Beta", beta),
+    ).not.toHaveAttribute("aria-disabled")
+  })
+
+  it("shows nothing of the server to a viewer without the role, even from what is cached", async () => {
+    mockApi({ role: "member" })
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    client.setQueryData(mcpServerKey(ORGANIZATION_MCP_SCOPE, SERVER.id), SERVER)
+    renderPage(client)
+
+    expect(
+      await screen.findByText(/Only organization owners and admins/),
+    ).toBeVisible()
+    expect(screen.queryByRole("heading", { name: SERVER.name })).toBeNull()
+  })
+
+  it("closes an untouched limit dialog without asking, though Any tool is not the stored value", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    renderPage()
+    const table = await workspacesTable()
+
+    await pressRowAction(user, "Set the limit for Alpha", table)
+    const dialog = await screen.findByRole("dialog", {
+      name: "Limit for Alpha",
+    })
+    // Alpha has no limit, so the editor opens on Any tool, which saving would set.
+    expect(
+      within(dialog).getByRole("button", { name: "Save limit" }),
+    ).toBeEnabled()
+    await user.keyboard("{Escape}")
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Limit for Alpha" }),
+      ).toBeNull(),
+    )
+    expect(screen.queryByRole("button", { name: "Discard" })).toBeNull()
+  })
+
+  it("holds the tool choice while a limit saves", async () => {
+    let settle = () => {}
+    const limit = new Promise<void>((resolve) => {
+      settle = resolve
+    })
+    mockApi({ limit })
+    const user = userEvent.setup()
+    renderPage()
+    const table = await workspacesTable()
+
+    await pressRowAction(user, "Set the limit for Alpha", table)
+    const dialog = await screen.findByRole("dialog", {
+      name: "Limit for Alpha",
+    })
+    await user.click(
+      within(dialog).getByRole("radio", { name: /Read tools only/ }),
+    )
+    await user.click(within(dialog).getByRole("button", { name: "Save limit" }))
+
+    await waitFor(() =>
+      expect(
+        within(dialog).getByRole("radio", { name: "Deny" }),
+      ).toBeDisabled(),
+    )
+    settle()
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Limit for Alpha" }),
+      ).toBeNull(),
+    )
+  })
+
+  it("shows the saved limit when the table cannot be read again", async () => {
+    const refused = Promise.reject(new apiClient.ApiError(500, "Read refused"))
+    // Handled here so the rejection is not reported before the reread awaits it.
+    refused.catch(() => {})
+    mockApi({ reread: refused })
+    const user = userEvent.setup()
+    renderPage()
+    const table = await workspacesTable()
+
+    await pressRowAction(user, "Set the limit for Alpha", table)
+    const dialog = await screen.findByRole("dialog", {
+      name: "Limit for Alpha",
+    })
+    await user.click(
+      within(dialog).getByRole("radio", { name: /Read tools only/ }),
+    )
+    await user.click(within(dialog).getByRole("button", { name: "Save limit" }))
+
+    expect(await screen.findByText("Read refused")).toBeVisible()
+    expect(within(table).getByRole("row", { name: /Alpha/ })).toHaveTextContent(
+      "Read tools",
+    )
+  })
+
+  it("keeps holding a row whose lift is in flight when another row's limit is opened and closed", async () => {
+    let settleLift = () => {}
+    const lifted = new Promise<void>((resolve) => {
+      settleLift = resolve
+    })
+    mockApi({
+      lift: async () => {
+        await lifted
+        return { ...BETA, organization_tools: null }
+      },
+      reread: Promise.resolve(),
+    })
+    const user = userEvent.setup()
+    renderPage()
+    const table = await workspacesTable()
+
+    await pressRowAction(user, "Lift the limit for Beta", table)
+    await pressRowAction(user, "Set the limit for Alpha", table)
+    await screen.findByRole("dialog", { name: "Limit for Alpha" })
+    await user.keyboard("{Escape}")
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Limit for Alpha" }),
+      ).toBeNull(),
+    )
+
+    const beta = within(table).getByRole("row", { name: /Beta/ })
+    expect(
+      await getRowMenuItem(user, /its limit is being lifted/, beta),
+    ).toHaveAttribute("aria-disabled", "true")
+    await user.keyboard("{Escape}")
+
+    settleLift()
     await waitFor(() =>
       expect(within(beta).getByText("No limit")).toBeVisible(),
     )

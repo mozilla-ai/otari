@@ -126,11 +126,13 @@ class McpUserConnectionRepository(BaseRepository[McpUserConnection, Never, Never
         """Up to ``limit`` connections whose authorization server can be asked to end them, and how many there are.
 
         Narrowed to these servers, to this user or these users, or both. A removal that ends more than ``limit``
-        revokes the first ``limit`` and counts the rest, rather than holding them all in memory.
+        revokes the first ``limit`` and counts the rest, rather than holding them all in memory. A ``limit``
+        of 0 only counts.
         """
         if (server_ids is not None and not server_ids) or (user_ids is not None and not user_ids):
             return [], 0
-        limit = limit or REVOCABLE_PAGE
+        if limit is None:
+            limit = REVOCABLE_PAGE
         conditions: list[ColumnElement[bool]] = [McpUserConnection.revocation_endpoint.is_not(None)]
         if server_ids is not None:
             conditions.append(McpUserConnection.server_id.in_(list(server_ids)))
@@ -138,13 +140,15 @@ class McpUserConnectionRepository(BaseRepository[McpUserConnection, Never, Never
             conditions.append(McpUserConnection.user_id == user_id)
         if user_ids is not None:
             conditions.append(McpUserConnection.user_id.in_(list(user_ids)))
-        rows = await self.db.execute(
-            select(McpUserConnection)
-            .where(*conditions)
-            .order_by(McpUserConnection.created_at, McpUserConnection.id)
-            .limit(limit)
-        )
-        found = list(rows.scalars().all())
+        found: list[McpUserConnection] = []
+        if limit > 0:
+            rows = await self.db.execute(
+                select(McpUserConnection)
+                .where(*conditions)
+                .order_by(McpUserConnection.created_at, McpUserConnection.id)
+                .limit(limit)
+            )
+            found = list(rows.scalars().all())
         if len(found) < limit:
             return found, len(found)
         total = (

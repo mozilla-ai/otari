@@ -37,7 +37,8 @@ const LIST = "/tools/mcp-servers"
 /**
  * The server's own page, for a sign-in that named no page to go back to. No
  * workspace is an organization owner's sign-in to an organization's server,
- * whose page is under Organization rather than a workspace.
+ * whose page is under Organization. A member's own sign-in to one names the
+ * workspace it started from, which shows the server too.
  */
 function serverPage(done: McpConnectionCompleted): string {
   return done.workspace_id === null
@@ -152,7 +153,7 @@ export function McpConnectionCallbackPage({
     if (isCancelled) {
       forgetSignInOrigin()
       rememberMcpConnectionNotice({ tone: "info", message: CANCELLED_NOTICE })
-      void navigate({ to: origin ?? LIST, replace: true })
+      void navigate({ to: returnTo ?? origin ?? LIST, replace: true })
       return
     }
     if (error) {

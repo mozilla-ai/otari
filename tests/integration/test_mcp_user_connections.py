@@ -2461,6 +2461,8 @@ async def test_a_removal_past_one_page_counts_what_it_did_not_revoke(
     monkeypatch.setattr("gateway.repositories.tools.mcp_user_connection_repository.REVOCABLE_PAGE", 1)
     rows, total = await McpUserConnectionRepository(async_db).revocable(server_ids=[world.server.id], limit=1)
     assert (len(rows), total) == (1, 2)
+    rows, total = await McpUserConnectionRepository(async_db).revocable(server_ids=[world.server.id], limit=0)
+    assert (rows, total) == ([], 2), "a zero limit only counts"
 
     with caplog.at_level("INFO", logger="gateway"):
         await _service(async_db, config).delete_server(
