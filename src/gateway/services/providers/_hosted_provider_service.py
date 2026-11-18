@@ -119,7 +119,7 @@ from gateway.services.providers._hosted_name_index import (
     remember_hosted_zero_data_retention,
 )
 from gateway.services.providers._hosted_offers import OTARI_IMPLEMENTATION, HostedOffers
-from gateway.services.providers._hosted_regions import HostedProviderRegions, region_public
+from gateway.services.providers._hosted_regions import HostedProviderRegions, ensure_regions_follow, region_public
 from gateway.services.providers._hosted_runtime import HostedProviderRuntime
 from gateway.services.providers._hosted_sources import HostedProviderProfile, HostedSource, HostedSources
 from gateway.services.providers._hosted_vendors import OTHER_VENDOR, vendor_of, vendors_of
@@ -340,6 +340,7 @@ class HostedProviderService:
 
         async with self.uow:
             row, source = await self._stored_or_raise(provider)
+            previous_origin = origin_of(row.api_base)
             if request.api_base is not None:
                 if api_base is not None:
                     api_base = unmask_api_base(api_base, row.api_base)
@@ -381,6 +382,7 @@ class HostedProviderService:
                 row.terms_url = request.terms_url
             if "privacy_url" in request.model_fields_set:
                 row.privacy_url = request.privacy_url
+            ensure_regions_follow(row, source.regions, previous_origin=previous_origin)
             await self.providers.save(row)
             public = self._public(source)
         remember_hosted_zero_data_retention(row.name, row.zero_data_retention)
@@ -442,6 +444,8 @@ class HostedProviderService:
             self.metadata_overrides.forget_provider(name)
         forget_hosted_name(name)
         remember_hosted_zero_data_retention(name, False)
+        # Its regions' names and every declared location go with it.
+        await refresh_hosted_name_index(self.uow, self.config)
         if source.shadows_config:
             # The configuration entry of the same name serves again, as its own implementation.
             entry = self.sources.entries()[name]

@@ -124,7 +124,8 @@ def ensure_workspace_may_use_hosted(workspace_id: uuid.UUID | None, provider: st
     if workspace_id is None:
         return
     # A name pinning a region is ruled by its provider's row.
-    provider = split_region(provider)[0]
+    if provider not in _rules.get(workspace_id, {}):
+        provider = split_region(provider)[0]
     if workspace_requires_zero_data_retention(workspace_id) and not hosted_zero_data_retention(provider):
         raise WorkspaceHostedAccessDeniedError(
             f"Hosted provider '{provider}' is not declared zero data retention, which this workspace requires",

@@ -57,6 +57,7 @@ from gateway.core.config import (
     USAGE_UNITS_HEADER,
     X_API_KEY_HEADER,
     GatewayConfig,
+    split_region,
 )
 from gateway.core.database import (
     DATABASE_ERRORS,
@@ -154,7 +155,11 @@ from gateway.services.pricing_refresh_service import (
     run_catalog_refresher,
     run_price_snapshot_refresher,
 )
-from gateway.services.pricing_service import configure_default_pricing, configure_provider_types
+from gateway.services.pricing_service import (
+    configure_default_pricing,
+    configure_hosted_regions,
+    configure_provider_types,
+)
 from gateway.services.provider_kwargs import (
     configure_hosted_names,
     settle_configured_providers,
@@ -1172,6 +1177,14 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             lambda name: config.provider_pricing_implementation(name) or hosted_implementation(name)
         )
         configure_hosted_names(hosted_implementation)
+        # A hosted provider's name never holds the separator, so a hosted name that does is a region of one.
+        configure_hosted_regions(
+            lambda name: (
+                split_region(name)[1] is not None
+                and name not in config.providers
+                and hosted_implementation(name) is not None
+            )
+        )
         log_writer: LogWriter
         workers: list[tuple[asyncio.Task[None], _LifespanWorker]] = []
         feature_workers: list[tuple[asyncio.Task[None], str]] = []

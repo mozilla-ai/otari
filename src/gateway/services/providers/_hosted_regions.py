@@ -6,7 +6,7 @@ a region never changes what a request already served is served on. Every field
 a region leaves unset is the provider's (``HostedProviderRegion``).
 """
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 
 from gateway.core.config import GatewayConfig, hosted_key_optional, region_instance, region_slug_problem
 from gateway.core.unit_of_work import UnitOfWork
@@ -15,7 +15,9 @@ from gateway.exceptions.providers_exceptions import (
     HostedProviderClientArgsUnreadableError,
     HostedProviderInvalidRegionSlugError,
     HostedProviderKeyRequiredError,
+    HostedProviderLastRegionError,
     HostedProviderRegionAlreadyExistsError,
+    HostedProviderRegionKeyRequiredError,
     HostedProviderRegionNotFoundError,
 )
 from gateway.models.providers import HostedProvider, HostedProviderRegion
@@ -98,6 +100,30 @@ def _ensure_servable(row: HostedProvider, *, encrypted_api_key: str | None, api_
     effective_base = api_base if api_base is not None else row.api_base
     if row.encrypted_api_key is None and not hosted_key_optional(row.provider, effective_base):
         raise HostedProviderApiKeyMissingError(row.provider)
+
+
+def ensure_regions_follow(
+    row: HostedProvider, regions: Sequence[HostedProviderRegion], *, previous_origin: object
+) -> None:
+    """Refuse a change to the provider that its regions cannot follow.
+
+    A region with a key of its own on the provider's endpoint must not have that
+    key carried to a new origin, and a region using the provider's key must
+    still have one where its endpoint needs it.
+
+    Raises:
+        HostedProviderRegionKeyRequiredError: the provider's endpoint moves under a region with a key of its own.
+        HostedProviderApiKeyMissingError: a region is left with no key where one is needed.
+    """
+    moved = origin_of(row.api_base) != previous_origin
+    for region in regions:
+        if region.encrypted_api_key is not None:
+            if moved and region.api_base is None:
+                raise HostedProviderRegionKeyRequiredError(region.slug)
+            continue
+        api_base = region.api_base if region.api_base is not None else row.api_base
+        if row.encrypted_api_key is None and not hosted_key_optional(row.provider, api_base):
+            raise HostedProviderApiKeyMissingError(row.provider)
 
 
 class HostedProviderRegions:
@@ -211,15 +237,15 @@ class HostedProviderRegions:
                 stored = client_args_of(region)
                 if stored is None and carries_redaction(request.client_args):
                     raise HostedProviderClientArgsUnreadableError
-                region.encrypted_client_args = encrypt_client_args(
-                    restore_redacted_values(request.client_args, stored)
-                )
+                region.encrypted_client_args = encrypt_client_args(restore_redacted_values(request.client_args, stored))
             if "data_location" in fields:
                 region.data_location = request.data_location
             if "supported_countries" in fields:
                 region.supported_countries = request.supported_countries
             if request.enabled is not None:
                 region.enabled = request.enabled
+            if not any(each.enabled for each in source.regions):
+                raise HostedProviderLastRegionError
             _ensure_servable(row, encrypted_api_key=region.encrypted_api_key, api_base=region.api_base)
             ordered = [other for other in source.regions if other is not region]
             if request.position is not None:
@@ -227,8 +253,9 @@ class HostedProviderRegions:
             else:
                 ordered.insert(source.regions.index(region), region)
             for position, each in enumerate(ordered):
-                each.position = position
-                await self.regions.save(each)
+                if each is region or each.position != position:
+                    each.position = position
+                    await self.regions.save(each)
             name = row.name
         await self._written(name)
         return name
@@ -248,6 +275,9 @@ class HostedProviderRegions:
             region = source.region(slug)
             if region is None:
                 raise HostedProviderRegionNotFoundError(row.name, slug)
+            remaining = [other for other in source.regions if other is not region]
+            if remaining and not any(other.enabled for other in remaining):
+                raise HostedProviderLastRegionError
             await self.regions.delete_row(region)
             name = row.name
         await self._written(name)

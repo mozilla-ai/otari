@@ -381,6 +381,27 @@ class HostedProviderInvalidRegionSlugError(TenancyValidationError):
         super().__init__(f"The region id '{slug}' {problem}")
 
 
+class HostedProviderRegionKeyRequiredError(TenancyValidationError):
+    """The provider's endpoint would move under a region that holds a key of its own and follows that endpoint.
+
+    The region's key would otherwise be sent to an endpoint chosen without
+    ever having to know it.
+    """
+
+    def __init__(self, slug: str) -> None:
+        super().__init__(
+            f"Region '{slug}' has a key of its own and uses the provider's endpoint; give it an endpoint of its "
+            "own, or its key again, before moving the provider's"
+        )
+
+
+class HostedProviderLastRegionError(TenancyValidationError):
+    """A change would leave a provider with regions but none switched on."""
+
+    def __init__(self) -> None:
+        super().__init__("A provider with regions keeps at least one switched on; switch the provider off instead")
+
+
 class DeploymentProviderNotFoundError(TenancyNotFoundError):
     def __init__(self, instance: str) -> None:
         super().__init__(f"Deployment provider '{instance}' not found")
@@ -453,6 +474,8 @@ __all__ = [
     "HostedProviderApiBaseMaskedError",
     "HostedProviderApiKeyMissingError",
     "HostedProviderInvalidRegionSlugError",
+    "HostedProviderLastRegionError",
+    "HostedProviderRegionKeyRequiredError",
     "HostedProviderNotFoundError",
     "HostedProviderRegionAlreadyExistsError",
     "HostedProviderRegionNotFoundError",

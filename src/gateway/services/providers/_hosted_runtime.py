@@ -16,7 +16,7 @@ from gateway.services.provider_kwargs import (
     missing_declared_credential,
 )
 from gateway.services.providers._country_gate import CountryGate, ensure_hosted_country
-from gateway.services.providers._hosted_credentials import ResolvedHostedProvider
+from gateway.services.providers._hosted_credentials import ResolvedHostedProvider, lookup_name
 from gateway.services.providers._hosted_sources import HostedSources
 from gateway.services.providers._hosted_vendors import vendor_of
 from gateway.services.providers._workspace_hosted_access import (
@@ -216,4 +216,5 @@ class HostedProviderRuntime:
                 disabled = await self.vendors.disabled_for(source.name)
                 if disabled and vendor_of(source.implementation, model) in disabled:
                     return []
-            return source.region_credentials(slug=split_region(name)[1])
+            pinned = None if source.name == lookup_name(name) else split_region(name)[1]
+            return source.region_credentials(slug=pinned)

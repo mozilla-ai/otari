@@ -47,7 +47,7 @@ def hosted_implementation(name: str) -> str | None:
 
 def hosted_zero_data_retention(name: str) -> bool:
     """Whether the hosted provider ``name`` is declared zero data retention; a region shares its provider's."""
-    return split_region(name)[0] in _zero_retention
+    return name in _zero_retention or split_region(name)[0] in _zero_retention
 
 
 def hosted_data_locations(name: str) -> tuple[str | None, ...]:

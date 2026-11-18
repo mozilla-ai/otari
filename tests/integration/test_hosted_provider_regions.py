@@ -244,3 +244,35 @@ def test_an_unknown_region_answers_404(client: TestClient) -> None:
     response = client.patch(f"{_PROVIDER}/regions/nowhere", json={"enabled": False}, headers=HEADERS)
 
     assert response.status_code == 404, response.text
+
+
+def test_the_last_region_switched_on_cannot_be_switched_off(client: TestClient) -> None:
+    _ok(_add_singapore(client))
+    _ok(client.patch(f"{_PROVIDER}/regions/us", json={"enabled": False}, headers=HEADERS))
+
+    response = client.patch(f"{_PROVIDER}/regions/sg", json={"enabled": False}, headers=HEADERS)
+    removed = client.delete(f"{_PROVIDER}/regions/sg", headers=HEADERS)
+
+    assert (response.status_code, removed.status_code) == (400, 400), (response.text, removed.text)
+
+
+def test_the_provider_endpoint_may_not_move_under_a_region_with_a_key_of_its_own(client: TestClient) -> None:
+    _ok(_add_singapore(client, api_base=None))
+
+    response = client.patch(
+        _PROVIDER, json={"api_base": "https://elsewhere.example/v1", "api_key": "sk-new"}, headers=HEADERS
+    )
+
+    assert response.status_code == 400, response.text
+    assert "Region 'sg'" in response.json()["detail"]
+
+
+def test_a_region_on_another_endpoint_does_not_take_the_provider_extras(client: TestClient) -> None:
+    _ok(client.patch(_PROVIDER, json={"client_args": {"default_headers": {"X-Team": "a"}}}, headers=HEADERS))
+    _ok(_add_singapore(client, client_args={"timeout": 5}))
+
+    _, sent_us = _chat(client, "tokenhub@us:gpt-4o")
+    _, sent_sg = _chat(client, "tokenhub@sg:gpt-4o")
+
+    assert sent_us["client_args"] == {"default_headers": {"X-Team": "a"}}
+    assert sent_sg["client_args"] == {"timeout": 5}

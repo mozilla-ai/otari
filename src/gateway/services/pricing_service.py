@@ -99,6 +99,18 @@ def default_pricing_enabled() -> bool:
 _provider_type_resolver: Callable[[str], str | None] | None = None
 
 
+# Whether an instance name is one region of a hosted provider (``tokenhub@sg``),
+# whose price falls back to its provider's. Registered at startup, as above.
+_hosted_region: Callable[[str], bool] | None = None
+
+
+def configure_hosted_regions(predicate: Callable[[str], bool] | None) -> None:
+    """Register the lookup that tells a hosted provider region's name from any other instance's."""
+
+    global _hosted_region
+    _hosted_region = predicate
+
+
 def configure_provider_types(resolver: Callable[[str], str | None] | None) -> None:
     """Register the instance to any-llm implementation lookup used for pricing."""
 
@@ -452,7 +464,7 @@ def pricing_key_forms(model_key: str) -> list[str]:
         return [model_key]
     forms = [model_key, f"{instance}/{model}"]
     base, region = split_region(instance)
-    if region is not None:
+    if region is not None and _hosted_region is not None and _hosted_region(instance):
         forms += [f"{base}:{model}", f"{base}/{model}"]
     return forms
 

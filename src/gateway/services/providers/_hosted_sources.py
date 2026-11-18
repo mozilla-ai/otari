@@ -224,11 +224,16 @@ class HostedSources:
     async def get(self, name: str) -> HostedSource | None:
         """One hosted provider by name, with the accepted aliases folded, or None.
 
-        A name pinning a region (``tokenhub@sg``) answers its provider.
+        A name pinning a region (``tokenhub@sg``) answers its provider, unless a
+        provider is stored under that whole name, which names made before
+        regions could be.
         """
-        name = lookup_name(split_region(name)[0])
+        name = lookup_name(name)
         entries = self.entries()
         row = await self.providers.get_by_name(name)
+        if row is None and name not in entries and split_region(name)[1] is not None:
+            name = split_region(name)[0]
+            row = await self.providers.get_by_name(name)
         if row is not None:
             regions = await self.regions.list_for_provider(row.id)
             return HostedSource(row=row, shadows_config=name in entries, regions=tuple(regions))

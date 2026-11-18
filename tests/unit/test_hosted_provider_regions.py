@@ -1,6 +1,7 @@
 """The pure rules behind hosted provider regions: names, locations, the region a request takes, its price key."""
 
 import uuid
+from collections.abc import Iterator
 from dataclasses import replace
 
 import pytest
@@ -8,7 +9,7 @@ import pytest
 from gateway.core.config import hosted_provider_name_problem, region_instance, region_slug_problem, split_region
 from gateway.core.settings.inference import data_location, data_location_admitted, data_locations
 from gateway.ports.model_provider_port import HostedCredential
-from gateway.services.pricing_service import pricing_key_forms
+from gateway.services.pricing_service import configure_hosted_regions, pricing_key_forms
 from gateway.services.providers import CountryGate, CountryNotServedError, ensure_hosted_country
 from gateway.services.providers import _workspace_hosted_access as access
 from gateway.services.providers._workspace_hosted_access import (
@@ -31,9 +32,7 @@ def _provider(*regions: HostedCredential) -> HostedCredential:
     return replace(regions[0], alternates=regions[1:])
 
 
-@pytest.mark.parametrize(
-    ("value", "expected"), [("us", "US"), (" de ", "DE"), ("eu", "EU"), ("Global", "GLOBAL")]
-)
+@pytest.mark.parametrize(("value", "expected"), [("us", "US"), (" de ", "DE"), ("eu", "EU"), ("Global", "GLOBAL")])
 def test_a_data_location_is_a_country_code_or_a_zone(value: str, expected: str) -> None:
     assert data_location(value) == expected
 
@@ -92,6 +91,14 @@ def test_a_region_instance_joins_the_name_and_the_slug() -> None:
     assert (region_instance("tokenhub", "sg"), region_instance("tokenhub", None)) == ("tokenhub@sg", "tokenhub")
 
 
+@pytest.fixture
+def _hosted_regions() -> Iterator[None]:
+    configure_hosted_regions(lambda name: name == "tokenhub@sg")
+    yield
+    configure_hosted_regions(None)
+
+
+@pytest.mark.usefixtures("_hosted_regions")
 def test_a_region_price_key_falls_back_to_its_provider() -> None:
     assert pricing_key_forms("tokenhub@sg:gpt-4o") == [
         "tokenhub@sg:gpt-4o",
@@ -100,6 +107,12 @@ def test_a_region_price_key_falls_back_to_its_provider() -> None:
         "tokenhub/gpt-4o",
     ]
     assert pricing_key_forms("tokenhub:gpt-4o") == ["tokenhub:gpt-4o", "tokenhub/gpt-4o"]
+
+
+@pytest.mark.usefixtures("_hosted_regions")
+def test_an_instance_that_is_no_hosted_region_keeps_its_own_price_key() -> None:
+    """``team@eu`` from config.yml is an instance of its own, not a region of ``team``."""
+    assert pricing_key_forms("team@eu:gpt-4o") == ["team@eu:gpt-4o", "team@eu/gpt-4o"]
 
 
 def test_a_request_takes_the_first_region_whose_countries_admit_it() -> None:

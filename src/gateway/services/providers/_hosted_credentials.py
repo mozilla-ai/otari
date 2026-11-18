@@ -237,7 +237,9 @@ def region_credential_of(
 
     Every value the region leaves unset is the provider's, and the region's SDK
     extras are merged over the provider's, so a Bedrock region names only its
-    ``region_name``.
+    ``region_name``. A region on another origin takes its own extras alone: the
+    provider's may carry a credential (a header, an IAM secret) meant for the
+    provider's endpoint.
     """
     try:
         api_key = None if region.encrypted_api_key is None else decrypt_secret(region.encrypted_api_key)
@@ -251,7 +253,12 @@ def region_credential_of(
                 provider.name,
             )
         return None
-    merged = client_args if provider.client_args is None else {**provider.client_args, **(client_args or {})}
+    same_origin = region.api_base is None or origin_of(region.api_base) == origin_of(provider.api_base)
+    merged = (
+        {**provider.client_args, **(client_args or {})}
+        if same_origin and provider.client_args is not None
+        else client_args
+    )
     return ResolvedHostedProvider(
         api_key=api_key if region.encrypted_api_key is not None else provider.api_key,
         api_base=region.api_base if region.api_base is not None else provider.api_base,

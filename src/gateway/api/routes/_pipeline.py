@@ -125,6 +125,7 @@ from gateway.core.config import (
     RESPONSE_DURATION_HEADER,
     SERVER_TIMING_HEADER,
     GatewayConfig,
+    split_region,
 )
 from gateway.core.database import DATABASE_ERRORS, describe_database_error, release_session
 from gateway.core.env import otari_env
@@ -1813,6 +1814,15 @@ async def _serve_from_hosted_credential(
     # here would make a build's own fleet unusable until it were priced. An
     # overlay binding this port owns that.
     await _warn_if_hosted_upstream_is_unpriced(ctx, resolved, credential.response_provider)
+    if served.instance != resolved.instance and split_region(served.instance)[0] == resolved.instance:
+        # A region settles at its own rate, which the hold taken at the
+        # provider's may not cover. A region with no rate of its own falls
+        # back to the provider's, so this never refuses an unpriced region.
+        try:
+            await _grow_reservation(ctx, served.instance, served.model, deployment_paid=True, refused_detail=None)
+        except HTTPException:
+            await release_reservation(ctx)
+            raise
 
     return served
 
