@@ -23,8 +23,10 @@ from gateway.repositories.identity import BlockedEmailRepository
 from gateway.repositories.organizations import OrganizationRepositories
 from gateway.repositories.tenancy import (
     OrganizationDomainRepository,
+    OrganizationMemberRepository,
     OrganizationRepository,
     UserRepository,
+    WorkspaceMemberRepository,
     WorkspaceRepository,
 )
 from gateway.repositories.traces import TracesRepositories
@@ -47,6 +49,7 @@ from gateway.services.tenancy import (
     MembershipListener,
     MembershipListeners,
     OrganizationDomainService,
+    OrganizationReach,
     OrganizationService,
 )
 from gateway.services.tenancy.authorization import WorkspaceAccess
@@ -70,7 +73,12 @@ def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
         BudgetMembershipListener(BudgetRepositories.on(uow)),
         ApiKeyMembershipListener(ApiKeyRepositories.on(uow)),
         TraceMembershipListener(TracesRepositories.on(uow)),
-        McpGrantMembershipListener(uow),
+        McpGrantMembershipListener(
+            uow,
+            OrganizationReach(
+                WorkspaceRepository(uow), WorkspaceMemberRepository(uow), OrganizationMemberRepository(uow)
+            ),
+        ),
     )
 
 

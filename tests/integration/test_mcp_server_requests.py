@@ -50,7 +50,7 @@ from gateway.services.mail import Mailer, MailMessage
 from gateway.services.mcp_catalog import McpCatalogService
 from gateway.services.mcp_stateless import ServerCheck
 from gateway.services.secret_box import generate_secret_key
-from gateway.services.tenancy import OrganizationService
+from gateway.services.tenancy import OrganizationReach, OrganizationService
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.workspace_mcp_server_service import WorkspaceMcpServerCreate, WorkspaceMcpServerService
 from gateway.services.tools import (
@@ -774,7 +774,12 @@ async def test_a_member_who_leaves_the_workspace_has_their_waiting_requests_with
 
     uow = UnitOfWork(async_db)
     async with uow:
-        await McpGrantMembershipListener(uow).member_lost_workspaces(team.ada.id, [team.workspace.id])
+        await McpGrantMembershipListener(
+            uow,
+            OrganizationReach(
+                WorkspaceRepository(uow), WorkspaceMemberRepository(uow), OrganizationMemberRepository(uow)
+            ),
+        ).member_lost_workspaces(team.ada.id, [team.workspace.id])
 
     group = (await world.requests.pending(user=team.owner, workspace_id=team.workspace.id)).data[0]
     assert [who.full_name for who in group.requesters] == ["Grace Viewer"]

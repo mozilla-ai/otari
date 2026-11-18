@@ -2749,10 +2749,7 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
     },
     "gateway.models.tools.WorkspaceMcpServer": {
         "repository": "gateway/repositories/tools/workspace_mcp_server_repository.py",
-        "baseline": (
-            "gateway/services/playground_service.py",
-            "gateway/services/tenancy/workspace_mcp_server_service.py",
-        ),
+        "baseline": ("gateway/services/tenancy/workspace_mcp_server_service.py",),
     },
     "gateway.models.tools.WorkspaceMcpServerGrant": {
         "repository": "gateway/repositories/tools/workspace_mcp_server_grant_repository.py",

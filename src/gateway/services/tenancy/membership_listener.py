@@ -4,10 +4,11 @@ The domain that changes membership calls it and never imports the domain that im
 """
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import Protocol
 
-from gateway.models.tenancy import OrganizationMember, WorkspaceMember
+from gateway.models.tenancy import MANAGEMENT_ROLES, OrganizationMember, WorkspaceMember
+from gateway.repositories.tenancy import OrganizationMemberRepository, WorkspaceMemberRepository, WorkspaceRepository
 
 
 class MembershipListener(Protocol):
@@ -72,3 +73,39 @@ class MembershipListeners:
 
 
 __all__ = ["MembershipListener", "MembershipListeners"]
+
+
+class OrganizationReach:
+    """Whether a person reaches an organization: through one of its workspaces, or as one of its owners or admins.
+
+    For a listener that has to know, inside the caller's Unit of Work, what a membership change leaves a person.
+    """
+
+    def __init__(
+        self,
+        workspaces: WorkspaceRepository,
+        members: WorkspaceMemberRepository,
+        organization_members: OrganizationMemberRepository,
+    ) -> None:
+        self._workspaces = workspaces
+        self._members = members
+        self._organization_members = organization_members
+
+    async def organization_of(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
+        """The organization a workspace belongs to, or ``None`` for one that does not exist."""
+        return await self._workspaces.get_organization_id(workspace_id)
+
+    async def still_reaches(
+        self, organization_id: uuid.UUID, user_id: uuid.UUID, *, losing: Collection[uuid.UUID]
+    ) -> bool:
+        """Whether a dashboard account reaches the organization once it loses these workspaces."""
+        kept = [
+            workspace_id
+            for workspace_id in await self._workspaces.get_ids_by_organization(organization_id)
+            if workspace_id not in losing
+        ]
+        if await self._members.get_active_pairs(kept, [user_id]):
+            return True
+        return user_id in await self._organization_members.active_with_roles(
+            organization_id, {user_id}, MANAGEMENT_ROLES
+        )

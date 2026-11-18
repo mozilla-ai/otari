@@ -79,6 +79,7 @@ from gateway.services.tools._mcp_oauth import (
     McpOAuthTokenError,
     McpOAuthTokens,
 )
+from gateway.services.tools._mcp_workspace_servers import McpWorkspaceServers
 
 # How long a started sign-in may take to come back. A first sign-in at a provider can ask for a password, a
 # second factor and a consent screen, and ran past ten minutes in testing. The state is single-use and bound to
@@ -313,10 +314,11 @@ def _registration_refusal(exc: McpOAuthRegistrationError) -> str:
     return f"{what} {_WHERE_TO_ADD_A_CLIENT}"
 
 
-def sign_in_link(config: GatewayConfig, *, server_id: uuid.UUID, user_id: str) -> str:
+def sign_in_link(config: GatewayConfig, *, server_id: uuid.UUID, user_id: str, workspace_id: uuid.UUID | None) -> str:
     """A link to the page that starts ``user_id``'s sign-in to a per-user server, for a conversation to show.
 
-    Minting stores nothing: the link carries the server and the user sealed with ``OTARI_SECRET_KEY``,
+    Minting stores nothing: the link carries the server, the user and the workspace the conversation is
+    in sealed with ``OTARI_SECRET_KEY``,
     and the sign-in, with its single-use state, starts only when somebody opens it and confirms on
     the page it shows, within ``SIGN_IN_LINK_LIFETIME``. It starts one sign-in at most. It always
     points at this gateway, never at an authorization server, so a conversation can tell it apart
@@ -330,9 +332,10 @@ def sign_in_link(config: GatewayConfig, *, server_id: uuid.UUID, user_id: str) -
     if user_id == DEFAULT_USER_ID:
         raise McpConnectionSetupError("The shared default user stands for keys with no owner and cannot sign in")
     callback_url(config)
-    sealed = _encrypted(
-        json.dumps({"p": _SIGN_IN_LINK_PURPOSE, "s": str(server_id), "u": user_id}, separators=(",", ":"))
-    )
+    payload = {"p": _SIGN_IN_LINK_PURPOSE, "s": str(server_id), "u": user_id}
+    if workspace_id is not None:
+        payload["w"] = str(workspace_id)
+    sealed = _encrypted(json.dumps(payload, separators=(",", ":")))
     # Fernet's padding is dropped and put back on reading, so the link has no character a chat may mangle.
     # The ticket rides in the fragment, which a browser never sends, so no access log or proxy records it.
     return f"{_gateway_base(config)}{API_ROOT}{SIGN_IN_LINK_PATH}#{urlencode({'ticket': sealed.rstrip('=')})}"
@@ -352,6 +355,8 @@ class SignInLinkTicket:
     user_id: str
     ticket_hash: str = field(repr=False)
     good_until: datetime
+    # The workspace the conversation was in; ``None`` on a link minted before links named one.
+    workspace_id: uuid.UUID | None = None
 
 
 def read_sign_in_link(ticket: str) -> SignInLinkTicket | None:
@@ -376,6 +381,7 @@ def read_sign_in_link(ticket: str) -> SignInLinkTicket | None:
             user_id=str(payload["u"]),
             ticket_hash=hashlib.sha256(raw).hexdigest(),
             good_until=good_until,
+            workspace_id=uuid.UUID(payload["w"]) if "w" in payload else None,
         )
     except (InvalidToken, SecretBoxUnavailableError, ValueError, KeyError, TypeError):
         return None
@@ -607,6 +613,7 @@ class _Pending:
     """A consumed sign-in, copied off its row."""
 
     server_id: uuid.UUID
+    workspace_id: uuid.UUID | None
     user_id: str
     identity_id: uuid.UUID | None
     encrypted_code_verifier: str
@@ -648,6 +655,10 @@ class McpConnectionEligibility(Protocol):
 
     async def may_manage(self, workspace_id: uuid.UUID, identity_id: uuid.UUID) -> bool:
         """Whether a dashboard identity may still manage ``workspace_id`` now, under ``hold``."""
+        ...
+
+    async def organization_of(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
+        """The organization a workspace belongs to, or ``None`` for one that does not exist."""
         ...
 
 
@@ -813,8 +824,10 @@ class McpConnectionService:
         *,
         eligibility: McpConnectionEligibility,
         users: UserAliases,
+        views: McpWorkspaceServers,
     ) -> None:
         self._uow = uow
+        self._views = views
         self._servers = servers
         self._connections = connections
         self._flows = flows
@@ -834,6 +847,7 @@ class McpConnectionService:
         for_shared: bool = False,
         browser_token: str | None = None,
         link: SignInLinkTicket | None = None,
+        workspace_id: uuid.UUID | None = None,
     ) -> str:
         """Start a user's sign-in to a per-user server, and return the URL to send their browser to.
 
@@ -854,10 +868,14 @@ class McpConnectionService:
         same transaction that stores the sign-in, so it starts this one and no other, and stays
         usable when the sign-in could not start at all.
 
+        ``workspace_id`` is the workspace it starts from, recorded so its membership decides whether the
+        sign-in may finish. A workspace's own server starts from that workspace whatever is passed; an
+        organization's starts only from a workspace that reaches it.
+
         The state is single-use and expires after ``FLOW_LIFETIME``.
 
         Raises:
-            WorkspaceMcpServerNotFoundError: no such server.
+            WorkspaceMcpServerNotFoundError: no such server, or none ``workspace_id`` reaches.
             McpConnectionModeError: the server is not in the mode this sign-in is for.
             McpConnectionSetupError: ``public_base_url`` is unset, ``return_to`` is not a dashboard
                 path, the user is the shared ``default`` one, or the authorization server registers
@@ -879,6 +897,7 @@ class McpConnectionService:
         return_to = checked_return_to(return_to)
         async with self._uow:
             server = await self._server_in_mode(server_id, mode)
+            started_in = await self._started_in(server, workspace_id)
             url, stored, pinned = server.url, stored_oauth_client(server), _Pin.of(server)
         try:
             metadata = await _mcp_oauth.discover(url)
@@ -927,6 +946,7 @@ class McpConnectionService:
             await self._flows.add(
                 state_hash=_state_hash(state),
                 server_id=server_id,
+                workspace_id=started_in,
                 user_id=user_id,
                 identity_id=identity_id,
                 encrypted_code_verifier=_encrypted(verifier),
@@ -963,7 +983,7 @@ class McpConnectionService:
         async with self._uow:
             if await self._link_uses.used(link.ticket_hash):
                 raise McpSignInLinkUsedError
-            server = await self._server_in_mode(link.server_id, McpCredentialMode.PER_USER)
+            server = await self._server_in_mode(await self._linked_server(link), McpCredentialMode.PER_USER)
             alias = (await self._users.aliases([link.user_id])).get(link.user_id)
             return SignInLinkTarget(
                 server_id=server.id,
@@ -999,16 +1019,41 @@ class McpConnectionService:
             logger.warning("MCP sign-in link refused reason=other_identity server_id=%s", link.server_id)
             raise McpSignInLinkOtherUserError
         browser_token = secrets.token_urlsafe(32) if opened_by is None else None
+        async with self._uow:
+            server_id = await self._linked_server(link)
         url = await self.start(
-            server_id=link.server_id,
+            server_id=server_id,
             user_id=link.user_id,
             identity_id=opened_by,
             browser_token=browser_token,
             link=link,
+            workspace_id=link.workspace_id,
         )
         if browser_token is None:
             return LinkSignIn(url=url)
         return LinkSignIn(url=url, state=_link_flow_state(browser_token), browser_token=browser_token)
+
+    async def _started_in(self, server: WorkspaceMcpServer, workspace_id: uuid.UUID | None) -> uuid.UUID:
+        """The workspace a sign-in to ``server`` starts from: its own, or one that reaches an organization's server.
+
+        Raises:
+            WorkspaceMcpServerNotFoundError: the server is an organization's and ``workspace_id`` does not reach it.
+        """
+        if server.workspace_id is not None:
+            return server.workspace_id
+        if (
+            workspace_id is None
+            or await self._eligibility.organization_of(workspace_id) != server.organization_id
+            or not await self._views.reaches(workspace_id, server)
+        ):
+            raise WorkspaceMcpServerNotFoundError(server.id)
+        return workspace_id
+
+    async def _linked_server(self, link: SignInLinkTicket) -> uuid.UUID:
+        """The server a link names; one handed out before its server was folded names the old id, swapped here."""
+        if link.workspace_id is None:
+            return link.server_id
+        return (await self._views.swap_aliases(link.workspace_id, [link.server_id]))[0]
 
     @staticmethod
     def _named_by(ticket: str) -> SignInLinkTicket:
@@ -1177,6 +1222,7 @@ class McpConnectionService:
                 if flow is None
                 else _Pending(
                     server_id=flow.server_id,
+                    workspace_id=flow.workspace_id,
                     user_id=flow.user_id,
                     identity_id=flow.identity_id,
                     encrypted_code_verifier=flow.encrypted_code_verifier,
@@ -1235,11 +1281,12 @@ class McpConnectionService:
             # is not sent to the endpoints discovered then, and they are not recorded on a connection.
             logger.warning("MCP sign-in refused reason=token_endpoint_changed server_id=%s", pending.server_id)
             raise McpConnectionFlowError("The server changed while you were signing in. Start it again.")
-        if server.workspace_id is None:
-            # Nothing starts a sign-in to an organization server yet.
-            raise McpConnectionFlowError("This server's sign-in cannot be finished here. Start it again.")
+        workspace_id = server.workspace_id or pending.workspace_id
+        if workspace_id is None:
+            # An organization's server names no workspace, and a sign-in to one always records where it started.
+            raise McpConnectionFlowError("This sign-in can no longer be finished. Start it again.")
         # Copied now: the row is read again below into this same object.
-        url_before, workspace_id = server.url, server.workspace_id
+        url_before = server.url
         try:
             tokens = await _mcp_oauth.exchange_code(
                 pending.token_endpoint,

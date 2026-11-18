@@ -238,10 +238,12 @@ from gateway.repositories.tenancy import (
 )
 from gateway.repositories.tools import (
     McpOAuthFlowRepository,
+    McpServerAliasRepository,
     McpServerRequestRepository,
     McpSignInLinkUseRepository,
     McpUserConnectionRepository,
     WorkspaceMcpServerLogoRepository,
+    WorkspaceMcpServerOverrideRepository,
     WorkspaceMcpServerRepository,
 )
 from gateway.repositories.update_check import UpdateCheckStateRepository
@@ -311,6 +313,7 @@ from gateway.services.tools import (
     McpServerLogoService,
     McpServerRequestService,
     McpSignedInServers,
+    McpWorkspaceServers,
     WorkspaceMcpServerUrls,
 )
 from gateway.services.update_check import UpdateCheckService
@@ -553,6 +556,9 @@ def get_mcp_connection_service(
             UserRepository(uow),
         ),
         users=get_user_access(uow),
+        views=McpWorkspaceServers(
+            WorkspaceMcpServerRepository(uow), WorkspaceMcpServerOverrideRepository(uow), McpServerAliasRepository(uow)
+        ),
     )
 
 

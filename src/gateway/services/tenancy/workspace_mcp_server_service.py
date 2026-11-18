@@ -61,6 +61,7 @@ from gateway.exceptions.tools_exceptions import (
     McpConnectionFlowError,
     McpConnectionSetupError,
     McpConnectionUnavailableError,
+    McpServerNameTakenError,
     McpSignInLinkNeedsSessionError,
     McpSignInRequiredError,
     WorkspaceMcpServerAccessDeniedError,
@@ -86,14 +87,17 @@ from gateway.models.tools import (
 from gateway.ports.growth_signal_port import GrowthAction, GrowthSignalPort
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
+    OrganizationRepository,
     UserRepository,
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
 from gateway.repositories.tools import (
     McpOAuthFlowRepository,
+    McpServerAliasRepository,
     McpUserConnectionRepository,
     WorkspaceMcpServerGrantRepository,
+    WorkspaceMcpServerOverrideRepository,
     WorkspaceMcpServerRepository,
 )
 from gateway.repositories.users_repository import lock_live_users, provision_attribution_users
@@ -133,11 +137,13 @@ from gateway.services.tools import (
     LinkSignIn,
     McpConnectionService,
     McpRevocation,
+    McpServerInWorkspace,
     McpServerRef,
     McpServerRequestService,
     McpSignInNeeded,
     McpSignInReason,
     McpUserTokens,
+    McpWorkspaceServers,
     SignInLinkTarget,
     StoredMcpOAuthClient,
     WorkspaceMcpServerHealth,
@@ -777,6 +783,10 @@ class WorkspaceMcpConnectionEligibility:
         )
         return identity in managers
 
+    async def organization_of(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
+        """The organization a workspace belongs to, or ``None`` for one that does not exist."""
+        return await self._workspaces.get_organization_id(workspace_id)
+
     async def may_manage(self, workspace_id: uuid.UUID, identity_id: uuid.UUID) -> bool:
         """An owner or admin of the workspace, or of its organization, as the management routes require."""
         membership = await self._members.get_active_by_workspace_and_user(workspace_id, identity_id)
@@ -936,11 +946,18 @@ async def _resolve_for_request(
         return RequestMcpServers()
     tokens = tokens or McpUserTokens(McpUserConnectionRepository(db))
 
-    named = list(dict.fromkeys(server_ids))
-    rows = await WorkspaceMcpServerRepository(db).for_request(workspace_id, named, attached=attach)
-    by_id = {row.id: row for row in rows}
+    organization_id = await WorkspaceRepository(db).get_organization_id(workspace_id)
+    if organization_id is None:
+        if server_ids:
+            raise WorkspaceMcpServerNotFoundError(server_ids[0])
+        return RequestMcpServers()
+    views = _mcp_views(db)
+    named = await views.swap_aliases(workspace_id, server_ids) if server_ids else []
+    seen = await views.for_request(workspace_id, organization_id, named, attached=attach)
+    by_id = {view.id: view.row for view in seen}
+    in_workspace = {view.id: view for view in seen}
 
-    patterns = {row.id: access.patterns_for(row.id, row.everyone_tools, _read_tools(row)) for row in rows}
+    patterns = {view.id: view.patterns_for(access) for view in seen}
     # Only a deferring caller is told a per-user server needs a user it does not have; the others answer 404.
     missing = [
         server_id
@@ -950,9 +967,9 @@ async def _resolve_for_request(
     if missing:
         raise WorkspaceMcpServerNotFoundError(missing[0])
     attached = [
-        row.id
-        for row in rows
-        if row.attach_by_default and row.id not in named and patterns[row.id] and not _needs_a_user(row, access)
+        view.id
+        for view in seen
+        if view.attach_by_default and view.id not in named and patterns[view.id] and not _needs_a_user(view.row, access)
     ]
     cooling = [server_id for server_id in attached if WorkspaceMcpServerHealth.cooling_down(by_id[server_id].health)]
     for server_id in cooling:
@@ -970,7 +987,7 @@ async def _resolve_for_request(
     accounts: dict[uuid.UUID, tuple[McpServerRef, bool]] = {}
     for server_id in named + attached:
         row = by_id[server_id]
-        if not row.enabled:
+        if not in_workspace[server_id].enabled:
             continue
         granted = patterns[server_id]
         per_user = row.credential_mode == McpCredentialMode.PER_USER
@@ -991,7 +1008,7 @@ async def _resolve_for_request(
             purpose_hint=row.purpose_hint,
             allowed_tools=row.allowed_tools,
             caller_tool_patterns=None if "*" in granted else granted,
-            caller_access_source=f"mcp_{access.decide(row.id, row.everyone_tools)[0]}",
+            caller_access_source=f"mcp_{access.decide(row.id, in_workspace[server_id].everyone_tools)[0]}",
             stored_server_id=str(row.id),
             attached=server_id not in named,
             attached_budget=budget if server_id not in named else None,
@@ -1164,21 +1181,19 @@ async def resolve_workspace_mcp_server(
     server that last asked for a credential, it is ``None`` for a caller with ``access``,
     as a disabled one is.
     """
-    row = (
-        await db.execute(
-            select(WorkspaceMcpServer).where(
-                WorkspaceMcpServer.workspace_id == workspace_id,
-                WorkspaceMcpServer.id == server_id,
-            )
-        )
-    ).scalar_one_or_none()
-    if row is None:
+    organization_id = await WorkspaceRepository(db).get_organization_id(workspace_id)
+    if organization_id is None:
         return None
+    seen = await _mcp_views(db).for_request(workspace_id, organization_id, [server_id], attached=False)
+    if not seen:
+        return None
+    view = seen[0]
+    row = view.row
     if access is not None:
-        if not row.enabled:
+        if not view.enabled:
             return None
-        if not access.patterns_for(row.id, row.everyone_tools, _read_tools(row)):
-            source, _ = access.decide(row.id, row.everyone_tools)
+        if not view.patterns_for(access):
+            source, _ = access.decide(row.id, view.everyone_tools)
             raise WorkspaceMcpServerAccessDeniedError(row.id, name=row.name, decided_by=f"mcp_{source}")
     if _needs_a_user(row, access):
         return None
@@ -1193,9 +1208,10 @@ async def resolve_workspace_mcp_server(
         renew_token=_renewer(row, access, tokens),
         # A user's token changes at every renewal, which is not a change to the server's configuration.
         credential_revision=McpCredentialMode.PER_USER if per_user else None,
-        enabled=row.enabled,
-        everyone_tools=row.everyone_tools,
-        read_tools=_read_tools(row),
+        enabled=view.enabled,
+        everyone_tools=view.everyone_tools,
+        read_tools=view.read_tools,
+        tool_limit=view.tool_limit,
         purpose_hint=row.purpose_hint,
         allowed_tools=row.allowed_tools,
     )
@@ -1223,11 +1239,10 @@ async def list_reachable_mcp_servers(
     A per-user server is left out for a caller with no user, and marked ``sign_in_required`` for
     one whose user has not signed in to it. A shared server that still needs a credential is left out.
     """
-    rows = await WorkspaceMcpServerRepository(db).enabled_in_workspace(workspace_id)
     reachable = [
-        row
-        for row in rows
-        if access.patterns_for(row.id, row.everyone_tools, _read_tools(row)) and not _needs_a_user(row, access)
+        view.row
+        for view in await _enabled_in_workspace(db, workspace_id)
+        if view.patterns_for(access) and not _needs_a_user(view.row, access)
     ]
     per_user = [row.id for row in reachable if row.credential_mode == McpCredentialMode.PER_USER]
     tokens = tokens or McpUserTokens(McpUserConnectionRepository(db))
@@ -1244,6 +1259,20 @@ async def list_reachable_mcp_servers(
         )
         for row in reachable
     ]
+
+
+def _mcp_views(db: AsyncSession) -> McpWorkspaceServers:
+    return McpWorkspaceServers(
+        WorkspaceMcpServerRepository(db), WorkspaceMcpServerOverrideRepository(db), McpServerAliasRepository(db)
+    )
+
+
+async def _enabled_in_workspace(db: AsyncSession, workspace_id: uuid.UUID) -> list[McpServerInWorkspace]:
+    """Every enabled server a workspace reaches, its own and its organization's, oldest first."""
+    organization_id = await WorkspaceRepository(db).get_organization_id(workspace_id)
+    if organization_id is None:
+        return []
+    return await _mcp_views(db).enabled(workspace_id, organization_id)
 
 
 async def _grant_or_404(
@@ -1314,8 +1343,14 @@ class WorkspaceMcpServers:
         )
 
     async def any_attached(self, workspace_id: uuid.UUID) -> bool:
-        """Whether the workspace has an enabled server marked ``attach_by_default``, in one indexed read."""
-        return await WorkspaceMcpServerRepository(self._db).any_attached(workspace_id)
+        """Whether the workspace attaches an enabled server to every request, its own or its organization's.
+
+        One indexed read when the workspace attaches one of its own.
+        """
+        if await WorkspaceMcpServerRepository(self._db).any_attached(workspace_id):
+            return True
+        organization_id = await WorkspaceRepository(self._db).get_organization_id(workspace_id)
+        return organization_id is not None and await _mcp_views(self._db).any_attached(workspace_id, organization_id)
 
     async def list_reachable(self, workspace_id: uuid.UUID, access: McpAccess) -> list[McpServerSummary]:
         """See :func:`list_reachable_mcp_servers`."""
@@ -1330,9 +1365,9 @@ class WorkspaceMcpServers:
         if access.user_id is not None:
             return []
         return [
-            McpServerLeftOut(id=row.id, name=row.name, reason="key_has_no_user", detail=_NO_USER_DETAIL)
-            for row in await WorkspaceMcpServerRepository(self._db).enabled_in_workspace(workspace_id)
-            if _needs_a_user(row, access) and access.patterns_for(row.id, row.everyone_tools, _read_tools(row))
+            McpServerLeftOut(id=view.id, name=view.row.name, reason="key_has_no_user", detail=_NO_USER_DETAIL)
+            for view in await _enabled_in_workspace(self._db, workspace_id)
+            if _needs_a_user(view.row, access) and view.patterns_for(access)
         ]
 
     async def resolve_one(
@@ -1652,6 +1687,7 @@ class WorkspaceMcpServerService:
         organization_id = await workspaces.get_organization_id(resolved_workspace_id)
         if organization_id is None:
             raise WorkspaceNotFoundError(workspace_id)
+        await self._refuse_organization_name(organization_id, request.name, except_id=None)
 
         count = (
             await self.db.execute(
@@ -1728,6 +1764,8 @@ class WorkspaceMcpServerService:
         # against, or a secret saved here would land on a client the move had dropped.
         await self.db.refresh(server, with_for_update=True)
         fields = request.model_dump(exclude_unset=True)
+        if "name" in fields and fields["name"] != server.name:
+            await self._refuse_organization_name(server.organization_id, fields["name"], except_id=server.id)
 
         new_token = fields.pop("authorization_token", _UNSET)
         new_client_id = fields.pop("oauth_client_id", _UNSET)
@@ -1833,6 +1871,23 @@ class WorkspaceMcpServerService:
         else:
             await self.db.refresh(server)
         return await self._public(server)
+
+    async def _refuse_organization_name(
+        self, organization_id: uuid.UUID, name: str, *, except_id: uuid.UUID | None
+    ) -> None:
+        """Refuse a workspace server ``name`` an organization server already has, which its workspaces all reach.
+
+        The tool loop labels tools by server name, so one workspace must never reach two of one name. The
+        organization's settings lock is held until the caller commits, as a write of an organization server
+        takes it too, so of two such writes the second sees the first.
+
+        Raises:
+            McpServerNameTakenError: an organization server of the organization has the name.
+        """
+        await OrganizationRepository(self.db).lock_settings(organization_id)
+        servers = WorkspaceMcpServerRepository(self.db)
+        if await servers.name_in_use(organization_id, name, of_workspace=True, except_id=except_id):
+            raise McpServerNameTakenError(name)
 
     def _key_service(self) -> ApiKeyService:
         if self.api_keys is None:
@@ -2264,7 +2319,11 @@ class WorkspaceMcpServerService:
             raise McpConnectionSetupError("Your user was removed from this deployment, so it cannot hold a connection")
         # The row minted above is committed by the connection service's first block, on this same session.
         url = await self._connection_service().start(
-            server_id=server.id, user_id=user_id, return_to=return_to, identity_id=user.id
+            server_id=server.id,
+            user_id=user_id,
+            return_to=return_to,
+            identity_id=user.id,
+            workspace_id=resolved_workspace_id,
         )
         return McpConnectionStarted(authorization_url=url)
 
@@ -2283,7 +2342,12 @@ class WorkspaceMcpServerService:
         if user_id not in await provision_attribution_users(self.db, [user_id]):
             raise McpConnectionSetupError("Your user was removed from this deployment, so it cannot sign in")
         url = await self._connection_service().start(
-            server_id=server.id, user_id=user_id, return_to=return_to, identity_id=user.id, for_check=True
+            server_id=server.id,
+            user_id=user_id,
+            return_to=return_to,
+            identity_id=user.id,
+            for_check=True,
+            workspace_id=resolved_workspace_id,
         )
         return McpConnectionStarted(authorization_url=url)
 
@@ -2304,7 +2368,12 @@ class WorkspaceMcpServerService:
         if user_id not in await provision_attribution_users(self.db, [user_id]):
             raise McpConnectionSetupError("Your user was removed from this deployment, so it cannot sign in")
         url = await self._connection_service().start(
-            server_id=server.id, user_id=user_id, return_to=return_to, identity_id=user.id, for_shared=True
+            server_id=server.id,
+            user_id=user_id,
+            return_to=return_to,
+            identity_id=user.id,
+            for_shared=True,
+            workspace_id=resolved_workspace_id,
         )
         return McpConnectionStarted(authorization_url=url)
 

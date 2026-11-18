@@ -43,7 +43,7 @@ from gateway.services.tools._mcp_connections import McpServerRef
 from gateway.services.tools._mcp_oauth import McpOAuthTokenError, McpOAuthTokens
 
 from . import test_mcp_user_connections as base
-from .test_mcp_user_connections import _row, _service, _sign_in, _state, _Wire, _World, _world
+from .test_mcp_user_connections import _reach, _row, _service, _sign_in, _state, _Wire, _World, _world
 
 # The scaffolding's fixtures, taken by assignment: pytest finds a fixture by its name in this module.
 wire = base.wire
@@ -468,13 +468,13 @@ async def test_deleting_the_workspace_revokes_its_shared_account_and_a_member_le
 
     async with uow:
         # The manager who signed the account in, leaving: everyone else still uses it.
-        await McpGrantMembershipListener(uow).member_lost_workspaces(world.owner.id, [world.workspace.id])
+        await McpGrantMembershipListener(uow, _reach(uow)).member_lost_workspaces(world.owner.id, [world.workspace.id])
     await base._drain_revocations()
     assert wire.revoked == []
     assert await _account(async_db, world) is not None
 
     async with uow:
-        await McpGrantMembershipListener(uow).workspace_deleted(world.workspace.id, [])
+        await McpGrantMembershipListener(uow, _reach(uow)).workspace_deleted(world.workspace.id, [])
     await base._drain_revocations()
     assert wire.revoked == ["refresh-1"]
 

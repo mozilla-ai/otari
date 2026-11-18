@@ -28,6 +28,7 @@ class McpOAuthFlowRepository(BaseRepository[McpOAuthFlow, Never, Never]):
         *,
         state_hash: str,
         server_id: uuid.UUID,
+        workspace_id: uuid.UUID,
         user_id: str,
         identity_id: uuid.UUID | None,
         encrypted_code_verifier: str,
@@ -51,6 +52,7 @@ class McpOAuthFlowRepository(BaseRepository[McpOAuthFlow, Never, Never]):
             McpOAuthFlow(
                 state_hash=state_hash,
                 server_id=server_id,
+                workspace_id=workspace_id,
                 user_id=user_id,
                 identity_id=identity_id,
                 encrypted_code_verifier=encrypted_code_verifier,
@@ -103,6 +105,16 @@ class McpOAuthFlowRepository(BaseRepository[McpOAuthFlow, Never, Never]):
                 return
             query = query.where(McpOAuthFlow.server_id.in_(list(server_ids)))
         await self.db.execute(query)
+
+    async def remove_for_user_in_workspaces(self, user_id: str, workspace_ids: Collection[uuid.UUID]) -> None:
+        """Stage the removal of a user's pending sign-ins started from these workspaces."""
+        if not workspace_ids:
+            return
+        await self.db.execute(
+            delete(McpOAuthFlow).where(
+                McpOAuthFlow.user_id == user_id, McpOAuthFlow.workspace_id.in_(list(workspace_ids))
+            )
+        )
 
     async def remove_unbound(self, server_id: uuid.UUID, user_id: str) -> None:
         """Stage the removal of a user's pending sign-ins to a server that no dashboard session started."""

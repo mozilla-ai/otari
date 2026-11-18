@@ -62,9 +62,11 @@ from gateway.repositories.tenancy import (
 )
 from gateway.repositories.tools import (
     McpOAuthFlowRepository,
+    McpServerAliasRepository,
     McpSignInLinkUseRepository,
     McpUserConnectionRepository,
     WorkspaceMcpServerGrantRepository,
+    WorkspaceMcpServerOverrideRepository,
     WorkspaceMcpServerRepository,
 )
 from gateway.services import mcp_stateless
@@ -72,7 +74,7 @@ from gateway.services.mcp_stateless import CheckFailure, McpCapacityUnavailable,
 from gateway.services.model_access import McpAccess, mcp_read_tools, revoke_user_mcp_grants
 from gateway.services.organizations import UserAccess
 from gateway.services.secret_box import SecretDecryptionError, decrypt_secret, encrypt_secret, generate_secret_key
-from gateway.services.tenancy import workspace_mcp_server_service
+from gateway.services.tenancy import OrganizationReach, workspace_mcp_server_service
 from gateway.services.tenancy.workspace_mcp_server_service import (
     WorkspaceMcpConnectionEligibility,
     WorkspaceMcpServerCheckRequest,
@@ -87,6 +89,7 @@ from gateway.services.tools import (
     McpGrantMembershipListener,
     McpSignInReason,
     McpUserTokens,
+    McpWorkspaceServers,
     _mcp_connections,
     _mcp_oauth,
 )
@@ -265,6 +268,15 @@ def _connections(db: AsyncSession, config: GatewayConfig) -> McpConnectionServic
             UserRepository(uow),
         ),
         users=UserAccess(OrganizationRepositories.on(uow)),
+        views=McpWorkspaceServers(
+            WorkspaceMcpServerRepository(uow), WorkspaceMcpServerOverrideRepository(uow), McpServerAliasRepository(uow)
+        ),
+    )
+
+
+def _reach(uow: UnitOfWork) -> OrganizationReach:
+    return OrganizationReach(
+        WorkspaceRepository(uow), WorkspaceMemberRepository(uow), OrganizationMemberRepository(uow)
     )
 
 
@@ -1906,7 +1918,7 @@ async def test_leaving_the_workspace_ends_a_members_connections_to_its_servers(
     uow = UnitOfWork(async_db)
 
     async with uow:
-        await McpGrantMembershipListener(uow).member_lost_workspaces(world.member.id, [world.workspace.id])
+        await McpGrantMembershipListener(uow, _reach(uow)).member_lost_workspaces(world.member.id, [world.workspace.id])
 
     assert await _connection(async_db, world.server.id, str(world.member.id)) is None
     assert await _connection(async_db, world.server.id, str(world.owner.id)) is not None
@@ -2394,7 +2406,7 @@ async def test_leaving_the_workspace_revokes_upstream_once_it_commits(
     uow = UnitOfWork(async_db)
 
     async with uow:
-        await McpGrantMembershipListener(uow).member_lost_workspaces(world.member.id, [world.workspace.id])
+        await McpGrantMembershipListener(uow, _reach(uow)).member_lost_workspaces(world.member.id, [world.workspace.id])
         await asyncio.sleep(0)
         assert wire.revoked == [], "nothing is sent before the removal commits"
     await _drain_revocations()
@@ -2412,7 +2424,9 @@ async def test_a_removal_that_rolls_back_revokes_nothing(
 
     with pytest.raises(RuntimeError):
         async with uow:
-            await McpGrantMembershipListener(uow).member_lost_workspaces(world.member.id, [world.workspace.id])
+            await McpGrantMembershipListener(uow, _reach(uow)).member_lost_workspaces(
+                world.member.id, [world.workspace.id]
+            )
             raise RuntimeError("the removal failed after the listener ran")
     await _drain_revocations()
     await async_db.commit()
@@ -2429,7 +2443,7 @@ async def test_deleting_the_workspace_revokes_its_servers_connections_once_it_co
     uow = UnitOfWork(async_db)
 
     async with uow:
-        await McpGrantMembershipListener(uow).workspace_deleted(world.workspace.id, [])
+        await McpGrantMembershipListener(uow, _reach(uow)).workspace_deleted(world.workspace.id, [])
     await _drain_revocations()
 
     assert wire.revoked == ["refresh-1"]
@@ -2849,7 +2863,7 @@ async def test_a_named_per_user_server_is_a_sign_in_for_a_user_and_a_no_user_not
 
 
 def _link_ticket(config: GatewayConfig, server_id: uuid.UUID, user_id: str = "alice") -> str:
-    return sign_in_link(config, server_id=server_id, user_id=user_id).split("ticket=", 1)[1]
+    return sign_in_link(config, server_id=server_id, user_id=user_id, workspace_id=None).split("ticket=", 1)[1]
 
 
 async def _link_uses(db: AsyncSession) -> list[McpSignInLinkUse]:

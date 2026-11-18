@@ -1,8 +1,9 @@
 """Ends a member's MCP server grants, connections and requests when they leave a workspace."""
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import UTC, datetime
+from typing import Protocol
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tenancy import OrganizationMember, WorkspaceMember
@@ -16,6 +17,23 @@ from gateway.repositories.tools import (
 from gateway.services.tools._mcp_connections import collect_revocations, revoke_in_background
 
 
+class McpOrganizationReach(Protocol):
+    """Whether a person still reaches an organization, which decides their sign-ins to its own servers.
+
+    Implemented where workspaces and their members are known, inside the caller's Unit of Work.
+    """
+
+    async def organization_of(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
+        """The organization a workspace belongs to, or ``None`` for one that does not exist."""
+        ...
+
+    async def still_reaches(
+        self, organization_id: uuid.UUID, user_id: uuid.UUID, *, losing: Collection[uuid.UUID]
+    ) -> bool:
+        """Whether a dashboard account reaches the organization once it loses these workspaces."""
+        ...
+
+
 class McpGrantMembershipListener:
     """Removes a member's user grants on a workspace's MCP servers as they leave it, inside the caller's Unit of Work.
 
@@ -23,9 +41,14 @@ class McpGrantMembershipListener:
     revives none, as with their keys and session shares. Their own connections to those servers, and any
     sign-in they had started, go the same way: the tokens were theirs to use as a member. A server they asked
     for and are still waiting on is withdrawn, so no manager answers someone who has left.
+
+    An organization's server is reached from every workspace of the organization. Leaving one workspace ends
+    the grants that applied there and the sign-ins started there; a connection to the server ends only once
+    the person reaches no workspace of the organization and is not one of its owners or admins.
     """
 
-    def __init__(self, uow: UnitOfWork) -> None:
+    def __init__(self, uow: UnitOfWork, reach: McpOrganizationReach) -> None:
+        self._reach = reach
         self._grants = WorkspaceMcpServerGrantRepository(uow)
         self._servers = WorkspaceMcpServerRepository(uow)
         self._connections = McpUserConnectionRepository(uow)
@@ -34,11 +57,27 @@ class McpGrantMembershipListener:
 
     async def _remove(self, user_id: uuid.UUID, workspace_ids: Sequence[uuid.UUID]) -> None:
         server_ids = await self._servers.ids_in_workspaces(workspace_ids)
+        server_ids += await self._organization_servers_lost(user_id, workspace_ids)
         await self._revoke_after_commit(server_ids=server_ids, user_id=str(user_id))
-        await self._grants.remove_for_user_on_servers(str(user_id), server_ids)
+        await self._grants.remove_for_user_in_workspaces(str(user_id), workspace_ids)
         await self._connections.remove_for_user_on_servers(str(user_id), server_ids)
         await self._flows.remove_for_user(str(user_id), server_ids)
+        await self._flows.remove_for_user_in_workspaces(str(user_id), workspace_ids)
         await self._requests.withdraw_for_requester(user_id, workspace_ids, at=datetime.now(UTC))
+
+    async def _organization_servers_lost(
+        self, user_id: uuid.UUID, workspace_ids: Sequence[uuid.UUID]
+    ) -> list[uuid.UUID]:
+        """The organization servers a person stops reaching as they lose these workspaces."""
+        organizations = {await self._reach.organization_of(workspace_id) for workspace_id in workspace_ids}
+        lost: list[uuid.UUID] = []
+        for organization_id in organizations:
+            if organization_id is None:
+                continue
+            shared = await self._servers.ids_of_organization(organization_id)
+            if shared and not await self._reach.still_reaches(organization_id, user_id, losing=workspace_ids):
+                lost += shared
+        return lost
 
     async def _revoke_after_commit(
         self, *, server_ids: Sequence[uuid.UUID], user_id: str | None = None, shared: bool = False

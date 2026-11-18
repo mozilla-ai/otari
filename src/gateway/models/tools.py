@@ -434,8 +434,10 @@ class McpOAuthFlow(Base):
     made only to check the server: its tokens list the server's tools once and are then discarded, and
     it never becomes a connection. ``for_shared`` marks a manager's sign-in for everyone, on a shared
     server: its tokens become the server's ``McpSharedConnection`` and nobody's own.
+    ``workspace_id`` is the workspace it started from, whose membership decides whether it may finish:
+    an organization's server belongs to none. Null on a sign-in started before it was recorded.
 
-    CASCADE on both: a sign-in means nothing without its server or its user.
+    CASCADE on all three: a sign-in means nothing without its server, its user or its workspace.
     """
 
     __tablename__ = "mcp_oauth_flows"
@@ -443,6 +445,9 @@ class McpOAuthFlow(Base):
     state_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
     server_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("workspace_mcp_servers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), default=None, index=True
     )
     user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
     identity_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, default=None)
