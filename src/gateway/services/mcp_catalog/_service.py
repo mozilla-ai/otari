@@ -12,6 +12,7 @@ from urllib.parse import quote
 
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, describe_database_error
+from gateway.core.endpoint_urls import url_spellings
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.exceptions.mcp_catalog_exceptions import (
     McpCatalogSyncDisabledError,
@@ -216,10 +217,9 @@ def _judged(entry: McpCatalogEntry) -> McpCatalogEntry:
     return entry.model_copy(update={"is_official": kind == "vendor"})
 
 
-def _spellings(url: str) -> tuple[str, str]:
-    """``url`` without and with a trailing slash, the two spellings of one endpoint a catalog row may hold."""
-    bare = url.strip().rstrip("/")
-    return bare, f"{bare}/"
+def _popular_by_url() -> dict[str, str]:
+    """Each Popular entry's name, by its URL without a trailing slash."""
+    return {entry.url.rstrip("/"): entry.name for entry in POPULAR_SERVERS}
 
 
 def _pick(rows: Sequence[McpCatalogServer], preferred_name: str | None) -> McpCatalogServer:
@@ -345,7 +345,7 @@ class McpCatalogService:
         if workspace_id is None or self._workspace_servers is None:
             return []
         urls = (await self._workspace_servers.urls_in_workspace(workspace_id)).values()
-        return [spelling for url in urls for spelling in _spellings(url)]
+        return [spelling for url in urls for spelling in url_spellings(url)]
 
     async def _store_extras(self, seen_at: datetime) -> None:
         """Store the bundled servers the registry does not list, as seen by the crawl begun at ``seen_at``.
@@ -357,7 +357,7 @@ class McpCatalogService:
         for extra in EXTRA_SERVERS:
             listed = [
                 await self._servers.by_name(extra.name),
-                *await self._servers.by_urls(list(_spellings(extra.url))),
+                *await self._servers.by_urls(list(url_spellings(extra.url))),
             ]
             if any(row is not None and row.source == SOURCE_REGISTRY for row in listed):
                 continue
@@ -386,11 +386,11 @@ class McpCatalogService:
 
     async def _row_at(self, url: str) -> McpCatalogServer | None:
         """The catalog row listed at ``url``, trailing slash or not, a Popular entry preferred. Inside a block."""
-        bare = _spellings(url)[0]
-        rows = await self._servers.by_urls(list(_spellings(url)))
+        bare = url_spellings(url)[0]
+        rows = await self._servers.by_urls(list(url_spellings(url)))
         if not rows:
             return None
-        popular = {entry.url.rstrip("/"): entry.name for entry in POPULAR_SERVERS}
+        popular = _popular_by_url()
         return _pick(rows, popular.get(bare))
 
     async def logo_refs(self, urls: Sequence[str]) -> dict[str, LogoRef]:
@@ -399,14 +399,14 @@ class McpCatalogService:
         Starts no look. A URL with no host gets nothing.
         """
         async with self._uow:
-            rows = await self._servers.by_urls([spelling for url in urls for spelling in _spellings(url)])
-            popular = {entry.url.rstrip("/"): entry.name for entry in POPULAR_SERVERS}
+            rows = await self._servers.by_urls([spelling for url in urls for spelling in url_spellings(url)])
+            popular = _popular_by_url()
             by_url: dict[str, list[McpCatalogServer]] = {}
             for row in rows:
                 by_url.setdefault(row.url.rstrip("/"), []).append(row)
             keys: dict[str, tuple[str, str | None]] = {}
             for url in dict.fromkeys(urls):
-                bare = _spellings(url)[0]
+                bare = url_spellings(url)[0]
                 if bare in by_url:
                     name = _pick(by_url[bare], popular.get(bare)).name
                     keys[url] = (catalog_key(name), name)

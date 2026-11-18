@@ -1,5 +1,5 @@
 import { RadioGroup, type RadioOption } from "@/design-system/forms/RadioGroup"
-import type { AccessMode } from "@/features/tools/mcpAccess"
+import { type AccessMode, toolNoun } from "@/features/tools/mcpAccess"
 import { ToolChecklist } from "@/features/tools/ToolChecklist"
 
 function options(readTools: readonly string[]): RadioOption[] {
@@ -10,7 +10,7 @@ function options(readTools: readonly string[]): RadioOption[] {
       label: "Read tools only",
       description:
         readTools.length > 0
-          ? `Allows the ${readTools.length} ${readTools.length === 1 ? "tool" : "tools"} labeled read on this server.`
+          ? `Allows the ${readTools.length} ${toolNoun(readTools.length)} labeled read on this server.`
           : "Allows nothing yet: no tool is labeled read on this server.",
     },
     { value: "some", label: "Allow specific tools…" },

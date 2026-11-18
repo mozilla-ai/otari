@@ -5,11 +5,11 @@ import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Field } from "@/design-system/forms/Field"
 import { SearchField } from "@/design-system/forms/SearchField"
 import { Dot } from "@/design-system/indicators/Dot"
-import { isToolPattern, toolsMatching } from "@/features/tools/mcpAccess"
-
-function toolNoun(count: number) {
-  return count === 1 ? "tool" : "tools"
-}
+import {
+  isToolPattern,
+  toolNoun,
+  toolsMatching,
+} from "@/features/tools/mcpAccess"
 
 /**
  * Picks tool names for a server: what goes on its allow-list, which tools are

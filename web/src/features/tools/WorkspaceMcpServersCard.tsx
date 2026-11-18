@@ -27,6 +27,7 @@ import { McpServerLogo } from "@/features/tools/McpServerLogo"
 import { McpServerRequestsBlock } from "@/features/tools/McpServerRequestsBlock"
 import { McpServerStatusDot } from "@/features/tools/McpServerStatusDot"
 import { sharedAccountState } from "@/features/tools/McpSharedAccount"
+import { toolNoun } from "@/features/tools/mcpAccess"
 import { AVAILABILITY, availabilityOf } from "@/features/tools/mcpAvailability"
 import type { CatalogPick } from "@/features/tools/mcpCatalog"
 import { hasToolListing } from "@/features/tools/mcpServerHealth"
@@ -78,7 +79,7 @@ function toolsLabel(server: WorkspaceMcpServer): string {
     server.allowed_tools?.length ??
     (hasToolListing(server.health) ? server.health.tool_count : null)
   if (count === null || count === undefined) return "All"
-  return `${count} ${count === 1 ? "tool" : "tools"}`
+  return `${count} ${toolNoun(count)}`
 }
 
 /** Whether a Shared server's one account is set up, in the list's Connections column. */

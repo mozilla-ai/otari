@@ -1,5 +1,5 @@
 import type { McpServerCheckFailure, WorkspaceMcpServerHealth } from "@/client"
-import { isLiteralToolName } from "@/features/tools/mcpAccess"
+import { isLiteralToolName, toolNoun } from "@/features/tools/mcpAccess"
 
 // What the gateway last learned by talking to a server, in words: from a
 // manager's check, or from a real request that reached it. The codes are
@@ -79,10 +79,6 @@ const FAILURES: Record<
 function toolCounts(health: WorkspaceMcpServerHealth) {
   const admitted = health.tool_count ?? 0
   return { admitted, offered: health.tools?.length || admitted }
-}
-
-function toolNoun(count: number) {
-  return count === 1 ? "tool" : "tools"
 }
 
 /** Whether the gateway holds a listing of the server's tools, from a passing check or a request that read them. */
