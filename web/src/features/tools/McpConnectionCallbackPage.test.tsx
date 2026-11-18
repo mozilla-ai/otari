@@ -304,6 +304,24 @@ describe("McpConnectionCallbackPage", () => {
     },
   )
 
+  it.each(["/\\", "/\\evil.example/tools"])(
+    "falls back to the noted origin for a cancel naming %s, which a URL reads as another host",
+    async (returnTo) => {
+      window.sessionStorage.setItem(
+        "otari.mcp-sign-in.origin",
+        `/tools/mcp-servers/${SERVER_ID}`,
+      )
+      mockComplete(() => Response.json({}))
+      renderCallback({
+        error: "access_denied",
+        state: "s",
+        return_to: returnTo,
+      })
+
+      expect(await screen.findByText("Server page")).toBeVisible()
+    },
+  )
+
   it("goes to the list for a cancel naming this page with no origin noted", async () => {
     mockComplete(() => Response.json({}))
     renderCallback({
