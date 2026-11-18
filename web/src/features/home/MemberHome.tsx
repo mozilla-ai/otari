@@ -42,6 +42,7 @@ import {
 import { SpendPeriodPicker } from "@/features/spend/SpendPeriodPicker"
 import { usePageClock } from "@/features/spend/usePageClock"
 import {
+  filterValues,
   type ReadState,
   readState,
   type SpendRow,
@@ -310,7 +311,7 @@ export function MemberHome({
           ? "api_key_id"
           : cut.value === "providers"
             ? "provider"
-            : "model"]: row.filterKey,
+            : "model"]: filterValues(row),
       },
     })
   }
@@ -348,7 +349,10 @@ export function MemberHome({
       isRowHeader: true,
       cell: (row) =>
         cut.value === "models" ? (
-          <span className="block md:max-w-[13rem] truncate text-mono-caption text-foreground">
+          <span
+            className="line-clamp-2 text-mono-caption text-foreground [overflow-wrap:anywhere] md:max-w-[13rem] xl:max-w-[24rem]"
+            title={row.spellings?.join("\n")}
+          >
             {row.name}
           </span>
         ) : (

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type {
   OrganizationMember,
   UsageEntry,
+  UsageGroupRow,
   UsageSummary,
   WorkspaceBudgetDefault,
 } from "@/client"
@@ -112,6 +113,7 @@ async function renderMemberHome({
   refusalMessage = "Member has $0.01 of budget remaining, less than this request's estimated cost",
   hasTraces = false,
   url = "/",
+  byModel = [],
 }: {
   windowCost: number
   periodCost: number
@@ -120,7 +122,10 @@ async function renderMemberHome({
   refusalMessage?: string
   /** Whether the deployment captures sessions, as its bootstrap says. */
   hasTraces?: boolean
+  /** Where the page opens, query string included. */
   url?: string
+  /** The window's spend by model id. */
+  byModel?: UsageGroupRow[]
 }): Promise<URL[]> {
   const asked: URL[] = []
   const refusal: Partial<UsageEntry> = {
@@ -163,7 +168,7 @@ async function renderMemberHome({
               is_other: false,
             },
           ],
-          // Asked by a provider row, for its top model.
+          // Asked by a provider row, for its top model; else the window's.
           by_model: query.has("provider")
             ? [
                 {
@@ -175,7 +180,7 @@ async function renderMemberHome({
                   is_other: false,
                 },
               ]
-            : [],
+            : byModel,
           by_provider: [
             {
               key: "anthropic",
@@ -204,7 +209,10 @@ async function renderMemberHome({
     <MemberHome workspaceId={PLATFORM} workspace="Platform" />,
     {
       url,
-      routes: [{ path: "/requests", element: <LocationProbe /> }],
+      routes: [
+        { path: "/requests", element: <LocationProbe /> },
+        { path: "/sessions", element: <LocationProbe /> },
+      ],
       shell: (
         <Provider>
           <DeploymentProvider
@@ -222,6 +230,54 @@ async function renderMemberHome({
   )
   return asked
 }
+
+describe("MemberHome, by model", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  it("lists one model once and opens the sessions of every id it ran as", async () => {
+    const user = userEvent.setup()
+    const glm = {
+      label: "GLM 5.3",
+      model_group: "z-ai/glm-5.3",
+      is_other: false,
+    }
+    await renderMemberHome({
+      windowCost: 2,
+      periodCost: 2,
+      hasTraces: true,
+      url: "/?by=models",
+      byModel: [
+        { ...glm, key: "zai-org/GLM-5.3", cost: 1.5, requests: 2, tokens: 600 },
+        {
+          ...glm,
+          key: "accounts/fireworks/models/glm-5p3",
+          cost: 0.5,
+          requests: 1,
+          tokens: 300,
+        },
+      ],
+    })
+    const table = await screen.findByRole("grid", {
+      name: "Your spend by models",
+    })
+    await within(table).findByRole("rowheader", { name: "GLM 5.3" })
+    const [row, ...rest] = within(table).getAllByRole("row").slice(1)
+    expect(rest).toHaveLength(0)
+    expect(within(row).getByRole("rowheader")).toHaveTextContent("GLM 5.3")
+
+    await user.click(within(row).getByRole("rowheader"))
+    const landed = await screen.findByTestId("location")
+    const [path, query] = (landed.textContent ?? "").split("?")
+    expect(path).toBe("/sessions")
+    expect(new URLSearchParams(query).getAll("model")).toEqual([
+      "zai-org/GLM-5.3",
+      "accounts/fireworks/models/glm-5p3",
+    ])
+  })
+})
 
 /** Where a row's press landed, with the search it carried. */
 
