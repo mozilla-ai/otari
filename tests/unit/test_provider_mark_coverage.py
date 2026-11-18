@@ -1,4 +1,4 @@
-"""Drift gate between the gateway's maker and provider vocabularies and the dashboard's marks.
+"""Drift gate between the gateway's maker vocabulary and the dashboard's marks.
 
 A vendor written into ``_ORG_VENDORS`` or ``_KEY_VENDORS`` in
 ``services/model_identity.py`` is one somebody added in this repository. The
@@ -17,8 +17,10 @@ A vendor can also be any org a models.dev canonical id names (``baai``,
 not gated: they arrive with data rather than a change here, and some are a
 person's account with no mark to draw.
 
-A provider is any id any-llm supports, so a new one arrives with an any-llm
-bump, and the same table file keys its mark on the id.
+Providers are not gated either. A provider is any id any-llm supports, so a new
+one arrives with an any-llm bump, often with no published mark. The dashboard
+tiles it until someone draws one, and a dependency bump should not fail over a
+missing logo.
 """
 
 from __future__ import annotations
@@ -26,13 +28,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from any_llm import AnyLLM
-
 from gateway.services.model_identity import _KEY_VENDORS, _ORG_VENDORS, vendor_slug
 
-HELPERS = Path(__file__).resolve().parents[2] / "web" / "src" / "shared" / "helpers"
-MARKS = HELPERS / "brandMarks.ts"
-MARK_KEYS = HELPERS / "brandMarkKeys.ts"
+MARKS = Path(__file__).resolve().parents[2] / "web" / "src" / "shared" / "helpers" / "brandMarks.ts"
 
 # Makers deliberately drawn as a lettermark tile instead, by reason.
 TILED = {
@@ -59,23 +57,6 @@ TILED = {
     "writer",
 }
 
-# Providers deliberately drawn as a lettermark tile instead, by reason.
-TILED_PROVIDERS = {
-    # The only AWS asset is the lowercase wordmark, unreadable at 16px.
-    "sagemaker",
-    # No vector mark in LobeHub or Simple Icons.
-    "cascadia",
-    "edenai",
-    "kenari",
-    "liner",
-    "llamafile",
-    "neosantara",
-    "portkey",
-    "requesty",
-    "telnyx",
-    "tokenhub",
-}
-
 
 def _table_keys(table: str) -> set[str]:
     """The keys of one mark table, read off the module rather than imported."""
@@ -87,17 +68,6 @@ def _table_keys(table: str) -> set[str]:
 
 def _maker_keys() -> set[str]:
     return _table_keys("MAKER_MARKS")
-
-
-def _product_mark_ids() -> set[str]:
-    """The ids ``ProviderMark`` draws with the Otari mark instead of a table entry."""
-    source = MARK_KEYS.read_text(encoding="utf-8")
-    start = source.index("[", source.index("=", source.index("const PRODUCT_MARK_IDS")))
-    return set(re.findall(r'"([a-z0-9-]+)"', source[start : source.index("]", start)]))
-
-
-def _supported_providers() -> set[str]:
-    return set(AnyLLM.get_supported_providers())
 
 
 def _vendor_slugs() -> set[str]:
@@ -121,18 +91,3 @@ def test_no_exemption_outlives_its_reason() -> None:
     marked = TILED & _maker_keys()
     assert not stale, f"{sorted(stale)} is exempted here but is no longer a vendor"
     assert not marked, f"{sorted(marked)} has a mark in {MARKS.name} and is also in TILED"
-
-
-def test_every_provider_is_marked_or_deliberately_tiled() -> None:
-    missing = _supported_providers() - _table_keys("PROVIDER_MARKS") - _product_mark_ids() - TILED_PROVIDERS
-    assert not missing, (
-        f"{sorted(missing)} is an any-llm provider but has no mark in {MARKS.name} "
-        "and is not in TILED_PROVIDERS. Add the mark, or add it to TILED_PROVIDERS with the reason."
-    )
-
-
-def test_no_provider_exemption_outlives_its_reason() -> None:
-    stale = TILED_PROVIDERS - _supported_providers()
-    marked = TILED_PROVIDERS & _table_keys("PROVIDER_MARKS")
-    assert not stale, f"{sorted(stale)} is exempted here but any-llm no longer supports it"
-    assert not marked, f"{sorted(marked)} has a mark in {MARKS.name} and is also in TILED_PROVIDERS"
