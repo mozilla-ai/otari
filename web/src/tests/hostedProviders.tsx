@@ -10,6 +10,7 @@ import type {
   HostedModel,
   HostedPriceReset,
   HostedProvider,
+  HostedProviderRegion,
   HostedProviderTestResult,
   HostedVendor,
   ProviderHealth,
@@ -64,6 +65,28 @@ export function hostedProvider(
     models: { total: 1, serving: 1, unpriced: 0, vendors_off: 0 },
     created_at: "2026-10-01T00:00:00Z",
     updated_at: null,
+    ...overrides,
+  }
+}
+
+/** One region of the `openai` provider, using every value of the provider's. */
+export function hostedRegion(
+  overrides: Partial<HostedProviderRegion> = {},
+): HostedProviderRegion {
+  const slug = overrides.slug ?? "primary"
+  return {
+    slug,
+    selector: `openai@${slug}`,
+    label: slug,
+    position: 0,
+    enabled: true,
+    data_location: null,
+    has_api_key: false,
+    api_key_last4: null,
+    api_base: null,
+    client_args: null,
+    supported_countries: null,
+    decryptable: true,
     ...overrides,
   }
 }
@@ -212,10 +235,12 @@ export function mockApi(
     keyEncryption?: boolean
     /** What GET /settings answers about pricing. */
     pricing?: { require_pricing: boolean; default_pricing: boolean }
+    /** Pricing keys a DELETE /pricing answers 404 for, as nothing stored there. */
+    missingPrices?: string[]
   } = {},
 ) {
   const granted = opts.granted ?? true
-  const providers = opts.providers ?? [hostedProvider()]
+  const providers = [...(opts.providers ?? [hostedProvider()])]
   const models = opts.models ?? [hostedModel()]
   const sweep = opts.sweep ?? EMPTY_SWEEP
   const previews = [...(opts.previews ?? [])]
@@ -374,6 +399,40 @@ export function mockApi(
         type_counts: typeCounts,
         vendors: vendorFacets(models, opts.vendorsOff ?? []),
       })
+    }
+    if (url.startsWith(`${API_ROOT}/pricing/`) && method === "DELETE") {
+      const key = decodeURIComponent(
+        url.slice(`${API_ROOT}/pricing/`.length).split("?")[0],
+      )
+      return (opts.missingPrices ?? []).includes(key)
+        ? jsonResponse({ detail: "Not Found" }, 404)
+        : new Response(null, { status: 204 })
+    }
+    const regionWrite = url.match(
+      /\/hosted-providers\/([^/]+)\/regions\/([^/?]+)/,
+    )
+    if (regionWrite && method === "PATCH") {
+      // A move is applied and kept, as the server does, so the next read of
+      // the list shows the new order.
+      const [, name, slug] = regionWrite.map(decodeURIComponent)
+      const index = providers.findIndex((row) => row.name === name)
+      const regions = [...(providers[index]?.regions ?? [])].sort(
+        (a, b) => a.position - b.position,
+      )
+      const sent = body as { position?: number }
+      const from = regions.findIndex((region) => region.slug === slug)
+      if (index >= 0 && from >= 0 && sent.position !== undefined) {
+        const [moved] = regions.splice(from, 1)
+        regions.splice(sent.position, 0, moved)
+        providers[index] = {
+          ...providers[index],
+          regions: regions.map((region, position) => ({
+            ...region,
+            position,
+          })),
+        }
+      }
+      return jsonResponse(providers[index] ?? {})
     }
     if (url.includes(hosted)) {
       if (method === "GET") {

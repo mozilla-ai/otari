@@ -5,8 +5,9 @@ from typing import Any
 
 from any_llm import LLMProvider
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import GatewayConfig, region_instance
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.log_config import logger
 from gateway.ports.model_provider_port import NO_ORGANIZATION, HostedCredential, HostedModels, ModelProviderPort
 from gateway.repositories.providers import HostedProviderModelRepository, HostedProviderVendorRepository
 from gateway.services.provider_kwargs import (
@@ -17,9 +18,14 @@ from gateway.services.provider_kwargs import (
 )
 from gateway.services.providers._country_gate import CountryGate, ensure_hosted_country
 from gateway.services.providers._hosted_credentials import ResolvedHostedProvider
+from gateway.services.providers._hosted_name_index import hosted_provider_named, remember_served_location
 from gateway.services.providers._hosted_sources import HostedSources
 from gateway.services.providers._hosted_vendors import vendor_of
-from gateway.services.providers._workspace_hosted_access import ensure_workspace_may_use_hosted
+from gateway.services.providers._workspace_hosted_access import (
+    ensure_workspace_may_use_hosted,
+    narrow_to_workspace_locations,
+    workspace_allowed_data_locations,
+)
 
 
 def organization_to_serve(organization_id: uuid.UUID | None) -> uuid.UUID:
@@ -48,18 +54,22 @@ async def hosted_credential_for(
     """The deployment-owned credential the port resolves for a request, a request with no organization included.
 
     The workspace's own rule is applied before the port is asked, because the
-    port decides for the organization alone.
+    port decides for the organization alone, and its data locations narrow the
+    regions the port answers with afterwards.
 
     Raises:
         HostedAccessDeniedError: the workspace or the organization may not use the upstream.
     """
+    # Read before the port is awaited, so the rule and the locations come from one cache snapshot.
     ensure_workspace_may_use_hosted(workspace_id, provider, model)
-    return await port.resolve_hosted_credential(
+    allowed = workspace_allowed_data_locations(workspace_id)
+    credential = await port.resolve_hosted_credential(
         organization_id=organization_to_serve(organization_id),
         workspace_id=workspace_id,
         provider=provider,
         model=model,
     )
+    return None if credential is None else narrow_to_workspace_locations(credential, allowed, workspace_id, provider)
 
 
 class UnknownHostedUpstreamError(ValueError):
@@ -74,6 +84,7 @@ def dispatch_on_hosted_credential(
     Raises:
         UnknownHostedUpstreamError: the credential names an upstream any-llm does not implement.
     """
+    remember_served_location(credential.response_provider, credential.data_location)
     try:
         upstream = LLMProvider(credential.upstream)
     except ValueError as exc:
@@ -115,7 +126,8 @@ async def serve_on_hosted_provider(
     the candidate, or answers for another provider where only its own name may.
     ``any_model`` asks for the provider rather than for ``resolved.model``, for
     a call that names no model (a batch's status, say). ``country_gate`` holds
-    the request to the provider's own ``supported_countries``.
+    the request to the provider's own ``supported_countries``, served by the
+    first region whose countries admit it.
 
     Raises:
         HostedAccessDeniedError: the organization may not use the upstream.
@@ -135,7 +147,7 @@ async def serve_on_hosted_provider(
         credential.response_provider, resolved.instance
     ):
         return None
-    ensure_hosted_country(country_gate, credential.supported_countries)
+    credential = ensure_hosted_country(country_gate, credential)
     return dispatch_on_hosted_credential(credential, model=resolved.model, alias=resolved.alias)
 
 
@@ -184,28 +196,48 @@ class HostedProviderRuntime:
 
     async def resolve(
         self, name: str, model: str | None = None, *, organization_id: uuid.UUID | None
-    ) -> ResolvedHostedProvider | None:
-        """A usable credential for the hosted provider ``name`` on behalf of ``organization_id``, or None.
+    ) -> list[ResolvedHostedProvider]:
+        """The usable connections of the hosted provider ``name`` on behalf of ``organization_id``, in order.
 
-        None covers every case the caller is not asked to tell apart: no
-        provider, one switched off or restricted to another organization, a
-        model the provider does not offer switched on, and a ciphertext no
-        configured key reads. A model with no row is refused unless the
+        One for a provider with no regions; otherwise each enabled region, or
+        only the one ``name`` pins (``tokenhub@sg``). Empty covers every case
+        the caller is not asked to tell apart: no provider or region, one
+        switched off or restricted to another organization, a model the
+        provider does not offer switched on, and a ciphertext no configured key
+        reads. A model with no row is refused unless the
         provider serves unlisted models, so otherwise the operator's roster is
         the whole of what the deployment's credential serves. A model of a
         vendor the provider has switched off is refused whatever its own row says.
         """
         async with self.uow:
-            source = await self.sources.get(name)
-            if source is None or not source.enabled or source.withheld_from(organization_id):
-                return None
+            found = await self.sources.get_serving(name)
+            if found is None:
+                return []
+            source, pinned = found
+            if not source.enabled or source.withheld_from(organization_id):
+                return []
             if model is not None:
                 offered = await self.models.get_by_model(source.name, model)
                 if offered is None and not source.serves_unlisted_models:
-                    return None
+                    return []
                 if offered is not None and not offered.enabled:
-                    return None
+                    return []
                 disabled = await self.vendors.disabled_for(source.name)
                 if disabled and vendor_of(source.implementation, model) in disabled:
-                    return None
-            return source.credential()
+                    return []
+            credentials = source.region_credentials(slug=pinned)
+        # A provider of a region's whole name answers that selector, so the
+        # region would settle under, and be priced as, a provider it is not.
+        shadowed = [
+            each
+            for each in credentials
+            if each.region and hosted_provider_named(region_instance(source.name, each.region))
+        ]
+        for each in shadowed:
+            logger.warning(
+                "Region %r of hosted provider %r is not served: a provider is named %r",
+                each.region,
+                source.name,
+                region_instance(source.name, each.region),
+            )
+        return [each for each in credentials if each not in shadowed]

@@ -219,6 +219,7 @@ from gateway.repositories.overview.overview_repository import OverviewRepository
 from gateway.repositories.pricing import ModelPricingRepository, OrganizationModelPricingRepository
 from gateway.repositories.providers import (
     HostedProviderModelRepository,
+    HostedProviderRegionRepository,
     HostedProviderRepository,
     HostedProviderVendorRepository,
     OrgProviderKeyModelRepository,
@@ -690,11 +691,13 @@ def build_hosted_provider_service(uow: UnitOfWork, *, config: GatewayConfig) -> 
     while offering a model lands in the same transaction as the offer.
     """
     providers = HostedProviderRepository(uow)
+    regions = HostedProviderRegionRepository(uow)
     return HostedProviderService(
         uow,
         config=config,
         providers=providers,
-        sources=HostedSources(config, providers),
+        regions=regions,
+        sources=HostedSources(config, providers, regions),
         models=HostedProviderModelRepository(uow),
         vendors=HostedProviderVendorRepository(uow),
         endpoints=ProviderEndpointRepository(uow),

@@ -1,6 +1,11 @@
 import { useState } from "react"
 
-import type { HostedModel, HostedProvider } from "@/client"
+import type {
+  HostedModel,
+  HostedProvider,
+  HostedProviderRegion,
+} from "@/client"
+import { Button } from "@/design-system/actions/Button"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { ComboBoxField } from "@/design-system/forms/ComboBoxField"
@@ -20,6 +25,7 @@ import {
   useHostedAvailableModels,
   useUpdateHostedModel,
 } from "@/shared/api/hostedProviders"
+import { useDeletePricing, useSetPricing } from "@/shared/api/pricing"
 import {
   canSubmitDraft,
   createBody,
@@ -29,6 +35,8 @@ import {
   type PriceDraft,
   type PriceKey,
   readDraft,
+  regionPriceBody,
+  regionRatesOf,
   repriceBody,
 } from "./modelPriceDraft"
 
@@ -47,6 +55,7 @@ const MAX_OPTIONS = 50
 export function HostedModelForm({
   provider,
   editing,
+  region,
   isOpen,
   onClose,
   onSaved,
@@ -54,6 +63,12 @@ export function HostedModelForm({
   provider: HostedProvider
   /** The model being repriced, or undefined when the form is offering one. */
   editing: HostedModel | undefined
+  /**
+   * The region whose price of `editing` is set, rather than the provider's.
+   * Its price is a pricing row of its own, keyed `<provider>@<slug>:<model>`,
+   * and clearing it puts the region back on the provider's price.
+   */
+  region?: HostedProviderRegion
   isOpen: boolean
   onClose: () => void
   onSaved: () => void
@@ -64,8 +79,29 @@ export function HostedModelForm({
     provider.name,
     isOpen && editing === undefined,
   )
+  const setRegionPrice = useSetPricing()
+  const clearRegionPrice = useDeletePricing()
+  const regionRates =
+    region && editing ? regionRatesOf(editing, region.slug) : undefined
+  const regionKey =
+    region && editing ? `${provider.name}@${region.slug}:${editing.model}` : ""
+  // The same override may be stored under the older `provider@slug/model`
+  // spelling, which the listing reads too, so a clear removes both.
+  const legacyRegionKey =
+    region && editing ? `${provider.name}@${region.slug}/${editing.model}` : ""
+  const clearRegion = async () => {
+    try {
+      // A 404 on either is a key already gone, which the hook resolves.
+      for (const modelKey of [regionKey, legacyRegionKey]) {
+        await clearRegionPrice.mutateAsync({ kind: "model", modelKey })
+      }
+      saved()
+    } catch {
+      // The refusal is the mutation's error, shown in the dialog.
+    }
+  }
   const [draft, setDraft] = useState<PriceDraft>(() =>
-    editing ? draftFrom(editing) : EMPTY_DRAFT,
+    editing ? draftFrom({ ...editing, ...regionRates }) : EMPTY_DRAFT,
   )
   const [query, setQuery] = useState("")
   // Repricing opens on the first rate, the field it is for. Not after a unit
@@ -79,8 +115,11 @@ export function HostedModelForm({
   // This form sends rate columns, which the gateway stores per second on audio
   // input, so a model priced per second of video is not repriced here: the
   // save would move its price off the slot video billing reads.
+  // The unit of the price this editor opened on: the region's own where it
+  // sets one.
   const pricedPerSecond =
-    editing !== undefined && pricingUnitOf(editing.unit) === "second"
+    editing !== undefined &&
+    pricingUnitOf((regionRates ?? editing).unit) === "second"
   const canSubmit =
     !pricedPerSecond && canSubmitDraft(draft, editing !== undefined)
 
@@ -91,6 +130,12 @@ export function HostedModelForm({
 
   const submit = () => {
     if (!canSubmit) return
+    if (editing && region) {
+      setRegionPrice.mutate(regionPriceBody(draft, regionKey), {
+        onSuccess: saved,
+      })
+      return
+    }
     if (editing) {
       reprice.mutate(
         { modelId: editing.id, body: repriceBody(draft) },
@@ -143,18 +188,50 @@ export function HostedModelForm({
         if (!open) onClose()
       }}
       size="lg"
-      title={editing ? "Edit model price" : "Add model"}
+      title={
+        region
+          ? `Edit price in ${region.label}`
+          : editing
+            ? "Edit model price"
+            : "Add model"
+      }
       description={
-        editing
-          ? `What this deployment charges for the model on ${provider.name}. Requests are billed at this rate from the moment it is saved.`
-          : `What ${provider.name} serves here, and at what price. Leave the rates blank to serve at the catalog's rates.`
+        region
+          ? regionRates
+            ? `What ${region.selector} charges for the model, in place of ${provider.name}'s price.`
+            : `${region.selector} charges ${provider.name}'s price for the model now. Saving gives it a price of its own.`
+          : editing
+            ? `What this deployment charges for the model on ${provider.name}. Requests are billed at this rate from the moment it is saved.`
+            : `What ${provider.name} serves here, and at what price. Leave the rates blank to serve at the catalog's rates.`
       }
       submitLabel={editing ? "Save" : "Add model"}
       onSubmit={submit}
-      isPending={add.isPending || reprice.isPending}
+      isPending={
+        add.isPending ||
+        reprice.isPending ||
+        setRegionPrice.isPending ||
+        clearRegionPrice.isPending
+      }
       isSubmitDisabled={!canSubmit}
       isDirty={isDirty}
-      error={add.error ?? reprice.error}
+      error={
+        add.error ??
+        reprice.error ??
+        setRegionPrice.error ??
+        clearRegionPrice.error
+      }
+      footerStart={
+        regionRates ? (
+          <Button
+            // Not while a save is in flight: a clear landing first would be
+            // undone by the save behind it.
+            isDisabled={setRegionPrice.isPending || clearRegionPrice.isPending}
+            onPress={() => void clearRegion()}
+          >
+            Use provider price
+          </Button>
+        ) : undefined
+      }
     >
       {editing ? (
         <div className="flex flex-col gap-1">

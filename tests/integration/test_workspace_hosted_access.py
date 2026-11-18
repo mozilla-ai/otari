@@ -151,6 +151,7 @@ def test_a_workspace_lists_the_hosted_providers_it_inherits(
             "served_models": ["gpt-4o", "gpt-4o-mini"],
             "served_by_own_key": False,
             "zero_data_retention": False,
+            "data_locations": [None],
         }
     ]
 

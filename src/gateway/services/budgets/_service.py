@@ -350,8 +350,11 @@ class BudgetService:
         *,
         estimate_inputs: EstimateInputs | None,
         price_of: PricingLookup,
+        ceiling_instance: str | None = None,
     ) -> None:
         """Hold ``handle`` on the ceilings of ``attempt``'s provider, at ``attempt``'s estimate, before it is sent.
+
+        ``ceiling_instance`` names that provider where it is not ``attempt``'s own instance.
 
         A ceiling both providers have grows to that estimate when it holds less, because a fallback's hold only grows.
         A ceiling only ``attempt``'s provider has takes what the others then hold.
@@ -363,7 +366,9 @@ class BudgetService:
             SpendCeilingExceededError: a ceiling on every provider has no room.
         Either way ``handle`` holds what it held before.
         """
-        move = await self._moves.plan(handle, attempt, estimate_inputs=estimate_inputs, price_of=price_of)
+        move = await self._moves.plan(
+            handle, attempt, estimate_inputs=estimate_inputs, price_of=price_of, ceiling_instance=ceiling_instance
+        )
         if move is None:
             return
         try:

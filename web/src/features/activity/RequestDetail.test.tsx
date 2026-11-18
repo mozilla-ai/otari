@@ -31,6 +31,21 @@ describe("RequestDetail", () => {
     ).toBeInTheDocument()
   })
 
+  it("names where the serving provider keeps data, only when it declared it", async () => {
+    mockApi()
+    const { unmount } = renderPage(
+      <RequestDetail entry={entry({ data_location: "SG" })} />,
+    )
+    await flushRouter()
+    expect(screen.getByText("Data location")).toBeInTheDocument()
+    expect(screen.getByText("Singapore")).toBeInTheDocument()
+    unmount()
+
+    renderPage(<RequestDetail entry={entry({ data_location: null })} />)
+    await flushRouter()
+    expect(screen.queryByText("Data location")).toBeNull()
+  })
+
   it("shows the Otari-Request-ID the request was answered under, not the row's own id", async () => {
     mockApi()
     renderPage(

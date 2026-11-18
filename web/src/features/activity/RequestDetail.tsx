@@ -2,6 +2,7 @@ import { Button } from "@heroui/react"
 
 import type { UsageEntry } from "@/client"
 import { isTokenChargeLine, isToolChargeLine, isUnitChargeLine } from "@/client"
+import { dataLocationLabel } from "@/features/hostedProviders/dataLocations"
 import { useMemberAttributionLabels } from "@/features/organization/attribution"
 import { userDisplay } from "@/features/users/userDisplay"
 import { formatUnitRate } from "@/shared/helpers/format"
@@ -108,6 +109,11 @@ export function RequestDetail({
         <DetailField label="Provider">
           {entry.provider ? providerDisplayName(entry.provider) : "—"}
         </DetailField>
+        {entry.data_location ? (
+          <DetailField label="Data location">
+            {dataLocationLabel(entry.data_location)}
+          </DetailField>
+        ) : null}
         <DetailField label="Endpoint">{calledPath(entry)}</DetailField>
         <DetailField label="Source">{describeSource(entry.source)}</DetailField>
         {entry.source_label ? (

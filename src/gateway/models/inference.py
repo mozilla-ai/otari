@@ -65,6 +65,11 @@ class BatchRecord(Base):
         Uuid, ForeignKey("workspace.id", ondelete="SET NULL"), index=True
     )
     model: Mapped[str] = mapped_column()
+    # Where the hosted provider or region the batch was submitted to declared it
+    # keeps data, as declared at submission; its result usage rows record this,
+    # not a later declaration. NULL for a batch not served by the deployment,
+    # one served where nothing was declared, and one submitted before this column.
+    data_location: Mapped[str | None] = mapped_column(String(16), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     # NULL until the first completed results retrieval accounts the batch; the
     # atomic NULL -> now transition is the idempotency gate for billing/logging.

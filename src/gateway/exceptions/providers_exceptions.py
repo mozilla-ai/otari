@@ -364,6 +364,45 @@ class HostedProviderNotFoundError(TenancyNotFoundError):
         super().__init__(f"Hosted provider '{provider}' not found")
 
 
+class HostedProviderRegionNotFoundError(TenancyNotFoundError):
+    def __init__(self, provider: str, slug: str) -> None:
+        super().__init__(f"Hosted provider '{provider}' has no region '{slug}'")
+
+
+class HostedProviderRegionAlreadyExistsError(TenancyConflictError):
+    def __init__(self, provider: str, slug: str) -> None:
+        super().__init__(f"Hosted provider '{provider}' already has a region '{slug}'")
+
+
+class HostedProviderInvalidRegionSlugError(TenancyValidationError):
+    """A slug a region cannot take, because a selector could not pin it."""
+
+    def __init__(self, slug: str, problem: str) -> None:
+        super().__init__(f"The region id '{slug}' {problem}")
+
+
+class HostedProviderRegionKeyRequiredError(TenancyValidationError):
+    """Moving the provider's endpoint would send a region a key meant for another endpoint.
+
+    A region with a key of its own that follows the provider's endpoint would
+    carry it to the new one, and a region on an endpoint of its own using the
+    provider's key would be sent the key for the new one.
+    """
+
+    def __init__(self, slug: str) -> None:
+        super().__init__(
+            f"Region '{slug}' would be sent a key for an endpoint it was not entered for; give the region its own "
+            "endpoint and key before moving the provider's endpoint"
+        )
+
+
+class HostedProviderLastRegionError(TenancyValidationError):
+    """A change would leave a provider with regions but none switched on."""
+
+    def __init__(self) -> None:
+        super().__init__("A provider with regions keeps at least one switched on; switch the provider off instead")
+
+
 class DeploymentProviderNotFoundError(TenancyNotFoundError):
     def __init__(self, instance: str) -> None:
         super().__init__(f"Deployment provider '{instance}' not found")
@@ -435,7 +474,12 @@ __all__ = [
     "HostedProviderAlreadyExistsError",
     "HostedProviderApiBaseMaskedError",
     "HostedProviderApiKeyMissingError",
+    "HostedProviderInvalidRegionSlugError",
+    "HostedProviderLastRegionError",
+    "HostedProviderRegionKeyRequiredError",
     "HostedProviderNotFoundError",
+    "HostedProviderRegionAlreadyExistsError",
+    "HostedProviderRegionNotFoundError",
     "HostedProviderClientArgsUnreadableError",
     "HostedProviderInvalidNameError",
     "HostedProviderKeyRequiredError",
