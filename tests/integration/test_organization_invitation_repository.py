@@ -448,17 +448,24 @@ async def test_decline_by_token_hash_returns_false_for_an_unknown_hash(async_db:
         assert await repository.decline_by_token_hash("no-such-hash", at=_NOW) is None
 
 
-async def _wait_until_a_statement_is_blocked(watcher: AsyncSession, *, timeout: float = 10.0) -> None:
-    """Wait until PostgreSQL reports a backend of this database waiting on another one's lock."""
+async def _backend_pid(session: AsyncSession) -> int:
+    """The PostgreSQL backend serving this session, which also opens its connection."""
+    return int((await session.execute(text("SELECT pg_backend_pid()"))).scalar_one())
+
+
+async def _wait_until_one_backend_blocks_another(
+    watcher: AsyncSession, *, blocked: int, by: int, timeout: float = 10.0
+) -> None:
+    """Wait until PostgreSQL reports the one backend waiting on a lock the other holds.
+
+    Naming both backends is what makes the wait evidence: any other lock wait in
+    this database would otherwise end it, and a statement that never reached
+    PostgreSQL would look the same as one that is waiting.
+    """
     async with asyncio.timeout(timeout):
         while True:
-            blocked = await watcher.execute(
-                text(
-                    "SELECT count(*) FROM pg_stat_activity "
-                    "WHERE datname = current_database() AND cardinality(pg_blocking_pids(pid)) > 0"
-                )
-            )
-            if blocked.scalar_one() > 0:
+            blockers = await watcher.execute(text("SELECT pg_blocking_pids(:blocked)"), {"blocked": blocked})
+            if by in blockers.scalar_one():
                 return
             await watcher.rollback()
             await asyncio.sleep(0.02)
@@ -481,11 +488,12 @@ async def test_two_deletes_of_one_token_hash_give_one_row(postgres_url: str) -> 
             await setup.commit()
 
         async with sessions() as first, sessions() as second, sessions() as watcher:
+            first_pid, second_pid = await _backend_pid(first), await _backend_pid(second)
             first_result = await remove(first)
             waiting = asyncio.create_task(remove(second))
             try:
                 # The second delete reached PostgreSQL and waits on the first one's row lock.
-                await _wait_until_a_statement_is_blocked(watcher)
+                await _wait_until_one_backend_blocks_another(watcher, blocked=second_pid, by=first_pid)
                 assert not waiting.done()
                 await first.commit()
                 second_result = await asyncio.wait_for(asyncio.shield(waiting), timeout=10.0)
