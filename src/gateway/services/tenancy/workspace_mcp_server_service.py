@@ -756,9 +756,9 @@ class WorkspaceMcpConnectionEligibility:
     async def may_connect(self, workspace_id: uuid.UUID, user_id: str) -> bool:
         """A live user who, when they are a dashboard account, can still reach the workspace.
 
-        A dashboard account reaches it as an active member of it, or as an owner or admin of its
-        organization. A request-plane user that is no dashboard account belongs to no workspace,
-        so only its deletion ends its connections. Locks the user's row as their deletion does.
+        A dashboard account reaches it as an active member of its organization and of it, or as an
+        owner or admin of its organization. A request-plane user that is no dashboard account belongs
+        to no workspace, so only its deletion ends its connections. Locks the user's row as their deletion does.
         """
         if user_id not in await lock_live_users(self._uow, [user_id]):
             return False
@@ -772,17 +772,18 @@ class WorkspaceMcpConnectionEligibility:
         # account behind it is a request-plane user like any other.
         if not await self._accounts.get_by_ids([identity]):
             return True
-        # Locked as read: an organization's removal of the person changes these rows without the
-        # workspace lock, and must wait for this sign-in, or be seen by it.
-        if await self._members.get_active_pairs([workspace_id], [identity], lock=True):
-            return True
         workspace = await self._workspaces.get(workspace_id)
         if workspace is None:
             return False
-        managers = await self._organization_members.active_with_roles(
-            workspace.organization_id, {identity}, MANAGEMENT_ROLES, lock=True
-        )
-        return identity in managers
+        # Locked as read: an organization's removal of the person changes these rows without the
+        # workspace lock, and must wait for this sign-in, or be seen by it. Suspending someone from
+        # the organization leaves their workspace rows as they were, so the organization decides first.
+        role = await self._organization_members.active_role(workspace.organization_id, identity, lock=True)
+        if role is None:
+            return False
+        if role in MANAGEMENT_ROLES:
+            return True
+        return bool(await self._members.get_active_pairs([workspace_id], [identity], lock=True))
 
     async def organization_of(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
         """The organization a workspace belongs to, or ``None`` for one that does not exist."""

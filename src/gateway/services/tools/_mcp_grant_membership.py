@@ -108,14 +108,11 @@ class McpGrantMembershipListener:
             server_ids=server_ids,
             user_ids=user_ids,
             shared=shared,
-            limit=max(budget, 1),
+            limit=budget,
         )
-        if len(revocations) > budget:
-            unread += len(revocations) - budget
-            revocations = revocations[:budget]
         if revocations or unread:
             self._connections.after_commit(lambda: revoke_in_background(revocations, unread=unread))
-        return budget - len(revocations)
+        return max(budget - len(revocations), 0)
 
     async def member_joined(self, member: WorkspaceMember) -> None:
         """Nothing: a grant that ended stays ended."""

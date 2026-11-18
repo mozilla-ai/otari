@@ -28,6 +28,7 @@ from gateway.exceptions.tools_exceptions import (
 from gateway.models.mcp import ResolvedMcpServer
 from gateway.models.tenancy import OrganizationMember, WorkspaceMember
 from gateway.models.tools import McpCredentialMode, McpOAuthFlow, McpSharedConnection, McpUserConnection
+from gateway.repositories.tools import McpUserConnectionRepository, WorkspaceMcpServerRepository
 from gateway.services import mcp_stateless
 from gateway.services.mcp_stateless import CheckFailure, ServerCheck
 from gateway.services.model_access import McpAccess
@@ -38,8 +39,8 @@ from gateway.services.tenancy.workspace_mcp_server_service import (
     WorkspaceMcpServers,
     WorkspaceMcpServerUpdate,
 )
-from gateway.services.tools import McpGrantMembershipListener, McpUserTokens
-from gateway.services.tools._mcp_connections import McpServerRef
+from gateway.services.tools import McpGrantMembershipListener, McpUserTokens, _mcp_connections
+from gateway.services.tools._mcp_connections import McpServerRef, collect_revocations
 from gateway.services.tools._mcp_oauth import McpOAuthTokenError, McpOAuthTokens
 
 from . import test_mcp_user_connections as base
@@ -554,3 +555,23 @@ async def test_a_check_of_an_account_replaced_while_it_ran_is_dropped(
 
     assert replaced
     assert checked.health is not None and checked.health.status == "healthy", "account B's health is kept"
+
+
+async def test_a_shared_account_counts_against_a_removal_s_revocation_limit(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    world = await _shared_world(async_db, config)
+    await _sign_in_for_everyone(async_db, config, world)
+    decrypted: list[str] = []
+
+    def counting(value: str) -> str:
+        decrypted.append(value)
+        return decrypt_secret(value)
+
+    monkeypatch.setattr(_mcp_connections, "decrypt_secret", counting)
+    repositories = (McpUserConnectionRepository(async_db), WorkspaceMcpServerRepository(async_db))
+
+    found, unread = await collect_revocations(*repositories, server_ids=[world.server.id], shared=True, limit=0)
+    assert (found, unread, decrypted) == ([], 1, []), "a zero limit counts the account and decrypts nothing"
+    found, unread = await collect_revocations(*repositories, server_ids=[world.server.id], shared=True, limit=1)
+    assert (len(found), unread) == (1, 0)
