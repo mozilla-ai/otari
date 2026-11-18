@@ -129,6 +129,17 @@ describe("mcpAccess", () => {
         { ...options, serverEnabled: false },
       ),
     ).toBe("DENY, the server is disabled")
+    expect(
+      verdictLabel(
+        {
+          allowed: false,
+          decided_by: "organization",
+          grant_id: null,
+          tools: ["get_issue"],
+        },
+        options,
+      ),
+    ).toBe("DENY, the organization's limit for this workspace decided it")
   })
 })
 

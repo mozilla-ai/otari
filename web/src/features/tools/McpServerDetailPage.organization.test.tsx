@@ -1,0 +1,242 @@
+import { screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { afterEach, describe, expect, it, vi } from "vitest"
+
+import type { McpServerWorkspaceSettings } from "@/client"
+import {
+  apiKey,
+  workspaceMcpServerGrant as grant,
+  workspaceMcpServerHealth as health,
+  organizationMember,
+  workspaceMcpServer,
+} from "@/tests/fixtures"
+import {
+  mcpWrites,
+  mockMcpServerApi,
+  renderMcpServerPage,
+  WORKSPACE,
+} from "@/tests/mcpServer"
+import { pressRowAction } from "@/tests/rowMenu"
+import { pickOption } from "@/tests/select"
+
+// An organization's server read through a workspace: the organization's
+// definition, with the workspace's own settings on it in `in_workspace`.
+
+function settings(
+  overrides: Partial<McpServerWorkspaceSettings> = {},
+): McpServerWorkspaceSettings {
+  return {
+    reached: true,
+    enabled: true,
+    everyone_tools: null,
+    attach_by_default: null,
+    organization_tools: null,
+    ...overrides,
+  }
+}
+
+function organizationServer(own: Partial<McpServerWorkspaceSettings> = {}) {
+  return workspaceMcpServer({
+    // Found only through the workspace, which the harness reads it from.
+    workspace_id: WORKSPACE,
+    scope: "organization",
+    name: "hub",
+    url: "https://mcp.example.com/***",
+    health: health({ tools: ["list_issues", "get_issue", "create_issue"] }),
+    in_workspace: settings(own),
+  })
+}
+
+/** The row as the gateway answers: an organization's server names no workspace. */
+function asRead(server: ReturnType<typeof organizationServer>) {
+  return { ...server, workspace_id: null }
+}
+
+const BO = "bo-0000"
+const BO_LAPTOP = apiKey({
+  id: "key-bo",
+  key_name: "Bo's laptop",
+  user_id: BO,
+  workspace_id: WORKSPACE,
+})
+
+async function openPage(serverId: string) {
+  renderMcpServerPage(serverId)
+  await screen.findByRole("heading", { level: 1, name: "hub" })
+}
+
+describe("McpServerDetailPage, an organization's server", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  it("shows the definition read-only, without what the organization keeps", async () => {
+    const server = organizationServer({ organization_tools: ["@read"] })
+    mockMcpServerApi({ server, row: asRead(server) })
+    await openPage(server.id)
+
+    expect(screen.getByText("Organization")).toBeVisible()
+    expect(
+      screen.getByText(
+        "Your organization manages this server. You can change how this workspace uses it.",
+      ),
+    ).toBeVisible()
+    expect(
+      screen.getByText("Organization limit:").parentElement,
+    ).toHaveTextContent("Organization limit: Read tools.")
+    // Its definition is the organization's to change.
+    expect(screen.queryByRole("button", { name: "Settings" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Edit connection" })).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: "Edit exposed tools" }),
+    ).toBeNull()
+    expect(screen.queryByRole("button", { name: "Check" })).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: "Change the logo of hub" }),
+    ).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: "Sign in for everyone" }),
+    ).toBeNull()
+    // Still read: how Otari reaches it.
+    expect(screen.getByText("https://mcp.example.com/***")).toBeVisible()
+  })
+
+  it("keeps the workspace's access rules and their grants", async () => {
+    const server = organizationServer()
+    mockMcpServerApi({
+      server,
+      row: asRead(server),
+      access: { everyone_tools: ["*"], grants: [grant({ id: "g-1" })] },
+    })
+    await openPage(server.id)
+
+    const rules = await screen.findByRole("grid", { name: "Access rules" })
+    expect(await within(rules).findByText("ci-bot")).toBeVisible()
+    expect(
+      within(rules).getByText("any other key, as your organization set it"),
+    ).toBeVisible()
+    expect(screen.getByRole("button", { name: "Add rule" })).toBeVisible()
+    // The workspace set nothing of its own, so there is nothing to clear.
+    expect(
+      screen.getByRole("button", { name: "Use organization defaults" }),
+    ).toBeDisabled()
+  })
+
+  it("sets the workspace's Availability through its own settings", async () => {
+    const server = organizationServer({ everyone_tools: ["@read"] })
+    const calls = mockMcpServerApi({ server, row: asRead(server) })
+    const user = userEvent.setup()
+    await openPage(server.id)
+
+    await pickOption(user, "Availability", "Every request")
+
+    await waitFor(() =>
+      expect(
+        mcpWrites(calls).find((call) => call.url.endsWith("/override")),
+      ).toMatchObject({
+        method: "PUT",
+        body: {
+          enabled: true,
+          everyone_tools: ["@read"],
+          attach_by_default: true,
+        },
+      }),
+    )
+    // Nothing that changes the organization's definition.
+    expect(mcpWrites(calls).some((call) => call.method === "PATCH")).toBe(false)
+  })
+
+  it("sets the workspace's default policy from the access rules", async () => {
+    const server = organizationServer({ enabled: false })
+    const calls = mockMcpServerApi({ server, row: asRead(server) })
+    const user = userEvent.setup()
+    await openPage(server.id)
+
+    await pressRowAction(user, "Edit the default policy")
+    const dialog = await screen.findByRole("dialog", {
+      name: "Edit the default policy",
+    })
+    await user.click(within(dialog).getByRole("radio", { name: "Deny" }))
+    await user.click(within(dialog).getByRole("button", { name: "Save rule" }))
+
+    await waitFor(() =>
+      expect(
+        mcpWrites(calls).find((call) => call.url.endsWith("/override")),
+      ).toMatchObject({
+        method: "PUT",
+        // The workspace's switch is sent as stored.
+        body: { enabled: false, everyone_tools: [], attach_by_default: null },
+      }),
+    )
+  })
+
+  it("clears the workspace's own settings back to the organization's", async () => {
+    const server = organizationServer({ attach_by_default: true })
+    const calls = mockMcpServerApi({ server, row: asRead(server) })
+    const user = userEvent.setup()
+    await openPage(server.id)
+
+    const reset = screen.getByRole("button", {
+      name: "Use organization defaults",
+    })
+    expect(reset).toBeEnabled()
+    await user.click(reset)
+
+    await waitFor(() =>
+      expect(
+        mcpWrites(calls).find((call) => call.url.endsWith("/override"))?.method,
+      ).toBe("DELETE"),
+    )
+  })
+
+  it("says the organization turned it off here, when the workspace did not", async () => {
+    const server = organizationServer({
+      reached: false,
+      organization_tools: [],
+    })
+    mockMcpServerApi({ server, row: asRead(server) })
+    await openPage(server.id)
+
+    expect(
+      screen.getByText(
+        "Your organization turned this server off for this workspace.",
+      ),
+    ).toBeVisible()
+  })
+
+  it("says when a trace was decided by the organization's limit", async () => {
+    const server = organizationServer({ organization_tools: ["get_issue"] })
+    mockMcpServerApi({
+      server,
+      row: asRead(server),
+      members: [
+        organizationMember({
+          user_id: "identity-bo",
+          attribution_user_id: BO,
+          full_name: "Bo",
+        }),
+      ],
+      keys: [BO_LAPTOP],
+      check: {
+        allowed: false,
+        decided_by: "organization",
+        grant_id: null,
+        tools: ["get_issue"],
+      },
+    })
+    const user = userEvent.setup()
+    await openPage(server.id)
+
+    await pickOption(user, "Source key", "Bo's laptop (Bo)")
+    await user.type(screen.getByRole("combobox", { name: "Tool" }), "create")
+    await user.click(
+      await screen.findByRole("option", { name: "create_issue" }),
+    )
+    await user.click(screen.getByRole("button", { name: "Trace" }))
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "DENY, the organization's limit for this workspace decided it",
+    )
+  })
+})

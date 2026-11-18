@@ -54,6 +54,24 @@ allows.
 
 ## What a workspace sees
 
+A workspace's **Tools** → **MCP servers** lists the organization's servers beside
+its own, marked as the organization's. Their definition is read-only there: the
+organization's owners and admins change it.
+
+A workspace's own admins decide how the workspace uses one:
+
+- turn it off for the workspace, and back on unless the organization's limit
+  turned it off there;
+- set the workspace's own default policy, what every key of the workspace may
+  call;
+- choose whether the workspace attaches it to every request;
+- add access rules for keys and members of the workspace, as on a workspace
+  server.
+
+The organization's limit, when it set one, is shown above these settings: it is
+the most the workspace reaches, whatever they say. Using the organization's
+defaults again takes the workspace's own settings away and keeps the limit.
+
 A workspace's requests reach the organization's servers with its own by id, in
 `mcp_server_ids`, and attached ones join its requests as its own do. A server the
 organization or the workspace turned off for it answers as an unknown id does.
@@ -61,4 +79,4 @@ organization or the workspace turned off for it answers as an unknown id does.
 Each person signs in to a personal server from a workspace that reaches it. Their
 sign-in lasts while they belong to any workspace of the organization, or are one
 of its owners or admins. Leaving one workspace ends only the access rules and
-sign-ins started there.
+sign-ins started there. Turning a server off for a workspace ends no sign-in.

@@ -136,6 +136,22 @@ export function mockMcpServerApi({
           { status: 404 },
         )
       }
+      // A workspace's own settings on its organization's server: set from
+      // the body, or cleared back to the server's.
+      if (url.endsWith("/override") && row.in_workspace) {
+        return Response.json({
+          ...row,
+          in_workspace:
+            method === "PUT"
+              ? { ...row.in_workspace, ...body }
+              : {
+                  ...row.in_workspace,
+                  enabled: true,
+                  everyone_tools: null,
+                  attach_by_default: null,
+                },
+        })
+      }
       if (method === "DELETE") return new Response(null, { status: 204 })
       return Response.json(method === "PATCH" ? { ...row, ...body } : row)
     }

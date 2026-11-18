@@ -24,6 +24,7 @@ import type {
   SearchToolsResponse,
   SearchToolTestRequest,
   SearchToolTestResponse,
+  SetWorkspaceMcpServerOverrideRequest,
   StoredSearchTool,
   StoredSearchToolTestRequest,
   TestOrganizationGuardrailRequest,
@@ -848,6 +849,64 @@ export function useUpdateMcpServer() {
       }
     },
   })
+}
+
+/**
+ * What a write to a workspace's own settings on its organization's server
+ * moves: the server as the workspace reads it (seeded from the answer), every
+ * read under the workspace's servers (the list, the access list, each key's
+ * view and the caller's tools), and the Playground's tools menu, which offers
+ * the server or not.
+ */
+function useWorkspaceMcpServerOverrideWrite<
+  Variables extends { workspaceId: string; serverId: string },
+>(request: (variables: Variables) => Promise<WorkspaceMcpServer>) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: request,
+    onSuccess: (server, { workspaceId, serverId }) => {
+      const scope = workspaceMcpScope(workspaceId)
+      queryClient.setQueryData(mcpServerKey(scope, serverId), server)
+      void queryClient.invalidateQueries({ queryKey: mcpServersKey(scope) })
+      void queryClient.invalidateQueries({
+        queryKey: playgroundToolsKey(workspaceId),
+      })
+    },
+  })
+}
+
+/**
+ * Sets a workspace's own settings on its organization's server: its switch,
+ * its default access and whether it is attached. Each replaces the one stored,
+ * so the caller sends all three; null takes the server's own.
+ */
+export function useSetWorkspaceMcpServerOverride() {
+  return useWorkspaceMcpServerOverrideWrite(
+    ({
+      workspaceId,
+      serverId,
+      body,
+    }: {
+      workspaceId: string
+      serverId: string
+      body: SetWorkspaceMcpServerOverrideRequest
+    }) =>
+      apiFetch<WorkspaceMcpServer>(
+        `${workspaceServerPath(workspaceId, serverId)}/override`,
+        { method: "PUT", body: JSON.stringify(body) },
+      ),
+  )
+}
+
+/** Takes a workspace's own settings off its organization's server, so it follows the server's. */
+export function useClearWorkspaceMcpServerOverride() {
+  return useWorkspaceMcpServerOverrideWrite(
+    ({ workspaceId, serverId }: { workspaceId: string; serverId: string }) =>
+      apiFetch<WorkspaceMcpServer>(
+        `${workspaceServerPath(workspaceId, serverId)}/override`,
+        { method: "DELETE" },
+      ),
+  )
 }
 
 // Connects to a stored server now and records the outcome as its `health`. A
