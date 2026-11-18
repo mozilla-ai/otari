@@ -206,8 +206,8 @@ describe("makerMark", () => {
     expect(makerMark("google")).not.toEqual(providerMark("gemini"))
   })
 
-  it("tiles the two makers that have no usable mark", () => {
-    // Amazon's only mark in the set is the aws wordmark, unreadable at these
+  it("tiles makers that have no usable mark", () => {
+    // Amazon's only company mark in the set is the aws wordmark, unreadable at these
     // steps, so it tiles like the SageMaker row. Writer has no vector mark.
     expect(makerMark("amazon")).toBeUndefined()
     expect(makerMark("writer")).toBeUndefined()
@@ -217,11 +217,11 @@ describe("makerMark", () => {
     // Not a coverage gate, and it does not claim to be: the list below is
     // hand-typed and would drift the moment the gateway's vocabulary grows.
     // `tests/unit/test_provider_mark_coverage.py` is the gate, asserted where
-    // the vocabulary is defined and against the two dicts that define it, so a
-    // maker added there fails in the change that adds it.
+    // a maker is added and against the two dicts it is added to, so a maker
+    // added there fails in the change that adds it.
     //
-    // What this pins is the outcome a reader of this module expects today: the
-    // two exemptions, and that everything else resolves.
+    // What this pins is the outcome a reader of this module expects today: two
+    // of the exemptions, and that everything else resolves.
     const TILED = ["amazon", "writer"]
     const SAMPLE = [
       "ai21",

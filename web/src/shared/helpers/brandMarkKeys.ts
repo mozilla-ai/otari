@@ -3,8 +3,8 @@
  *
  * Split from {@link brandMarks} because the two questions have different
  * costs. "Does this list need a mark slot" is asked at first paint, for every
- * row, and answering it needs ~60 short strings. "What shapes draw this mark"
- * is 70 kB of path data that only matters once something is on screen. Held
+ * row, and answering it needs ~80 short strings. "What shapes draw this mark"
+ * is about 130 kB of path data that only matters once something is on screen. Held
  * together, every visitor to the Models page downloaded all of the art before
  * the page painted, for the handful of providers a deployment actually has.
  *

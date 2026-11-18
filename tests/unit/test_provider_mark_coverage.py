@@ -97,7 +97,7 @@ def _product_mark_ids() -> set[str]:
 
 
 def _supported_providers() -> set[str]:
-    return {str(getattr(provider, "value", provider)) for provider in AnyLLM.get_supported_providers()}
+    return set(AnyLLM.get_supported_providers())
 
 
 def _vendor_slugs() -> set[str]:

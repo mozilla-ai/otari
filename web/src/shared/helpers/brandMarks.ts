@@ -4,9 +4,9 @@
  * Three words, kept apart because the module turns on the distinction. A
  * *mark* is the glyph alone, which is what fits a 16px box. A *wordmark* is the
  * company's name drawn as art, which does not: it is why Amazon is excluded
- * below, its only asset in the source set being the lowercase "aws" wordmark. A
- * *lettermark* is the fallback this file does not hold, a single initial in a
- * bordered tile, drawn by the component when no mark resolves.
+ * below, its only company asset in the source set being the lowercase "aws"
+ * wordmark. A *lettermark* is the fallback this file does not hold, a single
+ * initial in a bordered tile, drawn by the component when no mark resolves.
  *
  * The companion to {@link providerDisplayName}: that answers what a provider is
  * called, this answers what it looks like. Same display-layer rule, so nothing
@@ -43,7 +43,10 @@ export interface ProviderMarkShape {
 
 /** A mark's geometry, in its own coordinate system. */
 export interface ProviderMarkGlyph {
-  /** The source's own viewBox, kept rather than refitted, so the art is untouched. */
+  /**
+   * The source's own viewBox, so the art is untouched. A favicon's is refitted
+   * to the glyph once its plate is gone.
+   */
   viewBox: string
   /** A wrapping transform the source needed. Absent for everything on a 24 grid. */
   transform?: string
@@ -616,8 +619,7 @@ const GLYPH_CANOPYLABS: ProviderMarkGlyph = {
 }
 
 const GLYPH_CARTESIA: ProviderMarkGlyph = {
-  viewBox: "15.24 15.22 68.9 68.9",
-  transform: "translate(18 20.5) scale(0.711111)",
+  viewBox: "-3.88 -7.43 96.89 96.89",
   shapes: [
     {
       d: "M89.1256 28.6346V51.252H77.9183L76.4474 49.2161L72.9215 44.3358L70.5208 41.0131L66.4165 35.3331L67.6578 41.0131L69.4514 49.2161L69.8956 51.252L71.245 57.4192L72.9215 65.092L73.0376 65.6225L74.8301 73.8241L76.6237 82.0274H51.3153L49.5216 73.8241L48.6137 69.6692L47.7291 65.6225L45.9355 57.4192L44.5874 51.252L43.2394 57.4192L41.4457 65.6225L40.5122 69.8934L39.6532 73.8241L37.8595 82.0274H12.5021L14.2958 73.8241L16.0393 65.8445V65.8435L16.2042 65.7215L16.339 65.6225L24.3069 59.7214L27.4162 57.4192L32.4095 53.7207L35.7439 51.252H0V28.6346H24.1731L24.3069 28.0255L25.0544 24.6081L26.8469 16.405L28.6406 8.2019L30.4331 0H58.6925L60.485 8.2019L60.8605 9.9186L56.7162 12.9875L52.1007 16.405L48.6137 18.9878L41.0246 24.6081L40.5122 24.987L35.5868 28.6346H89.1256Z",
