@@ -6,8 +6,8 @@
  *
  * - **The page a sign-in started from** outlives the full-page trip to the
  *   provider, so it is kept in session storage. The gateway hands the page back
- *   on success (`return_to`), but not when the person cancels, and that is the
- *   case this exists for.
+ *   (`return_to`) on success and on a cancel, but not on a cancel that arrives
+ *   after the sign-in expired, and that is the case this exists for.
  * - **The notice** is said once by the page the callback lands on, so it is
  *   kept in memory, as `features/auth/signInNotice.ts` does for the sign-in
  *   screen. A sign-in that ran in a popup comes back to a page that is already

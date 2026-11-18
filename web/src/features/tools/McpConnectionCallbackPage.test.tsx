@@ -201,6 +201,24 @@ describe("McpConnectionCallbackPage", () => {
     expect(screen.queryByText("Server page")).toBeNull()
   })
 
+  it("lands a member's own sign-in to an organization's server on the workspace's list when it named nowhere", async () => {
+    mockComplete(() =>
+      Response.json({
+        server_id: SERVER_ID,
+        workspace_id: "w",
+        server_name: "drive",
+        server_scope: "organization",
+        return_to: null,
+      }),
+    )
+    renderCallback({ state: "s", code: "c" })
+
+    // The workspace has no page for the server, and the organization's is for its owners and admins.
+    expect(await screen.findByText("Server list")).toBeVisible()
+    expect(screen.queryByText("Server page")).toBeNull()
+    expect(screen.queryByText("Organization server page")).toBeNull()
+  })
+
   it("lands an organization owner's sign-in on the page that started it", async () => {
     mockComplete(() =>
       Response.json({
@@ -252,6 +270,17 @@ describe("McpConnectionCallbackPage", () => {
 
     expect(await screen.findByText("Server page")).toBeVisible()
     expect(window.sessionStorage.getItem("otari.mcp-sign-in.origin")).toBeNull()
+  })
+
+  it("goes back to the page the gateway names for a cancel, with nothing noted", async () => {
+    mockComplete(() => Response.json({}))
+    renderCallback({
+      error: "access_denied",
+      state: "s",
+      return_to: `/organization/mcp-servers/${SERVER_ID}`,
+    })
+
+    expect(await screen.findByText("Organization server page")).toBeVisible()
   })
 
   it("ignores a noted origin that would leave the dashboard", async () => {
