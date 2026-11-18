@@ -158,6 +158,9 @@ async def insert_replacing_duplicates(
     ``ON CONFLICT DO UPDATE`` rather than a read and then a write: an insert of the
     same key that another transaction has not committed is waited for and then
     replaced, where a read would have missed it and collided. Does not commit.
+
+    NOTE: This does not refresh an instance the session already holds, so a caller
+    holding a row it replaced must read it again to see the new values.
     """
     if not rows:
         return
