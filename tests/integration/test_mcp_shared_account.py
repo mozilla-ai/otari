@@ -339,6 +339,33 @@ async def test_ending_the_account_of_a_server_promoted_meanwhile_answers_as_the_
     assert "secret" not in answered.url
 
 
+async def test_ending_the_account_of_a_server_promoted_while_it_is_checked_answers_as_the_workspace_sees_it(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    """Promoted, and its URL given a key, while the check after the disconnect waited on the server."""
+    world = await _shared_world(async_db, config)
+    await _sign_in_for_everyone(async_db, config, world)
+    service = _service(async_db, config)
+    record_check = service._record_check
+    server_id = world.server.id
+
+    async def promoted_while_checking(server: WorkspaceMcpServer, **named: object) -> bool:
+        async with AsyncSession(async_db.bind, expire_on_commit=False) as other:
+            await other.execute(
+                update(WorkspaceMcpServer)
+                .where(WorkspaceMcpServer.id == server_id)
+                .values(workspace_id=None, url=f"{base.PUBLIC_URL}?key=secret")
+            )
+            await other.commit()
+        return await record_check(server, **named)  # type: ignore[arg-type]
+
+    service._record_check = promoted_while_checking  # type: ignore[method-assign]
+    answered = await service.disconnect_shared(user=world.owner, workspace_id=world.workspace.id, server_id=server_id)
+
+    assert answered.scope == "organization"
+    assert "secret" not in answered.url
+
+
 async def test_another_persons_shared_sign_in_cannot_be_finished(async_db: AsyncSession, config: GatewayConfig) -> None:
     world = await _shared_world(async_db, config)
     service = _service(async_db, config)

@@ -207,9 +207,13 @@ class McpServerFold:
             # Read while the copy still holds the client its tokens were issued to, up to what one background
             # revocation sends.
             ending: list[McpUserConnection | McpSharedConnection] = [*plan.revoked, *([account] if account else [])]
-            room = max(MAX_BACKGROUND_REVOCATIONS - len(revocations), 0)
-            revocations += revocations_for(copy, ending[:room])
-            unread += len(ending[room:])
+            # A sign-in with nothing to revoke takes no room.
+            read = 0
+            while read < len(ending) and len(revocations) < MAX_BACKGROUND_REVOCATIONS:
+                batch = ending[read : read + MAX_BACKGROUND_REVOCATIONS - len(revocations)]
+                revocations += revocations_for(copy, batch)
+                read += len(batch)
+            unread += len(ending) - read
             await self._connections.move([connection.id for connection in plan.carried], target.id)
             signed_in_there |= {connection.user_id for connection in plan.carried}
             carried += len(plan.carried)

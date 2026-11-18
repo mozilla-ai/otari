@@ -297,6 +297,58 @@ describe("McpServerDetailPage, making a server the organization's", () => {
     )
   })
 
+  it("leaves a ticked copy that went away and came back unticked", async () => {
+    const server = workspaceMcpServer({ workspace_id: WORKSPACE })
+    const calls = mockMcpServerApi({ server, copies: [KEEPS, SIGNS_AGAIN] })
+    const answer = vi.mocked(globalThis.fetch).getMockImplementation()
+    let onlyKeeps = false
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      if (onlyKeeps && String(input).includes("/same-url")) {
+        return Response.json({ data: [KEEPS] })
+      }
+      return answer?.(input, init) as Promise<Response>
+    })
+    const refocus = () =>
+      act(() => {
+        focusManager.setFocused(false)
+        focusManager.setFocused(true)
+      })
+    const user = userEvent.setup()
+    await openPage(server.id)
+
+    await user.click(screen.getByRole("button", { name: PROMOTE }))
+    const dialog = await screen.findByRole("dialog", {
+      name: "Make github an organization server",
+    })
+    await user.click(
+      await within(dialog).findByRole("checkbox", { name: "Gamma: gh" }),
+    )
+    onlyKeeps = true
+    refocus()
+    await within(dialog).findByText(
+      "No longer there, so no longer folded: Gamma: gh.",
+    )
+
+    // Another admin's workspace adds it back; the admin has not ticked it again.
+    onlyKeeps = false
+    refocus()
+    const back = await within(dialog).findByRole("checkbox", {
+      name: "Gamma: gh",
+    })
+    expect(back).not.toBeChecked()
+    await waitFor(() =>
+      expect(
+        within(dialog).getByRole("button", { name: PROMOTE }),
+      ).toBeEnabled(),
+    )
+    await user.click(within(dialog).getByRole("button", { name: PROMOTE }))
+    await waitFor(() =>
+      expect(
+        mcpWrites(calls).find((call) => call.url.endsWith("/promote"))?.body,
+      ).toEqual({ fold_server_ids: [KEEPS.server_id] }),
+    )
+  })
+
   it("leaves a copy that appears after the first read unticked", async () => {
     const server = workspaceMcpServer({ workspace_id: WORKSPACE })
     const calls = mockMcpServerApi({ server, copies: [] })

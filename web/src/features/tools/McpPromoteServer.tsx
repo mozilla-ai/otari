@@ -57,18 +57,37 @@ function PromoteDialog({
   const candidates = isFresh ? copies.data : []
   // The ticked copies: the defaults of the first read this opening answered,
   // then the admin's. A copy a later read adds was never reviewed, so it starts
-  // unticked.
+  // unticked, and so does one a read drops, gone or no longer foldable, should
+  // it come back.
   const [touched, setTouched] = useState<McpServerFoldCandidate[]>()
-  if (isFresh && touched === undefined) {
-    const defaults = defaultFoldIds(candidates, server.enabled)
-    setTouched(
-      candidates.filter((candidate) => defaults.includes(candidate.server_id)),
-    )
-  }
+  // Ticked copies another admin removed since, which are no longer offered or sent.
+  const [dropped, setDropped] = useState<McpServerFoldCandidate[]>([])
   const present = new Set(candidates.map((candidate) => candidate.server_id))
-  // A ticked copy another admin removed since: no longer offered or sent.
+  if (isFresh) {
+    if (touched === undefined) {
+      const defaults = defaultFoldIds(candidates, server.enabled)
+      setTouched(
+        candidates.filter((candidate) =>
+          defaults.includes(candidate.server_id),
+        ),
+      )
+    } else {
+      const foldable = foldableIds(
+        candidates,
+        touched.map((copy) => copy.server_id),
+        server.enabled,
+      )
+      if (foldable.length < touched.length) {
+        setTouched(touched.filter((copy) => foldable.includes(copy.server_id)))
+        setDropped([
+          ...dropped,
+          ...touched.filter((copy) => !present.has(copy.server_id)),
+        ])
+      }
+    }
+  }
   const gone = isFresh
-    ? (touched ?? []).filter((copy) => !present.has(copy.server_id))
+    ? dropped.filter((copy) => !present.has(copy.server_id))
     : []
   const selected = foldableIds(
     candidates,

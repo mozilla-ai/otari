@@ -40,7 +40,7 @@ from gateway.services.tenancy.workspace_mcp_server_service import (
     WorkspaceMcpServerUpdate,
     resolve_workspace_mcp_servers,
 )
-from gateway.services.tools import AttachedMcpServerIndex, McpServerFoldCandidate, McpUserTokens
+from gateway.services.tools import AttachedMcpServerIndex, McpServerFoldCandidate, McpUserTokens, _mcp_server_fold
 
 from . import test_mcp_user_connections as base
 from .test_mcp_user_connections import PUBLIC_URL, _expire, _service, _sign_in, _World, _world
@@ -273,6 +273,36 @@ async def test_a_sign_in_without_a_refresh_token_is_not_carried(async_db: AsyncS
     )
 
     assert (await async_db.execute(select(McpUserConnection.id))).scalars().all() == []
+
+
+async def test_a_sign_in_with_nothing_to_revoke_takes_no_room_from_one_that_has(
+    async_db: AsyncSession, config: GatewayConfig, wire: base._Wire, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With room for one revocation, the older sign-in has no endpoint to revoke at, and the newer one is sent."""
+    monkeypatch.setattr(_mcp_server_fold, "MAX_BACKGROUND_REVOCATIONS", 1)
+    world = await _world(async_db, config)
+    await _sign_in(async_db, config, world, world.member)
+    await _sign_in(async_db, config, world, world.owner)
+    await async_db.execute(
+        update(McpUserConnection)
+        .where(McpUserConnection.user_id == str(world.member.id))
+        .values(revocation_endpoint=None)
+    )
+    await async_db.execute(
+        update(McpUserConnection)
+        .where(McpUserConnection.user_id == str(world.owner.id))
+        .values(encrypted_refresh_token=encrypt_secret("owner-refresh"))
+    )
+    await async_db.commit()
+
+    await _service(async_db, config).create_server(
+        user=world.owner,
+        workspace_id=None,
+        request=WorkspaceMcpServerCreate(name="drive", url=PUBLIC_URL, fold_server_ids=[world.server.id]),
+    )
+
+    await base._drain_revocations()
+    assert wire.revoked == ["owner-refresh"]
 
 
 async def test_a_fold_revokes_the_token_a_renewal_stored_after_this_session_read_the_sign_in(

@@ -2988,11 +2988,13 @@ class WorkspaceMcpServerService:
             server_id=server.id, still_managed=lambda row: self._require_in(scope, row, server_id)
         )
         await self.db.refresh(server)
+        # Made the organization's while the account was revoked upstream, or while the server was checked: answered
+        # as the workspace sees an organization's server, its URL masked, and left for its admins to check.
         if scope.workspace_id is not None and server.workspace_id != scope.workspace_id:
-            # Made the organization's while the account was revoked upstream: answered as the workspace sees
-            # an organization's server, its URL masked, and left for the organization's admins to check.
             return await self.get_server(user=user, workspace_id=scope.workspace_id, server_id=server_id)
         await self._record_check(server)
+        if scope.workspace_id is not None and server.workspace_id != scope.workspace_id:
+            return await self.get_server(user=user, workspace_id=scope.workspace_id, server_id=server_id)
         return await self._public(server)
 
     async def _record_after_sign_in(self, done: CompletedConnection) -> None:
