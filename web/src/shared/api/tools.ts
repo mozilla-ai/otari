@@ -423,6 +423,10 @@ export function useSetWorkspaceCodeExecutionPolicy() {
         [WORKSPACES, workspaceId, "code-execution-policy"],
         data,
       )
+      // What the workspace's requests may use follows the stored row.
+      void queryClient.invalidateQueries({
+        queryKey: playgroundToolsKey(workspaceId),
+      })
     },
   })
 }
@@ -441,6 +445,9 @@ export function useClearWorkspaceCodeExecutionPolicy() {
     onSuccess: (_data, { workspaceId }) => {
       void queryClient.invalidateQueries({
         queryKey: [WORKSPACES, workspaceId, "code-execution-policy"],
+      })
+      void queryClient.invalidateQueries({
+        queryKey: playgroundToolsKey(workspaceId),
       })
     },
   })
@@ -483,6 +490,10 @@ export function useSetWorkspaceWebSearchConfig() {
       // holds the pre-write row until a GET lands, and each save costs two
       // requests instead of one.
       queryClient.setQueryData([WORKSPACES, workspaceId, "web-search"], data)
+      // What the workspace's requests may use follows the stored row.
+      void queryClient.invalidateQueries({
+        queryKey: playgroundToolsKey(workspaceId),
+      })
     },
   })
 }
@@ -501,6 +512,9 @@ export function useClearWorkspaceWebSearchConfig() {
     onSuccess: (_data, { workspaceId }) => {
       void queryClient.invalidateQueries({
         queryKey: [WORKSPACES, workspaceId, "web-search"],
+      })
+      void queryClient.invalidateQueries({
+        queryKey: playgroundToolsKey(workspaceId),
       })
     },
   })
