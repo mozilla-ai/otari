@@ -32290,12 +32290,14 @@ export interface operations {
     };
     "mcp-servers-list_organization_mcp_server_copies": {
         parameters: {
-            query: {
-                /** @description The URL of the server to add or promote */
-                url: string;
+            query?: {
+                /** @description The URL of the server to add; not sent with server_id */
+                url?: string | null;
                 /** @description How the new server signs in, when no server_id is given */
                 credential_mode?: components["schemas"]["McpCredentialMode"];
-                /** @description The workspace server about to be made the organization's, if any */
+                /** @description The new server is added with a token of its own, when no server_id is given */
+                with_token?: boolean;
+                /** @description The server about to be made the organization's, whose own URL is matched, if any */
                 server_id?: string | null;
             };
             header?: never;
