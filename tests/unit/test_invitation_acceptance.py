@@ -11,7 +11,7 @@ from sqlmodel import SQLModel
 
 import gateway.models  # noqa: F401  (registers every table on the metadata)
 from gateway.core.config import GatewayConfig
-from gateway.core.tokens import hash_token
+from gateway.core.tokens import generate_shared_token, hash_token
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.organizations_exceptions import (
     InvitationAddressMismatchError,
@@ -311,17 +311,24 @@ async def test_a_declined_invitation_is_still_there_for_the_admin(store: _Store)
     assert row.declined_at == _NOW
 
 
-async def test_the_proven_domain_rule_is_asked_only_where_links_cannot_be_delivered(store: _Store) -> None:
+async def test_the_proven_domain_rule_is_asked_of_a_hand_carried_link_alone(store: _Store) -> None:
+    """The token's kind decides it. A link this deployment emailed reached the address itself."""
     organization = await store.organization()
-    await store.invitation(organization, email="ada@proven.test")
+    hand_carried = generate_shared_token()
+    await store.invitation(organization, email="ada@proven.test", token=hand_carried)
+    await store.invitation(organization, email="bob@proven.test", token="emailed-token")
     await store.proven_domain_elsewhere("proven.test")
 
-    # Where Otari delivers the link, another organization's proof decides nothing.
-    preview = await store.acceptance().preview("plain-token")
-    assert preview.invited_email == "ada@proven.test"
+    # An emailed link is not held to another organization's proof, whether or not mail works now.
+    assert (await store.acceptance().preview("emailed-token")).invited_email == "bob@proven.test"
+    undelivered = store.acceptance(mail_transport="console")
+    assert (await undelivered.preview("emailed-token")).invited_email == "bob@proven.test"
 
+    # A hand-carried one is held to it, and configuring mail afterwards does not release it.
     with pytest.raises(InvitationNoLongerValidError):
-        await store.acceptance(mail_transport="console").preview("plain-token")
+        await undelivered.preview(hand_carried)
+    with pytest.raises(InvitationNoLongerValidError):
+        await store.acceptance().preview(hand_carried)
 
 
 async def test_preview_answers_alike_whether_or_not_the_address_holds_an_account(store: _Store) -> None:

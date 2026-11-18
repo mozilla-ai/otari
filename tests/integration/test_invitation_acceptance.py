@@ -449,31 +449,71 @@ async def test_signup_is_told_nothing_by_a_token_no_invitation_still_opens(async
     assert answers == [None, None, None]
 
 
-async def test_a_link_acceptance_refuses_proves_nothing_at_signup(async_db: AsyncSession) -> None:
-    """One reader answers both, so a link the deployment turns away cannot go on proving an address.
-
-    The deployment cannot deliver links, and another organization has proven the address's domain.
-    """
-    holder = await create_organization(async_db, slug="holds-the-domain")
-    inviter = await create_organization(async_db, slug="carries-the-link")
-    async_db.add(
+async def _domain_proven_elsewhere(session: AsyncSession, *, slug: str) -> Organization:
+    """An organization whose claim on example.com is proven, so another one's links to it are suspect."""
+    holder = await create_organization(session, slug=slug)
+    session.add(
         OrganizationDomain(
             domain="example.com",
             organization_id=holder.id,
-            verification_token="a-verification-token",
+            verification_token=f"token-for-{slug}",
             verified_at=_NOW - timedelta(days=1),
         )
     )
-    await async_db.flush()
-    await _invite(async_db, inviter, email="ada@example.com")
+    await session.flush()
+    return holder
+
+
+async def test_a_link_acceptance_refuses_proves_nothing_at_signup(async_db: AsyncSession) -> None:
+    """One reader answers both, so a link the deployment turns away cannot go on proving an address.
+
+    The deployment cannot deliver links, another organization has proven the address's domain, and
+    this link was carried by hand.
+    """
+    await _domain_proven_elsewhere(async_db, slug="holds-the-domain")
+    inviter = await create_organization(async_db, slug="carries-the-link")
+    hand_carried = generate_shared_token()
+    await _invite(async_db, inviter, email="ada@example.com", token=hand_carried)
     uow = UnitOfWork(async_db)
     link = _link(async_db, uow=uow, mail_transport="console")
 
     async with uow:
-        opened = await link.open(_TOKEN)
-    proof = await link.proof_for(_TOKEN, claimed_address="ada@example.com")
+        opened = await link.open(hand_carried)
+    proof = await link.proof_for(hand_carried, claimed_address="ada@example.com")
 
     assert (opened, proof) == (None, None)
+
+
+async def test_a_link_that_was_emailed_is_not_held_to_another_organization_proven_domain(
+    async_db: AsyncSession,
+) -> None:
+    """The rule is for a link an admin carried. One the deployment emailed reached the address itself."""
+    await _domain_proven_elsewhere(async_db, slug="holds-it-too")
+    inviter = await create_organization(async_db, slug="emailed-the-link")
+    emailed = generate_token()
+    await _invite(async_db, inviter, email="ada@example.com", token=emailed)
+
+    proof = await _link(async_db, mail_transport="console").proof_for(emailed, claimed_address="ada@example.com")
+
+    assert proof is AddressProof.MAILBOX
+
+
+async def test_a_hand_carried_link_stays_held_to_it_after_the_deployment_can_deliver(
+    async_db: AsyncSession,
+) -> None:
+    """The token's kind is the durable fact: it was minted because nobody could deliver it.
+
+    Configuring a mail transport afterwards does not turn a link an admin is carrying into one the
+    address received.
+    """
+    await _domain_proven_elsewhere(async_db, slug="holds-it-as-well")
+    inviter = await create_organization(async_db, slug="could-have-emailed")
+    hand_carried = generate_shared_token()
+    await _invite(async_db, inviter, email="ada@example.com", token=hand_carried)
+
+    proof = await _link(async_db).proof_for(hand_carried, claimed_address="ada@example.com")
+
+    assert proof is None
 
 
 async def test_a_token_proves_nothing_about_an_address_it_was_not_sent_to(async_db: AsyncSession) -> None:

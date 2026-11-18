@@ -41,13 +41,16 @@ class InvitationLink(SignupInvitePort):
     async def open(self, token: str) -> OrganizationInvitation | None:
         """The invitation this token still opens, or None where none does.
 
+        The only answer to that question. An invitation that has expired or been declined opens
+        nothing, and neither does one whose address this deployment refuses.
+
         NOTE: Callers must call this inside an open Unit of Work block.
         """
         now = self._clock()
         invitation = await self._invitations.get_by_token_hash(hash_token(token))
-        if invitation is None or not invitation.can_still_be_used(now=now):
+        if invitation is None or now >= invitation.expires_at or invitation.declined_at is not None:
             return None
-        if await self._refuses_the_address(invitation, now=now):
+        if await self._refuses_the_address(invitation, hand_carried=is_shared_token(token), now=now):
             return None
         return invitation
 
@@ -63,13 +66,17 @@ class InvitationLink(SignupInvitePort):
                 return None
         return AddressProof.VOUCHED if is_shared_token(token) else AddressProof.MAILBOX
 
-    async def _refuses_the_address(self, invitation: OrganizationInvitation, *, now: datetime) -> bool:
+    async def _refuses_the_address(
+        self, invitation: OrganizationInvitation, *, hand_carried: bool, now: datetime
+    ) -> bool:
         """Whether the deployment refuses this address its invitation.
 
         The blocklist is the deployment operator's own refusal, so it is asked wherever an invitation
         is opened. Whether another organization has proven the address's domain is that organization's
-        data, so it is asked only where links cannot be delivered and the admin carried this one by hand.
+        data, so it is asked only of a link an admin is carrying by hand. A link is minted in that
+        kind only where nobody could deliver it, so the kind carries that fact however the
+        deployment is configured later. The delivery rule asks the blocklist itself.
         """
-        if self._mailer.can_deliver_links:
-            return bool(await self._blocked.blocked_among([invitation.email]))
-        return not await self._delivery.allows(invitation.email, invitation.organization_id, now=now)
+        if hand_carried:
+            return not await self._delivery.allows(invitation.email, invitation.organization_id, now=now)
+        return bool(await self._blocked.blocked_among([invitation.email]))
