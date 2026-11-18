@@ -26,8 +26,12 @@ are not interchangeable: `openai/gpt-oss-120b` is a catalog id, while
 
 A model neither the catalog nor models.dev knows, such as a misspelled catalog
 id, is refused with `404` (`model_not_found`), naming up to two of the nearest
-catalog ids. A model that exists but whose provider has no credential is
-refused with `424` (`provider_not_configured`).
+catalog ids. A bare name that is no catalog id and none of the caller's aliases
+or routing policies, such as a policy saved in another workspace, is refused
+with `400` (`invalid_model`); its message points to
+[`GET /api/v1/models`](#listing-available-models), which lists the caller's
+aliases and routing policies. A model that exists but whose provider has no
+credential is refused with `424` (`provider_not_configured`).
 
 The legacy `provider/model` spelling is still honored where it names an
 offering the deployment serves (`openai/gpt-4o` while an `openai` instance
@@ -770,6 +774,10 @@ fails. A catalog id spelled like the legacy `provider/model` of one of its own
 offerings (`openai/gpt-4o` while the `openai` instance serves `gpt-4o`) tries that
 offering first (see [Catalog spellings](#catalog-spellings)). An entry's price, limits, capabilities and `deployment_managed` are those
 of the offering tried first, and `owned_by` is the model's vendor.
+
+The caller's aliases and routing policies are listed beside the models, under
+their own names: the configured ones, and the stored ones of the key's
+workspace.
 
 To pin a request to one provider, send its `provider:model` selector, which
 still works everywhere it did. `?provider=<instance>` lists only the models that

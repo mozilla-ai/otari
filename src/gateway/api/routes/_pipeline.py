@@ -1037,17 +1037,18 @@ def _end_user(
         raise adapter.error(502, NO_UPSTREAM_USER_DETAIL, ErrorKind.API) from exc
 
 
-def _raise_for_unresolvable_model(model_selector: str, exc: Exception) -> NoReturn:
+def _raise_for_unresolvable_model(model_selector: str, exc: Exception, *, detail: str | None = None) -> NoReturn:
     """Convert a selector-parse failure into an HTTP 400 with a helpful detail.
 
     resolve_provider_selector raises ValueError for an unparseable
     selector (no provider: prefix) and AnyLLMError for an unknown
     provider.  Both are client input errors; surfacing them as a bare 500 is
-    confusing.
+    confusing. ``detail`` replaces the general one where the caller has a
+    more specific reason.
     """
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
-        detail=unresolvable_model_detail(model_selector),
+        detail=detail or unresolvable_model_detail(model_selector),
         headers=error_headers(INVALID_MODEL),
     ) from exc
 
