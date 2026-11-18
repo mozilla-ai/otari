@@ -20,8 +20,8 @@ oauth_apps:
 ```
 
 Each key an app is issued holds the [scopes](api-keys.md#scopes) its
-registration named when the person approved it, and `inference:run` alone when it names none, so
-an app calls models and nothing else unless you say so. An app key is never a
+registration named when the person approved it, and the [default scopes](api-keys.md#scopes) when it
+names none, so an app calls models and tools and nothing else unless you say so. An app key is never a
 service key, so it cannot hold the `end-users` scopes.
 
 Restart the gateway after changing registration. Empty `oauth_apps` disables

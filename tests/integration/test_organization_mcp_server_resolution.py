@@ -29,6 +29,11 @@ from gateway.models.tools import (
     WorkspaceMcpServerOverride,
 )
 from gateway.repositories.tenancy import OrganizationRepository, WorkspaceMemberRepository, WorkspaceRepository
+from gateway.repositories.tools import (
+    McpServerAliasRepository,
+    WorkspaceMcpServerOverrideRepository,
+    WorkspaceMcpServerRepository,
+)
 from gateway.repositories.users_repository import provision_attribution_users
 from gateway.services.model_access import McpAccess, resolve_request_mcp_access
 from gateway.services.secret_box import encrypt_secret
@@ -38,7 +43,12 @@ from gateway.services.tenancy.workspace_mcp_server_service import (
     WorkspaceMcpServerUpdate,
     resolve_workspace_mcp_servers,
 )
-from gateway.services.tools import McpConnectionService, McpGrantMembershipListener
+from gateway.services.tools import (
+    AttachedMcpServerIndex,
+    McpConnectionService,
+    McpGrantMembershipListener,
+    McpWorkspaceServers,
+)
 
 from . import test_mcp_user_connections as base
 from .test_mcp_user_connections import PUBLIC_URL, _connections, _reach, _service, _state, _World, _world
@@ -165,15 +175,18 @@ async def test_a_workspace_s_own_setting_decides_whether_it_attaches_an_organiza
     attached_by_organization = await _shared(async_db, world.workspace.organization_id, attach_by_default=True)
     attached_here = await _shared(async_db, world.workspace.organization_id, name="sentry")
     servers = WorkspaceMcpServers(async_db)
-    assert await servers.any_attached(world.workspace.id)
 
+    async def attached() -> list[str]:
+        await _refresh_attached(async_db)
+        assert await servers.any_attached(world.workspace.id), "the organization attaches one, so the request reads"
+        reached = await servers.resolve_for_request(world.workspace.id, [], McpAccess(), attach=True)
+        return [server.name for server in reached.servers]
+
+    assert await attached() == ["jira"]
     await _override(async_db, world.workspace, attached_by_organization, attach_by_default=False)
-    assert not await servers.any_attached(world.workspace.id)
+    assert await attached() == []
     await _override(async_db, world.workspace, attached_here, attach_by_default=True)
-    reached = await servers.resolve_for_request(world.workspace.id, [], McpAccess(), attach=True)
-
-    assert await servers.any_attached(world.workspace.id)
-    assert [server.name for server in reached.servers] == ["sentry"]
+    assert await attached() == ["sentry"]
 
 
 async def test_an_old_id_names_the_server_it_was_folded_into_in_its_own_workspace_only(
@@ -454,3 +467,58 @@ async def test_a_sign_in_finishing_after_its_member_was_suspended_from_the_organ
         await _service(async_db, config).complete_connection(user=member, state=_state(url), code="code")
 
     assert (await async_db.execute(select(McpUserConnection.id))).scalars().all() == []
+
+
+async def _refresh_attached(db: AsyncSession) -> None:
+    await AttachedMcpServerIndex.refresh(WorkspaceMcpServerRepository(db), WorkspaceMcpServerOverrideRepository(db))
+
+
+async def test_an_organization_server_attached_to_every_request_counts_in_its_workspaces(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    AttachedMcpServerIndex.reset()
+    world = await _world(async_db, config)
+    await async_db.execute(update(WorkspaceMcpServer).values(attach_by_default=False))
+    organization_id = world.workspace.organization_id
+    jira = await _shared(async_db, organization_id)
+    sales = await _another_workspace(async_db, world)
+    servers = WorkspaceMcpServers(async_db)
+
+    async def attached(workspace: Workspace) -> bool:
+        await _refresh_attached(async_db)
+        return await servers.any_attached(workspace.id, organization_id)
+
+    assert not await attached(world.workspace)
+    await async_db.execute(
+        update(WorkspaceMcpServer).where(col(WorkspaceMcpServer.id) == jira).values(attach_by_default=True)
+    )
+    await async_db.commit()
+    assert await attached(world.workspace) and await attached(sales), "the organization's server, in every workspace"
+    assert await servers.any_attached(sales.id), "the organization is read when the caller has none"
+    await async_db.execute(update(WorkspaceMcpServer).where(col(WorkspaceMcpServer.id) == jira).values(enabled=False))
+    await async_db.commit()
+    assert not await attached(world.workspace), "turned off for the organization"
+
+
+async def test_a_workspace_s_own_setting_attaches_an_organization_server_there_alone(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    AttachedMcpServerIndex.reset()
+    world = await _world(async_db, config)
+    await async_db.execute(update(WorkspaceMcpServer).values(attach_by_default=False))
+    organization_id = world.workspace.organization_id
+    jira = await _shared(async_db, organization_id)
+    sales = await _another_workspace(async_db, world)
+    await _override(async_db, sales, jira, attach_by_default=True)
+    await _refresh_attached(async_db)
+    servers = WorkspaceMcpServers(async_db)
+
+    assert await servers.any_attached(sales.id, organization_id)
+    assert not await servers.any_attached(world.workspace.id, organization_id)
+    # The request then reads the server as the workspace sees it, and attaches it.
+    views, _ = await McpWorkspaceServers(
+        WorkspaceMcpServerRepository(async_db),
+        WorkspaceMcpServerOverrideRepository(async_db),
+        McpServerAliasRepository(async_db),
+    ).for_request(sales.id, organization_id, [], attached=True)
+    assert [view.row.id for view in views if view.attach_by_default] == [jira]

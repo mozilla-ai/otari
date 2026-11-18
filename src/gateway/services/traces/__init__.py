@@ -8,7 +8,12 @@ from gateway.services.traces._capture import RequestTraces
 from gateway.services.traces._collector import LlmCall, RequestTrace, ToolSpans, identifier_or_none
 from gateway.services.traces._content import SpanContent
 from gateway.services.traces._context import ContextWeights, context_of, read_context
-from gateway.services.traces._identity import SessionRef, harness_of, is_subagent, resolve_session
+from gateway.services.traces._identity import (
+    RequestClient,
+    SessionRef,
+    is_subagent,
+    resolve_session,
+)
 from gateway.services.traces._membership import TraceMembershipListener
 from gateway.services.traces._otlp import (
     CACHE_WRITE_ATTRIBUTES,
@@ -43,6 +48,7 @@ __all__ = [
     "LlmCall",
     "OtlpSpan",
     "PricedRequest",
+    "RequestClient",
     "RequestTrace",
     "RequestTraces",
     "SpanContent",
@@ -53,7 +59,6 @@ __all__ = [
     "TraceWriter",
     "TurnContent",
     "TurnFacts",
-    "harness_of",
     "identifier_or_none",
     "is_subagent",
     "cache_in_input",

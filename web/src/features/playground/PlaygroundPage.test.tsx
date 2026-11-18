@@ -83,6 +83,11 @@ const NO_TOOLS: PlaygroundTools = {
     enabled: false,
     reason: "No backend is configured on this deployment.",
   },
+  web_fetch: {
+    configured: false,
+    enabled: false,
+    reason: "Web fetch is turned off on this deployment.",
+  },
   code_execution: {
     configured: false,
     enabled: false,
@@ -793,6 +798,7 @@ describe("sending a question", () => {
       tools: {
         ...NO_TOOLS,
         web_search: { configured: true, enabled: true, reason: null },
+        web_fetch: { configured: true, enabled: true, reason: null },
         code_execution: { configured: true, enabled: true, reason: null },
         mcp_servers: [
           {
@@ -814,6 +820,7 @@ describe("sending a question", () => {
     await user.click(
       await screen.findByRole("checkbox", { name: "Web search" }),
     )
+    await user.click(await screen.findByRole("checkbox", { name: "Web fetch" }))
     await user.click(
       await screen.findByRole("checkbox", { name: "Code execution" }),
     )
@@ -826,9 +833,70 @@ describe("sending a question", () => {
 
     const [, init] = stream.mock.calls[0] ?? []
     expect(JSON.parse(String(init?.body))).toMatchObject({
-      tools: [{ type: "otari_web_search" }, { type: "otari_code_execution" }],
+      tools: [
+        { type: "otari_web_search" },
+        { type: "otari_web_fetch" },
+        { type: "otari_code_execution" },
+      ],
       mcp_server_ids: ["srv-1"],
     })
+  })
+
+  it("sends web fetch alone, and shows it as a removable chip", async () => {
+    mockApi({
+      tools: {
+        ...NO_TOOLS,
+        web_fetch: { configured: true, enabled: true, reason: null },
+      },
+    })
+    const stream = mockStream([delta("ok"), "[DONE]"])
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("Try a prompt.")
+
+    await user.click(await screen.findByRole("button", { name: "Add tools" }))
+    expect(
+      screen.queryByRole("checkbox", { name: "Web search" }),
+    ).not.toBeInTheDocument()
+    expect(screen.getByText("Reads a web page by its URL.")).toBeVisible()
+    await user.click(await screen.findByRole("checkbox", { name: "Web fetch" }))
+    await user.keyboard("{Escape}")
+
+    expect(
+      screen.getByRole("button", { name: "Remove Web fetch" }),
+    ).toBeVisible()
+    await user.type(await screen.findByLabelText("Message"), "hi")
+    await user.click(screen.getByRole("button", { name: "Send message" }))
+    await screen.findByText("ok")
+
+    const [, init] = stream.mock.calls[0] ?? []
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      tools: [{ type: "otari_web_fetch" }],
+    })
+  })
+
+  it("shows web fetch disabled, with the reason, where the workspace turned web access off", async () => {
+    mockApi({
+      tools: {
+        ...NO_TOOLS,
+        web_fetch: {
+          configured: true,
+          enabled: false,
+          reason: "Turned off for this workspace, with web search.",
+        },
+      },
+    })
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("Try a prompt.")
+
+    await user.click(await screen.findByRole("button", { name: "Add tools" }))
+    expect(
+      await screen.findByRole("checkbox", { name: "Web fetch" }),
+    ).toBeDisabled()
+    expect(
+      screen.getByText("Turned off for this workspace, with web search."),
+    ).toBeVisible()
   })
 
   it("shows a server the caller has not signed in to as unavailable, and never attaches it", async () => {

@@ -6664,7 +6664,7 @@
             "title": "Reject User Mismatch"
           },
           "scopes": {
-            "description": "The endpoint groups the key may reach. Omitted, the key gets 'inference:run' alone, which calls models and nothing else. The end-users scopes are a service key's alone.",
+            "description": "The endpoint groups the key may reach. Omitted, the key gets 'inference:run', 'web:search', 'web:fetch', 'code:execute', 'mcp:read' and 'mcp:execute': it calls models and tools and lists MCP servers, and nothing else. The end-users scopes are a service key's alone.",
             "items": {
               "$ref": "#/components/schemas/KeyScope"
             },
@@ -7042,7 +7042,7 @@
             "title": "Reject User Mismatch"
           },
           "scopes": {
-            "description": "The endpoint groups the key may reach. Omitted, the key gets 'inference:run' alone, which calls models and nothing else. The end-users scopes are a service key's alone.",
+            "description": "The endpoint groups the key may reach. Omitted, the key gets 'inference:run', 'web:search', 'web:fetch', 'code:execute', 'mcp:read' and 'mcp:execute': it calls models and tools and lists MCP servers, and nothing else. The end-users scopes are a service key's alone.",
             "items": {
               "$ref": "#/components/schemas/KeyScope"
             },
@@ -21266,7 +21266,7 @@
         "description": "Whether one gateway-run tool can be attached right now, and why not.\n\nThree states from two fields, which is what the composer's menu draws: a\ntool the deployment never configured is not offered, one the deployment\nconfigured and this workspace turned off is shown disabled with the reason,\nand an available one is a plain checkbox. A single boolean would collapse\nthe first two, which is how a checkbox comes to look attachable and then\nfail at request time (otari-ai#1419).",
         "properties": {
           "configured": {
-            "description": "Whether this deployment has a backend for the tool at all.",
+            "description": "Whether the menu lists the tool: the deployment, or for web search the workspace's organization search key, provides it. Whether it can be attached, and why not, are enabled and reason.",
             "title": "Configured",
             "type": "boolean"
           },
@@ -21312,12 +21312,17 @@
             "title": "Mcp Servers",
             "type": "array"
           },
+          "web_fetch": {
+            "$ref": "#/components/schemas/PlaygroundToolStatus",
+            "description": "Whether a message may declare otari_web_fetch."
+          },
           "web_search": {
             "$ref": "#/components/schemas/PlaygroundToolStatus"
           }
         },
         "required": [
           "web_search",
+          "web_fetch",
           "code_execution",
           "files",
           "mcp_servers"
@@ -27048,6 +27053,38 @@
               }
             ],
             "title": "Api Key Id"
+          },
+          "client_language": {
+            "anyOf": [
+              {
+                "enum": [
+                  "python",
+                  "javascript",
+                  "go",
+                  "java",
+                  "rust",
+                  "ruby"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The language the client was written in, from its SDK's headers or its HTTP library's User-Agent. `javascript` covers TypeScript.",
+            "title": "Client Language"
+          },
+          "client_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The client's version, from its own User-Agent.",
+            "title": "Client Version"
           },
           "cost": {
             "description": "USD, a snapshot of the usage rows' cost. Usage stays the billing record.",
