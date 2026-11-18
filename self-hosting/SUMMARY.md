@@ -13,6 +13,7 @@
 * [Connect otari.ai](providers/otari-ai.md)
 * [Connect OpenAI](providers/openai.md)
 * [Connect Gemini](providers/gemini.md)
+* [Connect Azure OpenAI](providers/azureopenai.md)
 * [Connect a llama.cpp server](providers/llamacpp.md)
 * [Use with a ChatGPT subscription](chatgpt-subscription.md)
 * [Hosted providers and BYO credentials](hosted-providers.md)
