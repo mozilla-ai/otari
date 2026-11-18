@@ -16,6 +16,7 @@ import {
 import { McpAccessTest } from "@/features/tools/McpAccessTest"
 import { McpGrantDialog } from "@/features/tools/McpGrantDialog"
 import { McpGrantsTable } from "@/features/tools/McpGrantsTable"
+import { McpUnconfirmedNotice } from "@/features/tools/McpUnconfirmedNotice"
 import { isLiteralToolName } from "@/features/tools/mcpAccess"
 import {
   grantSubject,
@@ -27,7 +28,6 @@ import { checkedTools } from "@/features/tools/mcpServerHealth"
 import {
   isOrganizationServer,
   isSamePolicy,
-  UNCONFIRMED_SETTINGS,
 } from "@/features/tools/mcpWorkspaceView"
 import { useMcpServerCheck } from "@/features/tools/useMcpServerCheck"
 import { useKeys } from "@/shared/api/apiKeys"
@@ -98,9 +98,8 @@ export function McpServerAcl({
   const isOverrideWriting =
     useWorkspaceMcpServerOverridePending(workspaceId, server.id) &&
     isOrganizations
-  const isUnconfirmed =
-    useWorkspaceMcpServer(workspaceId, server.id).isRefetchError &&
-    isOrganizations
+  const read = useWorkspaceMcpServer(workspaceId, server.id)
+  const isUnconfirmed = read.isRefetchError && isOrganizations
   const defaultHeld = isUnconfirmed
     ? "Refresh the settings first"
     : isOverrideWriting
@@ -359,9 +358,14 @@ export function McpServerAcl({
           {...pickerProps}
           readTools={server.read_tools}
           isPending={defaultWrite.isPending || isOverrideWriting}
-          error={
-            defaultWrite.error ??
-            (isUnconfirmed ? new Error(UNCONFIRMED_SETTINGS) : null)
+          error={defaultWrite.error}
+          held={
+            isUnconfirmed ? (
+              <McpUnconfirmedNotice
+                onRefresh={() => void read.refetch()}
+                isRefreshing={read.isFetching}
+              />
+            ) : undefined
           }
           onSubmit={(draft) => {
             const onSuccess = () => setEditingDefault(false)

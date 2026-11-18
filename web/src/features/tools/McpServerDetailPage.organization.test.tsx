@@ -389,11 +389,19 @@ describe("McpServerDetailPage, an organization's server", () => {
     release("refuse")
     expect(await within(dialog).findByText("Write refused")).toBeVisible()
     await waitFor(() =>
-      expect(screen.getByText(/could not be read again/)).toBeInTheDocument(),
+      expect(
+        within(dialog).getByRole("button", { name: "Save rule" }),
+      ).toBeDisabled(),
     )
 
-    // Saving again from the open dialog sends nothing: the refused write is the only one.
-    await user.click(within(dialog).getByRole("button", { name: "Save rule" }))
+    // The open dialog says so beside the write's refusal, offers the refresh
+    // itself, and cannot save again: the refused write is the only one sent.
+    expect(within(dialog).getByText(/could not be read again/)).toBeVisible()
+    expect(
+      within(dialog).getByRole("button", { name: "Refresh" }),
+    ).toBeVisible()
+    const save = within(dialog).getByRole("button", { name: "Save rule" })
+    expect(save).toBeDisabled()
     const sent = vi
       .mocked(globalThis.fetch)
       .mock.calls.filter(

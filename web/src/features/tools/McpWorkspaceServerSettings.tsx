@@ -10,6 +10,7 @@ import {
 } from "@/design-system/layout/SettingsGroup"
 import { McpAvailabilitySelect } from "@/features/tools/McpAvailabilitySelect"
 import { McpGrantDialog } from "@/features/tools/McpGrantDialog"
+import { McpUnconfirmedNotice } from "@/features/tools/McpUnconfirmedNotice"
 import { isLiteralToolName, ruleSummary } from "@/features/tools/mcpAccess"
 import { checkedTools } from "@/features/tools/mcpServerHealth"
 import {
@@ -18,7 +19,6 @@ import {
   isSamePolicy,
   organizationLimitLabel,
   organizationOffReason,
-  UNCONFIRMED_SETTINGS,
   workspaceAvailability,
 } from "@/features/tools/mcpWorkspaceView"
 import {
@@ -68,6 +68,12 @@ export function McpWorkspaceServerSettings({
   const read = useWorkspaceMcpServer(workspaceId, server.id)
   const isUnconfirmed = read.isRefetchError
   const isHeld = isWriting || isUnconfirmed
+  const unconfirmed = isUnconfirmed ? (
+    <McpUnconfirmedNotice
+      onRefresh={() => void read.refetch()}
+      isRefreshing={read.isFetching}
+    />
+  ) : undefined
   const picker = checkedTools(server, { withinAllowList: true })
   const tools = picker.isKnown
     ? picker.tools
@@ -97,19 +103,7 @@ export function McpWorkspaceServerSettings({
             </p>
           ) : null}
           {offReason ? <InfoBanner>{offReason}</InfoBanner> : null}
-          {isUnconfirmed ? (
-            <InfoBanner>
-              <span className="flex flex-wrap items-center gap-3">
-                {UNCONFIRMED_SETTINGS}
-                <Button
-                  onPress={() => void read.refetch()}
-                  className="min-h-11 md:min-h-0"
-                >
-                  Refresh
-                </Button>
-              </span>
-            </InfoBanner>
-          ) : null}
+          {unconfirmed}
           <McpAvailabilitySelect
             value={workspaceAvailability(server)}
             onChange={(next) => write(availabilityOverride(next))}
@@ -174,10 +168,8 @@ export function McpWorkspaceServerSettings({
           isKnown={picker.isKnown}
           readTools={server.read_tools}
           isPending={set.isPending || isWriting}
-          error={
-            set.error ??
-            (isUnconfirmed ? new Error(UNCONFIRMED_SETTINGS) : null)
-          }
+          error={set.error}
+          held={unconfirmed}
           onSubmit={(draft) => {
             if (isHeld) return
             // Unchanged: saving it would store the inherited policy as the
