@@ -86,6 +86,8 @@ export function mockMcpServerApi({
   copies?: McpServerFoldCandidate[]
 } = {}): McpCall[] {
   const calls: McpCall[] = []
+  // A read after a write of the workspace's own settings answers with them.
+  let saved = row
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
     const method = (init?.method ?? "GET").toUpperCase()
@@ -149,22 +151,23 @@ export function mockMcpServerApi({
       }
       // A workspace's own settings on its organization's server: set from
       // the body, or cleared back to the server's.
-      if (url.endsWith("/override") && row.in_workspace) {
-        return Response.json({
-          ...row,
+      if (url.endsWith("/override") && saved.in_workspace) {
+        saved = {
+          ...saved,
           in_workspace:
             method === "PUT"
-              ? { ...row.in_workspace, ...body }
+              ? { ...saved.in_workspace, ...body }
               : {
-                  ...row.in_workspace,
+                  ...saved.in_workspace,
                   enabled: true,
                   everyone_tools: null,
                   attach_by_default: null,
                 },
-        })
+        }
+        return Response.json(saved)
       }
       if (method === "DELETE") return new Response(null, { status: 204 })
-      return Response.json(method === "PATCH" ? { ...row, ...body } : row)
+      return Response.json(method === "PATCH" ? { ...row, ...body } : saved)
     }
     if (url.includes("/members")) {
       if (url.includes("/organizations/me/members")) {

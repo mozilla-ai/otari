@@ -40,6 +40,7 @@ import {
   useUpdateMcpServer,
   useUpdateWorkspaceMcpServerGrant,
   useWorkspaceMcpServerAccess,
+  useWorkspaceMcpServerOverridePending,
 } from "@/shared/api/tools"
 import { useWorkspaceMembers } from "@/shared/api/workspaces"
 import { useUrlValue } from "@/shared/helpers/urlState"
@@ -89,6 +90,10 @@ export function McpServerAcl({
   const setOverride = useSetWorkspaceMcpServerOverride()
   const isOrganizations = isOrganizationServer(server)
   const defaultWrite = isOrganizations ? setOverride : updateServer
+  // The workspace's settings card above writes the same override, whole.
+  const isOverrideWriting =
+    useWorkspaceMcpServerOverridePending(workspaceId, server.id) &&
+    isOrganizations
   const addGrants = useAddWorkspaceMcpServerGrants()
   const updateGrant = useUpdateWorkspaceMcpServerGrant()
   const removeGrant = useDeleteWorkspaceMcpServerGrant()
@@ -185,6 +190,7 @@ export function McpServerAcl({
     setEditing(grant)
   }
   const openEditDefault = () => {
+    if (isOverrideWriting) return
     defaultWrite.reset()
     setOpenCount((count) => count + 1)
     setEditingDefault(true)
@@ -250,6 +256,7 @@ export function McpServerAcl({
             showRules={!isRefused}
             onEdit={openEdit}
             onEditDefault={openEditDefault}
+            isDefaultBusy={isOverrideWriting}
             onRemove={(grant) => {
               removeGrant.reset()
               setRemoving(grant)
@@ -341,6 +348,7 @@ export function McpServerAcl({
           onSubmit={(draft) => {
             const onSuccess = () => setEditingDefault(false)
             if (isOrganizations) {
+              if (isOverrideWriting) return
               setOverride.mutate(
                 {
                   ...ids,

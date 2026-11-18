@@ -247,7 +247,7 @@ def _pin_issuer(server: WorkspaceMcpServer, client: StoredMcpOAuthClient, metada
     elif not pin.admits(metadata):
         if not client.dynamic:
             logger.warning("MCP sign-in refused reason=issuer_changed server_id=%s", server.id)
-            raise McpOAuthIssuerChangedError
+            raise McpOAuthIssuerChangedError(organization=server.workspace_id is None)
         raise McpConnectionFlowError("The server changed while the sign-in was starting. Start it again.")
 
 
@@ -936,6 +936,7 @@ class McpConnectionService:
             server = await self._reachable_in_mode(server_id, mode, workspace_id, managing=for_check or for_shared)
             # A manager's sign-in to an organization's server from no workspace starts from none.
             started_in = server.workspace_id or workspace_id
+            is_organizations = server.workspace_id is None
             url, stored, pinned = server.url, stored_oauth_client(server), _Pin.of(server)
         try:
             metadata = await _mcp_oauth.discover(url)
@@ -943,7 +944,7 @@ class McpConnectionService:
                 if not stored.dynamic:
                     # Before anything is sent through the client: its secret was saved for the other server.
                     logger.warning("MCP sign-in refused reason=issuer_changed server_id=%s", server_id)
-                    raise McpOAuthIssuerChangedError
+                    raise McpOAuthIssuerChangedError(organization=is_organizations)
                 # A client Otari registered with the other server means nothing to this one: register anew.
                 stored = None
             client = await self._client(server_id, mode, url, stored, metadata, redirect_uri)

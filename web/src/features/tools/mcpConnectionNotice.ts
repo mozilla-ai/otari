@@ -49,11 +49,33 @@ export function forgetMcpConnectionNotice(): void {
   notice = undefined
 }
 
-/** A dashboard path, and nothing that could leave the dashboard. */
+const CALLBACK_PATH = "/mcp-connections/callback"
+const DASHBOARD_ORIGIN = "http://dashboard.invalid"
+
+/**
+ * A dashboard path to land on after a sign-in, and nothing that could leave the
+ * dashboard. The callback page itself is refused: landing there again finishes
+ * nothing and shows it was opened without a sign-in.
+ */
 export function pickDashboardPath(
   path: string | null | undefined,
 ): string | undefined {
-  return path?.startsWith("/") && !path.startsWith("//") ? path : undefined
+  // A backslash reads as a slash in a URL, so "/\\host" would leave the dashboard.
+  if (!path?.startsWith("/") || path.startsWith("//") || path.includes("\\")) {
+    return undefined
+  }
+  // Resolved as the router would read it: dot segments, case, a trailing slash.
+  let resolved: URL
+  try {
+    resolved = new URL(path, DASHBOARD_ORIGIN)
+  } catch {
+    return undefined
+  }
+  if (resolved.origin !== DASHBOARD_ORIGIN) return undefined
+  const { pathname } = resolved
+  const isCallback =
+    pathname.replace(/\/+$/, "").toLowerCase() === CALLBACK_PATH
+  return isCallback ? undefined : path
 }
 
 /** Notes the page a sign-in is leaving from. Storage can be refused; then there is none. */

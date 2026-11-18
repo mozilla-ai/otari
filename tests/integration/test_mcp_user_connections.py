@@ -89,6 +89,8 @@ from gateway.services.tools import (
     AttachedMcpServerIndex,
     McpConnectionService,
     McpGrantMembershipListener,
+    McpServerContact,
+    McpServerContacts,
     McpSignInReason,
     McpUserTokens,
     McpWorkspaceServers,
@@ -695,6 +697,35 @@ async def test_a_members_sign_in_lists_the_server_once_and_records_it_as_a_check
     assert health["checked_at"]
 
 
+async def test_one_person_s_listing_is_not_recorded_on_an_organization_s_per_user_server(
+    async_db: AsyncSession, config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every workspace of the organization reads the server's health, and one account lists what that account may."""
+    seen: list[ResolvedMcpServer] = []
+    _catalog(monkeypatch, seen)
+    world = await _world(async_db, config)
+    row = await _row(async_db, world.server.id)
+    row.workspace_id = None
+    await async_db.commit()
+
+    await _sign_in(async_db, config, world, world.member)
+    assert seen == []
+    assert (await _row(async_db, world.server.id)).health is None
+
+    # Nor what a request through that person's connection listed: it still says the server answered.
+    @asynccontextmanager
+    async def unit_of_work() -> AsyncIterator[UnitOfWork]:
+        async with AsyncSession(async_db.bind, expire_on_commit=False) as session:
+            yield UnitOfWork(session)
+
+    listing = ServerCheck(tool_names=["list_files", "delete_file"])
+    contact = McpServerContact(server_id=world.server.id, url=PUBLIC_URL, listing=listing)
+    assert await McpServerContacts(unit_of_work=unit_of_work)._store(contact) == "decided"
+    health = (await _row(async_db, world.server.id)).health
+    assert health is not None
+    assert (health["status"], health.get("tools", [])) == ("healthy", [])
+
+
 async def test_a_listing_that_fails_right_after_a_sign_in_is_recorded_and_does_not_fail_the_sign_in(
     async_db: AsyncSession, config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -870,7 +901,7 @@ async def test_a_managers_client_is_never_sent_to_another_authorization_server_u
     with pytest.raises(McpOAuthIssuerChangedError) as refused:
         await service.start_connection(user=world.owner, return_to=None, **ids)
     assert refused.value.error_code == "mcp_oauth_issuer_changed"
-    assert "save the OAuth client again" in str(refused.value)
+    assert "A workspace admin must save the OAuth client again" in str(refused.value)
     assert len(wire.exchanges) == 1
     assert (await _row(async_db, world.server.id)).oauth_client_issuer == ISSUER
 
@@ -882,6 +913,27 @@ async def test_a_managers_client_is_never_sent_to_another_authorization_server_u
     await _sign_in(async_db, config, world, world.owner)
     assert (await _row(async_db, world.server.id)).oauth_client_issuer == moved
     assert wire.registrations == []
+
+
+async def test_a_moved_organization_server_sends_its_members_to_the_organizations_admins(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire
+) -> None:
+    """A workspace admin cannot save an organization's server, so the refusal names who can."""
+    world = await _world(async_db, config, oauth_client_id="my-client", oauth_client_secret="my-secret")
+    await _sign_in(async_db, config, world, world.member)
+    row = await _row(async_db, world.server.id)
+    row.workspace_id = None
+    await async_db.commit()
+
+    moved = "https://93.184.216.37"
+    wire.metadata = dataclasses.replace(wire.metadata, issuer=moved, token_endpoint=f"{moved}/token")
+    with pytest.raises(McpOAuthIssuerChangedError) as refused:
+        await _service(async_db, config).start_connection(
+            user=world.member, workspace_id=world.workspace.id, server_id=world.server.id, return_to=None
+        )
+    assert "An organization owner or admin" in str(refused.value)
+    assert "Organization > MCP servers" in str(refused.value)
+    assert "workspace admin" not in str(refused.value)
 
 
 async def test_a_managers_client_is_never_sent_to_a_moved_token_endpoint_under_the_same_issuer(

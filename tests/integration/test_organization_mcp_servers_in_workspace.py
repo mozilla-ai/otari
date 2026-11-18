@@ -170,6 +170,46 @@ async def test_the_organization_s_limit_decides_what_a_workspace_rule_cannot_rea
     assert {row.name: row.organization_tools for row in access} == {"drive": None, "jira": ["list_issues"]}
 
 
+async def test_an_empty_organization_limit_is_the_organization_s_refusal(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    world = await _world(async_db, config)
+    jira = await _shared(async_db, world.workspace.organization_id)
+    await _override(async_db, world.workspace, jira, organization_tools=[])
+    key = await _member_key(async_db, world)
+    service = _service(async_db, config)
+
+    check = await service.check_access(
+        user=world.owner, workspace_id=world.workspace.id, server_id=jira, api_key_id=key.id, tool="list_issues"
+    )
+
+    assert (check.allowed, check.decided_by) == (False, "organization")
+
+
+async def test_the_caller_s_access_is_read_as_the_workspace_reaches_the_server(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    world = await _world(async_db, config)
+    jira = await _shared(async_db, world.workspace.organization_id)
+    await _shared(async_db, world.workspace.organization_id, name="sentry")
+    await _override(async_db, world.workspace, jira, organization_tools=["list_issues"])
+    service = _service(async_db, config)
+    ids = {"workspace_id": world.workspace.id, "server_id": jira}
+
+    listed = await service.list_servers(user=world.member, workspace_id=world.workspace.id)
+    one = await service.get_server(user=world.member, **ids)
+
+    access = {server.name: server.caller_access for server in listed.data}
+    assert (access["jira"], one.caller_access) == ("some", "some"), "every tool, under a limit of one"
+    assert access["sentry"] == "all"
+
+    await service.set_workspace_settings(
+        user=world.owner, request=WorkspaceMcpServerSettingsUpdate(enabled=False), **ids
+    )
+    off = await service.get_server(user=world.owner, **ids)
+    assert off.caller_access == "none", "the workspace turned it off"
+
+
 async def test_another_organization_s_workspace_reaches_nothing_of_it(
     async_db: AsyncSession, config: GatewayConfig
 ) -> None:

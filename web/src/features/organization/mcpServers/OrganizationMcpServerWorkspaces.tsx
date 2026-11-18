@@ -222,15 +222,18 @@ export function OrganizationMcpServerWorkspaces({
       description="Each workspace reaches this server unless a limit here or its own admins say otherwise. A limit is the most its keys and members reach; its admins can narrow it, never widen it."
     >
       <ErrorBanner error={query.error ?? lift.error} />
-      <DataTable
-        ariaLabel={`Workspaces reaching ${server.name}`}
-        mobileLayout="cards"
-        columns={columns}
-        rows={rows}
-        getRowKey={(row) => row.workspace_id}
-        isLoading={query.isPending && !query.data}
-        emptyContent="This organization has no workspaces yet."
-      />
+      {/* A table that was never read is not an empty one; a failed reread keeps the rows it had. */}
+      {query.isError && !query.data ? null : (
+        <DataTable
+          ariaLabel={`Workspaces reaching ${server.name}`}
+          mobileLayout="cards"
+          columns={columns}
+          rows={rows}
+          getRowKey={(row) => row.workspace_id}
+          isLoading={query.isPending && !query.data}
+          emptyContent="This organization has no workspaces yet."
+        />
+      )}
       {editing ? (
         <LimitDialog
           key={openCount}

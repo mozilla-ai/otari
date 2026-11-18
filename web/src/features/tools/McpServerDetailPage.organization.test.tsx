@@ -16,7 +16,7 @@ import {
   renderMcpServerPage,
   WORKSPACE,
 } from "@/tests/mcpServer"
-import { pressRowAction } from "@/tests/rowMenu"
+import { getRowMenuItem, pressRowAction } from "@/tests/rowMenu"
 import { pickOption } from "@/tests/select"
 
 // An organization's server read through a workspace: the organization's
@@ -59,6 +59,31 @@ const BO_LAPTOP = apiKey({
   user_id: BO,
   workspace_id: WORKSPACE,
 })
+
+/**
+ * Holds the first PUT of the workspace's own settings until the returned
+ * function is called with how it answers: the stub's answer, or a refusal.
+ */
+function holdFirstOverrideWrite(): (outcome: "save" | "refuse") => void {
+  const answer = vi.mocked(globalThis.fetch).getMockImplementation()
+  let release: (outcome: "save" | "refuse") => void = () => {}
+  const held = new Promise<"save" | "refuse">((resolve) => {
+    release = resolve
+  })
+  let isHeld = false
+  vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+    if (String(input).endsWith("/override") && init?.method === "PUT") {
+      if (!isHeld) {
+        isHeld = true
+        if ((await held) === "refuse") {
+          return Response.json({ detail: "Write refused" }, { status: 500 })
+        }
+      }
+    }
+    return answer?.(input, init) as Promise<Response>
+  })
+  return release
+}
 
 async function openPage(serverId: string) {
   renderMcpServerPage(serverId)
@@ -173,6 +198,69 @@ describe("McpServerDetailPage, an organization's server", () => {
         body: { enabled: false, everyone_tools: [], attach_by_default: null },
       }),
     )
+  })
+
+  it("holds the default policy's Edit while an Availability write is in flight, and keeps its refusal", async () => {
+    const server = organizationServer()
+    mockMcpServerApi({ server, row: asRead(server) })
+    const release = holdFirstOverrideWrite()
+    const user = userEvent.setup()
+    await openPage(server.id)
+
+    await pickOption(user, "Availability", "Off")
+    const edit = screen.getByRole("button", {
+      name: "Edit the default policy for this workspace",
+    })
+    await waitFor(() => expect(edit).toBeDisabled())
+
+    release("refuse")
+    expect(await screen.findByText("Write refused")).toBeVisible()
+    await waitFor(() => expect(edit).toBeEnabled())
+
+    // Opening the editor clears the settled refusal.
+    await user.click(edit)
+    await screen.findByRole("dialog", { name: "Edit the default policy" })
+    expect(screen.queryByText("Write refused")).toBeNull()
+  })
+
+  it("keeps Off when the default policy is saved after it", async () => {
+    const server = organizationServer()
+    const calls = mockMcpServerApi({ server, row: asRead(server) })
+    const release = holdFirstOverrideWrite()
+    const user = userEvent.setup()
+    await openPage(server.id)
+
+    await pickOption(user, "Availability", "Off")
+    // The access rules write the same settings, so their Edit waits too.
+    const held = await getRowMenuItem(user, /Saving another change first/)
+    expect(held).toHaveAttribute("aria-disabled", "true")
+    await user.keyboard("{Escape}")
+
+    release("save")
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", {
+          name: "Edit the default policy for this workspace",
+        }),
+      ).toBeEnabled(),
+    )
+    await pressRowAction(user, "Edit the default policy")
+    const dialog = await screen.findByRole("dialog", {
+      name: "Edit the default policy",
+    })
+    await user.click(within(dialog).getByRole("radio", { name: "Deny" }))
+    await user.click(within(dialog).getByRole("button", { name: "Save rule" }))
+
+    await waitFor(() =>
+      expect(
+        mcpWrites(calls).filter((call) => call.url.endsWith("/override")),
+      ).toHaveLength(2),
+    )
+    const [off, policy] = mcpWrites(calls).filter((call) =>
+      call.url.endsWith("/override"),
+    )
+    expect(off?.body).toMatchObject({ enabled: false })
+    expect(policy?.body).toMatchObject({ enabled: false, everyone_tools: [] })
   })
 
   it("clears the workspace's own settings back to the organization's", async () => {

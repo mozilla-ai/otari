@@ -477,7 +477,10 @@ server's answers are written at most once every 15 minutes, and the same failure
 at most once a minute, unless its status changes; each gateway process runs at most 64 such writes at once: a contact past that
 is not recorded. A
 user who has not signed in to a per-user server, or whose own token the server
-refuses, is not a server failure and records nothing. So `health.checked_at` is
+refuses, is not a server failure and records nothing. On an organization's
+per-user server, whose `health` every workspace of the organization reads, a
+user's own connection records only whether the server answered, never its tool
+list: that list comes from the organization's own check. So `health.checked_at` is
 the last contact, and the manual check is for a server no request uses yet.
 
 A server that fails its check is still stored. `health.status` is `failing` and

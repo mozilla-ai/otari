@@ -27,6 +27,7 @@ export function McpGrantsTable({
   showRules = true,
   onEdit,
   onEditDefault,
+  isDefaultBusy = false,
   onRemove,
 }: {
   grants: readonly WorkspaceMcpServerGrant[]
@@ -41,6 +42,8 @@ export function McpGrantsTable({
   showRules?: boolean
   onEdit: (grant: WorkspaceMcpServerGrant) => void
   onEditDefault: () => void
+  /** True while a write of the default policy is in flight, which holds its Edit. */
+  isDefaultBusy?: boolean
   onRemove: (grant: WorkspaceMcpServerGrant) => void
 }) {
   const rules = showRules
@@ -126,8 +129,13 @@ export function McpGrantsTable({
               <RowAction
                 icon={FiEdit2}
                 label="Edit…"
-                ariaLabel="Edit the default policy"
+                ariaLabel={
+                  isDefaultBusy
+                    ? "Saving another change first"
+                    : "Edit the default policy"
+                }
                 onPress={onEditDefault}
+                isDisabled={isDefaultBusy}
               />
             </RowActionRow>
           )

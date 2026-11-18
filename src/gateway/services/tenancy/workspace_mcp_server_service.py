@@ -382,10 +382,24 @@ def _needs_setup(server: WorkspaceMcpServer, *, has_account: bool) -> bool:
     return (server.health or {}).get("error") == CheckFailure.UNAUTHORIZED
 
 
-def _caller_access(server: WorkspaceMcpServer, tools: Sequence[str]) -> McpCallerAccess:
-    """What a rule's tool patterns come to on a server, in one word, under the server's own allow-list."""
-    if not server.enabled or not tools or server.allowed_tools == []:
+def _caller_access(
+    server: WorkspaceMcpServer, tools: Sequence[str], view: McpServerInWorkspace | None = None
+) -> McpCallerAccess:
+    """What a rule's tool patterns come to on a server, in one word, under the server's own allow-list.
+
+    Read through ``view``, as a workspace reaches the server: its switch, and the organization's limit there.
+    """
+    enabled = server.enabled if view is None else view.enabled
+    if not enabled or not tools or server.allowed_tools == []:
         return "none"
+    limit = None if view is None else view.tool_limit
+    if limit is not None:
+        read_tools = _read_tools(server)
+        reached = clip_mcp_tool_patterns(expand_mcp_tool_patterns(tools, read_tools), limit)
+        if not reached:
+            return "none"
+        if "*" not in reached:
+            return "read" if read_tools and set(reached) == set(read_tools) else "some"
     if "*" in tools:
         return "all" if server.allowed_tools is None else "some"
     return "read" if list(tools) == [MCP_READ_PRESET] else "some"
@@ -487,7 +501,7 @@ class WorkspaceMcpServerPublic(BaseModel):
     id: uuid.UUID
     workspace_id: uuid.UUID | None = Field(description="The workspace that owns the server; null for an organization's")
     scope: Literal["workspace", "organization"] = Field(
-        description="Whose the server is: one workspace's own, or its organization's, which every workspace reaches"
+        description="Who owns the server: one workspace, or its organization"
     )
     name: str
     url: str
@@ -591,7 +605,7 @@ class WorkspaceMcpServerPublic(BaseModel):
             has_oauth_client_secret=own_client is not None and own_client.encrypted_secret is not None,
             attach_by_default=server.attach_by_default,
             health=WorkspaceMcpServerHealth.model_validate(server.health) if server.health is not None else None,
-            caller_access=None if caller_tools is None else _caller_access(server, caller_tools),
+            caller_access=None if caller_tools is None else _caller_access(server, caller_tools, view),
             in_workspace=McpServerWorkspaceSettings.of(view) if view is not None and view.of_organization else None,
             created_at=server.created_at.isoformat(),
             updated_at=server.updated_at.isoformat(),
@@ -1613,23 +1627,27 @@ class WorkspaceMcpServerService:
         admins, who may turn it back on. The old id of a copy folded into an organization's server names that
         server in the copy's workspace.
         """
-        server = await self.db.get(WorkspaceMcpServer, server_id)
-        if server is None:
-            folded_into = (await McpServerAliasRepository(self.db).targets(workspace_id, [server_id])).get(server_id)
-            if folded_into is not None:
-                server = await self.db.get(WorkspaceMcpServer, folded_into)
-        if server is not None and server.workspace_id == workspace_id:
-            return McpServerInWorkspace(server)
-        if server is not None and server.workspace_id is None:
-            organization_id = await WorkspaceRepository(self.db).get_organization_id(workspace_id)
-            if organization_id == server.organization_id:
-                override = await WorkspaceMcpServerOverrideRepository(self.db).find(
-                    workspace_id=workspace_id, server_id=server.id
+        organization_id = await WorkspaceRepository(self.db).get_organization_id(workspace_id)
+        server = None
+        if organization_id is not None:
+            servers = WorkspaceMcpServerRepository(self.db)
+            server = await servers.find_reached(server_id, workspace_id, organization_id)
+            if server is None:
+                # The old id of a copy folded into an organization's server names that server in its workspace.
+                folded_into = (await McpServerAliasRepository(self.db).targets(workspace_id, [server_id])).get(
+                    server_id
                 )
-                view = McpServerInWorkspace(server, override)
-                if all_states or view.visible:
-                    return view
-        raise WorkspaceMcpServerNotFoundError(server_id)
+                if folded_into is not None:
+                    server = await servers.find_reached(folded_into, workspace_id, organization_id)
+        # The list's own rule for what the workspace sees of it.
+        views = (
+            []
+            if server is None
+            else await _mcp_views(self.db).seen_from(workspace_id, [server], include_hidden=all_states)
+        )
+        if not views:
+            raise WorkspaceMcpServerNotFoundError(server_id)
+        return views[0]
 
     async def _get_or_404(self, workspace_id: uuid.UUID, server_id: uuid.UUID) -> WorkspaceMcpServer:
         server = await self.db.get(WorkspaceMcpServer, server_id)
@@ -2527,7 +2545,13 @@ class WorkspaceMcpServerService:
         server = view.row
         decided, grant_id, patterns = await self._decide_for_key(resolved_workspace_id, api_key_id, view)
         if not view.enabled:
-            return WorkspaceMcpServerAccessCheck(allowed=False, decided_by="server", grant_id=None, tools=[])
+            # Both switches on, so it is the organization's empty limit that turned it off here.
+            by_organization = (
+                server.enabled and view.override is not None and view.override.enabled and view.tool_limit == []
+            )
+            return WorkspaceMcpServerAccessCheck(
+                allowed=False, decided_by="organization" if by_organization else "server", grant_id=None, tools=[]
+            )
         if server.allowed_tools is not None and tool not in server.allowed_tools:
             return WorkspaceMcpServerAccessCheck(
                 allowed=False, decided_by="server", grant_id=None, tools=list(server.allowed_tools)
@@ -2928,7 +2952,8 @@ class WorkspaceMcpServerService:
                 return
             if done.shared:
                 await self._record_check(server)
-            elif done.user_id is not None:
+            # Not on an organization's server, whose health every workspace reads: this lists one person's account.
+            elif done.user_id is not None and server.workspace_id is not None:
                 token = await _check_credential(server, self._tokens, done.user_id)
                 if isinstance(token, str):
                     await self._record_check(server, check_token=token)
@@ -3077,7 +3102,7 @@ class WorkspaceMcpServerService:
         )
 
     async def disconnect(self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID) -> None:
-        """End the caller's own connection to a server.
+        """End the caller's own connection to a server the workspace reaches, its own or its organization's.
 
         Raises:
             McpConnectionNotFoundError: the caller has no connection to it.
