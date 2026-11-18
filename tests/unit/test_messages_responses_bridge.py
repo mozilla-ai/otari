@@ -34,7 +34,7 @@ _MODEL = "openai:gpt-5"
 _INSTANCE = "openai"
 _USAGE = {
     "input_tokens": 100,
-    "input_tokens_details": {"cached_tokens": 40},
+    "input_tokens_details": {"cached_tokens": 40, "cache_write_tokens": 0},
     "output_tokens": 30,
     "output_tokens_details": {"reasoning_tokens": 12},
     "total_tokens": 130,
@@ -836,6 +836,18 @@ async def test_usage_the_provider_did_not_report_is_missing_to_metering_not_zero
     # A tool loop that folds earlier turns' tokens in bills them.
     folded = result.usage.model_copy(update={"output_tokens": 7})
     assert not usage_unreported(folded)
+
+
+@pytest.mark.asyncio
+async def test_cache_writes_are_reported_apart_from_input() -> None:
+    response = _response([_message("hi")])
+    response["usage"] = {**_USAGE, "input_tokens_details": {"cached_tokens": 40, "cache_write_tokens": 25}}
+    result = await _via_responses(response)
+    assert (
+        result.usage.input_tokens,
+        result.usage.cache_read_input_tokens,
+        result.usage.cache_creation_input_tokens,
+    ) == (35, 40, 25)
 
 
 @pytest.mark.asyncio

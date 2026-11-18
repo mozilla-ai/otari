@@ -71,7 +71,7 @@ _REASONING_TOOLS_MSG = (
 
 def _openai_connection_error(cause: Exception) -> openai.APIConnectionError:
     """The OpenAI SDK's connection error, raised from the httpx error as the SDK does."""
-    request = httpx.Request("POST", "https://internal-proxy.example:8443/v1/chat/completions")
+    request = httpx2.Request("POST", "https://internal-proxy.example:8443/v1/chat/completions")
     try:
         raise openai.APIConnectionError(request=request) from cause
     except openai.APIConnectionError as exc:
@@ -137,7 +137,7 @@ def test_sdk_wrapped_timeout_maps_to_504() -> None:
     any-llm surfaces that wrapped type directly, so it must still classify
     as a 504, not fall through to the generic 502."""
     for exc in (
-        OpenAIAPITimeoutError(request=httpx.Request("POST", "http://upstream")),
+        OpenAIAPITimeoutError(request=httpx2.Request("POST", "http://upstream")),
         AnthropicAPITimeoutError(request=httpx2.Request("POST", "http://upstream")),
     ):
         assert UpstreamFailure(exc).mapping == (504, ProviderDetail.TIMEOUT)
@@ -157,7 +157,7 @@ def test_unified_any_llm_wrapped_timeout_maps_to_504() -> None:
             super().__init__(str(original_exception))
             self.original_exception = original_exception
 
-    request = httpx.Request("POST", "http://upstream")
+    request = httpx2.Request("POST", "http://upstream")
     wrapped = _WrappedByAnyLLM(OpenAIAPITimeoutError(request=request))
     assert UpstreamFailure(wrapped).mapping == (504, ProviderDetail.TIMEOUT)
 
@@ -529,7 +529,7 @@ def test_the_logged_status_reads_an_attached_response() -> None:
 def test_the_logged_status_records_504_for_a_timeout() -> None:
     """A timeout carries no upstream status, so the gateway's own classification
     is recorded rather than leaving the row unclassifiable."""
-    request = httpx.Request("POST", "http://upstream")
+    request = httpx2.Request("POST", "http://upstream")
     for exc in (asyncio.TimeoutError(), httpx.TimeoutException("slow"), OpenAIAPITimeoutError(request=request)):
         assert UpstreamFailure(exc).logged_status == 504
 
@@ -1329,7 +1329,7 @@ def test_a_local_fault_is_not_worth_retrying(exc: BaseException) -> None:
         _StatusError(500),
         _StatusError(503),
         _StatusError(429),
-        OpenAIAPITimeoutError(request=httpx.Request("POST", "https://api.example.com")),
+        OpenAIAPITimeoutError(request=httpx2.Request("POST", "https://api.example.com")),
         httpx.ConnectError("connection refused"),
         httpx.RemoteProtocolError("server disconnected"),
         ConnectionResetError("reset by peer"),
@@ -1420,8 +1420,8 @@ _COHERE_HEADERS = {"x-debug-trace-id": "f3a9c2", "x-endpoint-monthly-call-limit"
 
 def _openai_status_error(status_code: int, error: dict[str, Any]) -> openai.APIStatusError:
     """An OpenAI SDK status error built the way the SDK builds it from a response."""
-    request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
-    response = httpx.Response(status_code, request=request, json={"error": error})
+    request = httpx2.Request("POST", "https://api.openai.com/v1/chat/completions")
+    response = httpx2.Response(status_code, request=request, json={"error": error})
     error_class = openai.BadRequestError if status_code == 400 else openai.APIStatusError
     return error_class(f"Error code: {status_code} - {{'error': {error}}}", response=response, body=error)
 
@@ -1782,7 +1782,7 @@ _EXA_OVERLOADED = {"requestId": "r1", "error": "Service overloaded", "tag": "SER
             },
         ),
         (
-            OpenAIAPITimeoutError(request=httpx.Request("POST", "https://api.example/v1")),
+            OpenAIAPITimeoutError(request=httpx2.Request("POST", "https://api.example/v1")),
             {"Otari-Error-Provider": "exa", "Otari-Error-Tag": "timeout", "Otari-Error-Retryable": "true"},
         ),
         (
