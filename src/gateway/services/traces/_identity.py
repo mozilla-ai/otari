@@ -136,6 +136,11 @@ _LANGUAGE_NAMES: Mapping[str, ClientLanguage] = {
 # others) and Fern's (Cohere).
 _LANGUAGE_HEADERS = ("x-stainless-lang", "x-fern-language")
 
+# The languages a Stainless SDK names after its client class, ``OpenAI/Python 1.99``. Only
+# languages, never the HTTP libraries ``_LANGUAGE_NAMES`` also holds: ``my-app/okhttp`` is
+# no SDK, and the word after it is another product, not a version.
+_STAINLESS_LANGUAGES = frozenset({"python", "js", "node", "typescript", "go", "java", "kotlin", "ruby"})
+
 # A Stainless SDK's client classes that are one SDK, by class name less any ``Async``:
 # the cloud variants of the OpenAI and Anthropic clients.
 _SDK_CLIENT_CLASSES: Mapping[str, str] = {
@@ -279,7 +284,7 @@ def _user_agent_product(headers: Mapping[str, str]) -> str | None:
 
 def _is_stainless(segments: list[str]) -> bool:
     """Whether a ``User-Agent``'s first product is a Stainless SDK's ``Class/Language``."""
-    return len(segments) > 1 and segments[1].lower() in _LANGUAGE_NAMES
+    return len(segments) > 1 and segments[1].lower() in _STAINLESS_LANGUAGES
 
 
 def _user_agent_names(headers: Mapping[str, str], harness: str) -> bool:
