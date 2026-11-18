@@ -24,6 +24,7 @@ import {
   rosterRowOf,
   unseenLimitLines,
 } from "@/features/home/memberHomeModel"
+import { hasProviderSlot, ProviderSlot } from "@/features/home/ProviderSlot"
 import { ShareCell } from "@/features/home/ShareCell"
 import { useCanCreateKey } from "@/features/organization/access"
 import { useCurrentOwner } from "@/features/organization/attribution"
@@ -61,11 +62,23 @@ import {
 import { useUrlState } from "@/shared/helpers/urlState"
 import { useSurfaces } from "@/shared/hooks/useDeployment"
 
-type Cut = "keys" | "models"
+type Cut = "keys" | "models" | "providers"
 
-const CUTS: { value: Cut; label: string; noun: string }[] = [
-  { value: "keys", label: "API keys", noun: "API key" },
-  { value: "models", label: "Models", noun: "Model" },
+const CUTS: {
+  value: Cut
+  label: string
+  noun: string
+  /** What the empty table says shows up in it once there is spend. */
+  each: string
+}[] = [
+  { value: "keys", label: "API keys", noun: "API key", each: "key you make" },
+  { value: "models", label: "Models", noun: "Model", each: "model you use" },
+  {
+    value: "providers",
+    label: "Providers",
+    noun: "Provider",
+    each: "provider you use",
+  },
 ]
 
 const URL_DEFAULTS = { period: "month", by: "" }
@@ -112,7 +125,11 @@ export function MemberHome({
   const defaults = useWorkspaceBudgetDefaults(workspaceId)
   // A deployment that records no sessions serves no route to count them, and
   // has none to open.
-  const hasSessions = useSurfaces()("traces")
+  const hasSurface = useSurfaces()
+  const hasSessions = hasSurface("traces")
+  // Sessions cannot filter on a provider, so a provider's row opens Requests.
+  const canOpenRows =
+    cut.value === "providers" ? hasSurface("usage") : hasSessions
   const sessions = useTraceCount(
     {
       workspaceId,
@@ -124,7 +141,13 @@ export function MemberHome({
   )
   const ownKeys = new Map((keys.data ?? []).map((key) => [key.id, key]))
   // Rows the window spent on: keys with nothing spent are on Keys.
-  const rows: SpendRow[] = (cut.value === "keys" ? spend.keys : spend.models)
+  const rows: SpendRow[] = (
+    cut.value === "keys"
+      ? spend.keys
+      : cut.value === "providers"
+        ? spend.providers
+        : spend.models
+  )
     .filter((row) => row.requests > 0 || row.cost > 0)
     .map((row) => {
       if (cut.value !== "keys") return row
@@ -144,6 +167,7 @@ export function MemberHome({
     workspaceId,
     userId: me,
   })
+  const hasMarkSlot = cut.value === "providers" && hasProviderSlot(rows)
 
   const total = spend.totals?.cost ?? 0
   const requestCount = spend.totals?.request_count ?? 0
@@ -274,20 +298,25 @@ export function MemberHome({
   const open = (row: SpendRow) => {
     if (!row.filterKey) return
     void navigate({
-      to: "/sessions",
+      to: cut.value === "providers" ? "/requests" : "/sessions",
       search: {
         ...mySessions,
-        [cut.value === "keys" ? "api_key_id" : "model"]: row.filterKey,
+        [cut.value === "keys"
+          ? "api_key_id"
+          : cut.value === "providers"
+            ? "provider"
+            : "model"]: row.filterKey,
       },
     })
   }
 
   const menuFor = (row: SpendRow): RowMenuAction[] => {
     const actions: RowMenuAction[] = []
-    if (row.filterKey && hasSessions) {
+    if (row.filterKey && canOpenRows) {
       actions.push({
         id: "open",
-        label: "See its sessions",
+        label:
+          cut.value === "providers" ? "See its requests" : "See its sessions",
         hint: `What ran ${words}`,
         icon: FiLayers,
         run: () => open(row),
@@ -318,11 +347,14 @@ export function MemberHome({
             {row.name}
           </span>
         ) : (
-          <span className="flex min-w-0 md:max-w-[13rem] flex-col">
-            <span className="truncate text-foreground">{row.name}</span>
-            {row.detail ? (
-              <span className="truncate text-caption">{row.detail}</span>
-            ) : null}
+          <span className="flex min-w-0 items-center gap-3 md:max-w-[13rem]">
+            {hasMarkSlot ? <ProviderSlot row={row} /> : null}
+            <span className="flex min-w-0 flex-col">
+              <span className="truncate text-foreground">{row.name}</span>
+              {row.detail ? (
+                <span className="truncate text-caption">{row.detail}</span>
+              ) : null}
+            </span>
           </span>
         ),
     },
@@ -352,7 +384,7 @@ export function MemberHome({
         </span>
       ),
     },
-    ...(cut.value === "keys"
+    ...(cut.value !== "models"
       ? ([
           {
             id: "model",
@@ -590,12 +622,12 @@ export function MemberHome({
                 {usage === "failed"
                   ? "Could not load"
                   : canCreateKey
-                    ? `${nothingYet} Each ${cut.value === "keys" ? "key you make" : "model you use"} shows up here with what it spent.`
+                    ? `${nothingYet} Each ${cut.each} shows up here with what it spent.`
                     : nothingYet}
               </EmptyMessage>
             }
             onRowAction={
-              hasSessions
+              canOpenRows
                 ? (key) => {
                     const row = rows.find((one) => one.id === key)
                     if (row) open(row)
@@ -609,12 +641,16 @@ export function MemberHome({
           />
         </TableScrollFrame>
         {rows.length > 0 &&
-        (hasSessions || (cut.value === "keys" && canCreateKey)) ? (
+        (canOpenRows || (cut.value === "keys" && canCreateKey)) ? (
           <p className="text-sm text-muted">
-            {hasSessions ? "A row opens its sessions." : null}
+            {canOpenRows
+              ? cut.value === "providers"
+                ? "A row opens its requests."
+                : "A row opens its sessions."
+              : null}
             {cut.value === "keys" && canCreateKey ? (
               <>
-                {hasSessions ? " " : null}
+                {canOpenRows ? " " : null}
                 Keys that spent nothing {words} are on{" "}
                 <Link to="/keys" className="text-link underline">
                   API keys

@@ -535,12 +535,12 @@ export function useRefusedUsage(
 }
 
 /**
- * One spend-by-model summary since `start` per value of `param` (a person or a
- * key), in parallel. A null value asks nothing, so a caller passes only the
- * rows it shows and can ask about.
+ * One spend-by-model summary since `start` per value of `param` (a person, a
+ * key or a provider), in parallel. A null value asks nothing, so a caller
+ * passes only the rows it shows and can ask about.
  */
 export function useModelSummariesBy(
-  param: "user_id" | "api_key_id",
+  param: "user_id" | "api_key_id" | "provider",
   values: readonly (string | null)[],
   start: string,
   { workspaceId, userId }: { workspaceId: string; userId?: string },

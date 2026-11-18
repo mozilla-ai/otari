@@ -8,6 +8,7 @@ import {
   keyRows,
   modelRows,
   peopleRows,
+  providerRows,
   type Spend,
   useSpend,
   useWorkspaceSpend,
@@ -72,6 +73,55 @@ describe("the server's fold row", () => {
     const rows = peopleRows([NOBODY], [member], () => NO_LIMITS, false)
     expect(rows.find((row) => row.isMember)?.cost).toBe(0)
     expect(rows.find((row) => row.id === "user:none")?.cost).toBe(2)
+  })
+})
+
+describe("providerRows", () => {
+  const usage = [
+    group({ key: "anthropic", cost: 3, requests: 2 }),
+    group({ key: "openai", cost: 6, requests: 4 }),
+    // Requests that recorded no provider: imported, or refused before one.
+    group({ key: null, cost: 0.5, requests: 3 }),
+    group({ key: "acme-proxy", cost: 0.25 }),
+    FOLD,
+  ]
+
+  it("names each provider, biggest spend first, by the name the dashboard gives it", () => {
+    const rows = providerRows(usage)
+    expect(rows.map((row) => [row.id, row.name, row.filterKey])).toEqual([
+      ["provider:openai", "OpenAI", "openai"],
+      ["provider:anthropic", "Anthropic", "anthropic"],
+      // The server's fold, at $3 like Anthropic: a tie goes by name.
+      ["provider:other", "Other", null],
+      ["provider:none", "Unknown provider", null],
+      // An instance an operator named keeps the name they gave it.
+      ["provider:acme-proxy", "acme-proxy", "acme-proxy"],
+    ])
+  })
+
+  it("keeps the requests that recorded no provider as one row, so the rows add up to the total", () => {
+    const rows = providerRows(usage)
+    const unknown = rows.find((row) => row.id === "provider:none")
+    expect(unknown?.detail).toBe("Not recorded")
+    expect(unknown?.cost).toBe(0.5)
+    expect(rows.reduce((sum, row) => sum + row.cost, 0)).toBe(12.75)
+    const shares = rows.map((row) => row.cost / 12.75)
+    expect(shares.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+  })
+
+  it("sets no limit on a provider and offers none to set", () => {
+    for (const row of providerRows(usage)) {
+      expect(row.limits).toBe(NO_LIMITS)
+      expect(row.target).toBeNull()
+    }
+  })
+
+  it("leaves out a provider with no requests and no spend", () => {
+    const rows = providerRows([
+      group({ key: "openai", cost: 1 }),
+      group({ key: "mistral", cost: 0, requests: 0 }),
+    ])
+    expect(rows.map((row) => row.id)).toEqual(["provider:openai"])
   })
 })
 
@@ -205,6 +255,9 @@ const summary = (cost: number) => ({
   by_user: [],
   by_api_key: [],
   by_model: [],
+  by_provider: [
+    { key: "anthropic", label: null, cost, tokens: 10, requests: 1 },
+  ],
   errors_by_status_code: [],
 })
 
@@ -311,6 +364,31 @@ describe("useSpend", () => {
     expect(person?.limits.isUnknown).toBe(true)
     expect(person?.target).toBeNull()
     expect(result.spend.organization.target).toBeNull()
+  })
+
+  it("reads the providers in the summary it already asks for", async () => {
+    mockApi({})
+    const result = await renderSpend()
+    await waitFor(() => expect(result.spend.providers).toHaveLength(1))
+    expect(result.spend.providers[0]?.name).toBe("Anthropic")
+    const windowReads = vi
+      .mocked(globalThis.fetch)
+      .mock.calls.map(([input]) => new URL(String(input), "http://test"))
+      .filter(
+        (url) =>
+          url.pathname.endsWith("/organizations/me/usage/summary") &&
+          !url.searchParams.has("end_date") &&
+          // Not the per-workspace reads the probe's other hook makes.
+          !url.searchParams.has("workspace_id"),
+      )
+    // One read for the window, carrying every breakdown the page cuts by.
+    expect(windowReads).toHaveLength(1)
+    expect(windowReads[0]?.searchParams.getAll("dimensions")).toEqual([
+      "user",
+      "api_key",
+      "model",
+      "provider",
+    ])
   })
 
   it("marks figures unread, not zero, when usage cannot be read", async () => {

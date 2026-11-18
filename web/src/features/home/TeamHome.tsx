@@ -22,6 +22,7 @@ import { breakdownCut } from "@/features/home/breakdownCut"
 import { busiestWorkspace } from "@/features/home/busiestWorkspace"
 import { canOpenInKeys } from "@/features/home/keyAccess"
 import { useHomeAccount } from "@/features/home/overlayHomeAccount"
+import { hasProviderSlot, ProviderSlot } from "@/features/home/ProviderSlot"
 import { ShareCell } from "@/features/home/ShareCell"
 import { limitDialogCopy } from "@/features/spend/limitCopy"
 import {
@@ -70,7 +71,7 @@ import { useSurfaces } from "@/shared/hooks/useDeployment"
 /** Rows shown before the rest folds behind "Show all". */
 const TOP_ROWS = 5
 
-type Cut = "people" | "keys" | "models" | "workspaces"
+type Cut = "people" | "keys" | "models" | "providers" | "workspaces"
 
 const CUTS: {
   value: Cut
@@ -79,8 +80,11 @@ const CUTS: {
   noun: string
   /** What "Show all 19 …" counts. */
   plural: string
-  /** The Sessions filter a row opens, where a row is one. */
-  filter?: "user_id" | "api_key_id" | "model"
+  /**
+   * The filter a row opens on, where a row is one: Sessions', or Requests' for
+   * a provider, which Sessions cannot filter on.
+   */
+  filter?: "user_id" | "api_key_id" | "model" | "provider"
 }[] = [
   {
     value: "people",
@@ -102,6 +106,13 @@ const CUTS: {
     noun: "Model",
     plural: "models",
     filter: "model",
+  },
+  {
+    value: "providers",
+    label: "Providers",
+    noun: "Provider",
+    plural: "providers",
+    filter: "provider",
   },
   {
     value: "workspaces",
@@ -236,7 +247,9 @@ export function TeamHome({
   // A deployment that records no sessions serves no route to count them, and
   // has none to open. Over the page's own scope: a workspace it picked, or
   // every one.
-  const hasSessions = useSurfaces()("traces")
+  const hasSurface = useSurfaces()
+  const hasSessions = hasSurface("traces")
+  const hasRequests = hasSurface("usage")
   const sessions = useTraceCount(
     { workspaceId, start: window.start, q: "" },
     hasSessions,
@@ -250,7 +263,9 @@ export function TeamHome({
         ? spend.keys
         : cut.value === "models"
           ? spend.models
-          : byWorkspace.rows
+          : cut.value === "providers"
+            ? spend.providers
+            : byWorkspace.rows
   const isLoading =
     cut.value === "workspaces" ? byWorkspace.isLoading : spend.isLoading
   // A workspace's own total is the whole organization's when none is picked.
@@ -268,6 +283,16 @@ export function TeamHome({
     window,
     workspaceId,
   })
+  const pickCut = (next: string) => {
+    setShowingAll(false)
+    patch({ by: next })
+  }
+  const hasMarkSlot = cut.value === "providers" && hasProviderSlot(rows)
+  // What a row opens: a workspace narrows this table, a provider opens its
+  // requests, and anything else its sessions.
+  const canOpenRows =
+    cut.value === "workspaces" ||
+    (cut.value === "providers" ? hasRequests : hasSessions)
 
   /**
    * Sessions lists one workspace, so a row opens in the workspace its
@@ -307,7 +332,7 @@ export function TeamHome({
     const target = await workspaceFor(row)
     if (target) select(target)
     void navigate({
-      to: "/sessions",
+      to: cut.value === "providers" ? "/requests" : "/sessions",
       search: {
         ...sessionsSearchFor(window),
         [cut.filter]: row.filterKey,
@@ -341,11 +366,15 @@ export function TeamHome({
         icon: FiUsers,
         run: () => void open(row),
       })
-    } else if (row.filterKey && hasSessions) {
+    } else if (row.filterKey && canOpenRows) {
       actions.push({
         id: "open",
         label:
-          cut.value === "people" ? "See their sessions" : "See its sessions",
+          cut.value === "people"
+            ? "See their sessions"
+            : cut.value === "providers"
+              ? "See its requests"
+              : "See its sessions",
         hint: `What ran ${windowWords(period, window)}`,
         icon: FiLayers,
         run: () => void open(row),
@@ -378,6 +407,8 @@ export function TeamHome({
         <span className="flex min-w-0 items-center gap-3 md:max-w-[13rem]">
           {cut.value === "people" ? (
             <MemberAvatar userId={row.avatarUserId} face={row.avatarFace} />
+          ) : hasMarkSlot ? (
+            <ProviderSlot row={row} />
           ) : null}
           <span className="flex min-w-0 flex-col">
             <span className="truncate text-foreground">{row.name}</span>
@@ -446,7 +477,9 @@ export function TeamHome({
             ),
           },
         ] satisfies DataTableColumn<SpendRow>[])),
-    ...(cut.value !== "models"
+    // A provider's limit is set on a stored key, not on the name a request
+    // records, so no row here has one to show.
+    ...(cut.value !== "models" && cut.value !== "providers"
       ? ([
           {
             id: "limit",
@@ -683,16 +716,23 @@ export function TeamHome({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
             <h2 className="text-title">Where it went</h2>
-            <Segmented
-              label="Break down by"
-              size="md"
-              options={cuts}
-              value={shownCut ?? ""}
-              onChange={(next) => {
-                setShowingAll(false)
-                patch({ by: next })
-              }}
-            />
+            {/* A segmented track holds four choices at most. */}
+            {cuts.length > 4 ? (
+              <FilterSelect
+                ariaLabel="Break down by"
+                value={shownCut ?? ""}
+                onChange={pickCut}
+                options={cuts}
+              />
+            ) : (
+              <Segmented
+                label="Break down by"
+                size="md"
+                options={cuts}
+                value={shownCut ?? ""}
+                onChange={pickCut}
+              />
+            )}
           </div>
         </div>
         {isTeam && cut.value === "people" ? <WorkspaceDefaultLimit /> : null}
@@ -716,7 +756,7 @@ export function TeamHome({
                 </EmptyMessage>
               }
               onRowAction={
-                hasSessions || cut.value === "workspaces"
+                canOpenRows
                   ? (key) => {
                       const row = rows.find((one) => one.id === key)
                       if (row?.filterKey) void open(row)
@@ -744,11 +784,13 @@ export function TeamHome({
             <span />
           )}
           <span className="text-muted">
-            {cut.value === "workspaces"
-              ? "A row opens that workspace’s people."
-              : hasSessions
-                ? "A row opens its sessions."
-                : null}
+            {!canOpenRows
+              ? null
+              : cut.value === "workspaces"
+                ? "A row opens that workspace’s people."
+                : cut.value === "providers"
+                  ? "A row opens its requests."
+                  : "A row opens its sessions."}
           </span>
         </div>
         {isTeam || spend.isLoading || spend.reads.roster !== "ready" ? null : (

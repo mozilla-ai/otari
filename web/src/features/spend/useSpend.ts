@@ -34,10 +34,14 @@ import {
   useWorkspaceSpendSummaries,
 } from "@/shared/api/usage"
 import { useWorkspaces } from "@/shared/api/workspaces"
+import { providerDisplayName } from "@/shared/helpers/providers"
 
 export interface SpendRow {
   id: string
-  /** The id Sessions filters on, or null for a row that is not one spender. */
+  /**
+   * The id Sessions filters on (Requests, for a provider), or null for a row
+   * that is not one spender.
+   */
   filterKey: string | null
   name: string
   detail?: string
@@ -253,6 +257,34 @@ export function modelRows(usage: readonly UsageGroupRow[]): SpendRow[] {
     .sort(bySpend)
 }
 
+/**
+ * One row per provider the window's requests went to, by the name a usage row
+ * records: the provider, or the instance an operator named. Requests that
+ * recorded none (imported without one, refused before a provider was picked,
+ * or written before the column existed) are one row of their own, so the rows
+ * still add up to the total.
+ */
+export function providerRows(usage: readonly UsageGroupRow[]): SpendRow[] {
+  return usage
+    .filter((row) => row.cost > 0 || row.requests > 0)
+    .map((row) => ({
+      id: row.is_other ? "provider:other" : `provider:${row.key ?? "none"}`,
+      filterKey: row.is_other ? null : row.key,
+      name: row.is_other
+        ? OTHER
+        : row.key === null
+          ? "Unknown provider"
+          : providerDisplayName(row.key),
+      detail: !row.is_other && row.key === null ? "Not recorded" : undefined,
+      cost: row.cost,
+      requests: row.requests,
+      tokens: row.tokens,
+      limits: NO_LIMITS,
+      target: null,
+    }))
+    .sort(bySpend)
+}
+
 export interface Spend {
   totals: UsageTotals | undefined
   /** The window before this one, or null where there is nothing to compare. */
@@ -261,6 +293,7 @@ export interface Spend {
   people: SpendRow[]
   keys: SpendRow[]
   models: SpendRow[]
+  providers: SpendRow[]
   /** The organization's own limit, with its edit target for a manager. */
   organization: { limits: RowLimits; target: LimitTarget | null }
   /** Every ceiling a manager may read; empty for anyone else. */
@@ -305,7 +338,7 @@ export function useSpend(
   const current = useUsageSummary(
     { ...scope, start_date: window.start },
     "day",
-    ["user", "api_key", "model"],
+    ["user", "api_key", "model", "provider"],
     isEnabled,
     "organization",
   )
@@ -373,6 +406,7 @@ export function useSpend(
       { isUnread, now: resetEndedAt },
     ),
     models: modelRows(summary?.by_model ?? []),
+    providers: providerRows(summary?.by_provider ?? []),
     organization: {
       limits: organizationLimits,
       target:

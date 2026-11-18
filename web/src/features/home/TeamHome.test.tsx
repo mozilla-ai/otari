@@ -1,5 +1,6 @@
-import { Outlet } from "@tanstack/react-router"
+import { Outlet, useLocation } from "@tanstack/react-router"
 import { screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { TeamHome } from "@/features/home/TeamHome"
 import { API_ROOT } from "@/shared/api/client"
@@ -14,6 +15,8 @@ import {
 } from "@/tests/fixtures"
 import { AppProviders as Provider } from "@/tests/providers"
 import { renderWithRouter } from "@/tests/router"
+import { findRowMenuItem } from "@/tests/rowMenu"
+import { selectTrigger } from "@/tests/select"
 
 const ADA = organizationMember({
   organization_member_id: "m-ada",
@@ -210,5 +213,195 @@ describe("Home, People active", () => {
     for (const url of counts) {
       expect(url.searchParams.get("workspace_id")).toBeNull()
     }
+  })
+})
+
+describe("Home, by provider", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  const PROVIDERS = [
+    { key: "openai", label: null, cost: 6, tokens: 600, requests: 4 },
+    { key: "anthropic", label: null, cost: 3, tokens: 300, requests: 2 },
+    // Requests that recorded no provider.
+    { key: null, label: null, cost: 1, tokens: 100, requests: 3 },
+  ]
+
+  /** An owner's view, with one or two workspaces. */
+  function mockApi({ workspaces = 1 }: { workspaces?: number } = {}) {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = new URL(String(input), "http://test")
+      const path = url.pathname.replace(
+        new URL(API_ROOT, "http://test").pathname,
+        "",
+      )
+      if (path === "/organizations/me") {
+        return Response.json(
+          organizationContext({ role: "owner", deployment_operator: false }),
+        )
+      }
+      if (path === "/organizations/me/members") {
+        return Response.json({ data: [ADA, WEI], count: 2 })
+      }
+      if (path === "/organizations/me/usage/summary") {
+        const provider = url.searchParams.get("provider")
+        if (provider) {
+          // A provider row's top model.
+          return Response.json({
+            totals: usageTotals({ cost: 6, request_count: 4 }),
+            series: [],
+            by_model: [
+              {
+                key: `${provider}-flagship`,
+                label: null,
+                cost: 5,
+                tokens: 500,
+                requests: 3,
+                is_other: false,
+              },
+            ],
+          })
+        }
+        return Response.json({
+          totals: usageTotals({ cost: 10, request_count: 9 }),
+          series: [],
+          by_user: [],
+          by_api_key: [],
+          by_model: [],
+          by_provider: PROVIDERS.map((row) => ({ ...row, is_other: false })),
+          errors_by_status_code: [],
+        })
+      }
+      if (path === "/organizations/me/spend-ceilings") {
+        return Response.json({ data: [], count: 0 })
+      }
+      if (path === "/workspaces") {
+        const all = [
+          { id: "ws-a", name: "Platform" },
+          { id: "ws-b", name: "Data" },
+        ].slice(0, workspaces)
+        return Response.json({ data: all, count: all.length })
+      }
+      return Response.json([])
+    })
+  }
+
+  function RequestsProbe() {
+    const location = useLocation()
+    return (
+      <div data-testid="requests">
+        {location.pathname}
+        {location.searchStr}
+      </div>
+    )
+  }
+
+  async function renderHome(url = "/?by=providers") {
+    await renderWithRouter(<TeamHome />, {
+      url,
+      routes: [{ path: "/requests", element: <RequestsProbe /> }],
+      shell: (
+        <Provider>
+          <DeploymentProvider value={bootstrap()}>
+            <SelectedWorkspaceProvider>
+              <Outlet />
+            </SelectedWorkspaceProvider>
+          </DeploymentProvider>
+        </Provider>
+      ),
+    })
+  }
+
+  async function providerTable() {
+    const table = await screen.findByRole("grid", {
+      name: "Spend by providers",
+    })
+    await within(table).findByText("OpenAI")
+    return table
+  }
+
+  it("offers Providers beside the other cuts", async () => {
+    mockApi()
+    await renderHome("/")
+    const cuts = await screen.findByRole("radiogroup", {
+      name: "Break down by",
+    })
+    expect(
+      within(cuts)
+        .getAllByRole("radio")
+        .map((radio) => radio.closest("label")?.textContent),
+    ).toEqual(["People", "API keys", "Models", "Providers"])
+  })
+
+  it("lists each provider's spend and share, the unrecorded ones as one row", async () => {
+    mockApi()
+    await renderHome()
+    const table = await providerTable()
+    const names = within(table)
+      .getAllByRole("rowheader")
+      .map((cell) => cell.textContent)
+    expect(names).toEqual([
+      "OpenAI",
+      "Anthropic",
+      "Unknown providerNot recorded",
+    ])
+    const openai = within(table).getByRole("row", { name: /OpenAI/ })
+    expect(within(openai).getByText("$6.00")).toBeVisible()
+    expect(within(openai).getByText("60%")).toBeVisible()
+    expect(
+      await within(openai).findByText("openai-flagship"),
+    ).toBeInTheDocument()
+    const unknown = within(table).getByRole("row", {
+      name: /Unknown provider/,
+    })
+    expect(within(unknown).getByText("10%")).toBeVisible()
+    // A provider's limit lives on a stored key, so the cut shows none.
+    expect(
+      within(table).queryByRole("columnheader", { name: "Limit" }),
+    ).toBeNull()
+    expect(screen.getByText("A row opens its requests.")).toBeVisible()
+  })
+
+  it("opens a provider's requests over the window", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    await renderHome()
+    const table = await providerTable()
+    await user.click(within(table).getByText("OpenAI"))
+    const landed = await screen.findByTestId("requests")
+    const [path, query] = (landed.textContent ?? "").split("?")
+    expect(path).toBe("/requests")
+    const search = new URLSearchParams(query)
+    expect(search.get("provider")).toBe("openai")
+    expect(search.get("start_date")).toBeTruthy()
+  })
+
+  it("offers nothing to open on the row that recorded no provider", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    await renderHome()
+    const table = await providerTable()
+    const unknown = within(table).getByRole("row", {
+      name: /Unknown provider/,
+    })
+    expect(await findRowMenuItem(user, /See its requests/, unknown)).toBeNull()
+    const openai = within(table).getByRole("row", { name: /OpenAI/ })
+    expect(
+      await findRowMenuItem(user, /See its requests/, openai),
+    ).not.toBeNull()
+  })
+
+  it("picks the cut from a list once there are more than four", async () => {
+    mockApi({ workspaces: 2 })
+    await renderHome()
+    await providerTable()
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("radiogroup", { name: "Break down by" }),
+      ).toBeNull(),
+    )
+    expect(selectTrigger("Break down by")).toHaveTextContent("Providers")
   })
 })

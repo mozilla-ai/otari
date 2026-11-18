@@ -13,9 +13,9 @@ export type TopModelState =
 const NONE: TopModelState = { status: "none" }
 
 /**
- * Each shown row's top model. A person's or a key's models take one summary
- * request per row with spend, for the rows on screen only; a workspace's came
- * with its own summary.
+ * Each shown row's top model. A person's, a key's or a provider's models take
+ * one summary request per row with spend, for the rows on screen only; a
+ * workspace's came with its own summary.
  */
 export function useTopModels({
   rows,
@@ -25,18 +25,24 @@ export function useTopModels({
   userId,
 }: {
   rows: readonly SpendRow[]
-  cut: "people" | "keys" | "models" | "workspaces"
+  cut: "people" | "keys" | "models" | "providers" | "workspaces"
   window: SpendWindow
   workspaceId: string
   /** Narrows each row's models to one person's requests, for a member's Home. */
   userId?: string
 }): ReadonlyMap<string, TopModelState> {
-  const param = cut === "people" ? "user_id" : "api_key_id"
+  const param =
+    cut === "people"
+      ? "user_id"
+      : cut === "providers"
+        ? "provider"
+        : "api_key_id"
   const isAskable = (row: SpendRow) => row.cost > 0 && row.filterKey !== null
   const queries = useModelSummariesBy(
     param,
     rows.map((row) =>
-      (cut === "people" || cut === "keys") && isAskable(row)
+      (cut === "people" || cut === "keys" || cut === "providers") &&
+      isAskable(row)
         ? row.filterKey
         : null,
     ),
