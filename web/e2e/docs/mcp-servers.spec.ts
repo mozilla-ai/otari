@@ -7,7 +7,8 @@ import {
   dismissComboBox,
   expectOk,
   login,
-  openNested,
+  openTab,
+  pressRowAction,
 } from "../helpers"
 import { call, docScreenshot, listed } from "./fixtures"
 
@@ -51,7 +52,7 @@ test("configure an MCP server", async ({ page }) => {
   const keyId = await createKey(page)
   try {
     await login(page)
-    await openNested(page, "Tools", "MCP servers")
+    await openTab(page, "Tools", "MCP servers")
     await page.getByRole("button", { name: "Add MCP server" }).click()
 
     const dialog = page.getByRole("dialog")
@@ -94,7 +95,7 @@ test("configure an MCP server", async ({ page }) => {
     await expect(
       page.getByRole("heading", { name: "Access rules" }),
     ).toBeVisible()
-    await page.getByRole("button", { name: "Edit the default policy" }).click()
+    await pressRowAction(page.getByRole("main"), "Edit the default policy")
     let rule = page.getByRole("dialog")
     let action = rule.getByRole("radiogroup", { name: "Action" })
     // The input is visually hidden under its label, which takes the press.
@@ -229,7 +230,7 @@ async function fakeCatalog(page: Page): Promise<void> {
 test("browse the catalog", async ({ page }) => {
   await fakeCatalog(page)
   await login(page)
-  await openNested(page, "Tools", "MCP servers")
+  await openTab(page, "Tools", "MCP servers")
   await page.getByRole("button", { name: "Browse catalog" }).click()
 
   const dialog = page.getByRole("dialog", { name: "Browse catalog" })
@@ -297,7 +298,7 @@ test("browse the catalog", async ({ page }) => {
 
 test("an empty catalog offers to load it", async ({ page }) => {
   await login(page)
-  await openNested(page, "Tools", "MCP servers")
+  await openTab(page, "Tools", "MCP servers")
   await page.getByRole("button", { name: "Browse catalog" }).click()
 
   const dialog = page.getByRole("dialog", { name: "Browse catalog" })

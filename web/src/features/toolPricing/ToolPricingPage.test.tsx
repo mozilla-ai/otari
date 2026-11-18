@@ -13,6 +13,7 @@ import {
   pricingResponse,
 } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
+import { pressRowAction } from "@/tests/rowMenu"
 
 interface Request {
   url: string
@@ -128,11 +129,7 @@ describe("ToolPricingPage", () => {
       const user = userEvent.setup()
       await renderPage()
 
-      await user.click(
-        await screen.findByRole("button", {
-          name: "Edit the price of Code execution",
-        }),
-      )
+      await pressRowAction(user, "Edit the price of Code execution")
       await user.type(await screen.findByLabelText(/Price per call, USD/), raw)
 
       expect(
@@ -148,11 +145,7 @@ describe("ToolPricingPage", () => {
     const user = userEvent.setup()
     await renderPage()
 
-    await user.click(
-      await screen.findByRole("button", {
-        name: "Edit the price of Code execution",
-      }),
-    )
+    await pressRowAction(user, "Edit the price of Code execution")
     const price = await screen.findByLabelText(/Price per call, USD/)
     await user.type(price, "0.02")
     await user.click(screen.getByRole("button", { name: "Save" }))

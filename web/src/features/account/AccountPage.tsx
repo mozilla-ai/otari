@@ -23,11 +23,7 @@ export function AccountPage() {
 
   return (
     <div className="flex flex-col">
-      <PageIntro title="Account settings">
-        Who you are on this deployment, and how you sign in to it. Every setting
-        here is yours alone; the gateway&rsquo;s own configuration is on the
-        Settings page.
-      </PageIntro>
+      <PageIntro title="Account settings" />
       <ProfileCard />
       <AvatarCard />
       <PasswordCard />

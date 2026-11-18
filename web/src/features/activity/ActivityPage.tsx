@@ -94,6 +94,7 @@ const URL_DEFAULTS = {
   start_date: "",
   end_date: "",
   status: "",
+  status_code: "",
   model: "",
   user_id: "",
   api_key_id: "",
@@ -159,10 +160,11 @@ function ActivityPageContent({
   // Provenance: gateway traffic vs an imported agent source. Set by its own select,
   // or by a drill-down (the pricing alarm links here scoped to gateway traffic).
   const sourceFilter = url.get("source")
-  // The Usage breakdowns (session / endpoint / provider) drill in the same way:
-  // no select of their own, carried as a chip so the scoping is visible and one
-  // click removes it.
+  // Session, status code, endpoint and provider have no select of their own: a
+  // link carries them, shown as a chip so the scoping is visible and one click
+  // removes it.
   const sessionFilter = url.get("source_label")
+  const statusCodeFilter = url.get("status_code")
   const endpointFilter = url.get("endpoint")
   const providerFilter = url.get("provider")
   const toolFilter = url.get("tool")
@@ -262,6 +264,7 @@ function ActivityPageContent({
       api_key_id: apiKeyFilters.length > 0 ? apiKeyFilters : undefined,
       source: sourceFilter || undefined,
       source_label: sessionFilter || undefined,
+      status_code: statusCodeFilter || undefined,
       endpoint: endpointFilter || undefined,
       provider: providerFilter || undefined,
       tool: (toolFilter || undefined) as UsageFilters["tool"],
@@ -277,6 +280,7 @@ function ActivityPageContent({
       apiKeyFilters,
       sourceFilter,
       sessionFilter,
+      statusCodeFilter,
       endpointFilter,
       providerFilter,
       priced,
@@ -401,6 +405,7 @@ function ActivityPageContent({
       api_key_id: apiKeyFilters.length > 0 ? apiKeyFilters : undefined,
       source: sourceFilter || undefined,
       source_label: sessionFilter || undefined,
+      status_code: statusCodeFilter || undefined,
       endpoint: endpointFilter || undefined,
       provider: providerFilter || undefined,
       tool: (toolFilter || undefined) as UsageFilters["tool"],
@@ -418,6 +423,7 @@ function ActivityPageContent({
       apiKeyFilters,
       sourceFilter,
       sessionFilter,
+      statusCodeFilter,
       endpointFilter,
       providerFilter,
       priced,
@@ -510,8 +516,7 @@ function ActivityPageContent({
   // Neither the default preset nor the unbounded "All" is itself a filter: only an
   // explicit sub-window or a bounded non-default preset narrows the window, so a
   // brand-new gateway reads "never used" on both its 24h default and on "All",
-  // and only a real narrowing reads "filtered empty". (UsagePage can mirror this
-  // with a bare `!== default` because it has no unbounded preset; Activity does.)
+  // and only a real narrowing reads "filtered empty".
   const rangePreset = findPreset(ACTIVITY_PRESETS, range)
   const timeFiltered =
     Boolean(startParam || endParam) ||
@@ -524,6 +529,7 @@ function ActivityPageContent({
       pricedFilter ||
       sourceFilter ||
       sessionFilter ||
+      statusCodeFilter ||
       endpointFilter ||
       providerFilter ||
       toolFilter ||
@@ -555,6 +561,16 @@ function ActivityPageContent({
             label: "Source",
             value: describeSource(sourceFilter),
             onClear: () => url.patch({ source: "" }),
+          },
+        ]
+      : []),
+    ...(statusCodeFilter
+      ? [
+          {
+            key: "status_code",
+            label: "Status code",
+            value: statusCodeFilter,
+            onClear: () => url.patch({ status_code: "" }),
           },
         ]
       : []),
@@ -712,8 +728,8 @@ function ActivityPageContent({
   // `filters`, which tripped the page reset below: pressing refresh on page 12
   // dropped the operator back onto page 1, making deep browsing unusable. The
   // window is instead re-anchored when the range selection changes (see
-  // `pickPreset`). Every window-scoped query is refetched explicitly (see the
-  // UsagePage refresh note), since the keys are unchanged by design here.
+  // `pickPreset`). Every window-scoped query is refetched explicitly, since the
+  // keys are unchanged by design here.
   const refresh = () => {
     void usage.refetch()
     void count.refetch()
@@ -809,12 +825,7 @@ function ActivityPageContent({
         inert={openEntry !== undefined && isMobile}
       >
         {/* Inside the Overview the layout owns the heading. */}
-        {embedded ? null : (
-          <PageIntro title="Activity">
-            A per-request log of what the gateway served: tokens, cost, latency,
-            and failures. No request or response content is stored.
-          </PageIntro>
-        )}
+        {embedded ? null : <PageIntro title="Activity" />}
 
         {/* The timeline's summary error is included so a failed series request
           reads as a failure, not as an empty "No activity in this range" strip. */}

@@ -236,6 +236,7 @@ function ConnectedUsers({
             <RowAction
               icon={FiTrash2}
               label="Remove connection"
+              isDestructive
               ariaLabel={`Remove the connection of ${describeUser(row)}`}
               onPress={() => {
                 remove.reset()

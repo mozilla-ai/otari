@@ -8,9 +8,11 @@ import {
   login,
   nav,
   openAccountMenu,
-  openNested,
   openOrganization,
+  openTab,
   pageHeading,
+  pressRowAction,
+  rowMenuItem,
   tableRows,
 } from "./helpers"
 import { PARITY } from "./parity-data"
@@ -47,6 +49,13 @@ function row(page: Page, ariaLabel: string, name: string | RegExp): Locator {
   return tableRows(page, ariaLabel).filter({
     has: page.getByRole("rowheader", { name }),
   })
+}
+
+// The API keys list opens on active keys; a key switched off is listed under
+// another State.
+async function showEveryState(page: Page): Promise<void> {
+  await page.getByRole("button", { name: /State$/ }).click()
+  await page.getByRole("option", { name: "Every state" }).click()
 }
 
 // A routing form's model pickers take any selector, so the value is typed rather
@@ -198,9 +207,7 @@ test.describe("subagent router setup", () => {
 
     // The edit names the stored key by its tail, and no part of the page
     // carries the key back.
-    await routerRow(page, ROUTER_A)
-      .getByRole("button", { name: `Edit ${ROUTER_A}` })
-      .click()
+    await pressRowAction(routerRow(page, ROUTER_A), `Edit ${ROUTER_A}`)
     const editRouter = page.getByRole("dialog", { name: "Edit router" })
     await expect(
       editRouter.getByLabel("API key", { exact: true }),
@@ -213,9 +220,7 @@ test.describe("subagent router setup", () => {
     await expect(page.locator("body")).not.toContainText(DECISION_KEY)
 
     for (const model of [ROUTER_A, ROUTER_B]) {
-      await routerRow(page, model)
-        .getByRole("button", { name: `Remove ${model}` })
-        .click()
+      await pressRowAction(routerRow(page, model), `Remove ${model}`)
       const confirmRouter = page.getByRole("alertdialog")
       await expect(confirmRouter).toContainText(model)
       await confirmRouter.getByRole("button", { name: "Remove router" }).click()
@@ -236,18 +241,22 @@ test.describe("api keys", () => {
     await login(page)
     await openPage(page, "API keys", "API keys")
 
-    await page.getByRole("button", { name: "Create key" }).click()
-    // Scoped from here on, because "Create key" is now on screen twice: the
-    // heading's trigger stays visible while the dialog is open, and the labels
-    // rule makes the dialog's submit say the same words.
+    // The page's own, not the rail's.
+    await page
+      .getByRole("main")
+      .getByRole("button", { name: "Create API key" })
+      .click()
+    // Scoped from here on, because "Create API key" is now on screen twice:
+    // the heading's trigger stays visible while the dialog is open, and the
+    // labels rule makes the dialog's submit say the same words.
     const dialog = page.getByRole("dialog")
     await dialog.getByLabel("Name").fill(KEY_NAME)
-    // Owner is required: this is what keeps the dashboard from minting the
-    // anonymous virtual users an omitted id would.
+    // The owner is the operator unless one is named under More options.
+    await dialog.getByRole("button", { name: "More options" }).click()
     const ownerBox = dialog.getByPlaceholder("Pick a user, or type a new id…")
     await ownerBox.fill(PARITY.users.heavy)
     await dismissComboBoxInDialog(ownerBox)
-    await dialog.getByRole("button", { name: "Create key" }).click()
+    await dialog.getByRole("button", { name: "Create API key" }).click()
 
     // The secret is shown exactly once, behind an acknowledgement that is the
     // only way out: the dialog is `isDismissable={false}`, so Escape and the
@@ -268,14 +277,8 @@ test.describe("api keys", () => {
     // before the secret is known; now that it is, the stand-in is pinned to the
     // fingerprint of this key rather than of any key.
     expect(masked).toBe(expectedKeyFingerprint(secret))
-    await expect(reveal.getByLabel("curl", { exact: true })).toHaveValue(
-      new RegExp(secret),
-    )
     await reveal.getByRole("button", { name: "Hide Secret key" }).click()
     await expect(secretField).toHaveValue(masked)
-    await expect(reveal.getByLabel("curl", { exact: true })).not.toHaveValue(
-      new RegExp(secret),
-    )
     // Scoped to the dialog rather than to the reveal: the acknowledgement is
     // the dialog's own submit, in the footer, so it sits outside the alert
     // region the announcement covers.
@@ -286,15 +289,15 @@ test.describe("api keys", () => {
     await expect(key).toContainText(PARITY.users.heavy)
     // Permanent delete is withheld while a key is live, so a caller in production
     // cannot be broken (and its audit trail erased) in a single click.
-    await key.getByRole("button", { name: /^Actions for / }).click()
-    await expect(page.getByRole("menuitem", { name: /^Delete/ })).toBeDisabled()
+    await expect(await rowMenuItem(key, /^Delete/)).toBeDisabled()
     await page.keyboard.press("Escape")
 
-    await key.getByRole("button", { name: /^Actions for / }).click()
-    await page.getByRole("menuitem", { name: /^Disable/ }).click()
+    await pressRowAction(key, /^Disable/)
+    // The list opens on active keys, so the disabled one leaves it.
+    await expect(key).toHaveCount(0)
+    await showEveryState(page)
     await expect(key).toContainText("Disabled")
-    await key.getByRole("button", { name: /^Actions for / }).click()
-    await expect(page.getByRole("menuitem", { name: /^Enable/ })).toBeVisible()
+    await expect(await rowMenuItem(key, /^Enable/)).toBeVisible()
 
     await page.getByRole("menuitem", { name: /^Delete/ }).click()
     // Scoped to the dialog rather than to `key`: the confirmation is a modal
@@ -309,22 +312,26 @@ test.describe("api keys", () => {
     await login(page)
     await openPage(page, "API keys", "API keys")
 
-    await page.getByRole("button", { name: "Create key" }).click()
+    // The page's own, not the rail's.
+    await page
+      .getByRole("main")
+      .getByRole("button", { name: "Create API key" })
+      .click()
     const dialog = page.getByRole("dialog")
     await dialog.getByLabel("Name").fill(SERVICE_KEY_NAME)
+    await dialog.getByRole("button", { name: "More options" }).click()
     const ownerBox = dialog.getByPlaceholder("Pick a user, or type a new id…")
     await ownerBox.fill(PARITY.users.heavy)
     await dismissComboBoxInDialog(ownerBox)
-    await dialog.getByRole("button", { name: "More options" }).click()
     await dialog.getByText("Service key", { exact: true }).click()
     await dialog.getByRole("textbox", { name: "Max end users" }).fill("3")
-    await dialog.getByRole("button", { name: "Create key" }).click()
+    await dialog.getByRole("button", { name: "Create API key" }).click()
     await dialog.getByRole("button", { name: /saved this key/i }).click()
 
     const key = row(page, "API keys", SERVICE_KEY_NAME)
-    await key.getByRole("button", { name: /^Actions for / }).click()
-    await page.getByRole("menuitem", { name: /^Edit/ }).click()
-    const edit = page.getByRole("dialog", { name: "Edit key" })
+    await expect(key).toContainText("Service key")
+    await pressRowAction(key, /^Edit/)
+    const edit = page.getByRole("dialog", { name: "Edit API key" })
     await expect(
       edit.getByRole("textbox", { name: "Max end users" }),
     ).toHaveValue("3")
@@ -332,28 +339,26 @@ test.describe("api keys", () => {
     await edit.getByRole("button", { name: "Save" }).click()
     await expect(edit).toBeHidden()
 
-    await key.getByRole("button", { name: /^Actions for / }).click()
-    await page.getByRole("menuitem", { name: /^Edit/ }).click()
+    await pressRowAction(key, /^Edit/)
     await expect(
       page
-        .getByRole("dialog", { name: "Edit key" })
+        .getByRole("dialog", { name: "Edit API key" })
         .getByRole("textbox", { name: "Max end users" }),
     ).toHaveValue("")
     await page.keyboard.press("Escape")
 
-    await key.getByRole("button", { name: /^Actions for / }).click()
-    await page.getByRole("menuitem", { name: /^End users/ }).click()
+    await pressRowAction(key, /^End users/)
     const endUsers = page.getByRole("dialog", { name: "End users" })
     await expect(endUsers).toContainText("No end users yet.")
     // The footer's Close, not the header's icon of the same accessible name.
     await endUsers.getByRole("button", { name: "Close" }).last().click()
     await expect(endUsers).toBeHidden()
 
-    await key.getByRole("button", { name: /^Actions for / }).click()
-    await page.getByRole("menuitem", { name: /^Disable/ }).click()
+    await pressRowAction(key, /^Disable/)
+    await expect(key).toHaveCount(0)
+    await showEveryState(page)
     await expect(key).toContainText("Disabled")
-    await key.getByRole("button", { name: /^Actions for / }).click()
-    await page.getByRole("menuitem", { name: /^Delete/ }).click()
+    await pressRowAction(key, /^Delete/)
     await page
       .getByRole("alertdialog")
       .getByRole("button", { name: "Delete permanently" })
@@ -401,7 +406,7 @@ test.describe("budgets", () => {
     // assigned" into a real spend-against-allocation reading.
     await expect(budget).not.toContainText("No users assigned")
 
-    await budget.getByRole("button", { name: "Edit" }).click()
+    await pressRowAction(budget, "Edit")
     const editDialog = page.getByRole("dialog")
     await editDialog.getByLabel("Spending limit (USD)").fill("50")
     await editDialog.getByRole("button", { name: "Save" }).click()
@@ -409,18 +414,14 @@ test.describe("budgets", () => {
 
     // Reset history is a per-budget panel, not a page: it opens under the table
     // and names the budget it belongs to.
-    await row(page, "Budgets", BUDGET)
-      .getByRole("button", { name: "History" })
-      .click()
+    await pressRowAction(row(page, "Budgets", BUDGET), "History")
     await expect(page.getByText(`Reset history — ${BUDGET}`)).toBeVisible()
     await page.getByRole("button", { name: "Close" }).click()
 
     // The confirmation names the budget it is about to drop rather than asking
     // in the abstract, which is half of why it is a modal: the row it names is
     // behind the backdrop.
-    await row(page, "Budgets", BUDGET)
-      .getByRole("button", { name: "Delete", exact: true })
-      .click()
+    await pressRowAction(row(page, "Budgets", BUDGET), "Delete")
     const confirmBudget = page.getByRole("alertdialog")
     await expect(confirmBudget).toContainText(BUDGET)
     await confirmBudget
@@ -433,8 +434,9 @@ test.describe("budgets", () => {
 test.describe("fallback routing", () => {
   test("grows and shrinks a policy's failure chain", async ({ page }) => {
     await login(page)
-    await openNested(page, "Routing", "Policies")
-    await expect(pageHeading(page, "Routing")).toBeVisible()
+    await openTab(page, "Rules", "Routing")
+    // Routing is a tab of Rules, which titles the page.
+    await expect(pageHeading(page, "Rules")).toBeVisible()
 
     // `.first()` is the heading's action. An empty routing list also offers
     // the same words from its empty state, and a press has to name which.
@@ -467,7 +469,7 @@ test.describe("fallback routing", () => {
     // Shrinking has to be possible too: a chain that could only grow would strand
     // an operator who added a candidate by mistake. Edit opens the policy's own
     // page, where the chain is a section with its own Save.
-    await policy.getByRole("button", { name: "Edit" }).click()
+    await pressRowAction(policy, "Edit")
     await expect(pageHeading(page, POLICY)).toBeVisible()
     const fallbackTwo = page.getByRole("combobox", { name: /^Backup 2/ })
     await expect(fallbackTwo).toBeVisible()
@@ -485,9 +487,7 @@ test.describe("fallback routing", () => {
         .getByRole("listitem"),
     ).toHaveText(["claude-3-5-haiku-latest · Anthropic"])
 
-    await row(page, "Routing policies", POLICY)
-      .getByRole("button", { name: "Delete" })
-      .click()
+    await pressRowAction(row(page, "Routing policies", POLICY), "Delete")
     const confirmPolicy = page.getByRole("alertdialog")
     await expect(confirmPolicy).toContainText(POLICY)
     await confirmPolicy.getByRole("button", { name: "Delete policy" }).click()
@@ -508,7 +508,8 @@ test.describe("legacy routes", () => {
     // policies they are; the old path is a bookmark that still has to land.
     await gotoRoute(page, "/aliases")
     await expect(page).toHaveURL(/\/routing$/)
-    await expect(pageHeading(page, "Routing")).toBeVisible()
+    // Routing is a tab of Rules, which titles the page.
+    await expect(pageHeading(page, "Rules")).toBeVisible()
 
     // An unrecognised path is a stale link from a route that has since moved,
     // so it lands on the overview rather than a dead end.

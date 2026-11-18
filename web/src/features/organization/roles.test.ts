@@ -6,6 +6,9 @@ import {
   asSettableStatus,
   canManage,
   canManageWorkspace,
+  grantableRoleOptions,
+  isContributorRole,
+  isManagementRole,
   isOwner,
   MEMBERSHIP_ROLES,
   memberLabel,
@@ -35,6 +38,20 @@ describe("tenancy roles", () => {
     expect(
       canManageWorkspace(organizationContext({ role: "owner" }), undefined),
     ).toBe(true)
+  })
+
+  it("reads a bare role as managing, contributing, or neither", () => {
+    expect(MEMBERSHIP_ROLES.filter(isManagementRole)).toEqual([
+      "owner",
+      "admin",
+    ])
+    expect(MEMBERSHIP_ROLES.filter(isContributorRole)).toEqual([
+      "owner",
+      "admin",
+      "member",
+    ])
+    expect(isManagementRole(undefined)).toBe(false)
+    expect(isContributorRole(undefined)).toBe(false)
   })
 
   it("reserves ownership for the owner role", () => {
@@ -167,5 +184,45 @@ describe("memberLabel", () => {
         }),
       ),
     ).toBe("Identity abcdef01")
+  })
+})
+
+describe("grantableRoleOptions", () => {
+  it("offers an owner every role, member first", () => {
+    expect(grantableRoleOptions("owner").map((one) => one.value)).toEqual([
+      "member",
+      "viewer",
+      "admin",
+      "owner",
+    ])
+  })
+
+  it("never offers an admin Owner, which the server refuses them", () => {
+    expect(grantableRoleOptions("admin").map((one) => one.value)).toEqual([
+      "member",
+      "viewer",
+      "admin",
+    ])
+  })
+
+  it("offers a member or viewer nothing: they may not invite", () => {
+    expect(grantableRoleOptions("member")).toEqual([])
+    expect(grantableRoleOptions("viewer")).toEqual([])
+    expect(grantableRoleOptions(undefined)).toEqual([])
+  })
+})
+
+describe("the Members page's invitation", () => {
+  it("offers only the roles the caller may give", async () => {
+    // Pinned on the shared rule, which both invite forms read: the Members
+    // page offered an admin Owner, which the server then refused.
+    expect(
+      grantableRoleOptions("admin").some((one) => one.value === "owner"),
+    ).toBe(false)
+    expect(grantableRoleOptions("admin").map((one) => one.label)).toEqual([
+      "Member",
+      "Viewer",
+      "Admin",
+    ])
   })
 })

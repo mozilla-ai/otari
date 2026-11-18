@@ -782,7 +782,7 @@ function DeploymentBudgetsPage() {
             />
             <RowAction
               icon={FiEdit2}
-              label="Edit"
+              label="Edit…"
               onPress={() => {
                 setAddOpen(false)
                 setEditing(budget.budget_id)
@@ -791,7 +791,8 @@ function DeploymentBudgetsPage() {
             {isOrganizationOwned(budget) ? null : (
               <RowAction
                 icon={FiTrash2}
-                label="Delete"
+                label="Delete…"
+                isDestructive
                 onPress={() => setPendingDelete(budget)}
               />
             )}
@@ -876,10 +877,7 @@ function DeploymentBudgetsPage() {
             Create budget
           </Button>
         }
-      >
-        Define spending limits and reset schedules. Assign a budget to users to
-        enforce it.
-      </PageIntro>
+      />
 
       <ErrorBanner
         error={

@@ -341,7 +341,6 @@ describe("ModelCatalogPage", () => {
     expect(within(card).getByText("$2.00/M output tokens")).toBeInTheDocument()
     expect(within(card).getByText("200K context")).toBeInTheDocument()
     expect(within(card).getByText("Z.ai's flagship.")).toBeInTheDocument()
-    expect(screen.getByText(/2 models across 2 providers/)).toBeInTheDocument()
   })
 
   it("names a price in the unit it bills, and no number for mixed units", async () => {
@@ -880,7 +879,6 @@ describe("ModelCatalogPage", () => {
     renderPage(<ModelCatalogPage />)
 
     await screen.findByRole("list", { name: "Models" })
-    expect(screen.getByText(/1,206 models/)).toBeInTheDocument()
     await userEvent.click(screen.getByRole("button", { name: "Vendors" }))
     expect(
       screen.getByRole("checkbox", { name: "Off-page vendor" }),
@@ -911,7 +909,6 @@ describe("ModelCatalogPage", () => {
     const list = screen.getByRole("list", { name: "Models" })
     expect(await within(list).findByText(/Kimi K2.6/)).toBeInTheDocument()
     expect(within(list).queryByText(/GLM-5.3/)).toBeNull()
-    expect(screen.getByText(/26 models/)).toBeInTheDocument()
   })
 
   it("keeps the current rows visible until the next page arrives", async () => {

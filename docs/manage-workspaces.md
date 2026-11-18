@@ -20,11 +20,10 @@ To select which provider keys a workspace can use, open the workspace from the l
 
 ## Manage a workspace
 
-From the main dashboard, select the workspace in the top-left corner. Its menu has **Overview**, **Models**, **Routing**, **Guardrails**, **Tools**, **API keys** and **Members**.
+From the main dashboard, select the workspace in the top-left corner. Its menu has **Home**, **Sessions**, **People**, **Rules**, **Models**, **Tools** and **API keys**, with **Create API key** above them. **Routing** is a tab of **Rules**, and **People** links to the workspace's member list.
 
 Click **Organization** at the bottom of the menu, then use the sidebar to move between different areas:
 
-* **Usage**: for analytics and request history.
 * **Members & roles**: to invite members and manage their workspace-specific access.
 * **Spend & budgets**: to define how much can be spent and over what period. To enforce the budget, you need to create a **spend ceiling** that applies it to an organization or workspace.
 * **Providers**: to manage provider-key access. All workspaces within the organization can use the credentials for connecting to model providers, but you can also choose which provider keys a workspace can use (see **Create a workspace**, above).
@@ -37,7 +36,7 @@ For naming conventions and team patterns, see [How teams use workspaces](workspa
 ## Delete a workspace
 
 1. From the main dashboard, click **Organization** in the bottom-left corner, then **Workspaces**.
-2. Find the workspace you want to delete, click **Delete** (the bin icon), and confirm the deletion.
+2. Open the menu at the end of the workspace you want to delete, choose **Delete**, and confirm the deletion.
 
 ![The Workspaces page, listing the organization's workspaces with a Delete action on each.](assets/screenshots/manage-workspaces-list.png)
 

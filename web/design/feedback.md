@@ -258,15 +258,13 @@ one question; a form is a place to work.
 <FormDialog title="Create key" submitLabel="Save" …>
 ```
 
-**Sizes.** `sm` 440 for one or two fields, `md` 520 by default, `lg` 640 for
-tabs or six fields and up, and `xl` 928 for the one shape the others cannot
-hold: a body that is two columns side by side, where `lg` leaves the second one
-too narrow for its own controls. `ShareDialog` is the only one. Below a 640px
-viewport every size is a full-screen sheet. None of those widths can be spelled
-at a call site: `design-system.css` pins `.modal__dialog` unlayered, which outranks
-`@layer utilities` and puts a 448px floor under it, so the four sizes are
-modifier classes declared beside the rule they have to beat, and a `w-[…]` on a
-dialog compiles, lints, ships and loses. `Dialog` shares the family.
+**Sizes.** `sm` 440 for one or two fields, `md` 520 by default, and `lg` 640 for
+tabs or six fields and up. Below a 640px viewport every size is a full-screen
+sheet. None of those widths can be spelled at a call site: `design-system.css`
+pins `.modal__dialog` unlayered, which outranks `@layer utilities` and puts a
+448px floor under it, so the three sizes are modifier classes declared beside
+the rule they have to beat, and a `w-[…]` on a dialog compiles, lints, ships
+and loses. `Dialog` shares the family.
 
 **A field reserves its message line only where it has a description**, which is
 [forms.md](forms.md)'s rule and not a dialog rule: the reserved line exists so an

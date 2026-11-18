@@ -1,5 +1,11 @@
 import { Button, cn, Disclosure, Popover } from "@heroui/react"
-import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router"
+import {
+  Link,
+  Navigate,
+  Outlet,
+  useLocation,
+  useNavigate,
+} from "@tanstack/react-router"
 import type { MouseEvent as ReactMouseEvent } from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { IconType } from "react-icons"
@@ -16,6 +22,7 @@ import { AutoUpdate } from "@/app/AutoUpdate"
 import { ConnectionStatus } from "@/app/ConnectionStatus"
 import { AccountMenu } from "@/app/nav/AccountMenu"
 import { Breadcrumbs } from "@/app/nav/Breadcrumbs"
+import { CreateKeyRailButton } from "@/app/nav/CreateKeyRailButton"
 import {
   lastLocation,
   lastRailContext,
@@ -34,6 +41,7 @@ import {
   navLabelForPath,
   ORG_NAV_SECTIONS,
   pageLabelForPath,
+  railPathForPath,
   visibleNavSections,
 } from "@/app/nav/registry"
 import {
@@ -42,10 +50,14 @@ import {
   navIndicatorClass,
   navRowClass,
 } from "@/app/nav/rowStyles"
+import { TeamBudget } from "@/app/nav/TeamBudget"
 import { TopBarActions } from "@/app/nav/TopBarActions"
 import type { NavItem, NavPath, NavSection } from "@/app/nav/types"
 import {
+  routeAccess,
+  useCaller,
   useNavVisibility,
+  useRouteAccess,
   useRouteVisibility,
   useSurfaceVisibility,
 } from "@/app/nav/useNavVisibility"
@@ -58,16 +70,15 @@ import { TelemetryIdentity } from "@/app/TelemetryIdentity"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { useAdoptBrowserAvatar } from "@/features/account/avatar/avatarChoice"
 import { FeedbackDialog } from "@/features/feedback/FeedbackDialog"
+import { CreateKeyHost } from "@/features/keys/CreateKeyHost"
+import { useOpenCreateKey } from "@/features/keys/openCreateKey"
 import { PricingWarning } from "@/features/models/PricingWarning"
 import { UnpricedUsageWarning } from "@/features/models/UnpricedUsageWarning"
-import { canManage } from "@/features/organization/roles"
+import { useCanCreateKey } from "@/features/organization/access"
 import { UpdateCheckPrompt } from "@/features/updateCheck/UpdateCheckPrompt"
 import { UpdateNotice } from "@/features/updateCheck/UpdateNotice"
 import { useSessionCaller } from "@/shared/api/auth"
-import {
-  isNoOrganizationError,
-  useOrganizationContext,
-} from "@/shared/api/organizations"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import { BreadcrumbLeafProvider } from "@/shared/hooks/BreadcrumbLeaf"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
@@ -248,6 +259,10 @@ function NavRowLink({
         onNavigate()
       }}
       className={`${navRowClass({ isActive, isCollapsed, isNested })} w-full`}
+      // The row drawn selected is the one announced as current. The link's own
+      // match is exact on the path and its search, so on a detail page or an
+      // address with a query string it said nothing.
+      aria-current={isActive ? "page" : undefined}
       aria-label={isCollapsed ? label : undefined}
       title={isCollapsed ? label : undefined}
     >
@@ -300,12 +315,12 @@ function NavGroup({
   isVisible: (item: NavItem) => boolean
   isCollapsed: boolean
 }) {
-  // A child declaring its own surface is gated on it. Without this the field
-  // was decoration: Guardrails is grouped under Routing but served by the tools
-  // surface, so a deployment without that surface kept the link and landed on
-  // the "not available here" panel.
+  // A child is gated on the entry `navItemForPath` answers for it, which
+  // carries its own surface and capability, so the row and the route cannot
+  // disagree: a child served by another surface than its group's would
+  // otherwise keep its link and land on the "not available here" panel.
   const children = (item.children ?? []).filter((child) =>
-    child.surface ? isVisible({ ...item, surface: child.surface }) : true,
+    isVisible(navItemForPath(child.to) ?? item),
   )
   const holdsCurrent = children.some((child) => child.to === currentPath)
   const [open, setOpen] = useState(holdsCurrent)
@@ -478,9 +493,12 @@ export function AppShell() {
   return (
     <EntitlementResolver>
       <PostSignInGate>
-        <BreadcrumbLeafProvider>
-          <AppShellChrome />
-        </BreadcrumbLeafProvider>
+        {/* The Create API key dialog, opened from any page that offers a key. */}
+        <CreateKeyHost>
+          <BreadcrumbLeafProvider>
+            <AppShellChrome />
+          </BreadcrumbLeafProvider>
+        </CreateKeyHost>
       </PostSignInGate>
     </EntitlementResolver>
   )
@@ -489,6 +507,9 @@ export function AppShell() {
 function AppShellChrome() {
   const { feedback_enabled } = useDeployment()
   const [feedbackOpen, setFeedbackOpen] = useState(false)
+  // The rail's Create API key, which opens the dialog `CreateKeyHost` holds.
+  const canCreateKey = useCanCreateKey()
+  const openCreateKey = useOpenCreateKey()
   const feedbackTriggerRef = useRef<HTMLButtonElement>(null)
 
   // Navigation is data: the shell renders whatever the registry declares and
@@ -507,6 +528,11 @@ function AppShellChrome() {
   // server would refuse. An unregistered path (the guide, the 404 splat) has no
   // entry and is never gated.
   const currentItem = navItemForPath(pathname)
+  // A page the caller may not open answers as an unknown address does, by
+  // going Home. Decided once their role is known: until then the page waits,
+  // so nobody who may open it is sent away while it loads.
+  const access = useRouteAccess()(pathname)
+  const routeCaller = useCaller()
   // Through the registry's predicate rather than `isVisible(currentItem)` here,
   // so this and the rail memory cannot answer "is this destination served"
   // differently: whichever way the nested case resolves, both read it from one
@@ -545,7 +571,9 @@ function AppShellChrome() {
   // Which of the two sidebars this path belongs under. The organization context
   // is a separate rail reached from the footer, not a section inside the
   // workspace one, so the two never render together.
-  const navContext = navContextForPath(pathname)
+  // Not the rail of a page about to send its visitor Home.
+  const navContext =
+    access === "blocked" ? "workspace" : navContextForPath(pathname)
   const inOrganization = navContext === "organization"
   const inDeployment = navContext === "deployment"
   const organization = useOrganizationContext()
@@ -555,16 +583,12 @@ function AppShellChrome() {
   const { selected: selectedWorkspace } = useSelectedWorkspace()
   // True for the local operator, who owns the organization the gateway
   // provisioned for itself, and load-bearing for every account that signs in
-  // without managing it (otari-ai#1716).
-  // Fails open when the context errors rather than resolving false: Users,
-  // budgets and settings are reachable only through this entry, the routes still
-  // work by URL, and the server authorizes every request behind it regardless.
-  // Hiding the way there because one query failed strands three destinations.
-  // A 404 is not a failure but the answer that there is no organization to
-  // manage.
+  // without managing it (otari-ai#1716). The same answer that decides whether
+  // the organization's pages open, so it fails open as they do when the
+  // context read fails: hiding the way there because one query failed strands
+  // every destination behind it, and the server authorizes each request anyway.
   const managesOrganization =
-    canManage(organization.data) ||
-    (organization.isError && !isNoOrganizationError(organization.error))
+    routeAccess({ route: "/organization", params: {} }, routeCaller) === "open"
 
   // Both rails remember where you were, so the controls that cross between them
   // return you rather than resetting you. Recorded here rather than on those
@@ -982,6 +1006,20 @@ function AppShellChrome() {
           {/* No bottom padding: the account band closes the rail, so it sits on
               the viewport's edge the way the scope band sits on the top. */}
           <div className="flex min-h-0 flex-1 flex-col gap-4 px-3 pt-3">
+            {/* The rail's one action. A key is how every session starts, so it
+                leads the workspace rail; a viewer, who is refused one, is not
+                offered it. */}
+            {railContext === "workspace" && canCreateKey ? (
+              <CreateKeyRailButton
+                isCollapsed={effectiveCollapsed}
+                onPress={() => {
+                  closeMobileNav()
+                  // Below `md` this closes the drawer it sits in, so the
+                  // dialog gives focus back to the drawer's toggle.
+                  openCreateKey("sidebar", isMobile ? toggleRef.current : null)
+                }}
+              />
+            ) : null}
             <nav
               // Named because the header's breadcrumb is a navigation landmark
               // too, and two unnamed ones give a screen-reader user no way to tell
@@ -1031,12 +1069,14 @@ function AppShellChrome() {
                           // route. `navItemForPath` prefers the exact entry, and a
                           // future child route (`/routing/new`) still resolves to
                           // its parent, which is the highlight that route wants.
+                          // A page with no row selects the row that stands
+                          // for it (`railPathForPath`).
                           <NavRowLink
                             key={item.to}
                             to={item.to}
                             label={item.label}
                             icon={item.icon}
-                            isActive={currentItem?.to === item.to}
+                            isActive={railPathForPath(pathname) === item.to}
                             isCollapsed={effectiveCollapsed}
                             // Tapping a destination dismisses the mobile drawer so
                             // the page it landed on is visible, not behind it.
@@ -1049,6 +1089,11 @@ function AppShellChrome() {
                 )
               })}
             </nav>
+            {/* The organization's limit and how much of it is spent, for the
+                people who can change it. */}
+            {effectiveCollapsed ? null : (
+              <TeamBudget onNavigate={closeMobileNav} />
+            )}
             {/* The account block, set off by a rule as in the navigation prototype:
               the way onto the organization rail, the documentation, and the
               account control whose menu carries appearance and sign-out. */}
@@ -1319,7 +1364,9 @@ function AppShellChrome() {
             }
           >
             <div className="mx-auto flex max-w-[112.5rem] flex-col gap-6 px-4 pt-5 pb-[calc(1.25rem+var(--shell-corner-clearance))] md:px-6 md:pt-6 md:pb-[calc(1.5rem+var(--shell-corner-clearance))]">
-              {answerIsStillComing ? (
+              {access === "blocked" ? (
+                <Navigate to="/" replace />
+              ) : access === "pending" || answerIsStillComing ? (
                 <PendingPage />
               ) : routeIsGatedOff ? (
                 <EmptyState
@@ -1329,8 +1376,8 @@ function AppShellChrome() {
                   // a registered path can be gated off, so the fallback is there
                   // for the type rather than for a case that happens.
                   title={`${navLabelForPath(pathname) ?? currentItem?.label ?? "That page"} is not available here`}
-                  description="This deployment does not serve that page. Choose another page from the menu, or go back to Overview."
-                  actionLabel={pathname === "/" ? undefined : "Go to Overview"}
+                  description="This deployment does not serve that page. Choose another page from the menu, or go back to Home."
+                  actionLabel={pathname === "/" ? undefined : "Go to Home"}
                   onAction={() => void navigate({ to: "/" })}
                 />
               ) : (

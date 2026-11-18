@@ -576,7 +576,8 @@ export function OrganizationProvidersPage() {
                     accepts a delete for an archived key alone. */}
               <RowAction
                 icon={FiTrash2}
-                label="Delete"
+                label="Delete…"
+                isDestructive
                 onPress={() => setPendingDelete(row)}
               />
             </>
@@ -617,7 +618,7 @@ export function OrganizationProvidersPage() {
               )}
               <RowAction
                 icon={FiEdit2}
-                label="Edit"
+                label="Edit…"
                 onPress={() => {
                   setAdding(false)
                   setEditingId(row.id)
@@ -664,12 +665,7 @@ export function OrganizationProvidersPage() {
             </Button>
           ) : null
         }
-      >
-        The organization&rsquo;s own upstream credentials. Every workspace in
-        the organization can use them, and the default for a provider is the one
-        a request gets when it names no instance. Keys are encrypted at rest and
-        never shown again.
-      </PageIntro>
+      />
 
       <ErrorBanner
         error={

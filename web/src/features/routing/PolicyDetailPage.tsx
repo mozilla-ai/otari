@@ -86,18 +86,7 @@ export function PolicyDetailPage({ name }: { name: string }) {
   return (
     <div className="flex flex-col gap-6">
       {back}
-      <PageIntro title={row.name}>
-        {row.kind === "alias" ? "An alias for one model. " : null}
-        Callers send{" "}
-        <code className="font-mono text-caption">model: "{row.name}"</code>.
-        Applies to{" "}
-        {row.user_id ? (
-          <code className="font-mono text-caption">{row.user_id}</code>
-        ) : (
-          "every caller"
-        )}
-        .
-      </PageIntro>
+      <PageIntro title={row.name} />
 
       <ErrorBanner error={error} />
 

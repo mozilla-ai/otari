@@ -3,7 +3,6 @@ import { Fragment } from "react"
 import type { ToolServiceName, ToolSettingField } from "@/client"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { Skeleton } from "@/design-system/feedback/Skeleton"
-import { PageIntro } from "@/design-system/layout/PageIntro"
 import { CONTROL_LANE, SettingRow } from "@/design-system/layout/SettingRow"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { AdvancedRows } from "@/features/tools/AdvancedRows"
@@ -19,7 +18,6 @@ import {
   ToolStatusRow,
 } from "@/features/tools/ToolStatusGroup"
 import { WorkspaceCodeExecutionPolicyCard } from "@/features/tools/WorkspaceCodeExecutionPolicyCard"
-import { WorkspaceMcpServersCard } from "@/features/tools/WorkspaceMcpServersCard"
 import { WorkspaceWebSearchCard } from "@/features/tools/WorkspaceWebSearchCard"
 import { useDeploymentOperator } from "@/shared/api/organizations"
 import {
@@ -270,19 +268,16 @@ function LoadingGroups() {
 }
 
 /**
- * The tool and guardrail service settings, whole or narrowed to one service.
- *
- * `only` is what makes the sidebar's Tools group work: each child route renders
- * this page filtered to its own service rather than scrolling one long page.
- * Omitted, every service renders, which is the /tools route the group's parent
- * still points at.
+ * One service's settings, as a view of Tools: web search, code execution, or
+ * the deployment's guardrail services. The tab above names the service, so the
+ * view draws no title of its own.
  *
  * Every control on the page saves itself: text on blur or Enter, selects on
  * change, each row reporting its own outcome where it happened. There is no
  * Save button and no page-level toast, because a page of independent settings
  * has nothing for one button to be about.
  */
-export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
+export function ToolsGuardrailsPage({ only }: { only: ToolServiceName }) {
   // The Tools group is member-visible for the workspace and organization cards
   // below. Of the deployment-wide reads above them, the tool settings answer a
   // tenant without the service endpoints in them (otari-ai#1969), and the tool
@@ -305,27 +300,10 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
       )
       .map((field) => [field.key, field]),
   )
-  const shown = SERVICES.filter((service) => !only || service.key === only)
-  const narrowed = only ? shown[0] : undefined
+  const shown = SERVICES.filter((service) => service.key === only)
 
   return (
     <div className="flex flex-col gap-10 pb-10">
-      <PageIntro
-        title={narrowed?.label ?? "Tools & Guardrails"}
-        docsHref={toolsDocs(narrowed?.docsAnchor)}
-      >
-        {/* Two readings: an operator configures the service endpoints, and a
-            caller who does not is told what the deployment's tools do to their
-            requests instead of how to configure a backend they cannot reach.
-            A narrowed service's intro says only what its tools do, so it reads
-            the same to both. */}
-        {narrowed
-          ? narrowed.intro
-          : isOperator
-            ? "Configure the built-in tool and guardrail service endpoints without a restart. Changes apply immediately and persist."
-            : "How this deployment's built-in tools behave on your requests, what your workspace may use of them, and what your organization mandates."}
-      </PageIntro>
-
       <ErrorBanner error={query.error} />
 
       {query.isLoading ? <LoadingGroups /> : null}
@@ -479,12 +457,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
                 <SettingsGroup
                   isBounded
                   key={group.title}
-                  // On the combined page the service is not otherwise named,
-                  // and three groups called "Backend" say nothing about which
-                  // service each one configures.
-                  title={
-                    only ? group.title : `${service.label} · ${group.title}`
-                  }
+                  title={group.title}
                   description={group.blurb}
                   docsHref={toolsDocs(group.docsAnchor)}
                 >
@@ -534,11 +507,6 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
           </Fragment>
         )
       })}
-
-      {/* Beside the services rather than under one of them, and left out of
-          every narrowed view, each of which is one service. `/tools/mcp-servers`
-          renders the same card. */}
-      {only ? null : <WorkspaceMcpServersCard />}
     </div>
   )
 }

@@ -26,7 +26,7 @@ cannot be deleted.
 
 ## 2. Create the service key
 
-1. Open **API keys** and click **Create key**.
+1. Open **API keys** and click **Create API key**.
 2. Enter a **Name**, such as `mlpa`.
 3. Click **More options** and tick **Service key**.
 4. Pick the **Budget for each end user**: every new end user starts on its own
@@ -40,7 +40,7 @@ cannot be deleted.
    **End users** group under **Access** → **Advanced scopes**. With only **Call models** checked, the
    key makes model calls for its end users but cannot list, change or delete
    them.
-8. Click **Create key** and copy the key.
+8. Click **Create API key** and copy the key.
 
 The key belongs to the organization, not to you:
 

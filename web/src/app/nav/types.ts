@@ -95,8 +95,25 @@ interface NavItemBase {
    * *partly* deployment-wide declares nothing here on purpose, since hiding a
    * destination a member does use costs more than a panel on it reporting its
    * own refusal.
+   *
+   * The same declaration gates the route: a caller known not to operate the
+   * deployment who types the address goes Home (`useRouteAccess`). A failed
+   * read opens it, and the page then reports the server's own answer.
    */
   operatorOnly?: "unlisted" | "refused"
+  /**
+   * Who in the organization may open this destination, for one that is not
+   * everyone's: `"manager"` for an owner or admin of the organization,
+   * `"contributor"` for someone who may run things in the selected workspace,
+   * which a viewer may not, and `"manager-or-operator"` for a page that serves
+   * the deployment's operator as well.
+   *
+   * A destination on the organization rail declares nothing unless it asks
+   * something else: that whole rail is a manager's. A page someone may not
+   * open is in none of their navigation, and typing its address goes Home
+   * (`useRouteAccess`).
+   */
+  requires?: "manager" | "contributor" | "manager-or-operator"
   /**
    * That this destination is of use to a signed-in caller who belongs to no
    * organization: someone who declined their only invitation, or signed in
@@ -138,8 +155,7 @@ export interface NavChild {
    * The surface this destination needs, when it is not the parent's.
    *
    * Grouping is an editorial choice and gating is a fact about the deployment,
-   * so the two can disagree: Guardrails is grouped under Routing, where the
-   * navigation prototype puts it, but the page is served by the tools surface.
+   * so the two can disagree: a group can hold a page another surface serves.
    * Omitted, the child inherits the parent's, which is the ordinary case.
    */
   surface?: string
@@ -192,8 +208,8 @@ export interface NavItemContribution {
  * with its two fields pointing at this registry's label sites. Both differ in
  * name for the reason the shapes differ: a section's heading is `label` here and
  * `header` there, and nesting is `children` here where there it is a single
- * `NavDisclosure`, so a section here can hold several disclosures (Build holds
- * Routing and Tools) and a rename has to say which.
+ * `NavDisclosure`, so a section here can hold several disclosures and a rename
+ * has to say which.
  */
 export interface NavLabelOverride {
   /** Id of the base `NavSection` this override targets. */
@@ -208,4 +224,29 @@ export interface NavLabelOverride {
    * is dropped rather than applied to the wrong row.
    */
   disclosureLabels?: Readonly<Partial<Record<NavPath, string>>>
+}
+
+/**
+ * What a page asks of the caller. `operator` and `manager` are the
+ * deployment's and the organization's; `workspace-manager` is an owner or
+ * admin of the workspace the address names, or of the organization;
+ * `contributor` is someone who may run things in the selected workspace.
+ */
+export type Requirement =
+  | "operator"
+  | "manager"
+  | "manager-or-operator"
+  | "workspace-manager"
+  | "contributor"
+
+declare module "@tanstack/react-router" {
+  interface StaticDataRouteOption {
+    /**
+     * Who may open a route the registry does not govern, read before the
+     * registry entry its address falls under. For a build's own route below a
+     * gated one, such as a redirect under `/settings` that opens to everyone
+     * (`anyone`) while `/settings` is the operator's.
+     */
+    access?: Requirement | "anyone"
+  }
 }

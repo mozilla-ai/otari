@@ -10,7 +10,6 @@ import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Dot } from "@/design-system/indicators/Dot"
-import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { canManageWorkspace } from "@/features/organization/roles"
 import { McpCatalogDialog } from "@/features/tools/McpCatalogDialog"
@@ -42,7 +41,6 @@ import {
   useWorkspaceMcpServers,
 } from "@/shared/api/tools"
 import { useWorkspace } from "@/shared/api/workspaces"
-import { docsSourceHref } from "@/shared/helpers/docs"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useSurfaces } from "@/shared/hooks/useDeployment"
 
@@ -63,12 +61,6 @@ import { useSurfaces } from "@/shared/hooks/useDeployment"
 // workspace lock. Restating it here would be a second copy to go stale, so the
 // 51st Add is left to earn the server's own refusal, which names the real
 // number and lands in the dialog's error banner.
-
-/** The page's own opening line, which the `/tools` card does not carry. */
-const PAGE_DESCRIPTION =
-  "Give this workspace's requests the tools of remote MCP servers."
-
-const DOCS_HREF = docsSourceHref("mcp-servers.md")
 
 /**
  * How many tools a server exposes, never their names: the allow-list's length
@@ -153,18 +145,11 @@ function PersonalConnectionsCell({
   )
 }
 
-export function WorkspaceMcpServersCard({
-  variant = "card",
-}: {
-  /**
-   * Where this is rendering. As a `card` it is one section at the foot of
-   * `/tools`, with its own `h2` and the register control beside it. As a
-   * `page` it *is* `/tools/mcp-servers`, so it renders that page's opening
-   * instead and the control sits in the heading row there, which is where
-   * every other page in the dashboard keeps the one thing it creates.
-   */
-  variant?: "card" | "page"
-}) {
+/**
+ * The selected workspace's MCP servers: the MCP servers view of Tools, whose
+ * tab names it, so it draws no title of its own and leads with its controls.
+ */
+export function WorkspaceMcpServersCard() {
   const { selected, isLoading: workspaceLoading } = useSelectedWorkspace()
   const context = useOrganizationContext()
   // The client half of the *write* gate the service enforces. The list is a
@@ -208,18 +193,9 @@ export function WorkspaceMcpServersCard({
   }
   const openRequested = (pick: CatalogPick) => openCatalog(pick)
 
-  const isPage = variant === "page"
-
   if (!selected) {
     return (
       <section className="flex flex-col gap-2">
-        {isPage ? (
-          <PageIntro title="MCP servers" docsHref={DOCS_HREF}>
-            {PAGE_DESCRIPTION}
-          </PageIntro>
-        ) : (
-          <h2 className="text-title">MCP servers</h2>
-        )}
         <InfoBanner>
           {workspaceLoading
             ? "Reading the workspaces you belong to."
@@ -356,7 +332,8 @@ export function WorkspaceMcpServersCard({
           />
           <RowAction
             icon={FiTrash2}
-            label="Delete"
+            label="Delete…"
+            isDestructive
             onPress={() => openDelete(row)}
           />
         </RowActionRow>
@@ -377,21 +354,9 @@ export function WorkspaceMcpServersCard({
 
   return (
     <section className="flex flex-col gap-2">
-      {isPage ? (
-        <PageIntro title="MCP servers" action={addButton} docsHref={DOCS_HREF}>
-          {PAGE_DESCRIPTION}
-        </PageIntro>
-      ) : (
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-title">MCP servers</h2>
-          {addButton}
-        </div>
-      )}
+      {addButton ? <div className="flex justify-end">{addButton}</div> : null}
       {manages && workspace.data ? (
-        // Pulled up under the page's opening line, which ends in its own padding.
-        <div className={isPage ? "-mt-4 pb-2" : ""}>
-          <WorkspaceRequestMcpServers workspace={workspace.data} />
-        </div>
+        <WorkspaceRequestMcpServers workspace={workspace.data} />
       ) : null}
 
       <McpConnectionNoticeBanner />

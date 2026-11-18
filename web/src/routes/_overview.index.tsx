@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 
-import { UsagePage } from "@/features/usage/UsagePage"
+import { Home } from "@/features/home/Home"
 
 export const Route = createFileRoute("/_overview/")({
-  component: () => <UsagePage embedded />,
+  component: Home,
 })

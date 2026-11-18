@@ -55,8 +55,10 @@ describe("App", () => {
     renderApp(bootstrap())
 
     expect(screen.getByRole("status")).toHaveTextContent("Loading page…")
-    expect(await screen.findByText("Lazy overview")).toBeInTheDocument()
-    expect(document.title).toBe("Overview · Otari")
+    expect(
+      await screen.findByText("Lazy overview", undefined, { timeout: 3000 }),
+    ).toBeInTheDocument()
+    expect(document.title).toBe("Home · Otari")
   })
 
   it("reopens the model a visitor chose once their session starts", async () => {

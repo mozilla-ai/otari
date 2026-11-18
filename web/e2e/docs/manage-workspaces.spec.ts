@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 
-import { login, nav } from "../helpers"
+import { login, nav, rowMenuItem } from "../helpers"
 import { docScreenshot } from "./fixtures"
 
 // The dialog is captured filled in and never submitted, so nothing is created.
@@ -8,9 +8,12 @@ test("create a workspace", async ({ page }) => {
   await login(page)
   await page.getByRole("link", { name: "Organization", exact: true }).click()
   await nav(page).getByRole("link", { name: "Workspaces" }).click()
-  await expect(
-    page.getByRole("button", { name: /^Delete Default workspace/ }),
-  ).toBeVisible()
+  const workspace = page.getByRole("row", { name: /Default workspace/ })
+  // The last workspace's Delete is there, refused: an organization keeps one.
+  const remove = await rowMenuItem(workspace, /^Delete/)
+  await expect(remove).toBeVisible()
+  await expect(remove).toHaveAttribute("aria-disabled", "true")
+  await page.keyboard.press("Escape")
   await docScreenshot(page, "manage-workspaces-list")
 
   await page.getByRole("button", { name: "Create workspace" }).click()

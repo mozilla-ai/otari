@@ -6,6 +6,7 @@ import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
+import { useIsOrganizationManager } from "@/features/organization/access"
 import {
   canManage as canManageOrganization,
   canManageWorkspace,
@@ -45,13 +46,16 @@ export function WorkspaceDetailPage({ workspaceId }: { workspaceId: string }) {
     (row) => row.id === workspaceId,
   )
 
-  const back = (
+  // A workspace's own owner or admin may open this page but not the list,
+  // which is an organization owner's or admin's.
+  const isManager = useIsOrganizationManager()
+  const back = isManager ? (
     <nav aria-label="Breadcrumb" className="text-caption">
       <Link to="/workspaces" className="text-link hover:text-link-hover">
         ← Workspaces
       </Link>
     </nav>
-  )
+  ) : null
 
   if (workspace === undefined) {
     if (workspaces.isPending) return <PageLoading label="Loading workspace…" />
@@ -84,10 +88,7 @@ export function WorkspaceDetailPage({ workspaceId }: { workspaceId: string }) {
   return (
     <div className="flex flex-col gap-6">
       {back}
-      <PageIntro title={workspace.name}>
-        {workspace.description ||
-          "Settings, and the providers and models this workspace can use."}
-      </PageIntro>
+      <PageIntro title={workspace.name} />
       <TabRow>
         {TABS.map((entry) => (
           <Tab

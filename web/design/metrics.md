@@ -44,7 +44,7 @@ lives nowhere else.
 **Five cells.** The strip's grid is a fixed 2 / 3 / 5 columns by breakpoint, so four
 cells leave one empty track on a wide viewport and three leave two. Both call sites
 in the product pass five. If a page has fewer than five things worth leading with,
-it does not want this band: put the one number in the `PageIntro` sentence instead.
+it does not want this band.
 
 A cell has four rows and **always four**, in this order:
 

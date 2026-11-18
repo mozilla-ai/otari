@@ -712,26 +712,28 @@ export function ModelCatalogView({
     <div className="flex flex-col gap-5">
       <header className="flex flex-col gap-1">
         <h1 className="text-display">Models</h1>
-        <p className="max-w-[38.75rem] text-sm text-muted">
-          {catalog.data ? (
-            <>
-              {formatNumber(totalCount)} {totalCount === 1 ? "model" : "models"}
-              {providerCount !== undefined ? (
-                <>
-                  {" "}
-                  across {formatNumber(providerCount)}{" "}
-                  {providerCount === 1 ? "provider" : "providers"}
-                </>
-              ) : null}
-              .{" "}
-              {publicView
-                ? "Prices start from the cheapest offering."
-                : "Prices are what your organization is charged, cheapest offering first."}
-            </>
-          ) : (
-            "Every model available, grouped by model, with each provider's offering and price."
-          )}
-        </p>
+        {/* Only the public catalog says what it holds: a signed-in page opens
+            with its title alone. */}
+        {publicView ? (
+          <p className="max-w-[38.75rem] text-sm text-muted">
+            {catalog.data ? (
+              <>
+                {formatNumber(totalCount)}{" "}
+                {totalCount === 1 ? "model" : "models"}
+                {providerCount !== undefined ? (
+                  <>
+                    {" "}
+                    across {formatNumber(providerCount)}{" "}
+                    {providerCount === 1 ? "provider" : "providers"}
+                  </>
+                ) : null}
+                . Prices start from the cheapest offering.
+              </>
+            ) : (
+              "Every model available, grouped by model, with each provider's offering and price."
+            )}
+          </p>
+        ) : null}
       </header>
 
       <ErrorBanner error={catalog.error} />

@@ -117,8 +117,8 @@ export const getActivityRowClassName = (
 
 // ---------- filter option sets ----------
 //
-// The time presets and window math are shared with the Usage page via
-// `@/shared/helpers/timeRange` (see the ActivityTimeline selector). Activity keeps a
+// The time presets and window math live in `@/shared/helpers/timeRange` (see the
+// ActivityTimeline selector). Activity keeps a
 // truthful "All": its raw list endpoint applies no default and no clamp, so an
 // omitted start really is all-time.
 
@@ -151,7 +151,7 @@ export const TOOL_OPTIONS: { label: string; value: string }[] = [
 ]
 
 // Resolve the query window. Explicit start_date/end_date bounds (a custom range,
-// or a drill-down from the Usage page) take precedence; otherwise a preset anchors
+// or a link that carries one) take precedence; otherwise a preset anchors
 // `start` to "now minus N", and "all" (or an empty custom range) leaves it open.
 // `now` is a parameter, not a call inside, so a caller deriving more than one
 // window can hand both the same clock reading. Read independently they land

@@ -56,11 +56,11 @@ before changing the groups.
 For anything heavy that is not a route, lazy-load it:
 
 ```tsx
-const ShareDialog = lazy(() => import("./ShareDialog"))
+const ExportDialog = lazy(() => import("./ExportDialog"))
 
-{isSharing && (
+{isExporting && (
   <Suspense fallback={null}>
-    <ShareDialog onClose={close} />
+    <ExportDialog onClose={close} />
   </Suspense>
 )}
 ```

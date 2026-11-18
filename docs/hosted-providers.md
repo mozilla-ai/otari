@@ -29,8 +29,8 @@ Where an organization holds several keys for one provider, a workspace uses,
 in order, skipping keys it turned off:
 
 1. the key it set to "Always use this key"
-2. the organization's default for the provider (the star on the Providers
-   page; click a filled star to remove it)
+2. the organization's default for the provider (**Make default provider** in
+   a key's menu on the Providers page; the default's own menu takes it off)
 3. the organization's oldest key
 
 A key with its own API base URL is not in this list: requests name it by its
@@ -359,9 +359,9 @@ Some limits of the form:
 - The hosted model form stores per-million fields only, so it does not offer
   seconds of video and cannot reprice a per-second model.
 
-**Price this model** on a request in the Requests tab opens the same form, in the
-unit the request's endpoint bills. It is offered on a served request that carried
-no cost.
+**Price this model** on a request in the Requests view of Sessions opens the
+same form, in the unit the request's endpoint bills. It is offered on a served
+request that carried no cost.
 
 ## Catalog and discovery
 

@@ -35,11 +35,20 @@ async function horizontalOverflow(page: Page): Promise<number> {
 const PAGES = [
   {
     route: "/",
-    heading: "Overview",
-    // The usage tab's tiles and the tab row are the widest rows on the page.
+    heading: "Home",
+    // The figures and the breakdown table are the widest rows on the page.
     ready: (page: Page) =>
       expect(
-        page.getByRole("navigation", { name: "Overview views" }),
+        page.getByRole("main").getByRole("heading", { name: "Home" }),
+      ).toBeVisible(),
+  },
+  {
+    route: "/sessions",
+    heading: "Sessions",
+    // The tab row and the chart are the widest rows on the page.
+    ready: (page: Page) =>
+      expect(
+        page.getByRole("navigation", { name: "Sessions views" }),
       ).toBeVisible(),
   },
   {
@@ -50,7 +59,7 @@ const PAGES = [
   },
   {
     route: "/requests",
-    heading: "Overview",
+    heading: "Sessions",
     // A paginated table: the pager row is what could not wrap.
     ready: async (page: Page) => {
       await expect(table(page, "Activity log")).toBeVisible()

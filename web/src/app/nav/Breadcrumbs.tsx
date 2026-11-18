@@ -5,6 +5,7 @@ import {
   navContextForPath,
   navPageForPath,
   pageLabelForPath,
+  railLabelForPath,
 } from "@/app/nav/registry"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { useBreadcrumbLeafValue } from "@/shared/hooks/BreadcrumbLeaf"
@@ -48,6 +49,8 @@ export function Breadcrumbs({ pathname }: { pathname: string }) {
       : context === "organization"
         ? organizationName
         : selected?.name,
+    // The rail row a page with no row of its own sits under ("Rules" for Routing).
+    railLabelForPath(pathname),
     page,
   ].filter((one): one is string => Boolean(one))
 

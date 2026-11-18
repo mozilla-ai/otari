@@ -34,21 +34,48 @@ function renderTrail(pathname: string, leaf: string) {
 
 describe("Breadcrumbs", () => {
   it("ends a record's page on its name, linking back to the list", async () => {
+    // An MCP server opens from Tools, which is the list it links back to.
     renderTrail("/tools/mcp-servers/abc", "notion")
 
     const trail = await screen.findByRole("navigation", { name: "Breadcrumb" })
-    expect(trail).toHaveTextContent("Default workspace/MCP servers/notion")
-    expect(screen.getByRole("link", { name: "MCP servers" })).toHaveAttribute(
+    expect(trail).toHaveTextContent("Default workspace/Tools/notion")
+    expect(screen.getByRole("link", { name: "Tools" })).toHaveAttribute(
       "href",
-      "/tools/mcp-servers",
+      "/tools",
     )
   })
 
   it("names a list page without a link to itself", async () => {
-    renderTrail("/tools/mcp-servers", "")
+    renderTrail("/tools", "")
 
     const trail = await screen.findByRole("navigation", { name: "Breadcrumb" })
-    expect(trail).toHaveTextContent("Default workspace/MCP servers")
+    expect(trail).toHaveTextContent("Default workspace/Tools")
     expect(screen.queryByRole("link")).not.toBeInTheDocument()
+  })
+
+  it("puts a page with no row under the row that stands for it", async () => {
+    renderTrail("/routing", "")
+
+    const trail = await screen.findByRole("navigation", { name: "Breadcrumb" })
+    expect(trail).toHaveTextContent("Default workspace/Rules/Routing")
+    expect(screen.queryByRole("link")).not.toBeInTheDocument()
+  })
+
+  it("files the workspace roster under People", async () => {
+    renderTrail("/members", "")
+
+    const trail = await screen.findByRole("navigation", { name: "Breadcrumb" })
+    expect(trail).toHaveTextContent("Default workspace/People/Members")
+  })
+
+  it("ends a policy's page on its name, after Rules and a link to Routing", async () => {
+    renderTrail("/routing/coding", "coding")
+
+    const trail = await screen.findByRole("navigation", { name: "Breadcrumb" })
+    expect(trail).toHaveTextContent("Default workspace/Rules/Routing/coding")
+    expect(screen.getByRole("link", { name: "Routing" })).toHaveAttribute(
+      "href",
+      "/routing",
+    )
   })
 })

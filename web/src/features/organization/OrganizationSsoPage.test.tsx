@@ -195,14 +195,6 @@ describe("OrganizationSsoPage", () => {
     ).toBeInTheDocument()
   })
 
-  it("says the email_verified claim is not trusted", async () => {
-    mockApi()
-    renderPage(<OrganizationSsoPage />)
-
-    expect(await screen.findByText("email_verified")).toBeInTheDocument()
-    expect(screen.getByText(/does not trust/)).toBeInTheDocument()
-  })
-
   it("never renders the client secret", async () => {
     mockApi({ sso: organizationSso({ connection: oidcConnection() }) })
     const user = userEvent.setup()

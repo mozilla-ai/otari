@@ -17,6 +17,11 @@ import {
 } from "@/features/tools/mcpConnectionNotice"
 import { publishSignInResult } from "@/features/tools/mcpSignInWindow"
 import { organizationContext, workspaceMcpServer } from "@/tests/fixtures"
+import {
+  getRowMenuItem,
+  pressRowAction,
+  rowMenuTriggers,
+} from "@/tests/rowMenu"
 
 const SERVER = workspaceMcpServer({
   name: "drive",
@@ -368,13 +373,12 @@ describe("McpServerSignIn", () => {
 
   it("lets a manager see who is connected and remove one of them", async () => {
     const calls = mockApi({ others: [ALICE] })
+    const user = userEvent.setup()
     renderSignIn(true)
 
     expect(await screen.findByText("Alice")).toBeVisible()
     expect(screen.getByText("alice@example.com")).toBeVisible()
-    await userEvent.click(
-      screen.getByRole("button", { name: "Remove the connection of Alice" }),
-    )
+    await pressRowAction(user, "Remove the connection of Alice")
     const dialog = await screen.findByRole("alertdialog")
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Remove connection" }),
@@ -480,6 +484,7 @@ describe("McpServerSignIn", () => {
   it("gives the manager's own row the one remove action every row has, as Disconnect", async () => {
     // Not in the list the gateway returned, as right after a sign-in: the row is theirs all the same.
     const calls = mockApi({ mine: [MINE], others: [ALICE] })
+    const user = userEvent.setup()
     renderSignIn(true)
 
     const table = await screen.findByRole("grid", {
@@ -494,12 +499,10 @@ describe("McpServerSignIn", () => {
     expect(
       within(table).queryByRole("button", { name: /Reconnect/ }),
     ).not.toBeInTheDocument()
-    expect(within(table).getAllByRole("button")).toHaveLength(2)
+    expect(rowMenuTriggers(table)).toHaveLength(2)
 
     // Removing their own row is Disconnect: the same confirmation, the same call.
-    await userEvent.click(
-      within(table).getByRole("button", { name: "Disconnect your account" }),
-    )
+    await pressRowAction(user, "Disconnect your account", table)
     const dialog = await screen.findByRole("alertdialog")
     expect(
       within(dialog).getByText(
@@ -616,9 +619,8 @@ describe("McpServerSignIn", () => {
     await user.click(screen.getByRole("button", { name: "Next page" }))
 
     expect(await screen.findByText("(you)")).toBeVisible()
-    expect(
-      screen.getByRole("button", { name: "Disconnect your account" }),
-    ).toBeVisible()
+    expect(await getRowMenuItem(user, "Disconnect your account")).toBeVisible()
+    await user.keyboard("{Escape}")
     expect(
       screen.queryByText("Nobody has connected yet."),
     ).not.toBeInTheDocument()

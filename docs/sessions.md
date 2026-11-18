@@ -6,9 +6,9 @@ it serves, so you can see what an agent did, not only what one call did.
 
 ## Look at a session
 
-1. Open **Overview** and pick the **Sessions** tab.
+1. Open **Sessions**.
 
-   ![The Sessions tab, listing a support-agent session with its last activity, user and latency.](assets/screenshots/sessions-list.png)
+   ![Sessions, listing a support-agent session with its last activity, user and latency.](assets/screenshots/sessions-list.png)
 
 2. Click a session to open it.
 
@@ -17,11 +17,11 @@ it serves, so you can see what an agent did, not only what one call did.
 Where Otari has a logo for the agent that ran a session, it shows it beside the
 session's name, in the list and at the top of its panel.
 
-The tab shares the Overview's time range and its user, API key, model and status
-filters. A session opens on **At a glance**, which splits its time and cost, and
-shows what filled the model's context window. Pick a span to see its details, or
-switch to the timeline or the flat log. From the **Requests** tab, **View trace**
-on a request opens its session on that call.
+The **Sessions** and **Requests** views share one time range and the user, API
+key, model and status filters. A session opens on **At a glance**, which splits
+its time and cost, and shows what filled the model's context window. Pick a span
+to see its details, or switch to the timeline or the flat log. From the
+**Requests** view, **View trace** on a request opens its session on that call.
 
 ## Collect sessions
 

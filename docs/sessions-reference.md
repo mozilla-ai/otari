@@ -272,7 +272,7 @@ default), the operator can do the same with a reason and a reference. Each
 opening:
 
 - is recorded before any content opens, with who, which session, when and why;
-- is listed under **Break-glass openings** on the Sessions tab for the
+- is listed under **Break-glass openings** on **Sessions** for the
   organization's owners (the operator's openings are listed only on the
   operator's side, since a legal request may forbid telling the organization);
 - with AWS KMS, also shows in CloudTrail as a `Decrypt` naming the session;

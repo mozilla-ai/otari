@@ -497,13 +497,7 @@ export function HostedProvidersPage() {
             </Button>
           </div>
         }
-      >
-        The providers this deployment serves inference on, and the keys it
-        serves them with. Those marked config.yml are declared in the
-        configuration and changed there; a <code>providers:</code> instance
-        serves first, and the others only requests that bring no credential of
-        their own, after an organization's own keys.
-      </PageIntro>
+      />
 
       <ErrorBanner
         error={

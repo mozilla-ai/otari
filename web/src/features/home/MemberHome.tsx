@@ -1,0 +1,630 @@
+import { Link, useNavigate } from "@tanstack/react-router"
+import { type ReactNode, useState } from "react"
+import { FiKey, FiLayers } from "react-icons/fi"
+import { RowMenu, type RowMenuAction } from "@/design-system/actions/RowMenu"
+import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { useIsMobile } from "@/design-system/hooks/useIsMobile"
+import { PageIntro } from "@/design-system/layout/PageIntro"
+import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { Sparkline } from "@/design-system/metrics/charts"
+import { KpiCell } from "@/design-system/metrics/KpiCell"
+import { KpiStrip } from "@/design-system/metrics/KpiStrip"
+import { TrendChip } from "@/design-system/metrics/TrendChip"
+import { Segmented } from "@/design-system/navigation/Segmented"
+import { canOpenInKeys } from "@/features/home/keyAccess"
+import { MemberFirstRun } from "@/features/home/MemberFirstRun"
+import {
+  hasActiveKey,
+  isSpendRefusal,
+  lowerLimitNote,
+  memberLimit,
+  memberLimitLabel,
+  rosterRowOf,
+  unseenLimitLines,
+} from "@/features/home/memberHomeModel"
+import { ShareCell } from "@/features/home/ShareCell"
+import { useCanCreateKey } from "@/features/organization/access"
+import { useCurrentOwner } from "@/features/organization/attribution"
+import { wholePct } from "@/features/spend/limits"
+import {
+  isPeriodKey,
+  PERIODS,
+  type PeriodKey,
+  sessionsSearchFor,
+  windowOf,
+  windowWords,
+} from "@/features/spend/period"
+import {
+  type ReadState,
+  readState,
+  type SpendRow,
+  useSpend,
+} from "@/features/spend/useSpend"
+import { TopModelCell } from "@/features/usage/TopModelCell"
+import { billedTokenTotal, cacheSums } from "@/features/usage/usageTotals"
+import { useTopModels } from "@/features/usage/useTopModels"
+import { useKeys } from "@/shared/api/apiKeys"
+import { useOrganizationMembers } from "@/shared/api/organizations"
+import { useTraceCount } from "@/shared/api/traces"
+import { useRefusedUsage, useUsageSummary } from "@/shared/api/usage"
+import { useWorkspaceBudgetDefaults } from "@/shared/api/workspaces"
+import {
+  deltaFraction,
+  formatNumber,
+  formatPct,
+  formatRelative,
+  formatTokens,
+  formatUsd,
+} from "@/shared/helpers/format"
+import { useUrlState } from "@/shared/helpers/urlState"
+import { useSurfaces } from "@/shared/hooks/useDeployment"
+
+type Cut = "keys" | "models"
+
+const CUTS: { value: Cut; label: string; noun: string }[] = [
+  { value: "keys", label: "API keys", noun: "API key" },
+  { value: "models", label: "Models", noun: "Model" },
+]
+
+const URL_DEFAULTS = { period: "month", by: "" }
+
+/**
+ * Home for someone who uses the team rather than runs it: the owner's Home,
+ * for one person. Four figures (spent, their limit, tokens, and sessions, or
+ * failures where the deployment records no sessions), and where it went by
+ * their keys or their models, all over their own requests in the selected
+ * team. Nothing about anyone else, and no control the server would refuse them.
+ */
+export function MemberHome({
+  workspaceId,
+  workspace,
+  notice,
+}: {
+  /** A band under the title, such as the first step on a fresh gateway. */
+  notice?: ReactNode
+  workspaceId: string
+  workspace: string
+}) {
+  // One clock for the page's life, so its windows and query keys hold still.
+  const [now] = useState(() => Date.now())
+  const navigate = useNavigate()
+  const { get, patch } = useUrlState(URL_DEFAULTS)
+  const isMobile = useIsMobile()
+  const owner = useCurrentOwner()
+  const me = owner.ownerId || undefined
+  const canCreateKey = useCanCreateKey()
+
+  const rawPeriod = get("period")
+  const period: PeriodKey = isPeriodKey(rawPeriod) ? rawPeriod : "month"
+  const window = windowOf(period, now)
+  const cut = CUTS.find((one) => one.value === get("by")) ?? CUTS[0]
+
+  const spend = useSpend(window, {
+    workspaceId,
+    userId: me,
+    isEnabled: me !== undefined,
+    resetEndedAt: now,
+  })
+  const keys = useKeys(workspaceId)
+  const members = useOrganizationMembers()
+  const defaults = useWorkspaceBudgetDefaults(workspaceId)
+  // A deployment that records no sessions serves no route to count them, and
+  // has none to open.
+  const hasSessions = useSurfaces()("traces")
+  const sessions = useTraceCount(
+    {
+      workspaceId,
+      start: window.start,
+      q: "",
+      userIds: me ? [me] : undefined,
+    },
+    hasSessions,
+  )
+  const ownKeys = new Map((keys.data ?? []).map((key) => [key.id, key]))
+  // Rows the window spent on: keys with nothing spent are on Keys.
+  const rows: SpendRow[] = (cut.value === "keys" ? spend.keys : spend.models)
+    .filter((row) => row.requests > 0 || row.cost > 0)
+    .map((row) => {
+      if (cut.value !== "keys") return row
+      const key = row.filterKey ? ownKeys.get(row.filterKey) : undefined
+      if (!key) return row
+      return {
+        ...row,
+        detail: key.last_used_at
+          ? `Used ${formatRelative(key.last_used_at)}`
+          : "Never used",
+      }
+    })
+  const topModels = useTopModels({
+    rows,
+    cut: cut.value,
+    window,
+    workspaceId,
+    userId: me,
+  })
+
+  const total = spend.totals?.cost ?? 0
+  const requestCount = spend.totals?.request_count ?? 0
+  const delta = deltaFraction(total, spend.previousCost)
+  const cacheTotals = cacheSums(spend.series)
+  // The count is the caller's once their id is in the request. Until one has
+  // answered for it, an answer standing in from before is the workspace's.
+  const [hasOwnCount, setHasOwnCount] = useState(false)
+  if (!hasOwnCount && me && sessions.data && !sessions.isPlaceholderData) {
+    setHasOwnCount(true)
+  }
+  const sessionCount =
+    me && (hasOwnCount || !sessions.isPlaceholderData)
+      ? sessions.data?.count
+      : undefined
+  const sessionsFailed =
+    owner.isFailed ||
+    (me !== undefined && sessions.isError && sessions.data === undefined)
+  // What the spend figures stand on. A caller with no billing id has no
+  // spend read for them at all.
+  const usage: ReadState | "none" = owner.isFailed
+    ? "failed"
+    : owner.isPending
+      ? "loading"
+      : me
+        ? spend.reads.usage
+        : "none"
+  const unreadLine =
+    usage === "failed"
+      ? "Could not load"
+      : usage === "loading"
+        ? "Loading"
+        : undefined
+  const words = windowWords(period, window)
+  // A cell with no graphic still holds the row, or its figure drops off the
+  // baseline of the cells beside it that have one.
+  const hasGraphicRow = spend.series.length > 1 || Boolean(sessionCount)
+  const slot = (graphic: ReactNode) =>
+    graphic ?? (hasGraphicRow ? <span aria-hidden /> : undefined)
+  const isFirstRun =
+    !keys.isLoading && !hasActiveKey(keys.data ?? [], now) && sessionCount === 0
+  const mySessions = {
+    ...sessionsSearchFor(window),
+    ...(me ? { user_id: me } : {}),
+  }
+
+  const limitReads = [readState(members), readState(defaults)]
+  const limitRead: ReadState =
+    owner.isFailed || limitReads.includes("failed")
+      ? "failed"
+      : limitReads.includes("loading")
+        ? "loading"
+        : "ready"
+  const limit =
+    limitRead === "ready"
+      ? memberLimit({
+          member: rosterRowOf(members.data ?? [], me),
+          workspaceId,
+          defaults: defaults.data ?? [],
+          now,
+        })
+      : undefined
+  // The note weighs the per-person figure against its own period, not the
+  // window shown. Read from the refused requests themselves: the summary
+  // counts every 403 alike, and only a spend refusal says the limit is why.
+  // An unseen limit is only said to have refused the member over the window.
+  const periodStart = limit?.kind === "default" ? limit.periodStart : ""
+  const refusedSince = limit?.kind === "unseen" ? window.start : periodStart
+  const refused = useRefusedUsage(
+    { userIds: me ? [me] : undefined, workspaceId },
+    refusedSince,
+    100,
+    me !== undefined && refusedSince !== "",
+  )
+  const spendRefusals =
+    limit?.kind === "default"
+      ? (refused.data ?? []).filter((row) => isSpendRefusal(row.error_message))
+          .length
+      : 0
+  const periodSpend = useUsageSummary(
+    {
+      workspace_id: workspaceId,
+      user_id: me ? [me] : undefined,
+      start_date: periodStart,
+    },
+    "day",
+    [],
+    me !== undefined && spendRefusals > 0,
+    "organization",
+  )
+
+  const unseen = unseenLimitLines({
+    limit,
+    // A caller with no billing id has no refused requests to read.
+    refusals:
+      me === undefined || refused.isError
+        ? []
+        : refused.data?.map((row) => row.error_message),
+    words,
+    workspace,
+  })
+  // An unseen limit reads as loading until its lines are known.
+  const shown = limit?.kind === "unseen" && !unseen ? undefined : limit
+
+  const limitWords =
+    shown === undefined
+      ? limitRead === "failed"
+        ? "Could not load"
+        : "Loading"
+      : shown.kind === "own"
+        ? isMobile
+          ? `in ${workspace}, set by an owner or admin`
+          : "Set by an owner or admin"
+        : shown.kind === "default"
+          ? `${shown.per ? `${shown.per}, ` : ""}for everyone in ${workspace}`
+          : (unseen?.subline ?? "")
+
+  const limitNote =
+    (periodSpend.data && !periodSpend.isPlaceholderData
+      ? lowerLimitNote({
+          limit,
+          since: periodSpend.data.start_date,
+          spent: periodSpend.data.totals.cost,
+          spendRefusals,
+        })
+      : undefined) ?? unseen?.note
+
+  const open = (row: SpendRow) => {
+    if (!row.filterKey) return
+    void navigate({
+      to: "/sessions",
+      search: {
+        ...mySessions,
+        [cut.value === "keys" ? "api_key_id" : "model"]: row.filterKey,
+      },
+    })
+  }
+
+  const menuFor = (row: SpendRow): RowMenuAction[] => {
+    const actions: RowMenuAction[] = []
+    if (row.filterKey && hasSessions) {
+      actions.push({
+        id: "open",
+        label: "See its sessions",
+        hint: `What ran ${words}`,
+        icon: FiLayers,
+        run: () => open(row),
+      })
+    }
+    if (cut.value === "keys" && canOpenInKeys(row.filterKey, keys.data ?? [])) {
+      actions.push({
+        id: "keys",
+        label: "Open in API keys",
+        hint: canCreateKey
+          ? "Disable, edit or regenerate it"
+          : "See its details",
+        icon: FiKey,
+        run: () => void navigate({ to: "/keys" }),
+      })
+    }
+    return actions
+  }
+
+  const columns: DataTableColumn<SpendRow>[] = [
+    {
+      id: "name",
+      header: cut.noun,
+      isRowHeader: true,
+      cell: (row) =>
+        cut.value === "models" ? (
+          <span className="block md:max-w-[13rem] truncate text-mono-caption text-foreground">
+            {row.name}
+          </span>
+        ) : (
+          <span className="flex min-w-0 md:max-w-[13rem] flex-col">
+            <span className="truncate text-foreground">{row.name}</span>
+            {row.detail ? (
+              <span className="truncate text-caption">{row.detail}</span>
+            ) : null}
+          </span>
+        ),
+    },
+    {
+      id: "spend",
+      header: "Spent",
+      align: "end",
+      cell: (row) => (
+        <span className="text-mono-caption text-foreground">
+          {formatUsd(row.cost)}
+          {isMobile && total > 0 ? (
+            <span className="text-muted">
+              {" · "}
+              {wholePct(row.cost / total)}
+            </span>
+          ) : null}
+        </span>
+      ),
+    },
+    {
+      id: "tokens",
+      header: "Tokens",
+      align: "end",
+      cell: (row) => (
+        <span className="text-mono-caption text-foreground">
+          {formatTokens(row.tokens)}
+        </span>
+      ),
+    },
+    ...(cut.value === "keys"
+      ? ([
+          {
+            id: "model",
+            header: "Top model",
+            cell: (row) => (
+              <TopModelCell
+                state={topModels.get(row.id)}
+                rowCost={row.cost}
+                isInline={isMobile}
+              />
+            ),
+          },
+        ] satisfies DataTableColumn<SpendRow>[])
+      : []),
+    ...(isMobile
+      ? []
+      : ([
+          {
+            id: "share",
+            header: "Share",
+            cell: (row) => (
+              <ShareCell share={total > 0 ? row.cost / total : undefined} />
+            ),
+          },
+        ] satisfies DataTableColumn<SpendRow>[])),
+    {
+      id: "actions",
+      header: <span className="sr-only">Actions</span>,
+      align: "end",
+      cell: (row) => (
+        <RowMenu label={`Actions for ${row.name}`} actions={menuFor(row)} />
+      ),
+    },
+  ]
+
+  const nothingYet =
+    period === "month"
+      ? "Nothing spent this month yet."
+      : `Nothing spent in the last ${window.days} days.`
+
+  return (
+    <div className="flex flex-col gap-6">
+      <PageIntro
+        title="Home"
+        action={
+          <Segmented
+            label="Window"
+            size="md"
+            options={PERIODS}
+            value={period}
+            onChange={(next) => patch({ period: next })}
+            isFullWidth={isMobile}
+          />
+        }
+      />
+      {notice}
+      <ErrorBanner error={spend.error} />
+      {/* Needs attention (`MemberAttentionBand`) is held back until it reads
+          each row's scope right; only the first-run band shows here. */}
+      {isFirstRun ? (
+        <MemberFirstRun workspace={workspace} canCreateKey={canCreateKey} />
+      ) : null}
+      <KpiStrip isEmpty={false} columns={4}>
+        <KpiCell
+          label={
+            period === "month"
+              ? "Spent this month"
+              : `Spent, ${window.days} days`
+          }
+          value={spend.totals ? formatUsd(total) : "—"}
+          delta={
+            delta !== null ? (
+              <TrendChip
+                fraction={delta}
+                polarity="neutral"
+                caption={`vs prior ${window.days} days`}
+              />
+            ) : undefined
+          }
+          subline={
+            delta !== null
+              ? undefined
+              : !spend.totals
+                ? unreadLine
+                : requestCount > 0
+                  ? `${formatNumber(requestCount)} requests`
+                  : "No requests yet"
+          }
+          graphic={slot(
+            spend.series.length > 1 ? (
+              <Sparkline
+                values={spend.series.map((point) => point.cost)}
+                ariaLabel="Your spend per day over the window"
+                height={40}
+              />
+            ) : undefined,
+          )}
+        />
+        <KpiCell
+          label={memberLimitLabel(limit, workspace)}
+          value={
+            shown === undefined
+              ? "—"
+              : shown.kind === "unseen"
+                ? "Not shown"
+                : formatUsd(shown.amount)
+          }
+          subline={isMobile ? undefined : limitWords}
+          // A half-width cell would cut the subline short, and it is where the
+          // workspace is named now that the label is not: on a phone the
+          // words and the hint wrap together, under the figure, as far apart
+          // as the desktop cell sets them (18px between the two lines, there
+          // by the graphic row centering the hint).
+          delta={
+            isMobile && limitWords ? (
+              <span className="flex flex-col gap-4.5 whitespace-normal">
+                <span>{limitWords}</span>
+                {limitNote ? <span>{limitNote}</span> : null}
+              </span>
+            ) : undefined
+          }
+          // On its own line, wrapping: the subline truncates, and this is the
+          // sentence that must be read whole.
+          graphic={
+            limitNote && !isMobile ? (
+              <span className="whitespace-normal text-caption">
+                {limitNote}
+              </span>
+            ) : (
+              slot(undefined)
+            )
+          }
+        />
+        <KpiCell
+          label={
+            period === "month"
+              ? "Tokens this month"
+              : `Tokens, ${window.days} days`
+          }
+          value={
+            spend.totals
+              ? formatTokens(billedTokenTotal(spend.totals) ?? 0)
+              : "—"
+          }
+          subline={
+            !spend.totals
+              ? unreadLine
+              : cacheTotals.input > 0
+                ? `${formatPct(cacheTotals.read / cacheTotals.input)} of input from cache`
+                : requestCount > 0
+                  ? `${formatNumber(requestCount)} requests`
+                  : "No requests yet"
+          }
+          graphic={slot(
+            spend.series.length > 1 ? (
+              <Sparkline
+                values={spend.series.map(
+                  (point) => point.input_tokens + point.output_tokens,
+                )}
+                ariaLabel="Your billed tokens per day over the window"
+                height={40}
+              />
+            ) : undefined,
+          )}
+        />
+        {hasSessions ? (
+          <KpiCell
+            label="Your sessions"
+            value={
+              sessionCount === undefined ? "—" : formatNumber(sessionCount)
+            }
+            subline={
+              sessionsFailed
+                ? "Could not load"
+                : period === "month"
+                  ? `this month in ${workspace}`
+                  : `${window.days} days in ${workspace}`
+            }
+            graphic={slot(
+              sessionCount ? (
+                <Link
+                  to="/sessions"
+                  search={mySessions}
+                  className="self-start text-xs text-link underline max-sm:inline-flex max-sm:min-h-11 max-sm:items-center"
+                >
+                  See your sessions
+                </Link>
+              ) : undefined,
+            )}
+          />
+        ) : (
+          // The owner's Home has this cell, so the strip keeps its four.
+          <KpiCell
+            label="Failures"
+            value={
+              spend.totals
+                ? formatPct(
+                    requestCount > 0
+                      ? spend.totals.error_count / requestCount
+                      : 0,
+                  )
+                : "—"
+            }
+            subline={
+              spend.totals
+                ? `${formatNumber(spend.totals.error_count)} failed requests`
+                : unreadLine
+            }
+            graphic={slot(undefined)}
+          />
+        )}
+      </KpiStrip>
+      <section aria-label="Where it went" className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+          <h2 className="text-title">Where it went</h2>
+          <Segmented
+            label="Break down by"
+            size="md"
+            options={CUTS}
+            value={cut.value}
+            onChange={(next) => patch({ by: next })}
+            isFullWidth={isMobile}
+          />
+        </div>
+        <TableScrollFrame className="otari-breakdown otari-spend-table flex flex-col gap-2">
+          <DataTable
+            key={cut.value}
+            ariaLabel={`Your spend by ${cut.label.toLowerCase()}`}
+            columns={columns}
+            rows={rows}
+            getRowKey={(row) => row.id}
+            isLoading={spend.isLoading}
+            emptyContent={
+              <EmptyMessage>
+                {usage === "failed"
+                  ? "Could not load"
+                  : canCreateKey
+                    ? `${nothingYet} Each ${cut.value === "keys" ? "key you make" : "model you use"} shows up here with what it spent.`
+                    : nothingYet}
+              </EmptyMessage>
+            }
+            onRowAction={
+              hasSessions
+                ? (key) => {
+                    const row = rows.find((one) => one.id === key)
+                    if (row) open(row)
+                  }
+                : undefined
+            }
+            rowClassName={(row) =>
+              row.filterKey ? undefined : "cursor-default!"
+            }
+            mobileLayout="cards"
+          />
+        </TableScrollFrame>
+        {rows.length > 0 &&
+        (hasSessions || (cut.value === "keys" && canCreateKey)) ? (
+          <p className="text-sm text-muted">
+            {hasSessions ? "A row opens its sessions." : null}
+            {cut.value === "keys" && canCreateKey ? (
+              <>
+                {hasSessions ? " " : null}
+                Keys that spent nothing {words} are on{" "}
+                <Link to="/keys" className="text-link underline">
+                  API keys
+                </Link>
+                .
+              </>
+            ) : null}
+          </p>
+        ) : null}
+      </section>
+    </div>
+  )
+}

@@ -1032,7 +1032,7 @@ priced (see [Who is shown which models](models.md#who-is-shown-which-models)).
 The gateway logs a warning per unpriced model at most once an hour per
 process. Operators see a dashboard banner naming the models that served
 unpriced traffic in the selected workspace in the last 24 hours, linked to
-those requests on the Overview, where each can be priced.
+those requests in the Requests view of Sessions, where each can be priced.
 
 ### Keeping the defaults current
 

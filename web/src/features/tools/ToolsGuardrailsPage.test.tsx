@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { screen, waitFor } from "@testing-library/react"
+import { act, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -170,7 +170,7 @@ function renderWithClient(ui: ReactElement) {
       <QueryClientProvider client={client}>{ui}</QueryClientProvider>
     </DeploymentProvider>,
     { url: "/tools" },
-  )
+  ).then((result) => ({ ...result, client }))
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -281,25 +281,34 @@ describe("ToolsGuardrailsPage", () => {
     ).toHaveAttribute("href", "/organization/guardrails")
   })
 
-  it("renders every service's groups and effective values", async () => {
+  it("renders a service's group and effective values", async () => {
     mockApi()
-    await renderWithClient(<ToolsGuardrailsPage />)
+    await renderWithClient(<ToolsGuardrailsPage only="guardrails" />)
 
-    // The combined page names the service in each group heading, since two
-    // groups called "Backend" would not say which one they configure.
     expect(
-      await screen.findByRole("heading", { name: "Code execution · Sandbox" }),
+      await screen.findByRole("heading", { name: "Backend" }),
     ).toBeInTheDocument()
+    expect(screen.getByLabelText(GUARDRAILS_URL)).toHaveValue(
+      "http://guardrails:8000",
+    )
+    // Another service's group is not on this view.
     expect(
-      await screen.findByRole("heading", { name: "Guardrails · Backend" }),
+      screen.queryByRole("heading", { name: "Sandbox" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("renders the sandbox group on its own view", async () => {
+    mockApi()
+    await renderWithClient(<ToolsGuardrailsPage only="sandbox" />)
+
+    expect(
+      await screen.findByRole("heading", { name: "Sandbox" }),
     ).toBeInTheDocument()
+    expect(screen.queryByLabelText(GUARDRAILS_URL)).not.toBeInTheDocument()
     // Web search's settings are on the deployment's Web search page.
     expect(
       screen.queryByRole("heading", { name: /Search backend/ }),
     ).not.toBeInTheDocument()
-    expect(screen.getByLabelText(GUARDRAILS_URL)).toHaveValue(
-      "http://guardrails:8000",
-    )
   })
 
   it("leaves the page column to the shell rather than capping its own", async () => {
@@ -319,7 +328,7 @@ describe("ToolsGuardrailsPage", () => {
   it("saves a URL change on blur, with no Save button on the page", async () => {
     const fetchMock = mockApi()
     const user = userEvent.setup()
-    await renderWithClient(<ToolsGuardrailsPage />)
+    await renderWithClient(<ToolsGuardrailsPage only="guardrails" />)
     await screen.findByLabelText(GUARDRAILS_URL)
 
     const input = screen.getByLabelText(GUARDRAILS_URL)
@@ -354,7 +363,7 @@ describe("ToolsGuardrailsPage", () => {
   it("does not save a field that was focused and left unchanged", async () => {
     const fetchMock = mockApi()
     const user = userEvent.setup()
-    await renderWithClient(<ToolsGuardrailsPage />)
+    await renderWithClient(<ToolsGuardrailsPage only="guardrails" />)
     await screen.findByLabelText(GUARDRAILS_URL)
 
     await user.click(screen.getByLabelText(GUARDRAILS_URL))
@@ -366,7 +375,7 @@ describe("ToolsGuardrailsPage", () => {
   it("clears a URL to null when emptied", async () => {
     const fetchMock = mockApi()
     const user = userEvent.setup()
-    await renderWithClient(<ToolsGuardrailsPage />)
+    await renderWithClient(<ToolsGuardrailsPage only="guardrails" />)
     await screen.findByLabelText(GUARDRAILS_URL)
 
     await user.clear(screen.getByLabelText(GUARDRAILS_URL))
@@ -419,7 +428,7 @@ describe("ToolsGuardrailsPage", () => {
   it("tests a URL for reachability and announces the result", async () => {
     mockApi({ testBody: { ok: true, reason: "reachable (HTTP 200)" } })
     const user = userEvent.setup()
-    await renderWithClient(<ToolsGuardrailsPage />)
+    await renderWithClient(<ToolsGuardrailsPage only="guardrails" />)
     await screen.findByLabelText(GUARDRAILS_URL)
 
     await user.click(screen.getByRole("button", { name: "Test guardrails" }))
@@ -433,9 +442,8 @@ describe("ToolsGuardrailsPage", () => {
     // the URL it tested.
     const user = userEvent.setup()
     let guardrailsUrl = "http://guardrails:8000"
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
-      const method = (init?.method ?? "GET").toUpperCase()
       if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse(organizationContext())
       }
@@ -443,9 +451,6 @@ describe("ToolsGuardrailsPage", () => {
         return jsonResponse({ ok: true, reason: "reachable (HTTP 200)" })
       }
       if (url.includes(`${API_ROOT}/tool-settings`)) {
-        // Saving the sandbox URL surfaces a server-changed guardrails_url, so
-        // the next GET re-seeds that field without an operator keystroke.
-        if (method === "PATCH") guardrailsUrl = "http://guardrails:9999"
         return jsonResponse({
           fields: FIELDS.map((f) =>
             f.key === "guardrails_url" ? { ...f, value: guardrailsUrl } : f,
@@ -454,14 +459,17 @@ describe("ToolsGuardrailsPage", () => {
       }
       return jsonResponse([])
     })
-    await renderWithClient(<ToolsGuardrailsPage />)
+    const { client } = await renderWithClient(
+      <ToolsGuardrailsPage only="guardrails" />,
+    )
     await screen.findByLabelText(GUARDRAILS_URL)
 
     await user.click(screen.getByRole("button", { name: "Test guardrails" }))
     expect(await screen.findByText("reachable (HTTP 200)")).toBeInTheDocument()
 
-    await user.type(screen.getByLabelText(SANDBOX_URL), "http://sandbox:8080")
-    await user.tab()
+    // A refetch brings a different URL, as another tab's save would.
+    guardrailsUrl = "http://guardrails:9999"
+    await act(() => client.invalidateQueries())
 
     await waitFor(() =>
       expect(screen.getByLabelText(GUARDRAILS_URL)).toHaveValue(
@@ -477,7 +485,7 @@ describe("ToolsGuardrailsPage", () => {
       patchDetail: "URL must use http or https, got no scheme.",
     })
     const user = userEvent.setup()
-    await renderWithClient(<ToolsGuardrailsPage />)
+    await renderWithClient(<ToolsGuardrailsPage only="sandbox" />)
     await screen.findByLabelText(SANDBOX_URL)
 
     const input = screen.getByLabelText(SANDBOX_URL)
@@ -553,29 +561,33 @@ describe("ToolsGuardrailsPage", () => {
       ],
     }
     mockApi({ settings: withExtra })
-    await renderWithClient(<ToolsGuardrailsPage />)
+    await renderWithClient(<ToolsGuardrailsPage only="sandbox" />)
 
     expect(
       await screen.findByLabelText("sandbox_timeout_s"),
     ).toBeInTheDocument()
   })
 
-  it("lays every row out with the label left and the control in a shared lane", async () => {
-    // One row shape for every field type, which is what keeps the controls in a
-    // column down a group whether or not a row also carries a Test button.
-    mockApi()
-    await renderWithClient(<ToolsGuardrailsPage />)
-    await screen.findByLabelText(GUARDRAILS_URL)
+  it.each([
+    ["sandbox", SANDBOX_URL],
+    ["guardrails", GUARDRAILS_URL],
+  ] as const)(
+    "lays every %s row out with the label left and the control in a shared lane",
+    async (only, label) => {
+      // One row shape for every field type, which is what keeps the controls in a
+      // column down a group whether or not a row also carries a Test button.
+      mockApi()
+      await renderWithClient(<ToolsGuardrailsPage only={only} />)
+      await screen.findByLabelText(label)
 
-    for (const label of [SANDBOX_URL, GUARDRAILS_URL]) {
       const field = screen.getByLabelText(label)
       // No field carries a width of its own: the lane owns the width, and a
       // second one at the call site is how the column got a different left
       // edge on every row.
       expect(field.className).not.toMatch(/\b(md|lg):w-\[/)
       expect(field.closest(`div[class*="${CONTROL_LANE}"]`)).not.toBeNull()
-    }
-  })
+    },
+  )
 })
 
 describe("ToolsGuardrailsPage tool status", () => {
@@ -585,9 +597,8 @@ describe("ToolsGuardrailsPage tool status", () => {
 
   it("heads each tool's settings with whether the deployment can run it", async () => {
     mockApi()
-    await renderWithClient(<ToolsGuardrailsPage />)
+    await renderWithClient(<ToolsGuardrailsPage only="web_search" />)
 
-    // One row per gateway-run tool; guardrails declares none, so it has no row.
     expect(
       await screen.findByRole("button", { name: /otari_web_search/ }),
     ).toBeInTheDocument()
@@ -595,12 +606,31 @@ describe("ToolsGuardrailsPage tool status", () => {
       screen.getByRole("button", { name: /otari_web_fetch/ }),
     ).toBeInTheDocument()
     expect(
-      screen.getByRole("button", { name: /otari_code_execution/ }),
+      screen.queryByRole("button", { name: /otari_code_execution/ }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("heads the sandbox's settings with the code-execution tool and why it is off", async () => {
+    mockApi()
+    await renderWithClient(<ToolsGuardrailsPage only="sandbox" />)
+
+    expect(
+      await screen.findByRole("button", { name: /otari_code_execution/ }),
     ).toBeInTheDocument()
     // The code-execution fixture has available: false.
     expect(
       screen.getByRole("button", { name: /Unavailable · no sandbox/ }),
     ).toBeInTheDocument()
+  })
+
+  it("heads the guardrails service with no tool row, since it declares none", async () => {
+    mockApi()
+    await renderWithClient(<ToolsGuardrailsPage only="guardrails" />)
+
+    await screen.findByLabelText(GUARDRAILS_URL)
+    expect(
+      screen.queryByRole("button", { name: /otari_/ }),
+    ).not.toBeInTheDocument()
   })
 
   it("opens to the type a client declares and the reason a tool is unavailable", async () => {
@@ -783,21 +813,19 @@ describe("ToolsGuardrailsPage tool status", () => {
     ).toHaveAttribute("href", "/admin/web-search")
   })
 
-  it("carries the MCP servers section on the combined page and no narrowed one", async () => {
-    // The card has no service above it to be filtered with, so the `only` guard
-    // is the only thing keeping it off the per-service views.
+  it("carries no MCP servers section on any service view", async () => {
+    // The MCP servers have a tab of their own; none of these views owns them.
     mockApi()
-    const { unmount } = await renderWithClient(<ToolsGuardrailsPage />)
-    expect(
-      await screen.findByRole("heading", { name: "MCP servers" }),
-    ).toBeInTheDocument()
-    unmount()
-
-    await renderWithClient(<ToolsGuardrailsPage only="sandbox" />)
-    await screen.findByLabelText(SANDBOX_URL)
-    expect(
-      screen.queryByRole("heading", { name: "MCP servers" }),
-    ).not.toBeInTheDocument()
+    for (const only of ["web_search", "sandbox", "guardrails"] as const) {
+      const { unmount } = await renderWithClient(
+        <ToolsGuardrailsPage only={only} />,
+      )
+      await screen.findAllByText(/Setup|Backend|Sandbox|otari_|Web search/)
+      expect(
+        screen.queryByRole("heading", { name: "MCP servers" }),
+      ).not.toBeInTheDocument()
+      unmount()
+    }
   })
 })
 
@@ -818,15 +846,20 @@ describe("ToolsGuardrailsPage by caller role", () => {
         role: "member",
       }),
     })
-    await renderWithClient(<ToolsGuardrailsPage />)
-
-    // The two workspace cards, in the state a harness with no selected
-    // workspace lands in; their real forms are covered by their own suites.
+    // The workspace cards, in the state a harness with no selected workspace
+    // lands in; their real forms are covered by their own suites.
+    const { unmount } = await renderWithClient(
+      <ToolsGuardrailsPage only="web_search" />,
+    )
     expect(
       await screen.findByText(/Per-workspace web access is set on a workspace/),
     ).toBeInTheDocument()
+    unmount()
+    await renderWithClient(<ToolsGuardrailsPage only="sandbox" />)
     expect(
-      screen.getByText(/Per-workspace code execution is set on a workspace/),
+      await screen.findByText(
+        /Per-workspace code execution is set on a workspace/,
+      ),
     ).toBeInTheDocument()
 
     // No deployment search-tools group, whose read is still operator-only.

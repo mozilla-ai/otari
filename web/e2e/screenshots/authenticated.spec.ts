@@ -2,7 +2,13 @@ import { expect, type Page } from "@playwright/test"
 
 import { API_ROOT } from "@/shared/api/client"
 
-import { authHeaders, expectOk, gotoRoute, login } from "../helpers"
+import {
+  authHeaders,
+  expectOk,
+  gotoRoute,
+  login,
+  pressRowAction,
+} from "../helpers"
 import { captureScreenshot, test } from "./fixtures"
 
 /**
@@ -106,16 +112,6 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     name: "model-detail",
     // The page's own title, so a 404 does not pass for a model.
     heading: /parity/i,
-  },
-  { route: "/providers", name: "providers", heading: /providers/i },
-  {
-    // The organization's own openai key is the one provider the seeded
-    // deployment serves, so the page draws it.
-    route: "/providers/openai",
-    name: "provider-detail",
-    // The provider's own title, so a 404 ("Provider not found") does not pass.
-    heading: /openai/i,
-    prepare: ensureOrgProviderKey,
   },
   { route: "/routing", name: "routing", heading: /routing/i },
   { route: "/keys", name: "keys", heading: /keys/i },
@@ -343,9 +339,7 @@ test.describe("organization rail", () => {
     await login(page)
     await ensureOrgProviderKey(page)
     await gotoRoute(page, "/organization/provider-keys")
-    const models = page.getByRole("button", { name: /^Models on / }).first()
-    await expect(models).toBeVisible()
-    await models.click()
+    await pressRowAction(page.getByRole("main"), /^Models on /)
     await expect(
       page.getByRole("heading", { name: /^Models on / }),
     ).toBeVisible()
@@ -361,15 +355,6 @@ test.describe("organization rail", () => {
       page.getByRole("heading", { name: /^guardrails$/i }).first(),
     ).toBeVisible()
     await captureScreenshot(page, "organization-guardrails")
-  })
-
-  test("organization usage", async ({ page }) => {
-    await login(page)
-    await gotoRoute(page, "/organization/usage")
-    await expect(
-      page.getByRole("heading", { name: /organization usage/i }).first(),
-    ).toBeVisible()
-    await captureScreenshot(page, "organization-usage")
   })
 })
 
@@ -545,7 +530,11 @@ test.describe("the keys page's one-time secret", () => {
     // The heading's own action, not the empty state's: the seeded database has
     // rows, so there is no empty state, and this is the placement the whole
     // change is about.
-    await page.getByRole("button", { name: "Create key" }).first().click()
+    await page
+      .getByRole("main")
+      .getByRole("button", { name: "Create API key" })
+      .first()
+      .click()
     const dialog = page.getByRole("dialog")
     await expect(dialog).toBeVisible()
     await expect(dialog.getByLabel("Name")).toBeVisible()
@@ -560,10 +549,14 @@ test.describe("the keys page's one-time secret", () => {
     await expect(
       page.getByRole("heading", { name: /keys/i }).first(),
     ).toBeVisible()
-    await page.getByRole("button", { name: "Create key" }).first().click()
+    await page
+      .getByRole("main")
+      .getByRole("button", { name: "Create API key" })
+      .first()
+      .click()
     const dialog = page.getByRole("dialog")
     await dialog.getByRole("button", { name: "More options" }).click()
-    await expect(dialog.getByText("Restrict this key's models")).toBeVisible()
+    await expect(dialog.getByText("Restrict this key’s models")).toBeVisible()
     await captureScreenshot(page, "keys-create-dialog-advanced")
   })
 })

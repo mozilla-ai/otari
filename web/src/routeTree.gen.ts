@@ -22,7 +22,6 @@ import { Route as MembersRouteImport } from './routes/members'
 import { Route as ModelsRouteImport } from './routes/models'
 import { Route as OrganizationRouteImport } from './routes/organization'
 import { Route as PlaygroundRouteImport } from './routes/playground'
-import { Route as ProvidersRouteImport } from './routes/providers'
 import { Route as RoutingRouteImport } from './routes/routing'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ToolsRouteImport } from './routes/tools'
@@ -48,10 +47,12 @@ import { Route as OrganizationProviderKeysRouteImport } from './routes/organizat
 import { Route as OrganizationSsoRouteImport } from './routes/organization.sso'
 import { Route as OrganizationUsageRouteImport } from './routes/organization.usage'
 import { Route as OrganizationWebSearchKeysRouteImport } from './routes/organization.web-search-keys'
-import { Route as ProvidersIndexRouteImport } from './routes/providers.index'
-import { Route as ProvidersNameRouteImport } from './routes/providers.$name'
+import { Route as PeopleIndexRouteImport } from './routes/people.index'
+import { Route as PeoplePersonIdRouteImport } from './routes/people.$personId'
 import { Route as RoutingIndexRouteImport } from './routes/routing.index'
 import { Route as RoutingNameRouteImport } from './routes/routing.$name'
+import { Route as RulesIndexRouteImport } from './routes/rules.index'
+import { Route as RulesRuleIdRouteImport } from './routes/rules.$ruleId'
 import { Route as ToolsIndexRouteImport } from './routes/tools.index'
 import { Route as ToolsCodeExecutionRouteImport } from './routes/tools.code-execution'
 import { Route as ToolsGuardrailsRouteImport } from './routes/tools.guardrails'
@@ -126,11 +127,6 @@ const OrganizationRoute = OrganizationRouteImport.update({
 const PlaygroundRoute = PlaygroundRouteImport.update({
   id: '/playground',
   path: '/playground',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ProvidersRoute = ProvidersRouteImport.update({
-  id: '/providers',
-  path: '/providers',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RoutingRoute = RoutingRouteImport.update({
@@ -260,15 +256,15 @@ const OrganizationWebSearchKeysRoute =
     path: '/web-search-keys',
     getParentRoute: () => OrganizationRoute,
   } as any)
-const ProvidersIndexRoute = ProvidersIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => ProvidersRoute,
+const PeopleIndexRoute = PeopleIndexRouteImport.update({
+  id: '/people/',
+  path: '/people/',
+  getParentRoute: () => rootRouteImport,
 } as any)
-const ProvidersNameRoute = ProvidersNameRouteImport.update({
-  id: '/$name',
-  path: '/$name',
-  getParentRoute: () => ProvidersRoute,
+const PeoplePersonIdRoute = PeoplePersonIdRouteImport.update({
+  id: '/people/$personId',
+  path: '/people/$personId',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const RoutingIndexRoute = RoutingIndexRouteImport.update({
   id: '/',
@@ -279,6 +275,16 @@ const RoutingNameRoute = RoutingNameRouteImport.update({
   id: '/$name',
   path: '/$name',
   getParentRoute: () => RoutingRoute,
+} as any)
+const RulesIndexRoute = RulesIndexRouteImport.update({
+  id: '/rules/',
+  path: '/rules/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RulesRuleIdRoute = RulesRuleIdRouteImport.update({
+  id: '/rules/$ruleId',
+  path: '/rules/$ruleId',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ToolsIndexRoute = ToolsIndexRouteImport.update({
   id: '/',
@@ -352,7 +358,6 @@ export interface FileRoutesByFullPath {
   '/models': typeof ModelsRouteWithChildren
   '/organization': typeof OrganizationRouteWithChildren
   '/playground': typeof PlaygroundRoute
-  '/providers': typeof ProvidersRouteWithChildren
   '/routing': typeof RoutingRouteWithChildren
   '/settings': typeof SettingsRoute
   '/tools': typeof ToolsRouteWithChildren
@@ -375,8 +380,9 @@ export interface FileRoutesByFullPath {
   '/organization/sso': typeof OrganizationSsoRoute
   '/organization/usage': typeof OrganizationUsageRoute
   '/organization/web-search-keys': typeof OrganizationWebSearchKeysRoute
-  '/providers/$name': typeof ProvidersNameRoute
+  '/people/$personId': typeof PeoplePersonIdRoute
   '/routing/$name': typeof RoutingNameRoute
+  '/rules/$ruleId': typeof RulesRuleIdRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
   '/tools/mcp-servers': typeof ToolsMcpServersRouteWithChildren
@@ -384,8 +390,9 @@ export interface FileRoutesByFullPath {
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/models/': typeof ModelsIndexRoute
   '/organization/': typeof OrganizationIndexRoute
-  '/providers/': typeof ProvidersIndexRoute
+  '/people/': typeof PeopleIndexRoute
   '/routing/': typeof RoutingIndexRoute
+  '/rules/': typeof RulesIndexRoute
   '/tools/': typeof ToolsIndexRoute
   '/workspaces/': typeof WorkspacesIndexRoute
   '/admin/hosted-providers/$name': typeof AdminHostedProvidersNameRoute
@@ -422,8 +429,9 @@ export interface FileRoutesByTo {
   '/organization/sso': typeof OrganizationSsoRoute
   '/organization/usage': typeof OrganizationUsageRoute
   '/organization/web-search-keys': typeof OrganizationWebSearchKeysRoute
-  '/providers/$name': typeof ProvidersNameRoute
+  '/people/$personId': typeof PeoplePersonIdRoute
   '/routing/$name': typeof RoutingNameRoute
+  '/rules/$ruleId': typeof RulesRuleIdRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
   '/tools/web-search': typeof ToolsWebSearchRoute
@@ -431,8 +439,9 @@ export interface FileRoutesByTo {
   '/': typeof OverviewIndexRoute
   '/models': typeof ModelsIndexRoute
   '/organization': typeof OrganizationIndexRoute
-  '/providers': typeof ProvidersIndexRoute
+  '/people': typeof PeopleIndexRoute
   '/routing': typeof RoutingIndexRoute
+  '/rules': typeof RulesIndexRoute
   '/tools': typeof ToolsIndexRoute
   '/workspaces': typeof WorkspacesIndexRoute
   '/admin/hosted-providers/$name': typeof AdminHostedProvidersNameRoute
@@ -455,7 +464,6 @@ export interface FileRoutesById {
   '/models': typeof ModelsRouteWithChildren
   '/organization': typeof OrganizationRouteWithChildren
   '/playground': typeof PlaygroundRoute
-  '/providers': typeof ProvidersRouteWithChildren
   '/routing': typeof RoutingRouteWithChildren
   '/settings': typeof SettingsRoute
   '/tools': typeof ToolsRouteWithChildren
@@ -478,8 +486,9 @@ export interface FileRoutesById {
   '/organization/sso': typeof OrganizationSsoRoute
   '/organization/usage': typeof OrganizationUsageRoute
   '/organization/web-search-keys': typeof OrganizationWebSearchKeysRoute
-  '/providers/$name': typeof ProvidersNameRoute
+  '/people/$personId': typeof PeoplePersonIdRoute
   '/routing/$name': typeof RoutingNameRoute
+  '/rules/$ruleId': typeof RulesRuleIdRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
   '/tools/mcp-servers': typeof ToolsMcpServersRouteWithChildren
@@ -488,8 +497,9 @@ export interface FileRoutesById {
   '/_overview/': typeof OverviewIndexRoute
   '/models/': typeof ModelsIndexRoute
   '/organization/': typeof OrganizationIndexRoute
-  '/providers/': typeof ProvidersIndexRoute
+  '/people/': typeof PeopleIndexRoute
   '/routing/': typeof RoutingIndexRoute
+  '/rules/': typeof RulesIndexRoute
   '/tools/': typeof ToolsIndexRoute
   '/workspaces/': typeof WorkspacesIndexRoute
   '/admin/hosted-providers/$name': typeof AdminHostedProvidersNameRoute
@@ -513,7 +523,6 @@ export interface FileRouteTypes {
     | '/models'
     | '/organization'
     | '/playground'
-    | '/providers'
     | '/routing'
     | '/settings'
     | '/tools'
@@ -536,8 +545,9 @@ export interface FileRouteTypes {
     | '/organization/sso'
     | '/organization/usage'
     | '/organization/web-search-keys'
-    | '/providers/$name'
+    | '/people/$personId'
     | '/routing/$name'
+    | '/rules/$ruleId'
     | '/tools/code-execution'
     | '/tools/guardrails'
     | '/tools/mcp-servers'
@@ -545,8 +555,9 @@ export interface FileRouteTypes {
     | '/workspaces/$workspaceId'
     | '/models/'
     | '/organization/'
-    | '/providers/'
+    | '/people/'
     | '/routing/'
+    | '/rules/'
     | '/tools/'
     | '/workspaces/'
     | '/admin/hosted-providers/$name'
@@ -583,8 +594,9 @@ export interface FileRouteTypes {
     | '/organization/sso'
     | '/organization/usage'
     | '/organization/web-search-keys'
-    | '/providers/$name'
+    | '/people/$personId'
     | '/routing/$name'
+    | '/rules/$ruleId'
     | '/tools/code-execution'
     | '/tools/guardrails'
     | '/tools/web-search'
@@ -592,8 +604,9 @@ export interface FileRouteTypes {
     | '/'
     | '/models'
     | '/organization'
-    | '/providers'
+    | '/people'
     | '/routing'
+    | '/rules'
     | '/tools'
     | '/workspaces'
     | '/admin/hosted-providers/$name'
@@ -615,7 +628,6 @@ export interface FileRouteTypes {
     | '/models'
     | '/organization'
     | '/playground'
-    | '/providers'
     | '/routing'
     | '/settings'
     | '/tools'
@@ -638,8 +650,9 @@ export interface FileRouteTypes {
     | '/organization/sso'
     | '/organization/usage'
     | '/organization/web-search-keys'
-    | '/providers/$name'
+    | '/people/$personId'
     | '/routing/$name'
+    | '/rules/$ruleId'
     | '/tools/code-execution'
     | '/tools/guardrails'
     | '/tools/mcp-servers'
@@ -648,8 +661,9 @@ export interface FileRouteTypes {
     | '/_overview/'
     | '/models/'
     | '/organization/'
-    | '/providers/'
+    | '/people/'
     | '/routing/'
+    | '/rules/'
     | '/tools/'
     | '/workspaces/'
     | '/admin/hosted-providers/$name'
@@ -672,7 +686,6 @@ export interface RootRouteChildren {
   ModelsRoute: typeof ModelsRouteWithChildren
   OrganizationRoute: typeof OrganizationRouteWithChildren
   PlaygroundRoute: typeof PlaygroundRoute
-  ProvidersRoute: typeof ProvidersRouteWithChildren
   RoutingRoute: typeof RoutingRouteWithChildren
   SettingsRoute: typeof SettingsRoute
   ToolsRoute: typeof ToolsRouteWithChildren
@@ -684,6 +697,10 @@ export interface RootRouteChildren {
   AdminRecommenderRoute: typeof AdminRecommenderRoute
   AdminWebSearchRoute: typeof AdminWebSearchRoute
   McpConnectionsCallbackRoute: typeof McpConnectionsCallbackRoute
+  PeoplePersonIdRoute: typeof PeoplePersonIdRoute
+  RulesRuleIdRoute: typeof RulesRuleIdRoute
+  PeopleIndexRoute: typeof PeopleIndexRoute
+  RulesIndexRoute: typeof RulesIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -777,13 +794,6 @@ declare module '@tanstack/react-router' {
       path: '/playground'
       fullPath: '/playground'
       preLoaderRoute: typeof PlaygroundRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/providers': {
-      id: '/providers'
-      path: '/providers'
-      fullPath: '/providers'
-      preLoaderRoute: typeof ProvidersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/routing': {
@@ -961,19 +971,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrganizationWebSearchKeysRouteImport
       parentRoute: typeof OrganizationRoute
     }
-    '/providers/': {
-      id: '/providers/'
-      path: '/'
-      fullPath: '/providers/'
-      preLoaderRoute: typeof ProvidersIndexRouteImport
-      parentRoute: typeof ProvidersRoute
+    '/people/': {
+      id: '/people/'
+      path: '/people'
+      fullPath: '/people/'
+      preLoaderRoute: typeof PeopleIndexRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/providers/$name': {
-      id: '/providers/$name'
-      path: '/$name'
-      fullPath: '/providers/$name'
-      preLoaderRoute: typeof ProvidersNameRouteImport
-      parentRoute: typeof ProvidersRoute
+    '/people/$personId': {
+      id: '/people/$personId'
+      path: '/people/$personId'
+      fullPath: '/people/$personId'
+      preLoaderRoute: typeof PeoplePersonIdRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/routing/': {
       id: '/routing/'
@@ -988,6 +998,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/routing/$name'
       preLoaderRoute: typeof RoutingNameRouteImport
       parentRoute: typeof RoutingRoute
+    }
+    '/rules/': {
+      id: '/rules/'
+      path: '/rules'
+      fullPath: '/rules/'
+      preLoaderRoute: typeof RulesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/rules/$ruleId': {
+      id: '/rules/$ruleId'
+      path: '/rules/$ruleId'
+      fullPath: '/rules/$ruleId'
+      preLoaderRoute: typeof RulesRuleIdRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/tools/': {
       id: '/tools/'
@@ -1126,20 +1150,6 @@ const OrganizationRouteWithChildren = OrganizationRoute._addFileChildren(
   OrganizationRouteChildren,
 )
 
-interface ProvidersRouteChildren {
-  ProvidersNameRoute: typeof ProvidersNameRoute
-  ProvidersIndexRoute: typeof ProvidersIndexRoute
-}
-
-const ProvidersRouteChildren: ProvidersRouteChildren = {
-  ProvidersNameRoute: ProvidersNameRoute,
-  ProvidersIndexRoute: ProvidersIndexRoute,
-}
-
-const ProvidersRouteWithChildren = ProvidersRoute._addFileChildren(
-  ProvidersRouteChildren,
-)
-
 interface RoutingRouteChildren {
   RoutingNameRoute: typeof RoutingNameRoute
   RoutingIndexRoute: typeof RoutingIndexRoute
@@ -1226,7 +1236,6 @@ const rootRouteChildren: RootRouteChildren = {
   ModelsRoute: ModelsRouteWithChildren,
   OrganizationRoute: OrganizationRouteWithChildren,
   PlaygroundRoute: PlaygroundRoute,
-  ProvidersRoute: ProvidersRouteWithChildren,
   RoutingRoute: RoutingRouteWithChildren,
   SettingsRoute: SettingsRoute,
   ToolsRoute: ToolsRouteWithChildren,
@@ -1238,6 +1247,10 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRecommenderRoute: AdminRecommenderRoute,
   AdminWebSearchRoute: AdminWebSearchRoute,
   McpConnectionsCallbackRoute: McpConnectionsCallbackRoute,
+  PeoplePersonIdRoute: PeoplePersonIdRoute,
+  RulesRuleIdRoute: RulesRuleIdRoute,
+  PeopleIndexRoute: PeopleIndexRoute,
+  RulesIndexRoute: RulesIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

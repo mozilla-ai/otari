@@ -63,11 +63,7 @@ export function PendingInvitationsPage() {
 
   return (
     <div className="flex flex-col">
-      <PageIntro title="Invitations">
-        Organizations that have invited you. Accepting adds the membership to
-        your organization switcher; declining ends the invitation and stops its
-        emailed link from working.
-      </PageIntro>
+      <PageIntro title="Invitations" />
 
       {/* `&& !data` on both guards, so a refetch behind an accept keeps the
           list on screen instead of collapsing to a spinner and back. */}

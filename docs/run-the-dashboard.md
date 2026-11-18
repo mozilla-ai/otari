@@ -91,8 +91,8 @@ Which sign-in forms the page offers is described in
 4. Test the provider connection, or declare model IDs for a backend with no
    model-listing endpoint.
 5. Create an API key from the setup guide or the **Keys** page.
-6. Send a request and check that it appears on the **Overview**, in
-   **Requests**.
+6. Send a request and check that it appears in **Sessions**, in its
+   **Requests** view.
 
 The [Self-hosted quickstart](self-hosted-quickstart.md) has a complete request
 example.
@@ -106,8 +106,8 @@ someone else:
 1. Make sure their account is active, has a password and an email address it
    verified by email (not one only vouched for by a passed-on link), and is not
    blocked.
-2. On **Accounts**, click **Make operator** on their row if they are not an
-   operator yet.
+2. On **Accounts**, choose **Make operator** from the menu on their row if they
+   are not an operator yet.
 3. Signed in as the bootstrap operator, click **Make bootstrap operator** on
    their row, enter your current password, and confirm. An account with no
    password sets one in **Account settings** first, or uses the command below.
@@ -181,13 +181,13 @@ a call on an organization's own key; `otari:web_search` also prices a search on
 the legacy settings. A tool uses its own rate, or one stored under its old
 `<provider>:<name>` model key; with neither, it is unpriced.
 
-On a tool's row:
+Open a tool's row for its endpoint, enrichment and options. The menu at the
+end of the row offers:
 
-- Open the row for its endpoint, enrichment and options.
-- The star makes it the default the model uses.
-- **Test** runs one search or fetch and reports how many hits or characters
-  came back.
-- **Edit** and **Remove** change a stored tool. A `config.yml` tool,
+- **Make default**, which makes it the default the model uses.
+- **Test**, which runs one search or fetch and reports how many hits or
+  characters came back.
+- **Edit** and **Remove**, which change a stored tool. A `config.yml` tool,
   `builtin_fetch` and the two `otari:` rates take only a price; a rate from
   `price_per_call` is changed in `config.yml`.
 
@@ -217,7 +217,7 @@ it offers the key it already issued, named by its last characters, instead of
 a new one: **Use it** keeps that key, and **Replace it** issues a new one and
 the old key stops working.
 
-Set `activation_guide: false` to turn off the Overview's
+Set `activation_guide: false` to turn off the dashboard's
 setup guide for the deployment.
 
 ## Signup and terms

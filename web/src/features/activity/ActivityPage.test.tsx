@@ -573,7 +573,7 @@ describe("ActivityPage", () => {
     mockApi({ rows: [], total: 0 })
     renderPage(<ActivityPage />)
 
-    // The default 24h preset is not itself a filter (mirroring UsagePage), so an
+    // The default 24h preset is not itself a filter, so an
     // empty result on a brand-new gateway reads as "never used", not "filtered".
     expect(
       await screen.findByText("No requests recorded yet."),

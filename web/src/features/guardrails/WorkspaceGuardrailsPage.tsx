@@ -1,5 +1,3 @@
-import { Link } from "@tanstack/react-router"
-
 import type { OrganizationGuardrail } from "@/client"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
@@ -91,18 +89,7 @@ export function WorkspaceGuardrailsPage() {
 
   return (
     <div className="flex flex-col">
-      <PageIntro title="Guardrails">
-        The guardrails your organization runs on what models read and answer in{" "}
-        {selected?.name ?? "this workspace"}. An owner or admin changes them on
-        the organization&rsquo;s{" "}
-        <Link
-          to="/organization/guardrails"
-          className="font-medium text-link hover:text-link-hover"
-        >
-          Guardrails
-        </Link>{" "}
-        page.
-      </PageIntro>
+      <PageIntro title="Guardrails" />
 
       <ErrorBanner
         error={context.error ?? definitions.error ?? mandates.error}

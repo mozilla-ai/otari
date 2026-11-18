@@ -153,7 +153,7 @@ export function AgentRecommendersPage() {
         <RowActionRow>
           <RowAction
             icon={FiEdit2}
-            label="Edit"
+            label="Edit…"
             ariaLabel={`Edit ${row.model}`}
             onPress={() => {
               setIsAdding(false)
@@ -162,7 +162,8 @@ export function AgentRecommendersPage() {
           />
           <RowAction
             icon={FiTrash2}
-            label="Remove"
+            label="Remove…"
+            isDestructive
             ariaLabel={`Remove ${row.model}`}
             onPress={() => setPendingRemoveId(row.id)}
           />
@@ -180,11 +181,7 @@ export function AgentRecommendersPage() {
             Add router
           </Button>
         }
-      >
-        When a coding agent using Otari starts a subagent, the router switched
-        on here picks the model it runs on. Each recommendation is billed to the
-        caller: its tokens at the rates set here.
-      </PageIntro>
+      />
       {noneOn ? (
         <InfoBanner>
           No router is switched on, so no model is picked. The plugin starts

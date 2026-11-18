@@ -26,6 +26,7 @@ import {
   ORGANIZATION_MEMBERS,
   ORGANIZATION_SPEND_CEILINGS,
   SCOPED_BUDGETS,
+  WORKSPACES,
 } from "@/shared/api/queryKeys"
 
 const fetchAllBudgets = () => fetchAllRows<Budget>("/budgets")
@@ -298,10 +299,10 @@ export function useOrganizationSpendCeilings(
   })
 }
 
-// Both keys move together on every write. A budget's figure is read *through*
-// the budget by every ceiling naming it, so changing one changes what those
-// ceilings report; and creating a ceiling changes a budget's `ceiling_count`,
-// which is what makes its delete refuse.
+// Every key moves together on every write. A budget's figure is read *through*
+// the budget by every ceiling and workspace default naming it, so changing one
+// changes what those report; and creating a ceiling changes a budget's
+// `ceiling_count`, which is what makes its delete refuse.
 function invalidateOrganizationSpend(
   queryClient: ReturnType<typeof useQueryClient>,
 ) {
@@ -309,6 +310,25 @@ function invalidateOrganizationSpend(
   void queryClient.invalidateQueries({
     queryKey: [ORGANIZATION_SPEND_CEILINGS],
   })
+  // Each workspace's defaults, `[WORKSPACES, id, "budget-defaults"]`, and
+  // nothing else under that head.
+  void queryClient.invalidateQueries({
+    predicate: ({ queryKey }) =>
+      queryKey[0] === WORKSPACES && queryKey[2] === "budget-defaults",
+  })
+}
+
+/**
+ * Reads the spend ceilings again after a write elsewhere that makes them on
+ * the server: a new workspace default caps everyone already in the workspace.
+ * The roster carries each placement's ceiling too.
+ */
+export function useRefreshSpendCeilings() {
+  const queryClient = useQueryClient()
+  return () => {
+    invalidateOrganizationSpend(queryClient)
+    void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
+  }
 }
 
 export function useCreateOrganizationBudget() {
@@ -340,7 +360,12 @@ export function useUpdateOrganizationBudget() {
         `/organizations/me/budgets/${encodeURIComponent(id)}`,
         { method: "PATCH", body: JSON.stringify(body) },
       ),
-    onSuccess: () => invalidateOrganizationSpend(queryClient),
+    onSuccess: () => {
+      invalidateOrganizationSpend(queryClient)
+      // The roster's placement ceilings carry their budget's figure, which a
+      // workspace default's change moves for everyone it reached.
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
+    },
   })
 }
 
@@ -483,4 +508,34 @@ export function useMemberCeilingWriter(surface: "deployment" | "organization") {
     update: update.mutateAsync,
     remove: remove.mutateAsync,
   }
+}
+
+/**
+ * Every spend ceiling in the organization, not a page of them: a limit, the
+ * team budget and a rule must not drop off the screen because the
+ * organization has more ceilings than one page holds. Owners and admins only;
+ * anyone else is refused the read, so their callers pass `enabled: false`.
+ *
+ * Keyed and gated as `useOrganizationSpendCeilings` is, so a write that
+ * invalidates the ceilings refreshes this too, and a switch to an
+ * organization where the caller is a member does not make the read.
+ */
+export function useAllSpendCeilings(enabled = true) {
+  const queryClient = useQueryClient()
+  const context = useOrganizationContext().data
+  const organizationId = context?.organization?.id ?? null
+  return useQuery({
+    queryKey: [ORGANIZATION_SPEND_CEILINGS, organizationId, "all"],
+    queryFn: () =>
+      fetchAllPaged<OrganizationSpendCeiling>(
+        "/organizations/me/spend-ceilings",
+      ),
+    staleTime: 60_000,
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === organizationId ? previous : undefined,
+    enabled: () =>
+      enabled &&
+      queryClient.getQueryData<OrganizationContext>(ORGANIZATION_CONTEXT) ===
+        context,
+  })
 }

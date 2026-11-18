@@ -37,4 +37,14 @@ describe("MemberAvatar", () => {
     const { container } = render(<MemberAvatar userId={ADA} face={null} />)
     expect(drawnFace(container)).toBe(defaultFaceFor(ADA))
   })
+
+  it("draws a table cell's 20px face, and nothing for a row with no user", () => {
+    const { container } = render(
+      <MemberAvatar userId={ADA} face={42} isCompact />,
+    )
+    expect(drawnFace(container)).toBe(42)
+    expect(container.firstElementChild).toHaveClass("size-5")
+    const empty = render(<MemberAvatar userId={null} face={null} isCompact />)
+    expect(empty.container).toBeEmptyDOMElement()
+  })
 })

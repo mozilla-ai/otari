@@ -205,7 +205,7 @@ export function ProviderModelsPanel({
             <RowAction
               onPress={() => onEditRate(row)}
               icon={FiEdit2}
-              label="Set your rate"
+              label="Set your rate…"
               ariaLabel={`Set your rate for ${row.model}`}
             />
             {/* Only where there is one to clear. Removing the organization's own
@@ -231,7 +231,7 @@ export function ProviderModelsPanel({
             <RowAction
               onPress={() => setPendingWithdraw(row)}
               icon={FiSlash}
-              label="Stop offering"
+              label="Stop offering…"
               ariaLabel={`Stop offering ${row.model}`}
             />
           </RowActionRow>

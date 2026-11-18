@@ -16,6 +16,11 @@ import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap, organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
+import {
+  findRowMenuItem,
+  getRowMenuItem,
+  pressRowAction,
+} from "@/tests/rowMenu"
 
 function testUser(user_id: string): User {
   return {
@@ -186,7 +191,7 @@ describe("BudgetsPage", () => {
     renderPage(<BudgetsPage />)
 
     const row = (await screen.findByText("team-free-tier")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    await pressRowAction(user, "Edit…", row)
     // A dialog title is a noun phrase, so the budget it names is in the
     // description rather than folded into the title.
     const dialog = await screen.findByRole("dialog")
@@ -508,7 +513,7 @@ describe("BudgetsPage", () => {
     renderPage(<BudgetsPage />)
 
     const rowA = await screen.findByRole("row", { name: /alpha/ })
-    await user.click(within(rowA).getByRole("button", { name: "Edit" }))
+    await pressRowAction(user, "Edit…", rowA)
     await user.clear(screen.getByLabelText("Name (optional)"))
     await user.type(screen.getByLabelText("Name (optional)"), "beta")
     await user.click(
@@ -523,7 +528,7 @@ describe("BudgetsPage", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
 
     const rowB = screen.getByRole("row", { name: /beta/ })
-    await user.click(within(rowB).getByRole("button", { name: "Edit" }))
+    await pressRowAction(user, "Edit…", rowB)
     expect(await screen.findByRole("dialog")).toBeInTheDocument()
     expect(screen.queryByText(/A budget named beta already exists/)).toBeNull()
   })
@@ -815,7 +820,7 @@ describe("BudgetsPage", () => {
     renderPage(<BudgetsPage />)
 
     const row = (await screen.findByText("11111111")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    await pressRowAction(user, "Edit…", row)
     const field = await screen.findByLabelText("Every N days")
     expect(field).toHaveValue("14")
 
@@ -864,7 +869,7 @@ describe("BudgetsPage", () => {
     renderPage(<BudgetsPage />)
 
     const row = (await screen.findByText("11111111")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    await pressRowAction(user, "Edit…", row)
 
     expect(
       await screen.findByRole("button", { name: "Save" }),
@@ -880,7 +885,7 @@ describe("BudgetsPage", () => {
     renderPage(<BudgetsPage />)
 
     const row = (await screen.findByText("11111111")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    await pressRowAction(user, "Edit…", row)
     expect(await screen.findByLabelText("Token limit")).toBeVisible()
     expect(screen.getByLabelText("Token limit")).toHaveValue("5000")
 
@@ -917,7 +922,7 @@ describe("BudgetsPage", () => {
     const row = (await screen.findByText("11111111")).closest("tr")!
     expect(within(row).getByText("Organization")).toBeInTheDocument()
 
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    await pressRowAction(user, "Edit…", row)
     expect(
       await screen.findByRole("button", { name: "Save" }),
     ).toBeInTheDocument()
@@ -933,7 +938,7 @@ describe("BudgetsPage", () => {
     const row = (await screen.findByText("11111111")).closest("tr")!
     expect(within(row).queryByText("Organization")).toBeNull()
 
-    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    await pressRowAction(user, "Edit…", row)
     expect(
       await screen.findByText("Assign to people (optional)"),
     ).toBeInTheDocument()
@@ -957,7 +962,7 @@ describe("BudgetsPage", () => {
     renderPage(<BudgetsPage />)
 
     const row = (await screen.findByText("11111111")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "History" }))
+    await pressRowAction(user, "History", row)
 
     expect(await screen.findByText("alice")).toBeInTheDocument()
     expect(screen.getByText("$12.50")).toBeInTheDocument()
@@ -986,7 +991,7 @@ describe("BudgetsPage", () => {
     renderPage(<BudgetsPage />)
 
     const row = (await screen.findByText("11111111")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "History" }))
+    await pressRowAction(user, "History", row)
 
     const named = await screen.findByText("Alice Example")
     expect(named).toHaveAttribute("title", uuid)
@@ -999,7 +1004,7 @@ describe("BudgetsPage", () => {
     renderPage(<BudgetsPage />)
 
     const row = (await screen.findByText("11111111")).closest("tr")!
-    await user.click(within(row).getByRole("button", { name: "Delete" }))
+    await pressRowAction(user, "Delete…", row)
     const dialog = await screen.findByRole("alertdialog")
     expect(within(dialog).getByText(/lose this limit/)).toBeInTheDocument()
     await user.click(
@@ -1016,6 +1021,7 @@ describe("BudgetsPage", () => {
   })
 
   it("withholds Delete on a budget an organization owns", async () => {
+    const user = userEvent.setup()
     // /api/v1/budgets refuses to delete a tenant's budget.
     mockApi({
       budgets: [
@@ -1030,14 +1036,10 @@ describe("BudgetsPage", () => {
     renderPage(<BudgetsPage />)
 
     const tenantRow = (await screen.findByText("Tenant cap")).closest("tr")!
-    expect(
-      within(tenantRow).queryByRole("button", { name: "Delete" }),
-    ).toBeNull()
+    expect(await findRowMenuItem(user, "Delete…", tenantRow)).toBeNull()
 
     const ownRow = screen.getByText("Team monthly").closest("tr")!
-    expect(
-      within(ownRow).getByRole("button", { name: "Delete" }),
-    ).toBeInTheDocument()
+    expect(await getRowMenuItem(user, "Delete…", ownRow)).toBeInTheDocument()
     expect(screen.queryByRole("checkbox")).toBeNull()
   })
 

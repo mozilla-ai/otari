@@ -1,6 +1,7 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { FiArchive, FiTrash2 } from "react-icons/fi"
+import { Fragment } from "react"
+import { FiArchive, FiEdit2, FiTrash2, FiUserMinus } from "react-icons/fi"
 import { describe, expect, it, vi } from "vitest"
 import { ConfirmRowAction } from "@/design-system/actions/ConfirmRowAction"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
@@ -178,20 +179,136 @@ describe("RowAction wearing a glyph", () => {
   })
 })
 
+const LAST_OWNER = "This is the last active owner. Promote someone else first."
+
 describe("RowActionRow", () => {
-  it("sets the 16px pitch the actions repeat within", () => {
-    // Named here because it is the constraint on anything that later grows the
-    // actions' hit area: a target may not exceed the pitch it repeats within,
-    // and this is where that pitch is decided.
+  it("puts the row's actions behind one three-dot trigger", async () => {
+    const user = userEvent.setup()
+    const onEdit = vi.fn()
     render(
       <RowActionRow>
-        <RowAction onPress={() => undefined}>Edit</RowAction>
+        <RowAction
+          icon={FiEdit2}
+          label="Edit…"
+          ariaLabel="Edit Anthropic"
+          onPress={onEdit}
+        />
       </RowActionRow>,
     )
-    const lane = screen.getByRole("button", { name: "Edit" })
-      .parentElement as HTMLElement
-    expect([...lane.classList]).toContain("gap-4")
-    expect([...lane.classList]).toContain("justify-end")
+    expect(screen.queryByRole("button", { name: "Edit Anthropic" })).toBeNull()
+    await user.click(screen.getByRole("button", { name: "Row actions" }))
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Edit Anthropic" }),
+    )
+    expect(onEdit).toHaveBeenCalledOnce()
+  })
+
+  it("shows each item's label as written, in the danger ink only when destructive", async () => {
+    const user = userEvent.setup()
+    render(
+      <RowActionRow>
+        <RowAction icon={FiEdit2} label="Edit…" onPress={vi.fn()} />
+        <RowAction
+          icon={FiTrash2}
+          label="Delete…"
+          isDestructive
+          onPress={vi.fn()}
+        />
+      </RowActionRow>,
+    )
+    await user.click(screen.getByRole("button", { name: "Row actions" }))
+    const edit = await screen.findByRole("menuitem", { name: "Edit…" })
+    const remove = screen.getByRole("menuitem", { name: "Delete…" })
+    expect(edit.className).not.toContain("otari-row-menu-danger")
+    expect(remove.className).toContain("otari-row-menu-danger")
+  })
+
+  it("puts a refused item's reason in the trigger's name, fragments included", () => {
+    render(
+      <RowActionRow>
+        <Fragment key="lane">
+          <RowAction icon={FiEdit2} label="Edit…" onPress={vi.fn()} />
+          <RowAction
+            icon={FiUserMinus}
+            label="Remove…"
+            ariaLabel={LAST_OWNER}
+            isDisabled
+            onPress={vi.fn()}
+          />
+        </Fragment>
+      </RowActionRow>,
+    )
+    expect(
+      screen.getByRole("button", {
+        name: `Row actions. Remove… ${LAST_OWNER}`,
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it("keeps a note that is not an action on the row, beside the trigger", () => {
+    render(
+      <RowActionRow>
+        <span>Default</span>
+        <RowAction icon={FiEdit2} label="Edit…" onPress={vi.fn()} />
+      </RowActionRow>,
+    )
+    expect(screen.getByText("Default")).toBeVisible()
+    expect(screen.getByRole("button", { name: "Row actions" })).toBeVisible()
+  })
+
+  it("draws no trigger for a lane with nothing to do", () => {
+    render(
+      <RowActionRow>
+        <span>Default</span>
+      </RowActionRow>,
+    )
+    expect(screen.queryByRole("button")).toBeNull()
+  })
+
+  it("puts a destructive two-step action in the danger ink, with a danger confirm", async () => {
+    const user = userEvent.setup()
+    render(
+      <RowActionRow>
+        <ConfirmRowAction
+          icon={FiTrash2}
+          label="Remove the limit"
+          confirmLabel="Remove"
+          isDestructive
+          onConfirm={vi.fn()}
+        />
+      </RowActionRow>,
+    )
+    await user.click(screen.getByRole("button", { name: /^Row actions/ }))
+    const item = await screen.findByRole("menuitem", {
+      name: "Remove the limit…",
+    })
+    expect(item.className).toContain("otari-row-menu-danger")
+    await user.click(item)
+    const dialog = await screen.findByRole("alertdialog")
+    expect(
+      within(dialog).getByRole("button", { name: "Remove" }).className,
+    ).toContain("danger")
+  })
+
+  it("asks a two-step action's question in a dialog once the menu has closed", async () => {
+    const user = userEvent.setup()
+    const onConfirm = vi.fn()
+    render(
+      <RowActionRow>
+        <ConfirmRowAction
+          icon={FiArchive}
+          label="Archive"
+          confirmLabel="Archive"
+          onConfirm={onConfirm}
+        />
+      </RowActionRow>,
+    )
+    await user.click(screen.getByRole("button", { name: "Row actions" }))
+    await user.click(await screen.findByRole("menuitem", { name: "Archive…" }))
+    expect(onConfirm).not.toHaveBeenCalled()
+    const dialog = await screen.findByRole("alertdialog", { name: "Archive?" })
+    await user.click(within(dialog).getByRole("button", { name: "Archive" }))
+    expect(onConfirm).toHaveBeenCalledOnce()
   })
 })
 

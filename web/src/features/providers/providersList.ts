@@ -32,13 +32,6 @@ export function providersListFromUrl(
   }
 }
 
-export function providersListToUrl({
-  page,
-  pageSize,
-}: ProvidersListState): Record<ProvidersUrlKey, number> {
-  return { page, size: pageSize }
-}
-
 export function catalogPage({
   page,
   pageSize,

@@ -8,6 +8,7 @@ import { Field } from "@/design-system/forms/Field"
 import { FieldAction } from "@/design-system/forms/FieldAction"
 import { ControlField } from "@/design-system/forms/FieldMessages"
 import { GuardrailReadsField } from "@/features/guardrails/GuardrailReadsField"
+import { useIsOrganizationManager } from "@/features/organization/access"
 
 import { ModeToggle } from "./ModeToggle"
 
@@ -30,6 +31,9 @@ export function GuardrailsSection({
   /** Whether a guardrails service exists to run them. */
   isConfigured: boolean
 }) {
+  // The Guardrails page is an organization owner's or admin's, so nobody else
+  // is pointed at it.
+  const isManager = useIsOrganizationManager()
   const update = (index: number, patch: Partial<PolicyGuardrail>) =>
     onChange(
       guardrails.map((guardrail, i) =>
@@ -53,7 +57,11 @@ export function GuardrailsSection({
           {guardrails.length > 0
             ? "No guardrails service is configured, so these cannot run, and with the service set to block every request through this policy is refused. "
             : "No guardrails service is configured, so there would be nothing to call. "}
-          Set one up on the <GuardrailsPageLink />.
+          {isManager ? (
+            <>
+              Set one up on the <GuardrailsPageLink />.
+            </>
+          ) : null}
         </p>
       )}
       {guardrails.map((guardrail, index) => (
@@ -122,7 +130,7 @@ export function GuardrailsSection({
           Add a guardrail
         </Button>
       </div>
-      {isConfigured ? (
+      {isConfigured && isManager ? (
         <p className="text-caption">
           Profiles and the service are managed on the <GuardrailsPageLink />.
         </p>

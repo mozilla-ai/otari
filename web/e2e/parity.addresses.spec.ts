@@ -9,12 +9,13 @@ import { login, pageHeading } from "./helpers"
 test.describe("dashboard addresses", () => {
   test("a reload of a page's own path opens that page", async ({ page }) => {
     await login(page)
+    // Routing is a tab of Rules, which titles the page.
     await page.goto("/routing")
-    await expect(pageHeading(page, "Routing")).toBeVisible()
+    await expect(pageHeading(page, "Rules")).toBeVisible()
 
     await page.reload()
     await expect(page).toHaveURL(/\/routing$/)
-    await expect(pageHeading(page, "Routing")).toBeVisible()
+    await expect(pageHeading(page, "Rules")).toBeVisible()
   })
 
   test("a link from before path routing lands on the path it named", async ({
@@ -26,7 +27,7 @@ test.describe("dashboard addresses", () => {
     // A page load: the script runs ahead of the bundle.
     await page.goto("/#/routing")
     await expect(page).toHaveURL(/:\d+\/routing$/)
-    await expect(pageHeading(page, "Routing")).toBeVisible()
+    await expect(pageHeading(page, "Rules")).toBeVisible()
   })
 
   test("an old link opened in a tab already on the dashboard moves too", async ({
@@ -37,7 +38,7 @@ test.describe("dashboard addresses", () => {
     // nothing, which is the case the script's `hashchange` listener covers.
     await page.goto("/#/routing")
     await expect(page).toHaveURL(/:\d+\/routing$/)
-    await expect(pageHeading(page, "Routing")).toBeVisible()
+    await expect(pageHeading(page, "Rules")).toBeVisible()
   })
 
   test("an API path a browser opens stays the API's answer", async ({

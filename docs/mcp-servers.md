@@ -203,7 +203,7 @@ from the server's page: select the workspace in the top-left corner, go to
 
 The default policy applies to every key that no rule names.
 
-1. Under **Access rules**, find the **Default policy** row and click **Edit**.
+1. Under **Access rules**, open the menu on the **Default policy** row and choose **Edit**.
 2. Under **Action**, choose **Allow any tool** to keep the server open, or
    **Deny** to close it to every key you do not name in a rule. **Read tools
    only** and **Allow specific tools…** open part of it, as in a rule.

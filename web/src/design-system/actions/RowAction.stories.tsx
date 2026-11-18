@@ -12,28 +12,22 @@ import {
 import { RowAction, RowActionRow } from "./RowAction"
 
 /**
- * An action in a table row, and the trailing lane those sit in.
+ * An action in a table row, and the lane those sit in.
  *
- * Not a `Button`, and that is the rule rather than a preference: a row of
- * buttons in every table row turns a dense table into a grid of boxes, so a row
- * action wears a bare glyph. `RowActionRow` is the lane; reach for it rather
- * than `deprecated/RowActions`, which is a near-duplicate with a tighter gap
- * still on one call site.
+ * Inside a `RowActionRow`, which is where a table's actions go, each one is an
+ * item of the row's three-dot menu: its glyph and its label, written as the
+ * menu shows it (`Edit…` when it asks before acting). `isDestructive` puts a
+ * hard-to-undo action in the danger ink, after a rule; the menu is closed until
+ * somebody opens it, so that red is never on the row at rest.
  *
- * The glyph form is what a lane should reach for, and the word is not lost to
- * it: `label` is the accessible name and the tooltip both, so it is still read
- * aloud, still matched by speech input, and still spelled out on hover. The
- * text form is left for what no glyph says, which in practice is the armed half
- * of a confirm.
+ * Alone, a row action is still a bare glyph with a 44px target, for the rare
+ * control on a row that is not one of its actions.
  *
- * The danger prop paints the danger ink, and `src/styles/dotRamp.test.ts`
- * enforces something about it worth knowing: a row action never paints danger
- * *at rest*. A table whose every row carries a red "Delete" reads as a table of
- * problems, so the hue is spent on the armed step of a confirm instead, which
- * is why `ConfirmRowAction` supplies it and a call site here does not.
- *
- * That gate reads raw lines rather than parsed JSX, so naming the prop in prose
- * here would land this file on its offender list. Hence "the danger prop".
+ * The danger prop paints the danger ink on a standalone action, and
+ * `src/styles/dotRamp.test.ts` enforces something about it worth knowing: it is
+ * the armed step of a confirm, never the resting state. That gate reads raw
+ * lines rather than parsed JSX, so naming the prop in prose here would land this
+ * file on its offender list. Hence "the danger prop".
  */
 const meta = {
   title: "Design system/Actions/RowAction",
@@ -48,39 +42,34 @@ type Story = StoryObj<typeof meta>
 
 export const Default: Story = {}
 
-/** The lane, which is how they always appear. */
+/** A row's actions, which is how they always appear: one three-dot menu. */
 export const InALane: Story = {
   render: () => (
     <RowActionRow>
       <RowAction icon={FiClock} label="History" onPress={() => {}} />
-      <RowAction icon={FiEdit2} label="Edit" onPress={() => {}} />
-      <RowAction icon={FiRefreshCw} label="Regenerate" onPress={() => {}} />
-      <RowAction icon={FiTrash2} label="Delete" onPress={() => {}} />
+      <RowAction icon={FiEdit2} label="Edit…" onPress={() => {}} />
+      <RowAction icon={FiRefreshCw} label="Regenerate…" onPress={() => {}} />
+      <RowAction
+        icon={FiTrash2}
+        label="Delete…"
+        isDestructive
+        onPress={() => {}}
+      />
     </RowActionRow>
   ),
 }
 
-/**
- * The words the glyphs replaced, for comparison: four of them per row, re-read
- * on every row, against four shapes that are recognized rather than read
- * (otari-ai#2123). The text form is still what a confirm's armed half uses,
- * which is why it is public rather than retired.
- */
-export const TheTextFormItReplaced: Story = {
+/** A note that is not an action stays on the row, beside the trigger. */
+export const WithANote: Story = {
   render: () => (
     <RowActionRow>
-      <RowAction onPress={() => {}}>History</RowAction>
-      <RowAction onPress={() => {}}>Edit</RowAction>
-      <RowAction onPress={() => {}}>Regenerate</RowAction>
-      <RowAction onPress={() => {}}>Delete</RowAction>
+      <span className="text-caption">Default</span>
+      <RowAction icon={FiEdit2} label="Edit…" onPress={() => {}} />
     </RowActionRow>
   ),
 }
 
-/**
- * A pair whose glyph carries the state as well as the act, which is what a
- * label alone cannot do: the lane says at a glance which rows are blocked.
- */
+/** A toggle carries its state in its label and its glyph. */
 export const AToggledAction: Story = {
   render: () => {
     const [blocked, setBlocked] = useState(false)
@@ -97,20 +86,20 @@ export const AToggledAction: Story = {
 }
 
 /**
- * `isDisabled` with an `ariaLabel` carrying the reason. That pairing is the
- * point: a disabled control takes no focus, so a tooltip reaches a pointer and
- * nothing else, and the reason has to be in the accessible name.
+ * `isDisabled` with an `ariaLabel` carrying the reason. The item shows the
+ * reason under its label, and the trigger's own name carries it too: a disabled
+ * item takes no focus, so a keyboard would otherwise never reach it.
  */
 export const DisabledWithReason: Story = {
   render: () => (
     <RowActionRow>
-      <RowAction icon={FiEdit2} label="Edit" onPress={() => {}} />
+      <RowAction icon={FiEdit2} label="Edit…" onPress={() => {}} />
       <RowAction
         icon={FiSlash}
         label="Revoke"
         onPress={() => {}}
         isDisabled
-        ariaLabel="Revoke this key. Unavailable: an organization owner manages it."
+        ariaLabel="An organization owner manages this key."
       />
     </RowActionRow>
   ),
@@ -131,7 +120,7 @@ export const InContext: Story = {
           <RowActionRow>
             <RowAction
               icon={FiEdit2}
-              label="Edit"
+              label="Edit…"
               ariaLabel={`Edit ${name}`}
               onPress={() => {}}
             />
@@ -139,6 +128,7 @@ export const InContext: Story = {
               icon={FiSlash}
               label="Revoke"
               ariaLabel={`Revoke ${name}`}
+              isDestructive
               onPress={() => {}}
             />
           </RowActionRow>
@@ -157,20 +147,18 @@ export const InContext: Story = {
  * than at rest. The prop below is bound to an armed flag, which is the only
  * shape that gate allows and also the only one worth showing.
  *
- * `ConfirmRowAction` is what a row should actually reach for. This story exists
- * because the prop is public, so the catalog owes a picture of what it does.
+ * Standalone, because inside a `RowActionRow` the action is a menu item and
+ * `ConfirmRowAction` asks in a dialog instead. This story exists because the
+ * prop is public, so the catalog owes a picture of what it does.
  */
 export const ArmedPaintsDanger: Story = {
   render: () => {
     const [armed, setArmed] = useState(false)
     return (
       <div className="flex flex-col gap-3">
-        <RowActionRow>
-          <RowAction icon={FiEdit2} label="Edit" onPress={() => {}} />
-          <RowAction isDanger={armed} onPress={() => setArmed(!armed)}>
-            {armed ? "Confirm remove" : "Remove"}
-          </RowAction>
-        </RowActionRow>
+        <RowAction isDanger={armed} onPress={() => setArmed(!armed)}>
+          {armed ? "Confirm remove" : "Remove"}
+        </RowAction>
         <p className="text-caption">
           Press Remove: the ink is neutral at rest and danger once armed.
         </p>
