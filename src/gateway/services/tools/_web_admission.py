@@ -77,7 +77,7 @@ WEB_FETCH_NOT_ENABLED_DETAIL = (
     "otari_web_fetch tool requested but web fetch is disabled on this gateway. "
     "Set OTARI_WEB_FETCH_ENABLED=true on the gateway, or remove otari_web_fetch from `tools`."
 )
-WEB_FETCH_DECLARATION_INVALID_DETAIL = "otari_web_fetch declarations may contain only the type field"
+WEB_FETCH_DECLARATION_INVALID_DETAIL = "otari_web_fetch declarations contain an unsupported field"
 WEB_SEARCH_DECLARATION_INVALID_DETAIL = "otari_web_search declarations contain an unsupported field"
 WEB_TOOL_DUPLICATE_DETAIL = "A managed web tool may be declared at most once"
 WEB_TOOL_RESERVED_NAME_DETAIL = "A caller-defined function uses a reserved managed web-tool name"
@@ -137,6 +137,8 @@ _WEB_SEARCH_DECLARATION_FIELDS = frozenset(
     }
 )
 
+_WEB_FETCH_DECLARATION_FIELDS = frozenset({"type", "max_uses", "allowed_domains", "blocked_domains"})
+
 
 def _function_tool_name(entry: dict[str, Any]) -> str | None:
     function = entry.get("function")
@@ -177,7 +179,7 @@ def validate_web_declarations(tools: list[dict[str, Any]] | None, *, claims: Web
     if search_count > 1 or fetch_count > 1:
         raise WebToolDeclarationError(WEB_TOOL_DUPLICATE_DETAIL)
     for entry in entries:
-        if entry.get("type") == "otari_web_fetch" and set(entry) != {"type"}:
+        if entry.get("type") == "otari_web_fetch" and not set(entry) <= _WEB_FETCH_DECLARATION_FIELDS:
             raise WebToolDeclarationError(WEB_FETCH_DECLARATION_INVALID_DETAIL)
         if entry.get("type") == "otari_web_search" and not set(entry) <= _WEB_SEARCH_DECLARATION_FIELDS:
             raise WebToolDeclarationError(WEB_SEARCH_DECLARATION_INVALID_DETAIL)
