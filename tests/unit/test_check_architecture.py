@@ -2571,6 +2571,16 @@ def test_every_statement_that_binds_a_name_counts(tmp_path: Path, monkeypatch: p
         pytest.param("class Gate(metaclass=(GATE := type)):\n    pass\n", 3, id="class_keyword"),
         pytest.param("GATES = lambda gate=(GATE := object()): gate\n", 3, id="lambda_default"),
         pytest.param("try:\n    pass\nexcept (GATE := ValueError):\n    pass\n", 2, id="exception_type"),
+        pytest.param("def get_two[T](gate=(GATE := object())) -> None: ...\n", 3, id="generic_parameter_default"),
+        pytest.param("@(GATE := staticmethod)\nclass Gate[T]:\n    pass\n", 3, id="generic_class_decorator"),
+        # An assignment expression in an annotation binds on a Python that evaluates
+        # annotations eagerly. Every Python parses these, so the cases run anywhere.
+        pytest.param("def get_two(gate: (GATE := object)) -> None: ...\n", 3, id="parameter_annotation"),
+        pytest.param("def get_two(gate: (GATE := object), /) -> None: ...\n", 3, id="positional_only_annotation"),
+        pytest.param("def get_two(*, gate: (GATE := object)) -> None: ...\n", 3, id="keyword_only_annotation"),
+        pytest.param("def get_two(*gates: (GATE := object)) -> None: ...\n", 3, id="variadic_annotation"),
+        pytest.param("def get_two(**gates: (GATE := object)) -> None: ...\n", 3, id="keyword_variadic_annotation"),
+        pytest.param("def get_two() -> (GATE := object): ...\n", 3, id="return_annotation"),
     ],
 )
 def test_a_definition_header_binds_in_the_scope_around_it(
@@ -2591,7 +2601,7 @@ def test_a_definition_header_binds_in_the_scope_around_it(
             "try:\n    GATES = object()\nexcept Exception as gate:\n    pass\n",
             id="except_target_is_unbound",
         ),
-        pytest.param("class Gate[T]((gate := object)):\n    pass\n", id="a_generic_class_base_is_its_own_scope"),
+        pytest.param("GATES = object()\ngate: object\n", id="an_annotation_with_no_value_binds_nothing"),
         pytest.param("def get_two() -> None:\n    gate = object()\n", id="a_function_body_is_its_own_scope"),
         pytest.param("class Gate:\n    gate = object()\n", id="a_class_body_is_its_own_scope"),
         pytest.param("GATES = [gate for gate in ()]\n", id="comprehension_has_its_own_scope"),

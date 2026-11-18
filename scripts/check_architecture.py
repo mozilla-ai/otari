@@ -1449,29 +1449,31 @@ def _module_scope_statements(body: Iterable[ast.stmt]) -> Iterator[ast.stmt]:
 
 
 def _header_expressions(node: ast.AST) -> Iterator[ast.expr]:
-    """Yield each expression of a definition that is evaluated where the definition sits, not inside it.
+    """Yield each expression of a definition that can bind a name in the scope the definition sits in.
 
-    A decorator, a parameter default and a class base run at the point the definition
-    runs, so an assignment expression in one binds in the surrounding scope. The base
-    list of a generic class runs in the scope its type parameters open instead, so it is
-    left out.
+    A decorator, a parameter default and a class base are evaluated where the definition
+    runs, so an assignment expression in one binds in the surrounding scope. An annotation
+    does the same on a Python that evaluates annotations eagerly.
 
-    NOTE: An annotation is left out whatever it holds. Which scope evaluates one, and
-    whether it is evaluated at all, depends on the Python version and on whether the
-    module defers annotations.
+    NOTE: A generic definition evaluates its bases and its annotations in the scope its type
+    parameters open rather than the surrounding one. That needs no case of its own here,
+    because Python rejects an assignment expression anywhere inside a type-parameter scope.
     """
     if isinstance(node, ast.ClassDef):
         yield from node.decorator_list
-        if not node.type_params:
-            yield from node.bases
-            yield from (keyword.value for keyword in node.keywords)
+        yield from node.bases
+        yield from (keyword.value for keyword in node.keywords)
         return
     if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
         yield from node.decorator_list
+        if node.returns is not None:
+            yield node.returns
     elif not isinstance(node, ast.Lambda):
         return
     yield from node.args.defaults
     yield from (default for default in node.args.kw_defaults if default is not None)
+    parameters = (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs, node.args.vararg, node.args.kwarg)
+    yield from (one.annotation for one in parameters if one is not None and one.annotation is not None)
 
 
 def _statement_bindings(node: ast.stmt) -> Iterator[str]:
@@ -1490,6 +1492,10 @@ def _statement_bindings(node: ast.stmt) -> Iterator[str]:
     if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
         yield node.name
         pending.extend(_header_expressions(node))
+    elif isinstance(node, ast.AnnAssign) and node.value is None:
+        # An annotation with no value leaves its target unbound, while an assignment
+        # expression in the annotation still binds here.
+        pending.append(node.annotation)
     else:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, ast.stmt):
