@@ -100,8 +100,14 @@ check-architecture:
 # earlier revision, so a git show that fails here is reported rather than read
 # as an empty comparison. otari-baseline-ratchet.yml runs the same comparison on
 # a pull request.
+#
+# The branch point is resolved on its own line because `git show ":path"` reads
+# the staged copy, so folding a failed `git merge-base` into the argument would
+# compare the change with itself and pass.
 check-baselines:
-	@git show "$$(git merge-base origin/main HEAD):scripts/check_architecture.py" | \
+	@branch_point=$$(git merge-base origin/main HEAD) && \
+	[ -n "$$branch_point" ] && \
+	git show "$$branch_point:scripts/check_architecture.py" | \
 	uv run python scripts/check_baseline_ratchet.py --base - --head scripts/check_architecture.py
 
 # Refuse a branched revision graph. Cheap, and it runs before the suites so a
