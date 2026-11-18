@@ -41,6 +41,21 @@ Otari never guesses from content.
   and a client that names only its product is shown by it: `HermesAgent/`,
   `kimi-code-cli/`, `QwenCode/`, `GitHubCopilotChat/`, `Zed/` and `curl/` show as
   `hermes-agent`, `kimi-code`, `qwen-code`, `github-copilot`, `zed` and `curl`.
+- An SDK is shown by its own name, whichever of its clients sent the request:
+  `AsyncOpenAI/Python` and `AzureOpenAI/Python` show as `openai`, and
+  `AnthropicBedrock/Python` as `anthropic`.
+- A session also records the client's language and version, from the request
+  that opened it. The language comes from the SDK's own header
+  (`x-stainless-lang`, `x-fern-language`), else from the `User-Agent`: a
+  language it names (`OpenAI/Python`, `OpenAPI-Generator/1.0.0/python`,
+  `node/24.11.0`) or an HTTP library that implies one (`python-httpx`,
+  `python-requests`, `aiohttp`, `node`, `axios`, `Go-http-client`, `okhttp`).
+  JavaScript covers TypeScript, which no header tells apart. A `User-Agent` that
+  implies no language, such as `curl/8.7.1`, leaves it to the SDK header, and a
+  request with neither has no language. The version is the one the `User-Agent`
+  gives the client, kept only when the `User-Agent` is the harness's own: a
+  proxy's version never lands on a harness its session header names, and an
+  SDK's package-version header is not read.
 - When a request carries more than one signal, the first row in the table wins.
 - An exported span that names no session joins its nearest ancestor's session,
   then the session another span in its OTel trace names (within the same export),
