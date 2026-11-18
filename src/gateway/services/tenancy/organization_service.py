@@ -2285,8 +2285,7 @@ class OrganizationService:
             if organization is None:
                 raise OrganizationNotFoundError(organization_id)
             await self.organizations.lock(organization_id)
-            await self.users.lock(user_id)
-            identity = await self.users.get(user_id)
+            identity = await self.users.get_locked(user_id)
             if identity is None or not identity.is_active:
                 raise OrganizationMemberDeactivatedError(identity.email if identity is not None else user_id)
             membership, created = await self.members.add_if_absent(

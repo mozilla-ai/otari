@@ -5,8 +5,8 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import col
 
 from gateway.exceptions.organizations_exceptions import (
@@ -26,6 +26,7 @@ from gateway.services.organizations import MembershipAdmission
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.membership_listener import MembershipListener
 
+from .conftest import _to_async_url
 from .tenancy_helpers import (
     create_budget,
     create_member,
@@ -257,6 +258,41 @@ async def test_admitting_an_identity_only_another_organization_vouched_for_is_re
     with pytest.raises(OrganizationMemberAddressUnprovenError):
         async with writes["uow"]:
             await service.admit(organization_id=organization.id, role="member", user_id=invitee.id, workspaces=[])
+
+
+async def test_admitting_sees_a_vouch_committed_after_the_identity_was_resolved(postgres_url: str) -> None:
+    """The guard reads the identity under its own lock, so a vouch committed in between is not missed."""
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+
+    try:
+        async with sessions() as setup:
+            organization = await create_organization(setup, slug="admit-late-vouch")
+            elsewhere = await create_organization(setup, slug="admit-late-vouch-other")
+            await create_member(setup, organization, role="owner", full_name="Owner")
+            invitee = await _invitee(setup, active_organization_id=elsewhere.id, email="late@example.com")
+            await setup.commit()
+            organization_id, invitee_id = organization.id, invitee.id
+
+        async with sessions() as admitting, sessions() as vouching:
+            resolved = await UserRepository(admitting).get(invitee_id)
+            assert resolved is not None
+            assert resolved.email_vouched_at is None
+
+            await vouching.execute(
+                update(User).where(col(User.id) == invitee_id).values(email_vouched_at=datetime.now(UTC))
+            )
+            await vouching.commit()
+
+            writes = membership_writes(admitting)
+            service = OrganizationService(admitting, **writes)
+            with pytest.raises(OrganizationMemberAddressUnprovenError):
+                async with writes["uow"]:
+                    await service.admit(
+                        organization_id=organization_id, role="member", user_id=invitee_id, workspaces=[]
+                    )
+    finally:
+        await engine.dispose()
 
 
 async def test_admitting_somebody_already_on_this_roster_is_not_refused_for_being_vouched(
