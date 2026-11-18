@@ -5,7 +5,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -448,6 +448,22 @@ async def test_decline_by_token_hash_returns_false_for_an_unknown_hash(async_db:
         assert await repository.decline_by_token_hash("no-such-hash", at=_NOW) is None
 
 
+async def _wait_until_a_statement_is_blocked(watcher: AsyncSession, *, timeout: float = 10.0) -> None:
+    """Wait until PostgreSQL reports a backend of this database waiting on another one's lock."""
+    async with asyncio.timeout(timeout):
+        while True:
+            blocked = await watcher.execute(
+                text(
+                    "SELECT count(*) FROM pg_stat_activity "
+                    "WHERE datname = current_database() AND cardinality(pg_blocking_pids(pid)) > 0"
+                )
+            )
+            if blocked.scalar_one() > 0:
+                return
+            await watcher.rollback()
+            await asyncio.sleep(0.02)
+
+
 async def test_two_deletes_of_one_token_hash_give_one_row(postgres_url: str) -> None:
     engine = create_async_engine(_to_async_url(postgres_url))
     sessions = async_sessionmaker(engine, expire_on_commit=False)
@@ -464,14 +480,18 @@ async def test_two_deletes_of_one_token_hash_give_one_row(postgres_url: str) -> 
             )
             await setup.commit()
 
-        async with sessions() as first, sessions() as second:
+        async with sessions() as first, sessions() as second, sessions() as watcher:
             first_result = await remove(first)
             waiting = asyncio.create_task(remove(second))
-            # The first delete has not committed, so the second cannot finish.
-            with pytest.raises(TimeoutError):
-                await asyncio.wait_for(asyncio.shield(waiting), timeout=0.5)
-            await first.commit()
-            second_result = await waiting
+            try:
+                # The second delete reached PostgreSQL and waits on the first one's row lock.
+                await _wait_until_a_statement_is_blocked(watcher)
+                assert not waiting.done()
+                await first.commit()
+                second_result = await asyncio.wait_for(asyncio.shield(waiting), timeout=10.0)
+            finally:
+                waiting.cancel()
+                await asyncio.gather(waiting, return_exceptions=True)
     finally:
         await engine.dispose()
 
