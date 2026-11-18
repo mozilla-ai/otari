@@ -148,8 +148,10 @@ from gateway.api.deps.tools import (
     WorkspaceMcpServersDep,
     WorkspaceWebSearchPoliciesDep,
     WorkspaceWebSearchServiceDep,
+    build_mcp_server_fold,
     build_search_tool_refresh,
     build_search_tool_service,
+    build_workspace_mcp_server_urls,
     get_code_execution_environment_service,
     get_direct_tool_availability,
     get_direct_tool_service,
@@ -245,7 +247,6 @@ from gateway.repositories.tools import (
     McpServerRequestRepository,
     McpSignInLinkUseRepository,
     McpUserConnectionRepository,
-    WorkspaceMcpServerGrantRepository,
     WorkspaceMcpServerLogoRepository,
     WorkspaceMcpServerOverrideRepository,
     WorkspaceMcpServerRepository,
@@ -314,12 +315,10 @@ from gateway.services.tenancy.workspace_mcp_server_service import (
 from gateway.services.tenancy.workspace_service import WorkspaceService
 from gateway.services.tools import (
     McpConnectionService,
-    McpServerFold,
     McpServerLogoService,
     McpServerRequestService,
     McpSignedInServers,
     McpWorkspaceServers,
-    WorkspaceMcpServerUrls,
 )
 from gateway.services.update_check import UpdateCheckService
 from gateway.services.usage_and_telemetry import UsageService, VideoUsageWriter
@@ -823,17 +822,6 @@ def get_health_check_service(
 HealthCheckServiceDep = Annotated[HealthCheckService, Depends(get_health_check_service)]
 
 
-def build_workspace_mcp_server_urls(uow: UnitOfWork) -> WorkspaceMcpServerUrls:
-    """Build the read of where a workspace's MCP servers are, its organization's too, on a Unit of Work."""
-    return WorkspaceMcpServerUrls(
-        WorkspaceMcpServerRepository(uow),
-        McpWorkspaceServers(
-            WorkspaceMcpServerRepository(uow), WorkspaceMcpServerOverrideRepository(uow), McpServerAliasRepository(uow)
-        ),
-        WorkspaceRepository(uow).get_organization_id,
-    )
-
-
 def build_mcp_catalog_service(
     uow: UnitOfWork, config: GatewayConfig, workspaces: WorkspaceAccess | None = None
 ) -> McpCatalogService:
@@ -917,19 +905,6 @@ def get_mcp_server_request_service(
 
 
 McpServerRequestServiceDep = Annotated[McpServerRequestService, Depends(get_mcp_server_request_service)]
-
-
-def build_mcp_server_fold(db: AsyncSession) -> McpServerFold:
-    """Build the fold of workspaces' copies into an organization's MCP server, on the caller's session."""
-    return McpServerFold(
-        servers=WorkspaceMcpServerRepository(db),
-        grants=WorkspaceMcpServerGrantRepository(db),
-        overrides=WorkspaceMcpServerOverrideRepository(db),
-        aliases=McpServerAliasRepository(db),
-        connections=McpUserConnectionRepository(db),
-        flows=McpOAuthFlowRepository(db),
-        requests=McpServerRequestRepository(db),
-    )
 
 
 def get_workspace_mcp_server_service(
@@ -1303,6 +1278,7 @@ __all__ = [
     "build_trace_service",
     "build_unavailable_model_reporter",
     "build_update_check_service",
+    "build_mcp_server_fold",
     "build_workspace_mcp_server_urls",
     "catalog_reader_operates_deployment",
     "catalog_reader_organization",
