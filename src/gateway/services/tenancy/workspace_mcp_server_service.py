@@ -1951,8 +1951,12 @@ class WorkspaceMcpServerService:
         server = await self._server_in(scope, server_id)
         # Locked and read again: an edit that moved the URL meanwhile must be what this one decides
         # against, or a secret saved here would land on a client the move had dropped.
-        await self.db.refresh(server, with_for_update=True)
         fields = request.model_dump(exclude_unset=True)
+        if "name" in fields:
+            # A rename takes the organization's lock before the server's, in the order a workspace's deletion
+            # takes the two, which then cascades to the server.
+            await OrganizationRepository(self.db).lock_settings(server.organization_id)
+        await self.db.refresh(server, with_for_update=True)
         if "name" in fields and fields["name"] != server.name:
             await self._refuse_taken_name(scope, fields["name"], except_id=server.id)
 

@@ -1,6 +1,7 @@
 import { Link, useNavigate } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 
+import type { McpConnectionCompleted } from "@/client"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { PageIntro } from "@/design-system/layout/PageIntro"
@@ -32,6 +33,17 @@ export interface McpConnectionCallbackSearch {
 }
 
 const LIST = "/tools/mcp-servers"
+
+/**
+ * The server's own page, for a sign-in that named no page to go back to. No
+ * workspace is an organization owner's sign-in to an organization's server,
+ * whose page is under Organization rather than a workspace.
+ */
+function serverPage(done: McpConnectionCompleted): string {
+  return done.workspace_id === null
+    ? `/organization/mcp-servers/${done.server_id}`
+    : `${LIST}/${done.server_id}`
+}
 
 // What the gateway's callback names when it lands here without a code to spend.
 // A Map: the code comes from the URL, and an object would answer `constructor` with a function.
@@ -155,10 +167,7 @@ export function McpConnectionCallbackPage({
         onSuccess: (done) => {
           forgetSignInOrigin()
           void navigate({
-            to:
-              pickDashboardPath(done.return_to) ??
-              origin ??
-              `${LIST}/${done.server_id}`,
+            to: pickDashboardPath(done.return_to) ?? origin ?? serverPage(done),
             replace: true,
           })
         },

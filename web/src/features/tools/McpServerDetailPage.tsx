@@ -8,13 +8,12 @@ import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
-import { Select } from "@/design-system/forms/Select"
 import { Chip } from "@/design-system/indicators/Chip"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { canManageWorkspace } from "@/features/organization/roles"
+import { McpAvailabilitySelect } from "@/features/tools/McpAvailabilitySelect"
 import { McpConnectionNoticeBanner } from "@/features/tools/McpConnectionNoticeBanner"
 import { McpExposedTools } from "@/features/tools/McpExposedTools"
-import { McpInfoHint } from "@/features/tools/McpInfoHint"
 import { McpMemberTools } from "@/features/tools/McpMemberTools"
 import { McpModeLabel } from "@/features/tools/McpModeLabel"
 import { McpNotice } from "@/features/tools/McpNotice"
@@ -40,11 +39,8 @@ import { McpSharedAccount } from "@/features/tools/McpSharedAccount"
 import { McpWorkspaceServerSettings } from "@/features/tools/McpWorkspaceServerSettings"
 import {
   AVAILABILITY,
-  AVAILABILITY_OPTIONS,
-  AVAILABILITY_ORDER,
   availabilityFields,
   availabilityOf,
-  type McpAvailability,
 } from "@/features/tools/mcpAvailability"
 import { healthDetail } from "@/features/tools/mcpServerHealth"
 import {
@@ -225,33 +221,16 @@ export function McpServerDetailPage({
               // the button does not, and both are one field tall. `mb-1` is
               // the gap the select keeps under its trigger for a message.
               <div className="flex flex-wrap items-end gap-3">
-                <Select
-                  label="Availability"
+                <McpAvailabilitySelect
                   value={availability}
                   onChange={(next) =>
                     update.mutate({
                       scope,
                       serverId: server.id,
-                      body: availabilityFields(next as McpAvailability),
+                      body: availabilityFields(next),
                     })
                   }
-                  options={AVAILABILITY_OPTIONS}
-                  labelAction={
-                    <McpInfoHint label="Explain the three choices">
-                      {AVAILABILITY_ORDER.map((value) => (
-                        <span key={value}>
-                          <span className="font-medium">
-                            {AVAILABILITY[value].label}:
-                          </span>{" "}
-                          {AVAILABILITY[value].help}
-                        </span>
-                      ))}
-                    </McpInfoHint>
-                  }
                   isDisabled={update.isPending}
-                  // No message line under it, so its edge is the row's edge.
-                  shouldReserveMessage={false}
-                  className="w-44"
                 />
                 <Button
                   onPress={() => openSettings()}
