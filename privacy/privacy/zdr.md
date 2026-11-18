@@ -18,12 +18,13 @@ The following table summarizes the retention classifications of providers suppor
 
 | Provider       | Data retention | Model training | Privacy Policy                                                        | Models |
 | :------------- | :------------- | :------------- | :-------------------------------------------------------------------- | :----- |
-| Amazon Bedrock | Zero retention | No             | [Privacy](https://docs.aws.amazon.com/bedrock/latest/userguide/data-protection.html) | 49     |
-| Fireworks AI   | Zero retention | No             | [Privacy](https://fireworks.ai/privacy-policy)                        | 15     |
-| Mistral AI     | Zero retention | No             | [Privacy](https://legal.mistral.ai/terms/get-started/#privacy-policy) | 25     |
-| Nebius         | Zero retention | No             | [Privacy](https://docs.nebius.com/legal/privacy)                      | 22     |
-| OVH Cloud      | Zero retention | No             | [Privacy](https://us.ovhcloud.com/legal/privacy-policy/)              | 10     |
-| Together AI    | Zero retention | No             | [Privacy](https://www.together.ai/privacy)                            | 14     |
+| Amazon Bedrock | Zero retention | No             | [Privacy](https://docs.aws.amazon.com/bedrock/latest/userguide/data-protection.html) | 67     |
+| Fireworks AI   | Zero retention | No             | [Privacy](https://fireworks.ai/privacy-policy)                        | 26     |
+| Mistral AI     | Zero retention | No             | [Privacy](https://legal.mistral.ai/terms/get-started/#privacy-policy) | 34     |
+| Nebius         | Zero retention | No             | [Privacy](https://docs.nebius.com/legal/privacy)                      | 29     |
+| OVH Cloud      | Zero retention | No             | [Privacy](https://us.ovhcloud.com/legal/privacy-policy/)              | 19     |
+| Together AI    | Zero retention | No             | [Privacy](https://www.together.ai/privacy)                            | 78     |
+| DeepInfra      | Zero retention | No             | [Privacy](https://deepinfra.com/privacy)                              | 153    |
 
 Regarding metadata logging, note that even when Zero Data Retention is enabled, providers may retain operational metadata for monitoring, security, and compliance. This data may include timestamps, token counts, request identifiers, and usage statistics, but should not include prompt or response content under the applicable ZDR policy.
 

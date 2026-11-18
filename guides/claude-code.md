@@ -157,7 +157,7 @@ In a Claude Code session:
 The install asks for the gateway URL and an API key. The key goes to Claude
 Code's secure storage. The URL must be `https` unless the gateway runs on the
 same machine. The plugin stays active in every session after that; its
-[README](https://github.com/mozilla-ai/otari/blob/d6e2b0f34e8e724e75bd0d3035fcbc34d20a4974/plugins/otari-router/README.md) has the options and how to update.
+[README](https://github.com/mozilla-ai/otari/blob/8b6d8e3f1d7bd9ee0921f6da7d24ee27b71eae8f/plugins/otari-router/README.md) has the options and how to update.
 
 Each spawn then leaves a dim line in the transcript naming the model Otari chose
 and why. If Otari does not answer, the subagent starts on the model it would
