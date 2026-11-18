@@ -22,7 +22,7 @@ accepted headers are in [Base URL](api-reference.md#base-url) and
 The key is made in the workspace selected in the top-left corner.
 
 **Access**, under **More options**, sets what the key may call: one checkbox
-per scope, grouped by area. Models and Tools are shown; Files, Batches, MCP,
+per scope, grouped by area. Models, Tools and MCP are shown; Files, Batches,
 Coding agents, Usage, and End users on a service key are under **Advanced
 scopes**, which opens by itself on a key that holds one of them. A group's own
 box checks or clears the whole group. A new key starts with the Models, Tools

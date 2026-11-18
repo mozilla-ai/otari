@@ -45,9 +45,9 @@ class KeyScope(StrEnum):
 
 
 # What a key is given when its creator names no scopes: calling models and the
-# tools a model call may declare, which is what most keys are for. An MCP server
-# still has to be attached to the workspace, and signed in to, before it does
-# anything.
+# tools a model call may declare, which is what most keys are for. The MCP scopes
+# reach only a server the workspace attached and the caller signed in to, or one
+# a request declares inline where the workspace allows request servers.
 DEFAULT_KEY_SCOPES: tuple[KeyScope, ...] = (
     KeyScope.INFERENCE_RUN,
     KeyScope.WEB_SEARCH,
