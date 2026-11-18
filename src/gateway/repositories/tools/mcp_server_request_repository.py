@@ -300,6 +300,15 @@ class McpServerRequestRepository(BaseRepository[McpServerRequest, Never, Never])
             statement.values(acknowledged_at=at, updated_at=at).execution_options(synchronize_session=False)
         )
 
+    async def repoint(self, from_server_id: uuid.UUID, to_server_id: uuid.UUID) -> None:
+        """Stage every request that names one server naming another instead, so its history still links somewhere."""
+        await self.db.execute(
+            update(McpServerRequest)
+            .where(McpServerRequest.server_id == from_server_id)
+            .values(server_id=to_server_id)
+            .execution_options(synchronize_session=False)
+        )
+
     async def save(self) -> None:
         """Flush changes made to loaded rows."""
         await self.db.flush()

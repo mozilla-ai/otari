@@ -843,7 +843,9 @@ def build_mcp_catalog_service(
         McpCatalogSyncStateRepository(uow),
         workspaces,
         config,
-        workspace_servers=WorkspaceMcpServerUrls(WorkspaceMcpServerRepository(uow)),
+        workspace_servers=WorkspaceMcpServerUrls(
+            WorkspaceMcpServerRepository(uow), WorkspaceRepository(uow).get_organization_id
+        ),
     )
 
 

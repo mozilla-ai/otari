@@ -129,7 +129,9 @@ class _World:
             McpCatalogSyncStateRepository(uow),
             access,
             GatewayConfig(mcp_catalog_sync="manual"),
-            workspace_servers=WorkspaceMcpServerUrls(WorkspaceMcpServerRepository(uow)),
+            workspace_servers=WorkspaceMcpServerUrls(
+                WorkspaceMcpServerRepository(uow), WorkspaceRepository(uow).get_organization_id
+            ),
         )
         self.requests = McpServerRequestService(
             uow,

@@ -19,6 +19,15 @@ from gateway.repositories.base_repository import BaseRepository
 _WHITESPACE = " \t\n\r\f\v"
 
 
+def _bare(url: str) -> str:
+    return url.strip().rstrip("/")
+
+
+def _bare_url() -> ColumnElement[str]:
+    """A stored URL without the whitespace around it or a trailing slash, as :func:`_bare` reads a given one."""
+    return func.rtrim(func.ltrim(WorkspaceMcpServer.url, _WHITESPACE), _WHITESPACE + "/")
+
+
 class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Never]):
     """Read stored MCP server rows."""
 
@@ -152,7 +161,7 @@ class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Nev
         return list((await self.db.execute(query)).scalars().all())
 
     async def name_in_use(
-        self, organization_id: uuid.UUID, name: str, *, of_workspace: bool, except_id: uuid.UUID | None
+        self, organization_id: uuid.UUID, name: str, *, of_workspace: bool, except_ids: Collection[uuid.UUID] = ()
     ) -> bool:
         """Whether a server ``name`` would collide with another one a workspace of the organization reaches.
 
@@ -165,8 +174,8 @@ class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Nev
         )
         if of_workspace:
             query = query.where(WorkspaceMcpServer.workspace_id.is_(None))
-        if except_id is not None:
-            query = query.where(WorkspaceMcpServer.id != except_id)
+        if except_ids:
+            query = query.where(WorkspaceMcpServer.id.not_in(list(except_ids)))
         return (await self.db.execute(query.limit(1))).first() is not None
 
     async def any_attached(self, workspace_id: uuid.UUID) -> bool:
@@ -182,20 +191,33 @@ class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Nev
         )
         return found.first() is not None
 
-    async def has_url(self, workspace_id: uuid.UUID, url: str) -> bool:
-        """Whether a workspace stores a server at ``url``, a trailing slash and surrounding whitespace aside.
+    async def has_url(self, workspace_id: uuid.UUID, url: str, organization_id: uuid.UUID | None = None) -> bool:
+        """Whether a workspace reaches a server at ``url``, a trailing slash and surrounding whitespace aside.
 
-        SQL ``trim`` takes spaces alone, so the whitespace a stored URL can carry (a tab, a line
-        break) is named; ``ltrim`` and ``rtrim`` with a set read the same on PostgreSQL and SQLite.
+        Its own servers, and with ``organization_id`` its organization's. SQL ``trim`` takes spaces alone, so
+        the whitespace a stored URL can carry (a tab, a line break) is named; ``ltrim`` and ``rtrim`` with a set
+        read the same on PostgreSQL and SQLite.
         """
-        bare = url.strip().rstrip("/")
-        stored = func.rtrim(func.ltrim(WorkspaceMcpServer.url, _WHITESPACE), _WHITESPACE + "/")
         rows = await self.db.execute(
             select(WorkspaceMcpServer.id)
-            .where(WorkspaceMcpServer.workspace_id == workspace_id, stored == bare)
+            .where(self._reached_from(workspace_id, organization_id), _bare_url() == _bare(url))
             .limit(1)
         )
         return rows.first() is not None
+
+    async def copies_in_organization(
+        self, organization_id: uuid.UUID, url: str, *, except_id: uuid.UUID | None = None
+    ) -> list[WorkspaceMcpServer]:
+        """The organization's workspaces' own servers at ``url``, trailing slash and whitespace aside, oldest first."""
+        query = select(WorkspaceMcpServer).where(
+            WorkspaceMcpServer.organization_id == organization_id,
+            WorkspaceMcpServer.workspace_id.is_not(None),
+            _bare_url() == _bare(url),
+        )
+        if except_id is not None:
+            query = query.where(WorkspaceMcpServer.id != except_id)
+        query = query.order_by(WorkspaceMcpServer.created_at, WorkspaceMcpServer.id)
+        return list((await self.db.execute(query)).scalars().all())
 
     async def url_page(self, workspace_id: uuid.UUID, *, skip: int, limit: int) -> dict[uuid.UUID, str]:
         """A page of a workspace's stored servers' URLs, by server id, oldest first as the server list pages."""
@@ -208,10 +230,14 @@ class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Nev
         )
         return {row.id: row.url for row in rows}
 
-    async def urls_in_workspace(self, workspace_id: uuid.UUID) -> dict[uuid.UUID, str]:
-        """Each of a workspace's stored servers' URL, by server id."""
+    async def urls_in_workspace(
+        self, workspace_id: uuid.UUID, organization_id: uuid.UUID | None = None
+    ) -> dict[uuid.UUID, str]:
+        """Each of a workspace's stored servers' URL, and with ``organization_id`` its organization's, by server id."""
         rows = await self.db.execute(
-            select(WorkspaceMcpServer.id, WorkspaceMcpServer.url).where(WorkspaceMcpServer.workspace_id == workspace_id)
+            select(WorkspaceMcpServer.id, WorkspaceMcpServer.url).where(
+                self._reached_from(workspace_id, organization_id)
+            )
         )
         return {row.id: row.url for row in rows}
 

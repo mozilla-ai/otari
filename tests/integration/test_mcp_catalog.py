@@ -169,7 +169,9 @@ def _service(
         McpCatalogSyncStateRepository(uow),
         WorkspaceAccess(db, OrganizationService(db, membership_listener=None)),
         config,
-        workspace_servers=WorkspaceMcpServerUrls(WorkspaceMcpServerRepository(uow)),
+        workspace_servers=WorkspaceMcpServerUrls(
+            WorkspaceMcpServerRepository(uow), WorkspaceRepository(uow).get_organization_id
+        ),
         fetcher=fetcher or _Fetcher(),
         look_budget=budget or catalog_service.LogoLookBudget(),
         clock=clock,

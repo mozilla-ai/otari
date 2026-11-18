@@ -101,6 +101,20 @@ class McpUserConnectionRepository(BaseRepository[McpUserConnection, Never, Never
         )
         return list(rows.scalars().all())
 
+    async def every_for_server(self, server_id: uuid.UUID) -> list[McpUserConnection]:
+        """Every user's connection to a server, oldest first."""
+        rows = await self.db.execute(
+            select(McpUserConnection)
+            .where(McpUserConnection.server_id == server_id)
+            .order_by(McpUserConnection.created_at, McpUserConnection.id)
+        )
+        return list(rows.scalars().all())
+
+    async def move(self, connection: McpUserConnection, server_id: uuid.UUID) -> None:
+        """Stage a connection's move to another server, which it then belongs to as it is."""
+        connection.server_id = server_id
+        await self.db.flush()
+
     async def revocable(
         self,
         *,

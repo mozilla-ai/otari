@@ -215,7 +215,7 @@ class McpServerRequestService:
         async with self._uow:
             # Serializes with a manager adding the server, and makes the two counts below exact.
             await self._workspaces.lock_workspace(workspace.id)
-            if await self._servers.has_url(workspace.id, entry.url):
+            if await self._servers.has_url(workspace.id, entry.url, workspace.organization_id):
                 raise McpServerAlreadyAddedError
             if await self._requests.has_pending(workspace.id, entry.name, user.id):
                 raise McpServerAlreadyRequestedError
