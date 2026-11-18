@@ -162,7 +162,7 @@ describe("anyMakerMark", () => {
   })
 
   it("is false when none does", () => {
-    expect(anyMakerMark(["amazon", "openbmb"])).toBe(false)
+    expect(anyMakerMark(["amazon", "writer"])).toBe(false)
     expect(anyMakerMark([])).toBe(false)
   })
 })
