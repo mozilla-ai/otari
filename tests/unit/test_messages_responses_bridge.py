@@ -34,7 +34,7 @@ _MODEL = "openai:gpt-5"
 _INSTANCE = "openai"
 _USAGE = {
     "input_tokens": 100,
-    "input_tokens_details": {"cached_tokens": 40},
+    "input_tokens_details": {"cached_tokens": 40, "cache_write_tokens": 0},
     "output_tokens": 30,
     "output_tokens_details": {"reasoning_tokens": 12},
     "total_tokens": 130,

@@ -377,10 +377,10 @@ def _openai_bad_request() -> openai.BadRequestError:
         "param": "temperature",
         "code": "unsupported_value",
     }
-    request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+    request = httpx2.Request("POST", "https://api.openai.com/v1/chat/completions")
     return openai.BadRequestError(
         f"Error code: 400 - {{'error': {error}}}",
-        response=httpx.Response(400, request=request, json={"error": error}),
+        response=httpx2.Response(400, request=request, json={"error": error}),
         body=error,
     )
 
@@ -453,7 +453,7 @@ def test_messages_answers_a_provider_400_with_the_providers_sentence(
 
 
 def _dropped_connection() -> openai.APIConnectionError:
-    request = httpx.Request("POST", "https://internal-proxy.example/v1/chat/completions")
+    request = httpx2.Request("POST", "https://internal-proxy.example/v1/chat/completions")
     try:
         raise openai.APIConnectionError(request=request) from httpx.RemoteProtocolError(
             "Server disconnected without sending a response."
@@ -502,10 +502,10 @@ _IMAGE_DETAIL_TAIL = (
 def _fireworks_image_rejection() -> openai.BadRequestError:
     """Fireworks' 400, through its OpenAI-compatible SDK, for an image sent to a text-only model."""
     error = {"message": "Unsupported ChatMessageContent type: image_url", "type": "invalid_request_error"}
-    request = httpx.Request("POST", "https://api.fireworks.ai/inference/v1/chat/completions")
+    request = httpx2.Request("POST", "https://api.fireworks.ai/inference/v1/chat/completions")
     return openai.BadRequestError(
         f"Error code: 400 - {{'error': {error}}}",
-        response=httpx.Response(400, request=request, json={"error": error}),
+        response=httpx2.Response(400, request=request, json={"error": error}),
         body=error,
     )
 

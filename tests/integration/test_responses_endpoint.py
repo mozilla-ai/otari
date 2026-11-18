@@ -333,7 +333,7 @@ def _structured_response(status: str = "completed") -> Response:
             "text": {"format": _JSON_SCHEMA_FORMAT},
             "usage": {
                 "input_tokens": 5,
-                "input_tokens_details": {"cached_tokens": 0},
+                "input_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
                 "output_tokens": 7,
                 "output_tokens_details": {"reasoning_tokens": 0},
                 "total_tokens": 12,

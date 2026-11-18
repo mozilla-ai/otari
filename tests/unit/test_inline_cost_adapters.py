@@ -129,7 +129,7 @@ def _response(*, usage: ResponseUsage | None = None) -> Response:
 def _response_usage() -> ResponseUsage:
     return ResponseUsage(
         input_tokens=10,
-        input_tokens_details=InputTokensDetails(cached_tokens=0),
+        input_tokens_details=InputTokensDetails(cached_tokens=0, cache_write_tokens=0),
         output_tokens=7,
         output_tokens_details=OutputTokensDetails(reasoning_tokens=0),
         total_tokens=17,
@@ -299,7 +299,7 @@ def test_a_native_responses_providers_response_is_answered_with_its_cost() -> No
                 "input_tokens": 10,
                 "output_tokens": 7,
                 "total_tokens": 17,
-                "input_tokens_details": {"cached_tokens": 0},
+                "input_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
                 "output_tokens_details": {"reasoning_tokens": 0},
             },
             "max_output_tokens": None,

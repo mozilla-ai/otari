@@ -145,7 +145,7 @@ def _response(
         tools=[],
         usage=ResponseUsage(
             input_tokens=input_tokens,
-            input_tokens_details=InputTokensDetails(cached_tokens=cached_tokens),
+            input_tokens_details=InputTokensDetails(cached_tokens=cached_tokens, cache_write_tokens=0),
             output_tokens=output_tokens,
             output_tokens_details=OutputTokensDetails(reasoning_tokens=reasoning_tokens),
             total_tokens=input_tokens + output_tokens,
@@ -667,7 +667,7 @@ async def test_stream_tool_failure_keeps_the_exception_out_of_the_output_and_the
         [
             _async_iter(
                 _output_item_added(0, _function_call("c", "fetch_url", "")),
-                _function_call_args_done(0, "fc_item_1", "fetch_url", "{}"),
+                _function_call_args_done(0, "fc_item_1", "{}"),
                 _output_item_done(0, _function_call("c", "fetch_url", "{}")),
                 _response_completed(),
             ),
@@ -743,7 +743,7 @@ async def test_stream_refuses_a_call_whose_arguments_are_not_a_json_object(monke
         [
             _async_iter(
                 _output_item_added(0, _function_call("c", "fetch_url", "")),
-                _function_call_args_done(0, "fc_item_1", "fetch_url", '["x"]'),
+                _function_call_args_done(0, "fc_item_1", '["x"]'),
                 _output_item_done(0, _function_call("c", "fetch_url", '["x"]')),
                 _response_completed(),
             ),
@@ -932,13 +932,12 @@ def _function_call_args_delta(
 
 
 def _function_call_args_done(
-    output_index: int, item_id: str, name: str, arguments: str, seq: int = 0
+    output_index: int, item_id: str, arguments: str, seq: int = 0
 ) -> ResponseFunctionCallArgumentsDoneEvent:
     return ResponseFunctionCallArgumentsDoneEvent(
         type="response.function_call_arguments.done",
         item_id=item_id,
         output_index=output_index,
-        name=name,
         arguments=arguments,
         sequence_number=seq,
     )
@@ -1017,7 +1016,7 @@ async def test_the_terminal_response_lists_items_where_the_stream_showed_them(
                 _output_item_added(0, before),
                 _output_item_done(0, before),
                 _output_item_added(1, _function_call("call_1", "web_search", "")),
-                _function_call_args_done(1, "fc_item_1", "web_search", '{"query": "otari gateway"}'),
+                _function_call_args_done(1, "fc_item_1", '{"query": "otari gateway"}'),
                 _output_item_done(1, search),
                 _response_completed(output=[before, search]),
             ),
@@ -1095,7 +1094,7 @@ async def test_stream_max_uses_announces_only_the_search_that_ran(
         return _async_iter(
             _output_item_added(0, _function_call(call_id, "web_search", "")),
             _function_call_args_delta(0, item_id, arguments),
-            _function_call_args_done(0, item_id, "web_search", arguments),
+            _function_call_args_done(0, item_id, arguments),
             _output_item_done(0, _function_call(call_id, "web_search", arguments)),
             _response_completed(),
         )
@@ -1150,7 +1149,7 @@ async def test_stream_runs_owned_function_call_and_continues(monkeypatch: pytest
                 _output_item_added(0, fc),
                 _function_call_args_delta(0, "fc_item_1", '{"u":'),
                 _function_call_args_delta(0, "fc_item_1", ' "x"}'),
-                _function_call_args_done(0, "fc_item_1", "fetch_url", '{"u": "x"}'),
+                _function_call_args_done(0, "fc_item_1", '{"u": "x"}'),
                 _output_item_done(0, _function_call("call_1", "fetch_url", '{"u": "x"}')),
                 _response_completed(),
             ),
@@ -1198,7 +1197,7 @@ async def test_stream_a_tool_call_on_the_last_round_ends_as_the_answer(monkeypat
         call = _function_call("call_1", "fetch_url", "{}")
         return _async_iter(
             _output_item_added(0, _function_call("call_1", "fetch_url", "")),
-            _function_call_args_done(0, "fc_item_1", "fetch_url", "{}"),
+            _function_call_args_done(0, "fc_item_1", "{}"),
             _output_item_done(0, call),
             _response_completed(output=[call]),
         )
@@ -1229,7 +1228,7 @@ async def test_stream_fires_on_first_response_before_running_the_first_rounds_to
         [
             _async_iter(
                 _output_item_added(0, _function_call("call_1", "fetch_url", "")),
-                _function_call_args_done(0, "fc_item_1", "fetch_url", '{"u": "x"}'),
+                _function_call_args_done(0, "fc_item_1", '{"u": "x"}'),
                 _output_item_done(0, _function_call("call_1", "fetch_url", '{"u": "x"}')),
                 _response_completed(),
             ),
@@ -1341,7 +1340,7 @@ async def test_stream_counts_earlier_rounds_output_on_a_final_round_that_ended_u
         [
             _async_iter(
                 _output_item_added(0, fc),
-                _function_call_args_done(0, "fc_item_1", "fetch_url", '{"u": "x"}'),
+                _function_call_args_done(0, "fc_item_1", '{"u": "x"}'),
                 _response_terminal("completed", output_tokens=5),
             ),
             _async_iter(_text_delta("msg_1", 0, "cut"), _response_terminal(status, output_tokens=3)),
@@ -1374,7 +1373,7 @@ async def test_stream_counts_every_rounds_input(monkeypatch: pytest.MonkeyPatch)
         [
             _async_iter(
                 _output_item_added(0, fc),
-                _function_call_args_done(0, "fc_item_1", "fetch_url", '{"u": "x"}'),
+                _function_call_args_done(0, "fc_item_1", '{"u": "x"}'),
                 _response_terminal("completed", input_tokens=2000, cached_tokens=1800, output_tokens=5),
             ),
             _async_iter(
@@ -1419,7 +1418,7 @@ async def test_stream_adds_the_provider_searches_of_hidden_rounds(monkeypatch: p
         [
             _async_iter(
                 _output_item_added(0, fc),
-                _function_call_args_done(0, "fc_item_1", "fetch_url", '{"u": "x"}'),
+                _function_call_args_done(0, "fc_item_1", '{"u": "x"}'),
                 _searched_terminal(2),
             ),
             _async_iter(_text_delta("msg_1", 0, "done"), _searched_terminal(1)),
@@ -1496,7 +1495,7 @@ async def test_stream_replays_and_returns_compaction_from_hidden_iteration(
                 _output_item_added(0, compaction),
                 _output_item_done(0, compaction),
                 _output_item_added(1, function_call),
-                _function_call_args_done(1, "fc_item_1", "fetch_url", "{}"),
+                _function_call_args_done(1, "fc_item_1", "{}"),
                 _output_item_done(1, function_call),
                 _response_completed(output=[compaction, function_call]),
             ),
@@ -1552,7 +1551,7 @@ async def test_stream_foreign_function_call_forwards_terminal_and_exits(
         [
             _async_iter(
                 _output_item_added(0, fc),
-                _function_call_args_done(0, "fc_item_1", "user_tool", "{}"),
+                _function_call_args_done(0, "fc_item_1", "{}"),
                 _response_completed(),
             ),
         ]
@@ -1683,7 +1682,7 @@ async def test_stream_announces_a_failed_search_as_failed(monkeypatch: pytest.Mo
         [
             _async_iter(
                 _output_item_added(0, _function_call("call_1", "web_search", "")),
-                _function_call_args_done(0, "fc_item_1", "web_search", args),
+                _function_call_args_done(0, "fc_item_1", args),
                 _output_item_done(0, _function_call("call_1", "web_search", args)),
                 _response_completed(),
             ),
@@ -1731,7 +1730,7 @@ async def test_stream_announces_gateway_search_as_native_web_search_call(
         [
             _async_iter(
                 _output_item_added(0, fc),
-                _function_call_args_done(0, "fc_item_1", "web_search", '{"query": "otari gateway"}'),
+                _function_call_args_done(0, "fc_item_1", '{"query": "otari gateway"}'),
                 _output_item_done(0, _function_call("call_1", "web_search", '{"query": "otari gateway"}')),
                 _response_completed(),
             ),
@@ -1791,9 +1790,9 @@ async def test_stream_mixed_batch_hides_runs_and_strips_the_gateway_call(
         [
             _async_iter(
                 _output_item_added(0, owned),
-                _function_call_args_done(0, "fc_owned", "fetch_url", '{"u": "x"}'),
+                _function_call_args_done(0, "fc_owned", '{"u": "x"}'),
                 _output_item_added(1, foreign),
-                _function_call_args_done(1, "fc_foreign", "user_tool", "{}"),
+                _function_call_args_done(1, "fc_foreign", "{}"),
                 _response_completed(output=[owned, foreign]),
             ),
         ]
@@ -1838,9 +1837,9 @@ async def test_stream_mixed_capped_search_hides_refusal_and_returns_foreign_call
         [
             _async_iter(
                 _output_item_added(0, owned),
-                _function_call_args_done(0, "fc_owned", "web_search", '{"query": "x"}'),
+                _function_call_args_done(0, "fc_owned", '{"query": "x"}'),
                 _output_item_added(1, foreign),
-                _function_call_args_done(1, "fc_foreign", "user_tool", "{}"),
+                _function_call_args_done(1, "fc_foreign", "{}"),
                 _response_completed(output=[owned, foreign]),
             ),
         ]
@@ -1973,9 +1972,9 @@ async def test_a_streamed_mixed_batch_announces_the_execution_and_the_terminal_l
         [
             _async_iter(
                 _output_item_added(0, owned),
-                _function_call_args_done(0, "fc_owned", "code_execution", '{"code": "print(1)"}'),
+                _function_call_args_done(0, "fc_owned", '{"code": "print(1)"}'),
                 _output_item_added(1, foreign),
-                _function_call_args_done(1, "fc_foreign", "user_tool", "{}"),
+                _function_call_args_done(1, "fc_foreign", "{}"),
                 _response_completed(output=[owned, foreign]),
             ),
         ]
@@ -2068,7 +2067,7 @@ async def test_stream_announces_the_execution_as_a_code_interpreter_call(monkeyp
         [
             _async_iter(
                 _output_item_added(0, fc),
-                _function_call_args_done(0, "fc_item_1", "code_execution", '{"code": "print(1)"}'),
+                _function_call_args_done(0, "fc_item_1", '{"code": "print(1)"}'),
                 _output_item_done(0, _function_call("call_1", "code_execution", '{"code": "print(1)"}')),
                 _response_completed(),
             ),
@@ -2172,7 +2171,7 @@ async def test_stream_native_items_keep_the_order_their_calls_ran_in(monkeypatch
     for index, (call_id, name, args) in enumerate(_MIXED_BATCH):
         events_in += [
             _output_item_added(index, _function_call(call_id, name, "")),
-            _function_call_args_done(index, f"fc_item_{index}", name, args),
+            _function_call_args_done(index, f"fc_item_{index}", args),
             _output_item_done(index, _function_call(call_id, name, args)),
         ]
     iter_streams = iter(
