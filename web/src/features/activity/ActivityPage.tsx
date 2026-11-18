@@ -330,10 +330,10 @@ function ActivityPageContent({
 
   // Source options: the sources with usage in the window. This must ignore the
   // source filter itself, or picking Claude Code would hide every other source
-  // and switching would mean clearing first. The session/endpoint/provider
-  // drill-down chips are not applied either, so the list stays complete (and the
-  // picker useful) while a drill-down narrows everything else. The model, user
-  // and key pickers are the Overview's, which fetches their options.
+  // and switching would mean clearing first. The session/endpoint drill-down
+  // chips are not applied either, so the list stays complete (and the picker
+  // useful) while a drill-down narrows everything else. The model, user, key
+  // and provider pickers are the Overview's, which fetches their options.
   const sourceSuggestFilters: UsageFilters = useMemo(
     () => ({
       workspace_id: workspace?.workspace_id,
@@ -343,6 +343,7 @@ function ActivityPageContent({
       model: modelFilters.length > 0 ? modelFilters : undefined,
       user_id: userFilters.length > 0 ? userFilters : undefined,
       api_key_id: apiKeyFilters.length > 0 ? apiKeyFilters : undefined,
+      provider: providerFilter || undefined,
     }),
     [
       workspace?.workspace_id,
@@ -351,6 +352,7 @@ function ActivityPageContent({
       modelFilters,
       userFilters,
       apiKeyFilters,
+      providerFilter,
     ],
   )
   const sourceSummary = useUsageSummary(

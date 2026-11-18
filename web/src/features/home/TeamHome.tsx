@@ -301,7 +301,10 @@ export function TeamHome({
    */
   const workspaceFor = async (row: SpendRow): Promise<string | undefined> => {
     if (workspaceId) return workspaceId
-    const candidates = row.workspaceIds ?? []
+    // A model's or a provider's spend is in any workspace, so every one is a
+    // candidate; a person's or a key's are the ones they are in.
+    const candidates =
+      row.workspaceIds ?? (workspaces.data ?? []).map((one) => one.id)
     const { filter } = cut
     if (candidates.length <= 1 || !filter) return candidates[0]
     const costs = await Promise.all(
@@ -721,7 +724,7 @@ export function TeamHome({
             {cuts.length > (isMobile ? 3 : 4) ? (
               <FilterSelect
                 ariaLabel="Break down by"
-                value={shownCut ?? ""}
+                value={cut.value}
                 onChange={pickCut}
                 options={cuts}
               />

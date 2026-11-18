@@ -1,4 +1,4 @@
-import { Outlet, useLocation } from "@tanstack/react-router"
+import { Outlet } from "@tanstack/react-router"
 import { screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -26,7 +26,7 @@ import {
   workspaceBudgetDefault,
 } from "@/tests/fixtures"
 import { AppProviders as Provider } from "@/tests/providers"
-import { renderWithRouter } from "@/tests/router"
+import { LocationProbe, renderWithRouter } from "@/tests/router"
 import { findRowMenuItem } from "@/tests/rowMenu"
 
 const PLATFORM = "ws-platform"
@@ -201,7 +201,7 @@ async function renderMemberHome({
     <MemberHome workspaceId={PLATFORM} workspace="Platform" />,
     {
       url,
-      routes: [{ path: "/requests", element: <RequestsProbe /> }],
+      routes: [{ path: "/requests", element: <LocationProbe /> }],
       shell: (
         <Provider>
           <DeploymentProvider
@@ -220,15 +220,6 @@ async function renderMemberHome({
 }
 
 /** Where a row's press landed, with the search it carried. */
-function RequestsProbe() {
-  const location = useLocation()
-  return (
-    <div data-testid="requests">
-      {location.pathname}
-      {location.searchStr}
-    </div>
-  )
-}
 
 describe("MemberHome, a lower limit", () => {
   afterEach(() => {
@@ -397,7 +388,7 @@ describe("MemberHome, by provider", () => {
     })
     const table = await providerTable()
     await user.click(within(table).getByText("Anthropic"))
-    const landed = await screen.findByTestId("requests")
+    const landed = await screen.findByTestId("location")
     const [path, query] = (landed.textContent ?? "").split("?")
     expect(path).toBe("/requests")
     const search = new URLSearchParams(query)

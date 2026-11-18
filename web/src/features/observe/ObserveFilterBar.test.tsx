@@ -367,15 +367,44 @@ describe("ObserveFilterBar provider", () => {
     expect(urlParams().has("status")).toBe(false)
   })
 
-  it("is not offered where it cannot apply", async () => {
+  it("narrows the model list by the provider, and the provider list by the model", async () => {
+    const { calls } = mockApi({ rows: [entry()] })
+    await renderBar("requests", "?provider=openai&model=gpt-4o")
+
+    await waitFor(() =>
+      expect(reading(calls, "dimensions=provider")).toBeDefined(),
+    )
+    const models = reading(calls, "dimensions=model")
+    expect(models?.searchParams.get("provider")).toBe("openai")
+    expect(models?.searchParams.has("model")).toBe(false)
+    const providers = reading(calls, "dimensions=provider")
+    expect(providers?.searchParams.getAll("model")).toEqual(["gpt-4o"])
+    expect(providers?.searchParams.has("provider")).toBe(false)
+  })
+
+  it("is not offered where it cannot apply, and a linked one says so", async () => {
+    const user = userEvent.setup()
     const { calls } = mockApi({ rows: [entry()] })
     await renderBar("sessions", "?provider=openai")
 
     await waitFor(() =>
       expect(reading(calls, "dimensions=model")).toBeDefined(),
     )
-    expect(screen.queryByText("Provider")).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", {
+        name: (name) => name === "Provider" || name.endsWith(" Provider"),
+      }),
+    ).toBeNull()
     expect(reading(calls, "dimensions=provider")).toBeUndefined()
+    expect(
+      reading(calls, "dimensions=model")?.searchParams.has("provider"),
+    ).toBe(false)
+    expect(
+      screen.getByText("OpenAI (not applied to sessions)"),
+    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Clear all" }))
+    await waitFor(() => expect(urlParams().has("provider")).toBe(false))
   })
 })
 

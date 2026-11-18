@@ -1,4 +1,4 @@
-import { Outlet, useLocation } from "@tanstack/react-router"
+import { Outlet } from "@tanstack/react-router"
 import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -14,7 +14,7 @@ import {
   usageTotals,
 } from "@/tests/fixtures"
 import { AppProviders as Provider } from "@/tests/providers"
-import { renderWithRouter } from "@/tests/router"
+import { LocationProbe, renderWithRouter } from "@/tests/router"
 import { findRowMenuItem } from "@/tests/rowMenu"
 import { selectTrigger } from "@/tests/select"
 
@@ -247,6 +247,14 @@ describe("Home, by provider", () => {
       }
       if (path === "/organizations/me/usage/summary") {
         const provider = url.searchParams.get("provider")
+        if (provider && url.searchParams.get("dimensions") === "none") {
+          // Which workspace a provider row opens in: Data spent the most.
+          const workspace = url.searchParams.get("workspace_id")
+          return Response.json({
+            totals: usageTotals({ cost: workspace === "ws-b" ? 5 : 1 }),
+            series: [],
+          })
+        }
         if (provider) {
           // A provider row's top model.
           return Response.json({
@@ -288,20 +296,10 @@ describe("Home, by provider", () => {
     })
   }
 
-  function RequestsProbe() {
-    const location = useLocation()
-    return (
-      <div data-testid="requests">
-        {location.pathname}
-        {location.searchStr}
-      </div>
-    )
-  }
-
   async function renderHome(url = "/?by=providers") {
     await renderWithRouter(<TeamHome />, {
       url,
-      routes: [{ path: "/requests", element: <RequestsProbe /> }],
+      routes: [{ path: "/requests", element: <LocationProbe /> }],
       shell: (
         <Provider>
           <DeploymentProvider value={bootstrap()}>
@@ -370,12 +368,34 @@ describe("Home, by provider", () => {
     await renderHome()
     const table = await providerTable()
     await user.click(within(table).getByText("OpenAI"))
-    const landed = await screen.findByTestId("requests")
+    const landed = await screen.findByTestId("location")
     const [path, query] = (landed.textContent ?? "").split("?")
     expect(path).toBe("/requests")
     const search = new URLSearchParams(query)
     expect(search.get("provider")).toBe("openai")
     expect(search.get("start_date")).toBeTruthy()
+  })
+
+  it("opens a provider's requests in the workspace that spent the most on it", async () => {
+    mockApi({ workspaces: 2 })
+    const user = userEvent.setup()
+    await renderHome("/?by=providers")
+    const table = await providerTable()
+    await user.click(within(table).getByText("OpenAI"))
+    const landed = await screen.findByTestId("location")
+    expect(landed.textContent).toContain("provider=openai")
+    // Each workspace's spend on the provider was weighed, not just the one
+    // the sidebar had selected.
+    const weighed = vi
+      .mocked(globalThis.fetch)
+      .mock.calls.map(([input]) => new URL(String(input), "http://test"))
+      .filter(
+        (url) =>
+          url.searchParams.get("provider") === "openai" &&
+          url.searchParams.get("dimensions") === "none",
+      )
+      .map((url) => url.searchParams.get("workspace_id"))
+    expect(weighed.sort()).toEqual(["ws-a", "ws-b"])
   })
 
   it("offers nothing to open on the row that recorded no provider", async () => {

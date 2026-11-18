@@ -241,13 +241,21 @@ export function keyRows(
   return rows.sort(bySpend)
 }
 
-export function modelRows(usage: readonly UsageGroupRow[]): SpendRow[] {
+/**
+ * One row per value of a breakdown with spend, its fold as "Other", sorted by
+ * spend. `named` names a value, or the requests that recorded none (`null`).
+ */
+function breakdownRows(
+  usage: readonly UsageGroupRow[],
+  kind: string,
+  named: (key: string | null) => { name: string; detail?: string },
+): SpendRow[] {
   return usage
     .filter((row) => row.cost > 0 || row.requests > 0)
     .map((row) => ({
-      id: row.is_other ? "model:other" : `model:${row.key ?? "none"}`,
+      id: row.is_other ? `${kind}:other` : `${kind}:${row.key ?? "none"}`,
       filterKey: row.is_other ? null : row.key,
-      name: row.is_other ? OTHER : (row.key ?? "Unknown model"),
+      ...(row.is_other ? { name: OTHER } : named(row.key)),
       cost: row.cost,
       requests: row.requests,
       tokens: row.tokens,
@@ -255,6 +263,12 @@ export function modelRows(usage: readonly UsageGroupRow[]): SpendRow[] {
       target: null,
     }))
     .sort(bySpend)
+}
+
+export function modelRows(usage: readonly UsageGroupRow[]): SpendRow[] {
+  return breakdownRows(usage, "model", (key) => ({
+    name: key ?? "Unknown model",
+  }))
 }
 
 /**
@@ -265,24 +279,11 @@ export function modelRows(usage: readonly UsageGroupRow[]): SpendRow[] {
  * still add up to the total.
  */
 export function providerRows(usage: readonly UsageGroupRow[]): SpendRow[] {
-  return usage
-    .filter((row) => row.cost > 0 || row.requests > 0)
-    .map((row) => ({
-      id: row.is_other ? "provider:other" : `provider:${row.key ?? "none"}`,
-      filterKey: row.is_other ? null : row.key,
-      name: row.is_other
-        ? OTHER
-        : row.key === null
-          ? "Unknown provider"
-          : providerDisplayName(row.key),
-      detail: !row.is_other && row.key === null ? "Not recorded" : undefined,
-      cost: row.cost,
-      requests: row.requests,
-      tokens: row.tokens,
-      limits: NO_LIMITS,
-      target: null,
-    }))
-    .sort(bySpend)
+  return breakdownRows(usage, "provider", (key) =>
+    key === null
+      ? { name: "Unknown provider", detail: "Not recorded" }
+      : { name: providerDisplayName(key) },
+  )
 }
 
 export interface Spend {
