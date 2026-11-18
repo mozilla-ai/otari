@@ -613,6 +613,7 @@ def build_container(
     _verify_port_shape(container, UsageSignalPort)
     _verify_port_shape(container, FeedbackDeliveryPort)
     _verify_port_shape(container, GrowthSignalPort)
+    _verify_port_shape(container, SignupInvitePort)
     container.summary = f"{bootstrap_selector} rebound {', '.join(rebound) or 'no ports'}"
     contributed = ", ".join(contribution.capability for contribution in container.router_contributions())
     if contributed:

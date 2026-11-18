@@ -382,6 +382,35 @@ def register(container):
         build_container("stale_growth_bootstrap:register")
 
 
+def test_a_signup_invite_adapter_written_before_proof_for_fails_at_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without the check, a signup carrying an invitation fails as a 500 with no startup signal."""
+    _write_bootstrap(
+        tmp_path,
+        monkeypatch,
+        "stale_invite_bootstrap",
+        """
+from gateway.ports.signup_invite_port import SignupInvitePort
+
+
+class StaleSignupInvite:
+    def __init__(self, session):
+        del session
+
+    async def invited_email(self, token):
+        return None
+
+
+def register(container):
+    container.bind(SignupInvitePort, StaleSignupInvite)
+""",
+    )
+
+    with pytest.raises(PortShapeError, match="StaleSignupInvite, bound to SignupInvitePort, lacks proof_for"):
+        build_container("stale_invite_bootstrap:register")
+
+
 def test_bootstrap_that_rebinds_nothing_leaves_the_core_defaults(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
