@@ -11,6 +11,7 @@ import {
 function tools(overrides: Partial<PlaygroundTools> = {}): PlaygroundTools {
   return {
     web_search: { configured: true, enabled: true, reason: null },
+    web_fetch: { configured: true, enabled: true, reason: null },
     code_execution: { configured: true, enabled: true, reason: null },
     files: { configured: true, enabled: true, reason: null },
     mcp_servers: [
@@ -53,6 +54,7 @@ describe("usePlaygroundToolSelection", () => {
     const { result } = renderHook(() => usePlaygroundToolSelection(tools()))
     expect(result.current.selection).toEqual({
       isWebSearchOn: false,
+      isWebFetchOn: false,
       isCodeExecutionOn: false,
       mcpServerIds: [],
     })
@@ -65,6 +67,7 @@ describe("usePlaygroundToolSelection", () => {
     act(() => result.current.toggleMcpServer("srv-1", true))
     expect(result.current.selection).toEqual({
       isWebSearchOn: true,
+      isWebFetchOn: false,
       isCodeExecutionOn: true,
       mcpServerIds: ["srv-1"],
     })
@@ -73,8 +76,30 @@ describe("usePlaygroundToolSelection", () => {
     act(() => result.current.toggleMcpServer("srv-1", false))
     expect(result.current.selection).toEqual({
       isWebSearchOn: true,
+      isWebFetchOn: false,
       isCodeExecutionOn: false,
       mcpServerIds: [],
+    })
+  })
+
+  it("attaches web fetch without web search, and both together", () => {
+    const { result } = renderHook(() => usePlaygroundToolSelection(tools()))
+    act(() => result.current.toggleWebFetch(true))
+    expect(result.current.selection).toMatchObject({
+      isWebSearchOn: false,
+      isWebFetchOn: true,
+    })
+
+    act(() => result.current.toggleWebSearch(true))
+    expect(result.current.selection).toMatchObject({
+      isWebSearchOn: true,
+      isWebFetchOn: true,
+    })
+
+    act(() => result.current.toggleWebFetch(false))
+    expect(result.current.selection).toMatchObject({
+      isWebSearchOn: true,
+      isWebFetchOn: false,
     })
   })
 
@@ -105,6 +130,27 @@ describe("usePlaygroundToolSelection", () => {
       }),
     })
     expect(result.current.isWebSearchOn).toBe(false)
+  })
+
+  it("drops web fetch when the workspace turns web access off while the page is open", () => {
+    const { result, rerender } = renderHook(
+      ({ available }: { available: PlaygroundTools }) =>
+        usePlaygroundToolSelection(available),
+      { initialProps: { available: tools() } },
+    )
+    act(() => result.current.toggleWebFetch(true))
+    expect(result.current.isWebFetchOn).toBe(true)
+
+    rerender({
+      available: tools({
+        web_fetch: {
+          configured: true,
+          enabled: false,
+          reason: "Turned off for this workspace.",
+        },
+      }),
+    })
+    expect(result.current.isWebFetchOn).toBe(false)
   })
 
   it("drops an MCP server that is deleted while the page is open", () => {

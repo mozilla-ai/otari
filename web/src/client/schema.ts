@@ -19473,6 +19473,8 @@ export interface components {
             files: components["schemas"]["PlaygroundToolStatus"];
             /** Mcp Servers */
             mcp_servers: components["schemas"]["PlaygroundMcpServer"][];
+            /** @description Whether a message may declare otari_web_fetch. */
+            web_fetch: components["schemas"]["PlaygroundToolStatus"];
             web_search: components["schemas"]["PlaygroundToolStatus"];
         };
         /**

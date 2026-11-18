@@ -21200,12 +21200,17 @@
             "title": "Mcp Servers",
             "type": "array"
           },
+          "web_fetch": {
+            "$ref": "#/components/schemas/PlaygroundToolStatus",
+            "description": "Whether a message may declare otari_web_fetch."
+          },
           "web_search": {
             "$ref": "#/components/schemas/PlaygroundToolStatus"
           }
         },
         "required": [
           "web_search",
+          "web_fetch",
           "code_execution",
           "files",
           "mcp_servers"

@@ -25,9 +25,11 @@ export function keepAttachableMcpIds(
 
 export interface PlaygroundToolSelection {
   isWebSearchOn: boolean
+  isWebFetchOn: boolean
   isCodeExecutionOn: boolean
   selectedMcpIds: string[]
   toggleWebSearch: (isOn: boolean) => void
+  toggleWebFetch: (isOn: boolean) => void
   toggleCodeExecution: (isOn: boolean) => void
   toggleMcpServer: (id: string, isOn: boolean) => void
   selection: ToolSelection
@@ -36,7 +38,7 @@ export interface PlaygroundToolSelection {
 /**
  * What is attached to the next message.
  *
- * Any mix is allowed: web search, code execution and any number of MCP servers
+ * Any mix is allowed: web search, web fetch, code execution and any number of MCP servers
  * ride one request, and the gateway runs them in a single tool loop.
  *
  * The reconciliation effect is the non-obvious half. A tool can stop being
@@ -50,11 +52,16 @@ export function usePlaygroundToolSelection(
   tools: PlaygroundTools | undefined,
 ): PlaygroundToolSelection {
   const [isWebSearchOn, setWebSearchOn] = useState(false)
+  const [isWebFetchOn, setWebFetchOn] = useState(false)
   const [isCodeExecutionOn, setCodeExecutionOn] = useState(false)
   const [selectedMcpIds, setSelectedMcpIds] = useState<string[]>([])
 
   const toggleWebSearch = useCallback((isOn: boolean) => {
     setWebSearchOn(isOn)
+  }, [])
+
+  const toggleWebFetch = useCallback((isOn: boolean) => {
+    setWebFetchOn(isOn)
   }, [])
 
   const toggleCodeExecution = useCallback((isOn: boolean) => {
@@ -71,6 +78,7 @@ export function usePlaygroundToolSelection(
   useEffect(() => {
     if (!tools) return
     if (isWebSearchOn && !tools.web_search.enabled) setWebSearchOn(false)
+    if (isWebFetchOn && !tools.web_fetch.enabled) setWebFetchOn(false)
     if (isCodeExecutionOn && !tools.code_execution.enabled) {
       setCodeExecutionOn(false)
     }
@@ -81,18 +89,25 @@ export function usePlaygroundToolSelection(
         .map((tool) => tool.id),
     )
     setSelectedMcpIds((prev) => keepAttachableMcpIds(prev, attachable))
-  }, [tools, isWebSearchOn, isCodeExecutionOn])
+  }, [tools, isWebSearchOn, isWebFetchOn, isCodeExecutionOn])
 
   const selection = useMemo<ToolSelection>(
-    () => ({ isWebSearchOn, isCodeExecutionOn, mcpServerIds: selectedMcpIds }),
-    [isWebSearchOn, isCodeExecutionOn, selectedMcpIds],
+    () => ({
+      isWebSearchOn,
+      isWebFetchOn,
+      isCodeExecutionOn,
+      mcpServerIds: selectedMcpIds,
+    }),
+    [isWebSearchOn, isWebFetchOn, isCodeExecutionOn, selectedMcpIds],
   )
 
   return {
     isWebSearchOn,
+    isWebFetchOn,
     isCodeExecutionOn,
     selectedMcpIds,
     toggleWebSearch,
+    toggleWebFetch,
     toggleCodeExecution,
     toggleMcpServer,
     selection,

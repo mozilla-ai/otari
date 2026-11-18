@@ -46,12 +46,13 @@ from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import release_session
 from gateway.models.budgets import SCOPE_WORKSPACE, Budget, ScopedBudget
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
-from gateway.models.tools import McpCredentialMode, WorkspaceMcpServer, WorkspaceWebSearchConfig
+from gateway.models.tools import McpCredentialMode, OrgWebSearchKey, WorkspaceMcpServer, WorkspaceWebSearchConfig
 from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT, SERVED_HERE_SLUG, UsageLog
 from gateway.models.users import User as BillingUser
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.file_extractors import ExtractionResult
 from gateway.services.inference import upstream_user_identifier
+from gateway.services.secret_box import encrypt_secret, generate_secret_key
 
 from .conftest import MODEL_NAME, build_test_client
 from .test_web_fetch_instances import scripted_model, serve_fetch_on_tabstack
@@ -702,7 +703,18 @@ def test_an_unconfigured_tool_reports_unconfigured_rather_than_disabled(client: 
     assert body["web_search"]["configured"] is False
     assert body["web_search"]["enabled"] is False
     assert body["web_search"]["reason"] is not None
+    assert body["web_fetch"]["configured"] is False
+    assert body["web_fetch"]["enabled"] is False
     assert body["mcp_servers"] == []
+
+
+def _set_web_search_row(db_session_factory: Callable[[], Session], world: _World, *, enabled: bool) -> None:
+    session = db_session_factory()
+    try:
+        session.add(WorkspaceWebSearchConfig(workspace_id=world.workspaces["alpha_one"], enabled=enabled))
+        session.commit()
+    finally:
+        session.close()
 
 
 def test_a_workspace_can_only_narrow_the_deployment_s_answer(
@@ -711,12 +723,7 @@ def test_a_workspace_can_only_narrow_the_deployment_s_answer(
     db_session_factory: Callable[[], Session],
 ) -> None:
     """A workspace row saying ``enabled`` cannot turn on a tool the deployment lacks."""
-    session = db_session_factory()
-    try:
-        session.add(WorkspaceWebSearchConfig(workspace_id=world.workspaces["alpha_one"], enabled=True))
-        session.commit()
-    finally:
-        session.close()
+    _set_web_search_row(db_session_factory, world, enabled=True)
 
     code, body = _request(client, world, "member", "GET", f"{_PREFIX}/tools", params=_ws(world))
     assert code == status.HTTP_200_OK
@@ -724,6 +731,11 @@ def test_a_workspace_can_only_narrow_the_deployment_s_answer(
         "configured": False,
         "enabled": False,
         "reason": "No backend is configured on this deployment.",
+    }
+    assert body["web_fetch"] == {
+        "configured": False,
+        "enabled": False,
+        "reason": "Web fetch is turned off on this deployment.",
     }
 
 
@@ -736,6 +748,7 @@ def test_a_workspace_with_no_row_is_off_where_the_deployment_makes_tools_opt_in(
     """The menu reads a missing row the way the request path does, so it offers nothing a request would be refused."""
     monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9998/search")
     monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
+    monkeypatch.setattr(test_config, "web_fetch_enabled", True)
     monkeypatch.setattr(test_config, "web_search_workspace_default", False)
     monkeypatch.setattr(test_config, "code_execution_workspace_default", False)
 
@@ -744,7 +757,121 @@ def test_a_workspace_with_no_row_is_off_where_the_deployment_makes_tools_opt_in(
     assert code == status.HTTP_200_OK
     not_on = {"configured": True, "enabled": False, "reason": "Not turned on for this workspace."}
     assert body["web_search"] == not_on
+    assert body["web_fetch"] == {
+        "configured": True,
+        "enabled": False,
+        "reason": "Not turned on for this workspace. Turning on web search turns it on.",
+    }
     assert body["code_execution"] == not_on
+
+
+def test_web_fetch_is_offered_without_a_search_backend(
+    client: TestClient,
+    world: _World,
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fetch needs only the deployment's switch, so it is offered where search is not."""
+    monkeypatch.setattr(test_config, "web_fetch_enabled", True)
+
+    code, body = _request(client, world, "member", "GET", f"{_PREFIX}/tools", params=_ws(world))
+
+    assert code == status.HTTP_200_OK
+    assert body["web_fetch"] == {"configured": True, "enabled": True, "reason": None}
+    assert body["web_search"]["configured"] is False
+
+
+@pytest.mark.parametrize(
+    ("row_enabled", "expected"),
+    [
+        (True, {"configured": True, "enabled": True, "reason": None}),
+        (False, {"configured": True, "enabled": False, "reason": "Turned off for this workspace, with web search."}),
+    ],
+)
+def test_the_workspace_s_web_search_row_narrows_web_fetch(
+    client: TestClient,
+    world: _World,
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session_factory: Callable[[], Session],
+    row_enabled: bool,
+    expected: dict[str, Any],
+) -> None:
+    """The request path refuses a declared fetch when the workspace's web access is off, so the menu does too."""
+    monkeypatch.setattr(test_config, "web_fetch_enabled", True)
+    monkeypatch.setattr(test_config, "web_search_workspace_default", not row_enabled)
+    _set_web_search_row(db_session_factory, world, enabled=row_enabled)
+
+    code, body = _request(client, world, "member", "GET", f"{_PREFIX}/tools", params=_ws(world))
+
+    assert code == status.HTTP_200_OK
+    assert body["web_fetch"] == expected
+
+
+def _add_org_search_key(db_session_factory: Callable[[], Session], world: _World) -> None:
+    """Store a search key as alpha's default, which every workspace without a pin then uses."""
+    session = db_session_factory()
+    try:
+        session.add(
+            OrgWebSearchKey(
+                organization_id=world.alpha,
+                provider="tavily",
+                name="ours",
+                encrypted_api_key=encrypt_secret("tvly-org-secret"),
+                is_org_default=True,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+
+def test_an_organization_search_key_offers_search_where_the_deployment_has_none(
+    client: TestClient,
+    world: _World,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """The request path searches on the organization's key, so the menu offers search on it."""
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _add_org_search_key(db_session_factory, world)
+
+    code, body = _request(client, world, "member", "GET", f"{_PREFIX}/tools", params=_ws(world))
+
+    assert code == status.HTTP_200_OK
+    assert body["web_search"] == {"configured": True, "enabled": True, "reason": None}
+
+
+def test_a_stored_policy_that_cannot_be_read_refuses_both_web_tools(
+    client: TestClient,
+    world: _World,
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """The request path refuses every web declaration on such a row, so the menu offers neither tool."""
+    monkeypatch.setattr(test_config, "web_fetch_enabled", True)
+    session = db_session_factory()
+    try:
+        session.add(
+            WorkspaceWebSearchConfig(
+                workspace_id=world.workspaces["alpha_one"],
+                enabled=True,
+                allowed_domains=["https://example.com/private"],
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    code, body = _request(client, world, "member", "GET", f"{_PREFIX}/tools", params=_ws(world))
+
+    assert code == status.HTTP_200_OK
+    assert body["web_fetch"] == {
+        "configured": True,
+        "enabled": False,
+        "reason": "This workspace's web search settings hold a domain rule that cannot be read.",
+    }
 
 
 # =============================================================================
