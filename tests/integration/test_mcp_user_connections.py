@@ -723,6 +723,34 @@ async def test_one_person_s_listing_is_not_recorded_on_an_organization_s_per_use
     assert (health["status"], health.get("tools", [])) == ("healthy", [])
 
 
+async def test_a_contact_made_before_the_server_switched_credential_mode_is_not_recorded(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    """A personal account's listing that lands after a switch to shared would otherwise read as everyone's."""
+    world = await _world(async_db, config)
+    row = await _row(async_db, world.server.id)
+    row.credential_mode = McpCredentialMode.SHARED
+    await async_db.commit()
+
+    @asynccontextmanager
+    async def unit_of_work() -> AsyncIterator[UnitOfWork]:
+        async with AsyncSession(async_db.bind, expire_on_commit=False) as session:
+            yield UnitOfWork(session)
+
+    contacts = McpServerContacts(unit_of_work=unit_of_work)
+    listing = ServerCheck(tool_names=["list_files"])
+    personal = McpServerContact(
+        server_id=world.server.id, url=PUBLIC_URL, listing=listing, credential_mode=McpCredentialMode.PER_USER
+    )
+    assert await contacts._store(personal) == "stale"
+    assert (await _row(async_db, world.server.id)).health is None
+
+    shared = dataclasses.replace(personal, credential_mode=McpCredentialMode.SHARED)
+    assert await contacts._store(shared) == "decided"
+    health = (await _row(async_db, world.server.id)).health
+    assert health is not None and health["tools"] == ["list_files"]
+
+
 async def test_a_listing_that_fails_right_after_a_sign_in_is_recorded_and_does_not_fail_the_sign_in(
     async_db: AsyncSession, config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1165,6 +1193,24 @@ async def test_a_server_that_registers_no_client_asks_for_a_client_id(
     assert "does not let Otari register itself" in str(unpublished.value)
     assert "open Settings" in str(unpublished.value)
     assert (await async_db.execute(select(McpOAuthFlow))).first() is None
+
+
+async def test_an_organization_server_that_registers_no_client_sends_members_to_the_organization(
+    async_db: AsyncSession, config: GatewayConfig, wire: _Wire
+) -> None:
+    """A workspace cannot change its organization's server, so the refusal names who can."""
+    world = await _world(async_db, config)
+    row = await _row(async_db, world.server.id)
+    row.workspace_id = None
+    await async_db.commit()
+
+    wire.metadata = McpOAuthMetadata(authorization_endpoint=f"{ISSUER}/authorize", token_endpoint=f"{ISSUER}/token")
+    with pytest.raises(McpConnectionSetupError) as unpublished:
+        await _service(async_db, config).start_connection(
+            user=world.member, workspace_id=world.workspace.id, server_id=world.server.id, return_to=None
+        )
+    assert "An organization owner or admin must add an OAuth client ID" in str(unpublished.value)
+    assert "Organization > MCP servers" in str(unpublished.value)
 
 
 def _refusing_registration(monkeypatch: pytest.MonkeyPatch) -> None:

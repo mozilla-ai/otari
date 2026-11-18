@@ -5,9 +5,9 @@ import {
   asWorkspaceUses,
   availabilityOverride,
   hasWorkspaceSettings,
+  isSamePolicy,
   organizationLimitLabel,
   organizationOffReason,
-  overrideBody,
   workspaceAvailability,
 } from "@/features/tools/mcpWorkspaceView"
 import { workspaceMcpServer } from "@/tests/fixtures"
@@ -70,23 +70,23 @@ describe("workspace settings", () => {
     ).toBe("")
   })
 
-  it("sends every field, keeping what the change leaves alone", () => {
-    const server = organizationServer({ everyone_tools: [] })
-    expect(overrideBody(server, { attach_by_default: true })).toEqual({
+  it("sends only what Availability sets, so a stored policy is left alone", () => {
+    expect(availabilityOverride("off")).toEqual({ enabled: false })
+    expect(availabilityOverride("on_request")).toEqual({
       enabled: true,
-      everyone_tools: [],
+      attach_by_default: false,
+    })
+    expect(availabilityOverride("every_request")).toEqual({
+      enabled: true,
       attach_by_default: true,
     })
-    expect(availabilityOverride(server, "off")).toEqual({
-      enabled: false,
-      everyone_tools: [],
-      attach_by_default: null,
-    })
-    expect(availabilityOverride(server, "every_request")).toEqual({
-      enabled: true,
-      everyone_tools: [],
-      attach_by_default: true,
-    })
+  })
+
+  it("knows an unchanged policy in any order", () => {
+    expect(isSamePolicy(["b", "a"], ["a", "b"])).toBe(true)
+    expect(isSamePolicy(["*"], ["*"])).toBe(true)
+    expect(isSamePolicy([], ["*"])).toBe(false)
+    expect(isSamePolicy(["a"], ["a", "b"])).toBe(false)
   })
 
   it("knows whether there is anything to clear", () => {

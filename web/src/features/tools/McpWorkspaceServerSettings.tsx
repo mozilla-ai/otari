@@ -4,32 +4,26 @@ import type { WorkspaceMcpServer } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
-import { Select } from "@/design-system/forms/Select"
 import {
   SettingsBlock,
   SettingsGroup,
 } from "@/design-system/layout/SettingsGroup"
+import { McpAvailabilitySelect } from "@/features/tools/McpAvailabilitySelect"
 import { McpGrantDialog } from "@/features/tools/McpGrantDialog"
-import { McpInfoHint } from "@/features/tools/McpInfoHint"
 import { isLiteralToolName, ruleSummary } from "@/features/tools/mcpAccess"
-import {
-  AVAILABILITY,
-  AVAILABILITY_OPTIONS,
-  AVAILABILITY_ORDER,
-  type McpAvailability,
-} from "@/features/tools/mcpAvailability"
 import { checkedTools } from "@/features/tools/mcpServerHealth"
 import {
   availabilityOverride,
   hasWorkspaceSettings,
+  isSamePolicy,
   organizationLimitLabel,
   organizationOffReason,
-  overrideBody,
   workspaceAvailability,
 } from "@/features/tools/mcpWorkspaceView"
 import {
   useClearWorkspaceMcpServerOverride,
   useSetWorkspaceMcpServerOverride,
+  useWorkspaceMcpServer,
   useWorkspaceMcpServerOverridePending,
 } from "@/shared/api/tools"
 
@@ -61,17 +55,22 @@ export function McpWorkspaceServerSettings({
   const limit = organizationLimitLabel(own?.organization_tools)
   const offReason = organizationOffReason(server)
   const defaultTools = own?.everyone_tools ?? server.everyone_tools
-  // Any write here, or the access rules' default policy below, sends every
-  // setting from the row as read, so none starts while another is in flight.
-  // Resetting a write in flight would also lose its refusal.
+  // No control starts while a write here or in the access rules below is in
+  // flight, or while the server is read again after one. Resetting a write in
+  // flight would also lose its refusal.
   const isWriting = useWorkspaceMcpServerOverridePending(workspaceId, server.id)
+  // After a failed write the server is read again; if that read fails too,
+  // what is shown may not be what is stored, so nothing is changed from it.
+  const read = useWorkspaceMcpServer(workspaceId, server.id)
+  const isUnconfirmed = read.isRefetchError
+  const isHeld = isWriting || isUnconfirmed
   const picker = checkedTools(server, { withinAllowList: true })
   const tools = picker.isKnown
     ? picker.tools
     : (server.allowed_tools ?? []).filter(isLiteralToolName)
 
   const write = (body: Parameters<typeof set.mutate>[0]["body"]) => {
-    if (isWriting) return
+    if (isHeld) return
     clear.reset()
     set.mutate({ ...ids, body })
   }
@@ -94,28 +93,24 @@ export function McpWorkspaceServerSettings({
             </p>
           ) : null}
           {offReason ? <InfoBanner>{offReason}</InfoBanner> : null}
-          <Select
-            label="Availability"
+          {isUnconfirmed ? (
+            <InfoBanner>
+              <span className="flex flex-wrap items-center gap-3">
+                These settings could not be read again, so they may not be what
+                is saved.
+                <Button
+                  onPress={() => void read.refetch()}
+                  className="min-h-11 md:min-h-0"
+                >
+                  Refresh
+                </Button>
+              </span>
+            </InfoBanner>
+          ) : null}
+          <McpAvailabilitySelect
             value={workspaceAvailability(server)}
-            onChange={(next) =>
-              write(availabilityOverride(server, next as McpAvailability))
-            }
-            options={AVAILABILITY_OPTIONS}
-            labelAction={
-              <McpInfoHint label="Explain the three choices">
-                {AVAILABILITY_ORDER.map((value) => (
-                  <span key={value}>
-                    <span className="font-medium">
-                      {AVAILABILITY[value].label}:
-                    </span>{" "}
-                    {AVAILABILITY[value].help}
-                  </span>
-                ))}
-              </McpInfoHint>
-            }
-            isDisabled={isWriting}
-            shouldReserveMessage={false}
-            className="w-44"
+            onChange={(next) => write(availabilityOverride(next))}
+            isDisabled={isHeld}
           />
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-body">
@@ -129,12 +124,12 @@ export function McpWorkspaceServerSettings({
             </p>
             <Button
               onPress={() => {
-                if (isWriting) return
+                if (isHeld) return
                 set.reset()
                 setOpenCount((count) => count + 1)
                 setEditingDefault(true)
               }}
-              isDisabled={isWriting}
+              isDisabled={isHeld}
               aria-label="Edit the default policy for this workspace"
               className="min-h-11 shrink-0 md:min-h-0"
             >
@@ -148,12 +143,12 @@ export function McpWorkspaceServerSettings({
           <div>
             <Button
               onPress={() => {
-                if (isWriting) return
+                if (isHeld) return
                 set.reset()
                 clear.mutate(ids)
               }}
               isPending={clear.isPending}
-              isDisabled={!hasWorkspaceSettings(server) || isWriting}
+              isDisabled={!hasWorkspaceSettings(server) || isHeld}
               className="min-h-11 md:min-h-0"
             >
               Use organization defaults
@@ -177,12 +172,15 @@ export function McpWorkspaceServerSettings({
           isPending={set.isPending}
           error={set.error}
           onSubmit={(draft) => {
-            if (isWriting) return
+            if (set.isPending) return
+            // Unchanged: saving it would store the inherited policy as the
+            // workspace's own, which would stop following the organization's.
+            if (isSamePolicy(draft.tools, defaultTools)) {
+              setEditingDefault(false)
+              return
+            }
             set.mutate(
-              {
-                ...ids,
-                body: overrideBody(server, { everyone_tools: draft.tools }),
-              },
+              { ...ids, body: { everyone_tools: draft.tools } },
               { onSuccess: () => setEditingDefault(false) },
             )
           }}

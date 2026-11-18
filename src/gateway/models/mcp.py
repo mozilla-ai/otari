@@ -93,6 +93,9 @@ class McpServerConfig(BaseModel):
     caller_access_source: SkipJsonSchema[str | None] = Field(default=None, exclude=True)
     # Admission's too: the stored server's id, so a trace's tool span links to its page.
     stored_server_id: SkipJsonSchema[str | None] = Field(default=None, exclude=True)
+    # Admission's too: whose credential the stored server took ("shared" or "per_user"), so what a request
+    # learns from it is not recorded once the server has switched to the other.
+    credential_mode: SkipJsonSchema[str | None] = Field(default=None, exclude=True)
     # Admission's too: the workspace attached it and the request did not name it, so one that cannot be
     # reached is left out of the request rather than failing it.
     attached: SkipJsonSchema[bool] = Field(default=False, exclude=True)
@@ -136,6 +139,8 @@ class ResolvedMcpServer(BaseModel):
     tool_limit: list[str] | None = None
     # On a per-user server: a new token for the one the server refused, for one retry. Not configuration.
     renew_token: SkipJsonSchema[TokenRenewer | None] = Field(default=None, exclude=True)
+    # Whose credential the server took when resolved ("shared" or "per_user"). Not configuration either.
+    credential_mode: SkipJsonSchema[str | None] = Field(default=None, exclude=True)
 
     @property
     def revision(self) -> str:

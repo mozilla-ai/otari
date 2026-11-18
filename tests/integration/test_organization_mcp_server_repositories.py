@@ -180,6 +180,37 @@ async def test_clearing_a_workspace_s_settings_keeps_a_limit_stored_since_they_w
     assert (kept.organization_tools, kept.enabled) == ([], True)
 
 
+async def test_a_change_to_an_override_removed_since_it_was_read_lands_on_the_defaults(
+    async_db: AsyncSession,
+) -> None:
+    """The removal leaves this write's UPDATE no row to match; it inserts its own change instead of failing."""
+    acme = await _organization(async_db)
+    marcomms = await _workspace(async_db, acme, "Marcomms")
+    drive = await _server(async_db, acme)
+    read = await WorkspaceMcpServerOverrideRepository(async_db).save(
+        None, workspace_id=marcomms.id, server=drive, **{**_DEFAULTS, "organization_tools": ["@read"]}
+    )
+    await async_db.commit()
+    assert read is not None
+
+    async with AsyncSession(async_db.bind, expire_on_commit=False) as other:
+        overrides = WorkspaceMcpServerOverrideRepository(other)
+        theirs = await overrides.find(workspace_id=marcomms.id, server_id=drive.id)
+        assert await overrides.save(theirs, workspace_id=marcomms.id, server=drive, **_DEFAULTS) is None
+        await other.commit()
+
+    attached = await WorkspaceMcpServerOverrideRepository(async_db).save(
+        read,
+        workspace_id=marcomms.id,
+        server=drive,
+        **{**_DEFAULTS, "organization_tools": ["@read"], "attach_by_default": True},
+    )
+    await async_db.commit()
+
+    assert attached is not None
+    assert (attached.organization_tools, attached.attach_by_default) == (None, True), "the lifted limit stays lifted"
+
+
 async def test_a_first_override_stored_since_it_was_read_takes_this_write_too(async_db: AsyncSession) -> None:
     """Two writers that each read no override both insert one; the second changes the first's instead of failing."""
     acme = await _organization(async_db)

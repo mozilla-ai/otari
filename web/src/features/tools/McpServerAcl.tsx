@@ -26,7 +26,7 @@ import {
 import { checkedTools } from "@/features/tools/mcpServerHealth"
 import {
   isOrganizationServer,
-  overrideBody,
+  isSamePolicy,
 } from "@/features/tools/mcpWorkspaceView"
 import { useMcpServerCheck } from "@/features/tools/useMcpServerCheck"
 import { useKeys } from "@/shared/api/apiKeys"
@@ -90,7 +90,7 @@ export function McpServerAcl({
   const setOverride = useSetWorkspaceMcpServerOverride()
   const isOrganizations = isOrganizationServer(server)
   const defaultWrite = isOrganizations ? setOverride : updateServer
-  // The workspace's settings card above writes the same override, whole.
+  // The workspace's settings card above writes the same override.
   const isOverrideWriting =
     useWorkspaceMcpServerOverridePending(workspaceId, server.id) &&
     isOrganizations
@@ -348,12 +348,15 @@ export function McpServerAcl({
           onSubmit={(draft) => {
             const onSuccess = () => setEditingDefault(false)
             if (isOrganizations) {
-              if (isOverrideWriting) return
+              if (setOverride.isPending) return
+              // Unchanged: saving it would store the inherited policy as the
+              // workspace's own, which would stop following the organization's.
+              if (isSamePolicy(draft.tools, server.everyone_tools)) {
+                onSuccess()
+                return
+              }
               setOverride.mutate(
-                {
-                  ...ids,
-                  body: overrideBody(server, { everyone_tools: draft.tools }),
-                },
+                { ...ids, body: { everyone_tools: draft.tools } },
                 { onSuccess },
               )
               return

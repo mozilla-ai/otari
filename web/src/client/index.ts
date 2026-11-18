@@ -793,7 +793,7 @@ export type UpdateWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerUpdate"]
 // On an organization's server read through a workspace: that workspace's own
 // settings on it and the organization's limit there, and the body that sets
-// them (`PUT .../override`). Each field of the body replaces the one stored.
+// them (`PATCH .../override`). A field left out of the body keeps the one stored.
 export type McpServerWorkspaceSettings = Schemas["McpServerWorkspaceSettings"]
 export type SetWorkspaceMcpServerOverrideRequest =
   Schemas["WorkspaceMcpServerSettingsUpdate"]

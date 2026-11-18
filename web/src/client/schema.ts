@@ -9083,26 +9083,27 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /**
-         * Set Workspace Mcp Server Override
-         * @description Set this workspace's own settings on its organization's server. Workspace owners and admins only.
-         *
-         *     Its switch, its default access and whether it is attached, each replacing the one stored; null takes the
-         *     server's own. The organization's limit for the workspace stays, and caps what is set here. A 404 for a
-         *     workspace's own server, which is changed with `PATCH` instead.
-         */
-        put: operations["mcp-servers-set_workspace_mcp_server_override"];
+        put?: never;
         post?: never;
         /**
          * Clear Workspace Mcp Server Override
          * @description Take this workspace's own settings off its organization's server, so it inherits the server's. Idempotent.
          *
-         *     Workspace owners and admins only. The organization's limit for the workspace stays.
+         *     Organization owners/admins or this workspace's owners/admins. The organization's limit for the workspace stays.
          */
         delete: operations["mcp-servers-clear_workspace_mcp_server_override"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Set Workspace Mcp Server Override
+         * @description Change this workspace's own settings on its organization's server.
+         *
+         *     Organization owners/admins or this workspace's owners/admins. Sets only the fields sent; one left out
+         *     keeps what is stored, so two admins changing different settings do not undo each other. `enabled` is
+         *     the workspace's switch and is never null. `everyone_tools` and `attach_by_default` take null to follow
+         *     the server's own again. The organization's limit for the workspace stays, and caps what is set here.
+         */
+        patch: operations["mcp-servers-set_workspace_mcp_server_override"];
         trace?: never;
     };
     "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/shared-account": {
@@ -24591,7 +24592,7 @@ export interface components {
         };
         /**
          * WorkspaceMcpServerSettingsUpdate
-         * @description A workspace's own settings on its organization's server. Each replaces the one stored.
+         * @description A change to a workspace's own settings on its organization's server. A field left out keeps what is stored.
          */
         WorkspaceMcpServerSettingsUpdate: {
             /**
@@ -24601,10 +24602,9 @@ export interface components {
             attach_by_default?: boolean | null;
             /**
              * Enabled
-             * @description Off turns the server off for this workspace
-             * @default true
+             * @description The workspace's own switch: false turns the server off for this workspace
              */
-            enabled: boolean;
+            enabled?: boolean;
             /**
              * Everyone Tools
              * @description Tool patterns every key of the workspace may call; [] denies everyone; null takes the server's
@@ -40544,6 +40544,45 @@ export interface operations {
             };
         };
     };
+    "mcp-servers-clear_workspace_mcp_server_override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerPublic"];
+                };
+            };
+            /** @description No organization server by that id reaches the workspace. A workspace's own server is a 404 here too: it is changed with `PATCH /{server_id}`. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "mcp-servers-set_workspace_mcp_server_override": {
         parameters: {
             query?: never;
@@ -40569,37 +40608,12 @@ export interface operations {
                     "application/json": components["schemas"]["WorkspaceMcpServerPublic"];
                 };
             };
-            /** @description Validation Error */
-            422: {
+            /** @description No organization server by that id reaches the workspace. A workspace's own server is a 404 here too: it is changed with `PATCH /{server_id}`. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    "mcp-servers-clear_workspace_mcp_server_override": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                workspace_id: string;
-                server_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkspaceMcpServerPublic"];
-                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

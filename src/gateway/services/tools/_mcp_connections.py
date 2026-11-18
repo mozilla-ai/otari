@@ -107,6 +107,11 @@ _LINK_FLOW_STATE_PURPOSE = b"otari-mcp-link-flow:"
 CLIENT_METADATA_PATH = "/mcp-connections/client-metadata"
 # Where a manager supplies a client, said wherever a sign-in cannot start without one.
 _WHERE_TO_ADD_A_CLIENT = "Add an OAuth client ID: on the server's page, open Settings."
+# A workspace cannot change its organization's server, so its members are sent to who can.
+_WHERE_TO_ADD_AN_ORGANIZATION_CLIENT = (
+    "An organization owner or admin must add an OAuth client ID: open Settings on the server's page in "
+    "Organization > MCP servers."
+)
 # The dashboard route that finishes a sign-in a dashboard session started.
 DASHBOARD_CALLBACK_ROUTE = "/mcp-connections/callback"
 _MAX_RETURN_TO_LENGTH = 2048
@@ -304,8 +309,11 @@ def client_metadata(config: GatewayConfig) -> dict[str, object] | None:
     return _mcp_oauth.client_metadata_document(url, callback_url(config)) if url is not None else None
 
 
-def _registration_refusal(exc: McpOAuthRegistrationError) -> str:
-    """Why no client could be had for a sign-in, and where a manager supplies one."""
+def _registration_refusal(exc: McpOAuthRegistrationError, *, organization: bool = False) -> str:
+    """Why no client could be had for a sign-in, and where a manager supplies one.
+
+    On an ``organization`` server, that manager is one of the organization's owners or admins.
+    """
     if exc.status_code is None:
         what = "This server's sign-in does not let Otari register itself as a client."
     else:
@@ -314,7 +322,7 @@ def _registration_refusal(exc: McpOAuthRegistrationError) -> str:
         what = f"This server's sign-in refused to register Otari as a client ({detail})."
     if exc.takes_client_metadata:
         what += " It reads a client's details from a public https address instead, which this deployment does not have."
-    return f"{what} {_WHERE_TO_ADD_A_CLIENT}"
+    return f"{what} {_WHERE_TO_ADD_AN_ORGANIZATION_CLIENT if organization else _WHERE_TO_ADD_A_CLIENT}"
 
 
 def sign_in_link(config: GatewayConfig, *, server_id: uuid.UUID, user_id: str, workspace_id: uuid.UUID | None) -> str:
@@ -933,7 +941,7 @@ class McpConnectionService:
                 stored = None
             client = await self._client(server_id, mode, url, stored, metadata, redirect_uri)
         except McpOAuthRegistrationError as exc:
-            raise McpConnectionSetupError(_registration_refusal(exc)) from None
+            raise McpConnectionSetupError(_registration_refusal(exc, organization=is_organizations)) from None
         except McpOAuthPkceUnsupportedError as exc:
             raise McpConnectionSetupError(f"This server cannot be signed in to: {exc}") from None
         except McpOAuthDiscoveryError as exc:

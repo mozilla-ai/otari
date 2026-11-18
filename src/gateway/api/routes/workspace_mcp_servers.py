@@ -412,7 +412,15 @@ async def check_workspace_mcp_server_connection(
     return await service.check_connection(user=current_identity, workspace_id=workspace_id, request=body)
 
 
-@router.put("/{server_id}/override")
+_OVERRIDE_NOT_FOUND: dict[int | str, dict[str, Any]] = {
+    status.HTTP_404_NOT_FOUND: {
+        "description": "No organization server by that id reaches the workspace. A workspace's own server is a 404 "
+        "here too: it is changed with `PATCH /{server_id}`."
+    }
+}
+
+
+@router.patch("/{server_id}/override", responses=_OVERRIDE_NOT_FOUND)
 async def set_workspace_mcp_server_override(
     service: WorkspaceMcpServerServiceDep,
     current_identity: CurrentIdentity,
@@ -420,18 +428,19 @@ async def set_workspace_mcp_server_override(
     server_id: uuid.UUID,
     body: WorkspaceMcpServerSettingsUpdate,
 ) -> WorkspaceMcpServerPublic:
-    """Set this workspace's own settings on its organization's server. Workspace owners and admins only.
+    """Change this workspace's own settings on its organization's server.
 
-    Its switch, its default access and whether it is attached, each replacing the one stored; null takes the
-    server's own. The organization's limit for the workspace stays, and caps what is set here. A 404 for a
-    workspace's own server, which is changed with `PATCH` instead.
+    Organization owners/admins or this workspace's owners/admins. Sets only the fields sent; one left out
+    keeps what is stored, so two admins changing different settings do not undo each other. `enabled` is
+    the workspace's switch and is never null. `everyone_tools` and `attach_by_default` take null to follow
+    the server's own again. The organization's limit for the workspace stays, and caps what is set here.
     """
     return await service.set_workspace_settings(
         user=current_identity, workspace_id=workspace_id, server_id=server_id, request=body
     )
 
 
-@router.delete("/{server_id}/override")
+@router.delete("/{server_id}/override", responses=_OVERRIDE_NOT_FOUND)
 async def clear_workspace_mcp_server_override(
     service: WorkspaceMcpServerServiceDep,
     current_identity: CurrentIdentity,
@@ -440,7 +449,7 @@ async def clear_workspace_mcp_server_override(
 ) -> WorkspaceMcpServerPublic:
     """Take this workspace's own settings off its organization's server, so it inherits the server's. Idempotent.
 
-    Workspace owners and admins only. The organization's limit for the workspace stays.
+    Organization owners/admins or this workspace's owners/admins. The organization's limit for the workspace stays.
     """
     return await service.clear_workspace_settings(user=current_identity, workspace_id=workspace_id, server_id=server_id)
 

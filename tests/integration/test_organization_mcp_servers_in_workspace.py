@@ -4,6 +4,7 @@ Exercised at the service layer, as ``test_workspace_mcp_servers.py`` is. Organiz
 """
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -170,6 +171,49 @@ async def test_the_organization_s_limit_decides_what_a_workspace_rule_cannot_rea
     assert {row.name: row.organization_tools for row in access} == {"drive": None, "jira": ["list_issues"]}
 
 
+async def test_two_admins_changing_different_settings_keep_both_changes(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    """Each PATCH sends only what its control changed, so the second, from a view that missed the first, keeps it."""
+    world = await _world(async_db, config)
+    jira = await _shared(async_db, world.workspace.organization_id)
+    ids = {"workspace_id": world.workspace.id, "server_id": jira}
+    first = _service(async_db, config)
+    async with AsyncSession(async_db.bind, expire_on_commit=False) as other:
+        second = _service(other, config)
+        stale = await second.get_server(user=world.owner, **ids)
+        assert stale.in_workspace is not None and stale.in_workspace.enabled is True
+
+        await first.set_workspace_settings(
+            user=world.owner, request=WorkspaceMcpServerSettingsUpdate.model_validate({"enabled": False}), **ids
+        )
+        policy = await second.set_workspace_settings(
+            user=world.owner, request=WorkspaceMcpServerSettingsUpdate.model_validate({"everyone_tools": []}), **ids
+        )
+
+    assert policy.in_workspace is not None
+    assert (policy.in_workspace.enabled, policy.in_workspace.everyone_tools) == (False, []), "Off stays off"
+
+
+async def test_a_change_names_only_what_it_sets_and_null_restores_the_server_s_own(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    world = await _world(async_db, config)
+    jira = await _shared(async_db, world.workspace.organization_id)
+    await _override(async_db, world.workspace, jira, everyone_tools=["@read"], attach_by_default=True)
+    service = _service(async_db, config)
+    ids = {"workspace_id": world.workspace.id, "server_id": jira}
+
+    inherited = await service.set_workspace_settings(
+        user=world.owner, request=WorkspaceMcpServerSettingsUpdate.model_validate({"everyone_tools": None}), **ids
+    )
+
+    assert inherited.in_workspace is not None
+    assert (inherited.in_workspace.everyone_tools, inherited.in_workspace.attach_by_default) == (None, True)
+    with pytest.raises(ValidationError, match="enabled cannot be null"):
+        WorkspaceMcpServerSettingsUpdate.model_validate({"enabled": None})
+
+
 async def test_an_empty_organization_limit_is_the_organization_s_refusal(
     async_db: AsyncSession, config: GatewayConfig
 ) -> None:
@@ -208,6 +252,19 @@ async def test_the_caller_s_access_is_read_as_the_workspace_reaches_the_server(
     )
     off = await service.get_server(user=world.owner, **ids)
     assert off.caller_access == "none", "the workspace turned it off"
+
+
+async def test_the_caller_s_access_is_none_where_the_two_ceilings_do_not_meet(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    world = await _world(async_db, config)
+    jira = await _shared(async_db, world.workspace.organization_id, allowed_tools=["list_issues"])
+    await _override(async_db, world.workspace, jira, organization_tools=["delete_issue"])
+    service = _service(async_db, config)
+
+    one = await service.get_server(user=world.member, workspace_id=world.workspace.id, server_id=jira)
+
+    assert one.caller_access == "none"
 
 
 async def test_another_organization_s_workspace_reaches_nothing_of_it(

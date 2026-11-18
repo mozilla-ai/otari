@@ -1,4 +1,5 @@
 import {
+  useIsFetching,
   useIsMutating,
   useMutation,
   useQueries,
@@ -857,14 +858,17 @@ const OVERRIDE_WRITE = [WORKSPACES, "mcp-server-override"]
 
 /**
  * Whether a write of the workspace's own settings on this server is in flight,
- * from any control on the page. The PUT replaces every setting with what the
- * page last read, so a second write started before the first settles could
- * send back a value the first changed.
+ * from any control on the page, or the server is being read again. A control
+ * waits for both, so it never starts from a row a write has just changed.
  */
 export function useWorkspaceMcpServerOverridePending(
   workspaceId: string,
   serverId: string,
 ): boolean {
+  const reading = useIsFetching({
+    queryKey: mcpServerKey(workspaceMcpScope(workspaceId), serverId),
+    exact: true,
+  })
   const writing = useIsMutating({
     mutationKey: OVERRIDE_WRITE,
     predicate: (mutation) => {
@@ -874,7 +878,7 @@ export function useWorkspaceMcpServerOverridePending(
       return ids?.workspaceId === workspaceId && ids.serverId === serverId
     },
   })
-  return writing > 0
+  return writing + reading > 0
 }
 
 /**
@@ -899,13 +903,21 @@ function useWorkspaceMcpServerOverrideWrite<
         queryKey: playgroundToolsKey(workspaceId),
       })
     },
+    // A write that failed may still have landed (a lost answer, a read after
+    // the commit that failed), so the server is read again before another edit.
+    onError: (_error, { workspaceId, serverId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: mcpServerKey(workspaceMcpScope(workspaceId), serverId),
+        exact: true,
+      })
+    },
   })
 }
 
 /**
- * Sets a workspace's own settings on its organization's server: its switch,
- * its default access and whether it is attached. Each replaces the one stored,
- * so the caller sends all three; null takes the server's own.
+ * Changes a workspace's own settings on its organization's server: its switch,
+ * its default access and whether it is attached. Only the fields sent change;
+ * null on the default access or the attach setting takes the server's own.
  */
 export function useSetWorkspaceMcpServerOverride() {
   return useWorkspaceMcpServerOverrideWrite(
@@ -920,7 +932,7 @@ export function useSetWorkspaceMcpServerOverride() {
     }) =>
       apiFetch<WorkspaceMcpServer>(
         `${workspaceServerPath(workspaceId, serverId)}/override`,
-        { method: "PUT", body: JSON.stringify(body) },
+        { method: "PATCH", body: JSON.stringify(body) },
       ),
   )
 }

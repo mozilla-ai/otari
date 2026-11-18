@@ -40,7 +40,7 @@ import uuid
 from collections.abc import Awaitable, Callable, Collection, Sequence
 from contextlib import AbstractAsyncContextManager
 from functools import partial
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 from urllib.parse import urlsplit
 
 from fastapi import BackgroundTasks
@@ -383,16 +383,23 @@ def _caller_access(
     if not enabled or not tools or server.allowed_tools == []:
         return "none"
     limit = None if view is None else view.tool_limit
-    if limit is not None:
-        read_tools = _read_tools(server)
-        reached = clip_mcp_tool_patterns(expand_mcp_tool_patterns(tools, read_tools), limit)
-        if not reached:
-            return "none"
-        if "*" not in reached:
-            return "read" if read_tools and set(reached) == set(read_tools) else "some"
-    if "*" in tools:
-        return "all" if server.allowed_tools is None else "some"
-    return "read" if list(tools) == [MCP_READ_PRESET] else "some"
+    if limit is None and server.allowed_tools is None:
+        if "*" in tools:
+            return "all"
+        return "read" if list(tools) == [MCP_READ_PRESET] else "some"
+    # Under either ceiling or both, what the rule reaches is what all of them allow.
+    read_tools = _read_tools(server)
+    reached = expand_mcp_tool_patterns(tools, read_tools)
+    for ceiling in (limit, server.allowed_tools):
+        if ceiling is not None:
+            reached = clip_mcp_tool_patterns(reached, ceiling)
+    if not reached:
+        return "none"
+    if "*" in reached:
+        return "all"
+    if list(tools) == [MCP_READ_PRESET] or (read_tools and set(reached) == set(read_tools)):
+        return "read"
+    return "some"
 
 
 class McpServerWorkspaceSettings(BaseModel):
@@ -428,9 +435,11 @@ class McpServerWorkspaceSettings(BaseModel):
 
 
 class WorkspaceMcpServerSettingsUpdate(BaseModel):
-    """A workspace's own settings on its organization's server. Each replaces the one stored."""
+    """A change to a workspace's own settings on its organization's server. A field left out keeps what is stored."""
 
-    enabled: bool = Field(default=True, description="Off turns the server off for this workspace")
+    enabled: bool | SkipJsonSchema[None] = Field(
+        default=None, description="The workspace's own switch: false turns the server off for this workspace"
+    )
     everyone_tools: list[str] | None = Field(
         default=None,
         description="Tool patterns every key of the workspace may call; [] denies everyone; null takes the server's",
@@ -441,9 +450,15 @@ class WorkspaceMcpServerSettingsUpdate(BaseModel):
 
     @model_validator(mode="after")
     def _check(self) -> WorkspaceMcpServerSettingsUpdate:
+        if "enabled" in self.model_fields_set and self.enabled is None:
+            raise ValueError("enabled cannot be null; omit the field to leave it unchanged")
         if self.everyone_tools is not None:
             self.everyone_tools = validate_mcp_tool_patterns(self.everyone_tools)
         return self
+
+    def changes(self) -> dict[str, Any]:
+        """The settings this request sets, by name, and nothing it left out."""
+        return {name: getattr(self, name) for name in self.model_fields_set}
 
 
 class WorkspaceMcpServerPublic(BaseModel):
@@ -1099,6 +1114,7 @@ async def _resolve_for_request(
             caller_tool_patterns=None if "*" in granted else granted,
             caller_access_source=f"mcp_{access.decide(row.id, in_workspace[server_id].everyone_tools)[0]}",
             stored_server_id=str(row.id),
+            credential_mode=row.credential_mode,
             attached=server_id not in named,
             attached_budget=budget if server_id not in named else None,
         )
@@ -1298,6 +1314,7 @@ async def resolve_workspace_mcp_server(
         renew_token=_renewer(row, access, tokens),
         # A user's token changes at every renewal, which is not a change to the server's configuration.
         credential_revision=McpCredentialMode.PER_USER if per_user else None,
+        credential_mode=row.credential_mode,
         enabled=view.enabled,
         everyone_tools=view.everyone_tools,
         read_tools=view.read_tools,
@@ -1744,7 +1761,9 @@ class WorkspaceMcpServerService:
         servers = [view.row for view in page]
         own = await self._own_rules(user, [server.id for server in servers], workspace_id)
         accounts = await self._shared_accounts(servers)
-        connected = await self._connected_users(servers) if manages else {}
+        # Only the workspace's own: an organization's server counts sign-ins from every workspace, and shows none here.
+        own_rows = [view.row for view in page if not view.of_organization]
+        connected = await self._connected_users(own_rows) if manages else {}
         return WorkspaceMcpServersPublic(
             data=[
                 WorkspaceMcpServerPublic.from_model(
@@ -2468,49 +2487,49 @@ class WorkspaceMcpServerService:
     async def set_workspace_settings(
         self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID, request: WorkspaceMcpServerSettingsUpdate
     ) -> WorkspaceMcpServerPublic:
-        """Set the workspace's own settings on its organization's server: its switch, default access and attach.
+        """Change the workspace's own settings on its organization's server: its switch, default access and attach.
 
-        Workspace managers only. The organization's limit stays as the organization set it, and caps the access set
-        here. A workspace's own server has no such settings: it is changed itself.
+        Only the settings ``request`` names; the rest keep what is stored. Workspace managers only. The
+        organization's limit stays as the organization set it, and caps the access set here. A workspace's own
+        server has no such settings: it is changed itself.
 
         Raises:
             WorkspaceMcpServerNotFoundError: the server is not one of the organization's the workspace reaches.
         """
-        return await self._write_workspace_settings(
-            user, workspace_id, server_id, request.enabled, request.everyone_tools, request.attach_by_default
-        )
+        return await self._write_workspace_settings(user, workspace_id, server_id, request.changes())
 
     async def clear_workspace_settings(
         self, *, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID
     ) -> WorkspaceMcpServerPublic:
         """Take the workspace's own settings off its organization's server, so it inherits them. Idempotent."""
-        return await self._write_workspace_settings(user, workspace_id, server_id, True, None, None)
+        return await self._write_workspace_settings(
+            user, workspace_id, server_id, {"enabled": True, "everyone_tools": None, "attach_by_default": None}
+        )
 
     async def _write_workspace_settings(
-        self,
-        user: User,
-        workspace_id: uuid.UUID,
-        server_id: uuid.UUID,
-        enabled: bool,
-        everyone_tools: list[str] | None,
-        attach_by_default: bool | None,
+        self, user: User, workspace_id: uuid.UUID, server_id: uuid.UUID, changes: dict[str, Any]
     ) -> WorkspaceMcpServerPublic:
+        """Set ``changes`` among the workspace's settings on the server; a setting not named keeps what is stored."""
         resolved_workspace_id = await self._require_management(user, workspace_id)
-        # The workspace lock serializes two writes of its settings; the organization's limit is kept as read under it.
+        # The workspace lock serializes two writes of its settings on PostgreSQL; the repository's save keeps a
+        # setting this write leaves alone as stored where nothing locks (SQLite).
         await WorkspaceRepository(self.db).lock(resolved_workspace_id)
         view = await self._reached(resolved_workspace_id, server_id, all_states=True)
         if not view.of_organization:
             raise WorkspaceMcpServerNotFoundError(server_id)
         overrides = WorkspaceMcpServerOverrideRepository(self.db)
         override = await overrides.find(workspace_id=resolved_workspace_id, server_id=view.id)
+        stored = {
+            "enabled": True if override is None else override.enabled,
+            "everyone_tools": None if override is None else override.everyone_tools,
+            "attach_by_default": None if override is None else override.attach_by_default,
+        }
         saved = await overrides.save(
             override,
             workspace_id=resolved_workspace_id,
             server=view.row,
             organization_tools=None if override is None else override.organization_tools,
-            enabled=enabled,
-            everyone_tools=everyone_tools,
-            attach_by_default=attach_by_default,
+            **{**stored, **changes},
         )
         await self.db.commit()
         # The workspace's own setting may attach the server here alone.
@@ -2547,7 +2566,8 @@ class WorkspaceMcpServerService:
         ceiling = server.allowed_tools
         if not view.enabled:
             decided_by, patterns = "server", []
-        if not patterns or ceiling == []:
+        within_ceiling = ceiling is None or any(is_mcp_tool_allowed(patterns, name) for name in ceiling)
+        if not patterns or ceiling == [] or not within_ceiling:
             access: Literal["all", "some", "none"] = "none"
         elif "*" in patterns and ceiling is None:
             access = "all"
@@ -2588,7 +2608,7 @@ class WorkspaceMcpServerService:
             check = await _check(server, token)
         except McpCapacityUnavailable:
             return None
-        mcp_server_contacts.observed(server.id, server.url, check)
+        mcp_server_contacts.observed(server.id, server.url, check, credential_mode=McpCredentialMode.PER_USER)
         if check.failure is not None:
             logger.info("MCP server tools not listed server_id=%s outcome=%s", server.id, check.failure)
             return None

@@ -32601,7 +32601,7 @@
         "type": "object"
       },
       "WorkspaceMcpServerSettingsUpdate": {
-        "description": "A workspace's own settings on its organization's server. Each replaces the one stored.",
+        "description": "A change to a workspace's own settings on its organization's server. A field left out keeps what is stored.",
         "properties": {
           "attach_by_default": {
             "anyOf": [
@@ -32616,8 +32616,7 @@
             "title": "Attach By Default"
           },
           "enabled": {
-            "default": true,
-            "description": "Off turns the server off for this workspace",
+            "description": "The workspace's own switch: false turns the server off for this workspace",
             "title": "Enabled",
             "type": "boolean"
           },
@@ -65452,7 +65451,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/override": {
       "delete": {
-        "description": "Take this workspace's own settings off its organization's server, so it inherits the server's. Idempotent.\n\nWorkspace owners and admins only. The organization's limit for the workspace stays.",
+        "description": "Take this workspace's own settings off its organization's server, so it inherits the server's. Idempotent.\n\nOrganization owners/admins or this workspace's owners/admins. The organization's limit for the workspace stays.",
         "operationId": "mcp-servers-clear_workspace_mcp_server_override",
         "parameters": [
           {
@@ -65487,6 +65486,9 @@
             },
             "description": "Successful Response"
           },
+          "404": {
+            "description": "No organization server by that id reaches the workspace. A workspace's own server is a 404 here too: it is changed with `PATCH /{server_id}`."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -65511,8 +65513,8 @@
           "mcp-servers"
         ]
       },
-      "put": {
-        "description": "Set this workspace's own settings on its organization's server. Workspace owners and admins only.\n\nIts switch, its default access and whether it is attached, each replacing the one stored; null takes the\nserver's own. The organization's limit for the workspace stays, and caps what is set here. A 404 for a\nworkspace's own server, which is changed with `PATCH` instead.",
+      "patch": {
+        "description": "Change this workspace's own settings on its organization's server.\n\nOrganization owners/admins or this workspace's owners/admins. Sets only the fields sent; one left out\nkeeps what is stored, so two admins changing different settings do not undo each other. `enabled` is\nthe workspace's switch and is never null. `everyone_tools` and `attach_by_default` take null to follow\nthe server's own again. The organization's limit for the workspace stays, and caps what is set here.",
         "operationId": "mcp-servers-set_workspace_mcp_server_override",
         "parameters": [
           {
@@ -65556,6 +65558,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "404": {
+            "description": "No organization server by that id reaches the workspace. A workspace's own server is a 404 here too: it is changed with `PATCH /{server_id}`."
           },
           "422": {
             "content": {

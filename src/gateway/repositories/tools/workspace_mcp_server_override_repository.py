@@ -8,7 +8,7 @@ import uuid
 from collections.abc import Collection
 from typing import Any, Never
 
-from sqlalchemy import ColumnElement, delete, select
+from sqlalchemy import ColumnElement, delete, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -103,31 +103,42 @@ class WorkspaceMcpServerOverrideRepository(BaseRepository[WorkspaceMcpServerOver
             "attach_by_default": attach_by_default,
         }
         changed = {name: value for name, value in wanted.items() if value != read[name]}
-        if override is None:
-            if wanted == _DEFAULTS:
-                return None
-            # Inserts nothing where another writer's first override landed meanwhile; that one is changed below.
-            insert = postgresql_insert if dialect_name(self.db) == "postgresql" else sqlite_insert
-            await self.db.execute(
-                insert(WorkspaceMcpServerOverride)
-                .values(
-                    workspace_id=workspace_id, organization_id=server.organization_id, server_id=server.id, **wanted
-                )
-                .on_conflict_do_nothing(
-                    index_elements=[WorkspaceMcpServerOverride.workspace_id, WorkspaceMcpServerOverride.server_id]
-                )
-            )
-            override = await self._current(workspace_id, server.id)
-            if override is None:
-                raise LookupError("the MCP server override is missing after its insert")
         # Each pass is one other writer's change landing between this read and this write; a few settle it.
         for _ in range(_MAX_SAVE_PASSES):
-            current = _settings(override)
-            if {**current, **changed} != _DEFAULTS:
-                for name, value in changed.items():
-                    setattr(override, name, value)
-                await self.db.flush()
-                return override
+            if override is None:
+                # None stored: these changes go onto the defaults.
+                merged = {**_DEFAULTS, **changed}
+                if merged == _DEFAULTS:
+                    return None
+                # Inserts nothing where another writer's first override landed meanwhile; the next pass changes it.
+                insert = postgresql_insert if dialect_name(self.db) == "postgresql" else sqlite_insert
+                inserted = await self.db.execute(
+                    insert(WorkspaceMcpServerOverride)
+                    .values(
+                        workspace_id=workspace_id, organization_id=server.organization_id, server_id=server.id, **merged
+                    )
+                    .on_conflict_do_nothing(
+                        index_elements=[WorkspaceMcpServerOverride.workspace_id, WorkspaceMcpServerOverride.server_id]
+                    )
+                )
+                override = await self._current(workspace_id, server.id)
+                if getattr(inserted, "rowcount", 0) == 1:
+                    return override
+                continue
+            if {**_settings(override), **changed} != _DEFAULTS:
+                if changed:
+                    # One statement that matches no row where another writer removed it meanwhile.
+                    updated = await self.db.execute(
+                        update(WorkspaceMcpServerOverride)
+                        .where(WorkspaceMcpServerOverride.id == override.id)
+                        .values(**changed)
+                        .execution_options(synchronize_session=False)
+                    )
+                    if getattr(updated, "rowcount", 0) != 1:
+                        override = await self._current(workspace_id, server.id)
+                        continue
+                # Read back, so the caller holds what is stored, another writer's settings included.
+                return await self._current(workspace_id, server.id)
             # Removed only while the settings this caller left alone are still the defaults it read.
             kept: list[ColumnElement[bool]] = [_is_default(name) for name in _DEFAULTS if name not in changed]
             removed = await self.db.execute(
