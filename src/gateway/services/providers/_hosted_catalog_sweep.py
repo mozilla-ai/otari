@@ -15,7 +15,7 @@ what keeps it on the catalog.
 import uuid
 from collections.abc import Awaitable, Callable, Collection
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import GatewayConfig, region_instance
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.providers_exceptions import HostedCatalogEmptyError
 from gateway.models.pricing import ModelPricing
@@ -131,7 +131,17 @@ class HostedCatalogSweep:
             # prices exactly as the apply, and a listing is never credited to a
             # credential that did not answer it.
             present = {source.name: source.identity for source in sources if source.enabled}
-            unlisted = frozenset(source.name for source in sources if source.serves_unlisted_models)
+            # A region's selector is priced as its provider's own, and a region's own price is kept with it.
+            region_names = {
+                source.name: [region_instance(source.name, region.slug) for region in source.regions]
+                for source in sources
+            }
+            unlisted = frozenset(
+                name
+                for source in sources
+                if source.serves_unlisted_models
+                for name in (source.name, *region_names[source.name])
+            )
             for (source, _, _), answer in zip(serving, dialed, strict=True):
                 if present.get(answer.provider) != source.identity:
                     answer.added = []
@@ -150,6 +160,12 @@ class HostedCatalogSweep:
             if not apply:
                 # What an apply would offer, folded in without writing it.
                 offered_keys |= {f"{answer.provider}:{model}" for answer in dialed for model in answer.added}
+            offered_keys |= {
+                f"{region}:{model}"
+                for key in list(offered_keys)
+                for name, _, model in [key.partition(":")]
+                for region in region_names.get(name, ())
+            }
             if not offered_keys and not unlisted:
                 if not orphaned:
                     raise HostedCatalogEmptyError

@@ -2679,6 +2679,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/providers/hosted_provider_repository.py",
         "baseline": (),
     },
+    "gateway.models.providers.HostedProviderRegion": {
+        "repository": "gateway/repositories/providers/hosted_provider_region_repository.py",
+        "baseline": (),
+    },
     "gateway.models.providers.HostedProviderModel": {
         "repository": "gateway/repositories/providers/hosted_provider_repository.py",
         "baseline": (),

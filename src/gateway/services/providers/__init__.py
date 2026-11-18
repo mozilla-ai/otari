@@ -22,6 +22,7 @@ from gateway.services.providers._hosted_catalog_update import (
 )
 from gateway.services.providers._hosted_credentials import last4, normalize_api_base, public_api_base
 from gateway.services.providers._hosted_name_index import (
+    HostedRegionIndex,
     hosted_implementation,
     load_hosted_names_at_startup,
     reset_hosted_name_index,
@@ -86,6 +87,7 @@ __all__ = [
     "CountryNotServedError",
     "HostedCatalogUpdate",
     "HostedProviderService",
+    "HostedRegionIndex",
     "HostedSources",
     "LiveByoPairs",
     "OrganizationExists",

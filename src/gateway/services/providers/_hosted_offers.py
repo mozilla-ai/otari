@@ -25,6 +25,7 @@ from collections.abc import Collection, Mapping, Sequence
 
 from any_llm.types.model import Model
 
+from gateway.core.config import region_instance
 from gateway.exceptions.providers_exceptions import HostedModelAlreadyOfferedError
 from gateway.models.pricing import CONFIG_ORIGIN, LISTED_ORIGIN, SEED_ORIGIN, HostedPriceSource, ModelPricing
 from gateway.models.providers import DISABLED_BY_OPERATOR, DISABLED_UNAVAILABLE, DISABLED_UNPRICED, HostedProviderModel
@@ -317,6 +318,38 @@ class HostedOffers:
         missing = [model for model in keys.values() if model not in rates]
         for model, default in (await self.defaults_for(provider, missing, implementation=implementation)).items():
             rates[model] = HostedModelRates.from_version(default, PRICE_SOURCE_DEFAULT)
+        return rates
+
+    async def region_rates(
+        self, provider: str, regions: Sequence[str], rows: Sequence[HostedProviderModel]
+    ) -> dict[str, dict[str, HostedModelRates]]:
+        """The rates each region sets of its own, keyed by model name and then by region slug.
+
+        Only a version stored under the region's own key counts, canonical
+        (``tokenhub@sg:model``) ahead of the legacy ``tokenhub@sg/model``, as
+        settlement reads them: a region with neither settles at the provider's
+        rate, so it is absent.
+        """
+        if not rows or not regions:
+            return {}
+        now = normalize_effective_at(None)
+        keys: dict[str, tuple[str, str, int]] = {}
+        for slug in regions:
+            instance = region_instance(provider, slug)
+            for row in rows:
+                keys[_key(instance, row.model)] = (row.model, slug, 0)
+                keys[f"{instance}/{row.model}"] = (row.model, slug, 1)
+        versions = await self.pricing.current_versions(keys, now)
+        chosen: dict[tuple[str, str], tuple[int, ModelPricing]] = {}
+        for key, version in versions.items():
+            model, slug, rank = keys[key]
+            if (model, slug) not in chosen or rank < chosen[(model, slug)][0]:
+                chosen[(model, slug)] = (rank, version)
+        rates: dict[str, dict[str, HostedModelRates]] = {}
+        for (model, slug), (_, version) in chosen.items():
+            rates.setdefault(model, {})[slug] = HostedModelRates.from_version(
+                version, _SOURCES.get(version.origin, "deployment")
+            )
         return rates
 
     async def reset_to_defaults(self, provider: str, defaults: Mapping[str, ModelPricing]) -> None:

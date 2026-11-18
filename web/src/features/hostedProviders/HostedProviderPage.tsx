@@ -1,6 +1,6 @@
 import { Link, useNavigate } from "@tanstack/react-router"
 import { type ReactNode, useState } from "react"
-import { FiActivity, FiEdit2, FiTrash2 } from "react-icons/fi"
+import { FiActivity, FiEdit2, FiPlus, FiTrash2 } from "react-icons/fi"
 
 import type { HostedProvider, ProviderHealth } from "@/client"
 import { Button } from "@/design-system/actions/Button"
@@ -28,8 +28,11 @@ import {
 import { useProviderHealth, useProviders } from "@/shared/api/providers"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
+import { dataLocationLabel } from "./dataLocations"
 import { EditHostedProviderForm } from "./EditHostedProviderForm"
 import { HostedProviderModelsPanel } from "./HostedProviderModelsPanel"
+import { RegionFormDialog } from "./RegionFormDialog"
+import { RegionsCard } from "./RegionsCard"
 import { formatCountries } from "./supportedCountries"
 
 // One hosted provider on a page of its own: how it is reached and who it
@@ -63,41 +66,106 @@ function Setting({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
+function ApiKeyValue({ provider }: { provider: HostedProvider }) {
+  if (!provider.decryptable) return <Badge tone="warn">Key unreadable</Badge>
+  if (provider.api_key_last4) {
+    return <code className="text-muted">••••{provider.api_key_last4}</code>
+  }
+  if (provider.has_api_key) return <code className="text-muted">••••</code>
+  return <span className="text-muted">None needed</span>
+}
+
+/**
+ * The provider's settings. Without regions, everything about its one
+ * connection. With regions, where data is kept, the endpoint and who may call
+ * belong to each region, so the grid keeps only what applies provider-wide and
+ * a smaller block names what regions share unless they set their own.
+ */
 function ProviderSettings({ provider }: { provider: HostedProvider }) {
+  const hasRegions = (provider.regions?.length ?? 0) > 0
+  const serves = (
+    <Setting label="Serves">
+      {provider.restricted_to_organization_id ? (
+        <span className="flex flex-col gap-0.5">
+          <span>One organization</span>
+          <code className="truncate text-caption">
+            {provider.restricted_to_organization_id}
+          </code>
+        </span>
+      ) : (
+        <span className="text-muted">Every organization</span>
+      )}
+    </Setting>
+  )
+  const providerWide = (
+    <>
+      <Setting label="Zero data retention">
+        {provider.zero_data_retention ? "Declared" : "Not declared"}
+      </Setting>
+      <Setting label="Models not on its list">
+        {provider.serves_unlisted_models ? "Served" : "Refused"}
+      </Setting>
+    </>
+  )
+  if (hasRegions) {
+    const clientArgs = Object.keys(provider.client_args ?? {})
+    return (
+      <div className="flex flex-col gap-3">
+        <dl
+          aria-label={`${provider.name} settings`}
+          className="grid grid-cols-2 border border-border sm:grid-cols-3"
+        >
+          {serves}
+          {providerWide}
+        </dl>
+        <div className="flex flex-col gap-1">
+          <h2 className="text-overline">Shared by regions</h2>
+          <dl
+            aria-label={`Shared by ${provider.name}'s regions`}
+            className="grid grid-cols-2 border border-border sm:grid-cols-3"
+          >
+            <Setting label="API key">
+              <ApiKeyValue provider={provider} />
+            </Setting>
+            <Setting label="Fallback endpoint">
+              <span className="text-muted">
+                {provider.api_base ?? "Provider default"}
+              </span>
+            </Setting>
+            <Setting label="Client args">
+              {clientArgs.length > 0 ? (
+                <code className="text-caption">{clientArgs.join(", ")}</code>
+              ) : (
+                <span className="text-muted">None</span>
+              )}
+            </Setting>
+          </dl>
+        </div>
+      </div>
+    )
+  }
   return (
     <dl
       aria-label={`${provider.name} settings`}
-      className="grid grid-cols-2 border border-border sm:grid-cols-3 xl:grid-cols-6"
+      className="grid grid-cols-2 border border-border sm:grid-cols-3 xl:grid-cols-7"
     >
       <Setting label="API key">
-        {!provider.decryptable ? (
-          <Badge tone="warn">Key unreadable</Badge>
-        ) : provider.api_key_last4 ? (
-          <code className="text-muted">••••{provider.api_key_last4}</code>
-        ) : provider.has_api_key ? (
-          <code className="text-muted">••••</code>
-        ) : (
-          <span className="text-muted">None needed</span>
-        )}
+        <ApiKeyValue provider={provider} />
       </Setting>
       <Setting label="Endpoint">
         <span className="text-muted">
           {provider.api_base ?? "Provider default"}
         </span>
       </Setting>
-      <Setting label="Serves">
-        {provider.restricted_to_organization_id ? (
-          <span className="flex flex-col gap-0.5">
-            <span>One organization</span>
-            <code className="truncate text-caption">
-              {provider.restricted_to_organization_id}
-            </code>
-          </span>
+      {serves}
+      <Setting label="Data hosted in">
+        {provider.data_location ? (
+          dataLocationLabel(provider.data_location)
         ) : (
-          <span className="text-muted">Every organization</span>
+          <span className="text-muted">Not declared</span>
         )}
       </Setting>
-      <Setting label="Countries">
+      <Setting label="Requests from">
         {provider.supported_countries == null ? (
           <span className="text-muted">Every country</span>
         ) : provider.supported_countries.length === 0 ? (
@@ -106,12 +174,7 @@ function ProviderSettings({ provider }: { provider: HostedProvider }) {
           formatCountries(provider.supported_countries)
         )}
       </Setting>
-      <Setting label="Zero data retention">
-        {provider.zero_data_retention ? "Declared" : "Not declared"}
-      </Setting>
-      <Setting label="Models not on its list">
-        {provider.serves_unlisted_models ? "Served" : "Refused"}
-      </Setting>
+      {providerWide}
     </dl>
   )
 }
@@ -130,6 +193,8 @@ export function HostedProviderPage({ name }: { name: string }) {
   const [isEditing, setIsEditing] = useState(false)
   const [editOpening, setEditOpening] = useState(0)
   const [isRemoving, setIsRemoving] = useState(false)
+  const [isAddingRegion, setIsAddingRegion] = useState(false)
+  const [regionOpening, setRegionOpening] = useState(0)
 
   if (access.isLoading || (isGranted && providers.isPending)) {
     return <PageLoading label="Loading hosted provider…" />
@@ -249,6 +314,17 @@ export function HostedProviderPage({ name }: { name: string }) {
                     Edit
                   </Button>
                   <Button
+                    className="min-h-11 md:min-h-9"
+                    aria-label={`Add a region to ${provider.name}`}
+                    onPress={() => {
+                      setRegionOpening((n) => n + 1)
+                      setIsAddingRegion(true)
+                    }}
+                  >
+                    <FiPlus aria-hidden className="size-4" />
+                    Add region
+                  </Button>
+                  <Button
                     variant="danger"
                     className="min-h-11 md:min-h-9"
                     aria-label={`Remove ${provider.name}`}
@@ -295,8 +371,22 @@ export function HostedProviderPage({ name }: { name: string }) {
         <ProviderSettings provider={provider} />
       </div>
 
+      {/* Shown from one region on, since a lone region left by a removal is
+          still where the provider serves from and has to stay editable. */}
+      {(provider.regions?.length ?? 0) > 0 ? (
+        <RegionsCard provider={provider} isReadOnly={isConfig} />
+      ) : null}
+
       <HostedProviderModelsPanel key={provider.name} provider={provider} />
 
+      {isConfig ? null : (
+        <RegionFormDialog
+          key={`${provider.name}:region:${regionOpening}`}
+          provider={provider}
+          isOpen={isAddingRegion}
+          onClose={() => setIsAddingRegion(false)}
+        />
+      )}
       {isConfig ? null : (
         <EditHostedProviderForm
           key={`${provider.name}:${editOpening}`}

@@ -1,11 +1,12 @@
 """ORM tables for usage rows and coding-agent telemetry."""
 
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Literal
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, false
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, event, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from gateway.models.base import Base
@@ -104,6 +105,11 @@ class UsageLog(Base):
     # where an overlay binds one. False for every other row, and for every row
     # written before the column existed.
     deployment_paid: Mapped[bool] = mapped_column(default=False, server_default=false())
+    # Where the hosted provider (or region) that served the attempt declared it
+    # keeps request data, read when the row was written: a country code, ``EU``
+    # or ``GLOBAL``. Null for a row the deployment did not serve, or one served
+    # where nothing was declared.
+    data_location: Mapped[str | None] = mapped_column(String(16), default=None)
 
     prompt_tokens: Mapped[int | None] = mapped_column()
     completion_tokens: Mapped[int | None] = mapped_column()
@@ -320,3 +326,27 @@ class AgentTelemetry(Base):
     temporality: Mapped[str | None] = mapped_column()
     series_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     series_key: Mapped[str | None] = mapped_column()
+
+
+# Where a hosted provider (or region) name declares it keeps request data,
+# registered by the composition root: the provider domain owns that answer.
+_data_location_of: Callable[[str], str | None] | None = None
+
+
+def configure_usage_data_location(resolver: Callable[[str], str | None] | None) -> None:
+    """Register the lookup that stamps each deployment-served row with where it was served from."""
+    global _data_location_of  # noqa: PLW0603
+    _data_location_of = resolver
+
+
+@event.listens_for(UsageLog, "init")
+def _stamp_data_location(_row: UsageLog, _args: object, kwargs: dict[str, Any]) -> None:
+    """Fill in where a deployment-served row was served from, as the row is built.
+
+    Built in the request that served it, so the registered lookup answers what
+    the serving credential declared then, and a later change to a declaration
+    never reaches the row. A row that names its location keeps it.
+    """
+    if kwargs.get("deployment_paid") and kwargs.get("provider") and "data_location" not in kwargs:
+        if _data_location_of is not None:
+            kwargs["data_location"] = _data_location_of(kwargs["provider"])

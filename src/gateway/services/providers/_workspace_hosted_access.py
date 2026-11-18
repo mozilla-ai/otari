@@ -8,7 +8,9 @@ to a list of models. It never grants. No row is full inheritance.
 A workspace may also require zero data retention of every provider serving it
 (``WorkspaceProviderPolicy``). A hosted provider its operator did not declare
 is then refused here, and an organization key or a configured instance where
-the organization key's own gate runs (``services/model_access``).
+the organization key's own gate runs (``services/model_access``). It may list
+the data locations it accepts too, and a hosted provider region declared
+somewhere else, or nowhere, then never serves it.
 
 The rule is applied on the gateway side of the port, in
 :func:`~gateway.services.providers.hosted_credential_for` and in the catalog,
@@ -22,8 +24,9 @@ reaches its own worker at once and every other worker within
 import asyncio
 import uuid
 from collections.abc import Awaitable, Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
+from gateway.core.settings.inference import data_location_admitted
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.exceptions.providers_exceptions import (
     WorkspaceHostedModelsInvalidError,
@@ -32,7 +35,7 @@ from gateway.exceptions.providers_exceptions import (
 from gateway.log_config import logger
 from gateway.models.providers import WorkspaceHostedProviderAccess
 from gateway.models.tenancy import User
-from gateway.ports.model_provider_port import HostedAccessDeniedError, HostedModels
+from gateway.ports.model_provider_port import HostedAccessDeniedError, HostedCredential, HostedModels
 from gateway.repositories.providers import WorkspaceHostedAccessRepository, WorkspaceProviderPolicyRepository
 from gateway.schemas.providers import (
     WorkspaceHostedProviderAccessRequest,
@@ -41,7 +44,11 @@ from gateway.schemas.providers import (
     WorkspaceProviderPolicyPublic,
     WorkspaceProviderPolicyRequest,
 )
-from gateway.services.providers._hosted_name_index import hosted_zero_data_retention
+from gateway.services.providers._hosted_name_index import (
+    hosted_data_locations,
+    hosted_region_parent,
+    hosted_zero_data_retention,
+)
 from gateway.services.tenancy.authorization import WorkspaceAccess
 
 WORKSPACE_HOSTED_ACCESS_CACHE_TTL_SECONDS = 30.0
@@ -63,6 +70,8 @@ class WorkspaceHostedAccessDeniedError(HostedAccessDeniedError):
 _rules: dict[uuid.UUID, dict[str, WorkspaceHostedRule]] = {}
 # The workspaces that require zero data retention of every provider serving them.
 _zero_retention_workspaces: frozenset[uuid.UUID] = frozenset()
+# The workspaces that accept only some data locations, with those locations.
+_allowed_locations: dict[uuid.UUID, frozenset[str]] = {}
 # Refreshes started, and the number of the newest one applied.
 _refresh_count = 0
 _applied_refresh = 0
@@ -71,6 +80,34 @@ _applied_refresh = 0
 def workspace_requires_zero_data_retention(workspace_id: uuid.UUID | None) -> bool:
     """Whether the workspace refuses every provider not declared zero data retention."""
     return workspace_id is not None and workspace_id in _zero_retention_workspaces
+
+
+def workspace_allowed_data_locations(workspace_id: uuid.UUID | None) -> frozenset[str] | None:
+    """The data locations the workspace accepts from a hosted provider, or None for any."""
+    return None if workspace_id is None else _allowed_locations.get(workspace_id)
+
+
+def narrow_to_workspace_locations(
+    credential: HostedCredential, allowed: frozenset[str] | None, workspace_id: uuid.UUID | None, provider: str
+) -> HostedCredential:
+    """``credential`` and its alternates kept to the regions whose data location is in ``allowed``.
+
+    ``allowed`` is the workspace's list as read before the credential was
+    resolved (:func:`workspace_allowed_data_locations`), None for any location.
+
+    Raises:
+        WorkspaceHostedAccessDeniedError: no region of the provider keeps data where the workspace accepts.
+    """
+    if allowed is None:
+        return credential
+    kept = [
+        candidate for candidate in credential.candidates() if data_location_admitted(candidate.data_location, allowed)
+    ]
+    if not kept:
+        raise WorkspaceHostedAccessDeniedError(
+            f"No region of hosted provider '{provider}' keeps data where this workspace allows", workspace_id
+        )
+    return replace(kept[0], alternates=tuple(kept[1:]))
 
 
 def cached_workspace_hosted_rule(workspace_id: uuid.UUID, provider: str) -> WorkspaceHostedRule | None:
@@ -91,6 +128,8 @@ def ensure_workspace_may_use_hosted(workspace_id: uuid.UUID | None, provider: st
     """
     if workspace_id is None:
         return
+    # A name pinning a region is ruled by its provider's row.
+    provider = hosted_region_parent(provider) or provider
     if workspace_requires_zero_data_retention(workspace_id) and not hosted_zero_data_retention(provider):
         raise WorkspaceHostedAccessDeniedError(
             f"Hosted provider '{provider}' is not declared zero data retention, which this workspace requires",
@@ -122,7 +161,8 @@ def narrow_hosted_models(hosted: HostedModels, workspace_id: uuid.UUID | None) -
     """``hosted`` as one workspace may use it, for a catalog that answers for that workspace.
 
     A provider the workspace switched off is dropped, and so is one not
-    declared zero data retention where the workspace requires it. A narrowed
+    declared zero data retention where the workspace requires it, and one with
+    no region keeping data where the workspace accepts. A narrowed
     provider keeps the models both lists name; where the deployment advertises
     no roster, the workspace's list is the roster.
     """
@@ -130,6 +170,12 @@ def narrow_hosted_models(hosted: HostedModels, workspace_id: uuid.UUID | None) -
         return hosted
     if workspace_requires_zero_data_retention(workspace_id):
         hosted = {provider: roster for provider, roster in hosted.items() if hosted_zero_data_retention(provider)}
+    if (allowed := workspace_allowed_data_locations(workspace_id)) is not None:
+        hosted = {
+            provider: roster
+            for provider, roster in hosted.items()
+            if any(data_location_admitted(location, allowed) for location in hosted_data_locations(provider))
+        }
     rules = _rules.get(workspace_id)
     if not rules:
         return hosted
@@ -158,26 +204,32 @@ async def refresh_workspace_hosted_access_cache(uow: UnitOfWork) -> None:
     replaces what a later one already applied: a write refreshes after it
     commits, and the periodic refresher must not undo that with an older read.
     """
-    global _rules, _zero_retention_workspaces, _refresh_count, _applied_refresh  # noqa: PLW0603
+    global _rules, _zero_retention_workspaces, _allowed_locations, _refresh_count, _applied_refresh  # noqa: PLW0603
 
     _refresh_count += 1
     number = _refresh_count
     async with uow:
         rows = await WorkspaceHostedAccessRepository(uow).list_all()
-        zero_retention = await WorkspaceProviderPolicyRepository(uow).zero_data_retention_workspaces()
+        # One read, so both requirements of a workspace come from the same version of its row.
+        zero_retention, allowed_locations = await WorkspaceProviderPolicyRepository(uow).requirements()
     if number < _applied_refresh:
         return
     rules: dict[uuid.UUID, dict[str, WorkspaceHostedRule]] = {}
     for row in rows:
         rules.setdefault(row.workspace_id, {})[row.provider] = _rule_of(row)
-    _rules, _zero_retention_workspaces, _applied_refresh = rules, zero_retention, number
+    _rules, _zero_retention_workspaces, _allowed_locations, _applied_refresh = (
+        rules,
+        zero_retention,
+        allowed_locations,
+        number,
+    )
 
 
 def reset_workspace_hosted_access_cache() -> None:
     """Drop the cache so the next load starts clean (startup and tests)."""
-    global _rules, _zero_retention_workspaces, _applied_refresh  # noqa: PLW0603
+    global _rules, _zero_retention_workspaces, _allowed_locations, _applied_refresh  # noqa: PLW0603
 
-    _rules, _zero_retention_workspaces, _applied_refresh = {}, frozenset(), 0
+    _rules, _zero_retention_workspaces, _allowed_locations, _applied_refresh = {}, frozenset(), {}, 0
 
 
 async def _refresh_on_a_session_of_its_own() -> None:
@@ -310,7 +362,8 @@ class WorkspaceHostedAccessService:
         async with self.uow:
             policy = await self.policies.get_for(workspace.id)
         return WorkspaceProviderPolicyPublic(
-            require_zero_data_retention=policy is not None and policy.require_zero_data_retention
+            require_zero_data_retention=policy is not None and policy.require_zero_data_retention,
+            allowed_data_locations=policy.allowed_data_locations if policy is not None else None,
         )
 
     async def set_policy(
@@ -321,10 +374,16 @@ class WorkspaceHostedAccessService:
         await self.access.require_workspace_management_access(user=user, workspace=workspace)
         async with self.uow:
             policy = await self.policies.put(
-                workspace.id, require_zero_data_retention=request.require_zero_data_retention
+                workspace.id,
+                require_zero_data_retention=request.require_zero_data_retention,
+                allowed_data_locations=request.allowed_data_locations,
+                set_locations="allowed_data_locations" in request.model_fields_set,
             )
         await self.refresh_cache()
-        return WorkspaceProviderPolicyPublic(require_zero_data_retention=policy.require_zero_data_retention)
+        return WorkspaceProviderPolicyPublic(
+            require_zero_data_retention=policy.require_zero_data_retention,
+            allowed_data_locations=policy.allowed_data_locations,
+        )
 
     async def reset_access(
         self, *, user: User, workspace_id: uuid.UUID, provider: str
@@ -357,4 +416,5 @@ def _public(
         served_models=_sorted(served),
         served_by_own_key=served_by_own_key,
         zero_data_retention=hosted_zero_data_retention(provider),
+        data_locations=list(hosted_data_locations(provider)),
     )
