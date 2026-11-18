@@ -60,6 +60,24 @@ def downgrade() -> None:
     # The release before this one serves a provider from its own connection
     # alone, so a region's own endpoint, key and country limits would be lost
     # and its traffic sent where none of them say.
+    # Where past requests and batches were served is audit history nothing
+    # can rebuild once the columns are dropped.
+    recorded = (
+        op.get_bind()
+        .execute(
+            sa.text(
+                "SELECT (SELECT COUNT(*) FROM usage_logs WHERE data_location IS NOT NULL)"
+                " + (SELECT COUNT(*) FROM batches WHERE data_location IS NOT NULL)"
+            )
+        )
+        .scalar()
+    )
+    if recorded:
+        msg = (
+            f"{recorded} usage or batch row(s) record where they were served from, which this downgrade would drop. "
+            "Export usage_logs.data_location and batches.data_location first, then clear them to downgrade."
+        )
+        raise RuntimeError(msg)
     regions = op.get_bind().execute(sa.text("SELECT COUNT(*) FROM hosted_provider_regions")).scalar()
     if regions:
         msg = (

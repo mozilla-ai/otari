@@ -82,6 +82,7 @@ from gateway.services.pricing import PriceFacts, apply_rules
 from gateway.services.pricing_service import find_model_pricing
 from gateway.services.provider_kwargs import (
     MissingCredential,
+    ResolvedProvider,
     require_declared_credential,
     resolve_provider_selector,
 )
@@ -142,6 +143,11 @@ class CreateBatchRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Usage logging helper
 # ---------------------------------------------------------------------------
+
+
+def _served_location(resolved: ResolvedProvider) -> str | None:
+    """Where the hosted credential serving ``resolved`` declared it keeps data, or None off the deployment's own."""
+    return HostedRegionIndex.data_location_of(resolved.instance) if resolved.deployment_paid else None
 
 
 async def log_batch_usage(
@@ -549,6 +555,8 @@ async def create_batch(
                 error=str(e),
                 status_code=UpstreamFailure(e).logged_status,
                 counts_toward_budget=not budget_exempt,
+                deployment_paid=resolved.deployment_paid,
+                data_location=_served_location(resolved),
             )
         )
         await refund_reservation(db, reservation)
@@ -560,6 +568,9 @@ async def create_batch(
         except OSError:
             logger.warning("Failed to remove temp file %s", tmp_path)
 
+    # Read once, as the credential that took the batch declared it, for the
+    # submission's row now and the result rows the record keeps it for.
+    served_location = _served_location(resolved)
     await log_writer.put(
         await log_batch_usage(
             db=db,
@@ -572,6 +583,8 @@ async def create_batch(
             completion_tokens=0,
             total_tokens=0,
             counts_toward_budget=not budget_exempt,
+            deployment_paid=resolved.deployment_paid,
+            data_location=served_location,
         )
     )
     await reconcile_reservation(db, reservation, 0.0)
@@ -588,8 +601,7 @@ async def create_batch(
         api_key_id=api_key_id,
         model=model,
         workspace_id=workspace_id,
-        # As the credential that took it declared, for the usage its results write.
-        data_location=HostedRegionIndex.data_location_of(resolved.instance) if resolved.deployment_paid else None,
+        data_location=served_location,
     )
 
     if rate_limit_info:

@@ -373,7 +373,11 @@ export function InferenceAccessSection({
           allowed={allowedLocations}
           providers={hostedRows}
           providersState={
-            hosted.isError ? "error" : hosted.data ? "ready" : "loading"
+            hosted.isError
+              ? "error"
+              : hosted.data && !hosted.isFetching
+                ? "ready"
+                : "loading"
           }
           isOpen={isEditingLocations}
           onClose={() => setLocationsOpenFor("")}
