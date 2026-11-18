@@ -2158,19 +2158,25 @@ class WorkspaceMcpServerService:
         self,
         *,
         user: User,
-        url: str,
+        url: str | None = None,
         credential_mode: McpCredentialMode = McpCredentialMode.SHARED,
+        with_token: bool = False,
         server_id: uuid.UUID | None = None,
     ) -> McpServerFoldCandidates:
-        """The organization's workspaces' own servers at ``url``, and what folding each would do.
+        """The organization's workspaces' own servers at a URL, and what folding each would do.
 
-        Into a new server of ``credential_mode``, or with ``server_id`` into that server, a workspace's own one
-        about to be made the organization's or an organization's. Organization owners and admins only.
+        Into a new server at ``url`` of ``credential_mode``, with a token of its own when ``with_token``, or with
+        ``server_id`` into that server, matched at its own URL, which is never sent here. Organization owners and
+        admins only.
         """
         scope = await self._managed(user, None)
         target = await self.db.get(WorkspaceMcpServer, server_id) if server_id is not None else None
         if server_id is not None and (target is None or target.organization_id != scope.organization_id):
             raise WorkspaceMcpServerNotFoundError(server_id)
+        if target is not None:
+            url = target.url
+        if url is None:
+            raise McpServerFoldError("Name the URL of the server to add, or the server to promote")
         fold = self._fold()
         copies = await fold.copies(scope.organization_id, url, except_id=server_id)
         workspaces, _ = await WorkspaceRepository(self.db).get_by_organization(
@@ -2180,6 +2186,7 @@ class WorkspaceMcpServerService:
             copies,
             target=target,
             credential_mode=McpCredentialMode(target.credential_mode) if target is not None else credential_mode,
+            with_token=with_token,
             workspace_names={workspace.id: workspace.name for workspace in workspaces},
         )
         return McpServerFoldCandidates(data=weighed)

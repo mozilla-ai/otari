@@ -47310,16 +47310,23 @@
         "operationId": "mcp-servers-list_organization_mcp_server_copies",
         "parameters": [
           {
-            "description": "The URL of the server to add or promote",
+            "description": "The URL of the server to add; not sent with server_id",
             "in": "query",
             "name": "url",
-            "required": true,
+            "required": false,
             "schema": {
-              "description": "The URL of the server to add or promote",
-              "maxLength": 2048,
-              "minLength": 1,
-              "title": "Url",
-              "type": "string"
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The URL of the server to add; not sent with server_id",
+              "title": "Url"
             }
           },
           {
@@ -47334,7 +47341,19 @@
             }
           },
           {
-            "description": "The workspace server about to be made the organization's, if any",
+            "description": "The new server is added with a token of its own, when no server_id is given",
+            "in": "query",
+            "name": "with_token",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "The new server is added with a token of its own, when no server_id is given",
+              "title": "With Token",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "The server about to be made the organization's, whose own URL is matched, if any",
             "in": "query",
             "name": "server_id",
             "required": false,
@@ -47348,7 +47367,7 @@
                   "type": "null"
                 }
               ],
-              "description": "The workspace server about to be made the organization's, if any",
+              "description": "The server about to be made the organization's, whose own URL is matched, if any",
               "title": "Server Id"
             }
           }

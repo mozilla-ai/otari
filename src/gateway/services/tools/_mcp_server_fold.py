@@ -109,11 +109,20 @@ class McpServerFold:
         target: WorkspaceMcpServer | None,
         credential_mode: McpCredentialMode,
         workspace_names: dict[uuid.UUID, str],
+        with_token: bool = False,
     ) -> list[McpServerFoldCandidate]:
-        """What folding each copy into ``target`` would do; with no ``target`` yet, a server of ``credential_mode``."""
+        """What folding each copy into ``target`` would do.
+
+        With no ``target`` yet, into a server of ``credential_mode``, holding a token of its own when ``with_token``.
+        """
         signed_in_there = await self._signed_in(target)
         client_id = _client_id(target)
         accounts = await self._connections.shared_for_servers([copy.id for copy in copies])
+        # A copy with no credential of its own still changes account when the target brings one.
+        if target is not None:
+            with_token = target.encrypted_token is not None or bool(
+                await self._connections.shared_for_servers([target.id])
+            )
         weighed: list[McpServerFoldCandidate] = []
         for copy in copies:
             if copy.workspace_id is None:
@@ -127,7 +136,7 @@ class McpServerFold:
                     workspace_name=workspace_names.get(copy.workspace_id, ""),
                     name=copy.name,
                     credential_mode=McpCredentialMode(copy.credential_mode),
-                    same_credential=copy.credential_mode == credential_mode and not own_credential,
+                    same_credential=copy.credential_mode == credential_mode and not own_credential and not with_token,
                     signed_in=len(plan.carried) + len(plan.revoked),
                     keep_sign_in=len(plan.carried),
                     sign_in_again=len(plan.revoked),

@@ -616,12 +616,19 @@ async def check_organization_mcp_server_connection(
 async def list_organization_mcp_server_copies(
     service: WorkspaceMcpServerServiceDep,
     current_identity: CurrentIdentity,
-    url: Annotated[str, Query(min_length=1, max_length=2048, description="The URL of the server to add or promote")],
+    url: Annotated[
+        str | None,
+        Query(min_length=1, max_length=2048, description="The URL of the server to add; not sent with server_id"),
+    ] = None,
     credential_mode: Annotated[
         McpCredentialMode, Query(description="How the new server signs in, when no server_id is given")
     ] = McpCredentialMode.SHARED,
+    with_token: Annotated[
+        bool, Query(description="The new server is added with a token of its own, when no server_id is given")
+    ] = False,
     server_id: Annotated[
-        uuid.UUID | None, Query(description="The workspace server about to be made the organization's, if any")
+        uuid.UUID | None,
+        Query(description="The server about to be made the organization's, whose own URL is matched, if any"),
     ] = None,
 ) -> McpServerFoldCandidates:
     """The workspaces' own servers at a URL, which a new organization server can take the place of.
@@ -631,7 +638,7 @@ async def list_organization_mcp_server_copies(
     naming them in `fold_server_ids` when adding the server, or when promoting one.
     """
     return await service.fold_candidates(
-        user=current_identity, url=url, credential_mode=credential_mode, server_id=server_id
+        user=current_identity, url=url, credential_mode=credential_mode, with_token=with_token, server_id=server_id
     )
 
 
