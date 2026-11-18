@@ -8,6 +8,7 @@ import uuid
 import pytest
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
@@ -440,7 +441,7 @@ async def test_a_sign_in_finishing_after_its_member_was_suspended_from_the_organ
     url = await _start(async_db, config, jira, member_id, world.workspace.id)
     # Suspension leaves the workspace's own membership row as it was.
     await async_db.execute(
-        update(OrganizationMember).where(OrganizationMember.user_id == member_id).values(status="suspended")
+        update(OrganizationMember).where(col(OrganizationMember.user_id) == member_id).values(status="suspended")
     )
     await async_db.commit()
     member = await async_db.get(User, member_id)

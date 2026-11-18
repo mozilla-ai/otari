@@ -571,7 +571,7 @@ async def test_a_shared_account_counts_against_a_removal_s_revocation_limit(
     monkeypatch.setattr(_mcp_connections, "decrypt_secret", counting)
     repositories = (McpUserConnectionRepository(async_db), WorkspaceMcpServerRepository(async_db))
 
-    found, unread = await collect_revocations(*repositories, server_ids=[world.server.id], shared=True, limit=0)
-    assert (found, unread, decrypted) == ([], 1, []), "a zero limit counts the account and decrypts nothing"
-    found, unread = await collect_revocations(*repositories, server_ids=[world.server.id], shared=True, limit=1)
-    assert (len(found), unread) == (1, 0)
+    found, unread, read = await collect_revocations(*repositories, server_ids=[world.server.id], shared=True, limit=0)
+    assert (found, unread, read, decrypted) == ([], 1, 0, []), "a zero limit counts the account and reads nothing"
+    found, unread, read = await collect_revocations(*repositories, server_ids=[world.server.id], shared=True, limit=1)
+    assert (len(found), unread, read) == (1, 0, 1)

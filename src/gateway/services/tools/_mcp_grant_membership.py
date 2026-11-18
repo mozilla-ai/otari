@@ -98,11 +98,12 @@ class McpGrantMembershipListener:
 
         The change is the caller's, which may still roll back, so nothing is sent before it commits.
         ``shared`` adds the servers' shared accounts, for a change that deletes the servers. At most
-        ``budget`` tokens are read and decrypted; the rest are counted. Returns what is left of the budget.
+        ``budget`` connections are read, whether or not their tokens decrypt; the rest are counted. Returns
+        what is left of the budget.
         """
         if not server_ids:
             return budget
-        revocations, unread = await collect_revocations(
+        revocations, unread, read = await collect_revocations(
             self._connections,
             self._servers,
             server_ids=server_ids,
@@ -112,7 +113,7 @@ class McpGrantMembershipListener:
         )
         if revocations or unread:
             self._connections.after_commit(lambda: revoke_in_background(revocations, unread=unread))
-        return max(budget - len(revocations), 0)
+        return max(budget - read, 0)
 
     async def member_joined(self, member: WorkspaceMember) -> None:
         """Nothing: a grant that ended stays ended."""
