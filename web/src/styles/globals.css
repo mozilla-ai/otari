@@ -2291,6 +2291,11 @@ body {
     min-height: 2.75rem;
     min-width: 2.75rem;
   }
+  /* The rows a select or combo box opens are the same kind of target, and
+     measure 34px without this. */
+  .list-box-item {
+    min-height: 2.75rem;
+  }
 }
 
 /* The text-entry floor on a touch screen, the input-size twin of the button
