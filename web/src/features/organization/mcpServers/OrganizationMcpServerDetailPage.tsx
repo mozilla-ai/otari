@@ -91,7 +91,10 @@ export function OrganizationMcpServerDetailPage({
     setSettings((previous) => ({ ...previous, isOpen: false }))
   // What the last save's connection check found, when it found something.
   const [unchecked, setUnchecked] = useState<WorkspaceMcpServer>()
-  useBreadcrumbLeaf(query.data?.name ?? "")
+  // A disabled query still hands back what it cached, so a viewer who loses
+  // the role while the page is open would otherwise keep seeing the server.
+  const server = canEdit ? query.data : undefined
+  useBreadcrumbLeaf(server?.name ?? "")
 
   const back = (
     <nav aria-label="Breadcrumb" className="text-caption">
@@ -104,7 +107,6 @@ export function OrganizationMcpServerDetailPage({
     </nav>
   )
 
-  const server = query.data
   if (!server) {
     if (context.isPending || (canEdit && query.isPending)) {
       return <PageLoading label="Loading MCP server…" />

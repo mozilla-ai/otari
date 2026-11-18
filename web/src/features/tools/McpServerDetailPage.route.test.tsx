@@ -17,7 +17,11 @@ import { bootstrap, workspaceMcpServer } from "@/tests/fixtures"
 import { mockMcpServerApi, WORKSPACE } from "@/tests/mcpServer"
 
 const SERVER = workspaceMcpServer({ workspace_id: WORKSPACE })
-const OTHER_ID = "66666666-6666-6666-6666-666666666666"
+const OTHER = workspaceMcpServer({
+  id: "66666666-6666-6666-6666-666666666666",
+  workspace_id: WORKSPACE,
+  name: "linear",
+})
 
 // The route's own component, mounted at its own path, so what is tested is
 // how the route renders the page rather than the page alone. Its component is
@@ -60,6 +64,14 @@ describe("a workspace's MCP server route", () => {
 
   it("starts afresh on another server, so a dialog opened on one never saves to the next", async () => {
     mockMcpServerApi({ server: SERVER })
+    // The stock mock answers any id in the workspace with `SERVER`, so the
+    // second server's own read is answered here with a row of its own.
+    const answer = vi.mocked(globalThis.fetch).getMockImplementation()
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) =>
+      String(input).endsWith(`/mcp-servers/${OTHER.id}`)
+        ? Response.json(OTHER)
+        : (answer as typeof fetch)(input, init),
+    )
     const user = userEvent.setup()
     const router = await renderRoute(SERVER.id)
     await screen.findByRole("heading", { level: 1, name: SERVER.name })
@@ -71,7 +83,7 @@ describe("a workspace's MCP server route", () => {
     await act(() =>
       router.navigate({
         to: "/tools/mcp-servers/$serverId",
-        params: { serverId: OTHER_ID },
+        params: { serverId: OTHER.id },
         search: {},
       }),
     )
@@ -80,10 +92,10 @@ describe("a workspace's MCP server route", () => {
     // dialog still open would hide the heading from this query.
     await waitFor(() =>
       expect(router.state.location.pathname).toBe(
-        `/tools/mcp-servers/${OTHER_ID}`,
+        `/tools/mcp-servers/${OTHER.id}`,
       ),
     )
-    await screen.findByRole("heading", { level: 1, name: SERVER.name })
+    await screen.findByRole("heading", { level: 1, name: OTHER.name })
     expect(screen.queryByRole("dialog")).toBeNull()
   })
 })

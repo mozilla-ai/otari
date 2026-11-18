@@ -37,7 +37,7 @@ function limitLabel(tools: readonly string[] | null): string {
 /** What the workspace's own admins did with the server, in words. */
 function workspaceSideLabel(row: OrganizationMcpServerWorkspace): string {
   if (!row.workspace_enabled) return "Turned off by its admins"
-  if (row.narrowed) return "Narrowed by its admins"
+  if (row.narrowed) return "Customized by its admins"
   return "As set here"
 }
 
@@ -65,8 +65,12 @@ function LimitDialog({
     ? picker.tools
     : (server.allowed_tools ?? []).filter(isLiteralToolName)
   const next = toolsFor(mode, picked)
+  // With no limit stored, the editor opens on Any tool: saving it is a
+  // change, closing it untouched is not.
   const isChanged =
     JSON.stringify(next) !== JSON.stringify(workspace.organization_tools)
+  const isEdited =
+    JSON.stringify(next) !== JSON.stringify(toolsFor(seed.mode, seed.picked))
 
   return (
     <FormDialog
@@ -90,7 +94,7 @@ function LimitDialog({
       }}
       isPending={set.isPending}
       isSubmitDisabled={!isDraftComplete(mode, picked) || !isChanged}
-      isDirty={isChanged}
+      isDirty={isEdited}
       error={set.error}
     >
       <AccessChooser
@@ -101,6 +105,7 @@ function LimitDialog({
         descriptions={picker.descriptions}
         isKnown={picker.isKnown}
         readTools={server.read_tools}
+        isDisabled={set.isPending}
         onChange={(nextMode, nextPicked) => {
           setMode(nextMode)
           setPicked(nextPicked)
@@ -129,7 +134,9 @@ export function OrganizationMcpServerWorkspaces({
   const rows = query.data?.data ?? []
 
   const openLimit = (row: OrganizationMcpServerWorkspace) => {
-    lift.reset()
+    // Resetting a pending lift would forget it is in flight, and release the
+    // hold on its row while its DELETE could still land after a new limit.
+    if (!lift.isPending) lift.reset()
     setOpenCount((count) => count + 1)
     setEditing(row)
   }

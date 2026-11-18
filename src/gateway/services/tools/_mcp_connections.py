@@ -28,7 +28,7 @@ from collections.abc import Awaitable, Callable, Collection
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import ClassVar, Protocol
+from typing import ClassVar, Literal, Protocol
 from urllib.parse import urlencode, urlsplit
 
 from cryptography.fernet import InvalidToken
@@ -601,6 +601,9 @@ class CompletedConnection:
     # The workspace the sign-in started from; ``None`` for an owner's sign-in to their organization's own server.
     workspace_id: uuid.UUID | None
     server_name: str
+    # Whose the server is, which ``workspace_id`` does not say: a member's own sign-in to an organization's
+    # server names the workspace it started from.
+    server_scope: Literal["workspace", "organization"]
     return_to: str | None
     # The server URL the sign-in was approved for. Its token is never sent anywhere else.
     server_url: str
@@ -1227,12 +1230,12 @@ class McpConnectionService:
             logger.warning("MCP sign-in callback refused reason=other_browser")
             return CallbackOutcome(error="sign_in_failed", conversation=True)
         if error or not code:
-            await self.abandon(state)
+            return_to = await self.abandon(state)
             # A short code the authorization server chose; anything else is not passed on.
             refused = error if error and _SAFE_ERROR.fullmatch(error) else "invalid_request"
-            return CallbackOutcome(
-                error=refused, conversation=conversation, state=state if landing.needs_dashboard else None
-            )
+            if not landing.needs_dashboard:
+                return CallbackOutcome(error=refused, conversation=conversation)
+            return CallbackOutcome(error=refused, state=state, return_to=return_to)
         if not landing.known:
             return CallbackOutcome(error="unknown_state")
         if landing.needs_dashboard:
@@ -1254,10 +1257,14 @@ class McpConnectionService:
                 return FlowLanding(known=False)
             return FlowLanding(known=True, needs_dashboard=flow.identity_id is not None)
 
-    async def abandon(self, state: str) -> None:
-        """Drop the pending sign-in a ``state`` names: its authorization server refused it."""
+    async def abandon(self, state: str) -> str | None:
+        """Drop the pending sign-in a ``state`` names: its authorization server refused it.
+
+        Returns the dashboard path it was started with, if any, so a cancel lands back there.
+        """
         async with self._uow:
-            await self._flows.consume(_state_hash(state))
+            flow = await self._flows.consume(_state_hash(state))
+            return None if flow is None else flow.return_to
 
     async def complete(
         self, *, state: str, code: str, identity_id: uuid.UUID | None = None, iss: str | None = None
@@ -1455,6 +1462,7 @@ class McpConnectionService:
                 server_id=server.id,
                 workspace_id=workspace_id,
                 server_name=server.name,
+                server_scope="workspace" if server.workspace_id is not None else "organization",
                 return_to=pending.return_to,
                 server_url=url_before,
                 check_token=tokens.access_token,
@@ -1472,6 +1480,7 @@ class McpConnectionService:
                 server_id=server.id,
                 workspace_id=workspace_id,
                 server_name=server.name,
+                server_scope="workspace" if server.workspace_id is not None else "organization",
                 return_to=pending.return_to,
                 server_url=url_before,
                 shared=True,
@@ -1481,6 +1490,7 @@ class McpConnectionService:
             server_id=server.id,
             workspace_id=workspace_id,
             server_name=server.name,
+            server_scope="workspace" if server.workspace_id is not None else "organization",
             return_to=pending.return_to,
             server_url=url_before,
             user_id=pending.user_id,

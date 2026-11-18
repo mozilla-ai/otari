@@ -276,7 +276,10 @@ async def test_a_sign_in_to_an_organization_server_starts_only_from_a_workspace_
             await _start(async_db, config, jira, member_id, elsewhere)
     member = await async_db.get(User, member_id)
     assert member is not None
-    await _service(async_db, config).complete_connection(user=member, state=_state(url), code="code")
+    done = await _service(async_db, config).complete_connection(user=member, state=_state(url), code="code")
+    assert (done.workspace_id, done.server_scope) == (workspace_id, "organization"), (
+        "the workspace it started from, and the server named as the organization's, which has no page there"
+    )
     stored = (await async_db.execute(select(McpUserConnection.server_id))).scalars().all()
     assert stored == [jira]
 

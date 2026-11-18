@@ -14367,6 +14367,16 @@
             "title": "Server Name",
             "type": "string"
           },
+          "server_scope": {
+            "default": "workspace",
+            "description": "Whose the server is: one workspace's own, or its organization's, which a member signs in to from a workspace that reaches it",
+            "enum": [
+              "workspace",
+              "organization"
+            ],
+            "title": "Server Scope",
+            "type": "string"
+          },
           "shared": {
             "default": false,
             "description": "The sign-in was a manager's for everyone: it is now the shared server's account",

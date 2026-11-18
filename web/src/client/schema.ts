@@ -16294,6 +16294,13 @@ export interface components {
             /** Server Name */
             server_name: string;
             /**
+             * Server Scope
+             * @description Whose the server is: one workspace's own, or its organization's, which a member signs in to from a workspace that reaches it
+             * @default workspace
+             * @enum {string}
+             */
+            server_scope: "workspace" | "organization";
+            /**
              * Shared
              * @description The sign-in was a manager's for everyone: it is now the shared server's account
              * @default false

@@ -2568,6 +2568,7 @@ class WorkspaceMcpServerService:
             server_id=done.server_id,
             workspace_id=done.workspace_id,
             server_name=done.server_name,
+            server_scope=done.server_scope,
             return_to=done.return_to,
             checked=done.check_token is not None,
             shared=done.shared,
