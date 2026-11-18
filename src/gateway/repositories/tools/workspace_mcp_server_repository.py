@@ -95,18 +95,14 @@ class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Nev
         )
         return list((await self.db.execute(query)).scalars().all())
 
-    async def any_attached(self, workspace_id: uuid.UUID) -> bool:
-        """Whether a workspace has an enabled server attached by default."""
+    async def attached_workspace_ids(self) -> frozenset[uuid.UUID]:
+        """Every workspace that has an enabled server attached by default."""
         found = await self.db.execute(
-            select(WorkspaceMcpServer.id)
-            .where(
-                WorkspaceMcpServer.workspace_id == workspace_id,
-                WorkspaceMcpServer.attach_by_default.is_(True),
-                WorkspaceMcpServer.enabled.is_(True),
-            )
-            .limit(1)
+            select(WorkspaceMcpServer.workspace_id)
+            .where(WorkspaceMcpServer.attach_by_default.is_(True), WorkspaceMcpServer.enabled.is_(True))
+            .distinct()
         )
-        return found.first() is not None
+        return frozenset(found.scalars())
 
     async def has_url(self, workspace_id: uuid.UUID, url: str) -> bool:
         """Whether a workspace stores a server at ``url``, a trailing slash and surrounding whitespace aside.

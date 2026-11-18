@@ -1,8 +1,12 @@
 import {
   harnessMark,
+  languageMark,
   makerMark,
   providerMark,
 } from "@/shared/helpers/brandMarks"
+
+/** The table a mark is looked up in. */
+export type MarkKind = "provider" | "maker" | "harness" | "language"
 
 /**
  * One mark, drawn from the geometry table.
@@ -21,7 +25,7 @@ export default function BrandMarkGlyph({
   box,
 }: {
   markKey: string
-  kind: "provider" | "maker" | "harness"
+  kind: MarkKind
   box: string
 }) {
   const glyph =
@@ -29,7 +33,9 @@ export default function BrandMarkGlyph({
       ? providerMark(markKey)
       : kind === "maker"
         ? makerMark(markKey)
-        : harnessMark(markKey)
+        : kind === "harness"
+          ? harnessMark(markKey)
+          : languageMark(markKey)
   // The caller already asked whether a mark exists before rendering this, so
   // reaching here without one means the key lists and the tables disagree.
   // Nothing is drawn rather than throwing: the slot stays the size it was.

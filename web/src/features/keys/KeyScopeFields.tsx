@@ -10,7 +10,14 @@ const END_USER_SCOPES: ReadonlySet<KeyScope> = new Set(
 )
 
 /** What a new key holds unless the form says otherwise, as the gateway's default does. */
-export const DEFAULT_KEY_SCOPES: readonly KeyScope[] = ["inference:run"]
+export const DEFAULT_KEY_SCOPES: readonly KeyScope[] = [
+  "inference:run",
+  "web:search",
+  "web:fetch",
+  "code:execute",
+  "mcp:read",
+  "mcp:execute",
+]
 
 /** The scopes once each, in the gateway's order, so two lists compare equal when they hold the same. */
 const ordered = (scopes: readonly KeyScope[]): KeyScope[] =>

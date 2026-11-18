@@ -78,6 +78,9 @@ class Trace(Base):
     api_key_id: Mapped[str | None] = mapped_column(ForeignKey("api_keys.id", ondelete="SET NULL"), index=True)
     session_source: Mapped[str] = mapped_column(String)
     harness: Mapped[str | None] = mapped_column(String)
+    # Set by the session's first request, as harness is; a later request never changes them.
+    client_language: Mapped[str | None] = mapped_column(String)
+    client_version: Mapped[str | None] = mapped_column(String)
     name: Mapped[str | None] = mapped_column(String)
     started_at: Mapped[datetime] = mapped_column(UtcDateTime())
     last_activity_at: Mapped[datetime] = mapped_column(UtcDateTime())

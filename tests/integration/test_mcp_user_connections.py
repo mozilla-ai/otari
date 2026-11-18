@@ -83,6 +83,7 @@ from gateway.services.tenancy.workspace_mcp_server_service import (
     WorkspaceMcpServerUpdate,
 )
 from gateway.services.tools import (
+    AttachedMcpServerIndex,
     McpConnectionService,
     McpGrantMembershipListener,
     McpSignInReason,
@@ -2738,6 +2739,18 @@ async def test_both_resolvers_survive_a_release_that_rolls_back_while_renewing(
 # --------------------------------------------------------------------------- #
 
 
+@pytest.fixture
+def attached_index_on_async_db(async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point the attached-server refresh a write runs at the test database, which no app booted here."""
+
+    async def on_the_test_database() -> None:
+        async with AsyncSession(async_db.bind) as session:
+            await AttachedMcpServerIndex.refresh(WorkspaceMcpServerRepository(session))
+
+    monkeypatch.setattr(AttachedMcpServerIndex, "_refresh_on_a_session_of_its_own", on_the_test_database)
+
+
+@pytest.mark.usefixtures("attached_index_on_async_db")
 async def test_a_request_gets_the_attached_servers_after_the_named_ones_and_never_a_denied_one(
     async_db: AsyncSession, config: GatewayConfig
 ) -> None:
@@ -2775,6 +2788,41 @@ async def test_a_request_gets_the_attached_servers_after_the_named_ones_and_neve
     # A named one it may not reach still answers as unknown, as it always has.
     with pytest.raises(WorkspaceMcpServerNotFoundError):
         await servers.resolve_for_request(world.workspace.id, [uuid.uuid4()], member, attach=True)
+
+
+@pytest.mark.usefixtures("attached_index_on_async_db")
+async def test_whether_a_workspace_has_an_attached_server_follows_each_write_without_a_read_per_request(
+    async_db: AsyncSession, config: GatewayConfig
+) -> None:
+    AttachedMcpServerIndex.reset()
+    world = await _world(async_db, config)
+    service = _service(async_db, config)
+    servers = WorkspaceMcpServers(async_db)
+    ids = {"workspace_id": world.workspace.id, "server_id": world.server.id}
+
+    assert await servers.any_attached(world.workspace.id) is False
+    await service.update_server(user=world.owner, request=WorkspaceMcpServerUpdate(attach_by_default=True), **ids)
+    assert await servers.any_attached(world.workspace.id) is True
+    await service.update_server(user=world.owner, request=WorkspaceMcpServerUpdate(enabled=False), **ids)
+    assert await servers.any_attached(world.workspace.id) is False
+    await service.update_server(user=world.owner, request=WorkspaceMcpServerUpdate(enabled=True), **ids)
+    assert await servers.any_attached(world.workspace.id) is True
+    await service.delete_server(user=world.owner, **ids)
+    assert await servers.any_attached(world.workspace.id) is False
+    jira = await service.create_server(
+        user=world.owner,
+        workspace_id=world.workspace.id,
+        request=WorkspaceMcpServerCreate(name="jira", url=PUBLIC_URL, attach_by_default=True),
+    )
+    assert await servers.any_attached(world.workspace.id) is True
+    # Another worker's write, which runs no refresh here: it arrives with the next one, not before.
+    await async_db.execute(
+        update(WorkspaceMcpServer).where(col(WorkspaceMcpServer.id) == jira.id).values(attach_by_default=False)
+    )
+    await async_db.commit()
+    assert await servers.any_attached(world.workspace.id) is True
+    await AttachedMcpServerIndex.refresh(WorkspaceMcpServerRepository(async_db))
+    assert await servers.any_attached(world.workspace.id) is False
 
 
 async def test_an_attached_server_that_keeps_failing_is_left_out_until_its_cooldown_ends(

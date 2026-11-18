@@ -38,6 +38,7 @@ INHERITED_HEADERS = {
     "X-RateLimit-Reset": "Rate-limit convention clients already parse.",
     "X-Subscription-Token": "The Brave Search API's own header.",
     "x-opencode-session-id": "opencode's own session header, which traces read to group its requests.",
+    "x-fern-language": "The language header Fern-generated SDKs (Cohere's) send, which traces read.",
     "x-litellm-session-id": "LiteLLM's session header, which OpenHands sends and traces read to group its requests.",
     "x-session-affinity": "A session header pi and OpenClaw send, read only beside the harness's own mark.",
     "x-session-id": "The session header Kilo Code, Crush and pi send, read only beside the harness's own mark.",

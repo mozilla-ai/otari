@@ -1,4 +1,4 @@
-import { FiCode, FiGlobe, FiServer } from "react-icons/fi"
+import { FiCode, FiGlobe, FiLink, FiServer } from "react-icons/fi"
 
 import type { PlaygroundTools } from "@/client"
 import { DismissChip } from "@/design-system/indicators/DismissChip"
@@ -14,22 +14,31 @@ import { DismissChip } from "@/design-system/indicators/DismissChip"
  */
 export function ActiveToolChips({
   isWebSearchOn,
+  isWebFetchOn,
   isCodeExecutionOn,
   selectedMcpIds,
   tools,
   onToggleWebSearch,
+  onToggleWebFetch,
   onToggleCodeExecution,
   onToggleMcpServer,
 }: {
   isWebSearchOn: boolean
+  isWebFetchOn: boolean
   isCodeExecutionOn: boolean
   selectedMcpIds: readonly string[]
   tools: PlaygroundTools | undefined
   onToggleWebSearch: (isOn: boolean) => void
+  onToggleWebFetch: (isOn: boolean) => void
   onToggleCodeExecution: (isOn: boolean) => void
   onToggleMcpServer: (id: string, isOn: boolean) => void
 }) {
-  if (!isWebSearchOn && !isCodeExecutionOn && selectedMcpIds.length === 0) {
+  if (
+    !isWebSearchOn &&
+    !isWebFetchOn &&
+    !isCodeExecutionOn &&
+    selectedMcpIds.length === 0
+  ) {
     return null
   }
 
@@ -40,6 +49,13 @@ export function ActiveToolChips({
           name="Web search"
           icon={<FiGlobe aria-hidden className="size-4" />}
           onRemove={() => onToggleWebSearch(false)}
+        />
+      ) : null}
+      {isWebFetchOn ? (
+        <AttachedTool
+          name="Web fetch"
+          icon={<FiLink aria-hidden className="size-4" />}
+          onRemove={() => onToggleWebFetch(false)}
         />
       ) : null}
       {isCodeExecutionOn ? (

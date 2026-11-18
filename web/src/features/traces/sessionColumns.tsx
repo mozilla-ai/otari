@@ -21,7 +21,7 @@ import {
   traceKind,
 } from "@/features/traces/traceModel"
 import { useOrganizationMembers } from "@/shared/api/organizations"
-import { HarnessMark, NoHarnessMark } from "@/shared/components/marks/BrandMark"
+import { HarnessMark } from "@/shared/components/marks/BrandMark"
 import { formatCost, formatNumber } from "@/shared/helpers/format"
 
 const EMPTY = <span className="text-subtle">—</span>
@@ -80,11 +80,10 @@ export function columns(
       cell: (session) => (
         <span className="flex min-w-0 items-center gap-2">
           {withMarks ? (
-            session.harness ? (
-              <HarnessMark harness={session.harness} />
-            ) : (
-              <NoHarnessMark />
-            )
+            <HarnessMark
+              harness={session.harness}
+              language={session.client_language}
+            />
           ) : null}
           <span className="truncate text-body">{sessionName(session)}</span>
           <span className="shrink-0 text-mono-caption whitespace-nowrap text-subtle">

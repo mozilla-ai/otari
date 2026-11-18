@@ -106,6 +106,20 @@ const HARNESS_MARK_IDS: ReadonlySet<string> = new Set([
   "curl",
 ])
 
+/** Client languages with a mark, by the `client_language` a session carries, and how each reads. */
+const LANGUAGE_LABELS: Readonly<Record<string, string>> = {
+  python: "Python",
+  javascript: "JavaScript",
+  go: "Go",
+  java: "Java",
+  rust: "Rust",
+  ruby: "Ruby",
+}
+
+const LANGUAGE_MARK_IDS: ReadonlySet<string> = new Set(
+  Object.keys(LANGUAGE_LABELS),
+)
+
 /**
  * The ids this deployment serves its own models under.
  *
@@ -152,9 +166,21 @@ export function hasHarnessMark(harness: string): boolean {
   return HARNESS_MARK_IDS.has(normalize(harness))
 }
 
+/** The same question for a client's language. */
+export function hasLanguageMark(language: string): boolean {
+  return LANGUAGE_MARK_IDS.has(normalize(language))
+}
+
+/** A client language as it reads, `Python` for `python`, or the value itself when unknown. */
+export function languageLabel(language: string): string {
+  const key = normalize(language)
+  return LANGUAGE_MARK_IDS.has(key) ? LANGUAGE_LABELS[key] : language
+}
+
 /** Read by the drift gate beside this module, not by the app. */
 export const MARK_KEYS_FOR_TEST = {
   providers: PROVIDER_MARK_IDS,
   makers: MAKER_MARK_SLUGS,
   harnesses: HARNESS_MARK_IDS,
+  languages: LANGUAGE_MARK_IDS,
 }
