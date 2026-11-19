@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/ffa592b3e3d237ab6e7e7a855b9e735c777201d9/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/0e6fa5bcf0c2c2b1fda78cf2ae5cac2c38fadfd4/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -303,8 +303,8 @@ runs before route auth, so any caller can choose the trace ID and sampling flag
 your collector ingests, and a malformed `tracestate` makes OpenTelemetry log a
 warning per offending member (`opentelemetry.trace.span`). Enable it for trusted
 service-to-service callers, ideally behind a proxy that strips these headers at
-the edge. Browsers cannot send them cross-origin: they are not in the CORS
-allow-list.
+the edge. A browser page sends them cross-origin only to the endpoints
+`cors_inference_origins` opens (below), and never with credentials.
 
 ### Calling models from a browser
 
@@ -322,7 +322,9 @@ and image endpoints, direct web search and fetch (`/api/v1/search`,
 (`GET /api/v1/tools`), which a page reads to offer its models and tools, and
 the token exchange and revocation of [OAuth apps](oauth-apps.md). The rest of
 the API, the dashboard's included and the app consent screen with it, answers a
-page on another origin as it did before.
+page on another origin as it did before. On these endpoints a page may send any
+request header, so a header its client library adds, such as an app version,
+does not fail the browser's preflight.
 
 A browser never sends credentials under it, so a page cannot use the session
 of someone signed in to the dashboard: only the API key the page itself holds.
@@ -867,7 +869,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/ffa592b3e3d237ab6e7e7a855b9e735c777201d9/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/0e6fa5bcf0c2c2b1fda78cf2ae5cac2c38fadfd4/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -1912,7 +1914,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/ffa592b3e3d237ab6e7e7a855b9e735c777201d9/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/0e6fa5bcf0c2c2b1fda78cf2ae5cac2c38fadfd4/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Contacting the Otari team
