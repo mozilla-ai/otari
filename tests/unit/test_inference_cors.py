@@ -61,6 +61,21 @@ def test_any_page_may_call_a_model_without_credentials(client: TestClient) -> No
     assert "access-control-allow-credentials" not in preflight
 
 
+def test_a_header_the_client_adds_does_not_fail_the_preflight(client: TestClient) -> None:
+    response = client.options(
+        CHAT,
+        headers={
+            "Origin": PAGE,
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization,content-type,x-app-version",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "x-app-version" in response.headers["access-control-allow-headers"].lower()
+    assert "access-control-allow-credentials" not in response.headers
+
+
 def test_a_refusal_reaches_the_page_so_it_can_show_why(client: TestClient) -> None:
     refused = client.post(CHAT, json=BODY, headers={"Origin": PAGE})
 
@@ -151,6 +166,21 @@ def test_the_dashboard_keeps_its_credentialed_policy_beside_it(tmp_path: Path) -
     assert page["access-control-allow-origin"] == "*"
     assert "access-control-allow-credentials" not in page
     assert "access-control-allow-origin" not in page_on_settings
+
+
+def test_the_dashboard_policy_keeps_its_own_header_list(tmp_path: Path) -> None:
+    config = _config(tmp_path, cors_allow_origins=[DASHBOARD], cors_inference_origins=["*"])
+    with TestClient(create_app(config)) as client:
+        response = client.options(
+            CHAT,
+            headers={
+                "Origin": DASHBOARD,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "x-app-version",
+            },
+        )
+
+    assert response.status_code == 400
 
 
 def test_a_named_origin_is_opened_and_no_other(tmp_path: Path) -> None:

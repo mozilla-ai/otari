@@ -19,6 +19,7 @@ from gateway.api.deps.auth import (
     record_auth_failure,
     verify_master_key,
 )
+from gateway.api.deps.budgets import BudgetServiceDep
 from gateway.api.deps.organizations import (
     MembershipListenerDep,
     OrganizationServiceDep,
@@ -210,6 +211,7 @@ def get_oauth_app_service(
     key_format: ApiKeyFormatPortDep,
     organizations: OrganizationServiceDep,
     workspaces: WorkspaceServiceDep,
+    budgets: BudgetServiceDep,
 ) -> OAuthAppService:
     """Build app authorization using the external authorization API origin as issuer."""
     return OAuthAppService(
@@ -219,7 +221,10 @@ def get_oauth_app_service(
         key_format,
         organizations,
         workspaces,
+        budgets,
         apps=config.oauth_apps,
+        open_apps=config.oauth_open_apps,
+        spend_limits=config.budget_strategy.strip().lower() != "disabled",
         ui_link=config.ui_link,
         issuer=_oauth_app_issuer(request, config),
     )

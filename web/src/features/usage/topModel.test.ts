@@ -28,6 +28,25 @@ describe("pickTopModel", () => {
     expect(top?.name).toBe("many")
   })
 
+  it("counts a model's ids on every provider as one model, by its name", () => {
+    const top = pickTopModel([
+      row({ key: "solo", cost: 5 }),
+      row({
+        key: "accounts/fireworks/models/glm-5p3",
+        label: "GLM 5.3",
+        model_group: "z-ai/glm-5.3",
+        cost: 3,
+      }),
+      row({
+        key: "zai-org/GLM-5.3",
+        label: "GLM 5.3",
+        model_group: "z-ai/glm-5.3",
+        cost: 3,
+      }),
+    ])
+    expect(top).toEqual({ name: "GLM 5.3", cost: 6 })
+  })
+
   it("never picks the fold of other models", () => {
     const top = pickTopModel([
       row({ key: null, cost: 50, is_other: true }),

@@ -382,11 +382,18 @@ class UsageGroupRow(BaseModel):
 
     key: str | None
     # Display name for an opaque key (a user's alias, an API key's name), resolved
-    # in the same GROUP BY. Only ever set for the ``user`` and ``api_key``
-    # dimensions, and null there too when the entity has no label or is gone; a
-    # client falls back to ``key``. Its purpose is to let a client build a user or
-    # key filter from this breakdown alone, rather than reading both whole tables.
+    # in the same GROUP BY. Set for the ``user`` and ``api_key`` dimensions, and
+    # null there too when the entity has no label or is gone; a client falls back
+    # to ``key``. Its purpose is to let a client build a user or key filter from
+    # this breakdown alone, rather than reading both whole tables. A ``model`` row
+    # carries the model's name, the same on every spelling of one model.
     label: str | None = None
+    # A ``model`` row's grouping key, shared by every spelling of one model:
+    # providers name one model differently (``accounts/fireworks/models/glm-5p3``,
+    # ``zai-org/GLM-5.3``) and usage records the spelling sent. The rows stay one
+    # per spelling, since ``key`` is what a model filter matches; this is what lets
+    # a client show them as one. Null on every other dimension and on the fold.
+    model_group: str | None = None
     cost: float
     tokens: int
     requests: int

@@ -674,5 +674,5 @@ def test_summary_breakdowns_carry_labels_for_opaque_keys(
     assert user_row["label"] == "Grace Hopper"
     key_row = next(r for r in body["by_api_key"] if r["key"] == key.id)
     assert key_row["label"] == "Nightly batch"
-    # A dimension whose key already reads as its own name carries no label.
-    assert all(row["label"] is None for row in body["by_model"])
+    # A model is labeled with its name, which every spelling of it shares.
+    assert [(row["key"], row["label"]) for row in body["by_model"]] == [("gpt-4", "gpt-4")]

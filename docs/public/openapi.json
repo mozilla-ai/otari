@@ -2103,6 +2103,39 @@
             "title": "Code Challenge Method",
             "type": "string"
           },
+          "expiration": {
+            "default": "never",
+            "description": "How long the key lives once it is issued.",
+            "enum": [
+              "1-hour",
+              "1-day",
+              "7-days",
+              "30-days",
+              "90-days",
+              "180-days",
+              "1-year",
+              "never"
+            ],
+            "title": "Expiration",
+            "type": "string"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 1000000.0,
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The key's spending limit in USD over its whole life. Null sets none.",
+            "title": "Limit"
+          },
           "redirect_uri": {
             "maxLength": 2048,
             "title": "Redirect Uri",
@@ -2182,13 +2215,25 @@
             },
             "title": "Scopes",
             "type": "array"
+          },
+          "spend_limits": {
+            "description": "Whether a spending limit the person sets binds the key. It does not where the deployment has turned budget enforcement off, so the consent screen does not offer one.",
+            "title": "Spend Limits",
+            "type": "boolean"
+          },
+          "verified": {
+            "description": "Whether the operator registered this app. An unregistered app is named after its site, which nothing has checked beyond its callback being on it.",
+            "title": "Verified",
+            "type": "boolean"
           }
         },
         "required": [
           "name",
           "redirect_uri",
           "issuer",
-          "scopes"
+          "scopes",
+          "verified",
+          "spend_limits"
         ],
         "title": "AppDetails",
         "type": "object"
@@ -2268,6 +2313,11 @@
             "title": "Access Token",
             "type": "string"
           },
+          "manage_url": {
+            "description": "The absolute URL of the page where the person sees this key, and revokes it.",
+            "title": "Manage Url",
+            "type": "string"
+          },
           "scope": {
             "description": "The scopes the key holds, space delimited. Fewer than the registration names where the person approved it before an operator narrowed it.",
             "title": "Scope",
@@ -2282,7 +2332,8 @@
         },
         "required": [
           "access_token",
-          "scope"
+          "scope",
+          "manage_url"
         ],
         "title": "AppTokenResponse",
         "type": "object"
@@ -29939,6 +29990,17 @@
             ],
             "title": "Label"
           },
+          "model_group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Group"
+          },
           "requests": {
             "title": "Requests",
             "type": "integer"
@@ -45036,6 +45098,42 @@
               "default": "code",
               "title": "Response Type",
               "type": "string"
+            }
+          },
+          {
+            "description": "A spending limit in USD to suggest for the key. The person can change it on the consent screen, and one the screen cannot use is left blank.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A spending limit in USD to suggest for the key. The person can change it on the consent screen, and one the screen cannot use is left blank.",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "An expiry to suggest for the key: 1-hour, 1-day, 7-days, 30-days, 90-days, 180-days, 1-year or never. The person can change it, and any other value leaves it at never.",
+            "in": "query",
+            "name": "expiration",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "An expiry to suggest for the key: 1-hour, 1-day, 7-days, 30-days, 90-days, 180-days, 1-year or never. The person can change it, and any other value leaves it at never.",
+              "title": "Expiration"
             }
           }
         ],

@@ -3,6 +3,7 @@
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal
 from enum import StrEnum
 from typing import Any
 
@@ -10,6 +11,7 @@ from sqlalchemy import JSON, Enum, ForeignKey, Index, String, Text, UniqueConstr
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base, KeyScopeColumn, UtcDateTime
+from gateway.models.money import UsdCost
 from gateway.types.key_scope import KeyScopeSet
 
 MAX_EMAIL_LENGTH = 255
@@ -263,3 +265,7 @@ class OAuthAppGrant(Base):
     # that reaches nothing.
     scopes: Mapped[KeyScopeSet] = mapped_column(KeyScopeColumn, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(UtcDateTime(), index=True)
+    # What the person approved for the key itself: a lifetime spending limit, and
+    # how long it lives from the moment it is minted. Null is no limit, no expiry.
+    spend_limit: Mapped[Decimal | None] = mapped_column(UsdCost(), default=None)
+    key_lifetime_sec: Mapped[int | None] = mapped_column(default=None)
