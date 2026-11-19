@@ -5,6 +5,7 @@ refused, a workspace admin refused, another organization's workspace not found) 
 operator identity never has.
 """
 
+import ipaddress
 import uuid
 
 import pytest
@@ -15,7 +16,11 @@ from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions import TenancyError
 from gateway.exceptions.organizations_exceptions import WorkspaceNotFoundError
-from gateway.exceptions.tools_exceptions import McpServerNameTakenError, WorkspaceMcpServerNotFoundError
+from gateway.exceptions.tools_exceptions import (
+    McpServerNameTakenError,
+    WorkspaceMcpServerNotFoundError,
+    WorkspaceMcpServerUnsafeUrlError,
+)
 from gateway.models.tenancy import User, Workspace
 from gateway.models.tools import McpSharedConnection, WorkspaceMcpServerOverride
 from gateway.repositories.tenancy import OrganizationRepository, WorkspaceMemberRepository, WorkspaceRepository
@@ -266,3 +271,33 @@ async def test_every_organization_server_write_reaches_the_attached_server_index
     assert await attached()
     await service.delete_server(user=world.owner, workspace_id=None, server_id=jira)
     assert not await attached(), "deleted"
+
+
+@pytest.mark.parametrize(
+    ("url", "resolves_to"),
+    [
+        ("http://127.0.0.1:8000/mcp", None),
+        ("http://[::1]:8000/mcp", None),
+        ("http://localhost:8000/mcp", "127.0.0.1"),
+        ("https://mcp.rebound.example/mcp", "127.0.0.1"),
+    ],
+)
+async def test_an_organization_server_on_an_internal_address_is_refused_when_saved(
+    async_db: AsyncSession, config: GatewayConfig, monkeypatch: pytest.MonkeyPatch, url: str, resolves_to: str | None
+) -> None:
+    """An organization's URL is a tenant's, as a workspace's is, so it must be public."""
+    if resolves_to is not None:
+
+        async def resolve(_host: str) -> list[object]:
+            return [ipaddress.ip_address(resolves_to)]
+
+        monkeypatch.setattr("gateway.services.url_safety._resolve_all_async", resolve)
+    world = await _world(async_db, config)
+
+    with pytest.raises(WorkspaceMcpServerUnsafeUrlError):
+        await _add(async_db, config, world.owner, url=url)
+    jira = await _add(async_db, config, world.owner)
+    with pytest.raises(WorkspaceMcpServerUnsafeUrlError):
+        await _service(async_db, config).update_server(
+            user=world.owner, workspace_id=None, server_id=jira, request=WorkspaceMcpServerUpdate(url=url)
+        )
