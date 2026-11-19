@@ -521,7 +521,7 @@ providers:
 | `models` | Model ids offered for discovery, for a backend with no model-listing endpoint. |
 | `client_args` | Options for the provider's SDK client. See [Bedrock read timeout](#bedrock-read-timeout). |
 | `max_retries` | This instance's SDK retry count. See [Provider retries](#provider-retries). |
-| `messages_api` | `completions` (default) or `responses`. See [Messages through the Responses API](#messages-through-the-responses-api). |
+| `messages_api` | `completions` or `responses`; unset, `responses` for OpenAI's own API and `completions` otherwise. See [Messages through the Responses API](#messages-through-the-responses-api). |
 | `credentials`, `project`, `location` | Vertex AI only: configure its client. |
 | Any other key | Passed to the provider's any-llm call as it is. |
 
@@ -641,19 +641,27 @@ gateway's own values through it. Chat completions only.
 ### Messages through the Responses API
 
 A request to `/v1/messages` for a model with no Anthropic Messages API of its
-own is served as a chat completion by default. An OpenAI instance (or any
-instance whose provider has a Responses API, such as Azure OpenAI) can serve it
-through the Responses API instead:
+own is served as a chat completion, except on OpenAI's own API, which serves it
+through the Responses API. That holds for a configured instance, a hosted
+provider and an organization's own key alike; an OpenAI instance with another
+`api_base` (an OpenAI-compatible server) stays on chat completions, and so does
+a request that sends `stop_sequences`, which the Responses API cannot carry.
+
+An instance whose provider has a Responses API (such as Azure OpenAI) can opt in
+with `messages_api: responses`, and an OpenAI instance can opt out with
+`messages_api: completions`:
 
 ```yaml
 providers:
   openai:
     api_key: ${OPENAI_API_KEY}
-    messages_api: responses   # default: completions
+    messages_api: completions   # unset: responses for OpenAI's own API
 ```
 
 This reaches models OpenAI serves only on the Responses API (the codex and pro
-variants), and keeps a reasoning model's reasoning across turns:
+variants), lets a reasoning model call function tools with its reasoning on,
+which chat completions refuses for the newer ones, and keeps a reasoning model's
+reasoning across turns:
 
 - Each reasoning item comes back as a `thinking` block whose signature carries
   its encrypted content. When a client such as Claude Code sends the block back,
@@ -668,8 +676,8 @@ variants), and keeps a reasoning model's reasoning across turns:
   answers that turn without extended thinking.
 
 Reasoning fields are sent only to a model whose name looks like a reasoning
-model (`o1`, `o3`, `o4-mini` and the rest of the `o` series, `gpt-5*` except its
-`-chat` variants, and anything with `codex` in it), whether or not the client
+model (`o1`, `o3`, `o4-mini` and the rest of the `o` series, `gpt-5` and later
+except their `-chat` variants, and anything with `codex` in it), whether or not the client
 asked for thinking, because any other model fails the call over them. An Azure
 OpenAI deployment is called by its deployment name, so name a reasoning
 deployment after its model (`gpt-5-mini`, not `prod-reasoner`) or its reasoning

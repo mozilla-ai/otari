@@ -1,10 +1,11 @@
 """Serve a Messages request from a provider's Responses API.
 
-An operator opts a provider instance in with ``messages_api: responses``. A
-Messages request routed to that instance is then translated into a Responses
+A Messages request routed to OpenAI's own API, or to an instance an operator
+opts in with ``messages_api: responses``, is translated into a Responses
 request, called through any-llm, and the result (or its event stream) is
-translated back into a Messages response (or Messages stream events). Without
-the setting, any-llm serves the request as a chat completion, as it always has.
+translated back into a Messages response (or Messages stream events). An
+instance set to ``messages_api: completions``, and any other instance, is
+served a chat completion by any-llm.
 
 The point of the detour is reasoning. A Responses ``reasoning`` item comes back
 as a ``thinking`` block whose ``signature`` carries the item's encrypted content
@@ -31,6 +32,7 @@ import re
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from typing import Any
+from urllib.parse import urlsplit
 
 from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import UnsupportedParameterError
@@ -112,12 +114,14 @@ _DROPPED_FIELDS = frozenset({"metadata", "cache_control", "container", "context_
 # left out: neither is accepted by every reasoning model, while these three are.
 _EFFORT_BY_BUDGET = ((2048, "low"), (16384, "medium"))
 _EFFORT_ABOVE_BUDGETS = "high"
+_OPENAI_API_BASE = "https://api.openai.com/v1"
+
 _EFFORTS = frozenset({"low", "medium", "high"})
 
 # Reasoning models. Sending ``reasoning`` or asking for encrypted reasoning makes
 # any other model fail the call (``gpt-4.1``, ``gpt-5-chat-latest``), even when the
 # caller asked for thinking, so a model must match this to get either.
-_REASONING_MODEL = re.compile(r"^(o\d|gpt-5)(?!.*-chat)|codex", re.IGNORECASE)
+_REASONING_MODEL = re.compile(r"^(o\d|gpt-([5-9]|\d{2,}))(?!.*-chat)|codex", re.IGNORECASE)
 
 _STOP_FOR_INCOMPLETE = {"max_output_tokens": "max_tokens", "content_filter": "refusal"}
 
@@ -133,11 +137,29 @@ def serves_responses_natively(provider: str | LLMProvider) -> bool:
     return bool(getattr(provider_class, "SUPPORTS_RESPONSES", False))
 
 
-def with_responses_instance(kwargs: dict[str, Any], instance: str | None) -> dict[str, Any]:
-    """``kwargs`` marked to go through ``instance``'s Responses API, or unchanged for ``None``."""
-    if instance is None:
+def with_responses_instance(
+    kwargs: dict[str, Any], instance: str | None, *, messages_api: str | None = "responses"
+) -> dict[str, Any]:
+    """``kwargs`` marked to go through ``instance``'s Responses API, or unchanged.
+
+    ``messages_api`` is the instance's setting. Unset, a call to OpenAI's own API
+    goes through Responses, where OpenAI's reasoning models accept function tools
+    with their reasoning on; one asking for ``stop_sequences``, which Responses
+    cannot carry, stays a chat completion.
+    """
+    if instance is None or messages_api == "completions":
+        return kwargs
+    if messages_api is None and not _defaults_to_responses(kwargs):
         return kwargs
     return {**kwargs, RESPONSES_INSTANCE_FIELD: instance}
+
+
+def _defaults_to_responses(kwargs: dict[str, Any]) -> bool:
+    return (
+        _provider_of(kwargs) == LLMProvider.OPENAI.value
+        and urlsplit(str(kwargs.get("api_base") or _OPENAI_API_BASE)).hostname == urlsplit(_OPENAI_API_BASE).hostname
+        and not kwargs.get("stop_sequences")
+    )
 
 
 def conversation_cache_key(headers: Mapping[str, str], *, session_label: str | None) -> dict[str, str]:
@@ -496,7 +518,7 @@ def _tool_output(block: dict[str, Any], provider: str) -> str | list[dict[str, A
     content = block.get("content")
     parts = [{"type": "input_text", "text": content}] if isinstance(content, str) else []
     if isinstance(content, list):
-        parts = [_input_part(part, provider) for part in content]
+        parts = _tool_result_parts(content, provider)
     if block.get("is_error") is True:
         if parts and parts[0]["type"] == "input_text" and parts[0]["text"]:
             if not parts[0]["text"].startswith("Error:"):
@@ -506,6 +528,42 @@ def _tool_output(block: dict[str, Any], provider: str) -> str | list[dict[str, A
     if all(part["type"] == "input_text" for part in parts):
         return "".join(part["text"] for part in parts)
     return parts
+
+
+def _tool_result_parts(content: list[Any], provider: str) -> list[dict[str, Any]]:
+    """A ``tool_result``'s blocks as input parts, a block with no Responses part said in text.
+
+    Claude Code's tool search answers with ``tool_reference`` blocks. Like
+    ``search_result`` and ``browser_state``, each is set off from neighboring text
+    by newlines, as any-llm's chat-completions conversion renders it.
+    """
+    parts: list[dict[str, Any]] = []
+    after_rendered = False
+    for block in content:
+        if (rendered := _rendered_as_text(block)) is not None:
+            if any(part["type"] == "input_text" and part["text"] for part in parts):
+                rendered = f"\n{rendered}"
+            parts.append({"type": "input_text", "text": rendered})
+            after_rendered = True
+            continue
+        part = _input_part(block, provider)
+        if after_rendered and part["type"] == "input_text" and part["text"]:
+            part = {"type": "input_text", "text": f"\n{part['text']}"}
+            after_rendered = False
+        parts.append(part)
+    return parts
+
+
+def _rendered_as_text(block: Any) -> str | None:
+    block_type = block.get("type") if isinstance(block, dict) else None
+    if block_type == "search_result":
+        body = "".join(str(part.get("text") or "") for part in block.get("content") or [] if part.get("type") == "text")
+        return "\n".join(part for part in (block.get("title") or "", block.get("source") or "", body) if part)
+    if block_type == "tool_reference":
+        return f"Tool reference: {block.get('tool_name') or ''}"
+    if block_type == "browser_state":
+        return json.dumps({key: block[key] for key in ("tabs", "state_changes") if key in block})
+    return None
 
 
 def _input_part(block: Any, provider: str) -> dict[str, Any]:
