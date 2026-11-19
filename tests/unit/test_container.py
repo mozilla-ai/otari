@@ -411,6 +411,64 @@ def register(container):
         build_container("stale_invite_bootstrap:register")
 
 
+def test_a_signup_invite_adapter_that_inherits_the_port_stub_fails_at_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The port's own stub answers None for every token, so an adapter carrying it proves no address."""
+    _write_bootstrap(
+        tmp_path,
+        monkeypatch,
+        "inherited_stub_bootstrap",
+        """
+from gateway.ports.signup_invite_port import SignupInvitePort
+
+
+class InheritedStubInvite(SignupInvitePort):
+    def __init__(self, session):
+        del session
+
+    async def invited_email(self, token):
+        return None
+
+
+def register(container):
+    container.bind(SignupInvitePort, InheritedStubInvite)
+""",
+    )
+
+    with pytest.raises(PortShapeError, match="InheritedStubInvite, bound to SignupInvitePort, lacks proof_for"):
+        build_container("inherited_stub_bootstrap:register")
+
+
+def test_a_signup_invite_adapter_that_delegates_proof_for_builds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An adapter may carry the method on the instance, which is an implementation like any other."""
+    _write_bootstrap(
+        tmp_path,
+        monkeypatch,
+        "delegating_invite_bootstrap",
+        """
+from gateway.adapters.signup_invite_adapter import NullSignupInviteAdapter
+from gateway.ports.signup_invite_port import SignupInvitePort
+
+
+class DelegatingInvite(SignupInvitePort):
+    def __init__(self, session):
+        del session
+        self.proof_for = NullSignupInviteAdapter().proof_for
+
+
+def register(container):
+    container.bind(SignupInvitePort, DelegatingInvite)
+""",
+    )
+
+    container = build_container("delegating_invite_bootstrap:register")
+
+    assert "SignupInvitePort" in container.summary
+
+
 def test_bootstrap_that_rebinds_nothing_leaves_the_core_defaults(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
