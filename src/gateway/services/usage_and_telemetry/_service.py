@@ -23,6 +23,7 @@ from gateway.schemas.usage_and_telemetry import (
 )
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.organizations import UserAccess
+from gateway.services.usage_and_telemetry._model_groups import grouped_models
 from gateway.services.usage_and_telemetry._window import (
     MAX_SERIES_POINTS,
     SERIES_TOP_N,
@@ -263,11 +264,15 @@ class UsageService:
     ) -> list[UsageGroupRow]:
         """One dimension's top groups, labeled where the key is an opaque id, with the remainder folded.
 
-        Only the user and key dimensions need a label: a model, source or endpoint
-        already reads as its own name. Resolving it here is what lets a client
-        offer a user or key filter without holding those whole tables.
+        The user and key dimensions are labeled because their keys are ids:
+        resolving the label here is what lets a client offer a user or key filter
+        without holding those whole tables. A model is labeled and grouped with
+        its other spellings (:func:`grouped_models`); a source or endpoint
+        already reads as its own name.
         """
         rows = await self._usage_logs.groups(filters, scope, dimension=dimension, limit=limit)
+        if dimension == "model":
+            return _with_fold(grouped_models(rows), totals)
         keys = {row.key for row in rows if row.key is not None}
         if dimension == "user":
             labels = await self._users.aliases(keys)

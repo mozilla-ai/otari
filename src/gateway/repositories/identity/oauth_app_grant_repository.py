@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import Never
 
 from sqlalchemy import delete, select
@@ -27,6 +28,8 @@ class OAuthAppGrantRepository(BaseRepository[OAuthAppGrant, Never, Never]):
         workspace_id: uuid.UUID,
         scopes: KeyScopeSet,
         expires_at: datetime,
+        spend_limit: Decimal | None = None,
+        key_lifetime_sec: int | None = None,
     ) -> None:
         """Stage an approval without minting or retaining a credential."""
         self.db.add(
@@ -39,6 +42,8 @@ class OAuthAppGrantRepository(BaseRepository[OAuthAppGrant, Never, Never]):
                 workspace_id=workspace_id,
                 scopes=scopes,
                 expires_at=expires_at,
+                spend_limit=spend_limit,
+                key_lifetime_sec=key_lifetime_sec,
             )
         )
         await self.db.flush()
