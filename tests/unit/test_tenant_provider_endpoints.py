@@ -33,7 +33,12 @@ def _sdk_clients(llm: AnyLLM) -> list[object]:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", sorted(TENANT_ENDPOINT_PROVIDERS))
-async def test_every_sdk_client_of_a_pinnable_provider_uses_the_pinned_client(provider: str) -> None:
+async def test_every_sdk_client_of_a_pinnable_provider_uses_the_pinned_client(
+    provider: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Azure Anthropic refuses a resource beside the api_base, and both SDKs read one from the shell.
+    monkeypatch.delenv("AZURE_ANTHROPIC_RESOURCE", raising=False)
+    monkeypatch.delenv("ANTHROPIC_FOUNDRY_RESOURCE", raising=False)
     pinned = owned_endpoint_sdk_client(LLMProvider(provider))
     expected = httpx2.AsyncClient if provider in TENANT_ENDPOINT_HTTPX2_PROVIDERS else httpx.AsyncClient
     assert isinstance(pinned, expected)
