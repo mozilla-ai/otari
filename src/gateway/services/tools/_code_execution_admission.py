@@ -12,6 +12,7 @@ from gateway.exceptions.tools_exceptions import (
     CodeExecutionContainerBusyError,
     CodeExecutionDeclarationError,
     CodeExecutionRefusedError,
+    workspace_switch_hint,
 )
 from gateway.models.tools import CodeExecutor, ResolvedCodeExecutionPolicy
 from gateway.services.code_execution import (
@@ -58,15 +59,17 @@ SANDBOX_PROVIDER_TOOL_CONFLICT_DETAIL = (
     "The gateway sandbox and the provider's own are separate environments, and a request "
     "addressing both has no single place its files and state live."
 )
-SANDBOX_NOT_ENABLED_DETAIL = "code execution is not enabled for this workspace"
+SANDBOX_NOT_ENABLED_DETAIL = (
+    f"code execution is not enabled for this workspace. {workspace_switch_hint('Code execution')}"
+)
 SANDBOX_TOOLS_EXCLUDED_DETAIL = (
     "code execution is not available to this workspace: its policy's tool list excludes "
     "every tool kind this gateway's sandbox serves."
 )
-# Says what happened and nothing an API caller cannot act on. The setting to
-# change is named on the management surface, which the operator reaches; naming
-# it here would send an operator instruction to a data-plane caller, which is the
-# boundary ``SANDBOX_NOT_ENABLED_DETAIL`` next door already respects.
+# Says what happened and nothing an API caller cannot act on. The allowed images
+# are the operator's setting, so naming it would send an operator instruction to
+# a data-plane caller. ``SANDBOX_NOT_ENABLED_DETAIL`` names its switch, which the
+# workspace's own owners and admins change.
 SANDBOX_IMAGE_NOT_ALLOWED_DETAIL = "this workspace's code-execution policy pins a sandbox image that is not allowed"
 ENVIRONMENT_NOT_OFFERED_DETAIL_TEMPLATE = (
     "Environment '{environment}' is not offered on this gateway. "
