@@ -112,8 +112,8 @@ without a user gets no link. See
 ## Choosing a model
 
 Claude Code names its models bare (`claude-opus-5-5`), and Otari reads such a
-name as the model's [catalog id](models.md#catalog-spellings), so no alias is
-needed. An alias of the same name wins, which is how to send it elsewhere.
+name as the model's [catalog id](models.md#catalog-spellings), whether the
+catalog writes its version `5-5` or `5.5`, so no alias is needed. An alias of the same name wins, which is how to send it elsewhere.
 
 Otari can also serve Claude Code's requests from non-Anthropic models: set
 Claude Code's default Opus, Sonnet and Haiku model variables to them.
