@@ -656,7 +656,7 @@ def test_a_streamed_mcp_only_loop_candidates_failure_falls_over_to_the_next_cand
 ) -> None:
     """A stream whose only gateway tools are MCP servers is held for its first chunk like any other."""
     body = _messages_body(
-        "claude-then-vertex", mcp_servers=[{"name": "docs", "url": "http://127.0.0.1:9999/mcp"}], stream=True
+        "claude-then-vertex", mcp_servers=[{"name": "docs", "url": "http://93.184.216.34/mcp"}], stream=True
     )
 
     with patch("gateway.api.routes._pipeline.MCPClientPool", new=_McpPool):
@@ -802,7 +802,7 @@ def test_an_mcp_tool_shadowing_a_builtin_only_the_fallback_runs_is_refused_befor
     body = _messages_body(
         "claude-then-vertex",
         _SEARCH,
-        mcp_servers=[{"name": "docs", "url": "http://127.0.0.1:9999/mcp"}],
+        mcp_servers=[{"name": "docs", "url": "http://93.184.216.34/mcp"}],
         **({"stream": True} if stream else {}),
     )
 

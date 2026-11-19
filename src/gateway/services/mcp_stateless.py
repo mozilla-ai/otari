@@ -35,6 +35,7 @@ from mcp.types import PaginatedRequestParams
 from gateway.core.error_codes import MCP_SIGN_IN_REQUIRED
 from gateway.exceptions.tools_exceptions import McpConnectionUnavailableError, McpSignInRequiredError
 from gateway.log_config import logger
+from gateway.services.url_safety import mcp_private_hosts
 
 if TYPE_CHECKING:
     import uuid
@@ -404,7 +405,11 @@ class _BoundedResponseStream(httpx2.AsyncByteStream):
 
 
 def build_http_client_factory(*, screen_answers: bool = False) -> Callable[..., httpx2.AsyncClient]:
-    """An MCP HTTP client factory with redirects disabled and a size pre-check.
+    """An MCP HTTP client factory with a pinned public-only transport, redirects disabled and a size pre-check.
+
+    The server's URL is a tenant's, so every request is dialed through
+    :class:`OwnedEndpointHttpx2Transport`: its host is resolved again, refused
+    unless every address is public, and connected at the address that was checked.
 
     The SDK follows a redirect that stays on the endpoint's origin, up to the
     client's ``max_redirects``, whatever its ``follow_redirects`` says. Redirects
@@ -414,6 +419,9 @@ def build_http_client_factory(*, screen_answers: bool = False) -> Callable[..., 
     ``screen_answers`` adds :func:`refuse_unusable_answer` ahead of the size
     check, for a connection check that has to name why a server failed.
     """
+    # At call time: the providers package reaches this module through model access.
+    from gateway.services.providers import OwnedEndpointHttpx2Transport
+
     response_hooks: list[Callable[[httpx2.Response], Coroutine[Any, Any, None]]] = [enforce_content_length]
     response_hooks.insert(0, refuse_unusable_answer if screen_answers else refuse_rejected_token)
 
@@ -425,6 +433,7 @@ def build_http_client_factory(*, screen_answers: bool = False) -> Callable[..., 
         client_headers = dict(headers or {})
         client_headers["Accept-Encoding"] = "identity"
         kwargs: dict[str, Any] = {
+            "transport": OwnedEndpointHttpx2Transport(private_hosts=mcp_private_hosts()),
             "follow_redirects": False,
             "max_redirects": 0,
             "timeout": timeout if timeout is not None else httpx2.Timeout(CONNECT_TIMEOUT_S, read=CALL_TIMEOUT_S),

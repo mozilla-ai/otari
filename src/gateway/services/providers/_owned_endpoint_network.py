@@ -1,4 +1,4 @@
-"""The only way the gateway dials an endpoint a workspace or a user owns.
+"""The only way the gateway dials an endpoint a workspace, an organization or a user chose.
 
 The base URL is a tenant's, so it has to reach a public address and nothing
 else: not the metadata service, not a sidecar, not the database. Checking the
@@ -14,9 +14,15 @@ endpoint is saved, so a bad URL is refused where it is written.
 
 Anthropic's SDK accepts only an httpx2 client, so its client runs the same
 transport behind :class:`_Httpx2Bridge` rather than a second copy of it.
+
+MCP servers and guardrail endpoints are chosen by tenants too, so their clients
+take the same transport: :class:`OwnedEndpointTransport` for an httpx client,
+:class:`OwnedEndpointHttpx2Transport` for the MCP SDK's httpx2 one, and
+:class:`OwnedEndpointSyncTransport` for a guardrail vendor's blocking client.
 """
 
 import asyncio
+import threading
 import weakref
 from collections.abc import AsyncIterator
 
@@ -24,6 +30,8 @@ import httpx
 import httpx2
 from any_llm import LLMProvider
 
+from gateway.core.provider_params import TENANT_ENDPOINT_HTTPX2_PROVIDERS
+from gateway.services.url_safety import PrivateHosts, never_admitted_reason
 from gateway.services.web_retrieval_network import (
     PINNED_TARGET_EXTENSION,
     NoCookieJar,
@@ -66,23 +74,38 @@ async def check_owned_endpoint_api_base(api_base: str) -> None:
 
 
 class OwnedEndpointTransport(PinnedAsyncHTTPTransport):
-    """Validate and pin each request's destination, whatever the method."""
+    """Validate and pin each request's destination, whatever the method.
+
+    ``private_hosts`` is the operator's ``mcp_private_hosts``, given only by an MCP
+    client: a request whose host (and port, where the entry names one) is listed
+    exactly may reach a loopback or private address, still pinned to the address
+    checked, and never one :func:`never_admitted_reason` refuses.
+    """
 
     allowed_methods = frozenset({"GET", "POST", "DELETE"})
 
-    def __init__(self, *, transport_factory: TransportFactory | None = None) -> None:
+    def __init__(
+        self, *, transport_factory: TransportFactory | None = None, private_hosts: PrivateHosts | None = None
+    ) -> None:
         super().__init__(
             transport_factory=transport_factory,
             max_connections=_MAX_CONNECTIONS_PER_ADDRESS,
             max_keepalive_connections=20,
             max_pools=_MAX_POOLS,
         )
+        self._private_hosts = private_hosts
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        url = request.url
+        listed = self._private_hosts is not None and self._private_hosts.admits(url.host, url.port, url.scheme)
         try:
-            target = await validate_retrieval_target(str(request.url))
+            target = await validate_retrieval_target(str(url), allow_private=listed)
         except RetrievalTargetError as exc:
             raise PinnedTransportError(f"endpoint refused: {exc}") from None
+        if listed:
+            for address in target.addresses:
+                if (reason := never_admitted_reason(address)) is not None:
+                    raise PinnedTransportError(f"endpoint refused: destination resolves to {reason}")
         request.extensions = {**request.extensions, PINNED_TARGET_EXTENSION: target}
         return await super().handle_async_request(request)
 
@@ -92,14 +115,26 @@ class OwnedEndpointTransport(PinnedAsyncHTTPTransport):
 _clients: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, httpx.AsyncClient]" = weakref.WeakKeyDictionary()
 
 
+def _new_http_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        transport=OwnedEndpointTransport(), follow_redirects=False, timeout=_TIMEOUT, cookies=NoCookieJar()
+    )
+
+
 def owned_endpoint_http_client() -> httpx.AsyncClient:
-    """The HTTP client an owned endpoint's provider SDK must use. Call from a running loop."""
-    loop = asyncio.get_running_loop()
+    """The HTTP client an owned endpoint's provider SDK must use.
+
+    Outside a running loop the client is a new one, not shared: kwargs are
+    sometimes resolved where nothing dials, and whatever dials them later
+    still goes through the pinned transport.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return _new_http_client()
     client = _clients.get(loop)
     if client is None or client.is_closed:
-        client = httpx.AsyncClient(
-            transport=OwnedEndpointTransport(), follow_redirects=False, timeout=_TIMEOUT, cookies=NoCookieJar()
-        )
+        client = _new_http_client()
         _clients[loop] = client
     return client
 
@@ -174,27 +209,104 @@ class _Httpx2Bridge(httpx2.AsyncBaseTransport):
         await self._transport.aclose()
 
 
+class OwnedEndpointHttpx2Transport(_Httpx2Bridge):
+    """:class:`OwnedEndpointTransport` for an httpx2 client that carries its own headers, hooks and timeouts.
+
+    Each client takes a new one, since closing a client closes its transport.
+    """
+
+    def __init__(
+        self, *, transport_factory: TransportFactory | None = None, private_hosts: PrivateHosts | None = None
+    ) -> None:
+        super().__init__(OwnedEndpointTransport(transport_factory=transport_factory, private_hosts=private_hosts))
+
+
+class OwnedEndpointSyncTransport(httpx.BaseTransport):
+    """:class:`OwnedEndpointTransport` for a blocking httpx client, such as a guardrail vendor's.
+
+    Each thread that sends through it runs the async transport on an event loop
+    of its own, kept for the thread's life so its connections are reused. The
+    response body is read whole before it is returned, since the loop only runs
+    while a request is being sent. Not for a thread that already runs a loop.
+    """
+
+    def __init__(self, *, transport_factory: TransportFactory | None = None) -> None:
+        self._transport_factory = transport_factory
+        self._local = threading.local()
+
+    def _loop_and_transport(self) -> tuple[asyncio.AbstractEventLoop, OwnedEndpointTransport]:
+        loop: asyncio.AbstractEventLoop | None = getattr(self._local, "loop", None)
+        if loop is None or loop.is_closed():
+            loop = asyncio.new_event_loop()
+            self._local.loop = loop
+            self._local.transport = OwnedEndpointTransport(transport_factory=self._transport_factory)
+        return loop, self._local.transport
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        loop, transport = self._loop_and_transport()
+        body = request.read()
+
+        async def send() -> tuple[httpx.Response, bytes]:
+            bridged = httpx.Request(
+                method=request.method,
+                url=request.url,
+                headers=request.headers.raw,
+                content=body,
+                extensions=request.extensions,
+            )
+            response = await transport.handle_async_request(bridged)
+            try:
+                content = b"".join([chunk async for chunk in response.aiter_raw()])
+            finally:
+                await response.aclose()
+            return response, content
+
+        response, content = loop.run_until_complete(send())
+        return httpx.Response(
+            status_code=response.status_code,
+            headers=response.headers.raw,
+            content=content,
+            extensions={key: value for key, value in response.extensions.items() if key != "network_stream"},
+        )
+
+    def close(self) -> None:
+        loop: asyncio.AbstractEventLoop | None = getattr(self._local, "loop", None)
+        if loop is not None and not loop.is_closed():
+            loop.run_until_complete(self._local.transport.aclose())
+            loop.close()
+
+
 _httpx2_clients: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, httpx2.AsyncClient]" = (
     weakref.WeakKeyDictionary()
 )
 
 
+def _new_httpx2_client() -> httpx2.AsyncClient:
+    return httpx2.AsyncClient(
+        transport=OwnedEndpointHttpx2Transport(),
+        follow_redirects=False,
+        timeout=_HTTPX2_TIMEOUT,
+        cookies=NoCookieJar(),
+    )
+
+
 def _owned_endpoint_httpx2_client() -> httpx2.AsyncClient:
-    loop = asyncio.get_running_loop()
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return _new_httpx2_client()
     client = _httpx2_clients.get(loop)
     if client is None or client.is_closed:
-        client = httpx2.AsyncClient(
-            transport=_Httpx2Bridge(OwnedEndpointTransport()),
-            follow_redirects=False,
-            timeout=_HTTPX2_TIMEOUT,
-            cookies=NoCookieJar(),
-        )
+        client = _new_httpx2_client()
         _httpx2_clients[loop] = client
     return client
 
 
 def owned_endpoint_sdk_client(provider: LLMProvider) -> httpx.AsyncClient | httpx2.AsyncClient:
-    """The client ``provider``'s SDK dials an owned endpoint through. Call from a running loop."""
-    if provider is LLMProvider.ANTHROPIC:
+    """The client ``provider``'s SDK dials an endpoint a tenant chose through.
+
+    Only a provider in ``TENANT_ENDPOINT_PROVIDERS`` takes one; see ``core/provider_params.py``.
+    """
+    if provider.value in TENANT_ENDPOINT_HTTPX2_PROVIDERS:
         return _owned_endpoint_httpx2_client()
     return owned_endpoint_http_client()

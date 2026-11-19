@@ -13,6 +13,7 @@ catalog rule on its own. What is here is that the write path runs those rules,
 and what a column ends up holding.
 """
 
+import ipaddress
 import json
 import uuid
 from collections.abc import Iterator
@@ -61,8 +62,8 @@ pytestmark = pytest.mark.asyncio
 # example.com has used for years, the convention
 # `test_organization_guardrail_definitions.py` already follows and
 # `test_organization_guardrails.py` explains.
-VENDOR_ENDPOINT = "https://93.184.216.34/v2"
-OTHER_ENDPOINT = "https://93.184.216.35/v2"
+VENDOR_ENDPOINT = "https://api.lakera.ai/v2/guard"
+OTHER_ENDPOINT = "https://eu.api.lakera.ai/v2/guard"
 
 
 async def _organization(db: AsyncSession, *, slug: str = "acme") -> Organization:
@@ -88,6 +89,7 @@ def _service(db: AsyncSession) -> OrganizationGuardrailDefinitionService:
         organizations=OrganizationService(db, membership_listener=None),
         uow=uow,
         build_state=runner.build_state,
+        build_refusal=runner.build_refusal,
         rebuild=runner.rebuild_definition,
         handle=runner.handle,
     )
@@ -114,6 +116,16 @@ def _create(**overrides: object) -> OrganizationGuardrailDefinitionCreate:
     }
     fields.update(overrides)
     return OrganizationGuardrailDefinitionCreate(**fields)  # type: ignore[arg-type]
+
+
+@pytest.fixture(autouse=True)
+def _vendor_hosts_resolve_publicly(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The definitions here name Lakera's own hosts, which the address check resolves; keep it off the network."""
+
+    async def public(_host: str) -> list[object]:
+        return [ipaddress.ip_address("93.184.216.34")]
+
+    monkeypatch.setattr("gateway.services.url_safety._resolve_all_async", public)
 
 
 @pytest.fixture(autouse=True)
@@ -422,7 +434,7 @@ async def test_a_definition_with_no_secret_stores_no_ciphertext(async_db: AsyncS
 
     created = await service.create_definition(
         user=owner,
-        request=_create(create_kwargs={"endpoint": VENDOR_ENDPOINT}),
+        request=_create(create_kwargs={}),
     )
 
     assert created.create_secrets == {}

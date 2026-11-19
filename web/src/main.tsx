@@ -1,3 +1,5 @@
+// First: it moves an old `/#/…` link to its path before the router reads the address.
+import "@/app/legacyHashRouteOnLoad"
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 

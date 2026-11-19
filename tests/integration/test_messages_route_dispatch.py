@@ -515,7 +515,7 @@ def test_cache_control_survives_route_level_purpose_hint_injection(
                 "mcp_servers": [
                     {
                         "name": "reference",
-                        "url": "http://127.0.0.1:9999/mcp",
+                        "url": "http://93.184.216.34/mcp",
                         "purpose_hint": "Use for authoritative lookups",
                     }
                 ],
@@ -570,7 +570,7 @@ def test_mcp_servers_dispatches_through_anthropic_tool_loop(
                 "messages": [{"role": "user", "content": "hi"}],
                 "max_tokens": 100,
                 "mcp_servers": [
-                    {"name": "test", "url": "http://127.0.0.1:9999/mcp"},
+                    {"name": "test", "url": "http://93.184.216.34/mcp"},
                 ],
             },
             headers=api_key_header,
@@ -627,7 +627,7 @@ def test_web_search_replay_is_stripped_when_interception_is_off(
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": replayed_messages,
                 "max_tokens": 100,
-                "mcp_servers": [{"name": "test", "url": "http://127.0.0.1:9999/mcp"}],
+                "mcp_servers": [{"name": "test", "url": "http://93.184.216.34/mcp"}],
             },
             headers=api_key_header,
         )
@@ -1388,7 +1388,7 @@ def test_stream_mcp_servers_dispatches_through_tool_loop_stream(
                 "messages": [{"role": "user", "content": "hi"}],
                 "max_tokens": 100,
                 "stream": True,
-                "mcp_servers": [{"name": "test", "url": "http://127.0.0.1:9999/mcp"}],
+                "mcp_servers": [{"name": "test", "url": "http://93.184.216.34/mcp"}],
             },
             headers=api_key_header,
         )
@@ -1520,7 +1520,7 @@ def test_stream_mcp_activity_requires_beta(
                 "messages": [{"role": "user", "content": "look it up"}],
                 "max_tokens": 100,
                 "stream": True,
-                "mcp_servers": [{"name": "fixture", "url": "http://127.0.0.1:9999/mcp"}],
+                "mcp_servers": [{"name": "fixture", "url": "http://93.184.216.34/mcp"}],
             },
             headers={
                 **api_key_header,

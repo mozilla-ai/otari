@@ -26,7 +26,7 @@ import {
   workspaceBudgetDefault,
 } from "@/tests/fixtures"
 import { AppProviders as Provider } from "@/tests/providers"
-import { renderWithRouter } from "@/tests/router"
+import { LocationProbe, renderWithRouter } from "@/tests/router"
 import { findRowMenuItem } from "@/tests/rowMenu"
 
 const PLATFORM = "ws-platform"
@@ -100,8 +100,9 @@ const LAPTOP = apiKey({
 })
 
 /**
- * Wei's Home on this month, refused over spend just now. The month's summary
- * says `windowCost`; one read from any other start says `periodCost`.
+ * Wei's Home on the default window, refused over spend just now. The window's
+ * summary says `windowCost`; one read from any other start says `periodCost`.
+ * Returns every URL the page asked.
  */
 async function renderMemberHome({
   windowCost,
@@ -110,6 +111,7 @@ async function renderMemberHome({
   defaults = [WEEKLY],
   refusalMessage = "Member has $0.01 of budget remaining, less than this request's estimated cost",
   hasTraces = false,
+  url = "/",
 }: {
   windowCost: number
   periodCost: number
@@ -118,7 +120,9 @@ async function renderMemberHome({
   refusalMessage?: string
   /** Whether the deployment captures sessions, as its bootstrap says. */
   hasTraces?: boolean
-}) {
+  url?: string
+}): Promise<URL[]> {
+  const asked: URL[] = []
   const refusal: Partial<UsageEntry> = {
     id: "r-1",
     timestamp: new Date().toISOString(),
@@ -126,6 +130,7 @@ async function renderMemberHome({
     error_message: refusalMessage,
   }
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    asked.push(new URL(String(input), "http://test"))
     const [path = "", search] = String(input).slice(API_ROOT.length).split("?")
     const query = new URLSearchParams(search)
     switch (path) {
@@ -158,6 +163,37 @@ async function renderMemberHome({
               is_other: false,
             },
           ],
+          // Asked by a provider row, for its top model.
+          by_model: query.has("provider")
+            ? [
+                {
+                  key: "claude-sonnet-5",
+                  label: null,
+                  cost: 1.5,
+                  requests: 2,
+                  tokens: 600,
+                  is_other: false,
+                },
+              ]
+            : [],
+          by_provider: [
+            {
+              key: "anthropic",
+              label: null,
+              cost: 1.5,
+              requests: 2,
+              tokens: 600,
+              is_other: false,
+            },
+            {
+              key: null,
+              label: null,
+              cost: 0.5,
+              requests: 1,
+              tokens: 300,
+              is_other: false,
+            },
+          ],
         })
       }
       default:
@@ -167,6 +203,8 @@ async function renderMemberHome({
   await renderWithRouter(
     <MemberHome workspaceId={PLATFORM} workspace="Platform" />,
     {
+      url,
+      routes: [{ path: "/requests", element: <LocationProbe /> }],
       shell: (
         <Provider>
           <DeploymentProvider
@@ -182,7 +220,10 @@ async function renderMemberHome({
       ),
     },
   )
+  return asked
 }
+
+/** Where a row's press landed, with the search it carried. */
 
 describe("MemberHome, a lower limit", () => {
   afterEach(() => {
@@ -231,7 +272,7 @@ describe("MemberHome, a limit set on the member alone", () => {
     })
     expect(
       await screen.findByText(
-        "A limit set on you refused requests this month.",
+        "A limit set on you refused requests in the last 30 days.",
       ),
     ).toBeVisible()
     expect(screen.getByText("Your limit")).toBeVisible()
@@ -294,5 +335,111 @@ describe("MemberHome, sessions", () => {
       await findRowMenuItem(user, /See its sessions/, table),
     ).not.toBeNull()
     expect(screen.queryByText("Failures")).toBeNull()
+  })
+})
+
+describe("MemberHome, by provider", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  async function providerTable() {
+    const table = await screen.findByRole("grid", {
+      name: "Your spend by providers",
+    })
+    await within(table).findByText("Anthropic")
+    return table
+  }
+
+  it("offers Providers beside their keys and models", async () => {
+    await renderMemberHome({ windowCost: 2, periodCost: 2 })
+    const cuts = await screen.findByRole("radiogroup", {
+      name: "Break down by",
+    })
+    expect(
+      within(cuts)
+        .getAllByRole("radio")
+        .map((radio) => radio.closest("label")?.textContent),
+    ).toEqual(["API keys", "Models", "Providers"])
+  })
+
+  it("lists their spend by provider, the unrecorded ones as one row", async () => {
+    await renderMemberHome({
+      windowCost: 2,
+      periodCost: 2,
+      url: "/?by=providers",
+    })
+    const table = await providerTable()
+    const anthropic = within(table).getByRole("row", { name: /Anthropic/ })
+    expect(within(anthropic).getByText("75%")).toBeVisible()
+    expect(
+      await within(anthropic).findByText("claude-sonnet-5"),
+    ).toBeInTheDocument()
+    const unknown = within(table).getByRole("row", {
+      name: /Unknown provider/,
+    })
+    expect(within(unknown).getByText("25%")).toBeVisible()
+    expect(screen.getByText(/A row opens its requests/)).toBeVisible()
+  })
+
+  it("opens their own requests to that provider", async () => {
+    const user = userEvent.setup()
+    await renderMemberHome({
+      windowCost: 2,
+      periodCost: 2,
+      url: "/?by=providers",
+    })
+    const table = await providerTable()
+    await user.click(within(table).getByText("Anthropic"))
+    const landed = await screen.findByTestId("location")
+    const [path, query] = (landed.textContent ?? "").split("?")
+    expect(path).toBe("/requests")
+    const search = new URLSearchParams(query)
+    expect(search.get("provider")).toBe("anthropic")
+    expect(search.get("user_id")).toBe("user-wei")
+    expect(search.get("start_date")).toBeTruthy()
+  })
+})
+
+describe("MemberHome, the window", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  it("ends every read of yesterday at midnight, refusals and sessions included", async () => {
+    const asked = await renderMemberHome({
+      windowCost: 41,
+      periodCost: 41,
+      member: WEI_LIMITED_ALONE,
+      defaults: [],
+      refusalMessage: "Member has exceeded budget limit",
+      hasTraces: true,
+      url: "/?period=yesterday",
+    })
+    expect(
+      await screen.findByText("A limit set on you refused requests yesterday."),
+    ).toBeVisible()
+    expect(screen.getByText("Spent yesterday")).toBeVisible()
+    expect(screen.getByText("yesterday in Platform")).toBeVisible()
+    const reads = asked.filter(
+      (url) =>
+        url.searchParams.has("start_date") || url.searchParams.has("start"),
+    )
+    // The window, the one before it, the refusals and the session count.
+    expect(reads.length).toBeGreaterThanOrEqual(4)
+    for (const url of reads) {
+      expect(
+        url.searchParams.get("end_date") ?? url.searchParams.get("end"),
+        String(url),
+      ).toBeTruthy()
+    }
+  })
+
+  it("labels its figures over three months, not over a count of days", async () => {
+    await renderMemberHome({ windowCost: 2, periodCost: 2, url: "/?period=3m" })
+    expect(await screen.findByText("Spent, 3 months")).toBeVisible()
+    expect(screen.getByText("Tokens, 3 months")).toBeVisible()
   })
 })

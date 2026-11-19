@@ -33,7 +33,7 @@ A top-level list on `/api/v1/chat/completions`, `/api/v1/messages` and
 | `mode` | `monitor` (default) or `block`. See [Modes](#modes). |
 | `on_unavailable` | `block` (default) or `monitor`. See [When the guardrails service is unreachable](#when-the-guardrails-service-is-unreachable). |
 | `validate_kwargs` | Extra arguments for the check, merged on top of the profile's own. |
-| `url` | A guardrails service to send this check to instead of the deployment's. A URL that fails Otari's address safety check is a `400`. |
+| `url` | A guardrails service to send this check to instead of the deployment's. It must be on a public address: loopback, private and other internal addresses are refused with a `400`, and Otari connects to the address it checked, with no redirect followed. |
 | `credential` | Sent to `url` as `Authorization: Bearer`. Requires `url`, which must then be `https`, and an entry carrying one must be the only entry for its profile. Dropped when an organization or a routing policy mandates the same profile, because the mandate's endpoint replaces yours. |
 | `on` | What the guardrail reads: any of `input`, `tool_results`, `tool_calls` and `output`. Defaults to `["input"]`. See [What a guardrail reads](#what-a-guardrail-reads). |
 
@@ -170,7 +170,7 @@ session, and an organization owner or admin) carry:
 | --- | --- |
 | `profile` | The profile on the guardrails service. One entry per profile per organization. |
 | `mode`, `on`, `on_unavailable` | The same three settings a request-body entry has, with the same meanings. `on` defaults to `["input"]`. |
-| `url` | An endpoint of the organization's own. Omit it to use the deployment's `guardrails_url`. |
+| `url` | An endpoint of the organization's own, on a public address, held to the same rule as a request's `url`. Omit it to use the deployment's `guardrails_url`, which the operator sets and which may be on a private address. |
 | `definition_id` | One of the organization's own guardrail definitions, for Otari to build and run the check itself. Exclusive with `url` and `credential`, which name a service instead. An explicit `null` clears it. |
 | `credential` | Sent to that endpoint as `Authorization: Bearer`. Requires `url`, which must then be `https`, so the credential is never sent to the deployment URL, which may be a plain-http sidecar. Encrypted at rest, never returned. |
 | `validate_kwargs` | Forwarded to the guardrails service `/validate` call. A parameter whose name looks credential-shaped (it contains `key`, `secret`, `token`, `password`, `authorization` or `credential`) is read back as `***` rather than its stored value. Sending `***` back keeps what is stored, so editing the rest of an entry does not overwrite the parameter you were never shown. |
@@ -240,14 +240,39 @@ definition is refused when:
 Any argument whose value carries a scheme (an `endpoint`, `base_url` or `url`,
 including inside a nested argument such as Alinia's `detection_config`) is
 checked as an address at write time. It refuses plain `http`, an address with
-no host, and a host that resolves inside the network Otari runs in. The check
-does not run per request, and it does not cover:
+no host, and a host that resolves to anything but a public address, loopback
+included. No setting relaxes it. For `watsonx_guardian` and `openai_moderation`,
+Otari also checks the address on every request and connects to the address it
+checked, following no redirect.
 
-- an endpoint supplied by an environment variable (`ALINIA_ENDPOINT`,
-  `CONTENT_SAFETY_ENDPOINT`, `WATSONX_URL`), which is the operator's own;
-- private addresses when the operator has set
-  `OTARI_MCP_ALLOW_PRIVATE_HOSTS=true`, which turns off that half of the check
-  for every address the gateway dials.
+The other guardrails that take an address open their connection in the
+vendor's own library, which follows redirects, so their address must be on the
+vendor's own hosts:
+
+| Guardrail | Hosts an endpoint may name |
+| --- | --- |
+| `lakera_guard` | `api.lakera.ai`, `eu.api.lakera.ai`, `us.api.lakera.ai`, `ap-southeast-1.api.lakera.ai` |
+| `patronus` | `api.patronus.ai` |
+| `azure_content_safety`, `azure_prompt_shields` | a subdomain of `cognitiveservices.azure.com` (your resource's endpoint) |
+| `alinia` | none: Alinia publishes no API host, so leave the endpoint out to use the operator's `ALINIA_ENDPOINT` |
+
+A definition that names its own address must carry its own credentials too
+(`api_key`, and for watsonx a `project_id` or `space_id`), each as non-empty
+text. Otherwise the guardrail would read the operator's environment variable
+and send the operator's key to that address, so such a definition is refused.
+A credential sent as anything but text (`false`, `0`, a list) is refused on any
+definition.
+
+An address's host must be an IP address or plain letters, digits, dots and
+hyphens, and the URL may hold no user information, backslash, whitespace or
+control character, since the vendor libraries could read such a URL as a
+different host.
+
+These rules run when a definition is saved and again whenever its guardrail is
+built, so a definition saved before them stops running. Its `build_state` reads
+`failed` and `build_refusal` names the rule and the argument. Neither covers an endpoint supplied by an environment variable
+(`ALINIA_ENDPOINT`, `CONTENT_SAFETY_ENDPOINT`, `WATSONX_URL`), which is the
+operator's own.
 
 Two guardrails the catalog lists cannot be defined this way:
 

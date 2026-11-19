@@ -42,11 +42,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 
+from any_llm import LLMProvider
 from fastapi import BackgroundTasks
 
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.core.metered_pricing import quantize_rate
+from gateway.core.provider_params import TENANT_ENDPOINT_PROVIDERS, tenant_client_args
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.providers_exceptions import (
     OrgProviderKeyNotFoundError,
@@ -87,6 +89,12 @@ from gateway.services.model_discovery_service import ProviderDiscovery, test_pro
 from gateway.services.organization_pricing_service import EffectiveRate, OrganizationPricingService
 from gateway.services.pricing_service import default_model_pricing, normalize_effective_at
 from gateway.services.providers._model_kinds import page_by_kind
+from gateway.services.providers._owned_endpoint_network import (
+    OwnedEndpointAddressError,
+    check_owned_endpoint_api_base,
+    owned_endpoint_http_client,
+    owned_endpoint_sdk_client,
+)
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError, decrypt_secret
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_service import OrganizationService
@@ -231,6 +239,17 @@ def _resolve_defaults(provider: str, models: Sequence[str], as_of: datetime) -> 
         if default is not None:
             resolved[model] = default
     return resolved
+
+
+async def _endpoint_refusal(provider: str, api_base: str) -> str | None:
+    """Why an organization key's ``api_base`` may not be dialed, or ``None`` when it may."""
+    if provider not in TENANT_ENDPOINT_PROVIDERS:
+        return f"A {provider} key cannot take a custom api_base"
+    try:
+        await check_owned_endpoint_api_base(api_base)
+    except OwnedEndpointAddressError as exc:
+        return str(exc)
+    return None
 
 
 def _kinds(key: OrgProviderKey, models: Sequence[str]) -> dict[str, ModelType | None]:
@@ -864,14 +883,25 @@ class OrgProviderModelService:
         different server under the same prefix.
         """
         api_key = credential.get("api_key")
+        client_args: dict[str, object] = tenant_client_args(key.provider, key.client_args)
+        engine_client = None
+        if key.api_base:
+            # The organization chose this address, so it is held to public
+            # addresses and dialed through the pinned client, as dispatch is.
+            refusal = await _endpoint_refusal(key.provider, key.api_base)
+            if refusal is not None:
+                return ProviderDiscovery(provider=key.provider, models=[], error=refusal)
+            client_args["http_client"] = owned_endpoint_sdk_client(LLMProvider(key.provider))
+            engine_client = owned_endpoint_http_client()
         discovery = await test_provider_credentials(
             key.provider,
             api_key=api_key if isinstance(api_key, str) else None,
             api_base=key.api_base,
-            client_args=dict(key.client_args) if key.client_args else None,
+            client_args=client_args or None,
             # An organization's key never borrows the deployment's own credentials.
             declared=False,
             timeout=timeout,
+            engine_client=engine_client,
         )
         if discovery.error is None:
             await record_served_models(
