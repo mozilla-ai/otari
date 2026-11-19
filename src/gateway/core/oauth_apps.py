@@ -1,5 +1,6 @@
 """Strict redirect validation for registered public OAuth clients."""
 
+import ipaddress
 from datetime import timedelta
 from urllib.parse import SplitResult, urlsplit
 
@@ -60,7 +61,12 @@ def open_app_site(client_id: str, redirect_uri: str) -> str | None:
     if parsed is None or not client_id.isascii() or client_id != f"{parsed.scheme}://{parsed.netloc}":
         return None
     host = parsed.hostname or ""  # Never empty: parse_oauth_redirect refuses a callback without one.
-    host = f"[{host}]" if ":" in host else host
+    if ":" in host:
+        address = ipaddress.IPv6Address(host)
+        # A browser writes a mapped IPv4 address in hex, which ``compressed`` does not, and no site is served on one.
+        if address.ipv4_mapped is not None:
+            return None
+        host = f"[{address.compressed}]"
     if parsed.port is not None and parsed.port != {"http": 80, "https": 443}[parsed.scheme]:
         host += f":{parsed.port}"
     return parsed.netloc if parsed.netloc == host else None
