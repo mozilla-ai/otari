@@ -29878,6 +29878,17 @@
             ],
             "title": "Label"
           },
+          "model_group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Group"
+          },
           "requests": {
             "title": "Requests",
             "type": "integer"

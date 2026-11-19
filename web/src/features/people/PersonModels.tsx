@@ -1,15 +1,15 @@
-import type { UsageGroupRow } from "@/client"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { modelsUsed } from "@/features/people/modelsUsed"
 import type { SpendWindow } from "@/features/spend/period"
+import type { ModelGroup } from "@/features/usage/modelGroups"
 import { useUsageSummary } from "@/shared/api/usage"
 import { Band } from "@/shared/components/Band"
 import { formatCost, formatTokens, formatUsd } from "@/shared/helpers/format"
 
-const COLUMNS: DataTableColumn<UsageGroupRow>[] = [
+const COLUMNS: DataTableColumn<ModelGroup>[] = [
   {
     id: "model",
     header: "Model",
@@ -17,9 +17,9 @@ const COLUMNS: DataTableColumn<UsageGroupRow>[] = [
     cell: (row) => (
       <span
         className="block truncate text-mono-caption text-foreground"
-        title={row.key ?? "Unknown model"}
+        title={row.spellings.join("\n") || row.name}
       >
-        {row.key ?? "Unknown model"}
+        {row.name}
       </span>
     ),
   },
@@ -73,7 +73,7 @@ export function PersonModels({
           columns={COLUMNS}
           rows={rows}
           isLoading={summary.isLoading}
-          getRowKey={(row) => row.key ?? "none"}
+          getRowKey={(row) => row.id}
           emptyContent={
             summary.error ? (
               ""

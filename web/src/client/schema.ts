@@ -23195,6 +23195,8 @@ export interface components {
             key: string | null;
             /** Label */
             label?: string | null;
+            /** Model Group */
+            model_group?: string | null;
             /** Requests */
             requests: number;
             /** Tokens */
