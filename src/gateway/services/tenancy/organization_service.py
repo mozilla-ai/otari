@@ -194,7 +194,7 @@ def _ways_in(settings: "InvitationClaimSettings") -> list[InvitationWayIn]:
     ways: list[InvitationWayIn] = []
     if settings.sign_in_providers:
         ways.append("provider")
-    if settings.can_send_links:
+    if settings.can_deliver_links:
         ways.append("password_reset")
     return ways
 
@@ -282,7 +282,7 @@ def _invitation_accept_path(token: str) -> str:
     and left relative otherwise: still a valid link an operator can share and a
     browser already on this dashboard can follow, just not one that means
     anything outside a browser, which is why sending it by email is gated on
-    ``Mailer.can_send_links`` rather than on this.
+    ``Mailer.can_deliver_links`` rather than on this.
     """
     return f"/accept-invitation#token={token}"
 
@@ -355,12 +355,12 @@ class InvitationClaimSettings:
     """What this deployment asks of, and offers, an invitee who chooses a first password from an invitation link.
 
     ``terms_url`` is the terms the deployment publishes, which that invitee accepts as signup's do.
-    ``sign_in_providers`` (display names) and ``can_send_links`` say which other ways in a refusal can offer.
+    ``sign_in_providers`` (display names) and ``can_deliver_links`` say which other ways in a refusal can offer.
     """
 
     terms_url: str | None
     sign_in_providers: tuple[str, ...] = ()
-    can_send_links: bool = False
+    can_deliver_links: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -1987,15 +1987,14 @@ class OrganizationService:
         accept_link = mailer.link(_invitation_accept_path(token))
         mail_sent = False
         mail_limited = False
-        # can_send_links, not is_configured: an accept link that is relative
-        # (no public_base_url) means nothing in an inbox, so a deployment that
-        # cannot build an absolute one falls back to the operator sharing it
-        # rather than mailing a link that goes nowhere. This is the degrading
-        # branch of the no-mail design; a surface with no such fallback calls
-        # mailer.require_ready() instead.
-        if mailer.can_send_links:
+        # can_deliver_links: the operator shares the link unless an email carrying
+        # it reaches the invitee. A relative link means nothing in an inbox, and
+        # neither does a message the transport shows the operator instead of
+        # sending. This is the degrading branch of the no-mail design; a surface
+        # with no such fallback calls mailer.require_ready() instead.
+        if mailer.can_deliver_links:
             mail_limited = not await mail_limit.admit(organization.id, email)
-        if mailer.can_send_links and not mail_limited:
+        if mailer.can_deliver_links and not mail_limited:
             delivery = await mailer.send(
                 to=email,
                 message=render_invitation_email(
