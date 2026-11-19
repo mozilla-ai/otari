@@ -1,3 +1,4 @@
+import json
 import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any
@@ -299,7 +300,13 @@ class _ResponsesAdapter:
 
     def format_chunk(self, chunk: ResponseStreamEvent) -> str:
         # By alias, so a JSON schema format's ``schema`` keeps its wire name rather than its field name, ``schema_``.
-        return f"event: {chunk.type}\ndata: {chunk.model_dump_json(exclude_none=True, by_alias=True)}\n\n"
+        data = chunk.model_dump_json(exclude_none=True, by_alias=True)
+        if chunk.type in RESPONSES_TERMINAL_EVENTS:
+            event = json.loads(data)
+            if isinstance(event.get("response"), dict):
+                _with_cache_writes(event["response"])
+            data = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
+        return f"event: {chunk.type}\ndata: {data}\n\n"
 
     def extract_stream_usage(self, chunk: ResponseStreamEvent) -> CompletionUsage | None:
         response_obj = getattr(chunk, "response", None)
@@ -678,4 +685,17 @@ def response_body(result: Any) -> dict[str, Any]:
             value = getattr(usage, name, None)
             if value is not None:
                 body["usage"].setdefault(name, value)
+    return _with_cache_writes(body)
+
+
+def _with_cache_writes(body: dict[str, Any]) -> dict[str, Any]:
+    """``body`` with ``cache_write_tokens`` in its input token details, which OpenAI's type requires.
+
+    A provider without its own Responses API is answered through the OpenResponses types,
+    which have no such count, so its absence is read as no cache writes.
+    """
+    usage = body.get("usage")
+    details = usage.get("input_tokens_details") if isinstance(usage, dict) else None
+    if isinstance(details, dict):
+        details.setdefault("cache_write_tokens", 0)
     return body
