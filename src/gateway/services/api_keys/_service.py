@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from datetime import datetime
 from typing import Any, NamedTuple
 
 from gateway.auth.models import hash_key, key_suffix
@@ -80,8 +81,12 @@ class ApiKeyService:
         app_name: str,
         scopes: Iterable[KeyScope],
         key_format: ApiKeyFormatPort,
-    ) -> str:
+        expires_at: datetime | None = None,
+    ) -> tuple[str, str]:
         """Mint a budget-enforced app credential inside the caller's authority transaction.
+
+        Returns:
+            The key and its ID.
 
         Raises:
             ValueError: ``scopes`` is empty or names one an app key may not hold.
@@ -90,8 +95,9 @@ class ApiKeyService:
         if not await self._users.ensure_app_key_owner(str(user.id), user.full_name or user.email or "OAuth app user"):
             raise AppKeyOwnerInactiveError
         key = key_format.mint()
+        key_id = str(uuid.uuid4())
         await self._keys.issue_app_key(
-            key_id=str(uuid.uuid4()),
+            key_id=key_id,
             key_hash=hash_key(key),
             prefix=key_format.fingerprint(key),
             suffix=key_suffix(key),
@@ -100,8 +106,9 @@ class ApiKeyService:
             workspace_id=workspace_id,
             client_id=client_id,
             scopes=held,
+            expires_at=expires_at,
         )
-        return key
+        return key, key_id
 
     async def revoke_key_by_token(self, token: str) -> None:
         """Permanently revoke the presented API key, preserving its usage history."""

@@ -830,7 +830,10 @@ class ScopedCORSMiddleware:
                 allow_origins=inference_origins,
                 allow_credentials=False,
                 allow_methods=["GET", "POST", "OPTIONS"],
-                allow_headers=_CORS_ALLOW_HEADERS,
+                # Any header: with no credentials a header grants a page nothing it
+                # could not send from curl, while one a client adds that is missing
+                # here fails its preflight and so the whole request.
+                allow_headers=["*"],
                 expose_headers=_CORS_EXPOSE_HEADERS,
             )
             if inference_origins

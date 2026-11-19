@@ -10598,6 +10598,18 @@ export interface components {
              * @constant
              */
             code_challenge_method: "S256";
+            /**
+             * Expiration
+             * @description How long the key lives once it is issued.
+             * @default never
+             * @enum {string}
+             */
+            expiration: "1-hour" | "1-day" | "7-days" | "30-days" | "90-days" | "180-days" | "1-year" | "never";
+            /**
+             * Limit
+             * @description The key's spending limit in USD over its whole life. Null sets none.
+             */
+            limit?: number | string | null;
             /** Redirect Uri */
             redirect_uri: string;
             /**
@@ -10640,6 +10652,16 @@ export interface components {
              * @description The scopes each key this app is issued will hold, from its registration.
              */
             scopes: components["schemas"]["KeyScope"][];
+            /**
+             * Spend Limits
+             * @description Whether a spending limit the person sets binds the key. It does not where the deployment has turned budget enforcement off, so the consent screen does not offer one.
+             */
+            spend_limits: boolean;
+            /**
+             * Verified
+             * @description Whether the operator registered this app. An unregistered app is named after its site, which nothing has checked beyond its callback being on it.
+             */
+            verified: boolean;
         };
         /** AppRevocationRequest */
         AppRevocationRequest: {
@@ -10674,6 +10696,11 @@ export interface components {
         AppTokenResponse: {
             /** Access Token */
             access_token: string;
+            /**
+             * Manage Url
+             * @description The absolute URL of the page where the person sees this key, and revokes it.
+             */
+            manage_url: string;
             /**
              * Scope
              * @description The scopes the key holds, space delimited. Fewer than the registration names where the person approved it before an operator narrowed it.
@@ -23522,6 +23549,8 @@ export interface components {
             key: string | null;
             /** Label */
             label?: string | null;
+            /** Model Group */
+            model_group?: string | null;
             /** Requests */
             requests: number;
             /** Tokens */
@@ -30911,6 +30940,10 @@ export interface operations {
                 code_challenge: string;
                 code_challenge_method: "S256";
                 response_type?: "code";
+                /** @description A spending limit in USD to suggest for the key. The person can change it on the consent screen, and one the screen cannot use is left blank. */
+                limit?: string | null;
+                /** @description An expiry to suggest for the key: 1-hour, 1-day, 7-days, 30-days, 90-days, 180-days, 1-year or never. The person can change it, and any other value leaves it at never. */
+                expiration?: string | null;
             };
             header?: never;
             path?: never;

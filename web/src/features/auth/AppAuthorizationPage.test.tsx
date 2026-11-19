@@ -28,6 +28,10 @@ const request = new URLSearchParams({
 function renderPage(
   workspaces = [{ id: "workspace-one", name: "Personal" }],
   appError?: Error,
+  app: { name: string; verified: boolean; spend_limits?: boolean } = {
+    name: "Thunderbolt",
+    verified: true,
+  },
 ) {
   vi.mocked(apiFetch).mockImplementation(async (path) => {
     if (appError) throw appError
@@ -39,7 +43,8 @@ function renderPage(
           "http://localhost:5199/oauth/otari?code=grant&state=state-nonce",
       }
     return {
-      name: "Thunderbolt",
+      spend_limits: true,
+      ...app,
       issuer: "https://auth.otari.example",
       scopes: ["inference:run"],
       redirect_uri: "http://localhost:5199/oauth/otari",
@@ -104,7 +109,82 @@ it("shows the app, permission boundaries and the sole workspace before explicit 
     ...Object.fromEntries(request),
     workspace_id: "workspace-one",
     scopes: ["inference:run"],
+    expiration: "never",
   })
+})
+
+it("starts from the limit and expiry the app suggests and sends what the person approves", async () => {
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: {
+      ...realLocation,
+      ...routeLocation(
+        `/oauth/authorize?${request}&limit=12.50&expiration=7-days`,
+      ),
+      assign,
+    },
+  })
+  renderPage()
+  const limit = await screen.findByRole("textbox", {
+    name: "Spending limit (USD)",
+  })
+  expect(limit).toHaveValue("12.50")
+  await userEvent.clear(limit)
+  await userEvent.type(limit, "5")
+  await userEvent.click(screen.getByRole("button", { name: "Allow access" }))
+  await waitFor(() => expect(assign).toHaveBeenCalled())
+  const call = vi
+    .mocked(apiFetch)
+    .mock.calls.find(([path]) => path === "/oauth/apps/authorize")
+  expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
+    limit: "5",
+    expiration: "7-days",
+  })
+})
+
+it("does not approve a spending limit the server would refuse", async () => {
+  renderPage()
+  const limit = await screen.findByRole("textbox", {
+    name: "Spending limit (USD)",
+  })
+  await userEvent.type(limit, "12.345")
+  expect(screen.getByRole("button", { name: "Allow access" })).toBeDisabled()
+  await userEvent.clear(limit)
+  expect(screen.getByRole("button", { name: "Allow access" })).toBeEnabled()
+})
+
+it("warns that a site connecting without registration is unverified", async () => {
+  renderPage(undefined, undefined, {
+    name: "someone.github.io",
+    verified: false,
+  })
+  expect(
+    await screen.findByRole("heading", {
+      name: "Connect to someone.github.io",
+    }),
+  ).toBeVisible()
+  expect(
+    await screen.findByText(/Otari has not verified this site/),
+  ).toBeVisible()
+})
+
+it("offers no spending limit where budgets are not enforced", async () => {
+  renderPage(undefined, undefined, {
+    name: "Thunderbolt",
+    verified: true,
+    spend_limits: false,
+  })
+  await screen.findByText("Personal")
+  expect(
+    screen.queryByRole("textbox", { name: "Spending limit (USD)" }),
+  ).toBeNull()
+  expect(screen.getByText("Key expires")).toBeVisible()
+})
+
+it("does not warn about a registered app", async () => {
+  renderPage()
+  await screen.findByText("Personal")
+  expect(screen.queryByText(/Otari has not verified/)).toBeNull()
 })
 
 it("requires a workspace choice when more than one is available", async () => {

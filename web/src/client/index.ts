@@ -904,5 +904,7 @@ export type FeedbackSubmission =
   operations["feedback-submit_feedback"]["requestBody"]["content"]["application/json"]
 
 export type AppDetails = components["schemas"]["AppDetails"]
+export type AppAuthorizationRequest =
+  components["schemas"]["AppAuthorizationRequest"]
 export type AppAuthorizationResponse =
   components["schemas"]["AppAuthorizationResponse"]

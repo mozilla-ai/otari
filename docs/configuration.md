@@ -303,8 +303,8 @@ runs before route auth, so any caller can choose the trace ID and sampling flag
 your collector ingests, and a malformed `tracestate` makes OpenTelemetry log a
 warning per offending member (`opentelemetry.trace.span`). Enable it for trusted
 service-to-service callers, ideally behind a proxy that strips these headers at
-the edge. Browsers cannot send them cross-origin: they are not in the CORS
-allow-list.
+the edge. A browser page sends them cross-origin only to the endpoints
+`cors_inference_origins` opens (below), and never with credentials.
 
 ### Calling models from a browser
 
@@ -322,7 +322,9 @@ and image endpoints, direct web search and fetch (`/api/v1/search`,
 (`GET /api/v1/tools`), which a page reads to offer its models and tools, and
 the token exchange and revocation of [OAuth apps](oauth-apps.md). The rest of
 the API, the dashboard's included and the app consent screen with it, answers a
-page on another origin as it did before.
+page on another origin as it did before. On these endpoints a page may send any
+request header, so a header its client library adds, such as an app version,
+does not fail the browser's preflight.
 
 A browser never sends credentials under it, so a page cannot use the session
 of someone signed in to the dashboard: only the API key the page itself holds.

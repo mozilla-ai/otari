@@ -1,23 +1,25 @@
 import type { UsageGroupRow } from "@/client"
 import { wholePct } from "@/features/spend/limits"
+import { groupModels } from "@/features/usage/modelGroups"
 
 export interface TopModel {
-  /** The model's id, or "Unknown model" where the usage names none. */
+  /** The model's name, or "Unknown model" where the usage names none. */
   name: string
   cost: number
 }
 
 /**
- * The model a row spent the most on. Ranked by spend, then by tokens, and the
- * fold of smaller models ("other") is not a model, so it never wins.
+ * The model a row spent the most on, its ids on every provider counted as one
+ * (`groupModels`). Ranked by spend, then by tokens, and the fold of smaller
+ * models ("other") is not a model, so it never wins.
  */
 export function pickTopModel(
   rows: readonly UsageGroupRow[],
 ): TopModel | undefined {
-  const [top] = rows
-    .filter((row) => !row.is_other)
+  const [top] = groupModels(rows)
+    .filter((model) => !model.isOther)
     .sort((a, b) => b.cost - a.cost || b.tokens - a.tokens)
-  return top ? { name: top.key ?? "Unknown model", cost: top.cost } : undefined
+  return top ? { name: top.name, cost: top.cost } : undefined
 }
 
 /** How much of the row's spend the top model took, or why there is no figure. */
