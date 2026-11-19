@@ -458,6 +458,41 @@ async def test_only_an_operator_triggered_rebuild_may_dial(fetch: bool, expected
     assert build.await_args.kwargs["withhold_alias_targets"] is False
 
 
+@pytest.mark.asyncio
+async def test_a_build_that_started_first_does_not_replace_a_later_ones_index() -> None:
+    """A slow build read the catalog before a write that a later build saw, so it must not publish over it."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from gateway.services import selector_index_service
+    from gateway.services.merged_catalog_service import MergedCatalog
+
+    config = GatewayConfig(master_key="k", providers={"nebius": {"api_key": "x"}})
+    release_first = asyncio.Event()
+    calls = 0
+
+    async def merged(*_args: object, **_kwargs: object) -> MergedCatalog:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            await release_first.wait()
+        return MergedCatalog(models={}, aliases={}, dynamic_policies={}, discovered_keys=set())
+
+    with (
+        patch.object(selector_index_service, "build_merged_catalog", new=merged),
+        patch.object(selector_index_service, "resolve_all_organizations_offered_keys", new=AsyncMock(return_value={})),
+        patch.object(selector_index_service, "set_selector_index", new=MagicMock()) as publish,
+    ):
+        first = asyncio.create_task(selector_index_service.rebuild_selector_index(AsyncMock(), config))
+        await asyncio.sleep(0)
+        await selector_index_service.rebuild_selector_index(AsyncMock(), config)
+        assert publish.call_count == 1
+        release_first.set()
+        await first
+
+    assert publish.call_count == 1
+
+
 @pytest.fixture
 def claude_index() -> Iterator[selectors.SelectorIndex]:
     """Claude Code names models bare; ``llama-4`` ends two catalog ids."""
