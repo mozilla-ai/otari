@@ -120,17 +120,6 @@ from gateway.repositories.users_repository import (
     live_attribution_user_ids,
 )
 from gateway.services.mail import Mailer
-from gateway.services.organizations import (
-    AdmittedMember,
-    BlockedAddresses,
-    InvitationMailLimit,
-    SsoEnforcement,
-)
-from gateway.services.password_service import hash_password_async
-from gateway.services.secret_box import secret_box_configured
-from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess
-from gateway.services.tenancy.email_address import validated_email as _validated_email
-from gateway.services.tenancy.invitation_email import render_invitation_email
 
 # The name first boot gives an organization's workspace, reused so a created
 # organization's first workspace is the same thing rather than a near-copy.
@@ -138,7 +127,18 @@ from gateway.services.tenancy.invitation_email import render_invitation_email
 # into the tenancy graph is a function-local import), so this direction of the
 # dependency is the safe one; ``tests/unit/test_service_module_imports.py``
 # pins it.
-from gateway.services.tenancy.membership_listener import MembershipListener
+from gateway.services.organizations import (
+    AdmittedMember,
+    BlockedAddresses,
+    InvitationMailLimit,
+    MembershipListener,
+    SsoEnforcement,
+)
+from gateway.services.password_service import hash_password_async
+from gateway.services.secret_box import secret_box_configured
+from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess
+from gateway.services.tenancy.email_address import validated_email as _validated_email
+from gateway.services.tenancy.invitation_email import render_invitation_email
 from gateway.services.tenancy.password_policy import validate_new_password
 from gateway.services.tenancy.provisioning_service import (
     DEFAULT_ORGANIZATION_SLUG,

@@ -39,13 +39,13 @@ from gateway.services.organizations import (
     InvitationDelivery,
     InvitationFactsReader,
     InvitationMailLimit,
+    MembershipListener,
+    MembershipListeners,
     OrganizationClaimedDomains,
     UserAccess,
 )
 from gateway.services.tenancy import (
     InvitationClaimSettings,
-    MembershipListener,
-    MembershipListeners,
     OrganizationDomainService,
     OrganizationService,
 )

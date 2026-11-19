@@ -54,7 +54,7 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.services.budgets import BudgetMembershipListener
-from gateway.services.tenancy.membership_listener import MembershipListener
+from gateway.services.organizations import MembershipListener
 from gateway.services.tenancy.organization_domain_service import DomainAutoJoinListener, OrganizationDomainService
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME

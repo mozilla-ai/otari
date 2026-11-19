@@ -12,7 +12,6 @@ service is in `services/providers/` for that reason among others.
 """
 
 from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess, DeploymentUserService
-from gateway.services.tenancy.membership_listener import MembershipListener, MembershipListeners
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_domain_service import (
     DomainAutoJoinListener,
@@ -43,8 +42,6 @@ __all__ = [
     "DeploymentUserService",
     "DomainAutoJoinListener",
     "InvitationClaimSettings",
-    "MembershipListener",
-    "MembershipListeners",
     "OrgProviderKeyService",
     "OrganizationDomainService",
     "OrganizationService",

@@ -1211,7 +1211,6 @@ DOMAIN_NAME_BASELINE: dict[str, tuple[str, ...]] = {
         "domain_verification.py",
         "email_address.py",
         "invitation_email.py",
-        "membership_listener.py",
         "org_provider_key_service.py",
         "organization_domain_service.py",
         "organization_guardrail_definition_service.py",
@@ -1349,7 +1348,7 @@ def check_domain_names(src_root: Path, domains: set[str]) -> list[str]:
 # the number is what has to come down.
 NON_DOMAIN_SERVICE_IMPORT_BASELINE: dict[str, int] = {
     "code_execution": 1,
-    "tenancy": 76,
+    "tenancy": 74,
 }
 
 

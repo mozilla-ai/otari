@@ -75,8 +75,8 @@ from gateway.services.dashboard_session_service import (
     revoke_dashboard_session,
 )
 from gateway.services.maintenance_mode_service import is_maintenance_mode
+from gateway.services.organizations import MembershipListener
 from gateway.services.password_service import MAX_PASSWORD_BYTES
-from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.user_service import authenticate, operator_has_password, report_sign_in
 
