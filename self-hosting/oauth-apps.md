@@ -42,9 +42,14 @@ you first. An unregistered app sends its callback's origin as `client_id`,
 written as a browser writes `location.origin`: `https://someone.github.io`, or
 `http://localhost:8080` for loopback. Any path on that origin is accepted as
 `redirect_uri`, and nothing off it. HTTP is again allowed only for loopback
-hosts, and an origin longer than 128 characters cannot be a client ID.
+hosts, and an origin longer than 128 characters cannot be a client ID. The origin
+must be exactly what a browser writes: lowercase, with no default port, and with an
+international host in its ASCII `xn--` form, which is how the consent screen shows it,
+so a lookalike of another site's name is shown as the different name it is.
 
-The consent screen names the site and says Otari has not verified it. The key
+The consent screen names the site and says Otari has not verified it. The name
+is only the site's host, so on a host that serves many people's pages by path, it
+says nothing about whose page asked. The key
 holds the [default scopes](https://docs.otari.ai/guides/control/api-keys#scopes) and appears on the API keys page
 as `<site> (OAuth)`, for example `someone.github.io (OAuth)`. A registered
 client ID keeps its own registration, so turning this on changes nothing for
