@@ -51,11 +51,16 @@ def parse_oauth_redirect(value: str) -> SplitResult | None:
 def open_app_site(client_id: str, redirect_uri: str) -> str | None:
     """The site an unregistered app is, when its client ID is its callback's origin.
 
-    The origin is compared as a browser writes ``location.origin``, so a client ID that
-    differs from it in case or in a spelled-out default port is refused, not normalized.
+    The origin must be written as a browser writes ``location.origin``: ASCII with the host
+    in punycode, lowercase, and no default port. Anything else is refused, not normalized,
+    because the site's name is shown on the consent screen and a non-ASCII host can be
+    made to look like another site's.
     """
     parsed = parse_oauth_redirect(redirect_uri)
     if parsed is None or client_id != f"{parsed.scheme}://{parsed.netloc}":
+        return None
+    default_port = {"http": 80, "https": 443}[parsed.scheme]
+    if not client_id.isascii() or parsed.netloc != parsed.netloc.lower() or parsed.port == default_port:
         return None
     return parsed.netloc
 
