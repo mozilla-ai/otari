@@ -58,6 +58,7 @@ from gateway.ports.billing_port import BillingPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.provider_fields import surface_provider_fields
 from gateway.schemas.inference import SettledCost
+from gateway.services.api_keys import USER_MISMATCH_DETAIL
 from gateway.services.files import FileService, StagedFile
 from gateway.services.inference import (
     UpstreamFailure,
@@ -498,7 +499,6 @@ def _held_output_tokens(output_cap: int | None, n: int | None, default_output_to
 
 
 _MASTER_KEY_USER_REQUIRED = "When using master key, 'user' field is required in request body"
-_USER_FORBIDDEN = "'user' field does not match the authenticated API key's user"
 
 
 @router.post("/completions", response_model=None, openapi_extra=key_scope(KeyScope.INFERENCE_RUN))
@@ -662,7 +662,7 @@ async def run_chat_completion(
                 output_cap, request.n, config.budget_estimate_default_output_tokens
             ),
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
-            user_forbidden_detail=_USER_FORBIDDEN,
+            user_forbidden_detail=USER_MISMATCH_DETAIL,
             session_principal=session_principal,
             streaming=bool(request.stream),
             routing_signal=lambda: routing_signal(raw_request),

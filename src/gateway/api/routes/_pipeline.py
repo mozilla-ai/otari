@@ -136,6 +136,7 @@ from gateway.core.error_codes import (
     PRICING_REQUIRED,
     PROVIDER_NOT_CONFIGURED,
     USER_BLOCKED,
+    USER_MISMATCH,
     USER_NOT_FOUND,
     WRONG_MODEL_TYPE,
     ErrorKind,
@@ -2372,7 +2373,9 @@ async def _resolve_keyed_user_id(
             master_key_error=adapter.error(400, master_key_user_required_detail, ErrorKind.INVALID_REQUEST),
             no_api_key_error=adapter.error(500, API_KEY_VALIDATION_FAILED_DETAIL, ErrorKind.API),
             no_user_error=adapter.error(500, API_KEY_NO_USER_DETAIL, ErrorKind.API),
-            forbidden_user_error=adapter.error(403, user_forbidden_detail, ErrorKind.PERMISSION),
+            forbidden_user_error=adapter.error(
+                403, user_forbidden_detail, ErrorKind.PERMISSION, headers=error_headers(USER_MISMATCH)
+            ),
             reject_mismatch=config.reject_user_mismatch,
         )
     except HTTPException as exc:

@@ -34,6 +34,7 @@ from gateway.core.config import (
     GatewayConfig,
 )
 from gateway.core.database import get_db, release_session
+from gateway.core.error_codes import USER_MISMATCH, error_headers
 from gateway.core.settings.tools import ToolKind
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work_with_session
 from gateway.exceptions.tools_exceptions import DirectToolCallError, FundsCheckFailedError
@@ -464,7 +465,9 @@ class _DirectToolAccounts:
             no_user_error=DirectToolCallError(
                 API_KEY_NO_USER_DETAIL, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
             ),
-            forbidden_user_error=DirectToolCallError(USER_MISMATCH_DETAIL, status_code=status.HTTP_403_FORBIDDEN),
+            forbidden_user_error=DirectToolCallError(
+                USER_MISMATCH_DETAIL, status_code=status.HTTP_403_FORBIDDEN, headers=error_headers(USER_MISMATCH)
+            ),
             reject_mismatch=self._config.reject_user_mismatch,
         )
 

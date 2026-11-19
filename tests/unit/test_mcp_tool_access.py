@@ -5,6 +5,7 @@ from typing import Any, cast
 
 import pytest
 
+from gateway.core.error_codes import REQUEST_MCP_SERVERS_DISALLOWED
 from gateway.exceptions.tools_exceptions import McpServerDeclarationError
 from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.services.model_access import (
@@ -143,6 +144,7 @@ async def test_admission_refuses_a_declared_server_where_the_workspace_turned_th
         )
 
     assert str(raised.value) == INLINE_MCP_SERVER_REFUSED_DETAIL
+    assert raised.value.error_code == REQUEST_MCP_SERVERS_DISALLOWED
 
 
 @pytest.mark.asyncio

@@ -43,6 +43,7 @@ from gateway.api.key_scopes import key_scope
 from gateway.api.routes._helpers import bounded_body
 from gateway.api.routes._request_body import MULTIPART_OVERHEAD_BYTES, form_field
 from gateway.core.config import GatewayConfig
+from gateway.core.error_codes import USER_MISMATCH, error_headers
 from gateway.exceptions.budget_exceptions import EndUserNotFoundError
 from gateway.exceptions.files_exceptions import FilesDisabledError
 from gateway.models.api_keys import APIKey
@@ -54,7 +55,7 @@ from gateway.schemas.files import (
     OpenAIFileList,
     OpenAIFileObject,
 )
-from gateway.services.api_keys import names_end_user, resolve_user_id
+from gateway.services.api_keys import USER_MISMATCH_DETAIL, names_end_user, resolve_user_id
 from gateway.services.files import (
     FileDialect,
     FileListing,
@@ -178,7 +179,8 @@ def _resolve_user(
         ),
         forbidden_user_error=HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="'user' field does not match the authenticated API key's user",
+            detail=USER_MISMATCH_DETAIL,
+            headers=error_headers(USER_MISMATCH),
         ),
         reject_mismatch=config.reject_user_mismatch,
     )
