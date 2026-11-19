@@ -41,6 +41,7 @@ import { fetchAllPaged } from "@/shared/api/paging"
 import {
   GUARDRAIL_PROFILES,
   ORGANIZATION_GUARDRAILS,
+  PLAYGROUND,
   SEARCH_PROVIDERS,
   SEARCH_TOOLS,
   TOOL_SETTINGS,
@@ -408,6 +409,12 @@ export function useSetWorkspaceCodeExecutionPolicy() {
         [WORKSPACES, workspaceId, "code-execution-policy"],
         data,
       )
+      // The playground's tools menu reads a separate endpoint that reflects the
+      // effective per-workspace policy; a policy change must reach it immediately
+      // rather than waiting for the 60s stale window to expire (#3402).
+      void queryClient.invalidateQueries({
+        queryKey: [PLAYGROUND, workspaceId, "tools"],
+      })
     },
   })
 }
@@ -426,6 +433,9 @@ export function useClearWorkspaceCodeExecutionPolicy() {
     onSuccess: (_data, { workspaceId }) => {
       void queryClient.invalidateQueries({
         queryKey: [WORKSPACES, workspaceId, "code-execution-policy"],
+      })
+      void queryClient.invalidateQueries({
+        queryKey: [PLAYGROUND, workspaceId, "tools"],
       })
     },
   })
@@ -468,6 +478,12 @@ export function useSetWorkspaceWebSearchConfig() {
       // holds the pre-write row until a GET lands, and each save costs two
       // requests instead of one.
       queryClient.setQueryData([WORKSPACES, workspaceId, "web-search"], data)
+      // The playground's tools menu reads a separate endpoint that reflects the
+      // effective per-workspace policy; a policy change must reach it immediately
+      // rather than waiting for the 60s stale window to expire (#3402).
+      void queryClient.invalidateQueries({
+        queryKey: [PLAYGROUND, workspaceId, "tools"],
+      })
     },
   })
 }
@@ -486,6 +502,9 @@ export function useClearWorkspaceWebSearchConfig() {
     onSuccess: (_data, { workspaceId }) => {
       void queryClient.invalidateQueries({
         queryKey: [WORKSPACES, workspaceId, "web-search"],
+      })
+      void queryClient.invalidateQueries({
+        queryKey: [PLAYGROUND, workspaceId, "tools"],
       })
     },
   })
@@ -704,6 +723,9 @@ export function useCreateWorkspaceMcpServer() {
       void queryClient.invalidateQueries({
         queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
       })
+      void queryClient.invalidateQueries({
+        queryKey: [PLAYGROUND, workspaceId, "tools"],
+      })
     },
   })
 }
@@ -735,6 +757,11 @@ export function useUpdateWorkspaceMcpServer() {
       // which `everyone_tools` and `enabled` both move.
       void queryClient.invalidateQueries({
         queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
+      })
+      // `enabled` and `everyone_tools` directly change the playground tools
+      // menu, so the per-workspace answer must be refetched immediately (#3402).
+      void queryClient.invalidateQueries({
+        queryKey: [PLAYGROUND, workspaceId, "tools"],
       })
     },
   })
@@ -808,6 +835,9 @@ export function useDeleteWorkspaceMcpServer() {
       })
       void queryClient.invalidateQueries({
         queryKey: mcpKeyAccessRoot(workspaceId),
+      })
+      void queryClient.invalidateQueries({
+        queryKey: [PLAYGROUND, workspaceId, "tools"],
       })
     },
   })
