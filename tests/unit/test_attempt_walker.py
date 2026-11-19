@@ -20,6 +20,7 @@ from gateway.api.routes._attempts import (
     ALL_ATTEMPTS_FAILED_DETAIL,
     ALL_ATTEMPTS_TIMED_OUT_DETAIL,
     EMPTY_PLAN_DETAIL,
+    LOCKED_IN_DETAIL,
     CandidateCannotServe,
     all_attempts_rejected_detail,
     classify_local_attempt_error,
@@ -34,6 +35,7 @@ from gateway.core.error_codes import (
     CONTEXT_LENGTH_EXCEEDED,
     REQUEST_TOO_LARGE,
     STRUCTURED_OUTPUT_FAILED,
+    UPSTREAM_RATE_LIMITED,
     error_code_of,
 )
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
@@ -195,6 +197,30 @@ async def test_locked_in_failure_does_not_advance() -> None:
             [_http_error(503), "ok"],
             lock_in=True,
         )
+
+
+@pytest.mark.asyncio
+async def test_a_locked_in_failure_says_why_the_backups_were_not_tried() -> None:
+    """The status and code stay the provider's, so a client retrying on them is unaffected (#3198)."""
+    with pytest.raises(HTTPException) as unrouted:
+        await _walk([_attempt(1, "a")], [_http_error(429)])
+    with pytest.raises(HTTPException) as locked_in:
+        await _walk([_attempt(1, "a"), _attempt(2, "b")], [_http_error(429), "ok"], lock_in=True)
+
+    assert locked_in.value.status_code == 429
+    assert error_code_of(locked_in.value.headers) == UPSTREAM_RATE_LIMITED
+    assert locked_in.value.detail == f"{unrouted.value.detail} {LOCKED_IN_DETAIL}"
+
+
+@pytest.mark.asyncio
+async def test_a_locked_in_failure_on_the_last_candidate_answers_as_the_provider_did() -> None:
+    """No backup was left to try, so there is nothing to explain."""
+    with pytest.raises(HTTPException) as unrouted:
+        await _walk([_attempt(1, "a")], [_http_error(429)])
+    with pytest.raises(HTTPException) as locked_in:
+        await _walk([_attempt(1, "a")], [_http_error(429)], lock_in=True)
+
+    assert locked_in.value.detail == unrouted.value.detail
 
 
 @pytest.mark.asyncio

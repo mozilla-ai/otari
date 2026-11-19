@@ -39,6 +39,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
+from gateway.api.routes._attempts import LOCKED_IN_DETAIL
 from gateway.core.config import (
     API_KEY_HEADER,
     API_ROOT,
@@ -57,6 +58,7 @@ from gateway.core.error_codes import (
     ERROR_STATUS_HEADER,
     ERROR_TAG_HEADER,
     PROVIDER_ERROR,
+    UPSTREAM_RATE_LIMITED,
 )
 from gateway.models.routing import RoutingConfig
 from gateway.services import catalog as selectors
@@ -2251,6 +2253,30 @@ def test_a_locked_in_tool_loop_cannot_fail_over_and_still_owes_for_its_searches(
     # And the money is in the ledger, not only on the row.
     user = client.get(f"{API_ROOT}/users/test-user", headers=HEADERS).json()
     assert user["spend"] == pytest.approx(0.01)
+
+
+def test_a_rate_limit_after_lock_in_keeps_its_code_and_says_why_no_backup_was_tried(
+    client: TestClient,
+    serve_search_on_fake: Callable[..., None],
+) -> None:
+    """A 429 on the second round of a tool loop is the caller's 429, explained (#3198)."""
+    _create_user(client)
+    _serve_priced_searches(client, serve_search_on_fake)
+    scripted: list[ChatCompletion | Exception] = [_tool_completion("gpt-5-mini", tool_call=True), _http_error(429)]
+
+    async def scripted_provider(**_kwargs: Any) -> ChatCompletion:
+        nxt = scripted.pop(0)
+        if isinstance(nxt, Exception):
+            raise nxt
+        return nxt
+
+    with patch("gateway.services.mcp_loop.acompletion", new=scripted_provider):
+        resp = _chat(client, "fast", tools=[{"type": "otari_web_search"}])
+
+    assert resp.status_code == 429, resp.text
+    assert not scripted, "the fallback candidate should never have been called"
+    assert resp.json()["code"] == UPSTREAM_RATE_LIMITED
+    assert resp.json()["detail"].endswith(LOCKED_IN_DETAIL)
 
 
 # ---------------------------------------------------------------------------
