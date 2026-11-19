@@ -2208,6 +2208,7 @@ async def test_a_search_is_marked_failed_from_the_text_it_returned(monkeypatch: 
 
 @pytest.mark.asyncio
 async def test_a_search_that_raised_reports_none_of_its_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The entry still says the call failed inside Otari, rather than carrying no reason at all (#3198)."""
     sentinel = "sentinel-7f3a https://internal.example/search?key=leak"
 
     class _RaisingSearchPool(_FakeSearchPool):
@@ -2235,8 +2236,37 @@ async def test_a_search_that_raised_reports_none_of_its_exception(monkeypatch: p
 
     entries = [entry for chunk in chunks for entry in _reported(chunk)]
     assert [entry["status"] for entry in entries] == ["in_progress", "failed"]
-    assert "error" not in entries[1]
+    assert entries[1]["error"] == {"provider": None, "status": None, "tag": "internal_error", "retryable": False}
     assert not any("sentinel-7f3a" in chunk.model_dump_json() for chunk in chunks)
+
+
+@pytest.mark.asyncio
+async def test_a_fetch_that_raised_is_reported_as_an_internal_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _RaisingFetchPool(_FakePool):
+        async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+            raise RuntimeError("backend down")
+
+    responses = iter(
+        [
+            _completion(finish="tool_calls", tool_calls=[("c1", "web_fetch", '{"url": "https://example.com/a"}')]),
+            _completion(finish="stop", content="done"),
+        ]
+    )
+
+    async def fake_acompletion(**_kwargs: Any) -> ChatCompletion:
+        return next(responses)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+    result = await mcp_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}]},
+        pool=cast(Any, _RaisingFetchPool(tool_names=["web_fetch"])),
+        max_iterations=5,
+        native_tools=_REPORTED,
+    )
+
+    [entry] = _reported(result)
+    assert (entry["status"], entry["error"]["tag"]) == ("failed", "internal_error")
 
 
 @pytest.mark.asyncio

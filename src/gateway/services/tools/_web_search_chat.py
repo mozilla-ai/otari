@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Literal
 
 from gateway.schemas.tools import OtariToolCallError, OtariToolCallSource
-from gateway.services.tools._chat_tool_calls import chat_entry, refusal_error
+from gateway.services.tools._chat_tool_calls import chat_entry, ran_error, refusal_error
 from gateway.services.tools._web_display import hits_to_show, search_query, take_last_hits
 from gateway.services.tools._web_names import WEB_RETRIEVAL_RESULT_MAX_BYTES
 from gateway.services.tools._web_search_responses import WEB_SEARCH_CALL_ID_PREFIX
@@ -38,15 +38,12 @@ class ChatWebSearchRendering:
         """The ended entry: ``failed``, or ``completed`` with the hits the backend kept.
 
         A failed search's ``error`` is the failure the search backend kept: the
-        provider, its status, the tag and whether a retry may help. One that failed
-        on the old backend carries none: that backend raises or returns only a text,
-        and the text is the model's, not the caller's.
+        provider, its status, the tag and whether a retry may help, or
+        ``internal_error`` for a search that raised. One the old backend answered
+        with only a text carries none: the text is the model's, not the caller's.
         """
         if call.failed:
-            take_last_failure = getattr(pool, "take_last_failure", None)
-            failure = take_last_failure() if take_last_failure is not None else None
-            error = OtariToolCallError.model_validate(failure.as_dict()) if failure is not None else None
-            return [_entry(call, "failed", error=error)]
+            return [_entry(call, "failed", error=ran_error(call, pool))]
         return [_entry(call, "completed", sources=_sources(take_last_hits(pool) or []))]
 
     def refused(self, call: NativeCall, reason: Refusal) -> list[Any]:
