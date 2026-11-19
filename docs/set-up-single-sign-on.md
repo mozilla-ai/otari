@@ -41,7 +41,7 @@ A connection only admits addresses at a domain your organization has proven it c
 
 ![A saved connection, with example.com listed under Domains that admit sign-in.](assets/screenshots/sso-connection.png)
 
-A proof expires, and the page shows when. Verify the domain again before that date, or sign-in through the connection stops until you do.
+A proof expires, and the page shows when. Verifying again before that date does not extend it. Once it expires, sign-in through the connection stops until you verify the domain again on **Email domains**.
 
 ## Sign in
 
