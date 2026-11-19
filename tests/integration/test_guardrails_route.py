@@ -107,8 +107,7 @@ def test_block_mode_returns_403_and_skips_provider(
     assert detail["code"] == "guardrail_violation"
     assert detail["guardrails"][0]["profile"] == "prompt-injection"
     assert resp.headers["Otari-Error-Code"] == "guardrail_violation"
-    if route != "messages":
-        assert resp.json()["code"] == "guardrail_violation"
+    assert resp.json()["code"] == "guardrail_violation"
     provider.assert_not_awaited()
 
 
