@@ -152,7 +152,9 @@ async def app_workspaces(
 async def exchange(body: Annotated[AppTokenRequest, Form()], service: OAuthAppServiceDep) -> JSONResponse:
     """Exchange a form-encoded single-use authorization code and S256 verifier for a revocable API key."""
     key, scopes = await service.exchange(body)
-    token = AppTokenResponse(access_token=key, scope=" ".join(scope.value for scope in scopes))
+    token = AppTokenResponse(
+        access_token=key, scope=" ".join(scope.value for scope in scopes), manage_url=service.manage_url()
+    )
     return JSONResponse(token.model_dump(), headers=_NO_STORE)
 
 
@@ -166,6 +168,6 @@ async def revoke(body: Annotated[AppRevocationRequest, Form()], service: OAuthAp
 FEATURE = CoreFeature(
     name="oauth_apps",
     surface=None,
-    enabled=lambda config: bool(config.oauth_apps),
+    enabled=lambda config: bool(config.oauth_apps) or config.oauth_open_apps,
     routers=lambda config: (router, public_router),
 )
