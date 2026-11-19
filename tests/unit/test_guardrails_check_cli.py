@@ -4,6 +4,7 @@ These tests run against real repositories, because the paths Git reports for a r
 The model call is the one thing stubbed.
 """
 
+import json
 import re
 import shutil
 import subprocess
@@ -121,6 +122,50 @@ def test_a_change_touching_no_forbidden_path_exits_zero(repo: Path) -> None:
     assert "pass        no-hand-edited-changelog" in result.output
 
 
+def test_json_report_pins_the_gate_schema_and_exit_status(repo: Path) -> None:
+    (repo / "CHANGELOG.md").write_text("## 1.2.0\n")
+
+    result = _invoke("--format", "json")
+
+    assert result.exit_code == 1, result.output
+    assert json.loads(result.output) == {
+        "gates": [
+            {
+                "id": "no-hand-edited-changelog",
+                "type": "path",
+                "enforcement": "required",
+                "outcome": "fail",
+                "message": "CHANGELOG.md is generated at release time.",
+                "detail": "CHANGELOG.md",
+                "source": None,
+            },
+            {
+                "id": "no-force-push",
+                "type": "command",
+                "enforcement": "required",
+                "outcome": "not_applicable",
+                "message": (
+                    "A command or command_if_changed gate cannot run against a change, which carries no commands."
+                ),
+                "detail": None,
+                "source": None,
+            },
+        ],
+        "exit_status": 1,
+    }
+
+
+def test_json_report_returns_zero_when_required_gates_pass(repo: Path) -> None:
+    (repo / "README.md").write_text("edited\n", encoding="utf-8")
+
+    result = _invoke("--format", "json")
+
+    assert result.exit_code == 0, result.output
+    report = json.loads(result.output)
+    assert report["exit_status"] == 0
+    assert [gate["outcome"] for gate in report["gates"]] == ["pass", "not_applicable"]
+
+
 def test_commits_since_the_base_are_part_of_the_change(repo: Path) -> None:
     """A branch's own commits are what a pull request carries, not only what is uncommitted."""
     _git(repo, "switch", "-q", "-c", "feature")
@@ -179,6 +224,18 @@ def test_a_command_gate_is_reported_as_unable_to_run(repo: Path) -> None:
 
     assert result.exit_code == 0, result.output
     assert "cannot run against a change, which carries no commands: no-force-push." in result.output
+
+
+def test_a_gate_that_does_not_apply_still_has_a_text_result_line(repo: Path) -> None:
+    guardrail = _CHANGELOG_GATE.replace(
+        "runs: [pre_tool_use.edit_target, stop.working_tree]", "runs: [pre_tool_use.edit_target]"
+    )
+    _write_guardrail(repo, guardrail)
+
+    result = _invoke()
+
+    assert result.exit_code == 0, result.output
+    assert re.search(r"^  not_applicable +no-hand-edited-changelog \(path, required\)", result.output, re.MULTILINE)
 
 
 def test_a_failing_required_verifier_exits_one_and_runs_in_the_checked_repo(repo: Path) -> None:

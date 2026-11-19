@@ -611,6 +611,7 @@ Runs the repository's gates against a change, such as a pull request. Requires a
 | `--base <commit>` | | `HEAD` | Check the change from where the checked commit left this commit. |
 | `--head <commit>` | | the working tree | End the change at this commit, read from Git alone. |
 | `--type <type>` | | every runnable type | `path`, `verifier` or `judge`. Repeatable. Without it, the report also lists the `command` and `command_if_changed` gates that cannot run. |
+| `--format <format>` | | `text` | `text` prints the human-readable report; `json` prints the stable machine-readable schema below. |
 | `--guardrails-from <dir>` | | the checked repository | Read the guardrail files and verifier scripts from this checkout instead. |
 | `--judge-model` | `OTARI_HOOK_JUDGE_MODEL` | see [Choosing a judge CLI](#choosing-a-judge-cli) | Model for judge gate calls. |
 | `--judge-cli` | `OTARI_HOOK_JUDGE_CLI` | `claude` | Comma-separated, ordered judge CLIs to try. A gate's `judge_cli` overrides it. |
@@ -627,6 +628,29 @@ Without `--head`, the change includes untracked files. Every gate sees the paths
 | `command_if_changed` | Cannot run. It needs the commands a session ran. |
 
 It exits 1 when a `required` gate fails, errors or gets no result. A gate the change gives nothing to run against is reported as unable to run, and does not change the exit status. A `judge` finding never changes the exit status.
+
+#### JSON output
+
+`--format json` emits only one JSON object, so another tool can consume the result without parsing prose:
+
+```json
+{
+  "gates": [
+    {
+      "id": "no-hand-edited-changelog",
+      "type": "path",
+      "enforcement": "required",
+      "outcome": "fail",
+      "message": "CHANGELOG.md is generated at release time.",
+      "detail": null,
+      "source": null
+    }
+  ],
+  "exit_status": 1
+}
+```
+
+`gates` contains the selected gates in policy order. Each gate always has `id`, `type`, `enforcement` and `outcome`; `message`, `detail` and `source` carry the same diagnostics as the text report and are `null` when absent. A `command` or `command_if_changed` gate, and a `verifier` when `--head` is used, has `outcome: "not_applicable"` because the check cannot collect the evidence it needs. `exit_status` is the process status: `1` when a required gate did not pass, otherwise `0`.
 
 ### `otari guardrails generate`
 
