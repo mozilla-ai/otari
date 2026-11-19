@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.53.0/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.54.0/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -303,8 +303,8 @@ runs before route auth, so any caller can choose the trace ID and sampling flag
 your collector ingests, and a malformed `tracestate` makes OpenTelemetry log a
 warning per offending member (`opentelemetry.trace.span`). Enable it for trusted
 service-to-service callers, ideally behind a proxy that strips these headers at
-the edge. Browsers cannot send them cross-origin: they are not in the CORS
-allow-list.
+the edge. A browser page sends them cross-origin only to the endpoints
+`cors_inference_origins` opens (below), and never with credentials.
 
 ### Calling models from a browser
 
@@ -322,7 +322,9 @@ and image endpoints, direct web search and fetch (`/api/v1/search`,
 (`GET /api/v1/tools`), which a page reads to offer its models and tools, and
 the token exchange and revocation of [OAuth apps](oauth-apps.md). The rest of
 the API, the dashboard's included and the app consent screen with it, answers a
-page on another origin as it did before.
+page on another origin as it did before. On these endpoints a page may send any
+request header, so a header its client library adds, such as an app version,
+does not fail the browser's preflight.
 
 A browser never sends credentials under it, so a page cannot use the session
 of someone signed in to the dashboard: only the API key the page itself holds.
@@ -519,7 +521,7 @@ providers:
 | `models` | Model ids offered for discovery, for a backend with no model-listing endpoint. |
 | `client_args` | Options for the provider's SDK client. See [Bedrock read timeout](#bedrock-read-timeout). |
 | `max_retries` | This instance's SDK retry count. See [Provider retries](#provider-retries). |
-| `messages_api` | `completions` (default) or `responses`. See [Messages through the Responses API](#messages-through-the-responses-api). |
+| `messages_api` | `completions` or `responses`; unset, `responses` for OpenAI's own API and `completions` otherwise. See [Messages through the Responses API](#messages-through-the-responses-api). |
 | `credentials`, `project`, `location` | Vertex AI only: configure its client. |
 | Any other key | Passed to the provider's any-llm call as it is. |
 
@@ -639,19 +641,27 @@ gateway's own values through it. Chat completions only.
 ### Messages through the Responses API
 
 A request to `/v1/messages` for a model with no Anthropic Messages API of its
-own is served as a chat completion by default. An OpenAI instance (or any
-instance whose provider has a Responses API, such as Azure OpenAI) can serve it
-through the Responses API instead:
+own is served as a chat completion, except on OpenAI's own API, which serves it
+through the Responses API. That holds for a configured instance, a hosted
+provider and an organization's own key alike; an OpenAI instance with another
+`api_base` (an OpenAI-compatible server) stays on chat completions, and so does
+a request that sends `stop_sequences`, which the Responses API cannot carry.
+
+An instance whose provider has a Responses API (such as Azure OpenAI) can opt in
+with `messages_api: responses`, and an OpenAI instance can opt out with
+`messages_api: completions`:
 
 ```yaml
 providers:
   openai:
     api_key: ${OPENAI_API_KEY}
-    messages_api: responses   # default: completions
+    messages_api: completions   # unset: responses for OpenAI's own API
 ```
 
-This reaches models OpenAI serves only on the Responses API (the codex and pro
-variants), and keeps a reasoning model's reasoning across turns:
+The Responses path reaches models OpenAI serves only on the Responses API (the codex and pro
+variants), lets a reasoning model call function tools with its reasoning on,
+which chat completions refuses for the newer ones, and keeps a reasoning model's
+reasoning across turns:
 
 - Each reasoning item comes back as a `thinking` block whose signature carries
   its encrypted content. When a client such as Claude Code sends the block back,
@@ -666,8 +676,8 @@ variants), and keeps a reasoning model's reasoning across turns:
   answers that turn without extended thinking.
 
 Reasoning fields are sent only to a model whose name looks like a reasoning
-model (`o1`, `o3`, `o4-mini` and the rest of the `o` series, `gpt-5*` except its
-`-chat` variants, and anything with `codex` in it), whether or not the client
+model (`o1`, `o3`, `o4-mini` and the rest of the `o` series, `gpt-5` and later
+except their `-chat` variants, and anything with `codex` in it), whether or not the client
 asked for thinking, because any other model fails the call over them. An Azure
 OpenAI deployment is called by its deployment name, so name a reasoning
 deployment after its model (`gpt-5-mini`, not `prod-reasoner`) or its reasoning
@@ -867,7 +877,7 @@ client_country_header: CF-IPCountry
 ```
 
 OpenAI's list, as 208 codes taken from that page on 2026-10-23, is in
-[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/v0.53.0/docs/public/openai-supported-countries.json), a
+[openai-supported-countries.json](https://github.com/mozilla-ai/otari/blob/v0.54.0/docs/public/openai-supported-countries.json), a
 JSON list the dashboard's Load from JSON file button reads for a hosted
 provider. OpenAI changes the page, so check the file against it before relying
 on it. The page allows Ukraine "with certain exceptions", which a country code
@@ -961,9 +971,22 @@ that list or for the supported countries of an enabled hosted provider. A
 private address, or one the file does not hold, has no country, and
 a listed provider refuses it.
 
-A VPN changes the country a request appears to come from, so this check does
-not replace the account and billing checks a provider may also ask for, which
-need billing data a self-hosted Otari does not hold.
+A VPN changes the country a request appears to come from, so the gate also
+reads where the account lives, when the deployment knows. That country comes
+from the build, not from a setting: a self-hosted Otari holds no billing data
+and knows no account's country, and a build that bills its customers, such as
+otari.ai, answers it from the billing address of the organization the API key
+belongs to. A list refuses a request when either country is off it. An unknown
+account country is no opinion, so a deployment that knows none is gated on
+the request's country alone, while an unknown request country still refuses.
+The account is looked up only where a list could refuse it: a provider type
+lists countries, or the hosted credential a request is served on has a list.
+A build that holds the country but cannot read it at the moment refuses on
+every listed provider rather than going by the request's country alone. A
+master key is the operator, not an account, so its requests are gated on the
+request's country alone. A refusal names the request's country and never the
+account's, nor which of the two the list left out; the usage row's detail, a
+dropped candidate's operator detail and the log say which.
 
 ## Pricing
 
@@ -1912,7 +1935,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.53.0/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.54.0/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Contacting the Otari team

@@ -11,3 +11,4 @@ Split your organization into workspaces, bring in your team, and decide which pr
 * [Billing](https://docs.otari.ai/guides/organize/billing)
 * [Manage workspaces](https://docs.otari.ai/guides/organize/manage-workspaces)
 * [Members and invitations](https://docs.otari.ai/guides/organize/members)
+* [Set up single sign-on](https://docs.otari.ai/guides/organize/set-up-single-sign-on)

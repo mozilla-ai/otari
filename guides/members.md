@@ -53,8 +53,8 @@ address there join without an invitation. See
 3. Click **Verify domain**. Once Otari finds the record, the domain starts
    admitting people.
 
-Before the proof expires, verify the domain again from the same row to keep it
-admitting people.
+Once the proof expires, the domain stops admitting people until you verify it
+again from the same row. Verifying before then does not extend the proof.
 
 ## How it works
 

@@ -2,7 +2,7 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.53.0/docs/public/openapi.json), the source of truth for paths,
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.54.0/docs/public/openapi.json), the source of truth for paths,
 parameters, and schemas.
 
 ## Base URL
@@ -807,7 +807,7 @@ query:
 | Header | Value |
 |---|---|
 | `Otari-Error-Provider` | The provider that failed, such as `exa`. |
-| `Otari-Error-Status` | The provider's own HTTP error status; absent when it gave none, as for a timeout, an error inside a successful answer, or an answer that could not be read. |
+| `Otari-Error-Status` | The provider's own HTTP error status, 400 or above; absent otherwise, as for a timeout, a redirect from the provider's API (tagged `http_error`, since Otari's calls to a provider's API follow none), an error inside a successful answer, or an answer that could not be read. |
 | `Otari-Error-Tag` | What failed, in the provider's terms or the library's: `timeout`, `network`, `invalid_header` (a key holding a character that is not ASCII), `http_error`, `invalid_response`, `unexpected_response`, or the provider's own code, such as Exa's `INVALID_API_KEY`. |
 | `Otari-Error-Retryable` | `true` for a timeout, a 429 or a 5xx from the provider, when a retry may help; otherwise `false`. |
 
@@ -959,8 +959,11 @@ safe fields ride as the same headers a [search](#search)'s 502 carries:
 `Otari-Error-Status` (the page's own HTTP status, when the fetcher reports one),
 `Otari-Error-Tag` (the provider's own tag, or the built-in fetcher's: `timeout`,
 `network`, `http_status`, `redirect`, `url_invalid`, `content_type`,
-`extraction`, `content_decoding`) and `Otari-Error-Retryable`. The body never
-carries the URL.
+`extraction`, `content_decoding`) and `Otari-Error-Retryable`. A fetch
+provider whose own API answers with a redirect fails with `http_error` and no
+`Otari-Error-Status`, since Otari's calls to a provider's API follow none; the
+page's own redirects are followed as before, by the provider or by the built-in
+fetcher. The body never carries the URL.
 
 ## Code execution
 
@@ -1261,11 +1264,11 @@ at the top level of the body.
 |---|---|---|---|
 | `budget_exceeded` | 403 | A budget refused the request | `Otari-Budget-Scope`: `user` for the billed user's own budget, otherwise the ceiling's scope: `organization`, `workspace`, `workspace_member`, `org_member` or `api_token`; `Retry-After`: seconds until the refusing budget's window ends, when it resets and the request would fit a fresh one; `end_user` in the body and `Otari-End-User-Budget` naming its budget, when the scope is `user` and the billed user is a service key's [end user](https://docs.otari.ai/guides/control/end-users#how-end-users-are-billed-and-capped) |
 | `user_blocked` | 403 | The billed user is blocked | `end_user` in the body, when the billed user is a service key's end user |
-| `web_access_disabled` | 403 | The workspace turned web access off, refusing a web search or web fetch | |
+| `web_access_disabled` | 403 | The workspace turned web access off, refusing a web search or web fetch. The message says where an owner or admin of the workspace allows it: Tools > Web search in the dashboard | |
 | `user_not_found` | 404 | The billed user does not exist | |
 | `rate_limited` | 429 | A gateway rate limit is full | `Otari-Rate-Limit-Rule` for a `rate_limits` rule, or `organization_concurrency` for an organization's concurrency limit; `Retry-After` when waiting helps |
 | `upstream_rate_limited` | 429 | The provider rate limited the gateway | `Retry-After` when the provider sent one |
-| `invalid_model` | 400 | The model selector names no configured provider, alias, policy or catalog model id; checked before the key's allow-list, so a restricted key gets it too, and before `require_pricing`, so it is never answered as `pricing_required`. A `provider:model` selector whose provider resolves is not judged here, since only the provider knows its models | |
+| `invalid_model` | 400 | The model selector names no configured provider, alias, policy or catalog model id, and the message points to `GET /api/v1/models`, which lists the caller's aliases and policies. A routing policy that chooses its model per request is refused with this code on every route but chat completions, Messages and Responses, and the message says so. Checked before the key's allow-list, so a restricted key gets it too, and before `require_pricing`, so it is never answered as `pricing_required`. A `provider:model` selector whose provider resolves is not judged here, since only the provider knows its models | |
 | `model_not_allowed` | 403 | The key may not use the model | |
 | `model_not_serving` | 403 | The organization offers the model on a provider key, with its serving switch off | |
 | `model_not_found` | 404 | A provider key of the organization serves the provider, and none offers the model; or no credential serves the provider and neither the caller's catalog nor models.dev knows the model (a misspelled catalog id), when `detail` names up to two of the nearest catalog ids | |
