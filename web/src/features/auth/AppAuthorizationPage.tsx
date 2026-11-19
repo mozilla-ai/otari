@@ -222,16 +222,18 @@ export function AppAuthorizationPage() {
             </p>
           ) : null}
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field
-              label="Spending limit (USD)"
-              value={limit}
-              onChange={setLimit}
-              placeholder="No limit"
-              inputMode="decimal"
-              isDisabled={approval.isPending}
-              isInvalid={limitInvalid}
-              errorMessage="Enter an amount above 0 and under 1,000,000, in dollars and cents."
-            />
+            {app.data.spend_limits && (
+              <Field
+                label="Spending limit (USD)"
+                value={limit}
+                onChange={setLimit}
+                placeholder="No limit"
+                inputMode="decimal"
+                isDisabled={approval.isPending}
+                isInvalid={limitInvalid}
+                errorMessage="Enter an amount above 0 and under 1,000,000, in dollars and cents."
+              />
+            )}
             <Select
               label="Key expires"
               value={expiration}
@@ -256,7 +258,7 @@ export function AppAuthorizationPage() {
                 selectedWorkspace &&
                 approval.mutate({
                   workspaceId: selectedWorkspace.id,
-                  limit,
+                  limit: app.data.spend_limits ? limit : "",
                   expiration,
                 })
               }

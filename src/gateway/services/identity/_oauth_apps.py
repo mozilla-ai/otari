@@ -44,6 +44,7 @@ class OAuthAppService:
         *,
         apps: Mapping[str, OAuthAppConfig],
         open_apps: bool = False,
+        spend_limits: bool = True,
         ui_link: Callable[[str], str],
         issuer: str,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
@@ -51,7 +52,7 @@ class OAuthAppService:
         self.uow, self.grants, self.keys = uow, grants, keys
         self.key_format = key_format
         self.organizations, self.workspaces, self.budgets = organizations, workspaces, budgets
-        self.apps, self.open_apps = apps, open_apps
+        self.apps, self.open_apps, self.spend_limits = apps, open_apps, spend_limits
         self.ui_link, self.issuer, self.clock = ui_link, issuer, clock
 
     def require_app(self, client_id: str, redirect_uri: str) -> OAuthAppConfig:
@@ -65,7 +66,8 @@ class OAuthAppService:
             if any(redirect_matches(uri, redirect_uri) for uri in app.redirect_uris):
                 return app
         elif self.open_apps and (site := open_app_site(client_id, redirect_uri)) is not None:
-            return OAuthAppConfig(name=site, redirect_uris=[redirect_uri])
+            # Not validated: an admitted origin's host can be longer than a registered name may be.
+            return OAuthAppConfig.model_construct(name=site, redirect_uris=[redirect_uri])
         raise OAuthAppGrantError("invalid_request", "Unknown app or redirect URI")
 
     def details(self, client_id: str, redirect_uri: str) -> AppDetails:
@@ -77,6 +79,7 @@ class OAuthAppService:
             issuer=self.issuer,
             scopes=app.scopes,
             verified=client_id in self.apps,
+            spend_limits=self.spend_limits,
         )
 
     def authorization_url(self, request: AppAuthorizationParameters) -> str:
@@ -85,8 +88,13 @@ class OAuthAppService:
         return self.ui_link("/oauth/authorize?" + urlencode(request.model_dump(exclude_none=True)))
 
     def manage_url(self) -> str:
-        """The dashboard page where a person sees and revokes the keys apps were issued."""
-        return self.ui_link("/keys")
+        """The dashboard page where a person sees and revokes the keys apps were issued.
+
+        Absolute, since the app links to it from its own origin; with no interface address
+        configured, the gateway serves the dashboard itself.
+        """
+        link = self.ui_link("/keys")
+        return link if "://" in link else self.issuer + link
 
     async def authorize(self, user: User, request: AppAuthorizationRequest) -> str:
         """Record explicit consent, for the scopes the screen showed that the registration still names.
@@ -126,7 +134,7 @@ class OAuthAppService:
                 workspace_id=workspace.id,
                 scopes=approved,
                 expires_at=now + timedelta(minutes=2),
-                spend_limit=request.limit,
+                spend_limit=request.limit if self.spend_limits else None,
                 key_lifetime_sec=None if lifetime is None else int(lifetime.total_seconds()),
             )
             await self.grants.prune_expired(now)

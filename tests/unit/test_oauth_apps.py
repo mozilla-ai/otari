@@ -210,3 +210,7 @@ def test_consent_defaults_to_no_limit_and_no_expiry_and_refuses_an_unknown_expir
 def test_an_app_may_suggest_a_limit_and_expiry_the_screen_validates_later() -> None:
     wire = AppAuthorizationParameters.model_validate({**_authorization(), "limit": "lots", "expiration": "2-days"})
     assert (wire.limit, wire.expiration) == ("lots", "2-days")
+    too_long = AppAuthorizationParameters.model_validate(
+        {**_authorization(), "limit": "1" * 33, "expiration": "2026-11-18T00:00:00Z"}
+    )
+    assert (too_long.limit, too_long.expiration) == (None, None)

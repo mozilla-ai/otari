@@ -2,7 +2,9 @@
 
 import logging
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, Mock
 
@@ -15,6 +17,7 @@ from gateway.models.identity import OAuthAppGrant
 from gateway.models.tenancy import User
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.repositories.identity.oauth_app_grant_repository import OAuthAppGrantRepository
+from gateway.schemas.identity import AppAuthorizationRequest
 from gateway.schemas.identity.oauth_apps import AppTokenRequest
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService
@@ -23,7 +26,13 @@ from gateway.services.tenancy import OrganizationService, WorkspaceService
 from gateway.types.key_scope import DEFAULT_KEY_SCOPES, KeyScopeSet
 
 
-def _service(grants: OAuthAppGrantRepository, *, open_apps: bool = False) -> OAuthAppService:
+def _service(
+    grants: OAuthAppGrantRepository,
+    *,
+    open_apps: bool = False,
+    spend_limits: bool = True,
+    ui_link: Callable[[str], str] = lambda path: path,
+) -> OAuthAppService:
     return OAuthAppService(
         cast(UnitOfWork, MagicMock(spec=UnitOfWork)),
         grants,
@@ -34,7 +43,8 @@ def _service(grants: OAuthAppGrantRepository, *, open_apps: bool = False) -> OAu
         AsyncMock(spec=BudgetService),
         apps={"app": OAuthAppConfig(name="App", redirect_uris=["https://app.example/callback"])},
         open_apps=open_apps,
-        ui_link=lambda path: path,
+        spend_limits=spend_limits,
+        ui_link=ui_link,
         issuer="https://otari.example",
     )
 
@@ -69,6 +79,42 @@ def test_open_apps_admit_a_site_by_its_origin_and_mark_it_unverified() -> None:
     assert not details.verified
     assert details.scopes == list(DEFAULT_KEY_SCOPES)
     assert service.details("app", "https://app.example/callback").verified
+
+
+def test_an_open_app_may_be_a_site_with_a_name_longer_than_a_registration_allows() -> None:
+    site = f"{'a' * 50}.{'b' * 50}.example"
+    service = _service(AsyncMock(spec=OAuthAppGrantRepository), open_apps=True)
+    assert service.details(f"https://{site}", f"https://{site}/").name == site
+
+
+def test_the_manage_url_is_absolute_when_the_dashboard_has_no_address_of_its_own() -> None:
+    grants = AsyncMock(spec=OAuthAppGrantRepository)
+    assert _service(grants).manage_url() == "https://otari.example/keys"
+    configured = _service(grants, ui_link=lambda path: "https://app.otari.example" + path)
+    assert configured.manage_url() == "https://app.otari.example/keys"
+
+
+@pytest.mark.asyncio
+async def test_no_spending_limit_is_offered_or_kept_where_budgets_are_not_enforced() -> None:
+    grants = AsyncMock(spec=OAuthAppGrantRepository)
+    service = _service(grants, spend_limits=False)
+    service.workspaces = AsyncMock(spec=WorkspaceService)
+    assert not service.details("app", "https://app.example/callback").spend_limits
+    await service.authorize(
+        cast(User, Mock(id="user")),
+        AppAuthorizationRequest(
+            client_id="app",
+            redirect_uri="https://app.example/callback",
+            state="s" * 43,
+            code_challenge="c" * 43,
+            code_challenge_method="S256",
+            workspace_id=uuid.uuid4(),
+            scopes=list(DEFAULT_KEY_SCOPES),
+            limit=Decimal("5"),
+        ),
+    )
+    assert grants.issue.await_args is not None
+    assert grants.issue.await_args.kwargs["spend_limit"] is None
 
 
 @pytest.mark.parametrize(

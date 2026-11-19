@@ -26,7 +26,10 @@ service key, so it cannot hold the `end-users` scopes.
 
 Restart the gateway after changing registration. Empty `oauth_apps` disables
 these endpoints unless `oauth_open_apps` is on. Removing a registration prevents new approvals and exchanges;
-revoke already-issued keys on the API keys page. HTTPS redirects match exactly. HTTP is allowed only for
+revoke already-issued keys on the API keys page. With `oauth_open_apps` on, a removed
+client ID that is its callback's origin, such as `https://app.example`, still
+connects as an [unregistered app](#let-unregistered-apps-connect), from any path on
+that origin and marked as unverified. HTTPS redirects match exactly. HTTP is allowed only for
 loopback hosts; a native app may choose a different port on the registered
 loopback host and path, as RFC 8252 requires. Wildcards, query strings, fragments
 and embedded credentials are not accepted in registrations.
@@ -76,11 +79,13 @@ sign-in uses. `limit` is a spending limit in USD, a positive amount under
 1,000,000 with at most two decimals, such as `25` or `12.50`. `expiration` is one
 of `1-hour`, `1-day`, `7-days`, `30-days`, `90-days`, `180-days`, `1-year` or
 `never`. The consent screen starts from them and the person can change either,
-so treat them as suggestions. A value the screen cannot use starts it at no limit
-or `never`, which are also the defaults. An approved limit caps the key over its
+so treat them as suggestions. A value the screen cannot use, including one longer
+than 32 characters for `limit` or 16 for `expiration`, starts it at no limit or
+`never`, which are also the defaults. An approved limit caps the key over its
 whole life through a budget of its own, named like the key and listed with the
 organization's budgets, and an approved expiry counts from the moment the key is
-issued.
+issued. Where `budget_strategy` is `disabled`, no budget binds a key, so the
+consent screen offers no limit and a suggested one is dropped.
 
 The authorization endpoint uses the deployment's `ui_base_url` (falling back to
 `public_base_url`), so a separately hosted dashboard works too. The dashboard
@@ -102,8 +107,8 @@ grant_type=authorization_code&client_id=thunderbolt&redirect_uri=https%3A%2F%2Fy
 ```
 
 The JSON response contains `access_token`, `token_type: Bearer`, `scope`, and
-`manage_url`, the dashboard page where the person sees the key and revokes it, so
-an app can link there. Refusals use
+`manage_url`, the absolute URL of the dashboard page where the person sees the key
+and revokes it, so an app can link there. Refusals use
 OAuth `error` and `error_description` fields; token responses must not be cached.
 Use the token against Otari's OpenAI-compatible API. The code expires after two minutes, is bound to
 the exact redirect and client, and can be exchanged only once. No client secret

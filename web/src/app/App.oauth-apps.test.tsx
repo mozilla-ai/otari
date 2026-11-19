@@ -61,6 +61,8 @@ beforeEach(() => {
         issuer: "https://auth.otari.example",
         scopes: ["inference:run"],
         redirect_uri: params.get("redirect_uri"),
+        verified: true,
+        spend_limits: true,
       }
     if (path.startsWith("/oauth/apps/workspaces?"))
       return { data: [{ id: "workspace", name: "Personal" }], count: 1 }

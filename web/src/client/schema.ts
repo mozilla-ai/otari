@@ -10391,6 +10391,11 @@ export interface components {
              */
             scopes: components["schemas"]["KeyScope"][];
             /**
+             * Spend Limits
+             * @description Whether a spending limit the person sets binds the key. It does not where the deployment has turned budget enforcement off, so the consent screen does not offer one.
+             */
+            spend_limits: boolean;
+            /**
              * Verified
              * @description Whether the operator registered this app. An unregistered app is named after its site, which nothing has checked beyond its callback being on it.
              */
@@ -10431,7 +10436,7 @@ export interface components {
             access_token: string;
             /**
              * Manage Url
-             * @description The page where the person sees this key, and revokes it.
+             * @description The absolute URL of the page where the person sees this key, and revokes it.
              */
             manage_url: string;
             /**

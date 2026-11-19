@@ -224,6 +224,7 @@ def get_oauth_app_service(
         budgets,
         apps=config.oauth_apps,
         open_apps=config.oauth_open_apps,
+        spend_limits=config.budget_strategy.strip().lower() != "disabled",
         ui_link=config.ui_link,
         issuer=_oauth_app_issuer(request, config),
     )

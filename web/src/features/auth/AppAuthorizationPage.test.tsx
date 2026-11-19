@@ -28,7 +28,7 @@ const request = new URLSearchParams({
 function renderPage(
   workspaces = [{ id: "workspace-one", name: "Personal" }],
   appError?: Error,
-  app: { name: string; verified: boolean } = {
+  app: { name: string; verified: boolean; spend_limits?: boolean } = {
     name: "Thunderbolt",
     verified: true,
   },
@@ -43,6 +43,7 @@ function renderPage(
           "http://localhost:5199/oauth/otari?code=grant&state=state-nonce",
       }
     return {
+      spend_limits: true,
       ...app,
       issuer: "https://auth.otari.example",
       scopes: ["inference:run"],
@@ -165,6 +166,19 @@ it("warns that a site connecting without registration is unverified", async () =
   expect(
     await screen.findByText(/Otari has not verified this site/),
   ).toBeVisible()
+})
+
+it("offers no spending limit where budgets are not enforced", async () => {
+  renderPage(undefined, undefined, {
+    name: "Thunderbolt",
+    verified: true,
+    spend_limits: false,
+  })
+  await screen.findByText("Personal")
+  expect(
+    screen.queryByRole("textbox", { name: "Spending limit (USD)" }),
+  ).toBeNull()
+  expect(screen.getByText("Key expires")).toBeVisible()
 })
 
 it("does not warn about a registered app", async () => {

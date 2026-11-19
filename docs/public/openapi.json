@@ -2216,6 +2216,11 @@
             "title": "Scopes",
             "type": "array"
           },
+          "spend_limits": {
+            "description": "Whether a spending limit the person sets binds the key. It does not where the deployment has turned budget enforcement off, so the consent screen does not offer one.",
+            "title": "Spend Limits",
+            "type": "boolean"
+          },
           "verified": {
             "description": "Whether the operator registered this app. An unregistered app is named after its site, which nothing has checked beyond its callback being on it.",
             "title": "Verified",
@@ -2227,7 +2232,8 @@
           "redirect_uri",
           "issuer",
           "scopes",
-          "verified"
+          "verified",
+          "spend_limits"
         ],
         "title": "AppDetails",
         "type": "object"
@@ -2308,7 +2314,7 @@
             "type": "string"
           },
           "manage_url": {
-            "description": "The page where the person sees this key, and revokes it.",
+            "description": "The absolute URL of the page where the person sees this key, and revokes it.",
             "title": "Manage Url",
             "type": "string"
           },
@@ -44961,7 +44967,6 @@
             "schema": {
               "anyOf": [
                 {
-                  "maxLength": 32,
                   "type": "string"
                 },
                 {
@@ -44980,7 +44985,6 @@
             "schema": {
               "anyOf": [
                 {
-                  "maxLength": 16,
                   "type": "string"
                 },
                 {
