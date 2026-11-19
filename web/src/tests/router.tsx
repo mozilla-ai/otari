@@ -4,6 +4,7 @@ import {
   createRoute,
   createRouter,
   RouterProvider,
+  useLocation,
 } from "@tanstack/react-router"
 import { act, render } from "@testing-library/react"
 import type { ReactElement, ReactNode } from "react"
@@ -114,4 +115,18 @@ export async function renderWithRouter(
   const result = render(ui, { wrapper: withRouter(options) })
   await flushRouter()
   return result
+}
+
+/**
+ * A route body that prints where the app navigated to, for a test that follows
+ * a link onto a route it does not render (`getByTestId("location")`).
+ */
+export function LocationProbe() {
+  const location = useLocation()
+  return (
+    <div data-testid="location">
+      {location.pathname}
+      {location.searchStr}
+    </div>
+  )
 }

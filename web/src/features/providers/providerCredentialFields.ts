@@ -11,9 +11,8 @@
 // on the form.
 //
 // The registry lives here rather than being published by the gateway on
-// purpose. `client_args` is a passthrough on every otari code path that reads
-// an organization key, so there is no server-side call built from these specs
-// for the form to drift away from; the authority for the names below is
+// purpose. No server-side call is built from these specs for the form to
+// drift away from; the authority for the names below is
 // any-llm and boto3, which a server-side copy would be paraphrasing just as
 // this one does. The endpoint that would carry it, `/providers/catalog`, is
 // `require_deployment_operator`-gated, and the page that most needs these
@@ -22,9 +21,10 @@
 // either a 403 on the page that needs it or a new public route for what is
 // static, per-release data with no deployment variance.
 //
-// The names are boto3's own, and nothing between this file and the SDK call
-// validates them: `org_provider_key_service` hands `client_args` to
-// `provider_kwargs.get_provider_kwargs`, which spreads it into `AnyLLM.create`.
+// The names are boto3's own. The gateway refuses an organization key's
+// `client_args` outside a per-provider allow-list (`tenant_client_args_allowed`
+// in `core/provider_params.py`), which has to keep listing every name here;
+// beyond that, nothing validates them before `AnyLLM.create`.
 // `providerCredentialFields.test.ts` pins them against a silent edit here, not
 // against an upstream rename, which still surfaces as a provider error at
 // request time.

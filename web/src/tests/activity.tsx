@@ -178,6 +178,15 @@ export function mockApi(
             is_other: false,
           })),
           by_api_key: [],
+          by_provider: Array.from(new Set(rows.map((r) => r.provider))).map(
+            (p) => ({
+              key: p,
+              cost: 0,
+              tokens: 0,
+              requests: 0,
+              is_other: false,
+            }),
+          ),
           by_source: Array.from(new Set(rows.map((r) => r.source))).map(
             (s) => ({
               key: s,

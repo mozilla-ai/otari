@@ -160,9 +160,9 @@ function ActivityPageContent({
   // Provenance: gateway traffic vs an imported agent source. Set by its own select,
   // or by a drill-down (the pricing alarm links here scoped to gateway traffic).
   const sourceFilter = url.get("source")
-  // Session, status code, endpoint and provider have no select of their own: a
-  // link carries them, shown as a chip so the scoping is visible and one click
-  // removes it.
+  // Session, status code and endpoint have no select of their own: a link
+  // carries them, shown as a chip so the scoping is visible and one click
+  // removes it. The provider's select is in the Overview's filter bar.
   const sessionFilter = url.get("source_label")
   const statusCodeFilter = url.get("status_code")
   const endpointFilter = url.get("endpoint")
@@ -330,10 +330,10 @@ function ActivityPageContent({
 
   // Source options: the sources with usage in the window. This must ignore the
   // source filter itself, or picking Claude Code would hide every other source
-  // and switching would mean clearing first. The session/endpoint/provider
-  // drill-down chips are not applied either, so the list stays complete (and the
-  // picker useful) while a drill-down narrows everything else. The model, user
-  // and key pickers are the Overview's, which fetches their options.
+  // and switching would mean clearing first. The session/endpoint drill-down
+  // chips are not applied either, so the list stays complete (and the picker
+  // useful) while a drill-down narrows everything else. The model, user, key
+  // and provider pickers are the Overview's, which fetches their options.
   const sourceSuggestFilters: UsageFilters = useMemo(
     () => ({
       workspace_id: workspace?.workspace_id,
@@ -343,6 +343,7 @@ function ActivityPageContent({
       model: modelFilters.length > 0 ? modelFilters : undefined,
       user_id: userFilters.length > 0 ? userFilters : undefined,
       api_key_id: apiKeyFilters.length > 0 ? apiKeyFilters : undefined,
+      provider: providerFilter || undefined,
     }),
     [
       workspace?.workspace_id,
@@ -351,6 +352,7 @@ function ActivityPageContent({
       modelFilters,
       userFilters,
       apiKeyFilters,
+      providerFilter,
     ],
   )
   const sourceSummary = useUsageSummary(
@@ -591,16 +593,6 @@ function ActivityPageContent({
             label: "Endpoint",
             value: endpointFilter,
             onClear: () => url.patch({ endpoint: "" }),
-          },
-        ]
-      : []),
-    ...(providerFilter
-      ? [
-          {
-            key: "provider",
-            label: "Provider",
-            value: providerFilter,
-            onClear: () => url.patch({ provider: "" }),
           },
         ]
       : []),

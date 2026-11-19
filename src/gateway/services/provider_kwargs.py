@@ -570,10 +570,12 @@ def get_provider_kwargs(
     lookup = instance if instance is not None else provider.value
     kwargs: dict[str, Any] = {}
     raw_config = config.providers.get(lookup)
+    tenant_endpoint = False
     if raw_config is None and workspace_id is not None:
         # A slug names one key of its own; any other instance reads the provider's.
         named = lookup if cached_org_slug_provider(workspace_id, lookup) is not None else provider.value
         raw_config = cached_org_provider_kwargs(workspace_id, named)
+        tenant_endpoint = raw_config is not None and bool(raw_config.get("api_base"))
     if raw_config is not None:
         provider_config = {k: v for k, v in raw_config.items() if k not in _INSTANCE_META_KEYS}
 
@@ -621,6 +623,18 @@ def get_provider_kwargs(
     placeholder = keyless_placeholder_api_key(kwargs.get("api_base"), kwargs.get("api_key"))
     if placeholder is not None:
         kwargs["api_key"] = placeholder
+
+    if tenant_endpoint:
+        # An organization chose this address, so the SDK dials it only through
+        # the client that checks it is public on every request and connects to
+        # the address it checked. Imported here: the providers package imports
+        # this module through model discovery.
+        from gateway.services.providers import owned_endpoint_sdk_client
+
+        kwargs["client_args"] = {
+            **(kwargs.get("client_args") or {}),
+            "http_client": owned_endpoint_sdk_client(provider),
+        }
 
     return kwargs
 

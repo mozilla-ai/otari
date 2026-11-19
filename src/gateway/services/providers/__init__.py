@@ -48,7 +48,13 @@ from gateway.services.providers._missing_credential import (
     unpriced_model_refusal,
 )
 from gateway.services.providers._org_provider_model_service import OrgProviderModelService
-from gateway.services.providers._owned_endpoint_network import owned_endpoint_http_client, owned_endpoint_sdk_client
+from gateway.services.providers._owned_endpoint_network import (
+    OwnedEndpointHttpx2Transport,
+    OwnedEndpointSyncTransport,
+    OwnedEndpointTransport,
+    owned_endpoint_http_client,
+    owned_endpoint_sdk_client,
+)
 from gateway.services.providers._platform_connect import (
     PLATFORM_PROVIDER_NAME,
     PlatformClient,
@@ -93,6 +99,9 @@ __all__ = [
     "OrganizationExists",
     "OrgProviderModelService",
     "OwnedEndpoint",
+    "OwnedEndpointHttpx2Transport",
+    "OwnedEndpointSyncTransport",
+    "OwnedEndpointTransport",
     "PLATFORM_PROVIDER_NAME",
     "PlatformClient",
     "PlatformConnectService",

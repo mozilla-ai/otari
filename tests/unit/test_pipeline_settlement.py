@@ -2566,10 +2566,7 @@ async def test_duplicate_mcp_server_name_against_a_stored_server_releases_reserv
     assert settlement.refunded == 1
 
 
-# RFC 1918, deliberately not loopback: `MCP_ALLOW_LOOPBACK` defaults to *true*,
-# so `127.0.0.1` passes `validate_mcp_url` and would make the ordering test below
-# vacuous. `MCP_ALLOW_PRIVATE_HOSTS` defaults to false, so these are rejected with
-# only that variable cleared.
+# RFC 1918 literals, so `validate_mcp_url` refuses them without a DNS lookup.
 _UNSAFE_URL = "https://10.0.0.1/mcp"
 _OTHER_UNSAFE_URL = "https://10.0.0.2/mcp"
 
@@ -2581,7 +2578,6 @@ async def test_an_unsafe_inline_url_is_refused_when_the_names_are_distinct(
     """Negative control for the ordering test below: these URLs really do fail the safety check."""
     settlement = _Settlement()
     settlement.install(monkeypatch)
-    monkeypatch.delenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", raising=False)
 
     ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
     with pytest.raises(HTTPException) as exc_info:
@@ -2599,6 +2595,32 @@ async def test_an_unsafe_inline_url_is_refused_when_the_names_are_distinct(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1:8000/mcp",
+        "http://127.1:8000/mcp",
+        "http://0177.0.0.1:8000/mcp",
+        "http://[::1]:8000/mcp",
+        "http://127.0.0.1:4318/v1",
+    ],
+)
+async def test_an_inline_loopback_url_is_refused(monkeypatch: pytest.MonkeyPatch, url: str) -> None:
+    """Any key holder writes an inline server, so it may not name the gateway's own host, whatever the old flag says."""
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    monkeypatch.setenv("OTARI_MCP_ALLOW_LOOPBACK", "true")
+
+    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_prepare_gateway_tools(ctx, mcp_servers=[McpServerConfig(name="tools", url=url)])
+
+    assert exc_info.value.status_code == 400
+    assert "loopback" in str(exc_info.value.detail) or "written as a name" in str(exc_info.value.detail)
+    assert settlement.refunded == 1
+
+
+@pytest.mark.asyncio
 async def test_an_inline_duplicate_is_refused_before_the_url_safety_check(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2610,7 +2632,6 @@ async def test_an_inline_duplicate_is_refused_before_the_url_safety_check(
     """
     settlement = _Settlement()
     settlement.install(monkeypatch)
-    monkeypatch.delenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", raising=False)
 
     ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
     dupes = [

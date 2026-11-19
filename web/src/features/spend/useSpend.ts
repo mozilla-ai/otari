@@ -20,7 +20,7 @@ import {
   UNKNOWN_LIMITS,
 } from "@/features/spend/limits"
 import { keyName, memberName } from "@/features/spend/names"
-import type { SpendWindow } from "@/features/spend/period"
+import { type SpendWindow, usageRange } from "@/features/spend/period"
 import { billedTokenTotal } from "@/features/usage/usageTotals"
 import { useKeys } from "@/shared/api/apiKeys"
 import { useAllSpendCeilings } from "@/shared/api/budgets"
@@ -34,10 +34,14 @@ import {
   useWorkspaceSpendSummaries,
 } from "@/shared/api/usage"
 import { useWorkspaces } from "@/shared/api/workspaces"
+import { providerDisplayName } from "@/shared/helpers/providers"
 
 export interface SpendRow {
   id: string
-  /** The id Sessions filters on, or null for a row that is not one spender. */
+  /**
+   * The id Sessions filters on (Requests, for a provider), or null for a row
+   * that is not one spender.
+   */
   filterKey: string | null
   name: string
   detail?: string
@@ -237,13 +241,27 @@ export function keyRows(
   return rows.sort(bySpend)
 }
 
-export function modelRows(usage: readonly UsageGroupRow[]): SpendRow[] {
+/**
+ * One row per value of a breakdown with spend, its fold as "Other", sorted by
+ * spend. `named` names a value, or the requests that recorded none (`null`).
+ */
+function breakdownRows(
+  usage: readonly UsageGroupRow[],
+  kind: string,
+  named: (key: string | null) => { name: string; detail?: string },
+): SpendRow[] {
   return usage
     .filter((row) => row.cost > 0 || row.requests > 0)
     .map((row) => ({
-      id: row.is_other ? "model:other" : `model:${row.key ?? "none"}`,
+      // The fold and the requests that recorded none take ids no value can:
+      // an instance an operator names "other" or "none" is still its own row.
+      id: row.is_other
+        ? `${kind}::other`
+        : row.key === null
+          ? `${kind}::none`
+          : `${kind}:${row.key}`,
       filterKey: row.is_other ? null : row.key,
-      name: row.is_other ? OTHER : (row.key ?? "Unknown model"),
+      ...(row.is_other ? { name: OTHER } : named(row.key)),
       cost: row.cost,
       requests: row.requests,
       tokens: row.tokens,
@@ -251,6 +269,27 @@ export function modelRows(usage: readonly UsageGroupRow[]): SpendRow[] {
       target: null,
     }))
     .sort(bySpend)
+}
+
+export function modelRows(usage: readonly UsageGroupRow[]): SpendRow[] {
+  return breakdownRows(usage, "model", (key) => ({
+    name: key ?? "Unknown model",
+  }))
+}
+
+/**
+ * One row per provider the window's requests went to, by the name a usage row
+ * records: the provider, or the instance an operator named. Requests that
+ * recorded none (imported without one, refused before a provider was picked,
+ * or written before the column existed) are one row of their own, so the rows
+ * still add up to the total.
+ */
+export function providerRows(usage: readonly UsageGroupRow[]): SpendRow[] {
+  return breakdownRows(usage, "provider", (key) =>
+    key === null
+      ? { name: "Unknown provider", detail: "Not recorded" }
+      : { name: providerDisplayName(key) },
+  )
 }
 
 export interface Spend {
@@ -261,6 +300,7 @@ export interface Spend {
   people: SpendRow[]
   keys: SpendRow[]
   models: SpendRow[]
+  providers: SpendRow[]
   /** The organization's own limit, with its edit target for a manager. */
   organization: { limits: RowLimits; target: LimitTarget | null }
   /** Every ceiling a manager may read; empty for anyone else. */
@@ -303,14 +343,18 @@ export function useSpend(
     user_id: userId ? [userId] : undefined,
   }
   const current = useUsageSummary(
-    { ...scope, start_date: window.start },
-    "day",
-    ["user", "api_key", "model"],
+    { ...scope, ...usageRange(window) },
+    window.bucket,
+    ["user", "api_key", "model", "provider"],
     isEnabled,
     "organization",
   )
   const previous = useUsageSummary(
-    { ...scope, start_date: window.previousStart, end_date: window.start },
+    {
+      ...scope,
+      start_date: window.previousStart,
+      end_date: window.previousEnd,
+    },
     "day",
     NO_BREAKDOWNS,
     isEnabled && withPrevious,
@@ -373,6 +417,7 @@ export function useSpend(
       { isUnread, now: resetEndedAt },
     ),
     models: modelRows(summary?.by_model ?? []),
+    providers: providerRows(summary?.by_provider ?? []),
     organization: {
       limits: organizationLimits,
       target:
@@ -439,6 +484,7 @@ export function useWorkspaceSpend(
     workspaceList.map((workspace) => workspace.id),
     window.start,
     isEnabled,
+    window.end,
   )
   const rows = workspaceList
     .map((workspace, index): SpendRow => {

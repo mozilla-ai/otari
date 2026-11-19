@@ -37,6 +37,17 @@ A key can point at a compatible endpoint other than the provider's own, such as 
 
 The prefix is made from the key's name unless you enter one, and never changes once set, because your applications send it. A [routing policy](routing.md) or an alias can name the key by it too, for example to fall over from one key on the endpoint to another. To cap the key's spend, narrow a spend ceiling to its prefix, not to the provider. A key added without a base URL cannot gain one later: add a new key instead.
 
+The base URL comes from your organization, not from whoever runs the gateway, so it must reach public addresses only:
+
+- A host resolving to a private, loopback, link-local, shared or reserved address is refused when the key is saved, and checked again on every request (Otari connects to the address it checked). Redirects are not followed.
+- Only providers that speak the OpenAI or Anthropic API through their own SDK, such as OpenAI, Anthropic, vLLM, Groq or Together, take a base URL.
+
+A model server on a private address is added by the gateway's operator as a [hosted provider](hosted-providers.md) instead.
+
+### Client arguments
+
+A key's client arguments are the few settings its provider's SDK needs beyond the key: `timeout` and `max_retries` for every provider, plus `region_name`, `aws_access_key_id`, `aws_secret_access_key` and `aws_session_token` for Bedrock, `bill_to` for Hugging Face, `organization` and `project` for OpenAI, `api_version` for Azure OpenAI, `resource` for Azure Anthropic, `project` and `location` for Vertex AI, and `project_id` and `region` for Vertex AI Anthropic. Any other name is refused when the key is saved, and a key saved with one before is served without it.
+
 ## Set a default key per provider
 
 If you have multiple keys for the same provider, mark one as the default so workspaces inherit it automatically.

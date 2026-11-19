@@ -43,6 +43,7 @@ from gateway.services.mcp_stateless import (
 from gateway.services.model_access import is_mcp_tool_allowed
 from gateway.services.tool_usage import TOOL_BUDGET_EXCEEDED_TEXT, TOOL_ERROR_SENTINEL, ToolUsageTally
 from gateway.services.traces import RequestTrace, ToolSpans
+from gateway.services.url_safety import mcp_private_hosts
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -93,7 +94,15 @@ def _origin_bound_http_client(
     timeout: httpx2.Timeout | None = None,
     auth: httpx2.Auth | None = None,
 ) -> httpx2.AsyncClient:
-    """Create an MCP HTTP client that refuses redirects outside the vetted origin."""
+    """Create an MCP HTTP client that refuses redirects outside the vetted origin.
+
+    Every request, a followed redirect's included, goes through
+    :class:`OwnedEndpointHttpx2Transport`, which dials only the public address
+    it has just checked, so a name re-pointed after admission reaches nothing internal.
+    """
+    # At call time: the providers package reaches this module's imports through model access.
+    from gateway.services.providers import OwnedEndpointHttpx2Transport
+
     base = httpx2.URL(base_url)
 
     async def enforce_origin(request: httpx2.Request) -> None:
@@ -101,6 +110,7 @@ def _origin_bound_http_client(
             raise httpx2.RequestError("MCP redirect target is outside the validated origin", request=request)
 
     return httpx2.AsyncClient(
+        transport=OwnedEndpointHttpx2Transport(private_hosts=mcp_private_hosts()),
         headers=headers,
         timeout=timeout if timeout is not None else httpx2.Timeout(30.0, read=300.0),
         auth=auth,
