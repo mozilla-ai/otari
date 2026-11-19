@@ -11,13 +11,18 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
-from sqlalchemy import event, func, select
+from sqlalchemy import delete, event, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
 import gateway.models  # noqa: F401  (registers every table on the metadata)
-from gateway.adapters.telemetry_storage_adapter import ERASURE_MARGIN, DatabaseTelemetryStorageAdapter
+from gateway.adapters.telemetry_storage_adapter import (
+    ERASURE_MARGIN,
+    DatabaseTelemetryStorageAdapter,
+    _insert_same_source_batch,
+)
 from gateway.models.usage import AgentTelemetry, AgentTelemetryUserBarrier
+from gateway.models.users import User
 from gateway.ports.telemetry_storage_port import TelemetryFilter, TelemetryRecord
 
 _TS = datetime(2026, 8, 6, tzinfo=UTC)
@@ -148,12 +153,14 @@ async def test_record_drops_in_export_repeats_before_the_insert() -> None:
 
 @pytest.mark.asyncio
 async def test_record_counts_rows_the_database_refuses_instead_of_failing_the_export() -> None:
-    """A refusal other than the unique key (here a missing user) falls back to row at a time."""
+    """A refusal other than the unique key (here a missing key) falls back to row at a time."""
     async with _session(foreign_keys=True) as db:
+        db.add(User(user_id="alice"))
+        await db.commit()
         result = await DatabaseTelemetryStorageAdapter(db).record(
             admitted_at=_ADMITTED,
             api_key_id="no-such-key",
-            user_id="nobody",
+            user_id="alice",
             records=(_record("dedup-0"), _record("dedup-1")),
         )
 
@@ -269,7 +276,57 @@ async def test_purge_user_deletes_the_users_rows_and_records_when() -> None:
 
 
 @pytest.mark.asyncio
-async def test_purge_user_of_a_user_with_no_row_erases_nothing() -> None:
-    """With no user row, no telemetry names them and the foreign key refuses any that would."""
+async def test_record_rejects_the_export_of_a_user_with_no_row() -> None:
+    """The user row went, and the barrier with it: the export is refused, not miscounted as replayed."""
     async with _session(foreign_keys=True) as db:
-        assert await DatabaseTelemetryStorageAdapter(db).purge_user(user_id="nobody") == 0
+        result = await DatabaseTelemetryStorageAdapter(db).record(
+            admitted_at=_ADMITTED, api_key_id="key-1", user_id="nobody", records=(_record("d-0"), _record("d-1"))
+        )
+
+        assert (result.accepted, result.duplicate, result.rejected) == (0, 0, 2)
+
+
+@pytest.mark.asyncio
+async def test_a_fallback_refused_partway_stores_what_came_before_and_rejects_the_rest() -> None:
+    """Row at a time, each row asks again; an erasure landing between rows refuses those after it."""
+    async with _session(foreign_keys=True) as db:
+        db.add(User(user_id="alice"))
+        await db.commit()
+        # The bad key fails the batch statement, so it falls back to row at a time.
+        rows = [
+            AgentTelemetry(
+                api_key_id=None, user_id="alice", name="tool_result", timestamp=_TS, source="s", dedup_key="0"
+            ),
+            AgentTelemetry(
+                api_key_id="no-such-key", user_id="alice", name="tool_result", timestamp=_TS, source="s", dedup_key="1"
+            ),
+            AgentTelemetry(
+                api_key_id=None, user_id="alice", name="tool_result", timestamp=_TS, source="s", dedup_key="2"
+            ),
+        ]
+        answers = iter([True, True, True, False])
+
+        async def admitted() -> bool:
+            return next(answers)
+
+        result = await _insert_same_source_batch(db, rows, admitted)
+
+        assert (result.accepted, result.duplicate, result.rejected) == (1, 1, 1)
+        assert await _stored(db) == [("s", "0")]
+
+
+@pytest.mark.asyncio
+async def test_purge_user_of_a_user_with_no_row_still_deletes_rows_naming_them() -> None:
+    """With no user row there is no barrier to record, but rows that kept their id still go."""
+    async with _session() as db:
+        adapter = DatabaseTelemetryStorageAdapter(db)
+        # Written while foreign keys were off, the one way a row can name a user with no row.
+        await adapter.record(admitted_at=_ADMITTED, api_key_id="key-1", user_id="nobody", records=(_record("d-0"),))
+        await db.execute(delete(AgentTelemetryUserBarrier))
+        await db.commit()
+        await db.execute(text("PRAGMA foreign_keys=ON"))
+
+        assert await adapter.purge_user(user_id="nobody") == 1
+
+        assert await _stored(db) == []
+        assert (await db.execute(select(func.count()).select_from(AgentTelemetryUserBarrier))).scalar_one() == 0

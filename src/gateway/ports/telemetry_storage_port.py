@@ -245,9 +245,11 @@ class TelemetryStoragePort(Protocol):
         """Store ``records``, attributed to the key and user that exported them.
 
         ``admitted_at`` is when the export was let in, before its body uploaded.
-        Records of a user erased by :meth:`purge_user` at or after that moment are
+        Records of a user erased by :meth:`purge_user` after that moment are
         refused and counted as ``rejected``, so an export that outlasts its user's
-        erasure stores nothing after it, on any replica.
+        erasure stores nothing after it, on any replica. An adapter may also refuse
+        exports admitted shortly after an erasure, to absorb clock skew between
+        replicas; the core adapter refuses those within ``ERASURE_MARGIN``.
 
         Idempotent on ``(source, dedup_key)``: a record already stored counts
         as ``duplicate`` and is not stored twice, so an exporter that resends a

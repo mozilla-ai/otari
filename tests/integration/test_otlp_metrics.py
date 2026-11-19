@@ -7,18 +7,21 @@ usage and behavioral events. They are recorded content-free and non-billable.
 
 import gzip
 import json
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, event, inspect
 from sqlalchemy.orm import Session
 
-from gateway.api.routes.otlp import _MAX_METRIC_DATA_POINTS
+from gateway.adapters.telemetry_storage_adapter import ERASURE_MARGIN
+from gateway.api.routes.otlp import _MAX_METRIC_DATA_POINTS, _decode_body
 from gateway.core.config import API_ROOT
-from gateway.models.usage import AgentTelemetry, UsageLog
+from gateway.models.usage import AgentTelemetry, AgentTelemetryUserBarrier, UsageLog
 from gateway.models.users import User
 
 from .conftest import ALL_KEY_SCOPES
@@ -392,3 +395,39 @@ def test_capture_toggle_off_blocks_metric_rows_but_not_usage(
     response = client.post(_PATH, json=_outcome_export(), headers=headers)
     assert response.status_code == 200, response.text
     assert db_session.query(AgentTelemetry).count() == 5
+
+
+# How long the erasing decoder's upload takes.
+_UPLOAD_SECONDS = timedelta(seconds=1)
+
+
+def _erasing_on_upload(db_session: Session, user_id: str) -> Callable[[bytes, str | None], bytes]:
+    """The body decoder, erasing ``user_id``'s telemetry while the export uploads.
+
+    The erasure is dated just inside the margin and the upload outlasts it, so
+    only an export measured from before its upload is refused.
+    """
+    real_decode = _decode_body
+
+    def decode(body: bytes, encoding: str | None) -> bytes:
+        erased_at = datetime.now(UTC) - ERASURE_MARGIN + _UPLOAD_SECONDS / 2
+        db_session.merge(AgentTelemetryUserBarrier(user_id=user_id, erased_at=erased_at))
+        db_session.commit()
+        time.sleep(_UPLOAD_SECONDS.total_seconds())
+        return real_decode(body, encoding)
+
+    return decode
+
+
+def test_metrics_export_rejects_points_of_a_user_erased_while_it_uploads(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """Admitted before the erasure, written after it: the points are rejected, not stored."""
+    headers = _exempt_key(client, master_key_header, "erased-mid-upload")
+
+    with patch("gateway.api.routes.otlp._decode_body", _erasing_on_upload(db_session, "erased-mid-upload")):
+        response = client.post(_PATH, json=_outcome_export(), headers=headers)
+
+    assert response.status_code == 200, response.text
+    assert int(response.json()["partialSuccess"]["rejectedDataPoints"]) == 5
+    assert db_session.query(AgentTelemetry).count() == 0

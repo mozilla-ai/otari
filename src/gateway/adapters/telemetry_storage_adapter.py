@@ -19,7 +19,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from sqlalchemy import ColumnElement, case, delete, func, null, select, text, update
+from sqlalchemy import ColumnElement, case, delete, func, null, select, text
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
@@ -91,27 +91,44 @@ def _build_row(api_key_id: str, user_id: str, record: TelemetryRecord) -> AgentT
     return AgentTelemetry(api_key_id=api_key_id, user_id=user_id, **row_fields)
 
 
-async def _lock_barrier(db: AsyncSession, user_id: str, *, lock_timeout_ms: int | None = None) -> datetime | None:
-    """Lock the user's erasure barrier until the transaction ends, creating it if missing; return when they were erased.
+async def _share_barrier(db: AsyncSession, user_id: str) -> datetime | None:
+    """Hold the user's erasure barrier against an erasure until the transaction ends; return when they were erased.
 
-    The upsert both creates and locks the row, and on SQLite it is the write that
-    begins the transaction, so the read after it cannot predate an erasure. On
-    PostgreSQL ``lock_timeout_ms`` bounds the wait on an erasure still deleting.
+    Shared, so a user's concurrent exports do not wait on each other, only on an
+    erasure. The insert creates the row a first write needs to lock, and on SQLite
+    it is the write that begins the transaction, so the read after it cannot
+    predate an erasure. ``INGEST_LOCK_TIMEOUT_MS`` bounds the wait on an erasure
+    still deleting. Raises ``IntegrityError`` when the user has no row.
     """
     postgres = dialect_name(db) == "postgresql"
-    if postgres and lock_timeout_ms is not None:
-        await db.execute(text(f"SET LOCAL lock_timeout = {int(lock_timeout_ms)}"))
+    if postgres:
+        await db.execute(text(f"SET LOCAL lock_timeout = {int(INGEST_LOCK_TIMEOUT_MS)}"))
     insert = postgresql_insert if postgres else sqlite_insert
-    statement = insert(AgentTelemetryUserBarrier).values(user_id=user_id)
     await db.execute(
-        statement.on_conflict_do_update(
-            index_elements=[AgentTelemetryUserBarrier.user_id], set_={"user_id": statement.excluded.user_id}
-        )
+        insert(AgentTelemetryUserBarrier)
+        .values(user_id=user_id)
+        .on_conflict_do_nothing(index_elements=[AgentTelemetryUserBarrier.user_id])
     )
     result = await db.execute(
-        select(AgentTelemetryUserBarrier.erased_at).where(AgentTelemetryUserBarrier.user_id == user_id)
+        select(AgentTelemetryUserBarrier.erased_at)
+        .where(AgentTelemetryUserBarrier.user_id == user_id)
+        .with_for_update(read=True)
     )
     return result.scalar_one()
+
+
+async def _erase_barrier(db: AsyncSession, user_id: str, at: datetime) -> None:
+    """Record the user's erasure, holding their barrier exclusively until the transaction ends.
+
+    Raises ``IntegrityError`` when the user has no row.
+    """
+    insert = postgresql_insert if dialect_name(db) == "postgresql" else sqlite_insert
+    statement = insert(AgentTelemetryUserBarrier).values(user_id=user_id, erased_at=at)
+    await db.execute(
+        statement.on_conflict_do_update(
+            index_elements=[AgentTelemetryUserBarrier.user_id], set_={"erased_at": statement.excluded.erased_at}
+        )
+    )
 
 
 # Asked at the start of each transaction that inserts: whether its user's records may still be stored.
@@ -211,16 +228,21 @@ class DatabaseTelemetryStorageAdapter(TelemetryStoragePort):
         and drops it into the row-at-a-time fallback, turning one bulk insert
         into one commit per record.
 
-        Each transaction first locks the user's erasure barrier, which an erasure
+        Each transaction first takes the user's erasure barrier, which an erasure
         holds while it deletes, so this either commits before the erasure and is
-        deleted by it, or sees it and stores nothing more.
+        deleted by it, or sees it and stores nothing more. A user with no row any
+        more is refused the same way.
         """
         if not records:
             return IngestResult()
         db = self._db
 
         async def admitted() -> bool:
-            erased_at = await _lock_barrier(db, user_id, lock_timeout_ms=INGEST_LOCK_TIMEOUT_MS)
+            try:
+                erased_at = await _share_barrier(db, user_id)
+            except IntegrityError:
+                # The user's row is gone, and with it their barrier.
+                return False
             return erased_at is None or admitted_at >= erased_at + ERASURE_MARGIN
 
         by_source: dict[str, list[AgentTelemetry]] = defaultdict(list)
@@ -407,17 +429,11 @@ class DatabaseTelemetryStorageAdapter(TelemetryStoragePort):
         """
         db = self._db
         try:
-            await _lock_barrier(db, user_id)
-            await db.execute(
-                update(AgentTelemetryUserBarrier)
-                .where(AgentTelemetryUserBarrier.user_id == user_id)
-                .values(erased_at=datetime.now(UTC))
-            )
+            await _erase_barrier(db, user_id, datetime.now(UTC))
         except IntegrityError:
-            # No such user: their rows lost their owner when the user row went, and
-            # the foreign key refuses any write naming them.
+            # No such user, so no barrier to record: the foreign key refuses any write
+            # naming them. Their rows are still deleted, in case any kept their id.
             await db.rollback()
-            return 0
         except SQLAlchemyError as exc:
             await db.rollback()
             logger.error("agent_telemetry erase failed: %s", describe_database_error(exc))
