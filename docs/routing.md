@@ -45,6 +45,12 @@ candidate when:
   reject the request itself);
 - a Chat Completions candidate answers with no choices.
 
+A request that declares a tool Otari runs (web search, web fetch, code
+execution or an MCP server) is the exception: once a candidate has answered its
+first round, the rest of the tool loop stays on that candidate, and a later
+error, a rate limit included, is returned rather than retried on a backup. See
+[Failure behavior](#failure-behavior).
+
 A candidate nothing declares that one of the deployment's hosted providers
 serves is sent on the deployment's own credential, as a single model is
 ([hosted providers](hosted-providers.md#deployment-paid-credentials)). On
@@ -398,9 +404,17 @@ streaming failure after the stream begins is returned to the client because
 switching models mid-answer would corrupt the response.
 
 A tool loop that has already produced assistant state cannot be replayed on
-another provider. On Chat Completions, a stream that has reported one of Otari's
-web searches or fetches in `otari_tool_calls` has sent response bytes, so it is
-committed from that report on. Shared service failures, such as an unavailable mandatory
+another provider: its transcript holds that provider's own tool-call IDs and
+reasoning, and its tools have already run. A provider error on a later round,
+such as a `429` while the model is busy, is therefore returned to the caller.
+Before any response bytes are sent, it is the response, answered as the error
+is when the model is named directly: a `429` keeps its status and its `code`,
+and a provider's `500` or `503` is a `502`. When the policy had backups left,
+its `detail` also says they were not tried. On Chat Completions, a stream that
+has reported one of Otari's web searches or fetches in `otari_tool_calls` has
+sent response bytes, so it is committed from that report on: its status is
+already set, and a later error ends it with an error event instead. Sending the
+request again starts a new tool loop. Shared service failures, such as an unavailable mandatory
 guardrail or sandbox, also do not improve by changing candidates.
 
 If every candidate of a plan with more than one candidate fails, Otari returns a

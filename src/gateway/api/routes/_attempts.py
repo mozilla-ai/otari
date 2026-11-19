@@ -62,6 +62,10 @@ ALL_ATTEMPTS_TIMED_OUT_DETAIL = "All upstream providers timed out"
 # describe internals to the caller. The compiler raises a specific 403/400 for
 # every *expected* way a plan can end up empty, so reaching this is a defect.
 EMPTY_PLAN_DETAIL = "Routing produced no candidate to try"
+LOCKED_IN_DETAIL = (
+    "The routing policy's backups were not tried: a gateway-run tool had already run on this model, "
+    "and a tool loop cannot move to another provider."
+)
 
 
 def provider_failure_http_exc(
@@ -347,7 +351,9 @@ async def walk_attempts(
     fired, a later failure on that attempt terminates the request instead of
     falling through, because a tool-use loop's intermediate state (provider
     specific tool-call ids, reasoning blocks) cannot be replayed on a different
-    provider.
+    provider. Where a failure that would have fallen over leaves candidates
+    untried, its detail says so (:data:`LOCKED_IN_DETAIL`); its status and code
+    stay the provider's.
 
     Failures that are not the provider's fault do not advance the plan:
     ``MaxToolIterationsExceeded`` is a gateway-side cap (422), and an unreachable
@@ -375,7 +381,7 @@ async def walk_attempts(
     unrecorded_skips: list[tuple[Attempt, HTTPException]] = []
     last_failed: Attempt | None = None
 
-    for planned in attempts:
+    for index, planned in enumerate(attempts):
         # Rebound to the candidate as it is sent once ``credential_attempt`` has run.
         attempt = planned
         locked_in = False
@@ -479,7 +485,10 @@ async def walk_attempts(
             if locked_in or not retryable:
                 if on_terminal is not None:
                     on_terminal(attempt)
-                raise provider_failure_http_exc(exc, fallback_detail="LLM provider error") from exc
+                terminal = provider_failure_http_exc(exc, fallback_detail="LLM provider error")
+                if retryable and index < len(attempts) - 1:
+                    terminal.detail = f"{terminal.detail} {LOCKED_IN_DETAIL}"
+                raise terminal from exc
             failures.append(AttemptFailure(attempt.position, attempt.instance, attempt.model, error_class, exc))
             unabsorbed = (attempt, exc)
             if drop_admission is not None:
