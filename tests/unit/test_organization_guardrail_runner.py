@@ -13,6 +13,7 @@ would be testing the vendor.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import time
@@ -33,6 +34,16 @@ from gateway.services.tenancy import organization_guardrail_runner as runner
 
 ORGANIZATION_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 VENDOR_KEY = "lakera-key-nobody-should-see"
+
+
+@pytest.fixture(autouse=True)
+def _vendor_hosts_resolve_publicly(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The definitions here name Lakera's own host, which a build checks again; no test here should need DNS."""
+
+    async def public(_host: str) -> list[object]:
+        return [ipaddress.ip_address("93.184.216.34")]
+
+    monkeypatch.setattr("gateway.services.url_safety._resolve_all_async", public)
 
 
 @pytest.fixture(autouse=True)
@@ -59,7 +70,7 @@ def _definition(
         organization_id=ORGANIZATION_ID,
         name="prod-lakera",
         guardrail_name=guardrail_name,
-        create_kwargs=create_kwargs if create_kwargs is not None else {"endpoint": "https://93.184.216.34/v2"},
+        create_kwargs=create_kwargs if create_kwargs is not None else {"endpoint": "https://api.lakera.ai/v2/guard"},
         encrypted_create_secrets=encrypted,
         enabled=True,
         created_at=datetime.now(UTC),
@@ -121,7 +132,7 @@ async def test_a_build_is_handed_both_halves_of_the_stored_arguments(monkeypatch
     assert calls == [
         {
             "guardrail_name": GuardrailName.LAKERA_GUARD,
-            "endpoint": "https://93.184.216.34/v2",
+            "endpoint": "https://api.lakera.ai/v2/guard",
             "api_key": VENDOR_KEY,
         }
     ]
@@ -199,6 +210,7 @@ async def test_a_build_that_outran_its_deadline_records_nothing(monkeypatch: pyt
     would take the definition out of service until somebody edited it.
     """
     monkeypatch.setattr(runner, "_BUILD_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
 
     def _outlast_the_deadline(_name: GuardrailName, **_kwargs: Any) -> Any:
         time.sleep(1.0)
@@ -206,7 +218,7 @@ async def test_a_build_that_outran_its_deadline_records_nothing(monkeypatch: pyt
 
     _stub_any_guardrail(monkeypatch, create=_outlast_the_deadline)
 
-    assert await runner._build(_definition()) is None
+    assert await runner._build(_definition(encrypted=encrypt_secret(json.dumps({"api_key": VENDOR_KEY})))) is None
 
 
 def test_only_a_missing_package_is_quoted_in_full() -> None:

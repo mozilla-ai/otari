@@ -30,15 +30,66 @@ async def test_public_http_rejected_with_token() -> None:
 
 
 @pytest.mark.asyncio
-async def test_loopback_allowed_by_default() -> None:
-    await validate_mcp_url("http://127.0.0.1:9201/mcp", has_authorization_token=False)
+@pytest.mark.parametrize("url", ["http://127.0.0.1:9201/mcp", "http://[::1]:9201/mcp", "http://127.8.9.10/mcp"])
+async def test_loopback_rejected(url: str) -> None:
+    with pytest.raises(UnsafeURLError, match="loopback"):
+        await validate_mcp_url(url, has_authorization_token=False)
 
 
 @pytest.mark.asyncio
-async def test_loopback_can_be_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("OTARI_MCP_ALLOW_LOOPBACK", "false")
+async def test_a_name_resolving_to_loopback_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    import ipaddress
+
+    from gateway.services import url_safety
+
+    async def _loopback(_host: str) -> list[object]:
+        return [ipaddress.ip_address("127.0.0.1")]
+
+    monkeypatch.setattr(url_safety, "_resolve_all_async", _loopback)
     with pytest.raises(UnsafeURLError, match="loopback"):
-        await validate_mcp_url("http://127.0.0.1/mcp", has_authorization_token=False)
+        await validate_mcp_url("http://loopback.example.com:8000/mcp", has_authorization_token=False)
+
+
+# The spellings seen used against a deployment: the gateway's own host, written so a naive check misses it.
+LOOPBACK_SPELLINGS = ["127.1", "0177.0.0.1", "[::1]", "0x7f.0.0.1", "2130706433", "localhost", "[::ffff:127.0.0.1]"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("host", LOOPBACK_SPELLINGS)
+async def test_every_loopback_spelling_is_rejected(monkeypatch: pytest.MonkeyPatch, host: str) -> None:
+    """Resolved by the system resolver where it is resolved at all, as in production."""
+    monkeypatch.setenv("OTARI_MCP_ALLOW_LOOPBACK", "true")
+    with pytest.raises(UnsafeURLError, match="loopback|written as a name|local name|private"):
+        await validate_mcp_url(f"http://{host}:8000/mcp", has_authorization_token=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("host", ["localhost", "gateway", "otel-collector", "api.internal", "printer.local", "127.1"])
+async def test_a_local_or_address_shaped_name_is_rejected_before_any_lookup(
+    monkeypatch: pytest.MonkeyPatch, host: str
+) -> None:
+    """Such a name means something only on the gateway's own network, or reads differently per platform."""
+    from gateway.services import url_safety
+
+    async def _never(_host: str) -> list[object]:
+        raise AssertionError("resolved")
+
+    monkeypatch.setattr(url_safety, "_resolve_all_async", _never)
+    with pytest.raises(UnsafeURLError, match="local name|written as a name"):
+        await validate_mcp_url(f"http://{host}:8000/mcp", has_authorization_token=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url",
+    ["http://127.0.0.1:9201/mcp", "https://10.0.0.5/mcp", "https://100.64.0.1/mcp", "https://[fd00::1]/mcp"],
+)
+async def test_the_retired_mcp_flags_open_nothing(monkeypatch: pytest.MonkeyPatch, url: str) -> None:
+    """A tenant chooses every URL this check sees, so no operator setting relaxes it."""
+    monkeypatch.setenv("OTARI_MCP_ALLOW_LOOPBACK", "true")
+    monkeypatch.setenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", "true")
+    with pytest.raises(UnsafeURLError, match="public address"):
+        await validate_mcp_url(url, has_authorization_token=False)
 
 
 @pytest.mark.asyncio
@@ -67,12 +118,6 @@ async def test_shared_address_space_rejected() -> None:
             await validate_mcp_url(f"https://{ip}/mcp", has_authorization_token=False)
         with pytest.raises(UnsafeURLError, match="public address space"):
             await validate_outbound_fetch_url(f"https://{ip}/")
-
-
-@pytest.mark.asyncio
-async def test_shared_address_space_allowed_with_private_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", "true")
-    await validate_mcp_url("https://100.64.0.1/mcp", has_authorization_token=False)
 
 
 @pytest.mark.asyncio
@@ -142,9 +187,8 @@ async def test_port_that_is_not_a_number_rejected(url: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_shape_is_validated_before_the_private_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The override relaxes which addresses are allowed, not which URLs parse."""
-    monkeypatch.setenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", "true")
+async def test_shape_is_validated_before_the_address() -> None:
+    """An unbracketed IPv6 host is reported as malformed, not as an address the resolver never saw."""
     with pytest.raises(UnsafeURLError, match="IPv6 address in brackets"):
         await validate_mcp_url("http://2400:8901::1:8787/mcp", has_authorization_token=False)
 
@@ -164,21 +208,6 @@ async def test_every_validator_refuses_a_malformed_authority(monkeypatch: pytest
 
 
 @pytest.mark.asyncio
-async def test_private_override_allows_internal(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", "true")
-    await validate_mcp_url("https://10.0.0.5/mcp", has_authorization_token=False)
-
-
-@pytest.mark.asyncio
-async def test_mcp_private_override_reads_otari_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
-    # After promoting these gates to GatewayConfig, the SSRF read path still
-    # consults otari_env() directly (the functions have no config in scope), so
-    # the canonical OTARI_ prefix must keep toggling the gate.
-    monkeypatch.setenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", "true")
-    await validate_mcp_url("https://10.0.0.5/mcp", has_authorization_token=False)
-
-
-@pytest.mark.asyncio
 async def test_web_search_private_override_reads_otari_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
     # Same gate, web-search fetch path: rejected by default, allowed by the env
     # override that the promoted web_search_allow_private_hosts field mirrors.
@@ -195,8 +224,7 @@ async def test_unresolvable_host_rejected(monkeypatch: pytest.MonkeyPatch) -> No
     """Hostnames that fail to resolve are rejected (DNS-rebinding TOCTOU).
 
     A name that doesn't resolve at validation time could resolve to an internal
-    address at fetch time. Operators that genuinely want this behavior opt in
-    via OTARI_MCP_ALLOW_PRIVATE_HOSTS.
+    address at fetch time.
     """
     from gateway.services import url_safety
 
@@ -209,8 +237,7 @@ async def test_unresolvable_host_rejected(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 @pytest.mark.asyncio
-async def test_unresolvable_host_allowed_with_private_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The private-hosts opt-out also covers unresolvable hostnames."""
+async def test_unresolvable_host_rejected_whatever_the_retired_flag_says(monkeypatch: pytest.MonkeyPatch) -> None:
     from gateway.services import url_safety
 
     async def _empty(_host: str) -> list[object]:
@@ -218,7 +245,8 @@ async def test_unresolvable_host_allowed_with_private_override(monkeypatch: pyte
 
     monkeypatch.setenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", "true")
     monkeypatch.setattr(url_safety, "_resolve_all_async", _empty)
-    await validate_mcp_url("https://does-not-exist.invalid/mcp", has_authorization_token=False)
+    with pytest.raises(UnsafeURLError, match="could not be resolved"):
+        await validate_mcp_url("https://does-not-exist.invalid/mcp", has_authorization_token=False)
 
 
 # --------------------------------------------------------------------------- #

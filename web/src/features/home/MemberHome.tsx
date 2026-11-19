@@ -24,18 +24,23 @@ import {
   rosterRowOf,
   unseenLimitLines,
 } from "@/features/home/memberHomeModel"
+import { hasProviderSlot, ProviderSlot } from "@/features/home/ProviderSlot"
 import { ShareCell } from "@/features/home/ShareCell"
 import { useCanCreateKey } from "@/features/organization/access"
 import { useCurrentOwner } from "@/features/organization/attribution"
 import { wholePct } from "@/features/spend/limits"
 import {
-  isPeriodKey,
-  PERIODS,
-  type PeriodKey,
+  comparedWith,
+  DEFAULT_PERIOD,
+  figureLabel,
+  periodFromUrl,
   sessionsSearchFor,
   windowOf,
+  windowSpan,
   windowWords,
 } from "@/features/spend/period"
+import { SpendPeriodPicker } from "@/features/spend/SpendPeriodPicker"
+import { usePageClock } from "@/features/spend/usePageClock"
 import {
   type ReadState,
   readState,
@@ -61,14 +66,26 @@ import {
 import { useUrlState } from "@/shared/helpers/urlState"
 import { useSurfaces } from "@/shared/hooks/useDeployment"
 
-type Cut = "keys" | "models"
+type Cut = "keys" | "models" | "providers"
 
-const CUTS: { value: Cut; label: string; noun: string }[] = [
-  { value: "keys", label: "API keys", noun: "API key" },
-  { value: "models", label: "Models", noun: "Model" },
+const CUTS: {
+  value: Cut
+  label: string
+  noun: string
+  /** What the empty table says shows up in it once there is spend. */
+  each: string
+}[] = [
+  { value: "keys", label: "API keys", noun: "API key", each: "key you make" },
+  { value: "models", label: "Models", noun: "Model", each: "model you use" },
+  {
+    value: "providers",
+    label: "Providers",
+    noun: "Provider",
+    each: "provider you use",
+  },
 ]
 
-const URL_DEFAULTS = { period: "month", by: "" }
+const URL_DEFAULTS = { period: DEFAULT_PERIOD, by: "" }
 
 /**
  * Home for someone who uses the team rather than runs it: the owner's Home,
@@ -88,7 +105,7 @@ export function MemberHome({
   workspace: string
 }) {
   // One clock for the page's life, so its windows and query keys hold still.
-  const [now] = useState(() => Date.now())
+  const [now, refreshClock] = usePageClock()
   const navigate = useNavigate()
   const { get, patch } = useUrlState(URL_DEFAULTS)
   const isMobile = useIsMobile()
@@ -96,8 +113,7 @@ export function MemberHome({
   const me = owner.ownerId || undefined
   const canCreateKey = useCanCreateKey()
 
-  const rawPeriod = get("period")
-  const period: PeriodKey = isPeriodKey(rawPeriod) ? rawPeriod : "month"
+  const period = periodFromUrl(get("period"))
   const window = windowOf(period, now)
   const cut = CUTS.find((one) => one.value === get("by")) ?? CUTS[0]
 
@@ -112,11 +128,16 @@ export function MemberHome({
   const defaults = useWorkspaceBudgetDefaults(workspaceId)
   // A deployment that records no sessions serves no route to count them, and
   // has none to open.
-  const hasSessions = useSurfaces()("traces")
+  const hasSurface = useSurfaces()
+  const hasSessions = hasSurface("traces")
+  // Sessions cannot filter on a provider, so a provider's row opens Requests.
+  const canOpenRows =
+    cut.value === "providers" ? hasSurface("usage") : hasSessions
   const sessions = useTraceCount(
     {
       workspaceId,
       start: window.start,
+      end: window.end || undefined,
       q: "",
       userIds: me ? [me] : undefined,
     },
@@ -124,7 +145,13 @@ export function MemberHome({
   )
   const ownKeys = new Map((keys.data ?? []).map((key) => [key.id, key]))
   // Rows the window spent on: keys with nothing spent are on Keys.
-  const rows: SpendRow[] = (cut.value === "keys" ? spend.keys : spend.models)
+  const rows: SpendRow[] = (
+    cut.value === "keys"
+      ? spend.keys
+      : cut.value === "providers"
+        ? spend.providers
+        : spend.models
+  )
     .filter((row) => row.requests > 0 || row.cost > 0)
     .map((row) => {
       if (cut.value !== "keys") return row
@@ -144,6 +171,7 @@ export function MemberHome({
     workspaceId,
     userId: me,
   })
+  const hasMarkSlot = cut.value === "providers" && hasProviderSlot(rows)
 
   const total = spend.totals?.cost ?? 0
   const requestCount = spend.totals?.request_count ?? 0
@@ -177,7 +205,7 @@ export function MemberHome({
       : usage === "loading"
         ? "Loading"
         : undefined
-  const words = windowWords(period, window)
+  const words = windowWords(window)
   // A cell with no graphic still holds the row, or its figure drops off the
   // baseline of the cells beside it that have one.
   const hasGraphicRow = spend.series.length > 1 || Boolean(sessionCount)
@@ -217,6 +245,7 @@ export function MemberHome({
     refusedSince,
     100,
     me !== undefined && refusedSince !== "",
+    limit?.kind === "unseen" ? window.end : "",
   )
   const spendRefusals =
     limit?.kind === "default"
@@ -274,20 +303,25 @@ export function MemberHome({
   const open = (row: SpendRow) => {
     if (!row.filterKey) return
     void navigate({
-      to: "/sessions",
+      to: cut.value === "providers" ? "/requests" : "/sessions",
       search: {
         ...mySessions,
-        [cut.value === "keys" ? "api_key_id" : "model"]: row.filterKey,
+        [cut.value === "keys"
+          ? "api_key_id"
+          : cut.value === "providers"
+            ? "provider"
+            : "model"]: row.filterKey,
       },
     })
   }
 
   const menuFor = (row: SpendRow): RowMenuAction[] => {
     const actions: RowMenuAction[] = []
-    if (row.filterKey && hasSessions) {
+    if (row.filterKey && canOpenRows) {
       actions.push({
         id: "open",
-        label: "See its sessions",
+        label:
+          cut.value === "providers" ? "See its requests" : "See its sessions",
         hint: `What ran ${words}`,
         icon: FiLayers,
         run: () => open(row),
@@ -318,11 +352,14 @@ export function MemberHome({
             {row.name}
           </span>
         ) : (
-          <span className="flex min-w-0 md:max-w-[13rem] flex-col">
-            <span className="truncate text-foreground">{row.name}</span>
-            {row.detail ? (
-              <span className="truncate text-caption">{row.detail}</span>
-            ) : null}
+          <span className="flex min-w-0 items-center gap-3 md:max-w-[13rem]">
+            {hasMarkSlot ? <ProviderSlot row={row} /> : null}
+            <span className="flex min-w-0 flex-col">
+              <span className="truncate text-foreground">{row.name}</span>
+              {row.detail ? (
+                <span className="truncate text-caption">{row.detail}</span>
+              ) : null}
+            </span>
           </span>
         ),
     },
@@ -352,7 +389,7 @@ export function MemberHome({
         </span>
       ),
     },
-    ...(cut.value === "keys"
+    ...(cut.value !== "models"
       ? ([
           {
             id: "model",
@@ -388,23 +425,22 @@ export function MemberHome({
     },
   ]
 
-  const nothingYet =
-    period === "month"
-      ? "Nothing spent this month yet."
-      : `Nothing spent in the last ${window.days} days.`
+  // Only a window still under way can be spent in "yet".
+  const nothingYet = `Nothing spent ${words}${
+    period === "today" ? " yet" : ""
+  }.`
 
   return (
     <div className="flex flex-col gap-6">
       <PageIntro
         title="Home"
         action={
-          <Segmented
-            label="Window"
-            size="md"
-            options={PERIODS}
+          <SpendPeriodPicker
             value={period}
-            onChange={(next) => patch({ period: next })}
-            isFullWidth={isMobile}
+            onChange={(next) => {
+              refreshClock()
+              patch({ period: next })
+            }}
           />
         }
       />
@@ -417,18 +453,14 @@ export function MemberHome({
       ) : null}
       <KpiStrip isEmpty={false} columns={4}>
         <KpiCell
-          label={
-            period === "month"
-              ? "Spent this month"
-              : `Spent, ${window.days} days`
-          }
+          label={figureLabel("Spent", window)}
           value={spend.totals ? formatUsd(total) : "—"}
           delta={
             delta !== null ? (
               <TrendChip
                 fraction={delta}
                 polarity="neutral"
-                caption={`vs prior ${window.days} days`}
+                caption={comparedWith(window)}
               />
             ) : undefined
           }
@@ -445,7 +477,7 @@ export function MemberHome({
             spend.series.length > 1 ? (
               <Sparkline
                 values={spend.series.map((point) => point.cost)}
-                ariaLabel="Your spend per day over the window"
+                ariaLabel={`Your spend per ${window.bucket} over the window`}
                 height={40}
               />
             ) : undefined,
@@ -487,11 +519,7 @@ export function MemberHome({
           }
         />
         <KpiCell
-          label={
-            period === "month"
-              ? "Tokens this month"
-              : `Tokens, ${window.days} days`
-          }
+          label={figureLabel("Tokens", window)}
           value={
             spend.totals
               ? formatTokens(billedTokenTotal(spend.totals) ?? 0)
@@ -512,7 +540,7 @@ export function MemberHome({
                 values={spend.series.map(
                   (point) => point.input_tokens + point.output_tokens,
                 )}
-                ariaLabel="Your billed tokens per day over the window"
+                ariaLabel={`Your billed tokens per ${window.bucket} over the window`}
                 height={40}
               />
             ) : undefined,
@@ -527,9 +555,7 @@ export function MemberHome({
             subline={
               sessionsFailed
                 ? "Could not load"
-                : period === "month"
-                  ? `this month in ${workspace}`
-                  : `${window.days} days in ${workspace}`
+                : `${windowSpan(window)} in ${workspace}`
             }
             graphic={slot(
               sessionCount ? (
@@ -558,7 +584,7 @@ export function MemberHome({
             }
             subline={
               spend.totals
-                ? `${formatNumber(spend.totals.error_count)} failed requests`
+                ? `${formatNumber(spend.totals.error_count)} failed ${spend.totals.error_count === 1 ? "request" : "requests"}`
                 : unreadLine
             }
             graphic={slot(undefined)}
@@ -590,12 +616,12 @@ export function MemberHome({
                 {usage === "failed"
                   ? "Could not load"
                   : canCreateKey
-                    ? `${nothingYet} Each ${cut.value === "keys" ? "key you make" : "model you use"} shows up here with what it spent.`
+                    ? `${nothingYet} Each ${cut.each} shows up here with what it spent.`
                     : nothingYet}
               </EmptyMessage>
             }
             onRowAction={
-              hasSessions
+              canOpenRows
                 ? (key) => {
                     const row = rows.find((one) => one.id === key)
                     if (row) open(row)
@@ -609,12 +635,16 @@ export function MemberHome({
           />
         </TableScrollFrame>
         {rows.length > 0 &&
-        (hasSessions || (cut.value === "keys" && canCreateKey)) ? (
+        (canOpenRows || (cut.value === "keys" && canCreateKey)) ? (
           <p className="text-sm text-muted">
-            {hasSessions ? "A row opens its sessions." : null}
+            {canOpenRows
+              ? cut.value === "providers"
+                ? "A row opens its requests."
+                : "A row opens its sessions."
+              : null}
             {cut.value === "keys" && canCreateKey ? (
               <>
-                {hasSessions ? " " : null}
+                {canOpenRows ? " " : null}
                 Keys that spent nothing {words} are on{" "}
                 <Link to="/keys" className="text-link underline">
                   API keys

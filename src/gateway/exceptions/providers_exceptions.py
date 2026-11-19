@@ -50,15 +50,22 @@ class OrgProviderKeyUnknownProviderError(TenancyValidationError):
 
 
 class OrgProviderKeyUnsafeApiBaseError(TenancyValidationError):
-    """An ``api_base`` that resolves to an internal address, gated off.
+    """An ``api_base`` that does not reach public addresses alone, or that its provider cannot be pinned to.
 
-    Wraps ``services.url_safety.UnsafeURLError`` as a tenancy error so the
-    route stays thin; the message is that function's own, which already
-    carries no more than the host it refused.
+    The message names no more than the host it refused.
     """
 
     def __init__(self, message: str) -> None:
         super().__init__(message)
+
+
+class OrgProviderKeyClientArgsRefusedError(TenancyValidationError):
+    """``client_args`` naming something a provider key may not set."""
+
+    def __init__(self, provider: str, refused: list[str], allowed: list[str]) -> None:
+        super().__init__(
+            f"A {provider} key cannot set client_args {', '.join(refused)}; it may set {', '.join(allowed)}"
+        )
 
 
 class OrgProviderKeyCredentialRequiredError(TenancyValidationError):
@@ -490,6 +497,7 @@ __all__ = [
     "OrgDefaultProviderKeyConflictError",
     "OrgProviderKeyAlreadyExistsError",
     "OrgProviderKeyArchivedError",
+    "OrgProviderKeyClientArgsRefusedError",
     "OrgProviderKeyDisabledForWorkspaceError",
     "OrgProviderKeyNameRequiredError",
     "OrgProviderKeyNotArchivedError",

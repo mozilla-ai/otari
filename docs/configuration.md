@@ -1789,7 +1789,7 @@ settings, and the deployment's Web search page shows the web-search ones. Common
   (see [Search tools](#search-tools))
 - `guardrails_url`
 - `guardrail_thread_pool_size`
-- `mcp_allow_loopback` and `mcp_allow_private_hosts`
+- `mcp_private_hosts` (see [Connect an MCP server on a private network](connect-a-private-mcp-server.md#route-2-list-the-host-on-your-own-gateway))
 - `web_search_allow_private_hosts`
 - `provider_allow_private_hosts`
 - `provider_endpoints_enabled` (see [Provider endpoints](provider-endpoints.md))

@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx
 from any_llm import AnyLLM, LLMProvider, alist_models
 from any_llm.types.model import Model
 
@@ -604,6 +605,7 @@ async def test_provider_credentials(
     client_args: dict[str, object] | None = None,
     declared: bool,
     timeout: float = _ADHOC_DISCOVERY_TIMEOUT_SECONDS,
+    engine_client: httpx.AsyncClient | None = None,
 ) -> ProviderDiscovery:
     """List models for ad-hoc credentials without storing them.
 
@@ -615,6 +617,8 @@ async def test_provider_credentials(
     ``model_discovery_timeout_seconds`` so the saved and unsaved paths agree.
     ``declared`` is whether the credentials will back a ``providers:`` entry, which
     a keyless or ambient-credential provider needs in place of a key.
+    ``engine_client`` is what reads an SGLang server's settings where the
+    caller pinned the address; ``client_args`` then carries the SDK's own.
     """
     if not _supports_list_models(impl_name):
         return ProviderDiscovery(
@@ -675,7 +679,7 @@ async def test_provider_credentials(
     return ProviderDiscovery(
         provider=impl_name,
         models=models,
-        engine_settings=await read_engine_settings(models, api_base=api_base, api_key=api_key),
+        engine_settings=await read_engine_settings(models, api_base=api_base, api_key=api_key, client=engine_client),
     )
 
 

@@ -704,7 +704,7 @@ def _stream_responses_with_lookup(
         patch("gateway.services.mcp_loop_responses.aresponses", new=_scripted_aresponses(*rounds)),
     ):
         return _post_responses_stream(
-            client, headers, mcp_servers=[{"name": "docs", "url": "http://127.0.0.1:9999/mcp"}]
+            client, headers, mcp_servers=[{"name": "docs", "url": "http://93.184.216.34/mcp"}]
         )
 
 

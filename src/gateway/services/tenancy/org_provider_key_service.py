@@ -49,10 +49,12 @@ from sqlmodel import col
 
 from gateway.core.config import PROVIDER_TYPE_ALIASES, RESERVED_PROVIDER_INSTANCE_NAMES, GatewayConfig
 from gateway.core.database import create_session
+from gateway.core.provider_params import TENANT_ENDPOINT_PROVIDERS, tenant_client_args, tenant_client_args_allowed
 from gateway.exceptions.providers_exceptions import (
     OrgDefaultProviderKeyConflictError,
     OrgProviderKeyAlreadyExistsError,
     OrgProviderKeyArchivedError,
+    OrgProviderKeyClientArgsRefusedError,
     OrgProviderKeyCredentialRequiredError,
     OrgProviderKeyDisabledForWorkspaceError,
     OrgProviderKeyInvalidSlugError,
@@ -100,7 +102,7 @@ from gateway.services.secret_box import (
 )
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
+from gateway.services.web_retrieval_network import RetrievalTargetError, validate_retrieval_target
 
 ORG_PROVIDER_CACHE_TTL_SECONDS = 30.0
 
@@ -134,17 +136,28 @@ _org_key_zero_retention: dict[tuple[uuid.UUID, str], bool] = {}
 _org_slug_providers: dict[tuple[uuid.UUID, str], str] = {}
 
 
+class UnservableEndpointError(ValueError):
+    """A stored key's ``api_base`` is one its provider's client cannot be pinned to."""
+
+
 def _row_to_entry(key: OrgProviderKey) -> dict[str, Any]:
     """Build a config.providers-shaped overlay entry from a stored key.
 
+    A key stored before the write checks below existed is held to them here:
+    ``client_args`` outside the provider's allow-list are dropped, and an
+    ``api_base`` on a provider that cannot be pinned refuses the key.
+
     Raises ``SecretBoxUnavailableError`` / ``SecretDecryptionError`` when the
-    key cannot be decrypted; the caller decides whether to skip it.
+    key cannot be decrypted, and ``UnservableEndpointError``; the caller
+    decides whether to skip it.
     """
     entry: dict[str, Any] = {}
     if key.api_base:
+        if key.provider not in TENANT_ENDPOINT_PROVIDERS:
+            raise UnservableEndpointError(key.provider)
         entry["api_base"] = key.api_base
-    if key.client_args:
-        entry["client_args"] = dict(key.client_args)
+    if client_args := tenant_client_args(key.provider, key.client_args):
+        entry["client_args"] = client_args
     if key.encrypted_api_key:
         entry["api_key"] = decrypt_secret(key.encrypted_api_key)
     return entry
@@ -161,7 +174,7 @@ def key_is_usable(key: OrgProviderKey) -> bool:
     """
     try:
         _row_to_entry(key)
-    except (SecretBoxUnavailableError, SecretDecryptionError):
+    except (SecretBoxUnavailableError, SecretDecryptionError, UnservableEndpointError):
         return False
     return True
 
@@ -295,6 +308,16 @@ async def refresh_org_provider_cache(db: AsyncSession) -> None:
                 continue
             try:
                 new_cache[(workspace_id, provider)] = _row_to_entry(active)
+            except UnservableEndpointError:
+                logger.warning(
+                    "Skipping organization provider key '%s' (%s) for workspace %s: "
+                    "a %s key cannot be served on a custom api_base.",
+                    active.name,
+                    provider,
+                    workspace_id,
+                    active.provider,
+                )
+                continue
             except (SecretBoxUnavailableError, SecretDecryptionError):
                 logger.warning(
                     "Skipping organization provider key '%s' (%s) for workspace %s: "
@@ -449,21 +472,32 @@ def _slug_problem(slug: str, config: GatewayConfig | None) -> str | None:
     return None
 
 
-async def _gate_api_base(api_base: str | None) -> None:
-    """Reject storing an internal ``api_base`` when the SSRF gate is on.
+async def _gate_api_base(provider: str, api_base: str | None) -> None:
+    """Refuse an ``api_base`` that does not reach public addresses alone, or that its provider cannot be pinned to.
 
-    A no-op in the default allow-all state, but
-    when the operator sets ``OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=false`` a
-    private/link-local/reserved ``api_base`` is refused here rather than
-    persisted. Truthy check so an empty/absent api_base (the "use the SDK
-    default endpoint" case) is not treated as a URL.
+    A tenant chose it, so ``provider_allow_private_hosts`` does not apply.
+    Dispatch checks the address again on every request and connects to the
+    one it checked (``provider_kwargs.get_provider_kwargs``). An empty or
+    absent ``api_base`` is the provider's own endpoint, not a URL.
     """
     if not api_base:
         return
+    if provider not in TENANT_ENDPOINT_PROVIDERS:
+        raise OrgProviderKeyUnsafeApiBaseError(f"A {provider} key cannot take a custom api_base")
     try:
-        await validate_provider_api_base(api_base)
-    except UnsafeURLError as exc:
-        raise OrgProviderKeyUnsafeApiBaseError(str(exc)) from None
+        await validate_retrieval_target(api_base)
+    except RetrievalTargetError as exc:
+        raise OrgProviderKeyUnsafeApiBaseError(
+            f"api_base must reach a public address: {exc}. A model server the deployment runs on a "
+            "private address is added as a hosted provider instead."
+        ) from None
+
+
+def _check_client_args(provider: str, client_args: dict[str, Any] | None) -> None:
+    """Refuse ``client_args`` naming anything outside the provider's allow-list (``core/provider_params.py``)."""
+    refused = sorted(set(client_args or {}) - tenant_client_args_allowed(provider))
+    if refused:
+        raise OrgProviderKeyClientArgsRefusedError(provider, refused, sorted(tenant_client_args_allowed(provider)))
 
 
 class OrgProviderKeyService:
@@ -541,7 +575,8 @@ class OrgProviderKeyService:
 
         provider = _validated_provider(request.provider)
         name = _validated_name(request.name)
-        await _gate_api_base(request.api_base)
+        await _gate_api_base(provider, request.api_base)
+        _check_client_args(provider, request.client_args)
         slug = await self._slug_for(
             organization.id, request.slug, name=name, provider=provider, api_base=request.api_base
         )
@@ -651,7 +686,7 @@ class OrgProviderKeyService:
                     "A key for the provider's own endpoint cannot move to another; add a key for that endpoint"
                 )
         if "api_base" in update_data:
-            await _gate_api_base(update_data["api_base"])
+            await _gate_api_base(key.provider, update_data["api_base"])
             if update_data["api_base"] and update_data["api_base"] != key.api_base:
                 stored_args_follow = stored_secrets_survive(
                     key.client_args, update_data.get("client_args"), sent="client_args" in update_data
@@ -663,6 +698,7 @@ class OrgProviderKeyService:
             # resubmitting the whole object sends the mask for the entries it was
             # never shown; those keep their stored value.
             update_data["client_args"] = restore_redacted_values(update_data["client_args"], key.client_args)
+            _check_client_args(key.provider, update_data["client_args"])
         if "api_key" in update_data:
             encrypted_api_key, last4 = _encrypt_api_key(update_data.pop("api_key"))
             update_data["encrypted_api_key"] = encrypted_api_key

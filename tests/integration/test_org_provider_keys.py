@@ -23,11 +23,13 @@ from gateway.exceptions.organizations_exceptions import NotAuthorizedError, Work
 from gateway.exceptions.providers_exceptions import (
     OrgProviderKeyAlreadyExistsError,
     OrgProviderKeyArchivedError,
+    OrgProviderKeyClientArgsRefusedError,
     OrgProviderKeyCredentialRequiredError,
     OrgProviderKeyDisabledForWorkspaceError,
     OrgProviderKeyInvalidSlugError,
     OrgProviderKeyNotArchivedError,
     OrgProviderKeyNotFoundError,
+    OrgProviderKeyUnsafeApiBaseError,
     WorkspaceProviderKeyOverrideConflictError,
 )
 from gateway.models.provider_keys import (
@@ -58,7 +60,7 @@ from gateway.services.tenancy.org_provider_key_service import (
     reset_org_provider_cache,
 )
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("public_dns")]
 
 
 async def _organization(db: AsyncSession, *, slug: str = "acme") -> Organization:
@@ -147,7 +149,6 @@ async def test_moving_a_key_to_another_host_needs_its_credentials_again(async_db
             name="primary",
             api_key="sk-live-1234",
             api_base="https://proxy/v1",
-            client_args={"extra_token": "hidden-1"},
         ),
     )
 
@@ -156,18 +157,12 @@ async def test_moving_a_key_to_another_host_needs_its_credentials_again(async_db
             user=owner, key_id=created.id, request=OrgProviderKeyUpdateRequest(**fields)
         )
 
-    for refused in (
-        {"api_base": "https://elsewhere/v1"},
-        {"api_base": "https://elsewhere/v1", "api_key": "sk-live-5678"},
-        {"api_base": "https://elsewhere/v1", "api_key": "sk-live-5678", "client_args": {"extra_token": "***"}},
-    ):
+    for refused in ({"api_base": "https://elsewhere/v1"},):
         with pytest.raises(OrgProviderKeyCredentialRequiredError):
             await update(**refused)
 
     assert (await update(api_base="https://proxy/v1", name="same host")).api_base == "https://proxy/v1"
-    moved = await update(
-        api_base="https://elsewhere/v1", api_key="sk-live-5678", client_args={"extra_token": "hidden-2"}
-    )
+    moved = await update(api_base="https://elsewhere/v1", api_key="sk-live-5678")
     assert (moved.api_base, moved.last4) == ("https://elsewhere/v1", "5678")
     with pytest.raises(OrgProviderKeyInvalidSlugError):
         # A key named by its own prefix keeps an endpoint for that prefix to name.
@@ -211,6 +206,85 @@ async def test_a_provider_counts_as_zero_data_retention_only_while_every_key_dec
         user=owner, request=OrgProviderKeyCreateRequest(provider="openai", name="blank base", api_base="")
     )
     assert await declared() == frozenset({"openai"}), "an empty base URL is no credential either"
+
+
+@pytest.mark.parametrize(
+    "api_base",
+    [
+        "http://127.0.0.1:8000/v1",
+        "http://10.0.0.5/v1",
+        "http://169.254.169.254/latest",
+        "http://100.100.100.200/",
+        "http://[::1]/v1",
+    ],
+)
+async def test_an_internal_api_base_is_refused_whatever_provider_allow_private_hosts_says(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch, api_base: str
+) -> None:
+    """An organization chose the address, so the operator's allowance for its own endpoints does not reach it."""
+    monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "true")
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrgProviderKeyService(async_db)
+
+    with pytest.raises(OrgProviderKeyUnsafeApiBaseError):
+        await service.create_key_for_user(
+            user=owner,
+            request=OrgProviderKeyCreateRequest(provider="openai", name="internal", api_base=api_base),
+        )
+
+    created = await service.create_key_for_user(
+        user=owner, request=OrgProviderKeyCreateRequest(provider="openai", name="public", api_base="https://1.1.1.1/v1")
+    )
+    with pytest.raises(OrgProviderKeyUnsafeApiBaseError):
+        await service.update_key_for_user(
+            user=owner, key_id=created.id, request=OrgProviderKeyUpdateRequest(api_base=api_base)
+        )
+
+
+async def test_a_provider_whose_client_cannot_be_pinned_takes_no_api_base(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrgProviderKeyService(async_db)
+
+    with pytest.raises(OrgProviderKeyUnsafeApiBaseError, match="cannot take a custom api_base"):
+        await service.create_key_for_user(
+            user=owner,
+            request=OrgProviderKeyCreateRequest(provider="mistral", name="m", api_base="https://1.1.1.1/v1"),
+        )
+
+
+@pytest.mark.parametrize(
+    ("provider", "client_args"),
+    [
+        ("openai", {"default_headers": {"Authorization": "Bearer internal"}}),
+        ("openai", {"http_client": "anything"}),
+        ("cerebras", {"base_url": "http://169.254.169.254"}),
+        ("bedrock", {"region_name": "us-east-1", "endpoint_url": "http://10.0.0.1"}),
+        ("bedrock", {"region_name": "us-east-1", "profile_name": "operator"}),
+        ("gemini", {"http_options": {"base_url": "http://10.0.0.1"}}),
+    ],
+)
+async def test_client_args_outside_the_providers_allow_list_are_refused(
+    async_db: AsyncSession, provider: str, client_args: dict[str, Any]
+) -> None:
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrgProviderKeyService(async_db)
+
+    with pytest.raises(OrgProviderKeyClientArgsRefusedError):
+        await service.create_key_for_user(
+            user=owner,
+            request=OrgProviderKeyCreateRequest(provider=provider, name="k", api_key="sk-1", client_args=client_args),
+        )
+
+    created = await service.create_key_for_user(
+        user=owner, request=OrgProviderKeyCreateRequest(provider=provider, name="ok", api_key="sk-1")
+    )
+    with pytest.raises(OrgProviderKeyClientArgsRefusedError):
+        await service.update_key_for_user(
+            user=owner, key_id=created.id, request=OrgProviderKeyUpdateRequest(client_args=client_args)
+        )
 
 
 async def test_delete_requires_archived_first(async_db: AsyncSession) -> None:
@@ -291,12 +365,12 @@ async def test_plain_member_cannot_list_keys(async_db: AsyncSession) -> None:
     await service.create_key_for_user(
         user=owner,
         request=OrgProviderKeyCreateRequest(
-            provider="openai", name="primary", api_key="sk-live-1234", client_args={"region_name": "us-east-1"}
+            provider="openai", name="primary", api_key="sk-live-1234", client_args={"organization": "org-acme"}
         ),
     )
 
     as_owner = await service.list_keys_for_user(user=owner)
-    assert as_owner.data[0].client_args == {"region_name": "us-east-1"}
+    assert as_owner.data[0].client_args == {"organization": "org-acme"}
 
     with pytest.raises(NotAuthorizedError):
         await service.list_keys_for_user(user=member)

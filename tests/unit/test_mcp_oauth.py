@@ -440,7 +440,7 @@ async def test_a_compressed_answer_is_held_to_the_size_bound(wire: _Wire) -> Non
 async def test_the_address_check_counts_against_the_deadline(monkeypatch: pytest.MonkeyPatch, wire: _Wire) -> None:
     """A slow resolver must not hold a renewal's row lock past its deadline."""
 
-    async def slow_check(url: str, *, has_authorization_token: bool, label: str = "MCP server") -> None:
+    async def slow_check(url: str, *, has_authorization_token: bool, label: str = "MCP server", **_: Any) -> None:
         await asyncio.sleep(5)
 
     monkeypatch.setattr(_mcp_oauth, "validate_mcp_url", slow_check)

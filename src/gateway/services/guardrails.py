@@ -30,6 +30,7 @@ lookup that must be awaited, and Pydantic validators can't await — see
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
@@ -42,6 +43,7 @@ from typing import Any, Literal, Protocol
 import httpx
 
 from gateway.models.guardrails import GuardrailConfig
+from gateway.services.providers import OwnedEndpointTransport
 from gateway.services.tool_usage import TOOL_ERROR_SENTINEL
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 
@@ -216,6 +218,16 @@ class InProcessGuardrail(Protocol):
     """
 
     async def check(self, prompt: str, **validate_kwargs: Any) -> InProcessVerdict: ...
+
+
+def _tenant_endpoint_client() -> httpx.AsyncClient:
+    """The client an entry's own ``url`` is dialed through, since a caller or an organization wrote it.
+
+    Public addresses only, connected at the address that was checked, and no
+    redirects, the rule every tenant-chosen destination takes. The operator's
+    ``default_url`` keeps the plain client: it may be a sidecar on this host.
+    """
+    return httpx.AsyncClient(transport=OwnedEndpointTransport(), timeout=_DEFAULT_TIMEOUT_S, follow_redirects=False)
 
 
 async def _validate_one(
@@ -479,7 +491,11 @@ async def run_input_guardrails(
         return GuardrailVerdict()
 
     results: list[GuardrailResult] = []
-    async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT_S) as client:
+    async with contextlib.AsyncExitStack() as clients:
+        operator_client = await clients.enter_async_context(httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT_S))
+        tenant_client = operator_client
+        if any(cfg.url for cfg in guardrails):
+            tenant_client = await clients.enter_async_context(_tenant_endpoint_client())
         for cfg in guardrails:
             fails_closed = cfg.mode == "block" and cfg.on_unavailable == "block"
             base_url = (cfg.url or default_url or "").rstrip("/")
@@ -501,7 +517,7 @@ async def run_input_guardrails(
                     )
                 else:
                     result = await _validate_one(
-                        client,
+                        tenant_client if cfg.url else operator_client,
                         base_url=base_url,
                         cfg=cfg,
                         input_text=input_text,

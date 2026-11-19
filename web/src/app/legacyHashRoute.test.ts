@@ -1,15 +1,9 @@
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
+import { installLegacyHashRoute } from "./legacyHashRoute"
 
-// The script lives inline in index.html, so it can run before the bundle does;
-// this runs that same text rather than a copy of it.
-const html = readFileSync(resolve(__dirname, "../../index.html"), "utf8")
-const script = /<script id="legacy-hash-route">([\s\S]*?)<\/script>/.exec(
-  html,
-)?.[1]
-
-/** A browser on `href`, with the script run in it as the page loads. */
+/** A browser on `href`, with the move installed in it as the page loads. */
 function loadPage(href: string, base = "/") {
   const url = new URL(href, "https://otari.example.com")
   const listeners: Record<string, () => void> = {}
@@ -32,9 +26,7 @@ function loadPage(href: string, base = "/") {
       listeners[type] = listener
     },
   }
-  new Function("window", (script ?? "").replaceAll("%BASE_URL%", base))(
-    fakeWindow,
-  )
+  installLegacyHashRoute(fakeWindow, base)
   return {
     address: () => `${location.pathname}${location.search}${location.hash}`,
     /** The fragment alone changing, as following a link to `#…` in the tab does. */
@@ -50,11 +42,7 @@ function landing(href: string, base = "/"): string {
   return loadPage(href, base).address()
 }
 
-describe("the legacy hash route script in index.html", () => {
-  it("is there to run", () => {
-    expect(script).toBeTruthy()
-  })
-
+describe("installLegacyHashRoute", () => {
   it("moves a hash route to the path it names", () => {
     expect(landing("/#/organization/provider-keys")).toBe(
       "/organization/provider-keys",
@@ -114,5 +102,14 @@ describe("the legacy hash route script in index.html", () => {
   it("leaves an address with no hash route alone", () => {
     expect(landing("/keys")).toBe("/keys")
     expect(landing("/tools#section")).toBe("/tools#section")
+  })
+})
+
+describe("main.tsx", () => {
+  it("imports the move first, so it runs before the router reads the address", () => {
+    const main = readFileSync(resolve(__dirname, "../main.tsx"), "utf8")
+    expect(/^import\s+(.+)$/m.exec(main)?.[1]).toBe(
+      '"@/app/legacyHashRouteOnLoad"',
+    )
   })
 })
