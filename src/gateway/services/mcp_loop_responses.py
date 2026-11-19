@@ -217,8 +217,10 @@ def _with_usage(usage: Any, counts: dict[str, Any]) -> Any:
     """A copy of ``usage`` that reports ``counts``, its token details included."""
     input_details = usage.input_tokens_details or InputTokensDetails(cached_tokens=0, cache_write_tokens=0)
     # A round's retention breakdown no longer adds up once earlier rounds' writes join it.
-    writes_details = input_details.cache_write_tokens_details
-    if counts["cache_write_tokens"] != input_details.cache_write_tokens:
+    # Read leniently: a provider any-llm bridges to Responses reports openresponses-types
+    # usage, whose input details carry ``cached_tokens`` alone.
+    writes_details = getattr(input_details, "cache_write_tokens_details", None)
+    if counts["cache_write_tokens"] != (getattr(input_details, "cache_write_tokens", 0) or 0):
         writes_details = None
     output_details = usage.output_tokens_details or OutputTokensDetails(reasoning_tokens=0)
     return usage.model_copy(
