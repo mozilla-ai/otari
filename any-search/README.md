@@ -29,9 +29,10 @@ AnySearch.get_provider_metadata("fake")
 - `api_base`: overrides the provider's endpoint, which is how a test or a proxy redirects it. When
   it is not passed, the variable `env_api_base` names is read, then the provider's default.
 - `timeout`: seconds per request, 15 by default.
-- `client`: an `httpx.AsyncClient` you own. The provider sends every request through it with its own
-  timeout, and never closes it or changes its settings. Without one, the provider opens a client
-  with httpx's defaults and closes it in `aclose()`, which `async with` calls.
+- `client`: an `httpx.AsyncClient` you own. The provider sends every request to its API through it,
+  with its own timeout and without following a redirect, and never closes it or changes its
+  settings. Without one, the provider opens a client with httpx's defaults and closes it in
+  `aclose()`, which `async with` calls.
 
 Every request a provider sends carries `User-Agent: any-search/<version>`, the library's own
 version (`any_search.__version__`, which a change to the library bumps in the same PR), so a
@@ -59,10 +60,13 @@ provider signaled one inside a successful response, and the provider's whole res
 `raw` is left out of `repr`.
 
 A failed call raises `ProviderError` with the provider's name, a `tag` and the HTTP `status` when
-there is one. A successful answer that lacks a field the provider documents, or carries one of
-the wrong type, raises it with the tag `unexpected_response`, so a change on the provider's side
-fails the call rather than degrading it. A missing key raises `MissingCredentialError`. All errors derive from
-`AnySearchError`, and none carries a response body, a URL, the query or a key.
+there is one. A request to the provider's API follows no redirect, whatever `client` is set to, so
+a key sent in a header never reaches another host: a redirect, or any other answer below 400 that
+is not a success, raises it with the tag `http_error`. A successful answer that lacks a field the
+provider documents, or carries one of the wrong type, raises it with the tag `unexpected_response`,
+so a change on the provider's side fails the call rather than degrading it. A missing key raises
+`MissingCredentialError`. All errors derive from `AnySearchError`, and none carries a response
+body, a URL, the query or a key.
 
 `ProviderMetadata` says what a host needs before calling: where the key comes from, whether the
 query or the key travels in the URL, the provider's `tier` (`production` or `test`), its

@@ -807,7 +807,7 @@ query:
 | Header | Value |
 |---|---|
 | `Otari-Error-Provider` | The provider that failed, such as `exa`. |
-| `Otari-Error-Status` | The provider's own HTTP error status; absent when it gave none, as for a timeout, an error inside a successful answer, or an answer that could not be read. |
+| `Otari-Error-Status` | The provider's own HTTP error status, 400 or above; absent otherwise, as for a timeout, a redirect from the provider's API (tagged `http_error`, since Otari's calls to a provider's API follow none), an error inside a successful answer, or an answer that could not be read. |
 | `Otari-Error-Tag` | What failed, in the provider's terms or the library's: `timeout`, `network`, `invalid_header` (a key holding a character that is not ASCII), `http_error`, `invalid_response`, `unexpected_response`, or the provider's own code, such as Exa's `INVALID_API_KEY`. |
 | `Otari-Error-Retryable` | `true` for a timeout, a 429 or a 5xx from the provider, when a retry may help; otherwise `false`. |
 
@@ -959,8 +959,11 @@ safe fields ride as the same headers a [search](#search)'s 502 carries:
 `Otari-Error-Status` (the page's own HTTP status, when the fetcher reports one),
 `Otari-Error-Tag` (the provider's own tag, or the built-in fetcher's: `timeout`,
 `network`, `http_status`, `redirect`, `url_invalid`, `content_type`,
-`extraction`, `content_decoding`) and `Otari-Error-Retryable`. The body never
-carries the URL.
+`extraction`, `content_decoding`) and `Otari-Error-Retryable`. A fetch
+provider whose own API answers with a redirect fails with `http_error` and no
+`Otari-Error-Status`, since Otari's calls to a provider's API follow none; the
+page's own redirects are followed as before, by the provider or by the built-in
+fetcher. The body never carries the URL.
 
 ## Code execution
 
