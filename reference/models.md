@@ -613,8 +613,13 @@ what was sent, and pricing, budgets and usage key on the offering reached.
 A selector that already names an offering is never rewritten, so a provider's
 own id keeps working verbatim.
 
-The index behind this is rebuilt every minute and on
-`POST /api/v1/catalog/selectors/refresh`, an operator call. It holds the
+The index behind this is rebuilt every minute, on
+`POST /api/v1/catalog/selectors/refresh`, an operator call, and after each
+change made through `/api/v1/hosted-providers`, so a hosted model a refresh,
+a switch or an edit serves is reachable by its catalog id at once on the
+instance that took the change. That rebuild is best effort and local to the
+process: another replica or worker picks the change up on its own next
+rebuild, within a minute. It holds the
 deployment's catalog view, priced from the deployment's list and the defaults,
 and one view per organization for the models it offers on its own provider
 keys, priced at that organization's rates. An organization's view answers only
