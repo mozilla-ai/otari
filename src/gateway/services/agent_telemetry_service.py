@@ -273,6 +273,7 @@ async def ingest(
     *,
     api_key: APIKey,
     storage: TelemetryStoragePort,
+    admitted_at: datetime,
 ) -> IngestResult:
     """Gate an export on its attribution, then hand it to telemetry storage.
 
@@ -288,4 +289,4 @@ async def ingest(
     user_id = api_key.user_id
     if not user_id or await get_active_user(db, user_id) is None:
         return IngestResult(rejected=len(records))
-    return await storage.record(api_key_id=api_key.id, user_id=user_id, records=tuple(records))
+    return await storage.record(api_key_id=api_key.id, user_id=user_id, records=tuple(records), admitted_at=admitted_at)

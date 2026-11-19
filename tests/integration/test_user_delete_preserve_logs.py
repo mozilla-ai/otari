@@ -4,9 +4,11 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import patch
 
+import pytest
 from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from sqlalchemy import func, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
@@ -15,8 +17,9 @@ from gateway.models.api_keys import APIKey
 from gateway.models.budgets import BudgetResetLog
 from gateway.models.tenancy import Workspace
 from gateway.models.traces import Trace
-from gateway.models.usage import UsageLog
+from gateway.models.usage import AgentTelemetry, UsageLog
 from gateway.models.users import User
+from gateway.ports.telemetry_storage_port import TelemetryRecord
 from gateway.repositories.users_repository import lock_live_users
 
 from .conftest import MODEL_NAME
@@ -364,3 +367,34 @@ def test_a_second_delete_keeps_the_first_deletion_time(
     assert response.status_code == 204, response.text
     stored = db_session.execute(text("SELECT deleted_at FROM users WHERE user_id = 'race-user'")).scalar_one()
     assert stored == first_deleted_at
+
+
+@pytest.mark.asyncio
+async def test_delete_user_refuses_telemetry_an_export_admitted_before_it_writes_after(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    async_db: AsyncSession,
+) -> None:
+    """An export let in before the deletion, whose write lands after the erasure, stores nothing for the user."""
+    client.post(f"{API_ROOT}/users", json={"user_id": "late-export-user"}, headers=master_key_header)
+    key_id = client.post(
+        f"{API_ROOT}/keys",
+        json={"key_name": "late-export-key", "user_id": "late-export-user"},
+        headers=master_key_header,
+    ).json()["id"]
+    admitted_at = datetime.now(UTC)
+
+    assert client.delete(f"{API_ROOT}/users/late-export-user", headers=master_key_header).status_code == 204
+
+    result = await DatabaseTelemetryStorageAdapter(async_db).record(
+        admitted_at=admitted_at,
+        api_key_id=key_id,
+        user_id="late-export-user",
+        records=(TelemetryRecord(name="tool_result", timestamp=admitted_at, source="claude_code", dedup_key="late-0"),),
+    )
+
+    assert (result.accepted, result.rejected) == (0, 1)
+    stored = await async_db.execute(
+        select(func.count()).select_from(AgentTelemetry).where(AgentTelemetry.user_id == "late-export-user")
+    )
+    assert stored.scalar_one() == 0
