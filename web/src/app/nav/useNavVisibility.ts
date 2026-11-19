@@ -302,16 +302,3 @@ export function useRouteAccess(): (pathname: string) => Access {
     [router, context, answer, selectedWorkspaceRole],
   )
 }
-
-/**
- * Whether to offer a link to a page: only once it is known to open. A link
- * that would send someone Home is never drawn, and one that appears late is
- * better than one that disappears.
- */
-export function useCanOpen(): (pathname: string) => boolean {
-  const access = useRouteAccess()
-  return useMemo(
-    () => (pathname: string) => access(pathname) === "open",
-    [access],
-  )
-}

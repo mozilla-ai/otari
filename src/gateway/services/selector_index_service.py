@@ -288,6 +288,13 @@ async def _organization_views(
     return views
 
 
+# Builds overlap (the refresher's tick, each hosted write's), so each takes a
+# number as it starts and publishes only if no later-started build has
+# published: an older snapshot never replaces a newer index.
+_builds_started = 0
+_build_published = 0
+
+
 async def rebuild_selector_index(
     db: AsyncSession, config: GatewayConfig, *, model_provider: ModelProviderPort | None = None, fetch: bool = False
 ) -> None:
@@ -313,6 +320,9 @@ async def rebuild_selector_index(
     dial even while ``model_cache_ttl_seconds`` is 0, whose whole meaning is that
     the reads do their own dialing.
     """
+    global _builds_started, _build_published
+    _builds_started += 1
+    build = _builds_started
     merged = await build_merged_catalog(
         db,
         config,
@@ -334,12 +344,16 @@ async def rebuild_selector_index(
     grouped = group_offerings(seeds).values()
     identities = _identities(grouped)
     organizations = await _organization_views(db, config, catalog, rows, seeds)
+    workspace_organization = await workspace_organizations(db) if organizations else {}
+    if build < _build_published:
+        return
+    _build_published = build
     set_selector_index(
         build_selector_index(
             rows,
             identities,
             organizations=organizations,
-            workspace_organization=await workspace_organizations(db) if organizations else {},
+            workspace_organization=workspace_organization,
             names=_names(grouped),
         )
     )
@@ -355,10 +369,10 @@ async def run_selector_index_refresher(
 ) -> None:
     """Keep the selector index current with discovery, pricing and providers.
 
-    Rebuilt on a short fixed interval rather than hooked into every writer that
-    could change it (a price set, a provider added, a discovery tick): the
-    build is one catalog read, and a spelling that lags a minute behind a
-    change is a far smaller hazard than one hook missed.
+    Rebuilt on a short fixed interval, so a writer nothing hooks (a price set,
+    a discovery tick) lags at most a minute. The hosted-provider routes also
+    rebuild once their write commits, since an operator who switches a model on
+    sends a request by its catalog id next.
 
     ``resolve_model_provider`` hands each tick the hosted port for its session
     and Unit of Work, the way a request resolves it; the composition root is
