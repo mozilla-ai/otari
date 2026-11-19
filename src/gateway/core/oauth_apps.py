@@ -52,17 +52,18 @@ def open_app_site(client_id: str, redirect_uri: str) -> str | None:
     """The site an unregistered app is, when its client ID is its callback's origin.
 
     The origin must be written as a browser writes ``location.origin``: ASCII with the host
-    in punycode, lowercase, and no default port. Anything else is refused, not normalized,
-    because the site's name is shown on the consent screen and a non-ASCII host can be
-    made to look like another site's.
+    in punycode, lowercase, and the port in decimal unless it is the scheme's default.
+    Anything else is refused, not normalized, because the site's name is shown on the
+    consent screen and a non-ASCII host can be made to look like another site's.
     """
     parsed = parse_oauth_redirect(redirect_uri)
-    if parsed is None or client_id != f"{parsed.scheme}://{parsed.netloc}":
+    if parsed is None or not client_id.isascii() or client_id != f"{parsed.scheme}://{parsed.netloc}":
         return None
-    default_port = {"http": 80, "https": 443}[parsed.scheme]
-    if not client_id.isascii() or parsed.netloc != parsed.netloc.lower() or parsed.port == default_port:
-        return None
-    return parsed.netloc
+    host = parsed.hostname or ""  # Never empty: parse_oauth_redirect refuses a callback without one.
+    host = f"[{host}]" if ":" in host else host
+    if parsed.port is not None and parsed.port != {"http": 80, "https": 443}[parsed.scheme]:
+        host += f":{parsed.port}"
+    return parsed.netloc if parsed.netloc == host else None
 
 
 def redirect_matches(registered: str, requested: str) -> bool:

@@ -184,6 +184,7 @@ def test_an_open_app_is_the_site_its_callback_is_on(client_id: str, redirect_uri
         ("https://someone.github.io:443", "https://someone.github.io/"),
         ("https://someone.github.io:443", "https://someone.github.io:443/"),
         ("https://Someone.github.io", "https://Someone.github.io/"),
+        ("https://shop.example:08443", "https://shop.example:08443/"),
         # Lookalike hosts: a browser writes these in punycode, so the name shown would lie.
         ("https://\u0430pple.com", "https://\u0430pple.com/cb"),
         ("https://\uff41pple.com", "https://\uff41pple.com/cb"),
