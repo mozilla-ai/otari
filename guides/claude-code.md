@@ -127,9 +127,9 @@ To list only the open-weight models a key can use, ask the catalog for them:
 `GET /api/v1/catalog/models?capability=open_weights`. Each entry's `selectors`
 are the names to configure.
 
-On a gateway you run, OpenAI reasoning models work better through the Responses
-API: their reasoning carries over between turns, and the codex and pro models
-become reachable. Set `messages_api: responses` on the OpenAI provider; see
+Otari serves OpenAI's models through OpenAI's Responses API, so a reasoning
+model can call Claude Code's tools with its reasoning on, its reasoning carries
+over between turns, and the codex and pro models are reachable; see
 [Messages through the Responses API](https://docs.otari.ai/self-hosting/configuration#messages-through-the-responses-api).
 
 ## Let Otari choose a subagent's model
@@ -157,7 +157,7 @@ In a Claude Code session:
 The install asks for the gateway URL and an API key. The key goes to Claude
 Code's secure storage. The URL must be `https` unless the gateway runs on the
 same machine. The plugin stays active in every session after that; its
-[README](https://github.com/mozilla-ai/otari/blob/df23449b3f9f5115d603a6e344838d3c7af65705/plugins/otari-router/README.md) has the options and how to update.
+[README](https://github.com/mozilla-ai/otari/blob/840920dea23daeccc62d72b1312ea9b509d9829a/plugins/otari-router/README.md) has the options and how to update.
 
 Each spawn then leaves a dim line in the transcript naming the model Otari chose
 and why. If Otari does not answer, the subagent starts on the model it would
