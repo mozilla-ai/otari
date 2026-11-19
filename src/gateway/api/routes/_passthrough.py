@@ -136,7 +136,7 @@ from gateway.services.model_access import (
     model_not_allowed_detail,
     organization_key_refusal,
     resolve_request_allowlist,
-    unresolvable_model_detail,
+    unresolvable_selector_detail,
 )
 from gateway.services.pricing import NO_FACTS, PriceFacts, UsageCharge, apply_rules, can_price, price_usage
 from gateway.services.pricing_service import (
@@ -736,13 +736,14 @@ async def run_passthrough(
             resolved = resolve_provider_selector(config, model, user_id, workspace_id=workspace_id)
         except (ValueError, AnyLLMError) as exc:
             await refund_reservation(db, reservation)
+            detail = unresolvable_selector_detail(config, model, user_id, workspace_id=workspace_id)
             await _log_rejection(
-                unresolvable_model_detail(model),
+                detail,
                 row_model=model,
                 row_provider=None,
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
-            _raise_for_unresolvable_model(model, exc)
+            _raise_for_unresolvable_model(model, exc, detail=detail)
         if lookup_pricing:
             # Unlike the branch below, the reservation is already held here, so a
             # failed lookup must refund before propagating or the estimate leaks.
@@ -769,13 +770,14 @@ async def run_passthrough(
             resolved = resolve_provider_selector(config, model, user_id, workspace_id=workspace_id)
         except (ValueError, AnyLLMError) as exc:
             # Nothing is reserved yet on this branch, so there is no refund to do.
+            detail = unresolvable_selector_detail(config, model, user_id, workspace_id=workspace_id)
             await _log_rejection(
-                unresolvable_model_detail(model),
+                detail,
                 row_model=model,
                 row_provider=None,
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
-            _raise_for_unresolvable_model(model, exc)
+            _raise_for_unresolvable_model(model, exc, detail=detail)
         if lookup_pricing:
             found_pricing = await resolve_model_pricing(
                 db,

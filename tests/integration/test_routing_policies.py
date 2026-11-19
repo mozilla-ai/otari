@@ -1027,7 +1027,27 @@ def test_a_dynamic_policy_is_not_a_model_name_outside_the_completion_routes(clie
     )
 
     assert resp.status_code == 400
-    assert "thrifty" in resp.json()["detail"]
+    assert resp.json()["detail"] == (
+        "'thrifty' is a routing policy that chooses its model per request, which only chat completions, "
+        "messages and responses do. Send this endpoint a catalog model id, a 'provider:model' selector, "
+        "or an alias."
+    )
+
+
+def test_a_dynamic_policy_is_refused_as_a_batch_model_with_its_own_reason(client: TestClient) -> None:
+    _create_user(client)
+    resp = client.post(
+        f"{API_ROOT}/batches",
+        json={
+            "model": "thrifty",
+            "user": "test-user",
+            "requests": [{"custom_id": "req-1", "body": {"messages": [{"role": "user", "content": "hi"}]}}],
+        },
+        headers=HEADERS,
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"].startswith("'thrifty' is a routing policy that chooses its model per request")
 
 
 # ---------------------------------------------------------------------------
