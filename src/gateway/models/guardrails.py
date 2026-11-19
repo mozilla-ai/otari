@@ -50,11 +50,11 @@ class GuardrailConfig(BaseModel):
 
     URL safety: when ``url`` is supplied it is validated by
     :func:`gateway.services.guardrails.check_guardrail_urls` (not here at parse
-    time — the check does a DNS lookup that must be awaited) with the same
-    SSRF guard used for MCP server URLs (loopback allowed by default for
-    same-host sidecars; gated by ``OTARI_MCP_ALLOW_LOOPBACK`` /
-    ``OTARI_MCP_ALLOW_PRIVATE_HOSTS``). Most deployments omit ``url`` and rely
-    on the operator-set ``OTARI_GUARDRAILS_URL`` instead.
+    time, since the check does a DNS lookup that must be awaited) with the same
+    SSRF guard used for MCP server URLs: public addresses only, connected at the
+    address that was checked, with no redirect followed. Most deployments omit
+    ``url`` and rely on the operator-set ``OTARI_GUARDRAILS_URL`` instead, which
+    may be on a private address.
     """
 
     profile: str = Field(min_length=1, max_length=128)

@@ -22,6 +22,7 @@ import { breakdownCut } from "@/features/home/breakdownCut"
 import { busiestWorkspace } from "@/features/home/busiestWorkspace"
 import { canOpenInKeys } from "@/features/home/keyAccess"
 import { useHomeAccount } from "@/features/home/overlayHomeAccount"
+import { hasProviderSlot, ProviderSlot } from "@/features/home/ProviderSlot"
 import { ShareCell } from "@/features/home/ShareCell"
 import { limitDialogCopy } from "@/features/spend/limitCopy"
 import {
@@ -33,14 +34,18 @@ import {
 } from "@/features/spend/limits"
 import { paceOf } from "@/features/spend/pace"
 import {
-  isPeriodKey,
-  PERIODS,
-  type PeriodKey,
+  comparedWith,
+  DEFAULT_PERIOD,
+  figureLabel,
+  periodFromUrl,
   sessionsSearchFor,
+  usageRange,
   windowOf,
   windowWords,
 } from "@/features/spend/period"
 import { SetLimitDialog } from "@/features/spend/SetLimitDialog"
+import { SpendPeriodPicker } from "@/features/spend/SpendPeriodPicker"
+import { usePageClock } from "@/features/spend/usePageClock"
 import {
   type SpendRow,
   useSpend,
@@ -70,7 +75,7 @@ import { useSurfaces } from "@/shared/hooks/useDeployment"
 /** Rows shown before the rest folds behind "Show all". */
 const TOP_ROWS = 5
 
-type Cut = "people" | "keys" | "models" | "workspaces"
+type Cut = "people" | "keys" | "models" | "providers" | "workspaces"
 
 const CUTS: {
   value: Cut
@@ -79,8 +84,11 @@ const CUTS: {
   noun: string
   /** What "Show all 19 …" counts. */
   plural: string
-  /** The Sessions filter a row opens, where a row is one. */
-  filter?: "user_id" | "api_key_id" | "model"
+  /**
+   * The filter a row opens on, where a row is one: Sessions', or Requests' for
+   * a provider, which Sessions cannot filter on.
+   */
+  filter?: "user_id" | "api_key_id" | "model" | "provider"
 }[] = [
   {
     value: "people",
@@ -104,6 +112,13 @@ const CUTS: {
     filter: "model",
   },
   {
+    value: "providers",
+    label: "Providers",
+    noun: "Provider",
+    plural: "providers",
+    filter: "provider",
+  },
+  {
     value: "workspaces",
     label: "Workspaces",
     noun: "Workspace",
@@ -111,7 +126,7 @@ const CUTS: {
   },
 ]
 
-const URL_DEFAULTS = { period: "month", by: "", workspace: "" }
+const URL_DEFAULTS = { period: DEFAULT_PERIOD, by: "", workspace: "" }
 
 /** The limit figure's label, by how often the organization's limit resets. */
 const LIMIT_LABELS: Record<string, string | undefined> = {
@@ -193,7 +208,7 @@ export function TeamHome({
   notice?: ReactNode
 }) {
   // One clock for the page's life, so its windows and query keys hold still.
-  const [now] = useState(() => Date.now())
+  const [now, refreshClock] = usePageClock()
   const navigate = useNavigate()
   const { get, patch } = useUrlState(URL_DEFAULTS)
   const { select } = useSelectedWorkspace()
@@ -208,8 +223,7 @@ export function TeamHome({
   // The list `useSpend` reads, so this asks nothing new.
   const keys = useKeys()
 
-  const rawPeriod = get("period")
-  const period: PeriodKey = isPeriodKey(rawPeriod) ? rawPeriod : "month"
+  const period = periodFromUrl(get("period"))
   const window = windowOf(period, now)
   const workspaceId = get("workspace")
   const hasWorkspaces = (workspaces.data?.length ?? 0) > 1
@@ -236,9 +250,11 @@ export function TeamHome({
   // A deployment that records no sessions serves no route to count them, and
   // has none to open. Over the page's own scope: a workspace it picked, or
   // every one.
-  const hasSessions = useSurfaces()("traces")
+  const hasSurface = useSurfaces()
+  const hasSessions = hasSurface("traces")
+  const hasRequests = hasSurface("usage")
   const sessions = useTraceCount(
-    { workspaceId, start: window.start, q: "" },
+    { workspaceId, start: window.start, end: window.end || undefined, q: "" },
     hasSessions,
   )
 
@@ -250,7 +266,9 @@ export function TeamHome({
         ? spend.keys
         : cut.value === "models"
           ? spend.models
-          : byWorkspace.rows
+          : cut.value === "providers"
+            ? spend.providers
+            : byWorkspace.rows
   const isLoading =
     cut.value === "workspaces" ? byWorkspace.isLoading : spend.isLoading
   // A workspace's own total is the whole organization's when none is picked.
@@ -268,6 +286,16 @@ export function TeamHome({
     window,
     workspaceId,
   })
+  const pickCut = (next: string) => {
+    setShowingAll(false)
+    patch({ by: next })
+  }
+  const hasMarkSlot = cut.value === "providers" && hasProviderSlot(rows)
+  // What a row opens: a workspace narrows this table, a provider opens its
+  // requests, and anything else its sessions.
+  const canOpenRows =
+    cut.value === "workspaces" ||
+    (cut.value === "providers" ? hasRequests : hasSessions)
 
   /**
    * Sessions lists one workspace, so a row opens in the workspace its
@@ -276,7 +304,10 @@ export function TeamHome({
    */
   const workspaceFor = async (row: SpendRow): Promise<string | undefined> => {
     if (workspaceId) return workspaceId
-    const candidates = row.workspaceIds ?? []
+    // A model's or a provider's spend is in any workspace, so every one is a
+    // candidate; a person's or a key's are the ones they are in.
+    const candidates =
+      row.workspaceIds ?? (workspaces.data ?? []).map((one) => one.id)
     const { filter } = cut
     if (candidates.length <= 1 || !filter) return candidates[0]
     const costs = await Promise.all(
@@ -284,7 +315,7 @@ export function TeamHome({
         apiFetch<UsageSummary>(
           `${usageScope.base}/summary?${new URLSearchParams({
             workspace_id: candidate,
-            start_date: window.start,
+            ...usageRange(window),
             bucket: "day",
             dimensions: "none",
             [filter]: row.filterKey ?? "",
@@ -307,7 +338,7 @@ export function TeamHome({
     const target = await workspaceFor(row)
     if (target) select(target)
     void navigate({
-      to: "/sessions",
+      to: cut.value === "providers" ? "/requests" : "/sessions",
       search: {
         ...sessionsSearchFor(window),
         [cut.filter]: row.filterKey,
@@ -341,12 +372,16 @@ export function TeamHome({
         icon: FiUsers,
         run: () => void open(row),
       })
-    } else if (row.filterKey && hasSessions) {
+    } else if (row.filterKey && canOpenRows) {
       actions.push({
         id: "open",
         label:
-          cut.value === "people" ? "See their sessions" : "See its sessions",
-        hint: `What ran ${windowWords(period, window)}`,
+          cut.value === "people"
+            ? "See their sessions"
+            : cut.value === "providers"
+              ? "See its requests"
+              : "See its sessions",
+        hint: `What ran ${windowWords(window)}`,
         icon: FiLayers,
         run: () => void open(row),
       })
@@ -378,6 +413,8 @@ export function TeamHome({
         <span className="flex min-w-0 items-center gap-3 md:max-w-[13rem]">
           {cut.value === "people" ? (
             <MemberAvatar userId={row.avatarUserId} face={row.avatarFace} />
+          ) : hasMarkSlot ? (
+            <ProviderSlot row={row} />
           ) : null}
           <span className="flex min-w-0 flex-col">
             <span className="truncate text-foreground">{row.name}</span>
@@ -446,7 +483,9 @@ export function TeamHome({
             ),
           },
         ] satisfies DataTableColumn<SpendRow>[])),
-    ...(cut.value !== "models"
+    // A provider's limit is set on a stored key, not on the name a request
+    // records, so no row here has one to show.
+    ...(cut.value !== "models" && cut.value !== "providers"
       ? ([
           {
             id: "limit",
@@ -500,12 +539,12 @@ export function TeamHome({
         title="Home"
         action={
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <Segmented
-              label="Window"
-              size="md"
-              options={PERIODS}
+            <SpendPeriodPicker
               value={period}
-              onChange={(next) => patch({ period: next })}
+              onChange={(next) => {
+                refreshClock()
+                patch({ period: next })
+              }}
             />
             {hasWorkspaces ? (
               <FilterSelect
@@ -533,18 +572,14 @@ export function TeamHome({
       />
       <KpiStrip isEmpty={false} columns={5}>
         <KpiCell
-          label={
-            period === "month"
-              ? "Spent this month"
-              : `Spent, ${window.days} days`
-          }
+          label={figureLabel("Spent", window)}
           value={spend.totals ? formatUsd(total) : "—"}
           delta={
             delta !== null ? (
               <TrendChip
                 fraction={delta}
                 polarity="neutral"
-                caption={`vs prior ${window.days} days`}
+                caption={comparedWith(window)}
               />
             ) : undefined
           }
@@ -559,7 +594,7 @@ export function TeamHome({
             spend.series.length > 1 ? (
               <Sparkline
                 values={spend.series.map((point) => point.cost)}
-                ariaLabel="Spend per day over the window"
+                ariaLabel={`Spend per ${window.bucket} over the window`}
                 height={40}
               />
             ) : undefined
@@ -621,17 +656,13 @@ export function TeamHome({
             value={spend.totals ? formatPct(errorRate) : "—"}
             subline={
               spend.totals
-                ? `${formatNumber(spend.totals.error_count)} failed requests`
+                ? `${formatNumber(spend.totals.error_count)} failed ${spend.totals.error_count === 1 ? "request" : "requests"}`
                 : unreadLine
             }
           />
         )}
         <KpiCell
-          label={
-            period === "month"
-              ? "Tokens this month"
-              : `Tokens, ${window.days} days`
-          }
+          label={figureLabel("Tokens", window)}
           value={
             spend.totals
               ? formatTokens(billedTokenTotal(spend.totals) ?? 0)
@@ -650,7 +681,7 @@ export function TeamHome({
                 values={spend.series.map(
                   (point) => point.input_tokens + point.output_tokens,
                 )}
-                ariaLabel="Billed tokens per day over the window"
+                ariaLabel={`Billed tokens per ${window.bucket} over the window`}
                 height={40}
               />
             ) : undefined
@@ -664,7 +695,7 @@ export function TeamHome({
           subline={
             sessionCount === undefined
               ? `in ${scopeName}`
-              : `${formatNumber(sessionCount)} ${sessionCount === 1 ? "session" : "sessions"} ${windowWords(period, window)}`
+              : `${formatNumber(sessionCount)} ${sessionCount === 1 ? "session" : "sessions"} ${windowWords(window)}`
           }
           graphic={
             hasSessions ? (
@@ -683,16 +714,24 @@ export function TeamHome({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
             <h2 className="text-title">Where it went</h2>
-            <Segmented
-              label="Break down by"
-              size="md"
-              options={cuts}
-              value={shownCut ?? ""}
-              onChange={(next) => {
-                setShowingAll(false)
-                patch({ by: next })
-              }}
-            />
+            {/* A segmented track holds four choices at most, and a phone
+              fits three at a larger text size. */}
+            {cuts.length > (isMobile ? 3 : 4) ? (
+              <FilterSelect
+                ariaLabel="Break down by"
+                value={cut.value}
+                onChange={pickCut}
+                options={cuts}
+              />
+            ) : (
+              <Segmented
+                label="Break down by"
+                size="md"
+                options={cuts}
+                value={shownCut ?? ""}
+                onChange={pickCut}
+              />
+            )}
           </div>
         </div>
         {isTeam && cut.value === "people" ? <WorkspaceDefaultLimit /> : null}
@@ -712,11 +751,13 @@ export function TeamHome({
                 <EmptyMessage>
                   {isTableFailed
                     ? "Could not load"
-                    : "Nothing was spent in this window. Pick a longer one above."}
+                    : period === "6m"
+                      ? "Nothing was spent in this window."
+                      : "Nothing was spent in this window. Pick a longer one above."}
                 </EmptyMessage>
               }
               onRowAction={
-                hasSessions || cut.value === "workspaces"
+                canOpenRows
                   ? (key) => {
                       const row = rows.find((one) => one.id === key)
                       if (row?.filterKey) void open(row)
@@ -744,11 +785,13 @@ export function TeamHome({
             <span />
           )}
           <span className="text-muted">
-            {cut.value === "workspaces"
-              ? "A row opens that workspace’s people."
-              : hasSessions
-                ? "A row opens its sessions."
-                : null}
+            {!canOpenRows
+              ? null
+              : cut.value === "workspaces"
+                ? "A row opens that workspace’s people."
+                : cut.value === "providers"
+                  ? "A row opens its requests."
+                  : "A row opens its sessions."}
           </span>
         </div>
         {isTeam || spend.isLoading || spend.reads.roster !== "ready" ? null : (

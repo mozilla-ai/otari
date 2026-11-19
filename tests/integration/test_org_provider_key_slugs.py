@@ -30,6 +30,9 @@ from gateway.services.tenancy.org_provider_key_service import (
 
 from .test_organization_pricing_routes import _FakeHostedModelProvider, _identity, _rates
 
+pytestmark = pytest.mark.usefixtures("public_dns")
+
+
 _SYNTHETIC = "https://api.synthetic.new/openai/v1"
 _MODEL = "hf:Qwen/Qwen3.8-27B"
 

@@ -76,7 +76,7 @@ from .conftest import ALL_KEY_SCOPES, MODEL_NAME, admitted_search_spy
 _MCP_TOOL = "lookup"
 # The hit carries its page text, so a search reads no page and every page read is a fetch call.
 _HITS = [{"url": "https://python.org", "title": "Python", "text": "3.14"}]
-_MCP_SERVER = {"name": "docs", "url": "http://127.0.0.1:9999/mcp"}
+_MCP_SERVER = {"name": "docs", "url": "http://93.184.216.34/mcp"}
 _SEARCH = {"type": "otari_web_search"}
 _FETCH = {"type": "otari_web_fetch"}
 _CODE = {"type": "otari_code_execution"}

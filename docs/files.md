@@ -465,9 +465,8 @@ Three things to know:
 - SeaweedFS's filer API answers on port 8888 without credentials, so the store
   sits on an `object-storage` network that only the otari service joins. Keep
   every other service off that network.
-- `OTARI_MCP_ALLOW_PRIVATE_HOSTS` and `OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS`
-  let Otari call private addresses on a request's behalf, and the store is one
-  of them. Leave both off in this setup.
+- `OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS` lets Otari call private addresses on
+  a request's behalf, and the store is one of them. Leave it off in this setup.
 
 
 

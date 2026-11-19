@@ -210,7 +210,7 @@ def test_load_config_promotes_service_level_fields_from_otari_prefix(
     monkeypatch.setenv("OTARI_WEB_FETCH_ENABLED", "true")
     monkeypatch.setenv("OTARI_WEB_SEARCH_MAX_RESULTS", "7")
     monkeypatch.setenv("OTARI_WEB_SEARCH_EXTRACT", "false")
-    monkeypatch.setenv("OTARI_MCP_ALLOW_LOOPBACK", "false")
+    monkeypatch.setenv("OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS", "true")
 
     config = load_config(str(config_file))
 
@@ -219,7 +219,7 @@ def test_load_config_promotes_service_level_fields_from_otari_prefix(
     assert config.web_fetch_enabled is True
     assert config.web_search_max_results == 7
     assert config.web_search_extract is False
-    assert config.mcp_allow_loopback is False
+    assert config.web_search_allow_private_hosts is True
 
 
 def test_retrieval_proxy_trust_defaults_off(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -263,14 +263,14 @@ def test_load_config_service_level_fields_ignore_legacy_gateway_prefix(
     config_file.write_text("{}\n", encoding="utf-8")
 
     monkeypatch.delenv("OTARI_SANDBOX_URL", raising=False)
-    monkeypatch.delenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", raising=False)
+    monkeypatch.delenv("OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS", raising=False)
     monkeypatch.setenv("GATEWAY_SANDBOX_URL", "http://legacy-sandbox:9000")
-    monkeypatch.setenv("GATEWAY_MCP_ALLOW_PRIVATE_HOSTS", "true")
+    monkeypatch.setenv("GATEWAY_WEB_SEARCH_ALLOW_PRIVATE_HOSTS", "true")
 
     config = load_config(str(config_file))
 
     assert config.sandbox_url is None
-    assert config.mcp_allow_private_hosts is False
+    assert config.web_search_allow_private_hosts is False
 
 
 def test_load_config_rejects_invalid_service_level_field(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -292,12 +292,12 @@ def test_load_config_bridges_yaml_service_fields_into_env(tmp_path: Path, monkey
     # time.
     config_file = tmp_path / "gateway.yml"
     config_file.write_text(
-        "sandbox_url: http://yaml-sandbox:9000\nmcp_allow_loopback: false\nweb_search_max_results: 5\n",
+        "sandbox_url: http://yaml-sandbox:9000\nweb_search_extract: false\nweb_search_max_results: 5\n",
         encoding="utf-8",
     )
     for var in (
         "OTARI_SANDBOX_URL",
-        "OTARI_MCP_ALLOW_LOOPBACK",
+        "OTARI_WEB_SEARCH_EXTRACT",
         "OTARI_WEB_SEARCH_MAX_RESULTS",
     ):
         monkeypatch.delenv(var, raising=False)
@@ -307,7 +307,7 @@ def test_load_config_bridges_yaml_service_fields_into_env(tmp_path: Path, monkey
 
         assert config.sandbox_url == "http://yaml-sandbox:9000"
         assert otari_env("SANDBOX_URL") == "http://yaml-sandbox:9000"
-        assert otari_env("MCP_ALLOW_LOOPBACK") == "false"
+        assert otari_env("WEB_SEARCH_EXTRACT") == "false"
         assert otari_env("WEB_SEARCH_MAX_RESULTS") == "5"
 
 
@@ -379,15 +379,16 @@ def test_load_config_does_not_bridge_fields_absent_from_yaml(tmp_path: Path, mon
 @pytest.mark.asyncio
 async def test_yaml_ssrf_gates_round_trip_through_env_bridge(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # A YAML-set SSRF gate boolean must reach the url_safety gate parsers with
-    # the spelling they accept: `true` opens the private-host gates for both
-    # the MCP and web-search fetch paths.
+    # the spelling they accept: `true` opens the web-search fetch gate. The MCP
+    # keys are no longer settings, so a file that still carries one opens nothing.
     config_file = tmp_path / "gateway.yml"
     config_file.write_text(
-        "mcp_allow_private_hosts: true\nweb_search_allow_private_hosts: true\n",
+        "mcp_allow_private_hosts: true\nmcp_allow_loopback: true\nweb_search_allow_private_hosts: true\n",
         encoding="utf-8",
     )
     for var in (
         "OTARI_MCP_ALLOW_PRIVATE_HOSTS",
+        "OTARI_MCP_ALLOW_LOOPBACK",
         "OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS",
     ):
         monkeypatch.delenv(var, raising=False)
@@ -395,8 +396,11 @@ async def test_yaml_ssrf_gates_round_trip_through_env_bridge(tmp_path: Path, mon
     with mock.patch.dict(os.environ):
         load_config(str(config_file))
 
-        await validate_mcp_url("https://10.0.0.5/mcp", has_authorization_token=False)
         await validate_outbound_fetch_url("https://10.0.0.5/page")
+        with pytest.raises(UnsafeURLError, match="private"):
+            await validate_mcp_url("https://10.0.0.5/mcp", has_authorization_token=False)
+        with pytest.raises(UnsafeURLError, match="loopback"):
+            await validate_mcp_url("http://127.0.0.1:8080/mcp", has_authorization_token=False)
 
     # Outside the bridged environment the gates are closed again.
     with pytest.raises(UnsafeURLError, match="private"):

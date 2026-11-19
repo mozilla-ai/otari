@@ -426,13 +426,14 @@ describe("Segmented", () => {
 
   it("shows the focus ring on the label, since the input cannot show one", () => {
     // The input is visually hidden, so a focus ring drawn on it is invisible.
-    // `has-[:focus-visible]` moves it to the segment the user can actually see.
+    // `has-[:focus-visible]` moves it to the segment the user can actually see,
+    // and inside it, since the scrolling track clips a ring drawn outside.
     setup()
     const label = screen
       .getByRole("radio", { name: "Week" })
       .closest("label") as HTMLElement
     expect([...label.classList]).toContain(
-      "has-[:focus-visible]:otari-focus-ring",
+      "has-[:focus-visible]:otari-focus-ring-inset",
     )
   })
 

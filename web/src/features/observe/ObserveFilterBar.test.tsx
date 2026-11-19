@@ -321,6 +321,93 @@ describe("ObserveFilterBar chips", () => {
   })
 })
 
+describe("ObserveFilterBar provider", () => {
+  it("offers the window's providers by name on Requests and writes the id", async () => {
+    const user = userEvent.setup()
+    const { calls } = mockApi({
+      rows: [
+        entry({ id: "a", provider: "anthropic" }),
+        entry({ id: "b", provider: "openai" }),
+        entry({ id: "c", provider: null }),
+      ],
+    })
+    await renderBar("requests", "?page=2")
+
+    await waitFor(() =>
+      expect(reading(calls, "dimensions=provider")).toBeDefined(),
+    )
+    await pickOption(user, "Provider", "Anthropic")
+
+    await waitFor(() => expect(urlParams().get("provider")).toBe("anthropic"))
+    expect(urlParams().has("page")).toBe(false)
+  })
+
+  it("names a linked provider and clears it from its chip", async () => {
+    const user = userEvent.setup()
+    mockApi({ rows: [entry({ provider: "openai" })] })
+    await renderBar("requests", "?provider=gemini&model=gpt-4o")
+
+    expect(selectTrigger("Provider")).toHaveTextContent("Google Gemini")
+    await user.click(
+      screen.getByRole("button", { name: "Remove Provider filter" }),
+    )
+
+    await waitFor(() => expect(urlParams().has("provider")).toBe(false))
+    expect(urlParams().getAll("model")).toEqual(["gpt-4o"])
+  })
+
+  it("is cleared with the rest", async () => {
+    const user = userEvent.setup()
+    mockApi({ rows: [entry()] })
+    await renderBar("requests", "?provider=openai&status=error")
+
+    await user.click(screen.getByRole("button", { name: "Clear all" }))
+
+    await waitFor(() => expect(urlParams().has("provider")).toBe(false))
+    expect(urlParams().has("status")).toBe(false)
+  })
+
+  it("narrows the model list by the provider, and the provider list by the model", async () => {
+    const { calls } = mockApi({ rows: [entry()] })
+    await renderBar("requests", "?provider=openai&model=gpt-4o")
+
+    await waitFor(() =>
+      expect(reading(calls, "dimensions=provider")).toBeDefined(),
+    )
+    const models = reading(calls, "dimensions=model")
+    expect(models?.searchParams.get("provider")).toBe("openai")
+    expect(models?.searchParams.has("model")).toBe(false)
+    const providers = reading(calls, "dimensions=provider")
+    expect(providers?.searchParams.getAll("model")).toEqual(["gpt-4o"])
+    expect(providers?.searchParams.has("provider")).toBe(false)
+  })
+
+  it("is not offered where it cannot apply, and a linked one says so", async () => {
+    const user = userEvent.setup()
+    const { calls } = mockApi({ rows: [entry()] })
+    await renderBar("sessions", "?provider=openai")
+
+    await waitFor(() =>
+      expect(reading(calls, "dimensions=model")).toBeDefined(),
+    )
+    expect(
+      screen.queryByRole("button", {
+        name: (name) => name === "Provider" || name.endsWith(" Provider"),
+      }),
+    ).toBeNull()
+    expect(reading(calls, "dimensions=provider")).toBeUndefined()
+    expect(
+      reading(calls, "dimensions=model")?.searchParams.has("provider"),
+    ).toBe(false)
+    expect(
+      screen.getByText("OpenAI (not applied to sessions)"),
+    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Clear all" }))
+    await waitFor(() => expect(urlParams().has("provider")).toBe(false))
+  })
+})
+
 describe("ObserveFilterBar status by view", () => {
   it("applies every status to Requests", async () => {
     const { calls } = mockApi({ rows: [entry()] })

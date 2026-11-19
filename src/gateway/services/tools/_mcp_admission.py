@@ -13,7 +13,7 @@ from gateway.exceptions.tools_exceptions import McpServerConfigurationError, Mcp
 from gateway.log_config import logger
 from gateway.models.mcp import McpServerConfig
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
-from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
+from gateway.services.url_safety import UnsafeURLError, mcp_private_hosts, validate_mcp_url
 
 if TYPE_CHECKING:
     from gateway.services._tool_loop import ToolBackend
@@ -80,7 +80,11 @@ async def _validate_mcp_server_urls(
     try:
         await asyncio.gather(
             *(
-                validate_mcp_url(server.url, has_authorization_token=bool(server.authorization_token))
+                validate_mcp_url(
+                    server.url,
+                    has_authorization_token=bool(server.authorization_token),
+                    private_hosts=mcp_private_hosts(),
+                )
                 for server in mcp_servers
             )
         )
@@ -101,7 +105,9 @@ async def _safe_attached(servers: list[McpServerConfig], workspace_id: uuid.UUID
     """
 
     async def check(server: McpServerConfig) -> None:
-        validating = validate_mcp_url(server.url, has_authorization_token=bool(server.authorization_token))
+        validating = validate_mcp_url(
+            server.url, has_authorization_token=bool(server.authorization_token), private_hosts=mcp_private_hosts()
+        )
         if server.attached_budget is None:
             await validating
             return

@@ -385,7 +385,7 @@ def test_mcp_servers_dispatches_through_responses_tool_loop(
             json={
                 "model": _MODEL,
                 "input": "hi",
-                "mcp_servers": [{"name": "test", "url": "http://127.0.0.1:9999/mcp"}],
+                "mcp_servers": [{"name": "test", "url": "http://93.184.216.34/mcp"}],
             },
             headers=api_key_header,
         )
@@ -902,7 +902,7 @@ def test_stream_mcp_servers_dispatches_through_tool_loop_stream(
                 "model": _MODEL,
                 "input": "hi",
                 "stream": True,
-                "mcp_servers": [{"name": "test", "url": "http://127.0.0.1:9999/mcp"}],
+                "mcp_servers": [{"name": "test", "url": "http://93.184.216.34/mcp"}],
             },
             headers=api_key_header,
         )
@@ -947,7 +947,7 @@ def test_stream_mcp_pool_close_failure_does_not_cut_off_the_stream(
                 "model": _MODEL,
                 "input": "hi",
                 "stream": True,
-                "mcp_servers": [{"name": "test", "url": "http://127.0.0.1:9999/mcp"}],
+                "mcp_servers": [{"name": "test", "url": "http://93.184.216.34/mcp"}],
             },
             headers=api_key_header,
         )

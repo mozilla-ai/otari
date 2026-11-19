@@ -7,7 +7,9 @@ with S256 PKCE (RFC 7636) and the resource indicator (RFC 8707), the code exchan
 
 Nothing here reads or writes a row. Every URL is the remote server's or its authorization server's
 word, so each one passes :func:`gateway.services.url_safety.validate_mcp_url` before anything is
-sent to it, as a credential-carrying URL: https only. Redirects are never followed and a response
+sent to it, as a credential-carrying URL: https only, public addresses only. The request is then
+dialed through the owned-endpoint transport, which connects to the address it checked, so a name
+re-pointed after the check reaches nothing internal. Redirects are never followed and a response
 is read up to a fixed size. Nothing a remote party sent is logged or carried in an error message
 beyond a status and a short, charset-checked OAuth error code.
 """
@@ -32,7 +34,8 @@ import httpx
 from mcp.types import LATEST_PROTOCOL_VERSION
 
 from gateway.log_config import logger
-from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
+from gateway.services.providers import OwnedEndpointTransport
+from gateway.services.url_safety import UnsafeURLError, mcp_private_hosts, validate_mcp_url
 
 _DISCOVERY_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
 _TOKEN_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
@@ -161,13 +164,18 @@ class McpOAuthTokens:
 
 def _http_client(timeout: httpx.Timeout) -> httpx.AsyncClient:
     """The client every request here goes out on; a test swaps this for one on a mock transport."""
-    return httpx.AsyncClient(timeout=timeout, follow_redirects=False, trust_env=False)
+    return httpx.AsyncClient(
+        transport=OwnedEndpointTransport(private_hosts=mcp_private_hosts()),
+        timeout=timeout,
+        follow_redirects=False,
+        trust_env=False,
+    )
 
 
 async def _checked(url: str, label: str) -> str:
     """``url``, once it has passed the MCP URL safety check as a URL a credential travels to."""
     try:
-        await validate_mcp_url(url, has_authorization_token=True, label=label)
+        await validate_mcp_url(url, has_authorization_token=True, label=label, private_hosts=mcp_private_hosts())
     except UnsafeURLError as exc:
         logger.warning("MCP OAuth URL refused label=%s reason=%s", label, exc)
         raise McpOAuthDiscoveryError(f"The {label} URL failed its safety check") from None

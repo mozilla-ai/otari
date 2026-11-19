@@ -466,13 +466,15 @@ export function useRefusalsSince(
 }
 
 /**
- * Each workspace's spend since `start`, by model. The summary has no workspace
- * breakdown, so this asks once per workspace: a handful, read in parallel.
+ * Each workspace's spend since `start`, by model, up to `end` where the window
+ * has one. The summary has no workspace breakdown, so this asks once per
+ * workspace: a handful, read in parallel.
  */
 export function useWorkspaceSpendSummaries(
   workspaceIds: readonly string[],
   start: string,
   isEnabled: boolean,
+  end = "",
 ) {
   const scope = useUsageScope("organization")
   return useQueries({
@@ -483,6 +485,7 @@ export function useWorkspaceSpendSummaries(
         scope.base,
         workspaceId,
         start,
+        end,
         "model",
       ],
       queryFn: () =>
@@ -490,6 +493,7 @@ export function useWorkspaceSpendSummaries(
           `${scope.base}/summary?${new URLSearchParams({
             workspace_id: workspaceId,
             start_date: start,
+            ...(end ? { end_date: end } : {}),
             bucket: "day",
             dimensions: "model",
           })}`,
@@ -501,9 +505,10 @@ export function useWorkspaceSpendSummaries(
 }
 
 /**
- * Requests the gateway refused with a 403 since `start`, newest first, for the
- * people, keys or workspace named, or the whole organization when none is.
- * The usage log does not say which limit refused a request.
+ * Requests the gateway refused with a 403 since `start` (up to `end`, where
+ * one is given), newest first, for the people, keys or workspace named, or the
+ * whole organization when none is. The usage log does not say which limit
+ * refused a request.
  */
 export function useRefusedUsage(
   subject: {
@@ -514,13 +519,15 @@ export function useRefusedUsage(
   start: string,
   limit: number,
   isEnabled: boolean,
+  end = "",
 ) {
   const scope = useUsageScope("organization")
   return useQuery({
-    queryKey: [USAGE, "refused", scope.base, subject, start, limit],
+    queryKey: [USAGE, "refused", scope.base, subject, start, end, limit],
     queryFn: () => {
       const params = new URLSearchParams({
         start_date: start,
+        ...(end ? { end_date: end } : {}),
         status_code: "403",
         limit: String(limit),
       })
@@ -535,15 +542,20 @@ export function useRefusedUsage(
 }
 
 /**
- * One spend-by-model summary since `start` per value of `param` (a person or a
- * key), in parallel. A null value asks nothing, so a caller passes only the
- * rows it shows and can ask about.
+ * One spend-by-model summary since `start` (up to `end`, where the window has
+ * one) per value of `param` (a person, a key or a provider), in parallel. A
+ * null value asks nothing, so a caller passes only the rows it shows and can
+ * ask about.
  */
 export function useModelSummariesBy(
-  param: "user_id" | "api_key_id",
+  param: "user_id" | "api_key_id" | "provider",
   values: readonly (string | null)[],
   start: string,
-  { workspaceId, userId }: { workspaceId: string; userId?: string },
+  {
+    workspaceId,
+    userId,
+    end = "",
+  }: { workspaceId: string; userId?: string; end?: string },
 ) {
   const scope = useUsageScope("organization")
   return useQueries({
@@ -555,6 +567,7 @@ export function useModelSummariesBy(
         param,
         value,
         start,
+        end,
         workspaceId,
         userId ?? null,
       ],
@@ -562,6 +575,7 @@ export function useModelSummariesBy(
         apiFetch<UsageSummary>(
           `${scope.base}/summary?${new URLSearchParams({
             start_date: start,
+            ...(end ? { end_date: end } : {}),
             bucket: "day",
             dimensions: "model",
             [param]: value ?? "",
