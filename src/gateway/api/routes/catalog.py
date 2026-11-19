@@ -181,7 +181,9 @@ class OfferingSpeedInfo(BaseModel):
     ttft_ms_p50: int | None = Field(
         description="Median milliseconds to the first token. Null on fewer than 20 streamed requests."
     )
-    ttft_ms_p95: int | None = Field(description="Milliseconds to the first token that 95% of requests beat.")
+    ttft_ms_p95: int | None = Field(
+        description="The 95th percentile of milliseconds to the first token, rounded: the slow tail."
+    )
     throughput_samples: int = Field(
         description="Requests the throughput is read from: those with 20 or more output tokens."
     )
@@ -192,7 +194,7 @@ class OfferingSpeedInfo(BaseModel):
         )
     )
     output_tokens_per_second_p95: float | None = Field(
-        description="Output tokens per second that 95% of requests reached or beat: the slow tail."
+        description="The 5th percentile of output tokens per second: the slow tail."
     )
 
     @classmethod

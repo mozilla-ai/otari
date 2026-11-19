@@ -239,7 +239,7 @@ class UsageEntry(BaseModel):
     # Milliseconds to the first streamed chunk; null on a request that did not stream.
     ttft_ms: int | None
     # Output tokens over the whole request, as the catalog's throughput counts them;
-    # null on a response too short to measure.
+    # null on a response too short to measure or a stream cut short, whose count may be estimated.
     output_tokens_per_second: float | None
     source: str
     source_label: str | None
@@ -305,7 +305,9 @@ class UsageEntry(BaseModel):
             latency_ms=log.latency_ms,
             provider_latency_ms=log.provider_latency_ms,
             ttft_ms=log.ttft_ms,
-            output_tokens_per_second=output_tokens_per_second(log.completion_tokens, log.latency_ms),
+            output_tokens_per_second=(
+                None if log.stream_cut_by else output_tokens_per_second(log.completion_tokens, log.latency_ms)
+            ),
             policy_name=log.policy_name,
             selection_reason=log.selection_reason,
             attempt_position=log.attempt_position,

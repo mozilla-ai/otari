@@ -232,8 +232,13 @@ def test_the_shapes_reach_the_published_spec() -> None:
     assert "TokenChargeLine" in refs and "UnitChargeLine" in refs and "ToolChargeLine" in refs
 
 
-@pytest.mark.parametrize(("completion_tokens", "expected"), [(300, 150.0), (5, None)])
-def test_an_entry_carries_its_first_token_and_its_rate(completion_tokens: int, expected: float | None) -> None:
+@pytest.mark.parametrize(
+    ("completion_tokens", "stream_cut_by", "expected"),
+    [(300, None, 150.0), (5, None, None), (300, "provider", None), (300, "client", None)],
+)
+def test_an_entry_carries_its_first_token_and_its_rate(
+    completion_tokens: int, stream_cut_by: str | None, expected: float | None
+) -> None:
     from datetime import UTC, datetime
 
     from gateway.models.usage import UsageLog
@@ -249,6 +254,7 @@ def test_an_entry_carries_its_first_token_and_its_rate(completion_tokens: int, e
         completion_tokens=completion_tokens,
         latency_ms=2000,
         ttft_ms=400,
+        stream_cut_by=stream_cut_by,
     )
 
     entry = UsageEntry.from_model(log)

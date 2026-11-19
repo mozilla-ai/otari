@@ -533,13 +533,15 @@ class UsageLogRepository(BaseRepository[UsageLog, Never, Never]):
         """
         if not workspace_ids or not offerings:
             return []
-        matches = [
-            (UsageLog.provider == instance) & (UsageLog.model == model_id) | (UsageLog.model == selector)
+        matches = {
+            selector: (UsageLog.provider == instance) & (UsageLog.model == model_id) | (UsageLog.model == selector)
             for selector, instance, model_id in offerings
-        ]
+        }
+        # Ranked per offering, so both spellings of one share its cap.
+        offering = case(*((match, selector) for selector, match in matches.items()))
         rank = (
             func.row_number()
-            .over(partition_by=(UsageLog.provider, UsageLog.model), order_by=UsageLog.timestamp.desc())
+            .over(partition_by=offering, order_by=(UsageLog.timestamp.desc(), UsageLog.id.desc()))
             .label("rank")
         )
         ranked = (
@@ -559,8 +561,11 @@ class UsageLogRepository(BaseRepository[UsageLog, Never, Never]):
                 UsageLog.latency_ms.is_not(None),
                 or_(UsageLog.attempt_position.is_(None), UsageLog.attempt_position == 1),
                 UsageLog.billing_meters[TOOL_METER_NAMESPACE].as_string().is_(None),
-                or_(UsageLog.ttft_ms.is_not(None), UsageLog.completion_tokens >= MIN_THROUGHPUT_TOKENS),
-                or_(*matches),
+                or_(
+                    UsageLog.ttft_ms.is_not(None),
+                    (UsageLog.completion_tokens >= MIN_THROUGHPUT_TOKENS) & (UsageLog.latency_ms > 0),
+                ),
+                or_(*matches.values()),
             )
             .subquery()
         )

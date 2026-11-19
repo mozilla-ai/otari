@@ -17525,7 +17525,7 @@
                 "type": "null"
               }
             ],
-            "description": "Output tokens per second that 95% of requests reached or beat: the slow tail.",
+            "description": "The 5th percentile of output tokens per second: the slow tail.",
             "title": "Output Tokens Per Second P95"
           },
           "throughput_samples": {
@@ -17554,7 +17554,7 @@
                 "type": "null"
               }
             ],
-            "description": "Milliseconds to the first token that 95% of requests beat.",
+            "description": "The 95th percentile of milliseconds to the first token, rounded: the slow tail.",
             "title": "Ttft Ms P95"
           },
           "ttft_samples": {

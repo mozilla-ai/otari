@@ -17594,7 +17594,7 @@ export interface components {
             output_tokens_per_second_p50: number | null;
             /**
              * Output Tokens Per Second P95
-             * @description Output tokens per second that 95% of requests reached or beat: the slow tail.
+             * @description The 5th percentile of output tokens per second: the slow tail.
              */
             output_tokens_per_second_p95: number | null;
             /**
@@ -17609,7 +17609,7 @@ export interface components {
             ttft_ms_p50: number | null;
             /**
              * Ttft Ms P95
-             * @description Milliseconds to the first token that 95% of requests beat.
+             * @description The 95th percentile of milliseconds to the first token, rounded: the slow tail.
              */
             ttft_ms_p95: number | null;
             /**

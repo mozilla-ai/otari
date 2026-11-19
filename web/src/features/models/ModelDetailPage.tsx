@@ -563,15 +563,20 @@ export function ModelDetailView({
         .filter((query): query is string => !!query),
     ),
   ]
+  const withUsage = !publicView && hasUsage(model.offerings)
+  const withSpeed = !publicView && hasSpeed(model.offerings)
+  // A refetch can drop the speed columns while one of them is the sort.
+  const activeSort =
+    !withSpeed && (sort.column === "latency" || sort.column === "throughput")
+      ? ({ column: "input", direction: "asc" } as const)
+      : sort
   const rows: OfferingRow[] = model.offerings
     .filter(
       (offering) =>
         quantization === "all" || offering.quantization === quantization,
     )
     .map((offering) => offeringRow(offering, model.type))
-    .sort(compareOfferings(sort.column, sort.direction, percentile))
-  const withUsage = !publicView && hasUsage(model.offerings)
-  const withSpeed = !publicView && hasSpeed(model.offerings)
+    .sort(compareOfferings(activeSort.column, activeSort.direction, percentile))
   const unpriced = model.offerings.filter(
     (model) => model.pricing === null,
   ).length
@@ -587,8 +592,8 @@ export function ModelDetailView({
       : list.map((model) => MODALITY_LABELS[model] ?? model).join(", ")
   const title = model.vendor ? `${model.vendor}: ${model.name}` : model.name
   const sortDescriptor: SortDescriptor = {
-    column: sort.column,
-    direction: sort.direction === "asc" ? "ascending" : "descending",
+    column: activeSort.column,
+    direction: activeSort.direction === "asc" ? "ascending" : "descending",
   }
 
   return (

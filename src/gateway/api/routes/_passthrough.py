@@ -1048,7 +1048,7 @@ async def run_passthrough(
             fallback=False,
             latency_ms=usage_log.latency_ms,
             ttft_ms=None,
-            completion_tokens=None,
+            completion_tokens=usage_log.completion_tokens,
         )
         await log_writer.put(usage_log)
         # The measured total, so a token ceiling counts this endpoint's traffic.
