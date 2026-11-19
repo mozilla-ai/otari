@@ -5102,6 +5102,7 @@ async def record_usage(
             fallback=attribution is not None and attribution.position > 1,
             latency_ms=latency_ms,
             ttft_ms=ttft_ms,
+            completion_tokens=usage_log.completion_tokens,
         )
 
     await log_writer.put(usage_log)
