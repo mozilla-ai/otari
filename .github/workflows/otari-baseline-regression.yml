@@ -14,6 +14,12 @@ name: Otari Baseline Regression
 #
 # A branch point from before the script existed cannot check anything, and the
 # job says so rather than passing silently.
+#
+# NOTE: The gate was called check_baseline_ratchet.py before it was renamed, so
+# the branch point is read under either name. Without that, the renaming pull
+# request would skip the comparison for its whole life, and a later commit on it
+# could raise a baseline unchecked. The second name is removable once no branch
+# point reaches back past the rename.
 
 on:
   pull_request:
@@ -55,12 +61,20 @@ jobs:
           set -euo pipefail
           branch_point="$(git merge-base "$BASE_SHA" HEAD)"
           echo "Branch point: $branch_point"
-          if ! git cat-file -e "$branch_point:scripts/check_no_baseline_regression.py" 2> /dev/null; then
-            echo "::notice title=Baseline regression check skipped::The branch point has no scripts/check_no_baseline_regression.py."
+          gate=""
+          for candidate in scripts/check_no_baseline_regression.py scripts/check_baseline_ratchet.py; do
+            if git cat-file -e "$branch_point:$candidate" 2> /dev/null; then
+              gate="$candidate"
+              break
+            fi
+          done
+          if [ -z "$gate" ]; then
+            echo "::notice title=Baseline regression check skipped::The branch point carries no baseline regression check."
             exit 0
           fi
-          git show "$branch_point:scripts/check_no_baseline_regression.py" > "$RUNNER_TEMP/check_no_baseline_regression.py"
+          echo "Gate at the branch point: $gate"
+          git show "$branch_point:$gate" > "$RUNNER_TEMP/gate.py"
           git show "$branch_point:scripts/check_architecture.py" > "$RUNNER_TEMP/check_architecture.py"
-          python3 "$RUNNER_TEMP/check_no_baseline_regression.py" \
+          python3 "$RUNNER_TEMP/gate.py" \
             --base "$RUNNER_TEMP/check_architecture.py" \
             --head scripts/check_architecture.py
