@@ -523,7 +523,8 @@ class UsageLogRepository(BaseRepository[UsageLog, Never, Never]):
         """The latest timings these workspaces' requests got from each offering, at most ``per_offering`` each.
 
         ``offerings`` holds ``(selector, instance, model id)``: a row matches on the
-        instance and the model id, or carries the whole selector in ``model``.
+        instance and the model id, or, written before ``provider`` was recorded,
+        carries the whole selector in ``model``.
 
         Only a request a routing plan's first candidate served counts, because its
         timings start when the request arrived and a fallback's include the
@@ -534,7 +535,8 @@ class UsageLogRepository(BaseRepository[UsageLog, Never, Never]):
         if not workspace_ids or not offerings:
             return []
         matches = {
-            selector: (UsageLog.provider == instance) & (UsageLog.model == model_id) | (UsageLog.model == selector)
+            selector: (UsageLog.provider == instance) & (UsageLog.model == model_id)
+            | UsageLog.provider.is_(None) & (UsageLog.model == selector)
             for selector, instance, model_id in offerings
         }
         # Ranked per offering, so both spellings of one share its cap.

@@ -70,3 +70,10 @@ def test_samples_are_matched_to_an_offering_by_either_spelling() -> None:
 
     assert set(speed) == {"nebius:glm"}
     assert speed["nebius:glm"].ttft_samples == MIN_SPEED_SAMPLES
+
+
+def test_a_named_instance_is_not_read_as_the_offering_its_model_spells() -> None:
+    # ``home_lab:nebius:glm`` is recorded as provider ``home_lab``, model ``nebius:glm``.
+    samples = [_sample(provider="home_lab", model="nebius:glm") for _ in range(MIN_SPEED_SAMPLES)]
+
+    assert speed_by_selector(samples, [("nebius:glm", "nebius", "glm")]) == {}

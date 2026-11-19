@@ -76,7 +76,8 @@ def speed_by_selector(
     grouped: dict[str, list[SpeedSample]] = {}
     for sample in samples:
         selector = by_pair.get((sample.provider or "", sample.model))
-        if selector is None and sample.model in selectors:
+        # The whole selector in ``model`` only on a row from before ``provider`` was recorded.
+        if selector is None and not sample.provider and sample.model in selectors:
             selector = sample.model
         if selector is not None:
             grouped.setdefault(selector, []).append(sample)

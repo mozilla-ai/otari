@@ -43,6 +43,8 @@ async def test_both_spellings_of_an_offering_share_its_cap_and_unmeasurable_rows
             served(2, provider=None, model="nebius:glm"),
             served(3),
             served(4, provider=None, model="nebius:glm"),
+            # A named instance whose model happens to spell the selector.
+            served(0, provider="home_lab", model="nebius:glm"),
         ]
     )
     await async_db.commit()

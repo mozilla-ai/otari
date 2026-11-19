@@ -493,8 +493,10 @@ tiers.
 
 For the same caller, each offering carries how fast it answered the
 organization over the last seven days, in `speed_7d`: the time to first token
-and the output tokens per second, each at the median (p50) and the 95th
-percentile, and how many requests each was read from. Throughput counts the
+and the output tokens per second, each at the median (p50) and at p95, and how
+many requests each was read from. p95 is the slow tail of each: the 95th
+percentile of the time to first token, and the 5th percentile of the rate, the
+speed 95% of requests reached. Throughput counts the
 whole request, time to first token included, as OpenRouter measures it, so the
 two compare. Only a request a routing policy's first candidate served counts,
 because a fallback's timings include the attempts before it, and so does only a
