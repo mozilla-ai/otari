@@ -12,6 +12,7 @@ question the test can actually ask.
 
 from __future__ import annotations
 
+import ipaddress
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -30,7 +31,17 @@ from gateway.services.tenancy import organization_guardrail_runner as runner
 pytestmark = pytest.mark.asyncio
 
 # A public IP literal, so nothing here depends on a resolver.
-VENDOR_ENDPOINT = "https://93.184.216.34/v2"
+VENDOR_ENDPOINT = "https://api.lakera.ai/v2/guard"
+
+
+@pytest.fixture(autouse=True)
+def _vendor_hosts_resolve_publicly(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The definitions here name Lakera's own host, which a build checks again; no test here should need DNS."""
+
+    async def public(_host: str) -> list[object]:
+        return [ipaddress.ip_address("93.184.216.34")]
+
+    monkeypatch.setattr("gateway.services.url_safety._resolve_all_async", public)
 
 
 @pytest.fixture(autouse=True)
@@ -70,7 +81,9 @@ async def _definition(
         organization_id=organization.id,
         name=name,
         guardrail_name="lakera_guard",
-        create_kwargs={"endpoint": endpoint},
+        # The key in the plain column, which a build reads the same way: a definition naming its
+        # own endpoint has to carry its own key.
+        create_kwargs={"endpoint": endpoint, "api_key": "lakera-key"},
         encrypted_create_secrets=None,
         enabled=enabled,
         created_at=datetime.now(UTC),

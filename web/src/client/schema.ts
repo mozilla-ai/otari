@@ -14427,11 +14427,11 @@ export interface components {
          *
          *     URL safety: when ``url`` is supplied it is validated by
          *     :func:`gateway.services.guardrails.check_guardrail_urls` (not here at parse
-         *     time — the check does a DNS lookup that must be awaited) with the same
-         *     SSRF guard used for MCP server URLs (loopback allowed by default for
-         *     same-host sidecars; gated by ``OTARI_MCP_ALLOW_LOOPBACK`` /
-         *     ``OTARI_MCP_ALLOW_PRIVATE_HOSTS``). Most deployments omit ``url`` and rely
-         *     on the operator-set ``OTARI_GUARDRAILS_URL`` instead.
+         *     time, since the check does a DNS lookup that must be awaited) with the same
+         *     SSRF guard used for MCP server URLs: public addresses only, connected at the
+         *     address that was checked, with no redirect followed. Most deployments omit
+         *     ``url`` and rely on the operator-set ``OTARI_GUARDRAILS_URL`` instead, which
+         *     may be on a private address.
          */
         GuardrailConfig: {
             /** Credential */
@@ -18681,8 +18681,13 @@ export interface components {
          */
         OrganizationGuardrailDefinitionPublic: {
             /**
+             * Build Refusal
+             * @description When build_state is failed because the definition breaks one of the gateway's own rules (an address off the vendor's hosts or not public, or an endpoint without its own credential), which rule and which argument. Null otherwise, including when the vendor's library failed, whose reason stays in the gateway's log because it can repeat what was sent
+             */
+            build_refusal?: string | null;
+            /**
              * Build State
-             * @description Whether the worker that answered this request holds a guardrail built from this version of the definition. built means it does and the check runs; failed means that worker tried these exact arguments and could not build them, so every mandate pointing here is unevaluable; pending means it holds nothing for this version yet, which is the answer right after a write and on any worker that has not caught up within the refresh interval; disabled means the definition is switched off and nothing is built on purpose. It answers for one worker, so two reads can disagree while a write propagates. Why a build failed is never reported here: the reason is in the gateway's log
+             * @description Whether the worker that answered this request holds a guardrail built from this version of the definition. built means it does and the check runs; failed means that worker tried these exact arguments and could not build them, so every mandate pointing here is unevaluable; pending means it holds nothing for this version yet, which is the answer right after a write and on any worker that has not caught up within the refresh interval; disabled means the definition is switched off and nothing is built on purpose. It answers for one worker, so two reads can disagree while a write propagates. Why a build failed is not reported here: see build_refusal for a rule this definition breaks, and the gateway's log for anything else
              * @enum {string}
              */
             build_state: "built" | "failed" | "pending" | "disabled";

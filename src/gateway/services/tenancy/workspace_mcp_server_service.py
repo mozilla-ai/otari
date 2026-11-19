@@ -152,7 +152,7 @@ from gateway.services.tools import (
     WorkspaceMcpServerHealth,
     mcp_server_contacts,
 )
-from gateway.services.url_safety import UnsafeURLError, redact_url_secrets, validate_mcp_url
+from gateway.services.url_safety import UnsafeURLError, mcp_private_hosts, redact_url_secrets, validate_mcp_url
 
 MAX_ALLOWED_TOOLS = WorkspaceMcpServerHealth.MAX_ALLOWED_TOOLS
 MAX_TOOL_NAME_LENGTH = WorkspaceMcpServerHealth.MAX_TOOL_NAME_LENGTH
@@ -914,7 +914,7 @@ async def _validate_url(url: str, *, has_token: bool) -> None:
     under a URL that was safe when it was stored.
     """
     try:
-        await validate_mcp_url(url, has_authorization_token=has_token)
+        await validate_mcp_url(url, has_authorization_token=has_token, private_hosts=mcp_private_hosts())
     except UnsafeURLError as exc:
         raise WorkspaceMcpServerUnsafeUrlError(str(exc)) from exc
 
@@ -983,7 +983,7 @@ async def _check(server: WorkspaceMcpServer, token: str | None | _NoCredential) 
     if isinstance(token, _NoCredential):
         return ServerCheck(tool_names=[], failure=CheckFailure.CREDENTIALS_UNAVAILABLE)
     try:
-        await validate_mcp_url(server.url, has_authorization_token=token is not None)
+        await validate_mcp_url(server.url, has_authorization_token=token is not None, private_hosts=mcp_private_hosts())
     except UnsafeURLError:
         return ServerCheck(tool_names=[], failure=CheckFailure.UNSAFE_URL)
     return await _connect(server.url, token, server_id=server.id)

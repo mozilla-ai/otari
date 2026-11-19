@@ -24,6 +24,7 @@ names nothing, and several search instances with no default between them.
 """
 
 import copy
+import ipaddress
 import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -49,6 +50,63 @@ WEB_SEARCH_PROVIDERS = ("tavily", "brave")
 # C8): ``web_search_url`` with no ``api_base``, ``web_search_engines`` with no
 # ``engines``.
 SEARCH_PROVIDERS_REQUIRING_API_BASE = ("searxng",)
+
+# What ``mcp_private_hosts`` holds once parsed: each listed host, canonical, with
+# the one port it is limited to or ``None`` for any port.
+PrivateHostEntry = tuple[str, int | None]
+
+
+def canonical_host(host: str) -> str:
+    """``host`` in the form an allowlist entry and a URL are compared in: lowercased, no trailing dot, IP canonical."""
+    host = host.strip().rstrip(".").lower()
+    try:
+        return str(ipaddress.ip_address(host))
+    except ValueError:
+        return host
+
+
+def parse_mcp_private_hosts(value: str | None) -> frozenset[PrivateHostEntry]:
+    """The entries of ``mcp_private_hosts``: comma-separated exact hosts, each with an optional ``:port``.
+
+    A host is a name or an IP literal, an IPv6 one in brackets when a port follows.
+    Wildcards, CIDR ranges and URLs are refused rather than read as something
+    narrower, since an operator who writes one means a range this setting does not offer.
+
+    Raises:
+        ValueError: an entry is not an exact host.
+    """
+    entries: set[PrivateHostEntry] = set()
+    for raw in (value or "").split(","):
+        entry = raw.strip()
+        if not entry:
+            continue
+        if any(marker in entry for marker in ("*", "/", "@", " ")) or entry.startswith("."):
+            raise ValueError(f"mcp_private_hosts entry {entry!r} is not an exact host: no wildcards, ranges or URLs")
+        host, port = _split_host_and_port(entry)
+        if not host:
+            raise ValueError(f"mcp_private_hosts entry {entry!r} names no host")
+        entries.add((canonical_host(host), port))
+    return frozenset(entries)
+
+
+def _split_host_and_port(entry: str) -> tuple[str, int | None]:
+    if entry.startswith("["):
+        host, _, rest = entry[1:].partition("]")
+        if rest and not rest.startswith(":"):
+            raise ValueError(f"mcp_private_hosts entry {entry!r} is not an exact host")
+        return host, _port(entry, rest[1:]) if rest else None
+    if entry.count(":") > 1:
+        # An IPv6 literal with no port; one with a port has to be bracketed.
+        return entry, None
+    host, colon, port = entry.partition(":")
+    return host, _port(entry, port) if colon else None
+
+
+def _port(entry: str, port: str) -> int:
+    if not port.isdigit() or not 1 <= int(port) <= 65535:
+        raise ValueError(f"mcp_private_hosts entry {entry!r} has a port that is not a number from 1 to 65535")
+    return int(port)
+
 
 # The fetch instance that always exists: the built-in fetcher, on any-fetch's
 # ``builtin`` provider, which no declared instance may use.
@@ -433,6 +491,16 @@ class ToolSettings(BaseModel):
             "admin turns on."
         ),
     )
+    mcp_private_hosts: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
+        default=None,
+        description=(
+            "Exact hosts an MCP server URL may name although they resolve to a loopback or private address, "
+            "comma-separated, each a name or an IP literal with an optional :port (an IPv6 literal in brackets "
+            "when a port follows). No wildcards or ranges. Every tenant who can name an MCP server can reach a "
+            "listed host, so this is for a single-tenant or trusted deployment. Link-local and metadata "
+            "addresses are refused even for a listed host. Empty by default. Not settable at runtime."
+        ),
+    )
     web_search_allow_private_hosts: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
         default=False,
         description=(
@@ -607,6 +675,16 @@ class ToolSettings(BaseModel):
     def _null_web_search_workspace_default_is_on(cls, value: object) -> object:
         # An earlier release accepted null here, so a config still carrying it keeps the default.
         return True if value is None else value
+
+    @field_validator("mcp_private_hosts", mode="before")
+    @classmethod
+    def _validate_mcp_private_hosts(cls, value: object) -> object:
+        # A config file may write a list; the environment writes the comma-separated form it becomes.
+        if isinstance(value, list | tuple):
+            value = ",".join(str(item) for item in value)
+        if isinstance(value, str):
+            parse_mcp_private_hosts(value)
+        return value
 
     @field_validator("web_search_provider")
     @classmethod

@@ -35,6 +35,9 @@ from gateway.services.tenancy.organization_service import OrganizationService
 
 from .conftest import build_test_client
 
+pytestmark = pytest.mark.usefixtures("public_dns")
+
+
 _MASTER = {API_KEY_HEADER: "Bearer test-master-key"}
 _OVERRIDE = f"{API_ROOT}/model-overrides/cairn:cairn-glm"
 

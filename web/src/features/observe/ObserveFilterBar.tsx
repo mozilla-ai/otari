@@ -11,6 +11,7 @@ import { STATUS_OPTIONS } from "@/features/activity/activityModel"
 import { useMemberAttributionLabels } from "@/features/organization/attribution"
 import { userDisplay } from "@/features/users/userDisplay"
 import { useUsageSummary } from "@/shared/api/usage"
+import { providerDisplayName } from "@/shared/helpers/providers"
 import { findPreset, localMidnightIso } from "@/shared/helpers/timeRange"
 import { useUrlState } from "@/shared/helpers/urlState"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
@@ -25,6 +26,7 @@ import { useObserveScope } from "./useObserveScope"
 // The pickers read these two summaries. by_user and by_api_key carry each
 // entity's display name, so naming an option costs nothing beyond the breakdown.
 const MODEL_BREAKDOWN: SummaryDimension[] = ["model"]
+const PROVIDER_BREAKDOWN: SummaryDimension[] = ["provider"]
 const ENTITY_BREAKDOWNS: SummaryDimension[] = ["user", "api_key"]
 
 const URL_DEFAULTS = {
@@ -36,6 +38,7 @@ const URL_DEFAULTS = {
   model: "",
   user_id: "",
   api_key_id: "",
+  provider: "",
   page: "0",
 } as const
 
@@ -76,6 +79,12 @@ export function ObserveFilterBar({
   const { scope, userIds: users, isResolved, clearMine } = useObserveScope()
   const isMine = scope === "mine"
   const apiKeys = url.getAll("api_key_id")
+  // Only the request log can filter on a provider, so only it offers one, and
+  // a tab switch leaves it behind (it is not a shared key). A link that names
+  // one elsewhere still shows it, marked as not applied.
+  const offersProvider = view === "requests"
+  const provider = url.get("provider")
+  const appliedProvider = offersProvider ? provider : ""
 
   const range = url.get("range")
   const startParam = url.get("start_date")
@@ -138,8 +147,18 @@ export function ObserveFilterBar({
       ...base,
       user_id: users.length > 0 ? users : undefined,
       api_key_id: apiKeys.length > 0 ? apiKeys : undefined,
+      provider: appliedProvider || undefined,
     }),
-    [base, users, apiKeys],
+    [base, users, apiKeys, appliedProvider],
+  )
+  const providerFilters: UsageFilters = useMemo(
+    () => ({
+      ...base,
+      model: models.length > 0 ? models : undefined,
+      user_id: users.length > 0 ? users : undefined,
+      api_key_id: apiKeys.length > 0 ? apiKeys : undefined,
+    }),
+    [base, models, users, apiKeys],
   )
   // Under Mine the key list narrows to the caller's own; otherwise the user
   // picker's own filter stays out so its list is complete.
@@ -148,8 +167,9 @@ export function ObserveFilterBar({
       ...base,
       model: models.length > 0 ? models : undefined,
       user_id: isMine && users.length > 0 ? users : undefined,
+      provider: appliedProvider || undefined,
     }),
-    [base, models, isMine, users],
+    [base, models, isMine, users, appliedProvider],
   )
   const modelSummary = useUsageSummary(
     modelFilters,
@@ -168,6 +188,23 @@ export function ObserveFilterBar({
     value: group.key as string,
     label: group.key as string,
   }))
+  const providerSummary = useUsageSummary(
+    providerFilters,
+    "day",
+    PROVIDER_BREAKDOWN,
+    usageAvailable && isResolved && offersProvider,
+  )
+  const providerIds = realGroups(providerSummary.data?.by_provider).map(
+    (group) => group.key as string,
+  )
+  // A provider a link names keeps its own option, by name, even when the
+  // window holds none of its requests.
+  const providerOptions = [
+    { value: "", label: "Any provider" },
+    ...(provider && !providerIds.includes(provider) ? [provider] : [])
+      .concat(providerIds)
+      .map((id) => ({ value: id, label: providerDisplayName(id) })),
+  ]
   // Name first, id in parentheses: the id is what the filter submits, and two
   // people can share a name.
   const userOptions = realGroups(entitySummary.data?.by_user).map((group) => {
@@ -229,6 +266,18 @@ export function ObserveFilterBar({
     ...valueChips("key", "API key", "api_key_id", apiKeys, (value) =>
       labelFrom(keyOptions, value),
     ),
+    ...(provider
+      ? [
+          {
+            key: "provider",
+            label: "Provider",
+            value: offersProvider
+              ? providerDisplayName(provider)
+              : `${providerDisplayName(provider)} (not applied to ${view})`,
+            onClear: () => patch({ provider: "" }),
+          },
+        ]
+      : []),
   ]
 
   return (
@@ -243,6 +292,7 @@ export function ObserveFilterBar({
             model: [],
             user_id: [],
             api_key_id: [],
+            provider: "",
           })
         }
       >
@@ -290,6 +340,14 @@ export function ObserveFilterBar({
           placeholder="Any model"
           options={modelOptions}
         />
+        {offersProvider ? (
+          <FilterSelect
+            label="Provider"
+            value={provider}
+            onChange={(value) => patch({ provider: value })}
+            options={providerOptions}
+          />
+        ) : null}
       </FilterChips>
     </div>
   )

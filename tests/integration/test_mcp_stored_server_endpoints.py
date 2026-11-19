@@ -12,6 +12,7 @@ and the suite does not need egress.
 
 from __future__ import annotations
 
+import ipaddress
 import uuid
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
@@ -127,12 +128,14 @@ def _store_server(
     token: str | None = "ghp_token",
     enabled: bool = True,
     allowed_tools: list[str] | None = None,
+    organizations: bool = False,
 ) -> WorkspaceMcpServer:
+    """A server ``workspace_id`` reaches: its own, or with ``organizations`` its organization's."""
     workspace = test_db.get(Workspace, workspace_id)
     assert workspace is not None
     row = WorkspaceMcpServer(
         organization_id=workspace.organization_id,
-        workspace_id=workspace_id,
+        workspace_id=None if organizations else workspace_id,
         name="github",
         url=url,
         encrypted_token=encrypt_secret(token) if token else None,
@@ -360,6 +363,95 @@ def test_an_unblocked_user_is_unaffected(
     response = client.post(f"{API_ROOT}/mcp/execute", headers=api_key_header, json=_execute_body(row))
 
     assert response.status_code == 200, response.text
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1:8000/mcp",
+        "http://127.1:8000/mcp",
+        "http://0177.0.0.1:8000/mcp",
+        "http://[::1]:8000/mcp",
+        "https://10.0.0.5/mcp",
+    ],
+)
+def test_a_stored_server_on_an_internal_address_is_not_called(
+    client: TestClient,
+    test_db: Session,
+    api_key_obj: dict[str, Any],
+    api_key_header: dict[str, str],
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+    url: str,
+) -> None:
+    """A row written before loopback was refused still reaches nothing: execution re-checks the URL."""
+    monkeypatch.setenv("OTARI_MCP_ALLOW_LOOPBACK", "true")
+    monkeypatch.setenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", "true")
+    row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]), url=url, token=None)
+
+    response = client.post(
+        f"{API_ROOT}/mcp/execute",
+        headers=api_key_header,
+        json=_execute_body(row, server_revision=_revision(row, token=None)),
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["code"] == "unsafe_mcp_url"
+    assert response.json()["execution_state"] == "not_started"
+    assert session.calls == []
+
+
+def test_an_organization_server_is_executed_from_a_workspace_that_reaches_it(
+    client: TestClient,
+    test_db: Session,
+    api_key_obj: dict[str, Any],
+    api_key_header: dict[str, str],
+    session: _FakeSession,
+) -> None:
+    """The other half of the refusal below, so it cannot pass by not finding the server."""
+    row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]), organizations=True)
+
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=api_key_header, json=_execute_body(row))
+
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.parametrize(
+    ("url", "resolves_to"),
+    [
+        ("http://127.0.0.1:8000/mcp", None),
+        ("http://[::1]:8000/mcp", None),
+        ("https://mcp.rebound.example/mcp", "127.0.0.1"),
+    ],
+)
+def test_an_organization_server_on_an_internal_address_is_not_called(
+    client: TestClient,
+    test_db: Session,
+    api_key_obj: dict[str, Any],
+    api_key_header: dict[str, str],
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+    url: str,
+    resolves_to: str | None,
+) -> None:
+    """An organization's server is held to the rule a workspace's is: execution checks its URL again."""
+    if resolves_to is not None:
+
+        async def resolve(_host: str) -> list[object]:
+            return [ipaddress.ip_address(resolves_to)]
+
+        monkeypatch.setattr("gateway.services.url_safety._resolve_all_async", resolve)
+    row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]), url=url, token=None, organizations=True)
+
+    response = client.post(
+        f"{API_ROOT}/mcp/execute",
+        headers=api_key_header,
+        json=_execute_body(row, server_revision=_revision(row, token=None)),
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["code"] == "unsafe_mcp_url"
+    assert session.calls == []
 
 
 def test_a_stored_token_is_never_sent_over_cleartext_http(

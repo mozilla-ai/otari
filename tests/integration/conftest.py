@@ -262,6 +262,22 @@ def clean_database(postgres_url: str) -> None:
 
 
 @pytest.fixture
+def public_dns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Resolve every hostname to a public address, so a tenant's ``api_base`` passes the address check without DNS.
+
+    An address literal is never resolved, so a test naming a private one still sees it refused.
+    """
+    import ipaddress
+
+    from gateway.services.web_retrieval_network import SystemAddressResolver
+
+    async def resolve(self: SystemAddressResolver, host: str, port: int) -> tuple[ipaddress.IPv4Address, ...]:
+        return (ipaddress.IPv4Address("1.1.1.1"),)
+
+    monkeypatch.setattr(SystemAddressResolver, "resolve", resolve)
+
+
+@pytest.fixture
 def unpriced_builtin_fetch(postgres_url: str, clean_database: None) -> None:
     """A database whose ``builtin_fetch`` has no price: a migration gives it 0 on a fresh one."""
     with _reset_engine(postgres_url).begin() as conn:
