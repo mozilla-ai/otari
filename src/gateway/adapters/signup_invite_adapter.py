@@ -1,12 +1,12 @@
-"""The core ``SignupInvitePort``: the core sends no invitation that proves an address."""
+"""The adapter for a deployment whose invitations prove nothing about a signup's address."""
 
-from gateway.ports.signup_invite_port import SignupInvitePort
+from gateway.ports.signup_invite_port import AddressProof, SignupInvitePort
 
 
 class NullSignupInviteAdapter(SignupInvitePort):
     """Knows no invitation token."""
 
-    async def invited_email(self, token: str) -> str | None:
-        """No token names an address here."""
-        del token
+    async def proof_for(self, token: str, *, claimed_address: str) -> AddressProof | None:
+        """No token proves an address here."""
+        del token, claimed_address
         return None
