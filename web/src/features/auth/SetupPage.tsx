@@ -4,7 +4,6 @@ import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { useSetPassword } from "@/shared/api/auth"
 import { createSession } from "@/shared/api/client"
 import {
-  MAX_PASSWORD_BYTES,
   MIN_PASSWORD_LENGTH,
   newPasswordProblem,
 } from "@/shared/helpers/password"
@@ -138,7 +137,7 @@ export function SetupPage({ route }: { route: string }) {
             setError(null)
           }}
           autoComplete="new-password"
-          description={`At least ${MIN_PASSWORD_LENGTH} characters, and at most ${MAX_PASSWORD_BYTES} bytes.`}
+          description={`At least ${MIN_PASSWORD_LENGTH} characters.`}
           errorMessage={problem ?? undefined}
           canReveal
         />
