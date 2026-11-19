@@ -5,6 +5,8 @@ import { groupModels } from "@/features/usage/modelGroups"
 export interface TopModel {
   /** The model's name, or "Unknown model" where the usage names none. */
   name: string
+  /** Every id the usage recorded it as, which the name stands in for. */
+  spellings: string[]
   cost: number
 }
 
@@ -19,7 +21,9 @@ export function pickTopModel(
   const [top] = groupModels(rows)
     .filter((model) => !model.isOther)
     .sort((a, b) => b.cost - a.cost || b.tokens - a.tokens)
-  return top ? { name: top.name, cost: top.cost } : undefined
+  return top
+    ? { name: top.name, spellings: top.spellings, cost: top.cost }
+    : undefined
 }
 
 /** How much of the row's spend the top model took, or why there is no figure. */
