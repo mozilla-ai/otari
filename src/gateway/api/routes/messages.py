@@ -746,13 +746,13 @@ class _MessagesAdapter:
     # behavior this endpoint has always had.
     log_success_without_usage = False
 
-    def __init__(self, responses_instances: frozenset[str] = frozenset()) -> None:
-        # The provider instances whose Messages traffic goes through their Responses API.
-        self._responses_instances = responses_instances
+    def __init__(self, messages_api: Mapping[str, str] | None = None) -> None:
+        # Each provider instance's ``messages_api`` setting, where it has one.
+        self._messages_api = dict(messages_api or {})
 
     def for_instance(self, kwargs: dict[str, Any], instance: str) -> dict[str, Any]:
-        """``kwargs`` for a call to ``instance``, marked for its Responses API when it opted in."""
-        return with_responses_instance(kwargs, instance if instance in self._responses_instances else None)
+        """``kwargs`` for a call to ``instance``, marked for its Responses API where it goes through it."""
+        return with_responses_instance(kwargs, instance, messages_api=self._messages_api.get(instance))
 
     def error(
         self,
@@ -934,12 +934,12 @@ _ADAPTER = _MessagesAdapter()
 
 def _adapter_for(config: GatewayConfig) -> _MessagesAdapter:
     """The adapter for a request under ``config``: the shared one unless an instance set ``messages_api``."""
-    instances = frozenset(
-        name
+    settings = {
+        name: str(entry["messages_api"])
         for name, entry in config.providers.items()
-        if isinstance(entry, dict) and entry.get("messages_api") == "responses"
-    )
-    return _MessagesAdapter(instances) if instances else _ADAPTER
+        if isinstance(entry, dict) and entry.get("messages_api") is not None
+    }
+    return _MessagesAdapter(settings) if settings else _ADAPTER
 
 
 @router.post(

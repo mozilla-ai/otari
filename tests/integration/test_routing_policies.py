@@ -125,7 +125,8 @@ def routing_config(postgres_url: str) -> GatewayConfig:
         require_pricing=False,
         model_discovery=False,
         providers={
-            "openai": {"api_key": "sk-openai"},
+            # The /v1/messages tests here mock amessages, which only the chat-completions path calls.
+            "openai": {"api_key": "sk-openai", "messages_api": "completions"},
             "anthropic": {"api_key": "sk-ant"},
         },
         routing=RoutingConfig.model_validate(

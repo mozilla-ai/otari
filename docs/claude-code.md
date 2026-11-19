@@ -127,9 +127,9 @@ To list only the open-weight models a key can use, ask the catalog for them:
 `GET /api/v1/catalog/models?capability=open_weights`. Each entry's `selectors`
 are the names to configure.
 
-On a gateway you run, OpenAI reasoning models work better through the Responses
-API: their reasoning carries over between turns, and the codex and pro models
-become reachable. Set `messages_api: responses` on the OpenAI provider; see
+Otari serves OpenAI's models through OpenAI's Responses API, so a reasoning
+model can call Claude Code's tools with its reasoning on, its reasoning carries
+over between turns, and the codex and pro models are reachable; see
 [Messages through the Responses API](configuration.md#messages-through-the-responses-api).
 
 ## Let Otari choose a subagent's model
