@@ -17,8 +17,9 @@ sign-in is the organization's, not the provider's.
 
 A domain's proof expires 90 days after it was verified, and nothing re-proves
 it automatically. Once every domain's proof has lapsed, the connection stops
-admitting anyone until one is re-verified. Re-verify a domain before its proof
-expires to avoid a gap.
+admitting anyone until one is re-verified. Verifying a domain whose proof is
+still current leaves its expiry unchanged, so it can only be renewed once it
+has expired.
 
 Two organizations may configure a connection to the same issuer. A person is
 admitted to an organization only on a domain that organization itself has
