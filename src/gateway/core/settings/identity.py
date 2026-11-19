@@ -44,6 +44,15 @@ class IdentitySettings(BaseModel):
         description="Registered OAuth apps, keyed by public client ID. Empty disables app authorization.",
     )
 
+    oauth_open_apps: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
+        default=False,
+        description=(
+            "Let an app connect with OAuth without being registered in oauth_apps. Its client ID is "
+            "the origin of its HTTPS (or loopback HTTP) callback, the consent screen names that site "
+            "as unverified, and its keys hold the default scopes."
+        ),
+    )
+
     oidc_allow_private_hosts: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
         default=False,
         description=(

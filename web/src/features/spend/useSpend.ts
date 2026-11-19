@@ -21,6 +21,7 @@ import {
 } from "@/features/spend/limits"
 import { keyName, memberName } from "@/features/spend/names"
 import { type SpendWindow, usageRange } from "@/features/spend/period"
+import { groupModels, OTHER } from "@/features/usage/modelGroups"
 import { billedTokenTotal } from "@/features/usage/usageTotals"
 import { useKeys } from "@/shared/api/apiKeys"
 import { useAllSpendCeilings } from "@/shared/api/budgets"
@@ -43,6 +44,11 @@ export interface SpendRow {
    * that is not one spender.
    */
   filterKey: string | null
+  /**
+   * A model's row: every id it was requested as, which a Sessions filter
+   * names together (`filterValues`). `filterKey` is the busiest of them.
+   */
+  spellings?: string[]
   name: string
   detail?: string
   cost: number
@@ -78,9 +84,6 @@ export const readState = (query: {
   isError: boolean
 }): ReadState =>
   query.data !== undefined ? "ready" : query.isError ? "failed" : "loading"
-
-/** The server folds its smallest rows into one `is_other` row with no key. */
-const OTHER = "Other"
 
 /** Usage rows that are one spender, by key: not the fold, not "nobody". */
 const bySpender = (usage: readonly UsageGroupRow[]) =>
@@ -271,10 +274,22 @@ function breakdownRows(
     .sort(bySpend)
 }
 
+/** One row per model, its ids on every provider summed (`groupModels`). */
 export function modelRows(usage: readonly UsageGroupRow[]): SpendRow[] {
-  return breakdownRows(usage, "model", (key) => ({
-    name: key ?? "Unknown model",
-  }))
+  return groupModels(usage)
+    .filter((model) => model.cost > 0 || model.requests > 0)
+    .map((model) => ({
+      id: model.id,
+      filterKey: model.spellings[0] ?? null,
+      spellings: model.spellings,
+      name: model.name,
+      cost: model.cost,
+      requests: model.requests,
+      tokens: model.tokens,
+      limits: NO_LIMITS,
+      target: null,
+    }))
+    .sort(bySpend)
 }
 
 /**
@@ -290,6 +305,11 @@ export function providerRows(usage: readonly UsageGroupRow[]): SpendRow[] {
       ? { name: "Unknown provider", detail: "Not recorded" }
       : { name: providerDisplayName(key) },
   )
+}
+
+/** What a row's filter takes: a model's every id, else its one key. */
+export function filterValues(row: SpendRow): string[] {
+  return row.spellings ?? (row.filterKey === null ? [] : [row.filterKey])
 }
 
 export interface Spend {

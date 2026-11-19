@@ -118,6 +118,7 @@ _SETTING_NAMES = frozenset(
         "oauth_google_client_id",
         "oauth_google_client_secret",
         "oauth_apps",
+        "oauth_open_apps",
         "oidc_allow_private_hosts",
         "open_signup",
         "passkeys_enabled",
