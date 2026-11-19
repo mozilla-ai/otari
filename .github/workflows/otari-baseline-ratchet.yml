@@ -1,0 +1,66 @@
+name: Otari Baseline Ratchet
+
+# Every baseline in the architecture check records debt the repository has
+# already taken on, and each one only shrinks. The check itself reads the number
+# and the code from the same tree, so a change that adds a builder and raises
+# the number together passes it. This compares the branch point with the change
+# instead, which is the half the check cannot reach.
+#
+# The script and the baselines it measures against both come from the branch
+# point, so the values a pull request is judged by are not its own. This file is
+# not covered: a pull_request workflow runs as the pull request has it, which is
+# why it holds no secret and asks for nothing but read access. The code-owner
+# review that /.github/workflows/ carries is what keeps it honest.
+#
+# A branch point from before the script existed cannot check anything, and the
+# job says so rather than passing silently.
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'scripts/check_architecture.py'
+      - 'scripts/check_baseline_ratchet.py'
+      - '.github/workflows/otari-baseline-ratchet.yml'
+
+permissions: {}
+
+concurrency:
+  group: otari-baseline-ratchet-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  baselines:
+    name: Baseline ratchet
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the pull request with its history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The branch point rather than the base branch's tip, so a baseline that
+      # main lowered after the branch was cut does not read as a rise here.
+      # The script needs the standard library alone, so there is no environment
+      # to build before it runs.
+      - name: Compare the baselines with the branch point
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          branch_point="$(git merge-base "$BASE_SHA" HEAD)"
+          echo "Branch point: $branch_point"
+          if ! git cat-file -e "$branch_point:scripts/check_baseline_ratchet.py" 2> /dev/null; then
+            echo "::notice title=Baseline ratchet skipped::The branch point has no scripts/check_baseline_ratchet.py."
+            exit 0
+          fi
+          git show "$branch_point:scripts/check_baseline_ratchet.py" > "$RUNNER_TEMP/check_baseline_ratchet.py"
+          git show "$branch_point:scripts/check_architecture.py" > "$RUNNER_TEMP/check_architecture.py"
+          python3 "$RUNNER_TEMP/check_baseline_ratchet.py" \
+            --base "$RUNNER_TEMP/check_architecture.py" \
+            --head scripts/check_architecture.py

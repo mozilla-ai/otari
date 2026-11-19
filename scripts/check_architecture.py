@@ -107,12 +107,13 @@ Enforces:
     definition under a module-level if or try counts, a type alias statement
     counts, and an unpacking assignment counts each name it binds; one nested in
     a function or a class body does not, because it binds no name the root
-    exports. Raising the baseline itself is caught in review rather than here:
-    every baseline in this file is read from the tree being checked, so a change
-    that moves the number and the code together passes. This says nothing
-    about which module a builder belongs in, which is a judgment no check can
-    make; it says only that the root is full, so the next builder goes where a
-    reader of that domain will look.
+    exports. Raising the baseline itself is caught by check_baseline_ratchet.py
+    rather than here: every baseline in this file is read from the tree being
+    checked, so a change that adds a builder and raises the baseline to match
+    passes this check and fails that one. This says nothing about which module a
+    builder belongs in, which is a judgment no check can make; it says only that
+    the root is full, so the next builder goes where a reader of that domain
+    will look.
 
 Usage:
     uv run python scripts/check_architecture.py
