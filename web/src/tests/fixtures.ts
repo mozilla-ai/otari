@@ -38,7 +38,6 @@ import type {
   PricingResponse,
   ScopedBudget,
   UpdateCheckStatus,
-  UsageSeriesPoint,
   UsageTotals,
   User,
   Workspace,
@@ -117,22 +116,6 @@ export function usageTotals(overrides: Partial<UsageTotals> = {}): UsageTotals {
     error_count: 0,
     unpriced_requests: 0,
     avg_latency_ms: null,
-    ...overrides,
-  }
-}
-
-export function seriesPoint(
-  overrides: Partial<UsageSeriesPoint> & Pick<UsageSeriesPoint, "bucket_start">,
-): UsageSeriesPoint {
-  return {
-    cost: 0,
-    tokens: 0,
-    requests: 0,
-    errors: 0,
-    input_tokens: 0,
-    output_tokens: 0,
-    cache_read_tokens: 0,
-    cache_write_tokens: 0,
     ...overrides,
   }
 }

@@ -23,9 +23,13 @@ same" as a reason.
 the old shape.
 
 - Do not flag an existing baseline entry the PR does not touch.
-- Flag a PR that adds a name to any baseline.
+- Flag a PR that adds a name to any baseline, or raises a count one records.
+  A baseline records debt already taken on, so it only shrinks, and a PR that
+  needs more room has to give some back first.
 - A PR that moves code out of the old shape removes its names from the
   baseline. The check fails until it does.
+- `scripts/check_baseline_ratchet.py` compares the branch point's baselines
+  with the PR's, so name which baseline moved and what it gained.
 
 ## Layer rules
 
