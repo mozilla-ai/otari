@@ -63,6 +63,11 @@ def test_every_per_entry_baseline_the_real_check_records_is_read() -> None:
     assert all(name.startswith("MODEL_ACCESS[") and name.endswith("['baseline']") for name in nested)
 
 
+def test_every_constant_the_real_check_records_a_baseline_in_is_read_in_full() -> None:
+    found = check.baselines(_architecture_check())
+    assert sorted(set(found.owners.values()) & found.unread) == []
+
+
 def test_no_baseline_the_real_check_records_is_unreadable() -> None:
     found = check.baselines(_architecture_check()).rooms
     assert [name for name, room in found.items() if isinstance(room, check.Unreadable)] == []
@@ -372,22 +377,41 @@ def test_one_computed_baseline_does_not_hide_the_rest_of_a_map() -> None:
     ]
 
 
+_MAY_BE_REPLACED = (
+    "sits in a mapping whose keys are not all written out, so the value written here may be replaced; "
+    "a baseline is read without running the check"
+)
+_HIDES = "ACCESS records a baseline and is not written out in full, so a baseline written in it may be missed"
+
+
 def test_a_baseline_an_unpacking_can_replace_is_reported() -> None:
     before = 'ACCESS = {"a.B": {"baseline": ("one.py",)}}\n'
     after = 'ACCESS = {"a.B": {"baseline": ("one.py",), **EXTRA}}\n'
-    assert check.check_baselines(before, after) == [
-        "ACCESS['a.B']['baseline'] sits in a mapping that unpacks another into itself, "
-        "so the value written here may be replaced; a baseline is read without running the check"
-    ]
+    assert check.check_baselines(before, after) == [f"ACCESS['a.B']['baseline'] {_MAY_BE_REPLACED}", _HIDES]
 
 
 def test_an_unpacking_in_the_map_itself_is_reported() -> None:
     before = 'ACCESS = {"a.B": {"baseline": ("one.py",)}}\n'
     after = 'ACCESS = {"a.B": {"baseline": ("one.py",)}, **EXTRA}\n'
-    assert check.check_baselines(before, after) == [
-        "ACCESS['a.B']['baseline'] sits in a mapping that unpacks another into itself, "
-        "so the value written here may be replaced; a baseline is read without running the check"
-    ]
+    assert check.check_baselines(before, after) == [f"ACCESS['a.B']['baseline'] {_MAY_BE_REPLACED}", _HIDES]
+
+
+def test_a_baseline_a_key_not_written_out_can_replace_is_reported() -> None:
+    before = 'ACCESS = {"a.B": {"baseline": ()}}\n'
+    after = 'MODEL = "a.B"\nACCESS = {"a.B": {"baseline": ()}, MODEL: {"baseline": ("new.py",)}}\n'
+    assert check.check_baselines(before, after) == [f"ACCESS['a.B']['baseline'] {_MAY_BE_REPLACED}", _HIDES]
+
+
+def test_an_entry_that_arrives_unreadable_beside_a_readable_one_is_reported() -> None:
+    before = 'ACCESS = {"a.B": {"baseline": ()}}\n'
+    after = 'ACCESS = {"a.B": {"baseline": ()}, "c.D": dict(baseline=("new.py",))}\n'
+    assert check.check_baselines(before, after) == [_HIDES]
+
+
+def test_a_key_that_cannot_collide_with_an_entry_leaves_a_map_readable() -> None:
+    before = 'ACCESS = {"a.B": {"baseline": ()}}\n'
+    after = 'ACCESS = {1: "unrelated", "a.B": {"baseline": ()}}\n'
+    assert check.check_baselines(before, after) == []
 
 
 def test_an_empty_baseline_gone_into_a_map_that_cannot_be_read_is_reported() -> None:

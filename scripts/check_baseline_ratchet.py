@@ -11,7 +11,9 @@ A baseline that is new passes, because that is how a rule arrives with the debt
 it found. A baseline that is gone passes only once it is empty, and only once the
 constant it was read from still reads in full, because a rule is retired after its
 debt is paid rather than before. A baseline whose room cannot be read fails either
-way, because a comparison that proves nothing is not a pass.
+way, because a comparison that proves nothing is not a pass. A mapping that records
+baselines answers for every entry, so one this check cannot read in full fails as
+well, rather than being read for the entries it can see.
 
 NOTE: This takes two files and reads neither repository. The caller decides which
 revision is which, so the same command serves a pull request and a local branch.
@@ -45,7 +47,8 @@ _NOT_A_LITERAL = "is not written out in full"
 _WRITTEN_AGAIN = "is written at module scope more than once, so the last value decides"
 _UNDECLARED = "is written at module scope without a declaration this check can read"
 _UNSUPPORTED = "records a kind of value this check does not read"
-_UNPACKED = "sits in a mapping that unpacks another into itself, so the value written here may be replaced"
+_UNSETTLED_KEY = "sits in a mapping whose keys are not all written out, so the value written here may be replaced"
+_HIDES_A_BASELINE = "records a baseline and is not written out in full, so a baseline written in it may be missed"
 
 
 class Revision(NamedTuple):
@@ -142,17 +145,18 @@ def _nested_baselines(label: str, node: ast.expr) -> tuple[list[tuple[str, ast.e
     """Return each baseline a constant records under a ``baseline`` key, and whether it was read in full.
 
     This reads the mapping as it is written rather than as a whole value, so one entry
-    that is not written out in full costs only that entry.
+    whose value is not written out in full costs only that entry.
 
-    NOTE: A mapping that unpacks another into itself is not read in full, because the
-    unpacked keys decide and are not written out. Every baseline written in such a
-    mapping is returned as unreadable, since unpacking may replace any of them.
+    NOTE: A key that is not written out decides which entry it lands on only when the
+    mapping is built, so it may replace any of them. Unpacking another mapping does the
+    same. Either leaves the mapping not read in full, and every baseline written in it
+    is returned as unreadable.
     """
     if not isinstance(node, ast.Dict):
         return [], _written_out_in_full(node)
-    unpacks = any(key is None for key in node.keys)
+    settled = all(isinstance(key, ast.Constant) for key in node.keys)
     found: list[tuple[str, ast.expr | Unreadable]] = []
-    read_in_full = not unpacks
+    read_in_full = settled
     for key, value in zip(node.keys, node.values, strict=True):
         if not isinstance(key, ast.Constant) or not isinstance(key.value, str):
             continue
@@ -162,8 +166,8 @@ def _nested_baselines(label: str, node: ast.expr) -> tuple[list[tuple[str, ast.e
         nested, whole = _nested_baselines(f"{label}[{key.value!r}]", value)
         found.extend(nested)
         read_in_full = read_in_full and whole
-    if unpacks:
-        return [(nested_label, Unreadable(_UNPACKED)) for nested_label, _ in found], False
+    if not settled:
+        return [(nested_label, Unreadable(_UNSETTLED_KEY)) for nested_label, _ in found], False
     return found, read_in_full
 
 
@@ -256,6 +260,8 @@ def check_baselines(base: str, head: str) -> list[str]:
         else:
             findings.extend(_retired(label, recorded))
     findings.extend(_arrived(label, after.rooms[label]) for label in sorted(after.rooms) if label not in before.rooms)
+    recording = set(after.owners.values())
+    findings.extend(f"{owner} {_HIDES_A_BASELINE}" for owner in sorted(after.unread & recording))
     return [finding for finding in findings if finding]
 
 
