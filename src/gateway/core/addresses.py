@@ -19,9 +19,14 @@ def normalized_address(value: str) -> str | None:
 
     A plain address is one address and nothing else.
     It has no display name, comment, quoted text, list, domain literal, encoded word, space or invisible character.
+    Its local part is ASCII, because the SMTP transport does not ask for SMTPUTF8 (RFC 6531).
     Its domain has two or more labels, and no label is empty.
     """
-    candidate = value.strip().lower()
+    candidate = value.strip()
+    # Checked before lower-casing, which turns a character such as the Kelvin sign (U+212A) into ASCII "k".
+    if not candidate.partition("@")[0].isascii():
+        return None
+    candidate = candidate.lower()
     if not candidate.isprintable() or not _NOT_IN_A_PLAIN_ADDRESS.isdisjoint(candidate) or _ENCODED_WORD in candidate:
         return None
     local, at, domain = candidate.partition("@")
