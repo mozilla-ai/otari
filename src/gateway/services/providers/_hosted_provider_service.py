@@ -356,9 +356,14 @@ class HostedProviderService:
                 if api_base is not None:
                     api_base = unmask_api_base(api_base, row.api_base)
                 new_origin = origin_of(api_base)
-                moves = new_origin is not None and new_origin != origin_of(row.api_base)
                 moved = new_origin != origin_of(row.api_base)
-                if moves and encrypted is None and row.encrypted_api_key is not None and not removes_key:
+                if (
+                    moved
+                    and new_origin is not None
+                    and encrypted is None
+                    and row.encrypted_api_key is not None
+                    and not removes_key
+                ):
                     # The stored key would otherwise be sent to an endpoint the
                     # operator chose without ever having to know the key.
                     raise HostedProviderKeyRequiredError
