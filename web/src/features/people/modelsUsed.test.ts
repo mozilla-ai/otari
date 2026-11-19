@@ -24,7 +24,7 @@ describe("modelsUsed", () => {
         row("dear", 2, 10),
         row("free", 0, 50),
         row("tie", 0.01, 1000),
-      ]).map((one) => one.key),
+      ]).map((one) => one.name),
     ).toEqual(["dear", "tie", "cheap", "free"])
   })
 })

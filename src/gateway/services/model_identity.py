@@ -254,6 +254,11 @@ def vendor_slug(vendor: str) -> str:
 _LEADING_WORD = re.compile(r"([a-z0-9]+)[\s_-]+", re.IGNORECASE)
 
 
+def org_vendor(org: str) -> str | None:
+    """The vendor an org segment of a model id names (``deepseek-ai`` is DeepSeek), or None where none is known."""
+    return _ORG_VENDORS.get(org.lower())
+
+
 def _family_vendor(key: str) -> str | None:
     for prefix, vendor in _KEY_VENDORS:
         if key.startswith(prefix):
@@ -415,7 +420,8 @@ class ModelIdentity:
         return f"{vendor_slug(self.vendor)}/{self.slug}" if self.vendor else self.slug
 
 
-def _fallback_name(model_id: str) -> str:
+def name_from_id(model_id: str) -> str:
+    """A readable name from a provider's id alone: ``accounts/fireworks/models/glm-5p3`` reads ``glm-5.3``."""
     return _P_FOR_POINT.sub(".", clean_model_id(model_id).model)
 
 
@@ -437,7 +443,7 @@ def _vote_name(seeds: list[OfferingSeed], vendor: str | None) -> str:
     if spellings:
         counts = Counter(spellings)
         return max(spellings, key=lambda name: (counts[name], -spellings.index(name)))
-    return _fallback_name(seeds[0].model_id)
+    return name_from_id(seeds[0].model_id)
 
 
 def _vote_vendor(seeds: list[OfferingSeed], key: str) -> str | None:
@@ -487,7 +493,9 @@ __all__ = [
     "group_offerings",
     "identity_key",
     "infer_vendor",
+    "name_from_id",
     "normalize",
+    "org_vendor",
     "own_providers_for_vendor_slug",
     "slugify",
 ]

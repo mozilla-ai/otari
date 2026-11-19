@@ -47,6 +47,7 @@ import { SetLimitDialog } from "@/features/spend/SetLimitDialog"
 import { SpendPeriodPicker } from "@/features/spend/SpendPeriodPicker"
 import { usePageClock } from "@/features/spend/usePageClock"
 import {
+  filterValues,
   type SpendRow,
   useSpend,
   useWorkspaceSpend,
@@ -311,19 +312,18 @@ export function TeamHome({
     const { filter } = cut
     if (candidates.length <= 1 || !filter) return candidates[0]
     const costs = await Promise.all(
-      candidates.map((candidate) =>
-        apiFetch<UsageSummary>(
-          `${usageScope.base}/summary?${new URLSearchParams({
-            workspace_id: candidate,
-            ...usageRange(window),
-            bucket: "day",
-            dimensions: "none",
-            [filter]: row.filterKey ?? "",
-          })}`,
-        )
+      candidates.map((candidate) => {
+        const params = new URLSearchParams({
+          workspace_id: candidate,
+          ...usageRange(window),
+          bucket: "day",
+          dimensions: "none",
+        })
+        for (const value of filterValues(row)) params.append(filter, value)
+        return apiFetch<UsageSummary>(`${usageScope.base}/summary?${params}`)
           .then((summary) => summary.totals.cost)
-          .catch(() => undefined),
-      ),
+          .catch(() => undefined)
+      }),
     )
     return busiestWorkspace(candidates, costs)
   }
@@ -341,7 +341,7 @@ export function TeamHome({
       to: cut.value === "providers" ? "/requests" : "/sessions",
       search: {
         ...sessionsSearchFor(window),
-        [cut.filter]: row.filterKey,
+        [cut.filter]: filterValues(row),
       },
     })
   }
@@ -410,14 +410,23 @@ export function TeamHome({
       header: cut.noun,
       isRowHeader: true,
       cell: (row) => (
-        <span className="flex min-w-0 items-center gap-3 md:max-w-[13rem]">
+        <span
+          className={`flex min-w-0 items-center gap-3 md:max-w-[13rem] ${cut.value === "models" ? "xl:max-w-[24rem]" : ""}`}
+        >
           {cut.value === "people" ? (
             <MemberAvatar userId={row.avatarUserId} face={row.avatarFace} />
           ) : hasMarkSlot ? (
             <ProviderSlot row={row} />
           ) : null}
           <span className="flex min-w-0 flex-col">
-            <span className="truncate text-foreground">{row.name}</span>
+            {/* A model is told apart by its whole name, so a long id wraps,
+                to two lines; the title holds every id it ran as. */}
+            <span
+              className={`text-foreground ${cut.value === "models" ? "line-clamp-2 [overflow-wrap:anywhere]" : "truncate"}`}
+              title={row.spellings?.join("\n")}
+            >
+              {row.name}
+            </span>
             {row.detail && cut.value !== "people" ? (
               <span className="truncate text-caption">{row.detail}</span>
             ) : null}

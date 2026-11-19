@@ -218,6 +218,40 @@ def test_summary_breakdowns_reconcile_with_totals(
     assert [r["key"] for r in body["by_model"]] == ["gpt-4", "claude"]
 
 
+def test_summary_groups_a_models_spellings_under_one_name(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """Two providers' spellings of one model share a group and a name; a different build does not.
+
+    The rows stay one per spelling, since the key is what a model filter matches.
+    """
+    now = datetime.now(UTC) - timedelta(hours=1)
+    for model, provider, cost in (
+        ("accounts/fireworks/models/deepseek-v4p1-flash-1017", "fireworks", 0.30),
+        ("deepseek-ai/DeepSeek-V4.1-Flash-1017", "nebius", 0.20),
+        ("deepseek-ai/DeepSeek-V4.1-Pro-1017", "nebius", 0.10),
+    ):
+        _make_log(db_session, user_id="spell", timestamp=now, model=model, provider=provider, cost=cost)
+    _make_log(db_session, user_id="spell", timestamp=now, model="claude-opus-5-5", provider="anthropic", cost=0.05)
+    db_session.commit()
+
+    body = client.get(
+        SUMMARY_PATH, headers=master_key_header, params={"user_id": "spell", "dimensions": ["model", "user"]}
+    ).json()
+    rows = {row["key"]: row for row in body["by_model"]}
+    fireworks = rows["accounts/fireworks/models/deepseek-v4p1-flash-1017"]
+    nebius = rows["deepseek-ai/DeepSeek-V4.1-Flash-1017"]
+    pro = rows["deepseek-ai/DeepSeek-V4.1-Pro-1017"]
+    assert len(rows) == 4
+    assert fireworks["model_group"] == nebius["model_group"] != pro["model_group"]
+    # No catalog is indexed here, so the group is named by the least of its cleaned ids.
+    assert fireworks["label"] == nebius["label"] == "DeepSeek-V4.1-Flash-1017"
+    assert pro["label"] == "DeepSeek-V4.1-Pro-1017"
+    assert rows["claude-opus-5-5"]["label"] == "claude-opus-5-5"
+    # Only a model row is grouped.
+    assert all(row["model_group"] is None for row in body["by_user"])
+
+
 def test_summary_top_n_fold_reconciles(
     client: TestClient, master_key_header: dict[str, str], db_session: Session
 ) -> None:

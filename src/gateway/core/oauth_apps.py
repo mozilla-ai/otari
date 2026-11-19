@@ -1,8 +1,21 @@
 """Strict redirect validation for registered public OAuth clients."""
 
+from datetime import timedelta
 from urllib.parse import SplitResult, urlsplit
 
 from pydantic import HttpUrl
+
+# How long an app key lives, by the names OpenRouter's PKCE sign-in uses for its ``expiration``.
+APP_KEY_LIFETIMES: dict[str, timedelta | None] = {
+    "1-hour": timedelta(hours=1),
+    "1-day": timedelta(days=1),
+    "7-days": timedelta(days=7),
+    "30-days": timedelta(days=30),
+    "90-days": timedelta(days=90),
+    "180-days": timedelta(days=180),
+    "1-year": timedelta(days=365),
+    "never": None,
+}
 
 # The only hosts plain HTTP is admitted for, and where RFC 8252 lets the port vary.
 _LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")
@@ -33,6 +46,18 @@ def parse_oauth_redirect(value: str) -> SplitResult | None:
     ):
         return None
     return parsed
+
+
+def open_app_site(client_id: str, redirect_uri: str) -> str | None:
+    """The site an unregistered app is, when its client ID is its callback's origin.
+
+    The origin is compared as a browser writes ``location.origin``, so a client ID that
+    differs from it in case or in a spelled-out default port is refused, not normalized.
+    """
+    parsed = parse_oauth_redirect(redirect_uri)
+    if parsed is None or client_id != f"{parsed.scheme}://{parsed.netloc}":
+        return None
+    return parsed.netloc
 
 
 def redirect_matches(registered: str, requested: str) -> bool:

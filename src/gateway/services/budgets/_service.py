@@ -2,6 +2,7 @@ import asyncio
 import uuid
 from collections.abc import Callable, Mapping
 from datetime import datetime
+from decimal import Decimal
 
 from fastapi import BackgroundTasks
 
@@ -16,7 +17,7 @@ from gateway.exceptions.budget_exceptions import (
 )
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
-from gateway.models.budgets import Budget, ScopedBudget, ScopeType
+from gateway.models.budgets import SCOPE_API_TOKEN, Budget, ScopedBudget, ScopeType
 from gateway.models.tenancy import User
 from gateway.ports.growth_signal_port import GrowthAction, GrowthActivationEvent, GrowthSignalPort
 from gateway.rate_limit import BudgetMinuteLimits
@@ -90,6 +91,20 @@ class BudgetService:
         self._member_policies = _MemberPolicies(repositories, organizations, workspace_access)
         self._moves = _ReservationMoves(repositories)
         self._key_limits = _KeyLimits(repositories, organizations, users)
+
+    async def cap_app_key(self, *, key_id: str, workspace_id: uuid.UUID, name: str, max_budget: Decimal) -> None:
+        """Cap an OAuth app key at the lifetime spending limit its person approved.
+
+        The budget belongs to the key's organization, so its managers see it beside their own.
+        """
+        async with self._uow:
+            organization_id = await self._organizations.get_organization_id_for_workspace(workspace_id)
+            budget_id = await self._budgets.add_lifetime_cap(
+                organization_id=organization_id, name=name, max_budget=max_budget
+            )
+            await self._repositories.ceilings.add_scope_ceiling_if_absent(
+                scope_type=SCOPE_API_TOKEN, scope_id=key_id, budget_id=budget_id, period_start=None, period_end=None
+            )
 
     async def list_deployment_budgets(self, organization_id: uuid.UUID, *, skip: int, limit: int) -> list[Budget]:
         """A page of the budgets the deployment owns and the operator's organization owns."""
