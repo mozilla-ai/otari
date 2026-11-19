@@ -18,6 +18,8 @@ You need two things from your own company:
 3. In your identity provider, create an OIDC web application with that redirect URI. Allow the `openid`, `email` and `profile` scopes.
 4. Keep the application's issuer URL, client ID and client secret for the next section.
 
+![The Provider setup section, showing the redirect URI to register.](assets/screenshots/sso-provider-setup.png)
+
 ## Add the connection
 
 1. On **Single sign-on**, click **Add connection**.
@@ -28,6 +30,8 @@ You need two things from your own company:
    - **New sign-ins join as**: Member or Viewer.
 3. Click **Add connection**.
 
+![The Add connection dialog, filled in for an Example Corp identity provider.](assets/screenshots/sso-add-connection.png)
+
 ## Prove your email domain
 
 A connection only admits addresses at a domain your organization has proven it controls.
@@ -35,12 +39,16 @@ A connection only admits addresses at a domain your organization has proven it c
 1. Go to **Organization** → **Email domains** and claim your domain, as in [Let colleagues join by email domain](members.md#let-colleagues-join-by-email-domain).
 2. Back on **Single sign-on**, check that the domain is listed under **Domains that admit sign-in** with a proof date.
 
+![A saved connection, with example.com listed under Domains that admit sign-in.](assets/screenshots/sso-connection.png)
+
 A proof expires, and the page shows when. Verify the domain again before that date, or sign-in through the connection stops until you do.
 
 ## Sign in
 
 1. On the sign-in screen, click **Sign in with your company (SSO)**.
 2. Enter your **Work email** and click **Continue**. Otari sends you to your identity provider and back.
+
+![The company sign-in, with a work email entered.](assets/screenshots/sso-sign-in.png)
 
 Try it yourself before telling colleagues.
 
@@ -54,6 +62,8 @@ This step is optional. Once at least one person has signed in through the connec
 2. Select **Require sign-in through this connection**.
 3. Choose the **Owner who can still sign in if your provider breaks**.
 4. Click **Save enforcement**.
+
+![The Require sign-in section, listing the two members affected and an owner chosen as the exception.](assets/screenshots/sso-require-sign-in.png)
 
 See [Requiring sign-in](sso.md#requiring-sign-in) for what this refuses.
 
