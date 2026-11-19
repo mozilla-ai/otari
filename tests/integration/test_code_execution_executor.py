@@ -443,7 +443,9 @@ def test_a_header_that_agrees_with_the_pin_is_fine(
     monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
     _pin_executor(client, master_key_header, "provider")
 
-    response, seen = _post_messages(client, {**api_key_header, _HEADER: "provider"}, _messages_body(_CHAT_BRIDGED, _DATED))
+    response, seen = _post_messages(
+        client, {**api_key_header, _HEADER: "provider"}, _messages_body(_CHAT_BRIDGED, _DATED)
+    )
 
     assert response.status_code == 200, response.text
     assert seen.forwarded_tool_types == {"code_execution_20250825"}

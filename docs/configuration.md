@@ -658,7 +658,7 @@ providers:
     messages_api: completions   # unset: responses for OpenAI's own API
 ```
 
-This reaches models OpenAI serves only on the Responses API (the codex and pro
+The Responses path reaches models OpenAI serves only on the Responses API (the codex and pro
 variants), lets a reasoning model call function tools with its reasoning on,
 which chat completions refuses for the newer ones, and keeps a reasoning model's
 reasoning across turns:
