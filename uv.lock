@@ -1950,7 +1950,7 @@ sdist = { url = "https://files.pythonhosted.org/packages/f3/ff/c9baf0997266d398a
 
 [[package]]
 name = "ibm-watsonx-ai"
-version = "1.5.5"
+version = "1.9.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cachetools" },
@@ -1964,9 +1964,9 @@ dependencies = [
     { name = "tabulate" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d7/29/e1cbc63b5eb78656abe9f4d1dc2cb567e48cdf91f6e15d9518c73d759361/ibm_watsonx_ai-1.5.5.tar.gz", hash = "sha256:68988e554d4c735e2f70af80e741d5874bd6fc9ca20d0dc9fd2aeaae1983dd51", size = 716479, upload-time = "2026-03-25T12:08:05.439Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e2/05/d45f3fa00f9fbed444370d942f957781982d8e87604b271ca664e4de4994/ibm_watsonx_ai-1.9.1.tar.gz", hash = "sha256:63f9a505d256f5f83df836bf5ddfbb949c0fab3022b3fe687add4118f29e1d4a", size = 746005, upload-time = "2026-11-05T10:47:44.707Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fc/4f/df8f1126b52b5f7e299c53449a186820c590befbafa7f400269b950a95f4/ibm_watsonx_ai-1.5.5-py3-none-any.whl", hash = "sha256:a0aa6d252d1a1fee4ffea3fb3e834ed8e4ffa5f2b9c27caf3d04f9434a79a5d0", size = 1085754, upload-time = "2026-03-25T12:08:03.75Z" },
+    { url = "https://files.pythonhosted.org/packages/3d/f3/9fa7432e64848466686d02e2050c7cd3af75d7ccabc460240fcd5054f261/ibm_watsonx_ai-1.9.1-py3-none-any.whl", hash = "sha256:580da2aeb6e9f4bc05a13d6a4e26b898fd1d44d08c2a2191371a624f27bb6f0a", size = 1134886, upload-time = "2026-11-05T10:47:43.151Z" },
 ]
 
 [[package]]
@@ -3262,7 +3262,7 @@ name = "protobuf-py"
 version = "0.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "protobuf-py-ext", marker = "(platform_machine == 'arm64' and platform_python_implementation == 'CPython' and sys_platform != 'linux') or (platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or (platform_machine == 'x86_64' and platform_python_implementation == 'CPython' and sys_platform == 'linux')" },
+    { name = "protobuf-py-ext", marker = "platform_machine == 'arm64' and platform_python_implementation == 'CPython' and sys_platform != 'linux' or (platform_machine == 'aarch64' or platform_machine == 'x86_64') and platform_python_implementation == 'CPython' and sys_platform == 'linux'" },
     { name = "typing-extensions" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/71/2a/6a08d3a3ddbfd745f987c5ff22129a979ea74319fbfe5b9d59c7a6730d25/protobuf_py-0.6.0.tar.gz", hash = "sha256:be6b8d84ba54380ca5e5e50f20e4dd42df81c845cf9dc8c021f147d8c516b341", size = 161533, upload-time = "2026-09-30T06:45:41.388Z" }
