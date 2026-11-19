@@ -1,17 +1,27 @@
+import { Navigate } from "@tanstack/react-router"
 import type { OrganizationContext } from "@/client"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { PageIntro } from "@/design-system/layout/PageIntro"
+import {
+  useDeploymentOperator,
+  useOrganizationContext,
+} from "@/shared/api/organizations"
 
 import { OrganizationBudgetsCard } from "./OrganizationBudgetsCard"
 import { SpendCeilingsCard } from "./SpendCeilingsCard"
 
 // Spend & budgets, for an organization owner or admin.
 //
-// The tenant-scoped half of `BudgetsPage`, which keeps the deployment-wide page
-// an operator sees. The roles matrix (otari-ai#1943) puts this row at Edit for an
-// admin and Hidden for a member, and before this it was operator-only end to
-// end: `/budgets` gates every handler on `require_deployment_operator` and
-// `/scoped-budgets` gates its whole router, so an organization's own admins could
-// manage neither its own caps nor where they applied.
+// The organization's own budgets, whoever opens them. The deployment's are a
+// page of their own on the deployment rail (`DeploymentBudgetsPage`): this
+// route used to show those to an operator instead, so an operator who also
+// managed an organization could not reach its budgets at all (otari#2099).
+// The roles matrix (otari-ai#1943) puts this row at Edit for an admin and
+// Hidden for a member, and before that it was operator-only end to end:
+// `/budgets` gates every handler on `require_deployment_operator` and
+// `/scoped-budgets` gates its whole router, so an organization's own admins
+// could manage neither its own caps nor where they applied.
 //
 // Two sections, because the schema has two objects and they answer different
 // questions: a budget is *what a cap is*, and a ceiling is *who is capped*. They
@@ -38,4 +48,29 @@ export function OrganizationBudgetsPage({
       />
     </div>
   )
+}
+
+/**
+ * The `/budgets` route: Spend & budgets for the organization the caller is in.
+ *
+ * Deployment authority is not asked. The route is the organization rail's, so
+ * it opens to an owner or admin (`useRouteAccess`), and an operator wanting the
+ * deployment's budgets has `/admin/budgets`.
+ */
+export function SpendAndBudgetsPage() {
+  const organization = useOrganizationContext()
+  const { answer } = useDeploymentOperator()
+
+  // No organization means no budgets of its own; the index is where such a
+  // caller is told how to get in.
+  if (answer === "no-organization") {
+    return <Navigate to="/" replace />
+  }
+  if (organization.data) {
+    return <OrganizationBudgetsPage organization={organization.data} />
+  }
+  if (organization.error) {
+    return <ErrorBanner error={organization.error} />
+  }
+  return <PageLoading label="Loading spend and budgets…" />
 }
