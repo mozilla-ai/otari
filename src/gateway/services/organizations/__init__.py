@@ -18,6 +18,7 @@ from gateway.services.organizations._delivery import InvitationDelivery
 from gateway.services.organizations._delivery_rule import DeliveryRule
 from gateway.services.organizations._invitation_facts import InvitationFactsReader
 from gateway.services.organizations._invitation_mail_limit import InvitationMailLimit
+from gateway.services.organizations._membership_listener import MembershipListener, MembershipListeners
 from gateway.services.organizations._sso_enforcement import SsoEnforcement
 from gateway.services.organizations._user_access import UserAccess
 
@@ -36,6 +37,8 @@ __all__ = [
     "InvitationFactsReader",
     "InvitationMailLimit",
     "MembershipAdmission",
+    "MembershipListener",
+    "MembershipListeners",
     "OrganizationClaimedDomains",
     "ReleasedOrganizations",
     "SsoEnforcement",

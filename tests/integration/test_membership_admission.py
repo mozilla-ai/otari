@@ -27,9 +27,8 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
-from gateway.services.organizations import AdmittedMember, MembershipAdmission
+from gateway.services.organizations import AdmittedMember, MembershipAdmission, MembershipListener
 from gateway.services.tenancy import OrganizationService
-from gateway.services.tenancy.membership_listener import MembershipListener
 
 from .conftest import _to_async_url
 from .tenancy_helpers import (

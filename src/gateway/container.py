@@ -68,9 +68,9 @@ from gateway.ports.signup_invite_port import SignupInvitePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.usage_signal_port import UsageSignalPort
 from gateway.repositories.tenancy import UserRepository
+from gateway.services.organizations import MembershipListener
 from gateway.services.providers import HostedProviderService
 from gateway.services.tenancy import forget_unproven_access
-from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.tools import sandbox_api_key
 
