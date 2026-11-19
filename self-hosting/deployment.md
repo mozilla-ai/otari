@@ -66,6 +66,7 @@ dashboard can follow one provider's errors, latency and spend:
 | `gateway_upstream_attempts_total` | `provider`, `model`, `outcome` (`success` or `error`), `status_code`, `fallback` | One per attempt on the completion, embedding, image, audio, moderation and rerank routes, including a routing policy's failed candidates. `status_code` is `200` for a success, the HTTP status of a failure (a timeout is `504`, an unclassified connection failure `502`), or `none` for a failure with no status, such as a stream that ended without reporting usage. `fallback` is `true` for any candidate after the first |
 | `gateway_attempt_duration_seconds` | `provider`, `model`, `outcome` | From the start of the request to the end of the attempt, for the first candidate only |
 | `gateway_time_to_first_token_seconds` | `provider`, `model` | From the start of the request to a streamed attempt's first chunk, for the first candidate only |
+| `gateway_output_tokens_per_second` | `provider`, `model` | A successful attempt's output tokens over its whole duration, time to first token included, for the first candidate only and for responses of 20 output tokens or more |
 | `gateway_tokens_total` | `provider`, `model`, `type` | Input and output tokens |
 | `gateway_request_cost_dollars` | `provider`, `model` | Each request's cost in USD |
 | `gateway_abandoned_attempts_total` | `provider`, `model`, `reason`, `position` | Attempts given up before their first chunk |
