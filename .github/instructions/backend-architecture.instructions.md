@@ -28,7 +28,7 @@ the old shape.
   needs more room has to give some back first.
 - A PR that moves code out of the old shape removes its names from the
   baseline. The check fails until it does.
-- `scripts/check_baseline_ratchet.py` compares the branch point's baselines
+- `scripts/check_no_baseline_regression.py` compares the branch point's baselines
   with the PR's, so name which baseline moved and what it gained.
 
 ## Layer rules
