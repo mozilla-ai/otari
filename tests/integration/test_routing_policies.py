@@ -125,7 +125,7 @@ def routing_config(postgres_url: str) -> GatewayConfig:
         require_pricing=False,
         model_discovery=False,
         providers={
-            # Mocked as a chat-completions bridge on /v1/messages, as before OpenAI defaulted to Responses there.
+            # The /v1/messages tests here mock amessages, which only the chat-completions path calls.
             "openai": {"api_key": "sk-openai", "messages_api": "completions"},
             "anthropic": {"api_key": "sk-ant"},
         },
