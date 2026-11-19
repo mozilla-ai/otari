@@ -26,8 +26,12 @@ are not interchangeable: `openai/gpt-oss-120b` is a catalog id, while
 
 A model neither the catalog nor models.dev knows, such as a misspelled catalog
 id, is refused with `404` (`model_not_found`), naming up to two of the nearest
-catalog ids. A model that exists but whose provider has no credential is
-refused with `424` (`provider_not_configured`).
+catalog ids. A bare name that is no catalog id and none of the caller's aliases
+or routing policies, such as a policy saved in another workspace, is refused
+with `400` (`invalid_model`); its message points to
+[`GET /api/v1/models`](#listing-available-models), which lists the caller's
+aliases and routing policies. A model that exists but whose provider has no
+credential is refused with `424` (`provider_not_configured`).
 
 The legacy `provider/model` spelling is still honored where it names an
 offering the deployment serves (`openai/gpt-4o` while an `openai` instance
@@ -491,6 +495,22 @@ caller, the organization's last thirty days on that offering: requests, cache
 hit rate, and the effective price per million tokens after cache reads and
 tiers.
 
+For the same caller, each offering carries how fast it answered the
+organization over the last seven days, in `speed_7d`: the time to first token
+and the output tokens per second, each at the median (p50) and at p95, and how
+many requests each was read from. p95 is the slow tail of each: the 95th
+percentile of the time to first token, and the 5th percentile of the rate, the
+speed 95% of requests reached. Throughput counts the
+whole request, time to first token included, as OpenRouter measures it, so the
+two compare. Only a request a routing policy's first candidate served counts,
+because a fallback's timings include the attempts before it, and so does only a
+request that ran no gateway tool. A value is null on fewer than 20 measured
+requests: the time to first token needs streamed requests, and throughput needs
+responses of 20 output tokens or more. These are the organization's own
+requests, so an offering that served the longer prompts reads slower. The
+model's page shows them as the Latency and Throughput columns, with a switch
+between the two percentiles.
+
 Each offering also lists the Otari routes its models.dev protocols map to, in
 `endpoints`. A route is a path below the API base, so `/embeddings` is called at
 `/api/v1/embeddings`. The list comes from the protocols in models.dev's v2
@@ -770,6 +790,10 @@ fails. A catalog id spelled like the legacy `provider/model` of one of its own
 offerings (`openai/gpt-4o` while the `openai` instance serves `gpt-4o`) tries that
 offering first (see [Catalog spellings](#catalog-spellings)). An entry's price, limits, capabilities and `deployment_managed` are those
 of the offering tried first, and `owned_by` is the model's vendor.
+
+The caller's aliases and routing policies are listed beside the models, under
+their own names: the configured ones, and the stored ones of the key's
+workspace.
 
 To pin a request to one provider, send its `provider:model` selector, which
 still works everywhere it did. `?provider=<instance>` lists only the models that

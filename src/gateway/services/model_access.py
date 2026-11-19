@@ -49,6 +49,7 @@ from gateway.services.alias_service import all_alias_names
 from gateway.services.catalog import catalog_models, dated_builds, metadata_entry
 from gateway.services.mcp_stateless import reads_as_pattern
 from gateway.services.model_catalog_service import cached_models_dev_catalog
+from gateway.services.policy_store import resolve_effective_policy
 from gateway.services.provider_kwargs import reaches_organization_key, split_selector
 from gateway.services.tenancy.org_provider_key_service import (
     cached_org_key_offer,
@@ -545,11 +546,34 @@ def model_not_allowed_detail(model: str) -> str:
 
 
 def unresolvable_model_detail(model_selector: str) -> str:
-    """Human-readable 400 detail for a selector the gateway cannot resolve."""
+    """Human-readable 400 detail for a selector the gateway cannot resolve.
+
+    A stored alias or routing policy resolves only in its own workspace, so a name saved in another
+    one reaches here too; the listing the detail points to holds the caller's own.
+    """
     return (
-        f"Unknown or unsupported model {model_selector!r}. Send a model id from the catalog "
-        f"(GET {API_ROOT}/models) such as 'vendor/model', an alias, or a 'provider:model' selector."
+        f"Unknown or unsupported model {model_selector!r}. Send a catalog model id such as 'vendor/model', "
+        "a 'provider:model' selector, or an alias or routing policy name. "
+        f"GET {API_ROOT}/models lists the model ids, aliases and routing policies you can use."
     )
+
+
+def unresolvable_selector_detail(
+    config: GatewayConfig, model_selector: str, user_id: str | None, *, workspace_id: uuid.UUID | None
+) -> str:
+    """The 400 detail for a selector a route outside the completion routes cannot resolve.
+
+    A routing policy that chooses its model per request runs only on the completion routes, which
+    compile it, so the detail names that rule for one of the caller's own.
+    """
+    policy = resolve_effective_policy(config, model_selector, user_id, workspace_id=workspace_id)
+    if policy is not None and policy.is_dynamic:
+        return (
+            f"{model_selector!r} is a routing policy that chooses its model per request, which only "
+            "chat completions, messages and responses do. Send this endpoint a catalog model id, "
+            "a 'provider:model' selector, or an alias."
+        )
+    return unresolvable_model_detail(model_selector)
 
 
 def _quoted(names: tuple[str, ...]) -> str:
