@@ -1,9 +1,11 @@
 """Dashboard-facing budget endpoints: per-budget usage rollup and reset history."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 from decimal import Decimal
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -437,3 +439,133 @@ def test_a_rename_does_not_restart_a_ceiling_period(
     assert untouched is not None
     assert untouched.period_start == start
     assert untouched.period_end == end
+
+
+def test_a_budget_resets_at_midnight_in_its_timezone(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """A user on it gets the next local midnight as their reset, not the next UTC one."""
+    created = client.post(
+        f"{API_ROOT}/budgets",
+        json={"max_budget": 1.0, "reset_alignment": "calendar_day", "reset_timezone": "America/New_York"},
+        headers=master_key_header,
+    )
+    assert created.status_code == 200, created.text
+    assert created.json()["reset_timezone"] == "America/New_York"
+
+    assert client.post(f"{API_ROOT}/users", json={"user_id": "nyc"}, headers=master_key_header).status_code == 200
+    assigned = client.patch(
+        f"{API_ROOT}/users/nyc", json={"budget_id": created.json()["budget_id"]}, headers=master_key_header
+    )
+
+    assert assigned.status_code == 200, assigned.text
+    reset_at = datetime.fromisoformat(assigned.json()["next_budget_reset_at"])
+    assert reset_at.astimezone(ZoneInfo("America/New_York")).time() == time()
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"max_budget": 1.0, "reset_timezone": "America/New_York"},
+        {"max_budget": 1.0, "budget_duration_sec": 86400, "reset_timezone": "America/New_York"},
+    ],
+)
+def test_a_timezone_without_a_calendar_boundary_is_refused(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    body: dict[str, object],
+) -> None:
+    refused = client.post(f"{API_ROOT}/budgets", json=body, headers=master_key_header)
+
+    assert refused.status_code == 400, refused.text
+    assert "needs reset_alignment" in refused.json()["detail"]
+
+
+@pytest.mark.parametrize("timezone", ["Mars/Olympus", "EST5EDT/../UTC", ""])
+def test_an_unknown_timezone_is_refused(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    timezone: str,
+) -> None:
+    """422 on the request, not a window derivation that fails on the first roll."""
+    refused = client.post(
+        f"{API_ROOT}/budgets",
+        json={"max_budget": 1.0, "reset_alignment": "calendar_day", "reset_timezone": timezone},
+        headers=master_key_header,
+    )
+
+    assert refused.status_code == 422, refused.text
+
+
+def test_changing_the_timezone_retimes_the_ceilings_and_keeps_their_spend(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """The ceiling moves onto the local day it is in now, with what it already spent."""
+    created = client.post(
+        f"{API_ROOT}/budgets", json={"max_budget": 100.0, "reset_alignment": "calendar_day"}, headers=master_key_header
+    ).json()
+    budget_id = created["budget_id"]
+    ceiling = ScopedBudget(
+        scope_type="workspace",
+        scope_id=str(uuid4()),
+        budget_id=budget_id,
+        current_spend=Decimal("7"),
+        period_start=datetime(2026, 8, 1, tzinfo=UTC),
+        period_end=datetime(2026, 8, 2, tzinfo=UTC),
+    )
+    db_session.add(ceiling)
+    db_session.commit()
+
+    patched = client.patch(
+        f"{API_ROOT}/budgets/{budget_id}", json={"reset_timezone": "Asia/Tokyo"}, headers=master_key_header
+    )
+    assert patched.status_code == 200, patched.json()
+    assert patched.json()["reset_timezone"] == "Asia/Tokyo"
+
+    db_session.expire_all()
+    retimed = db_session.get(ScopedBudget, ceiling.id)
+    assert retimed is not None
+    assert retimed.period_start is not None and retimed.period_end is not None
+    tokyo = ZoneInfo("Asia/Tokyo")
+    assert retimed.period_start.astimezone(tokyo).time() == time()
+    assert retimed.period_end.astimezone(tokyo).time() == time()
+    assert retimed.current_spend == Decimal("7")
+
+
+def test_moving_a_budget_off_calendar_boundaries_drops_its_timezone(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    created = client.post(
+        f"{API_ROOT}/budgets",
+        json={"max_budget": 1.0, "reset_alignment": "calendar_day", "reset_timezone": "America/New_York"},
+        headers=master_key_header,
+    ).json()
+
+    moved = client.patch(
+        f"{API_ROOT}/budgets/{created['budget_id']}",
+        json={"reset_alignment": None, "budget_duration_sec": 3600},
+        headers=master_key_header,
+    )
+
+    assert moved.status_code == 200, moved.text
+    assert moved.json()["budget_duration_sec"] == 3600
+    assert moved.json()["reset_timezone"] is None
+
+
+def test_a_timezone_named_alongside_a_duration_is_refused_on_an_update(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    budget_id = _make_budget(client, master_key_header)
+
+    refused = client.patch(
+        f"{API_ROOT}/budgets/{budget_id}",
+        json={"budget_duration_sec": 3600, "reset_timezone": "America/New_York"},
+        headers=master_key_header,
+    )
+
+    assert refused.status_code == 400, refused.text

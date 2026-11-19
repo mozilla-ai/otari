@@ -113,8 +113,9 @@ chooses where they are counted; see
 
 ## Periods and exemptions
 
-Scoped budgets use either a UTC calendar boundary (daily, weekly from Monday,
-monthly from the first) or a rolling duration. A key marked **Exempt from
+Scoped budgets use either a calendar boundary (daily, weekly from Monday,
+monthly from the first) or a rolling duration. A calendar boundary is midnight UTC,
+or midnight in the budget's `reset_timezone` when it names one. A key marked **Exempt from
 budget** (`exclude_from_budget`) logs its cost without enforcement. A self-hosted
 deployment can turn enforcement off entirely; see
 [Budget enforcement](configuration.md#budget-enforcement).
@@ -153,8 +154,9 @@ as `end_user` in the body; see [End users](end-users.md).
 ### `Retry-After`
 
 When the refusing budget resets, the refusal carries `Retry-After`: the whole
-seconds, rounded up, until its current window ends (the next UTC midnight, ISO
-week or month for a calendar budget, or the end of the rolling period). Where
+seconds, rounded up, until its current window ends (the next midnight, ISO
+week or month for a calendar budget, in its `reset_timezone` or UTC, or the end
+of the rolling period). Where
 several budgets apply, it is the window of the one that refused.
 
 A budget with no period sends no `Retry-After`, and neither does a refusal of a

@@ -193,17 +193,19 @@ async def roll_ended_windows(
     for ceiling in ceilings:
         if ceiling.period_end is None or now < ceiling.period_end:
             continue
-        budget_id, alignment = ceiling.scoped_budget_id, ceiling.reset_alignment
+        budget_id, alignment, timezone = ceiling.scoped_budget_id, ceiling.reset_alignment, ceiling.reset_timezone
         try:
-            window = period_window(now, duration=ceiling.budget_duration_sec, alignment=alignment)
+            window = period_window(now, duration=ceiling.budget_duration_sec, alignment=alignment, timezone=timezone)
         except ValueError:
             # Only reachable by a write that went around the API, and the safe
             # direction is to leave the exhausted window in place: not resetting
             # refuses requests, while guessing a cadence would admit them.
             logger.warning(
-                "Scoped budget %s has an unrecognized reset_alignment %r; leaving its period in place",
+                "Scoped budget %s has an unrecognized reset_alignment %r or reset_timezone %r; "
+                "leaving its period in place",
                 budget_id,
                 alignment,
+                timezone,
             )
             continue
         period_start, next_period_end = window if window is not None else (now, None)

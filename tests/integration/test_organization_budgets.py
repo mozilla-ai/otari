@@ -17,9 +17,10 @@ tenant's.
 """
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 from decimal import Decimal
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi import status
@@ -1204,4 +1205,57 @@ async def test_an_unknown_scope_type_reaching_the_service_is_a_validation_error(
             organization=organization,
             scope_type="galaxy",
             scope_id=str(organization.id),
+        )
+
+
+@pytest.mark.asyncio
+async def test_an_organization_budget_resets_its_ceilings_at_midnight_in_its_timezone(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db, slug="acme-timezone")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = _service(async_db)
+    budget = await service.create_organization_budget(
+        user=owner, request=_create(reset_alignment="calendar_day", reset_timezone="Europe/Berlin")
+    )
+    assert budget.reset_timezone == "Europe/Berlin"
+
+    ceiling = await service.create_organization_ceiling(
+        user=owner,
+        request=OrganizationScopedBudgetCreate(
+            scope_type="organization", scope_id=str(organization.id), budget_id=budget.budget_id
+        ),
+    )
+
+    assert ceiling.reset_timezone == "Europe/Berlin"
+    assert ceiling.period_end is not None
+    assert datetime.fromisoformat(ceiling.period_end).astimezone(ZoneInfo("Europe/Berlin")).time() == time()
+
+
+@pytest.mark.asyncio
+async def test_an_organization_budget_drops_its_timezone_off_calendar_boundaries(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db, slug="acme-timezone-drop")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = _service(async_db)
+    budget = await service.create_organization_budget(
+        user=owner, request=_create(reset_alignment="calendar_day", reset_timezone="Europe/Berlin")
+    )
+
+    updated = await service.update_organization_budget(
+        user=owner,
+        budget_id=budget.budget_id,
+        request=OrganizationBudgetUpdate(reset_alignment=None, budget_duration_sec=3600),
+    )
+
+    assert updated.reset_alignment is None
+    assert updated.reset_timezone is None
+
+
+@pytest.mark.asyncio
+async def test_an_organization_budget_refuses_a_timezone_with_no_calendar_boundary(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db, slug="acme-timezone-refused")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = _service(async_db)
+
+    with pytest.raises(TenancyValidationError, match="needs reset_alignment"):
+        await service.create_organization_budget(
+            user=owner, request=_create(reset_alignment=None, reset_timezone="Europe/Berlin")
         )

@@ -6,7 +6,8 @@ awkward (December, February, a leap year), which a rolling window in seconds
 cannot express at all.
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -91,3 +92,79 @@ def test_an_unknown_alignment_is_refused_rather_than_guessed() -> None:
     roll at the gate) leaves the exhausted window in place instead of guessing."""
     with pytest.raises(ValueError, match="Unknown reset alignment"):
         period_window(_at("2026-08-19T09:30:00"), duration=None, alignment="calendar_quarter")
+
+
+@pytest.mark.parametrize(
+    ("now", "expected_start", "expected_end"),
+    [
+        # 03:00 UTC is still the evening before in New York, on standard time (UTC-5).
+        ("2026-11-19T03:00:00", "2026-11-18T05:00:00", "2026-11-19T05:00:00"),
+        # Daylight time (UTC-4) moves the boundary an hour earlier in UTC.
+        ("2026-07-01T12:00:00", "2026-07-01T04:00:00", "2026-07-02T04:00:00"),
+    ],
+)
+def test_a_timezone_moves_the_day_to_its_own_midnight(now: str, expected_start: str, expected_end: str) -> None:
+    assert period_window(_at(now), duration=None, alignment="calendar_day", timezone="America/New_York") == (
+        _at(expected_start),
+        _at(expected_end),
+    )
+
+
+@pytest.mark.parametrize(
+    ("now", "hours"),
+    [
+        # 2026-03-08: clocks go forward, so the day is an hour short.
+        ("2026-03-08T12:00:00", 23),
+        # 2026-11-01: clocks go back, so the day is an hour long.
+        ("2026-11-01T12:00:00", 25),
+    ],
+)
+def test_a_day_across_a_daylight_saving_change_runs_midnight_to_midnight(now: str, hours: int) -> None:
+    """Adding 24 hours to the start would land an hour off the next midnight."""
+    window = period_window(_at(now), duration=None, alignment="calendar_day", timezone="America/New_York")
+    assert window is not None
+    start, end = window
+    assert end - start == timedelta(hours=hours)
+    assert end.astimezone(ZoneInfo("America/New_York")).time() == time()
+
+
+def test_a_week_and_a_month_snap_to_local_midnight() -> None:
+    now = _at("2026-11-19T03:00:00")  # Wednesday evening in New York.
+    assert period_window(now, duration=None, alignment="calendar_week", timezone="America/New_York") == (
+        _at("2026-11-16T05:00:00"),
+        _at("2026-11-23T05:00:00"),
+    )
+    # The month starts on daylight time and ends on standard time.
+    assert period_window(now, duration=None, alignment="calendar_month", timezone="America/New_York") == (
+        _at("2026-11-01T04:00:00"),
+        _at("2026-12-01T05:00:00"),
+    )
+
+
+def test_a_day_whose_midnight_is_skipped_starts_at_its_first_instant() -> None:
+    """Chile moves its clocks forward at midnight, so 2026-09-06 has no 00:00 and starts at 01:00 local."""
+    window = period_window(
+        _at("2026-09-06T12:00:00"), duration=None, alignment="calendar_day", timezone="America/Santiago"
+    )
+    assert window == (_at("2026-09-06T04:00:00"), _at("2026-09-07T03:00:00"))
+
+
+def test_naming_utc_is_the_same_as_naming_no_timezone() -> None:
+    now = _at("2026-08-19T09:30:00")
+    assert period_window(now, duration=None, alignment="calendar_day", timezone="UTC") == period_window(
+        now, duration=None, alignment="calendar_day"
+    )
+
+
+def test_a_rolling_window_ignores_the_timezone() -> None:
+    now = _at("2026-08-19T09:30:00")
+    assert period_window(now, duration=3600, alignment=None, timezone="America/New_York") == (
+        now,
+        now + timedelta(hours=1),
+    )
+
+
+def test_an_unknown_timezone_is_refused_rather_than_guessed() -> None:
+    """A ValueError, like an unknown alignment, so the roll at the gate leaves the window in place."""
+    with pytest.raises(ValueError, match="Unknown reset timezone"):
+        period_window(_at("2026-08-19T09:30:00"), duration=None, alignment="calendar_day", timezone="Mars/Olympus")

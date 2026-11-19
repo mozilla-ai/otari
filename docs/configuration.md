@@ -357,6 +357,7 @@ budgets:
   team-monthly:
     max_budget: 500
     reset_alignment: calendar_month
+    reset_timezone: America/New_York
 
 api_keys:
   backend:
@@ -371,6 +372,8 @@ A service key with end-user budgets is declared the same way; see
 A budget is keyed by its id and takes the fields `PUT /api/v1/budgets/{budget_id}`
 takes: `name`, `max_budget`, `token_limit`, `request_limit`, `rpm_limit`,
 `tpm_limit`, and either `budget_duration_sec` or `reset_alignment`, not both.
+`reset_timezone` (an IANA name, UTC when unset) moves a `reset_alignment`
+budget's boundaries to midnight in that zone, and needs `reset_alignment`.
 An id is up to 128 letters, digits, `.`, `_` and `-`, and starts with a letter
 or digit.
 

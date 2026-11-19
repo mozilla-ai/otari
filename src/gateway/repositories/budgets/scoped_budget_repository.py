@@ -49,6 +49,7 @@ class ApplicableCeiling:
     max_budget: Decimal | None
     current_spend: Decimal
     reserved_spend: Decimal
+    reset_timezone: str | None = None
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,7 @@ class LimitUsage:
     budget_duration_sec: int | None
     reset_alignment: str | None
     usage: CeilingUsage
+    reset_timezone: str | None = None
 
 
 @dataclass(frozen=True)
@@ -345,6 +347,7 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
                 ScopedBudget.provider_key_id,
                 Budget.budget_duration_sec,
                 Budget.reset_alignment,
+                Budget.reset_timezone,
                 ScopedBudget.period_end,
                 Budget.token_limit,
                 Budget.request_limit,
@@ -363,6 +366,7 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
                 provider_key_id=provider_key_id,
                 budget_duration_sec=budget_duration_sec,
                 reset_alignment=reset_alignment,
+                reset_timezone=reset_timezone,
                 period_end=period_end,
                 token_limit=token_limit,
                 request_limit=request_limit,
@@ -376,6 +380,7 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
                 provider_key_id,
                 budget_duration_sec,
                 reset_alignment,
+                reset_timezone,
                 period_end,
                 token_limit,
                 request_limit,
@@ -393,6 +398,7 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
                 ScopedBudget.provider_key_id,
                 Budget.budget_duration_sec,
                 Budget.reset_alignment,
+                Budget.reset_timezone,
                 Budget.max_budget,
                 ScopedBudget.current_spend,
                 ScopedBudget.reserved_spend,
@@ -413,6 +419,7 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
                 provider_key_id=row.provider_key_id,
                 budget_duration_sec=row.budget_duration_sec,
                 reset_alignment=row.reset_alignment,
+                reset_timezone=row.reset_timezone,
                 usage=CeilingUsage(
                     max_budget=row.max_budget,
                     current_spend=row.current_spend,

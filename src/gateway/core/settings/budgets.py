@@ -7,7 +7,14 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from gateway.core.settings.declarations import declaration_digest
 from gateway.core.settings_view import OMITTED, SettingsGroup, Shown
-from gateway.models.budgets import BUDGET_ID_PATTERN, MAX_COUNT_LIMIT, MAX_MINUTE_LIMIT, ResetAlignment
+from gateway.models.budgets import (
+    BUDGET_ID_PATTERN,
+    MAX_COUNT_LIMIT,
+    MAX_MINUTE_LIMIT,
+    MAX_RESET_TIMEZONE_LENGTH,
+    ResetAlignment,
+    check_reset_timezone,
+)
 from gateway.models.money import MAX_USD_LIMIT
 
 STREAM_MISSING_USAGE_POLICIES = ("estimate", "fail", "allow_free")
@@ -32,17 +39,31 @@ class BudgetConfig(BaseModel):
     tpm_limit: int | None = Field(default=None, ge=1, le=MAX_MINUTE_LIMIT)
     budget_duration_sec: int | None = Field(default=None, gt=0)
     reset_alignment: ResetAlignment | None = None
+    reset_timezone: str | None = Field(default=None, max_length=MAX_RESET_TIMEZONE_LENGTH)
+
+    @field_validator("reset_timezone")
+    @classmethod
+    def _known_timezone(cls, value: str | None) -> str | None:
+        return None if value is None else check_reset_timezone(value)
 
     @model_validator(mode="after")
     def _single_period_source(self) -> Self:
         if self.budget_duration_sec is not None and self.reset_alignment is not None:
             msg = "a budget resets on budget_duration_sec or on reset_alignment, not both"
             raise ValueError(msg)
+        if self.reset_timezone is not None and self.reset_alignment is None:
+            msg = "reset_timezone places reset_alignment's boundaries, so it needs reset_alignment"
+            raise ValueError(msg)
         return self
 
     def declaration_digest(self) -> str:
-        """A digest of this entry, which changes when any field config.yml sets for it does."""
-        return declaration_digest(self.model_dump(mode="json"))
+        """A digest of this entry, which changes when any field config.yml sets for it does.
+
+        An entry naming no reset_timezone digests as it did before the field
+        existed, so the upgrade does not write every declared budget back.
+        """
+        exclude = {"reset_timezone"} if self.reset_timezone is None else set()
+        return declaration_digest(self.model_dump(mode="json", exclude=exclude))
 
 
 class BudgetSettings(BaseModel):

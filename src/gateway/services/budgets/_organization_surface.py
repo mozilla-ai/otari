@@ -41,18 +41,20 @@ from gateway.schemas.budgets import (
     OrganizationScopedBudgetsPublic,
     OrganizationScopedBudgetUpdate,
 )
-from gateway.services.budgets._periods import period_window
-from gateway.services.budgets._retiming import cadence_of
+from gateway.services.budgets._periods import budget_window
+from gateway.services.budgets._retiming import cadence_of, settle_reset_timezone
 from gateway.services.budgets._scopes import ScopeOwnership, lock_workspace_for_scope
 from gateway.services.tenancy.organization_service import OrganizationService
 
 _MAX_LIST_LIMIT = 1000
 
 
-def _require_single_period_source(duration: int | None, alignment: str | None) -> None:
-    """Refuse a budget that resets on a duration and on a calendar boundary at once."""
+def _require_single_period_source(duration: int | None, alignment: str | None, timezone: str | None = None) -> None:
+    """Refuse a budget that resets on a duration and on a calendar boundary at once, or a timezone with no boundary."""
     if duration is not None and alignment is not None:
         raise TenancyValidationError("A budget resets on budget_duration_sec or on reset_alignment, not both")
+    if timezone is not None and alignment is None:
+        raise TenancyValidationError("reset_timezone places reset_alignment's boundaries, so it needs reset_alignment")
 
 
 def _current_window(budget: Budget) -> tuple[datetime | None, datetime | None]:
@@ -60,7 +62,7 @@ def _current_window(budget: Budget) -> tuple[datetime | None, datetime | None]:
 
     An aligned budget opens on the current calendar boundary, so the first period is a partial one.
     """
-    window = period_window(datetime.now(UTC), duration=budget.budget_duration_sec, alignment=budget.reset_alignment)
+    window = budget_window(datetime.now(UTC), budget)
     return window if window is not None else (None, None)
 
 
@@ -127,7 +129,7 @@ class _OrganizationSurface:
 
     async def create_budget(self, *, user: User, request: OrganizationBudgetCreate) -> OrganizationBudgetPublic:
         organization = await self._get_managed_organization(user)
-        _require_single_period_source(request.budget_duration_sec, request.reset_alignment)
+        _require_single_period_source(request.budget_duration_sec, request.reset_alignment, request.reset_timezone)
         budget = await self._repositories.budgets.add(
             Budget(
                 organization_id=organization.id,
@@ -137,6 +139,7 @@ class _OrganizationSurface:
                 request_limit=request.request_limit,
                 budget_duration_sec=request.budget_duration_sec,
                 reset_alignment=request.reset_alignment,
+                reset_timezone=request.reset_timezone,
             )
         )
         return OrganizationBudgetPublic.from_model(budget, organization_id=organization.id, ceiling_count=0)
@@ -261,17 +264,19 @@ class _OrganizationSurface:
         """
         organization = await self._get_managed_organization(user)
         budget = await self._require_own_budget(organization=organization, budget_id=budget_id)
-        cadence_before = cadence_of(budget.budget_duration_sec, budget.reset_alignment)
+        cadence_before = cadence_of(budget.budget_duration_sec, budget.reset_alignment, budget.reset_timezone)
         changes: dict[str, Any] = request.model_dump(exclude_unset=True)
         if "max_budget" in changes:
             changes["max_budget"] = to_usd_or_none(changes["max_budget"])
-        # The resulting pair is what the CHECK constraint refuses, and neither submitted field alone looks wrong.
+        settle_reset_timezone(changes, stored_alignment=budget.reset_alignment, stored_timezone=budget.reset_timezone)
+        # The resulting cadence is what the CHECK constraints refuse, and no submitted field alone looks wrong.
         _require_single_period_source(
             changes.get("budget_duration_sec", budget.budget_duration_sec),
             changes.get("reset_alignment", budget.reset_alignment),
+            changes.get("reset_timezone", budget.reset_timezone),
         )
         budget = await self._repositories.budgets.update(budget, changes)
-        if cadence_of(budget.budget_duration_sec, budget.reset_alignment) != cadence_before:
+        if cadence_of(budget.budget_duration_sec, budget.reset_alignment, budget.reset_timezone) != cadence_before:
             period_start, period_end = _current_window(budget)
             await self._repositories.ceilings.retime_for_budget(
                 budget.budget_id, period_start=period_start, period_end=period_end
