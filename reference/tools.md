@@ -735,7 +735,9 @@ gets what `code_execution_workspace_default` says: `true`, deployment defaults
 apply; `false`, code execution is off until a workspace owner or admin turns it
 on, and the request is refused as if a disabled policy were stored. It defaults
 to `true`. The Playground's tools menu and the policy endpoint's `default_enabled`
-field read the same setting.
+field read the same setting. The refusal's message names the dashboard's Tools >
+Code execution page, whose tool row says whether the selected workspace's
+requests may declare the tool.
 
 ## Web retrieval
 
@@ -989,7 +991,12 @@ Manage it under `/api/v1/workspaces/{workspace_id}/web-search`. The dashboard's
 Tools > Web search page sets `enabled`, the two executors, `max_results`, the
 domain lists, and the provider options, with a field for each option of the
 provider the workspace's searches run on; the purpose hint is set through the
-API.
+API. Each tool's row says whether the selected workspace's requests may
+declare it, and why not when they may not. A request that declares a web tool
+in a workspace with `enabled` off is refused with a 403 `web_access_disabled`
+whose message names this page. A Search with nothing to run on, neither the
+deployment's own search nor an organization key, is refused with a 400 that
+says so, whatever `enabled` is.
 `max_results`, the purpose hint, and provider options apply only to Search.
 Workspace values can narrow deployment policy but cannot enable a missing
 backend, enable deployment-disabled Fetch, or relax an operator limit. Fetch
