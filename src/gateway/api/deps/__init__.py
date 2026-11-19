@@ -60,7 +60,7 @@ from gateway.api.deps.budgets import (
     build_budget_service,
     get_budget_service,
 )
-from gateway.api.deps.catalog import SelectorReindexDep
+from gateway.api.deps.catalog import SelectorReindexDep, get_selector_reindex
 from gateway.api.deps.identity import (
     CurrentIdentity,
     DeploymentAdministrationAccessDep,
@@ -1320,6 +1320,7 @@ __all__ = [
     "get_search_catalog_caller",
     "get_search_tool_service",
     "get_search_tool_tester",
+    "get_selector_reindex",
     "get_session_identity",
     "get_signup_invite_port",
     "get_telemetry_storage_port",
