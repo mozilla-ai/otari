@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 
+import { Button } from "../actions/Button"
 import { PageError } from "./PageError"
 
 /**
@@ -25,8 +26,17 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-/** The banner alone, which is what a failed bootstrap shows. */
+/** The banner alone, which is what a caught throw with no guidance shows. */
 export const Default: Story = {}
+
+/** A failed bootstrap: what is happening, and the one control that asks again. */
+export const WithAction: Story = {
+  args: {
+    children:
+      "Check that it is running. The dashboard keeps trying in the background and opens as soon as the gateway answers.",
+    action: <Button variant="primary">Retry</Button>,
+  },
+}
 
 /** With the sentence a caught throw adds, since the thrown value carries none. */
 export const WithGuidance: Story = {
