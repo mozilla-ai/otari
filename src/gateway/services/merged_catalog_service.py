@@ -173,7 +173,14 @@ class ModelObject(BaseModel):
     type: ModelType | None = None
     # True when the deployment pays the upstream bill for this model, so the organization may not set its own rate.
     # An alias or policy is a name, not a model, so it is always False.
-    deployment_managed: bool = False
+    deployment_managed: bool = Field(
+        default=False,
+        description=(
+            "True when the deployment pays the upstream bill for this model, so the caller's organization "
+            "may not set its own rate for it. False for a model the organization pays for, and for an alias "
+            "or policy, which is a name rather than a model."
+        ),
+    )
 
 
 def mark_deployment_managed(
@@ -711,11 +718,18 @@ async def catalog_scope(
             organization_id=session_identity.active_organization_id,
         )
     api_key, is_master_key = auth
-    # An API key's hosted models stay unflagged, because its organization is
-    # resolved to ask the port and not to say who pays the bill.
     workspace_id = api_key.workspace_id if api_key is not None else None
     organization_id = None if workspace_id is None else await organization_for_workspace_id(db, workspace_id)
     hosted_models = await resolve_hosted_models(model_provider, None if is_master_key else organization_id)
+    # The organization's hosted set before any workspace narrowing: deployment_managed asks whether the
+    # organization may set its own rate for a model, which the rate-override gate decides per organization,
+    # not per workspace. A master key may price any model, so it flags none.
+    deployment_supplied_providers: frozenset[str] = frozenset()
+    if not is_master_key and organization_id is not None and hosted_models:
+        byo_providers_in_organization = await OrgProviderKeyService(db).get_byo_providers(
+            organization_id=organization_id
+        )
+        deployment_supplied_providers = frozenset(hosted_models) - byo_providers_in_organization
     if not is_master_key:
         hosted_models = narrow_hosted_models(hosted_models, workspace_id)
     withheld_providers: frozenset[str] = frozenset()
@@ -744,7 +758,7 @@ async def catalog_scope(
         organization_id=organization_id if include_offered else None,
         allowlist=None if is_master_key else await resolve_request_allowlist(db, api_key),
         reads_workspace_layer=True,
-        deployment_supplied_providers=frozenset(),
+        deployment_supplied_providers=deployment_supplied_providers,
         # A master key is the deployment acting on its own behalf, which lands in
         # the default workspace exactly as pricing resolution does for it; a real
         # key names its own workspace, and what that workspace's organization

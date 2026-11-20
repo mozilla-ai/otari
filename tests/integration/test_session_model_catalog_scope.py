@@ -263,6 +263,22 @@ def _catalog_as(client: TestClient, world: _World, who: str) -> set[str]:
     return set(_listing_as(client, world, who))
 
 
+def _listing_with_key_in(client: TestClient, world: _World, *, owner: str, workspace: str) -> dict[str, dict[str, Any]]:
+    """List /models as an API key minted into ``workspace`` by ``owner`` on the member key surface."""
+    client.cookies.set(SESSION_COOKIE_NAME, world.sessions[owner])
+    try:
+        minted = client.post(
+            f"{API_ROOT}/organizations/me/keys",
+            json={"key_name": f"{workspace} catalog key", "workspace_id": str(world.workspaces[workspace])},
+        )
+    finally:
+        client.cookies.clear()
+    assert minted.status_code == status.HTTP_200_OK, minted.text
+    response = client.get(f"{API_ROOT}/models", headers={"Otari-Key": f"Bearer {minted.json()['key']}"})
+    assert response.status_code == status.HTTP_200_OK, response.text
+    return {model["id"]: model for model in response.json()["data"]}
+
+
 def test_the_master_key_still_sees_every_priced_model(
     client: TestClient, master_key_header: dict[str, str], world: _World
 ) -> None:
@@ -764,6 +780,37 @@ def test_the_deployment_managed_flag_agrees_with_the_rate_override_gate(
         client.cookies.clear()
     expected = status.HTTP_403_FORBIDDEN if deployment_managed else status.HTTP_201_CREATED
     assert written.status_code == expected, written.text
+
+
+def test_an_api_key_flags_deployment_managed_as_a_session_in_its_organization_does(
+    client: TestClient, world: _World
+) -> None:
+    """The flag has one meaning on every path (#1267): an API key sees it exactly as a session does.
+
+    Alpha holds an openai key, so openai is the organization's to price; nobody holds a mistral key, so
+    mistral is the deployment's. A listing read through an alpha API key must agree with alpha's session.
+    """
+    bind_model_provider(client, HostedModelProvider("openai", "mistral"))
+
+    session_listing = _listing_as(client, world, "alpha_owner")
+    key_listing = _listing_with_key_in(client, world, owner="alpha_owner", workspace="alpha_one")
+
+    for model in (_OPENAI_MODEL, _MISTRAL_MODEL):
+        listed_as = _LISTED_AS[model]
+        assert key_listing[listed_as]["deployment_managed"] == session_listing[listed_as]["deployment_managed"]
+    # Concretely: the key the organization holds pays openai, the deployment pays mistral.
+    assert key_listing[_LISTED_AS[_OPENAI_MODEL]]["deployment_managed"] is False
+    assert key_listing[_LISTED_AS[_MISTRAL_MODEL]]["deployment_managed"] is True
+
+
+def test_a_master_key_flags_no_hosted_model_as_deployment_managed(
+    client: TestClient, master_key_header: dict[str, str], world: _World
+) -> None:
+    """An operator may price any model, so a master key's listing flags none (#1267)."""
+    bind_model_provider(client, HostedModelProvider("openai", "mistral"))
+    response = client.get(f"{API_ROOT}/models", headers=master_key_header)
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert not [model for model in response.json()["data"] if model["deployment_managed"]]
 
 
 @pytest.mark.parametrize(

@@ -17245,6 +17245,7 @@ export interface components {
             created: number;
             /**
              * Deployment Managed
+             * @description True when the deployment pays the upstream bill for this model, so the caller's organization may not set its own rate for it. False for a model the organization pays for, and for an alias or policy, which is a name rather than a model.
              * @default false
              */
             deployment_managed: boolean;
