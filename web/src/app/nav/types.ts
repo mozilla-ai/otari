@@ -103,17 +103,16 @@ interface NavItemBase {
   operatorOnly?: "unlisted" | "refused"
   /**
    * Who in the organization may open this destination, for one that is not
-   * everyone's: `"manager"` for an owner or admin of the organization,
-   * `"contributor"` for someone who may run things in the selected workspace,
-   * which a viewer may not, and `"manager-or-operator"` for a page that serves
-   * the deployment's operator as well.
+   * everyone's: `"manager"` for an owner or admin of the organization, and
+   * `"contributor"` for someone who may run things in the selected
+   * workspace, which a viewer may not.
    *
    * A destination on the organization rail declares nothing unless it asks
    * something else: that whole rail is a manager's. A page someone may not
    * open is in none of their navigation, and typing its address goes Home
    * (`useRouteAccess`).
    */
-  requires?: "manager" | "contributor" | "manager-or-operator"
+  requires?: "manager" | "contributor"
   /**
    * That this destination is of use to a signed-in caller who belongs to no
    * organization: someone who declined their only invitation, or signed in
@@ -235,7 +234,6 @@ export interface NavLabelOverride {
 export type Requirement =
   | "operator"
   | "manager"
-  | "manager-or-operator"
   | "workspace-manager"
   | "contributor"
 

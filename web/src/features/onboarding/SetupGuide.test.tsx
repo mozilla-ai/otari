@@ -509,9 +509,7 @@ describe("SetupGuide", () => {
     // A failure is news, not the end of the guide: the panel keeps its shape
     // and "Check now" stays where it was.
     expect(screen.getByText(/Still listening/)).toBeInTheDocument()
-    expect(
-      screen.getByRole("link", { name: "Open budgets" }),
-    ).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Open rules" })).toBeInTheDocument()
     expect(
       screen.getByRole("button", { name: "Check now" }),
     ).toBeInTheDocument()
@@ -746,7 +744,7 @@ describe("SetupGuide", () => {
     const user = userEvent.setup()
     await renderGuide()
 
-    await user.click(await screen.findByRole("link", { name: "Open budgets" }))
+    await user.click(await screen.findByRole("link", { name: "Open rules" }))
 
     await waitFor(() => {
       expect(
@@ -894,9 +892,7 @@ describe("SetupGuide", () => {
       const user = userEvent.setup()
       await renderGuide()
 
-      await user.click(
-        await screen.findByRole("link", { name: "Open budgets" }),
-      )
+      await user.click(await screen.findByRole("link", { name: "Open rules" }))
 
       expect(recordEvent).toHaveBeenCalledWith(
         TELEMETRY_EVENTS.ACTIVATION_GUIDE_DISMISSED,
