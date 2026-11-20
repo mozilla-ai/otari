@@ -391,6 +391,7 @@ POST /validate  {"profile": "...", "input_text": "...", "validate_kwargs": {...}
 verdict. `GET /profiles` is optional: it lists
 `[{"name": "prompt-injection", "guardrail_name": "injec_guard"}]` so the
 dashboard can offer the profile in a picker.
+[Host your own guardrail](host-your-own-guardrail.md) walks through writing one.
 
 ## How long a service has to answer
 
