@@ -129,7 +129,7 @@ _threads: ThreadPoolExecutor | None = None
 
 @dataclass(frozen=True)
 class GuardrailCheck:
-    """One in-process verdict, in the three fields the remote path also reports.
+    """One in-process verdict, in the fields the remote path also reports.
 
     Deliberately not any-guardrail's own `GuardrailOutput`: the caller is
     `services/guardrails`, which knows nothing about this package and must not
@@ -140,6 +140,8 @@ class GuardrailCheck:
     valid: bool
     explanation: str | None
     score: float | None
+    categories: tuple[str, ...] = ()
+    """The names of the categories the guardrail says fired, unfiltered: the caller holds them to its own rule."""
 
 
 @dataclass(frozen=True)
@@ -225,7 +227,14 @@ class OrganizationGuardrailHandle:
                 f"guardrail definition {self._definition_id} returned {type(output).__name__}, not one verdict",
                 public_detail="guardrail could not be evaluated",
             )
-        return GuardrailCheck(valid=output.valid, explanation=output.explanation, score=output.score)
+        # Only a category the guardrail decided fired: `triggered` is None where it
+        # reports a score and no verdict, which says nothing about why it flagged.
+        return GuardrailCheck(
+            valid=output.valid,
+            explanation=output.explanation,
+            score=output.score,
+            categories=tuple(category.name for category in output.categories if category.triggered is True),
+        )
 
 
 def handle(organization_id: uuid.UUID, definition_id: uuid.UUID) -> OrganizationGuardrailHandle | None:

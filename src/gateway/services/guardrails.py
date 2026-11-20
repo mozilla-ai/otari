@@ -46,6 +46,7 @@ from gateway.models.guardrails import GuardrailConfig
 from gateway.services.providers import OwnedEndpointTransport
 from gateway.services.tool_usage import TOOL_ERROR_SENTINEL
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
+from gateway.types.traces import is_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,30 @@ the detail.
 """
 
 GuardrailStatus = Literal["evaluated", "inconclusive", "unavailable"]
+
+# Enough to name what fired, too few and too short for a vendor's prose to fit.
+_MAX_CATEGORIES = 8
+_MAX_CATEGORY_LENGTH = 64
+
+
+def reported_categories(raw: object) -> tuple[str, ...]:
+    """What a check says fired, such as ``prompt_attack`` or ``pii/phone_number``, as a caller may see it.
+
+    They come from a vendor, or from a service the caller chose, so only short
+    identifier-shaped names are kept, each once, and at most a few; anything
+    else is dropped rather than shown. An item is a name, or any-guardrail's own
+    category object, which counts only when ``triggered`` is true.
+    """
+    if not isinstance(raw, list | tuple):
+        return ()
+    kept: list[str] = []
+    for item in raw:
+        name = item.get("name") if isinstance(item, dict) and item.get("triggered") is True else item
+        if isinstance(name, str) and len(name) <= _MAX_CATEGORY_LENGTH and is_identifier(name) and name not in kept:
+            kept.append(name)
+            if len(kept) == _MAX_CATEGORIES:
+                break
+    return tuple(kept)
 
 
 def _unevaluated_detail(profile: str) -> str:
@@ -175,6 +200,8 @@ class GuardrailResult:
     score: object | None = None
     unavailable: UnavailableReason | None = None
     """Set when the check could not run and the request was served anyway."""
+    categories: tuple[str, ...] = ()
+    """What fired, as :func:`reported_categories` keeps it. Empty when the guardrail names nothing."""
 
     @property
     def status(self) -> GuardrailStatus:
@@ -213,7 +240,7 @@ class GuardrailVerdict:
 class InProcessVerdict(Protocol):
     """What a guardrail this process runs answers with.
 
-    The same three fields the guardrails service reports, so both backends reach
+    The same fields the guardrails service reports, so both backends reach
     :class:`GuardrailResult` the same way. Read-only properties rather than
     attributes, so a frozen value type satisfies this by shape.
     """
@@ -226,6 +253,9 @@ class InProcessVerdict(Protocol):
 
     @property
     def score(self) -> float | None: ...
+
+    @property
+    def categories(self) -> tuple[str, ...]: ...
 
 
 class InProcessGuardrail(Protocol):
@@ -332,6 +362,7 @@ async def _validate_one(
         valid=valid,
         explanation=result.get("explanation"),
         score=result.get("score"),
+        categories=reported_categories(result.get("categories")),
     )
 
 
@@ -372,6 +403,7 @@ async def _check_in_process(
         valid=verdict.valid,
         explanation=verdict.explanation,
         score=verdict.score,
+        categories=reported_categories(verdict.categories),
     )
 
 
@@ -628,6 +660,7 @@ class _CachedVerdict:
     valid: bool | None
     explanation: object | None
     score: object | None
+    categories: tuple[str, ...]
     expires_at: float
 
 
@@ -673,6 +706,7 @@ def cached_result(identity: str, text: str, cfg: GuardrailConfig) -> GuardrailRe
         valid=entry.valid,
         explanation=entry.explanation,
         score=entry.score,
+        categories=entry.categories,
     )
 
 
@@ -685,6 +719,7 @@ def remember_result(identity: str, text: str, result: GuardrailResult) -> None:
         valid=result.valid,
         explanation=result.explanation,
         score=result.score,
+        categories=result.categories,
         expires_at=time.monotonic() + _VERDICT_CACHE_TTL_S,
     )
     _verdicts.move_to_end(key)
