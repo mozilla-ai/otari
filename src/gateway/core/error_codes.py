@@ -34,6 +34,8 @@ BUDGET_EXCEEDED = "budget_exceeded"
 GUARDRAIL_VIOLATION = "guardrail_violation"
 # A guardrail that enforces has no guardrails service configured, so the request was refused unchecked.
 GUARDRAIL_NOT_CONFIGURED = "guardrail_not_configured"
+# A guardrail that enforces could not be evaluated for any other reason, so the request was refused unchecked.
+GUARDRAIL_UNAVAILABLE = "guardrail_unavailable"
 USER_BLOCKED = "user_blocked"
 USER_NOT_FOUND = "user_not_found"
 RATE_LIMITED = "rate_limited"

@@ -152,6 +152,9 @@ async def test_apply_guardrails_unreachable_is_502(monkeypatch: pytest.MonkeyPat
     with pytest.raises(HTTPException) as exc:
         await apply_input_guardrails([GuardrailConfig(profile="prompt-injection")], "x", response=Response())
     assert exc.value.status_code == 502
+    # Otari#2982: a stable code, so a client can tell this 502 from a provider's.
+    assert exc.value.headers is not None
+    assert exc.value.headers["Otari-Error-Code"] == "guardrail_unavailable"
 
 
 @pytest.mark.asyncio
