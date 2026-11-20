@@ -12,7 +12,7 @@ from typing import Any, Literal, cast
 import httpx
 import pytest
 from any_llm import LLMProvider
-from any_llm.exceptions import ContextLengthExceededError
+from any_llm.exceptions import ContextLengthExceededError, UnsupportedParameterError
 from fastapi import HTTPException
 
 from _unavailable_model_support import reporter_with_null_listener
@@ -464,9 +464,68 @@ async def test_single_attempt_exhaustion_keeps_the_classified_status() -> None:
 @pytest.mark.asyncio
 async def test_timeout_exhaustion_is_504() -> None:
     with pytest.raises(HTTPException) as exc_info:
-        await _walk([_attempt(1, "a"), _attempt(2, "b")], [_http_error(503), asyncio.TimeoutError()])
+        await _walk([_attempt(1, "a"), _attempt(2, "b")], [asyncio.TimeoutError(), asyncio.TimeoutError()])
     assert exc_info.value.status_code == 504
     assert exc_info.value.detail == ALL_ATTEMPTS_TIMED_OUT_DETAIL
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("first", "detail"),
+    [
+        (
+            _Rejection(400, "no seed argument"),
+            "The last candidate timed out; the 1 earlier candidate refused the request.",
+        ),
+        (
+            UnsupportedParameterError("response_format", "bedrock"),
+            "The last candidate timed out; the 1 earlier candidate refused the request.",
+        ),
+        (_http_error(503), "The last candidate timed out; the 1 earlier candidate failed for another reason."),
+        (
+            _StructuredOutputFailure(),
+            "The last candidate timed out; the 1 earlier candidate failed for another reason.",
+        ),
+        (_http_error(401), "The last candidate timed out; the 1 earlier candidate failed for another reason."),
+        (_http_error(404), "The last candidate timed out; the 1 earlier candidate failed for another reason."),
+    ],
+    ids=["400", "unsupported-parameter", "503", "structured-output", "credential-401", "unknown-model-404"],
+)
+async def test_a_timeout_after_another_failure_does_not_claim_every_candidate_timed_out(
+    first: Exception, detail: str
+) -> None:
+    """#2983: a caller read "all timed out" and retried a request the first candidate refused."""
+    with pytest.raises(HTTPException) as exc_info:
+        await _walk([_attempt(1, "a"), _attempt(2, "b")], [first, asyncio.TimeoutError()])
+    assert exc_info.value.status_code == 504
+    assert exc_info.value.detail == detail
+
+
+@pytest.mark.asyncio
+async def test_a_timeout_after_several_mixed_failures_counts_each_kind() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await _walk(
+            [_attempt(1, "a"), _attempt(2, "b"), _attempt(3, "c")],
+            [_Rejection(400, "bad"), _http_error(503), asyncio.TimeoutError()],
+        )
+    assert exc_info.value.status_code == 504
+    assert exc_info.value.detail == (
+        "The last candidate timed out; of the 2 earlier candidates, "
+        "1 refused the request and 1 failed for another reason."
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_earlier_timeout_in_a_mixed_plan_is_counted_as_a_timeout() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await _walk(
+            [_attempt(1, "a"), _attempt(2, "b"), _attempt(3, "c"), _attempt(4, "d")],
+            [asyncio.TimeoutError(), _Rejection(400, "bad"), _http_error(503), asyncio.TimeoutError()],
+        )
+    assert exc_info.value.detail == (
+        "The last candidate timed out; of the 3 earlier candidates, "
+        "1 refused the request, 1 timed out and 1 failed for another reason."
+    )
 
 
 @pytest.mark.asyncio
