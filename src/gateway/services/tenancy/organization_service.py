@@ -18,6 +18,7 @@ import uuid
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 from fastapi import BackgroundTasks
 from sqlalchemy.exc import IntegrityError
@@ -103,6 +104,7 @@ from gateway.models.tenancy import (
     WorkspacesPublic,
 )
 from gateway.ports.growth_signal_port import GrowthAction, GrowthSignalPort
+from gateway.repositories.organizations import BootstrapMarkerRepository
 from gateway.repositories.tenancy import (
     InvitationRepository,
     OrganizationDomainRepository,
@@ -121,6 +123,9 @@ from gateway.repositories.users_repository import (
 )
 from gateway.services.mail import Mailer
 
+if TYPE_CHECKING:
+    from gateway.services.identity import DeploymentAdministrationAccess
+
 # The name first boot gives an organization's workspace, reused so a created
 # organization's first workspace is the same thing rather than a near-copy.
 # ``provisioning_service`` reaches nothing in this module (its one edge back
@@ -130,13 +135,13 @@ from gateway.services.mail import Mailer
 from gateway.services.organizations import (
     AdmittedMember,
     BlockedAddresses,
+    BootstrapOperatorMarker,
     InvitationMailLimit,
     MembershipListener,
     SsoEnforcement,
 )
 from gateway.services.password_service import hash_password_async
 from gateway.services.secret_box import secret_box_configured
-from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess
 from gateway.services.tenancy.email_address import validated_email as _validated_email
 from gateway.services.tenancy.invitation_email import render_invitation_email
 from gateway.services.tenancy.password_policy import validate_new_password
@@ -442,6 +447,18 @@ class OrganizationService:
     # Context resolution and authorization
     # ------------------------------------------------------------------
 
+    def _deployment_access(self) -> "DeploymentAdministrationAccess":
+        """Build the reader that says whether a caller operates the whole deployment.
+
+        NOTE: The import is function-local because the identity domain imports this
+        package, so a module-scope edge back to it would be a cycle.
+        """
+        from gateway.services.identity import DeploymentAdministrationAccess  # noqa: PLC0415
+
+        return DeploymentAdministrationAccess(
+            self.users, self.members, BootstrapOperatorMarker(BootstrapMarkerRepository(self.db))
+        )
+
     async def bootstrap_operator_id(self) -> uuid.UUID | None:
         """Return the id of the identity first-boot provisioning made the deployment's operator, or None."""
         bootstrap = await load_bootstrap_identity(self.db)
@@ -476,14 +493,14 @@ class OrganizationService:
         Delegated rather than re-derived, so this and the gate on the deployment-wide routers cannot
         come to disagree about who holds that authority.
         """
-        return await DeploymentAdministrationAccess(self.db).has_administration_access(user)
+        return await self._deployment_access().has_administration_access(user)
 
     async def deployment_operator_ids(self, users: Iterable[User]) -> set[uuid.UUID]:
         """Which of ``users`` the deployment admits across every organization, in one lookup.
 
         The plural form, for deciding over several accounts without a lookup each.
         """
-        return await DeploymentAdministrationAccess(self.db).administration_access_ids(users)
+        return await self._deployment_access().administration_access_ids(users)
 
     async def get_active_organization_for_user(self, user: User) -> Organization:
         """Return the organization the caller acts in, or a live membership where the pointer is stale.
@@ -800,7 +817,7 @@ class OrganizationService:
                 has_password=user.hashed_password is not None,
                 claims_deployment=await password_claims_deployment(self.db, user),
             ),
-            deployment_operator=await DeploymentAdministrationAccess(self.db).has_administration_access(user),
+            deployment_operator=await self._deployment_access().has_administration_access(user),
             provider_key_encryption_available=secret_box_configured(),
         )
 
@@ -1400,7 +1417,7 @@ class OrganizationService:
         # would read as a member who has spent nothing.
         spend_rows = (
             await attribution_spend(self.db, [str(member_user.id) for _, member_user in rows])
-            if await DeploymentAdministrationAccess(self.db).has_administration_access(user)
+            if await self._deployment_access().has_administration_access(user)
             else {}
         )
         spend = {

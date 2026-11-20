@@ -85,7 +85,7 @@ def _service_with(
         identity_provider=policy,
         domain_claims=VerifiedDomainLookup(OrganizationDomainRepository(uow)),
         organizations=organizations,
-        bootstrap_operator=BootstrapOperatorMarker(OrganizationRepositories.on(uow)),
+        bootstrap_operator=BootstrapOperatorMarker(OrganizationRepositories.on(uow).bootstrap_marker),
         sign_in_listener=DomainAutoJoinListener(
             OrganizationDomainRepository(uow), OrganizationMemberRepository(uow), organizations
         ),
