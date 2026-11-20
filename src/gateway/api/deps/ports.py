@@ -27,6 +27,7 @@ from gateway.core.config import (
 )
 from gateway.core.database import get_db, release_session
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.ports.account_country_port import AccountCountryPort
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import (
@@ -202,6 +203,11 @@ RequestSessionModelProviderPortDep = Annotated[ModelProviderPort, Depends(get_re
 def model_provider_port_on(request: Request, db: AsyncSession) -> ModelProviderPort:
     """Resolve the model-provider adapter on ``db``, for a path that resolves it only when it needs it."""
     return get_container(request).resolve(ModelProviderPort, db, uow=get_unit_of_work(db))
+
+
+def account_country_port_on(request: Request, db: AsyncSession) -> AccountCountryPort:
+    """Resolve the account country adapter on ``db``, for the provider country gate."""
+    return get_container(request).resolve(AccountCountryPort, db)
 
 
 def get_signup_invite_port(

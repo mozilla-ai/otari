@@ -24,6 +24,12 @@ class ProviderHttp:
     defaults and the provider's timeout is opened on the first request and
     closed by ``aclose``.
 
+    No request to the provider's API follows a redirect, whatever the client is
+    set to: httpx drops ``Authorization`` on a redirect to another host but
+    keeps every other header, so a key sent as ``X-API-Key`` would reach that
+    host. A page a provider fetches follows its own redirects on the
+    provider's side.
+
     Each request names the library in its ``User-Agent``, so a provider can
     tell whose traffic it is, unless the host's client carries one of its own:
     httpx's default is replaced and a missing one filled in, any other kept.
@@ -37,6 +43,11 @@ class ProviderHttp:
 
     async def request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         """Send one request.
+
+        An answer that is neither a success nor an error, a redirect in
+        practice, raises a ``ProviderError`` tagged ``http_error``, since its
+        body is not the provider's answer. A 4xx or 5xx is returned, for the
+        adapter to tag from the provider's error body.
 
         Transport failures become a ``ProviderError`` without the exception's
         text, which can carry the URL and with it a query or a key. It is
@@ -52,7 +63,9 @@ class ProviderHttp:
             headers = httpx.Headers(kwargs.pop("headers", None))
             if client.headers.get("User-Agent") in (None, _HTTPX_USER_AGENT):
                 headers["User-Agent"] = USER_AGENT
-            return await client.request(method, url, headers=headers, timeout=self._timeout, **kwargs)
+            response = await client.request(
+                method, url, headers=headers, timeout=self._timeout, follow_redirects=False, **kwargs
+            )
         except httpx.TimeoutException:
             tag = "timeout"
         except (httpx.HTTPError, httpx.InvalidURL):
@@ -60,6 +73,10 @@ class ProviderHttp:
         except UnicodeEncodeError:
             # A header httpx cannot send, in practice a key pasted with a character that is not ASCII.
             tag = "invalid_header"
+        else:
+            if not response.is_success and response.status_code < httpx.codes.BAD_REQUEST:
+                raise ProviderError(self._provider, response.status_code, "http_error")
+            return response
         raise ProviderError(self._provider, None, tag)
 
     async def aclose(self) -> None:

@@ -96,6 +96,26 @@ def _safe_origin(api_base: str | None) -> object:
         return ("unparsed", api_base)
 
 
+def _region_origin(row: HostedProvider, region: HostedProviderRegion) -> object:
+    """The origin a region is served on: its own endpoint's, else the provider's."""
+    return _safe_origin(region.api_base if region.api_base is not None else row.api_base)
+
+
+def _borrows_key_elsewhere(row: HostedProvider, api_base: str | None) -> bool:
+    """Whether a region on ``api_base`` using the provider's key would carry it to another origin."""
+    return (
+        row.encrypted_api_key is not None
+        and api_base is not None
+        and _safe_origin(api_base) != _safe_origin(row.api_base)
+    )
+
+
+def _lacks_needed_key(row: HostedProvider, api_base: str | None) -> bool:
+    """Whether a region on ``api_base`` using the provider's key is left with none where its endpoint needs one."""
+    effective_base = api_base if api_base is not None else row.api_base
+    return row.encrypted_api_key is None and not hosted_key_optional(row.provider, effective_base)
+
+
 def _ensure_servable(row: HostedProvider, *, encrypted_api_key: str | None, api_base: str | None) -> None:
     """Refuse a region the provider's key would follow to another endpoint, or one left with no key it needs.
 
@@ -110,16 +130,11 @@ def _ensure_servable(row: HostedProvider, *, encrypted_api_key: str | None, api_
         raise HostedProviderUnsafeApiBaseError(f"Region endpoint {problem}")
     if encrypted_api_key is not None:
         return
-    if (
-        row.encrypted_api_key is not None
-        and api_base is not None
-        and _safe_origin(api_base) != _safe_origin(row.api_base)
-    ):
+    if _borrows_key_elsewhere(row, api_base):
         # The provider's key would otherwise reach an endpoint chosen without
         # ever having to know the key, as an update refuses.
         raise HostedProviderKeyRequiredError
-    effective_base = api_base if api_base is not None else row.api_base
-    if row.encrypted_api_key is None and not hosted_key_optional(row.provider, effective_base):
+    if _lacks_needed_key(row, api_base):
         raise HostedProviderApiKeyMissingError(row.provider)
 
 
@@ -142,14 +157,9 @@ def ensure_regions_follow(row: HostedProvider, regions: Sequence[HostedProviderR
             if moved and region.api_base is None:
                 raise HostedProviderRegionKeyRequiredError(region.slug)
             continue
-        if (
-            row.encrypted_api_key is not None
-            and region.api_base is not None
-            and _safe_origin(region.api_base) != _safe_origin(row.api_base)
-        ):
+        if _borrows_key_elsewhere(row, region.api_base):
             raise HostedProviderRegionKeyRequiredError(region.slug)
-        api_base = region.api_base if region.api_base is not None else row.api_base
-        if row.encrypted_api_key is None and not hosted_key_optional(row.provider, api_base):
+        if _lacks_needed_key(row, region.api_base):
             raise HostedProviderApiKeyMissingError(row.provider)
 
 
@@ -293,9 +303,9 @@ class HostedProviderRegions:
             if request.label is not None:
                 region.label = request.label
             if "api_base" in fields:
-                before = _safe_origin(region.api_base if region.api_base is not None else row.api_base)
+                before = _region_origin(row, region)
                 region.api_base = None if api_base is None else unmask_api_base(api_base, region.api_base)
-                after = _safe_origin(region.api_base if region.api_base is not None else row.api_base)
+                after = _region_origin(row, region)
                 if region.encrypted_api_key is not None and "api_key" not in fields and before != after:
                     # The region's own key would otherwise reach an endpoint
                     # chosen without ever having to know it.

@@ -79,7 +79,9 @@ input tokens. Cache writes are read from
 
 Claude Code and Codex send recognized usage events on the logs signal. With
 `capture_agent_telemetry` on, their tool and outcome counters also feed
-content-free agent telemetry.
+content-free agent telemetry. Deleting a user erases their telemetry on every
+replica: an export let in before the deletion stores none of their records, and
+counts them as rejected.
 
 ## Claude Platform
 

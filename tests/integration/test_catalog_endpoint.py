@@ -843,6 +843,81 @@ def test_a_signed_in_caller_sees_their_own_usage_of_an_offering(
         assert (by_selector[_NEBIUS_GLM]["usage_30d"] is not None) is reads_usage
 
 
+def test_a_signed_in_caller_sees_how_fast_each_offering_answered_them(
+    priced: TestClient, master_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    from sqlmodel import select
+
+    from gateway.models.tenancy import Workspace
+    from gateway.models.usage import UsageLog
+
+    assert priced.get(f"{API_ROOT}/organizations/me", headers=master_header).status_code == status.HTTP_200_OK
+    session = db_session_factory()
+
+    def served(provider: str, model: str, step: int, **overrides: Any) -> UsageLog:
+        fields: dict[str, Any] = {
+            "workspace_id": workspace_id,
+            "timestamp": datetime.now(UTC) - timedelta(days=1),
+            "model": model,
+            "provider": provider,
+            "endpoint": f"{API_ROOT}/chat/completions",
+            "status": "success",
+            "prompt_tokens": 1000,
+            "completion_tokens": 200 + 10 * step,
+            "total_tokens": 1200 + 10 * step,
+            "latency_ms": 2000,
+            "ttft_ms": 100 + 10 * step,
+        }
+        fields.update(overrides)
+        return UsageLog(**fields)
+
+    try:
+        workspace_id = session.execute(select(Workspace.id)).scalars().first()
+        assert workspace_id is not None
+        session.add_all(served("nebius", "zai-org/GLM-5.3", step) for step in range(25))
+        # Each of these would drag the percentiles if it counted: too old, a
+        # fallback whose timings include the attempt before it, a request whose
+        # duration includes gateway tools, an import, and a failure.
+        slow = {"ttft_ms": 60_000, "latency_ms": 120_000}
+        session.add_all(
+            [
+                served("nebius", "zai-org/GLM-5.3", 0, timestamp=datetime.now(UTC) - timedelta(days=10), **slow),
+                served("nebius", "zai-org/GLM-5.3", 0, attempt_position=2, attempt_count=2, **slow),
+                served("nebius", "zai-org/GLM-5.3", 0, billing_meters={"tools": {"web_search": {"billed": 1}}}, **slow),
+                served("nebius", "zai-org/GLM-5.3", 0, source="imported", **slow),
+                served("nebius", "zai-org/GLM-5.3", 0, status="error", **slow),
+            ]
+        )
+        # Too few to read a 95th percentile from.
+        session.add_all(served("fireworks", "accounts/fireworks/models/glm-5p3", step) for step in range(5))
+        session.commit()
+    finally:
+        session.close()
+
+    body = _get(priced, f"{API_ROOT}/catalog/models/z-ai/glm-5.3", headers=master_header)
+    by_selector = {offering["selector"]: offering for offering in body["offerings"]}
+    assert by_selector[_NEBIUS_GLM]["speed_7d"] == {
+        "ttft_samples": 25,
+        "ttft_ms_p50": 220,
+        "ttft_ms_p95": 328,
+        "throughput_samples": 25,
+        # 200 to 440 output tokens over two seconds each, so 100 to 220 tokens per second.
+        "output_tokens_per_second_p50": 160.0,
+        "output_tokens_per_second_p95": 106.0,
+    }
+    assert by_selector[_FIREWORKS_GLM]["speed_7d"] is None
+
+    # The same gate as the usage beside it.
+    created = priced.post(
+        f"{API_ROOT}/keys", json={"key_name": "no-usage", "scopes": ["inference:run"]}, headers=master_header
+    )
+    assert created.status_code == status.HTTP_200_OK, created.text
+    body = _get(
+        priced, f"{API_ROOT}/catalog/models/z-ai/glm-5.3", headers={"Authorization": f"Bearer {created.json()['key']}"}
+    )
+    assert all(offering["speed_7d"] is None for offering in body["offerings"])
+
+
 @pytest.mark.parametrize(
     ("params", "expected"),
     [

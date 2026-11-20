@@ -58,6 +58,7 @@ from gateway.services.tools import (
     parse_code_execution_header,
     resolve_code_executor_preference,
 )
+from gateway.types.country_gate import CountryGate
 from gateway.types.provider_account import ResolvedCredential
 
 
@@ -195,7 +196,7 @@ async def normalize_request_messages(
     instance: str | None = None,
     workspace_id: uuid.UUID | None = None,
     upstream_user: str | None = None,
-    client_country: str | None = None,
+    country_gate: CountryGate | None = None,
     sandbox_requested: bool = False,
     provider_container: bool = False,
     candidates: Sequence[LLMProvider | None] = (),
@@ -257,7 +258,7 @@ async def normalize_request_messages(
             may_read_files=may_read_files,
             workspace_id=workspace_id,
             upstream_user=upstream_user,
-            client_country=client_country,
+            country_gate=country_gate,
             sandbox_requested=sandbox_requested,
             provider_container=provider_container,
             inline_limit=inline_limit,

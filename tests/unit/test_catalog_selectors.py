@@ -542,6 +542,41 @@ def test_an_alias_wins_over_a_bare_name(claude_index: selectors.SelectorIndex) -
     assert (resolved.instance, resolved.model) == ("bedrock", "anthropic.claude-opus-5-5")
 
 
+@pytest.fixture
+def dotted_index() -> Iterator[selectors.SelectorIndex]:
+    """The catalog writes the version with a dot, Claude Code with a dash; ``gpt-4-1`` is its own model."""
+    rows = [
+        selectors.OfferingRow("anthropic:claude-opus-5-5", "anthropic", "anthropic", 5.0),
+        selectors.OfferingRow("openai:gpt-4.1", "openai", "openai", 2.0),
+        selectors.OfferingRow("acme:gpt-4-1", "acme", "acme", 1.0),
+    ]
+    identities: dict[str, tuple[str, tuple[str, ...]]] = {
+        "anthropic/claude-opus-5.5": ("claude-opus-5.5", ("anthropic:claude-opus-5-5",)),
+        "openai/gpt-4.1": ("gpt-4.1", ("openai:gpt-4.1",)),
+        "acme/gpt-4-1": ("gpt-4-1", ("acme:gpt-4-1",)),
+    }
+    built = selectors.build_selector_index(rows, identities)
+    selectors.set_selector_index(built)
+    yield built
+    selectors.reset_selector_index()
+
+
+def test_a_bare_name_with_a_dashed_version_resolves_as_the_dotted_catalog_id(
+    dotted_index: selectors.SelectorIndex,
+) -> None:
+    assert selectors.resolve_catalog_selector("claude-opus-5-5") == "anthropic:claude-opus-5-5"
+    assert selectors.resolve_catalog_selector("claude-opus-5.5") == "anthropic:claude-opus-5-5"
+    assert selectors.resolve_catalog_offerings("claude-opus-5-5") == dotted_index.offerings["anthropic/claude-opus-5.5"]
+
+
+def test_a_bare_name_the_catalog_spells_exactly_wins_over_its_dashed_reading(
+    dotted_index: selectors.SelectorIndex,
+) -> None:
+    assert dotted_index.dashed["gpt-4-1"] == ("openai/gpt-4.1", "acme/gpt-4-1")
+    assert selectors.resolve_catalog_selector("gpt-4-1") == "acme:gpt-4-1"
+    assert selectors.resolve_catalog_selector("gpt-4.1") == "openai:gpt-4.1"
+
+
 def test_a_bare_name_reaches_an_organizations_own_key_first() -> None:
     deployment = [selectors.OfferingRow("bedrock:anthropic.claude-opus-5-5", "bedrock", "bedrock", 4.0)]
     own = [selectors.OfferingRow("anthropic:claude-opus-5-5", "anthropic", "anthropic", 5.0)]

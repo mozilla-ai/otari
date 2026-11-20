@@ -12,15 +12,15 @@ type Read = "tools" | "web" | "mcp"
 
 const TOOLS = ["otari_web_search", "otari_web_fetch", "otari_code_execution"]
 
-/** An owner's overview of Platform, with whichever reads refused. */
-async function renderOverview(refused: Read[] = []) {
+/** An overview of Platform, an owner's by default, with whichever reads refused. */
+async function renderOverview(refused: Read[] = [], role = "owner") {
   const refuse = () => Response.json({ detail: "Forbidden" }, { status: 403 })
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input)
     if (url === `${API_ROOT}/organizations/me`) {
       return Response.json(
         organizationContext({
-          role: "owner",
+          role,
           deployment_operator: false,
           workspace_memberships: [
             { workspace_id: "ws-platform", name: "Platform", role: "admin" },
@@ -38,6 +38,21 @@ async function renderOverview(refused: Read[] = []) {
       return refused.includes("web")
         ? refuse()
         : Response.json({ enabled: false })
+    }
+    // What Platform's requests may declare, which any member may read.
+    if (url.includes("/playground/tools")) {
+      const on = { configured: true, enabled: true, reason: null }
+      return Response.json({
+        web_search: {
+          configured: true,
+          enabled: false,
+          reason: "Turned off for this workspace.",
+        },
+        web_fetch: on,
+        code_execution: on,
+        files: on,
+        mcp_servers: [],
+      })
     }
     if (url.endsWith("/code-execution-policy")) {
       return Response.json({ enabled: false })
@@ -77,6 +92,18 @@ describe("the Tools overview", () => {
       await within(await row("MCP servers")).findByText(
         "No server is connected to Platform. Connect one to give agents its tools.",
       ),
+    ).toBeVisible()
+  })
+
+  it("tells a member which tools their workspace has off", async () => {
+    await renderOverview([], "member")
+    const web = await row("Web search")
+    expect(await within(web).findByText("Off")).toBeVisible()
+    expect(
+      within(web).getByText(/^Turned off for this workspace\./),
+    ).toBeVisible()
+    expect(
+      await within(await row("Web fetch")).findByText("Available"),
     ).toBeVisible()
   })
 

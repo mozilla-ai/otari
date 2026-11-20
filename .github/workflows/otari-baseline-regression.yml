@@ -1,4 +1,4 @@
-name: Otari Baseline Ratchet
+name: Otari Baseline Regression
 
 # Every baseline in the architecture check records debt the repository has
 # already taken on, and each one only shrinks. The check itself reads the number
@@ -14,24 +14,30 @@ name: Otari Baseline Ratchet
 #
 # A branch point from before the script existed cannot check anything, and the
 # job says so rather than passing silently.
+#
+# NOTE: The gate was called check_baseline_ratchet.py before it was renamed, so
+# the branch point is read under either name. Without that, the renaming pull
+# request would skip the comparison for its whole life, and a later commit on it
+# could raise a baseline unchecked. The second name is removable once no branch
+# point reaches back past the rename.
 
 on:
   pull_request:
     branches: [ main ]
     paths:
       - 'scripts/check_architecture.py'
-      - 'scripts/check_baseline_ratchet.py'
-      - '.github/workflows/otari-baseline-ratchet.yml'
+      - 'scripts/check_no_baseline_regression.py'
+      - '.github/workflows/otari-baseline-regression.yml'
 
 permissions: {}
 
 concurrency:
-  group: otari-baseline-ratchet-${{ github.event.pull_request.number }}
+  group: otari-baseline-regression-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
   baselines:
-    name: Baseline ratchet
+    name: Baseline regression
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -55,12 +61,20 @@ jobs:
           set -euo pipefail
           branch_point="$(git merge-base "$BASE_SHA" HEAD)"
           echo "Branch point: $branch_point"
-          if ! git cat-file -e "$branch_point:scripts/check_baseline_ratchet.py" 2> /dev/null; then
-            echo "::notice title=Baseline ratchet skipped::The branch point has no scripts/check_baseline_ratchet.py."
+          gate=""
+          for candidate in scripts/check_no_baseline_regression.py scripts/check_baseline_ratchet.py; do
+            if git cat-file -e "$branch_point:$candidate" 2> /dev/null; then
+              gate="$candidate"
+              break
+            fi
+          done
+          if [ -z "$gate" ]; then
+            echo "::notice title=Baseline regression check skipped::The branch point carries no baseline regression check."
             exit 0
           fi
-          git show "$branch_point:scripts/check_baseline_ratchet.py" > "$RUNNER_TEMP/check_baseline_ratchet.py"
+          echo "Gate at the branch point: $gate"
+          git show "$branch_point:$gate" > "$RUNNER_TEMP/gate.py"
           git show "$branch_point:scripts/check_architecture.py" > "$RUNNER_TEMP/check_architecture.py"
-          python3 "$RUNNER_TEMP/check_baseline_ratchet.py" \
+          python3 "$RUNNER_TEMP/gate.py" \
             --base "$RUNNER_TEMP/check_architecture.py" \
             --head scripts/check_architecture.py

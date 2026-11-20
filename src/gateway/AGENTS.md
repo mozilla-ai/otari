@@ -306,13 +306,20 @@ tenant.
 
 ## Mail
 
-Features import `Mailer`, ask `can_send_links` before offering a mail-only
-flow, and inspect the `MailDelivery` returned by `send`. They do not select
-transports or catch transport exceptions.
+Features import `Mailer`, inspect the `MailDelivery` returned by `send`, and do
+not select transports or catch transport exceptions.
 
-A send that no person watches, such as a background worker's, asks
-`can_deliver_links` instead. It is false for the console transport, which shows
-an email to the deployment operator and delivers it to nobody.
+Two predicates say what mail can do, and the choice turns on what the answer
+decides. `can_send_links` asks whether mail is configured at all, for a readiness
+check and for hiding a mail-only surface. `can_deliver_links` asks whether the
+message reaches its recipient, and is false for the console transport, which
+shows an email to the deployment operator and delivers it to nobody.
+
+Anything whose outcome depends on the recipient receiving the message asks
+`can_deliver_links`. That covers a send no person watches, such as a background
+worker's, a flow that falls back to handing the link over, and any decision about
+what a link proves: a link the recipient's mailbox never saw is hand-carried,
+whatever the transport reported.
 
 Mail is optional. A flow with a manual fallback, such as invitations, continues
 and returns the link. A flow with no fallback is hidden or refuses before doing

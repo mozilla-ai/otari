@@ -359,7 +359,16 @@ def test_a_restricted_key_is_told_an_unresolvable_selector_is_invalid_not_forbid
     assert refusal is not None
     assert (refusal.code, refusal.status_code) == (INVALID_MODEL, 400)
     assert "no-such-model" in refusal.detail
-    assert "Send a model id from the catalog (GET /api/v1/models) such as 'vendor/model'" in refusal.detail
+
+
+def test_an_unresolvable_selector_points_to_the_workspace_routing_policies() -> None:
+    refusal = key_model_refusal(["openai:gpt-4o"], None, selector="faber-verify")
+    assert refusal is not None
+    assert refusal.detail == (
+        "Unknown or unsupported model 'faber-verify'. Send a catalog model id such as 'vendor/model', "
+        "a 'provider:model' selector, or an alias or routing policy name. "
+        "GET /api/v1/models lists the model ids, aliases and routing policies you can use."
+    )
 
 
 def test_a_restricted_key_is_refused_a_model_its_list_excludes() -> None:

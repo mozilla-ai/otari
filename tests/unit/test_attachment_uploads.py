@@ -297,7 +297,7 @@ async def test_a_country_the_hosted_provider_does_not_serve_is_no_oversized_atta
     """The request is refused for its country, rather than for an attachment too large to send."""
 
     async def _refused(data: bytes, mime: str, filename: str) -> str:
-        raise CountryNotServedError(CountryGate("FR"))
+        raise CountryNotServedError(CountryGate("FR"), "country 'FR'", under="the provider's supported_countries")
 
     stats = NormalizationStats()
     source = _Source(kind="image", data=b"0123456789", mime="image/png", filename=None, data_url=None)

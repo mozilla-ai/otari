@@ -4,6 +4,43 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.54.0](https://github.com/mozilla-ai/otari/releases/tag/v0.54.0) - 2026-11-19
+
+
+
+### Bug Fixes
+
+- **web:** Move old /#/ links in a module, not an inline script in [#3424](https://github.com/mozilla-ai/otari/pull/3424) by [@hasangzl](https://github.com/hasangzl) ([`ffa592b`](https://github.com/mozilla-ai/otari/commit/ffa592b3e3d237ab6e7e7a855b9e735c777201d9))
+- **deps:** Lock ibm-watsonx-ai 1.9.1, which imports on Python 3.14 in [#3432](https://github.com/mozilla-ai/otari/pull/3432) by [@tbille](https://github.com/tbille) ([`fbb2d63`](https://github.com/mozilla-ai/otari/commit/fbb2d6365daab8e3453ebc74f063c8f1c8ee7b98))
+- **cors:** Let a page send any request header to the inference endpoints in [#3430](https://github.com/mozilla-ai/otari/pull/3430) by [@daavoo](https://github.com/daavoo) ([`79828c0`](https://github.com/mozilla-ai/otari/commit/79828c0302590c78550bf072424af70312b03e9d))
+- **home:** Show each model once, by name, in Where it went in [#3414](https://github.com/mozilla-ai/otari/pull/3414) by [@jigjigjig](https://github.com/jigjigjig) ([`0e6fa5b`](https://github.com/mozilla-ai/otari/commit/0e6fa5bcf0c2c2b1fda78cf2ae5cac2c38fadfd4))
+- **home:** Name the top model on one line in [#3419](https://github.com/mozilla-ai/otari/pull/3419) by [@jigjigjig](https://github.com/jigjigjig) ([`d0a115a`](https://github.com/mozilla-ai/otari/commit/d0a115af2dfee14a210176e8a2898d5ace3a79ce))
+- **hosted-providers:** Rebuild the catalog selector index after a hosted write in [#3395](https://github.com/mozilla-ai/otari/pull/3395) by [@daavoo](https://github.com/daavoo) ([`79af8bd`](https://github.com/mozilla-ai/otari/commit/79af8bd555ffe7a745af03cafb99afbda069006c))
+- **mail:** Refuse an email address with a non-ASCII local part in [#3295](https://github.com/mozilla-ai/otari/pull/3295) by [@tomron](https://github.com/tomron) ([`fb8e971`](https://github.com/mozilla-ai/otari/commit/fb8e971bb632d2cd45945e4a52dc2fcaeec76e55))
+- **responses:** Always send cache_write_tokens in a Responses usage in [#3435](https://github.com/mozilla-ai/otari/pull/3435) by [@daavoo](https://github.com/daavoo) ([`03efbf2`](https://github.com/mozilla-ai/otari/commit/03efbf2dc68012be403da4c47c8234f2f1b3bfdb))
+- **usage:** Bill the cache writes a Responses usage reports in [#3436](https://github.com/mozilla-ai/otari/pull/3436) by [@daavoo](https://github.com/daavoo) ([`a540b31`](https://github.com/mozilla-ai/otari/commit/a540b317b843b966cfcebec98a2909113445a13a))
+- **any-search,any-fetch:** Follow no redirect from a provider's API, and fail on a 3xx answer in [#3416](https://github.com/mozilla-ai/otari/pull/3416) by [@aittalam](https://github.com/aittalam) ([`1dc9506`](https://github.com/mozilla-ai/otari/commit/1dc9506f23042a7f5061eadbd935eabbb7fdd8a4))
+- **oauth-apps:** Admit an open app only by the origin a browser writes in [#3433](https://github.com/mozilla-ai/otari/pull/3433) by [@daavoo](https://github.com/daavoo) ([`be80e94`](https://github.com/mozilla-ai/otari/commit/be80e94cc7e4905cbd3047c62500bcc9bad1203c))
+- **usage:** Keep a single round's cache-write breakdown in the Responses tool loop in [#3431](https://github.com/mozilla-ai/otari/pull/3431) by [@daavoo](https://github.com/daavoo) ([`ee99ed5`](https://github.com/mozilla-ai/otari/commit/ee99ed5fc47ff63332c213522f861cb6df479250))
+- **telemetry:** Refuse agent telemetry admitted before its user's erasure in [#3438](https://github.com/mozilla-ai/otari/pull/3438) by [@daavoo](https://github.com/daavoo) ([`e17ee40`](https://github.com/mozilla-ai/otari/commit/e17ee4024404808849e15fa234b3c8ab66256ffb))
+- **tools:** Name the workspace switch in tool refusals and tool rows in [#3418](https://github.com/mozilla-ai/otari/pull/3418) by [@aittalam](https://github.com/aittalam) ([`687b00c`](https://github.com/mozilla-ai/otari/commit/687b00c415afafce7c1fad52f859f19af55d1f62))
+- **models:** Name routing policies in the unknown-model error in [#3420](https://github.com/mozilla-ai/otari/pull/3420) by [@aittalam](https://github.com/aittalam) ([`0d272aa`](https://github.com/mozilla-ai/otari/commit/0d272aae95672d003ee36425dd5dfce6eccca77e))
+- **catalog:** Resolve a bare name whose version Claude Code writes with a dash in [#3439](https://github.com/mozilla-ai/otari/pull/3439) by [@daavoo](https://github.com/daavoo) ([`df23449`](https://github.com/mozilla-ai/otari/commit/df23449b3f9f5115d603a6e344838d3c7af65705))
+- **messages:** Serve OpenAI's own API through the Responses bridge by default in [#3440](https://github.com/mozilla-ai/otari/pull/3440) by [@daavoo](https://github.com/daavoo) ([`840920d`](https://github.com/mozilla-ai/otari/commit/840920dea23daeccc62d72b1312ea9b509d9829a))
+- **usage:** Read a bridged provider's Responses usage leniently in the tool loop in [#3445](https://github.com/mozilla-ai/otari/pull/3445) by [@daavoo](https://github.com/daavoo) ([`bc35d58`](https://github.com/mozilla-ai/otari/commit/bc35d5862f6d6e5bd803bcedb39e30b7f9a672cc))
+
+
+### Features
+
+- **oauth-apps:** Let unregistered sites connect, with a key limit and expiry in [#3422](https://github.com/mozilla-ai/otari/pull/3422) by [@daavoo](https://github.com/daavoo) ([`1c75c78`](https://github.com/mozilla-ai/otari/commit/1c75c780c1cdd143c8ad3e217141d668873bd1f0))
+- **architecture:** Check that no baseline gives back room in [#3410](https://github.com/mozilla-ai/otari/pull/3410) by [@peteski22](https://github.com/peteski22) ([`239f959`](https://github.com/mozilla-ai/otari/commit/239f959551f2f0cb387d8f9bec7d3a6d7eba3cbe))
+- **BREAKING:** **organizations:** Accept and decline an invitation in [#3409](https://github.com/mozilla-ai/otari/pull/3409) by [@peteski22](https://github.com/peteski22) ([`1c7a9df`](https://github.com/mozilla-ai/otari/commit/1c7a9dfc8593931f333df0e1b72c473676917515))
+- **ports:** Add the account country port by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`be40fff`](https://github.com/mozilla-ai/otari/commit/be40fff33c48b46193829161d22fc49b67865443))
+- **providers:** Check the account's country in the provider country gate by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`2709202`](https://github.com/mozilla-ai/otari/commit/2709202c6a0225d480ac504ae66f6e837d4bc14b))
+- **catalog:** Show each provider's latency and throughput on the model page in [#3393](https://github.com/mozilla-ai/otari/pull/3393) by [@daavoo](https://github.com/daavoo) ([`c0510b4`](https://github.com/mozilla-ai/otari/commit/c0510b4dbba8da200aa5251f802e8b34a64b0cb5))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.53.0...v0.54.0
 ## [0.53.0](https://github.com/mozilla-ai/otari/releases/tag/v0.53.0) - 2026-11-18
 
 

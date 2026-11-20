@@ -1348,7 +1348,8 @@ export interface paths {
          *     A model the caller may not see answers 404, the same as one that does not
          *     exist, so the route cannot be used to probe the catalog behind an allow-list.
          *     A signed-in caller's offerings also carry their organization's own usage of
-         *     each over the last 30 days, and so do an API key's when it holds ``usage:read``.
+         *     each over the last 30 days, and how fast each answered it over the last 7, and
+         *     so do an API key's when it holds ``usage:read``.
          */
         get: operations["catalog-get_catalog_model"];
         put?: never;
@@ -11825,6 +11826,7 @@ export interface components {
              * @description The pinned spelling the gateway also accepts for this offering: the instance with the model's catalog id (`fireworks:openai/gpt-oss-120b`), which pins the instance and reaches the model's best offering on it. Null for another build on the same instance, or until the gateway has indexed the catalog.
              */
             short_selector?: string | null;
+            speed_7d?: components["schemas"]["OfferingSpeedInfo"] | null;
             usage_30d?: components["schemas"]["OfferingUsage"] | null;
             /**
              * Zero Data Retention
@@ -17814,6 +17816,47 @@ export interface components {
             issuer: string;
         };
         /**
+         * OfferingSpeedInfo
+         * @description How fast one offering answered the viewer's organization over the last 7 days.
+         *
+         *     Read from the organization's own requests, so it describes that traffic rather
+         *     than the provider in general: an offering that served the long prompts looks
+         *     slower. Only a request a routing plan's first candidate served counts, and
+         *     only one that ran no gateway tool.
+         */
+        OfferingSpeedInfo: {
+            /**
+             * Output Tokens Per Second P50
+             * @description Median output tokens per second over the whole request, time to first token included, as OpenRouter measures it. Null on fewer than 20 measured requests.
+             */
+            output_tokens_per_second_p50: number | null;
+            /**
+             * Output Tokens Per Second P95
+             * @description The 5th percentile of output tokens per second: the slow tail.
+             */
+            output_tokens_per_second_p95: number | null;
+            /**
+             * Throughput Samples
+             * @description Requests the throughput is read from: those with 20 or more output tokens.
+             */
+            throughput_samples: number;
+            /**
+             * Ttft Ms P50
+             * @description Median milliseconds to the first token. Null on fewer than 20 streamed requests.
+             */
+            ttft_ms_p50: number | null;
+            /**
+             * Ttft Ms P95
+             * @description The 95th percentile of milliseconds to the first token, rounded: the slow tail.
+             */
+            ttft_ms_p95: number | null;
+            /**
+             * Ttft Samples
+             * @description Streamed requests the time to first token is read from.
+             */
+            ttft_samples: number;
+        };
+        /**
          * OfferingUsage
          * @description What the viewer's organization actually paid for one offering, last 30 days.
          *
@@ -23403,6 +23446,8 @@ export interface components {
             latency_ms: number | null;
             /** Model */
             model: string;
+            /** Output Tokens Per Second */
+            output_tokens_per_second: number | null;
             /** Policy Name */
             policy_name?: string | null;
             /** Pricing Breakdown */
@@ -23439,6 +23484,8 @@ export interface components {
             timestamp: string;
             /** Total Tokens */
             total_tokens: number | null;
+            /** Ttft Ms */
+            ttft_ms: number | null;
             /** User Alias */
             user_alias?: string | null;
             /** User Id */
