@@ -723,6 +723,84 @@ async def test_streaming_request_falls_back_to_a_bridged_event_stream() -> None:
     assert types[-1] == "response.completed"
 
 
+# ---------- a native /responses that refuses the model ----------
+
+
+def _model_refused(status_code: int = 400, message: str = "This model does not support Responses API") -> AnyLLMError:
+    return AnyLLMError(message, provider_name="nebius", status_code=status_code)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message",
+    [
+        "This model does not support Responses API",
+        "The Responses API is not supported for this model",
+        "model google/x is unsupported on the responses endpoint",
+    ],
+)
+async def test_native_refusal_of_the_model_is_served_as_a_chat_completion(message: str) -> None:
+    result, chat_calls = await _call_responses(
+        _model_refused(message=message), provider=LLMProvider.NEBIUS, api_base=None
+    )
+
+    assert result.output_text == "pong"
+    assert len(chat_calls) == 1
+    assert chat_calls[0]["provider"] == LLMProvider.NEBIUS
+
+
+@pytest.mark.asyncio
+async def test_native_refusal_of_a_streamed_request_is_served_as_a_bridged_event_stream() -> None:
+    async def native(**_: Any) -> Any:
+        raise _model_refused()
+
+    async def fake_acompletion(**call_kwargs: Any) -> Any:
+        assert call_kwargs["stream"] is True
+        return _aiter([_chunk({"role": "assistant", "content": "ok"}, "stop")])
+
+    request = {"provider": LLMProvider.NEBIUS, "model": "m", "input_data": "hi", "stream": True}
+    with patch(_ACOMPLETION, new=fake_acompletion):
+        stream = await call_responses(native, request)
+        types = [event.type async for event in stream]
+
+    assert types[0] == "response.created"
+    assert types[-1] == "response.completed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status_code", "message"),
+    [
+        (400, "max_output_tokens must be at least 16"),
+        (400, "Responses API: unsupported parameter 'foo'"),
+        (400, "Invalid model"),
+        (500, "This model does not support Responses API"),
+        (401, "This model does not support Responses API"),
+    ],
+)
+async def test_other_native_failures_without_a_model_refusal_are_not_retried(status_code: int, message: str) -> None:
+    with pytest.raises(AnyLLMError):
+        await _call_responses(_model_refused(status_code, message), provider=LLMProvider.NEBIUS, api_base=None)
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_naming_a_request_field_is_not_taken_for_a_model_refusal() -> None:
+    error = AnyLLMError("not supported in Responses API", status_code=400, param="tools")
+
+    with pytest.raises(AnyLLMError):
+        await _call_responses(error, provider=LLMProvider.NEBIUS, api_base=None)
+
+
+@pytest.mark.asyncio
+async def test_model_refusal_the_bridge_cannot_translate_reraises_the_native_error() -> None:
+    error = _model_refused()
+
+    with pytest.raises(AnyLLMError) as raised:
+        await _call_responses(error, provider=LLMProvider.NEBIUS, api_base=None, previous_response_id="resp_1")
+
+    assert raised.value is error
+
+
 @pytest.fixture
 def minted_items(monkeypatch: pytest.MonkeyPatch) -> OrderedDict[str, dict[str, Any]]:
     """A fresh per-process item cache, so one test's minted items cannot resolve another's references."""

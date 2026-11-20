@@ -101,6 +101,15 @@ REASONING_ITEM_ID_PREFIX = f"{_REASONING_ID_STEM}_"
 _RESPONSES_ROUTE_MISSING = frozenset({404, 405, 501})
 _NOT_A_MISSING_ROUTE = re.compile(r"\b(item|model)\b", re.IGNORECASE)
 
+# A vendor that has a Responses API but not for this model says so in prose; the wording
+# varies, so the pattern wants only "not supported" near "Responses API".
+_NO_RESPONSES_FOR_MODEL = re.compile(
+    r"(?:not\s+support\w*|unsupported|not\s+available)\b.{0,40}\bresponses\s+(?:api|endpoint)\b"
+    r"|\bresponses\s+(?:api|endpoint)\b.{0,40}(?:not\s+support\w*|unsupported|not\s+available)",
+    re.IGNORECASE,
+)
+_NAMES_A_REQUEST_FIELD = re.compile(r"\b(?:parameter|field)\b", re.IGNORECASE)
+
 # The route puts these Responses-only Codex fields in ``extra_body``; a chat request has no use for them.
 _RESPONSES_ONLY_EXTRA_BODY = ("input", "client_metadata")
 
@@ -190,6 +199,23 @@ def _lacks_responses_route(kwargs: dict[str, Any], exc: AnyLLMError) -> bool:
     return _supports_completion(kwargs.get("provider"))
 
 
+def _refuses_model_on_responses(exc: AnyLLMError) -> bool:
+    """Whether ``exc`` is a vendor's 400 saying this model has no Responses API.
+
+    Matches a 400 whose message says the Responses API is not supported and that
+    names no request field. A 400 about a parameter, a 401, a 429 or a 5xx does not
+    match, so a genuine bad request is never repeated as a second upstream call.
+    """
+    if exc.status_code != 400 or exc.param:
+        return False
+    message = exc.message
+    return bool(_NO_RESPONSES_FOR_MODEL.search(message)) and not _NAMES_A_REQUEST_FIELD.search(message)
+
+
+def _refuses_model(kwargs: dict[str, Any], exc: AnyLLMError) -> bool:
+    return _refuses_model_on_responses(exc) and _supports_completion(kwargs.get("provider"))
+
+
 def _supports_completion(provider: Any) -> bool:
     try:
         provider_class = AnyLLM.get_provider_class(LLMProvider(provider))
@@ -208,6 +234,9 @@ async def call_responses(native: Callable[..., Awaitable[Any]], kwargs: dict[str
     ``/responses`` at all. When one answers 404, 405 or 501, the request is served
     through the bridge instead. A request the bridge cannot translate re-raises the
     original error, because that is the one that explains what the endpoint lacks.
+
+    A vendor that has the API but refuses one model (Nebius answers 400 "This model
+    does not support Responses API") is served the same way, on the same candidate.
     """
     if uses_chat_completions_bridge(kwargs.get("provider")):
         return await aresponses_via_chat_completions(**kwargs)
@@ -217,14 +246,14 @@ async def call_responses(native: Callable[..., Awaitable[Any]], kwargs: dict[str
             return _typed_stream_events(result)
         return result
     except AnyLLMError as exc:
-        if not _lacks_responses_route(kwargs, exc):
+        if not (_lacks_responses_route(kwargs, exc) or _refuses_model(kwargs, exc)):
             raise
         try:
             plan = _plan_chat_completion(kwargs)
         except UnsupportedParameterError:
             raise exc from None
         logger.info(
-            "%s answered %s on /responses at its api_base; serving as a chat completion",
+            "%s refused /responses with %s; serving as a chat completion",
             kwargs["provider"],
             exc.status_code,
         )
