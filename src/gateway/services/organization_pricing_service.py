@@ -69,7 +69,10 @@ from gateway.models.pricing import (
 )
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
+from gateway.repositories.organizations import BootstrapMarkerRepository
 from gateway.repositories.pricing import OrganizationModelPricingRepository
+from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository
+from gateway.services.organizations import BootstrapOperatorMarker
 from gateway.services.pricing_service import (
     default_model_pricing,
     normalize_effective_at,
@@ -78,7 +81,6 @@ from gateway.services.pricing_service import (
 )
 from gateway.services.provider_kwargs import is_deployment_instance_key, split_selector
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
-from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.types.price_unit import PriceUnit
@@ -291,7 +293,16 @@ class OrganizationPricingService:
             raise OrganizationPricingManagedModelError(model_key)
 
     async def _operates_deployment(self, user: TenancyUser) -> bool:
-        return await DeploymentAdministrationAccess(self.db).has_administration_access(user)
+        # NOTE: The import is function-local because the identity domain reaches this
+        # module through the providers graph, so a module-scope edge back is a cycle.
+        from gateway.services.identity import DeploymentAdministrationAccess  # noqa: PLC0415
+
+        access = DeploymentAdministrationAccess(
+            UserRepository(self.db),
+            OrganizationMemberRepository(self.db),
+            BootstrapOperatorMarker(BootstrapMarkerRepository(self.db)),
+        )
+        return await access.has_administration_access(user)
 
     async def _origin_for(self, user: TenancyUser) -> str:
         """The origin a rate ``user`` writes is stored under, which settlement reads back."""

@@ -95,6 +95,7 @@ from gateway.services.api_keys import (
     organization_key_changes,
     refuse_service_key_flag_change,
 )
+from gateway.services.identity import DeploymentAdministrationAccess
 from gateway.services.model_access import (
     KEY_MODELS_EXCEED_USER_DETAIL,
     KEY_TOOLS_EXCEED_USER_DETAIL,
@@ -103,7 +104,7 @@ from gateway.services.model_access import (
     validate_allowed_models,
     validate_allowed_tools,
 )
-from gateway.services.tenancy import DeploymentAdministrationAccess, OrganizationService
+from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import resolve_workspace_in_organization
 from gateway.services.workspace_scope import organization_default_workspace_id
 from gateway.types.key_scope import DEFAULT_KEY_SCOPES, KeyScope, KeyScopeSet

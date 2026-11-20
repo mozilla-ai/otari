@@ -2,14 +2,14 @@
 
 import uuid
 
-from gateway.repositories.organizations import OrganizationRepositories
+from gateway.repositories.organizations import BootstrapMarkerRepository
 
 
 class BootstrapOperatorMarker:
-    """Read and move the bootstrap operator marker in the caller's Unit of Work block."""
+    """Read and move the bootstrap operator marker in the caller's transaction."""
 
-    def __init__(self, repositories: OrganizationRepositories) -> None:
-        self._marker = repositories.bootstrap_marker
+    def __init__(self, marker: BootstrapMarkerRepository) -> None:
+        self._marker = marker
 
     async def user_id(self) -> uuid.UUID | None:
         """The account the marker names now, read past the session's identity map."""

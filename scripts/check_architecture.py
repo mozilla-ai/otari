@@ -480,7 +480,6 @@ SERVICE_DATABASE_IMPORT_BASELINE = (
     "gateway/services/runtime_settings_service.py",
     "gateway/services/selector_index_service.py",
     "gateway/services/tenancy/authorization.py",
-    "gateway/services/tenancy/deployment_user_service.py",
     "gateway/services/tenancy/org_provider_key_service.py",
     "gateway/services/tenancy/organization_domain_service.py",
     "gateway/services/tenancy/organization_guardrail_service.py",
@@ -1207,7 +1206,6 @@ DOMAIN_NAME_BASELINE: dict[str, tuple[str, ...]] = {
     "gateway/services/tenancy/": (
         "__init__.py",
         "authorization.py",
-        "deployment_user_service.py",
         "domain_verification.py",
         "email_address.py",
         "invitation_email.py",
@@ -1348,7 +1346,7 @@ def check_domain_names(src_root: Path, domains: set[str]) -> list[str]:
 # the number is what has to come down.
 NON_DOMAIN_SERVICE_IMPORT_BASELINE: dict[str, int] = {
     "code_execution": 1,
-    "tenancy": 74,
+    "tenancy": 67,
 }
 
 
