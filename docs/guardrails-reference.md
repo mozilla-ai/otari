@@ -466,6 +466,7 @@ result without `categories` names nothing. Otari keeps only the names a
 `GET /profiles` is optional: it lists
 `[{"name": "prompt-injection", "guardrail_name": "injec_guard"}]` so the
 dashboard can offer the profile in a picker.
+[Host your own guardrail](host-your-own-guardrail.md) walks through writing one.
 
 ## How long a service has to answer
 
