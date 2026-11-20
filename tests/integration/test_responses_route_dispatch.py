@@ -9,12 +9,15 @@ string — the Responses API doesn't use the Anthropic-style error envelope).
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import AsyncIterator, Callable
+from decimal import Decimal
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from any_llm import AnyLLM, LLMProvider
+from any_llm.exceptions import AnyLLMError
 from any_llm.types.completion import ChatCompletion, ChatCompletionChunk
 from any_llm.types.responses import Response, ResponseStreamEvent
 from fastapi.testclient import TestClient
@@ -27,8 +30,13 @@ from openai.types.responses import (
     ResponseUsage,
 )
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
+from sqlalchemy.orm import Session
 
-from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, ATTEMPT_COUNT_HEADER, FALLBACK_HEADER, GatewayConfig
+from gateway.models.usage import UsageLog
+from gateway.models.users import User
+
+from .conftest import ALL_KEY_SCOPES
 
 _MODEL = "openai:gpt-4o-mini"
 
@@ -1224,3 +1232,154 @@ def test_provider_without_responses_api_refuses_server_state(
     assert resp.status_code == 400, resp.text
     assert "previous_response_id" in resp.json()["detail"]
     acompletion.assert_not_called()
+
+
+# ---------- a native Responses API that refuses the model ----------
+
+_NATIVE_MODEL = "openai:gpt-4o-mini"
+_NATIVE_REFUSAL = "This model does not support Responses API"
+# 9 input tokens at $1/M plus 4 output tokens at $2/M.
+_EXPECTED_COST = Decimal("0.000017")
+
+
+def _chat_completion() -> ChatCompletion:
+    return ChatCompletion.model_validate(
+        {
+            "id": "cmpl-1",
+            "object": "chat.completion",
+            "created": 1700000000,
+            "model": "google/gemma-3-27b-it",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "OK 42"}, "finish_reason": "stop"}],
+            "usage": _CHAT_USAGE,
+        }
+    )
+
+
+def _usage_rows_and_holds(db_session: Session) -> tuple[list[UsageLog], Decimal, Decimal]:
+    db_session.rollback()
+    rows = list(db_session.query(UsageLog).all())
+    users = db_session.query(User).all()
+    return rows, sum((u.spend for u in users), Decimal(0)), sum((u.reserved for u in users), Decimal(0))
+
+
+@pytest.fixture
+def priced_native_model(client: TestClient, master_key_header: dict[str, str]) -> None:
+    resp = client.post(
+        f"{API_ROOT}/pricing",
+        json={"model_key": _NATIVE_MODEL, "input_price_per_million": 1.0, "output_price_per_million": 2.0},
+        headers=master_key_header,
+    )
+    assert resp.status_code == 200, resp.text
+
+
+@pytest.fixture
+def budgeted_key_header(client: TestClient, master_key_header: dict[str, str]) -> dict[str, str]:
+    """A key for a user with a budget, so a request holds a reservation against it."""
+    budget = client.post(
+        f"{API_ROOT}/budgets", json={"max_budget": 100.0, "budget_duration_sec": 86400}, headers=master_key_header
+    )
+    assert budget.status_code == 200, budget.text
+    user = client.post(
+        f"{API_ROOT}/users",
+        json={"user_id": "budgeted-user", "budget_id": budget.json()["budget_id"]},
+        headers=master_key_header,
+    )
+    assert user.status_code == 200, user.text
+    key = client.post(
+        f"{API_ROOT}/keys",
+        json={"scopes": ALL_KEY_SCOPES, "key_name": "budgeted", "user_id": "budgeted-user"},
+        headers=master_key_header,
+    )
+    assert key.status_code == 200, key.text
+    return {API_KEY_HEADER: f"Bearer {key.json()['key']}"}
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_native_refusal_of_the_model_is_served_as_chat_on_the_same_attempt(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    db_session: Session,
+    priced_native_model: None,
+    stream: bool,
+) -> None:
+    async def refusing_native(**_: Any) -> Any:
+        raise AnyLLMError(_NATIVE_REFUSAL, provider_name="openai", status_code=400)
+
+    async def chunks() -> AsyncIterator[ChatCompletionChunk]:
+        for chunk in (
+            _chat_chunk({"role": "assistant", "content": "OK 42"}, finish_reason="stop"),
+            _chat_chunk(None, usage=_CHAT_USAGE),
+        ):
+            yield chunk
+
+    async def fake_acompletion(**kwargs: Any) -> Any:
+        return chunks() if kwargs.get("stream") else _chat_completion()
+
+    with (
+        patch("gateway.api.routes.responses.aresponses", new=refusing_native),
+        patch(_ACOMPLETION, new=fake_acompletion),
+    ):
+        resp = client.post(
+            f"{API_ROOT}/responses",
+            json={"model": _NATIVE_MODEL, "input": "Reply with exactly: OK 42", "stream": stream},
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.headers[ATTEMPT_COUNT_HEADER] == "1"
+    assert resp.headers[FALLBACK_HEADER] == "false"
+    assert resp.headers["Otari-Provider"] == "openai"
+    assert "OK 42" in resp.text
+
+    rows: list[UsageLog] = []
+    spend = reserved = Decimal(0)
+    for _ in range(50):
+        rows, spend, reserved = _usage_rows_and_holds(db_session)
+        if rows:
+            break
+        time.sleep(0.1)
+    assert len(rows) == 1
+    assert rows[0].status == "success"
+    assert rows[0].provider == "openai"
+    assert Decimal(str(rows[0].cost)) == _EXPECTED_COST
+    assert spend == _EXPECTED_COST
+    assert reserved == 0
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_native_400_naming_a_field_is_not_served_as_chat(
+    client: TestClient,
+    budgeted_key_header: dict[str, str],
+    db_session: Session,
+    priced_native_model: None,
+    stream: bool,
+) -> None:
+    held_at_dispatch: list[Decimal] = []
+
+    async def refusing_native(**_: Any) -> Any:
+        held_at_dispatch.append(_usage_rows_and_holds(db_session)[2])
+        raise AnyLLMError(_NATIVE_REFUSAL, provider_name="openai", status_code=400, param="max_output_tokens")
+
+    acompletion = AsyncMock()
+    with (
+        patch("gateway.api.routes.responses.aresponses", new=refusing_native),
+        patch(_ACOMPLETION, new=acompletion),
+    ):
+        resp = client.post(
+            f"{API_ROOT}/responses",
+            json={"model": _NATIVE_MODEL, "input": "hi", "stream": stream},
+            headers=budgeted_key_header,
+        )
+
+    acompletion.assert_not_called()
+    assert resp.status_code == 400, resp.text
+    # A hold existed, so reading none afterwards means it was released.
+    assert held_at_dispatch and held_at_dispatch[0] > 0
+    spend = reserved = Decimal(0)
+    for _ in range(50):
+        _, spend, reserved = _usage_rows_and_holds(db_session)
+        if reserved == 0:
+            break
+        time.sleep(0.1)
+    assert spend == 0
+    assert reserved == 0
