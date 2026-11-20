@@ -429,6 +429,7 @@ class RequestGuardrails:
                 started,
                 ended,
                 withheld=content.withheld and result.flagged,
+                categories=result.categories,
             )
 
     def _record_span(
@@ -441,6 +442,7 @@ class RequestGuardrails:
         ended: datetime,
         *,
         withheld: bool = False,
+        categories: tuple[str, ...] = (),
     ) -> None:
         if self._trace is not None:
             self._trace.record_guardrail(
@@ -452,6 +454,7 @@ class RequestGuardrails:
                 event=content.target.event,
                 tool=content.target.tool,
                 withheld=withheld,
+                categories=categories,
             )
 
     def _write_header(self) -> None:
