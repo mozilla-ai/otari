@@ -85,7 +85,7 @@ curl https://api.otari.ai/api/v1/chat/completions \
 
 In otari.ai's EU region use `https://eu.api.otari.ai/api/v1`; on your own deployment, its own address.
 
-- In `block` mode, a flagged request is refused with `403` and `guardrail_violation`.
+- In `block` mode, a flagged request is refused with `403` and `guardrail_violation`. Each guardrail in the body lists in `categories` what it says fired, such as `prompt_attack` or `pii/phone_number` ([Modes](guardrails-reference.md#modes)).
 - In `monitor` mode, the request is served and the verdict comes back in the `Otari-Guardrails` response header ([Reading the header](guardrails-reference.md#reading-the-otari-guardrails-header)).
 
 A request can tighten a mandate but never loosen it ([How the layers compose](guardrails-reference.md#how-the-layers-compose)). The model never sees the guardrail and cannot decline it.
