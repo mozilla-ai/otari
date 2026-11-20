@@ -122,7 +122,10 @@ through `extra_body={"input_type": "search_query"}`.
 a chat completion and translates the answer back, streamed or not, so the client
 sees an ordinary Responses object or event stream. A provider with its own
 Responses API (OpenAI, Azure OpenAI, Gemini, Groq, and others) is called
-natively.
+natively. When such a provider refuses one model with a `400` saying the model does
+not support the Responses API (Nebius does this for some models), Otari serves that
+same request as a chat completion on the same provider, with no fallback and no
+second attempt. A `400` that names a request field is not retried.
 
 The translation covers text, image and file input, `instructions`, function
 tools and `tool_choice`, `max_output_tokens`, `reasoning.effort`, JSON output
