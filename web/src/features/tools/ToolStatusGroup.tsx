@@ -8,6 +8,7 @@ import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { DisclosureRow } from "@/design-system/navigation/DisclosureRow"
 import { DocsLink } from "@/design-system/navigation/DocsLink"
 import { settingInputId } from "@/features/tools/ToolSettingRows"
+import type { WorkspaceToolState } from "@/features/tools/useWorkspaceToolState"
 
 /**
  * The declaration a client sends, as a value to take.
@@ -63,6 +64,27 @@ interface ToolStatusProps {
   unavailableSummary?: string
   /** What turns that tool on, in place of setting a URL. */
   unavailableHelp?: string
+  /** Whether the selected workspace's requests may declare the tool. */
+  inWorkspace?: WorkspaceToolState
+}
+
+/** The trailing status: the deployment's answer, then the selected workspace's. */
+function statusOf(
+  tool: ManagedTool,
+  unavailableSummary: string,
+  inWorkspace: WorkspaceToolState | undefined,
+): { label: string; isOn: boolean } {
+  if (!tool.available) return { label: unavailableSummary, isOn: false }
+  if (!inWorkspace) return { label: "Available", isOn: true }
+  if (inWorkspace.enabled === null) {
+    return {
+      label: inWorkspace.isError ? "Could not read" : "…",
+      isOn: false,
+    }
+  }
+  return inWorkspace.enabled
+    ? { label: "Available", isOn: true }
+    : { label: `Off in ${inWorkspace.workspace}`, isOn: false }
 }
 
 /** The status row alone, for a group that carries more rows under it. */
@@ -74,11 +96,14 @@ export function ToolStatusRow({
   setUp,
   unavailableSummary = "Unavailable · no backend",
   unavailableHelp = "No backend URL is set, so every call is rejected with 400.",
+  inWorkspace,
 }: ToolStatusProps) {
   const [isOpen, setIsOpen] = useState(false)
   // The provider-named keywords interception adds. Absent when it is off, which
   // is the only thing on this page that changes the list.
   const alsoAccepted = tool.accepted_types.filter((type) => type !== tool.id)
+  const status = statusOf(tool, unavailableSummary, inWorkspace)
+  const isOffHere = tool.available && inWorkspace?.enabled === false
 
   return (
     <DisclosureRow
@@ -88,12 +113,26 @@ export function ToolStatusRow({
       onToggle={() => setIsOpen((open) => !open)}
       trailing={
         <span className="flex items-center gap-2.5 text-mono-overline text-subtle">
-          <Dot className={tool.available ? "bg-success" : "bg-text-subtle"} />
-          {tool.available ? "Available" : unavailableSummary}
+          <Dot className={status.isOn ? "bg-success" : "bg-text-subtle"} />
+          {/* A workspace name can be long, and this lane does not shrink. */}
+          <span className="max-w-48 truncate" title={status.label}>
+            {status.label}
+          </span>
         </span>
       }
     >
       <div className="flex flex-col divide-y divide-border-subtle">
+        {isOffHere ? (
+          <SettingRow
+            isNested
+            label={`Why off in ${inWorkspace?.workspace}`}
+            help={
+              inWorkspace?.reason ??
+              "This workspace's requests may not declare it."
+            }
+            control={null}
+          />
+        ) : null}
         {/* Absent rather than empty when the tool is available: there is no
               reason to give. */}
         {tool.available ? null : (

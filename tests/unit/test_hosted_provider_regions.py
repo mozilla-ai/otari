@@ -124,19 +124,21 @@ def test_an_instance_that_is_no_hosted_region_keeps_its_own_price_key() -> None:
     assert pricing_key_forms("team@eu:gpt-4o") == ["team@eu:gpt-4o", "team@eu/gpt-4o"]
 
 
-def test_a_request_takes_the_first_region_whose_countries_admit_it() -> None:
+@pytest.mark.asyncio
+async def test_a_request_takes_the_first_region_whose_countries_admit_it() -> None:
     provider = _provider(_region("us", countries=("US",)), _region("sg", countries=("SG",)), _region("any"))
 
-    assert ensure_hosted_country(CountryGate("SG"), provider).response_provider == "sg"
-    assert ensure_hosted_country(CountryGate("FR"), provider).response_provider == "any"
-    assert ensure_hosted_country(None, provider) is provider
+    assert (await ensure_hosted_country(CountryGate("SG"), provider)).response_provider == "sg"
+    assert (await ensure_hosted_country(CountryGate("FR"), provider)).response_provider == "any"
+    assert await ensure_hosted_country(None, provider) is provider
 
 
-def test_a_request_no_region_admits_is_refused() -> None:
+@pytest.mark.asyncio
+async def test_a_request_no_region_admits_is_refused() -> None:
     provider = _provider(_region("us", countries=("US",)), _region("sg", countries=("SG",)))
 
     with pytest.raises(CountryNotServedError):
-        ensure_hosted_country(CountryGate("FR"), provider)
+        await ensure_hosted_country(CountryGate("FR"), provider)
 
 
 @pytest.fixture

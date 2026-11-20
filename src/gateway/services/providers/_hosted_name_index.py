@@ -44,9 +44,11 @@ _refresh_count = 0
 _published_refresh = 0
 # Writes this worker made, numbered, so a refresh whose read began before one
 # replays it rather than overwriting it with an older snapshot. name ->
-# (write number, implementation, or None for a name removed).
+# (write number, implementation, or None for a name removed), and for the
+# retention flag, name -> (write number, whether the name is declared).
 _write_count = 0
 _recent_writes: dict[str, tuple[int, str | None]] = {}
+_recent_retention: dict[str, tuple[int, bool]] = {}
 
 
 def hosted_implementation(name: str) -> str | None:
@@ -123,14 +125,19 @@ def remember_hosted_zero_data_retention(name: str, declared: bool) -> None:
     """Record what this worker just stored as ``name``'s declaration, ahead of the next refresh."""
     global _zero_retention  # noqa: PLW0603
 
+    _recent_retention[name] = (_next_write(), declared)
     _zero_retention = _zero_retention | {name} if declared else _zero_retention - {name}
 
 
-def _record_write(name: str, implementation: str | None) -> None:
+def _next_write() -> int:
     global _write_count  # noqa: PLW0603
 
     _write_count += 1
-    _recent_writes[name] = (_write_count, implementation)
+    return _write_count
+
+
+def _record_write(name: str, implementation: str | None) -> None:
+    _recent_writes[name] = (_next_write(), implementation)
     if implementation is None:
         _names.pop(name, None)
     else:
@@ -154,7 +161,7 @@ async def refresh_hosted_name_index(uow: UnitOfWork, config: GatewayConfig) -> N
     this worker made while the read was in flight is newer than what the read
     saw, so it is replayed over the snapshot rather than lost.
     """
-    global _names, _recent_writes, _zero_retention, _locations, _region_parents, _providers  # noqa: PLW0603
+    global _names, _recent_retention, _recent_writes, _zero_retention, _locations, _region_parents, _providers  # noqa: PLW0603
     global _refresh_count, _published_refresh  # noqa: PLW0603
 
     _refresh_count += 1
@@ -205,16 +212,28 @@ async def refresh_hosted_name_index(uow: UnitOfWork, config: GatewayConfig) -> N
             fresh.pop(name, None)
         else:
             fresh[name] = implementation
-    _names, _recent_writes, _zero_retention, _locations = fresh, newer, frozenset(declared), locations
-    _region_parents, _providers, _published_refresh = parents, providers, number
+    retention = _replay(_recent_retention, read_from, declared)
+    _names, _recent_writes, _recent_retention, _zero_retention = fresh, newer, retention, frozenset(declared)
+    _locations, _region_parents, _providers, _published_refresh = locations, parents, providers, number
+
+
+def _replay(journal: dict[str, tuple[int, bool]], read_from: int, members: set[str]) -> dict[str, tuple[int, bool]]:
+    """Apply the retention writes made after ``read_from`` to ``members``, and keep only those for the next refresh."""
+    newer = {name: write for name, write in journal.items() if write[0] > read_from}
+    for name, (_, member) in newer.items():
+        if member:
+            members.add(name)
+        else:
+            members.discard(name)
+    return newer
 
 
 def reset_hosted_name_index() -> None:
     """Drop the map so the next load starts clean (startup and tests)."""
-    global _names, _recent_writes, _zero_retention, _locations, _region_parents, _providers  # noqa: PLW0603
+    global _names, _recent_retention, _recent_writes, _zero_retention, _locations, _region_parents, _providers  # noqa: PLW0603
     global _published_refresh  # noqa: PLW0603
 
-    _names, _recent_writes, _zero_retention, _locations = {}, {}, frozenset(), {}
+    _names, _recent_writes, _recent_retention, _zero_retention, _locations = {}, {}, {}, frozenset(), {}
     _region_parents, _providers, _published_refresh = {}, frozenset(), 0
 
 

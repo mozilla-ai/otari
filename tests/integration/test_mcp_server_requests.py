@@ -50,8 +50,9 @@ from gateway.services import mcp_stateless
 from gateway.services.mail import Mailer, MailMessage
 from gateway.services.mcp_catalog import McpCatalogService
 from gateway.services.mcp_stateless import ServerCheck
+from gateway.services.organizations import OrganizationReach
 from gateway.services.secret_box import generate_secret_key
-from gateway.services.tenancy import OrganizationReach, OrganizationService
+from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.workspace_mcp_server_service import (
     McpServerPromote,

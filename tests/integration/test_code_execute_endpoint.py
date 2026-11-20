@@ -32,6 +32,7 @@ from gateway.core.error_codes import ERROR_CODE_HEADER, INSUFFICIENT_FUNDS
 from gateway.ports.billing_port import InsufficientFundsError
 from gateway.ports.code_execution_port import SandboxFileEntry, SandboxNotReachableError, SandboxSessionGoneError
 from gateway.services.code_execution import CONTAINER_ID_PREFIX
+from gateway.services.tools._code_execution_admission import SANDBOX_NOT_ENABLED_DETAIL
 from gateway.types.code_execution import CodeExecutionResult, ResultBlock
 
 from .conftest import ALL_SERVICE_KEY_SCOPES
@@ -396,7 +397,7 @@ def test_a_workspace_with_code_execution_off_is_refused(
     resp = client.post(_ENDPOINT, json={"code": "print(1)"}, headers=api_key_header)
 
     assert resp.status_code == 403, resp.text
-    assert resp.json()["detail"] == "code execution is not enabled for this workspace"
+    assert resp.json()["detail"] == SANDBOX_NOT_ENABLED_DETAIL
     assert port.opened == []
     (row,) = _rows(client, master_key_header, api_key_obj["user_id"])
     assert (row["status"], row["status_code"]) == ("error", 403)

@@ -1019,6 +1019,12 @@ def test_every_address_accepted_from_generated_text_is_the_address_an_email_to_i
     assert accepted > 1_000
 
 
+@pytest.mark.parametrize("address", ["jös@example.com", "非@example.com", "a.é@example.com", "\u212a@example.com"])
+def test_normalized_address_refuses_a_non_ascii_local_part(address: str) -> None:
+    assert normalized_address(address) is None
+    assert stored_address(address) is None
+
+
 def test_normalized_address_is_linear_on_a_long_run_of_dots() -> None:
     started = time.perf_counter()
     assert normalized_address("!@!." + "!." * 50_000 + "@") is None

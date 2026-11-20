@@ -1,4 +1,5 @@
 import {
+  type QueryClient,
   useIsFetching,
   useIsMutating,
   useMutation,
@@ -113,6 +114,7 @@ export function useUpdateToolSettings() {
       // Toggling interception or clearing a backend URL changes which
       // declarations the gateway accepts, so the "how to call" card must refetch.
       void queryClient.invalidateQueries({ queryKey: [TOOLS] })
+      invalidateWorkspaceToolAnswers(queryClient)
       // A searxng search tool with no api_base of its own inherits web_search_url,
       // which this PATCH may have just changed, so the endpoint a blank box
       // resolves to (and whether one is required at all) has to be re-read.
@@ -214,6 +216,7 @@ export function useCreateSearchTool() {
       void queryClient.invalidateQueries({ queryKey: [SEARCH_PROVIDERS] })
       void queryClient.invalidateQueries({ queryKey: [TOOL_SETTINGS] })
       void queryClient.invalidateQueries({ queryKey: [TOOLS] })
+      invalidateWorkspaceToolAnswers(queryClient)
     },
   })
 }
@@ -253,6 +256,7 @@ export function useDeleteSearchTool() {
       void queryClient.invalidateQueries({ queryKey: [SEARCH_PROVIDERS] })
       void queryClient.invalidateQueries({ queryKey: [TOOL_SETTINGS] })
       void queryClient.invalidateQueries({ queryKey: [TOOLS] })
+      invalidateWorkspaceToolAnswers(queryClient)
     },
   })
 }
@@ -439,6 +443,10 @@ export function useSetWorkspaceCodeExecutionPolicy() {
         [WORKSPACES, workspaceId, "code-execution-policy"],
         data,
       )
+      // What the workspace's requests may use follows the stored row.
+      void queryClient.invalidateQueries({
+        queryKey: playgroundToolsKey(workspaceId),
+      })
     },
   })
 }
@@ -457,6 +465,9 @@ export function useClearWorkspaceCodeExecutionPolicy() {
     onSuccess: (_data, { workspaceId }) => {
       void queryClient.invalidateQueries({
         queryKey: [WORKSPACES, workspaceId, "code-execution-policy"],
+      })
+      void queryClient.invalidateQueries({
+        queryKey: playgroundToolsKey(workspaceId),
       })
     },
   })
@@ -499,6 +510,10 @@ export function useSetWorkspaceWebSearchConfig() {
       // holds the pre-write row until a GET lands, and each save costs two
       // requests instead of one.
       queryClient.setQueryData([WORKSPACES, workspaceId, "web-search"], data)
+      // What the workspace's requests may use follows the stored row.
+      void queryClient.invalidateQueries({
+        queryKey: playgroundToolsKey(workspaceId),
+      })
     },
   })
 }
@@ -517,6 +532,9 @@ export function useClearWorkspaceWebSearchConfig() {
     onSuccess: (_data, { workspaceId }) => {
       void queryClient.invalidateQueries({
         queryKey: [WORKSPACES, workspaceId, "web-search"],
+      })
+      void queryClient.invalidateQueries({
+        queryKey: playgroundToolsKey(workspaceId),
       })
     },
   })
@@ -1018,6 +1036,17 @@ export function useMcpServerProbes(workspaceId: string, urls: string[]) {
 
 function mcpConnectionsKey(workspaceId: string) {
   return [WORKSPACES, workspaceId, "mcp-connections"] as const
+}
+
+/**
+ * Every workspace's answer to which tools its requests may declare. A deployment
+ * setting or search tool narrows each of them, whatever the workspace.
+ */
+function invalidateWorkspaceToolAnswers(queryClient: QueryClient) {
+  void queryClient.invalidateQueries({
+    predicate: ({ queryKey }) =>
+      queryKey[0] === PLAYGROUND && queryKey[2] === "tools",
+  })
 }
 
 /** The Playground's tools menu says which servers still need a sign-in. */

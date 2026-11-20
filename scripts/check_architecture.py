@@ -107,7 +107,7 @@ Enforces:
     definition under a module-level if or try counts, a type alias statement
     counts, and an unpacking assignment counts each name it binds; one nested in
     a function or a class body does not, because it binds no name the root
-    exports. Raising the baseline itself is caught by check_baseline_ratchet.py
+    exports. Raising the baseline itself is caught by check_no_baseline_regression.py
     rather than here: every baseline in this file is read from the tree being
     checked, so a change that adds a builder and raises the baseline to match
     passes this check and fails that one. This says nothing about which module a
@@ -1211,7 +1211,6 @@ DOMAIN_NAME_BASELINE: dict[str, tuple[str, ...]] = {
         "domain_verification.py",
         "email_address.py",
         "invitation_email.py",
-        "membership_listener.py",
         "org_provider_key_service.py",
         "organization_domain_service.py",
         "organization_guardrail_definition_service.py",
@@ -1349,7 +1348,7 @@ def check_domain_names(src_root: Path, domains: set[str]) -> list[str]:
 # the number is what has to come down.
 NON_DOMAIN_SERVICE_IMPORT_BASELINE: dict[str, int] = {
     "code_execution": 1,
-    "tenancy": 76,
+    "tenancy": 74,
 }
 
 
@@ -2958,6 +2957,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "baseline": (),
     },
     "gateway.models.usage.AgentTelemetry": {
+        "repository": None,
+        "baseline": ("gateway/adapters/telemetry_storage_adapter.py",),
+    },
+    "gateway.models.usage.AgentTelemetryUserBarrier": {
         "repository": None,
         "baseline": ("gateway/adapters/telemetry_storage_adapter.py",),
     },

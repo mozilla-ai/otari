@@ -295,6 +295,43 @@ class OrganizationInvitationRepository(BaseRepository[OrganizationInvitation, Ne
             .execution_options(synchronize_session=False)
         )
 
+    async def delete_by_token_hash(self, token_hash: str) -> OrganizationInvitation | None:
+        """Delete the undeclined invitation holding this token hash, and return the row it removed.
+
+        None when no row holds it and none when the invitation was declined, which is how a second
+        acceptance of one link, and one racing a decline, each learn they lost. The returned row
+        carries every column and belongs to no session, so a later lookup of the same invitation
+        answers that it is gone.
+        """
+        result = await self.db.execute(
+            delete(OrganizationInvitation)
+            .where(
+                OrganizationInvitation.token_hash == token_hash,
+                OrganizationInvitation.declined_at.is_(None),
+            )
+            .returning(OrganizationInvitation)
+            .execution_options(synchronize_session="fetch")
+        )
+        removed = result.scalar_one_or_none()
+        if removed is not None:
+            self.db.expunge(removed)
+        return removed
+
+    async def decline_by_token_hash(self, token_hash: str, *, at: datetime) -> datetime | None:
+        """Record that the invitation holding this token hash was declined, and return the time it settled on.
+
+        None when no row holds the hash. A decline that follows another keeps the first one's time,
+        so two at once settle on one answer, and the answer comes back rather than being read off a row.
+        """
+        result = await self.db.execute(
+            update(OrganizationInvitation)
+            .where(OrganizationInvitation.token_hash == token_hash)
+            .values(declined_at=func.coalesce(OrganizationInvitation.declined_at, at))
+            .returning(OrganizationInvitation.declined_at)
+            .execution_options(synchronize_session=False)
+        )
+        return result.scalar_one_or_none()
+
     async def delete_expired_in_organization(
         self, invitation_ids: Collection[uuid.UUID], organization_id: uuid.UUID, *, expired_by: datetime
     ) -> int:

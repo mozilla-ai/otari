@@ -88,7 +88,7 @@ export const PasswordWithProblem: Story = {
         value="short"
         onChange={() => {}}
         autoComplete="new-password"
-        description="At least 12 characters, and at most 72 bytes."
+        description="At least 12 characters."
         errorMessage="At least 12 characters."
       />
     </div>

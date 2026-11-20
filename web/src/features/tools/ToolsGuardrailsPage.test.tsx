@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type {
   OrganizationContext,
+  PlaygroundTools,
   ToolSettingField,
   ToolSettingsResponse,
   ToolsResponse,
@@ -112,6 +113,21 @@ const TENANT_RESPONSE: ToolSettingsResponse = {
   sandbox_provider: null,
 }
 
+/** Every tool allowed in the workspace, with `overrides` applied. */
+function workspaceTools(
+  overrides: Partial<PlaygroundTools> = {},
+): PlaygroundTools {
+  const on = { configured: true, enabled: true, reason: null }
+  return {
+    web_search: on,
+    web_fetch: on,
+    code_execution: on,
+    files: on,
+    mcp_servers: [],
+    ...overrides,
+  }
+}
+
 // GET /v1/tools drives the "how to call this" card. `accepted_types` is what the
 // deployment currently honors, so it is the interesting axis here.
 const TOOLS: ToolsResponse = {
@@ -192,6 +208,9 @@ interface MockOpts {
   // its deployment-wide reads on `deployment_operator`, so most tests here are
   // about the forms only an operator sees.
   context?: OrganizationContext
+  /** What the selected workspace's requests may declare. */
+  workspaceTools?: PlaygroundTools
+  workspaceToolsStatus?: number
 }
 
 function mockApi(opts: MockOpts = {}) {
@@ -212,6 +231,12 @@ function mockApi(opts: MockOpts = {}) {
           search_provider: "exa",
           fetch_provider: "builtin",
         })
+      }
+      if (opts.workspaceToolsStatus && url.includes("/playground/tools")) {
+        return jsonResponse({ detail: "nope" }, opts.workspaceToolsStatus)
+      }
+      if (opts.workspaceTools && url.includes("/playground/tools")) {
+        return jsonResponse(opts.workspaceTools)
       }
       if (url.includes(`${API_ROOT}/tools`)) {
         if (opts.toolsStatus && opts.toolsStatus >= 400) {
@@ -774,6 +799,65 @@ describe("ToolsGuardrailsPage tool status", () => {
     expect(
       await screen.findByText(/Neither tool can run on this deployment/),
     ).toBeInTheDocument()
+  })
+
+  it("says each web tool is off in a workspace whose requests may not declare it", async () => {
+    const user = userEvent.setup()
+    mockApi({
+      context: organizationContext({
+        workspace_memberships: [
+          {
+            workspace_id: "11111111-1111-1111-1111-111111111111",
+            name: "Alpha",
+            role: "admin",
+          },
+        ],
+      }),
+      workspaceTools: workspaceTools({
+        web_search: {
+          configured: true,
+          enabled: false,
+          reason: "Turned off for this workspace.",
+        },
+        web_fetch: { configured: true, enabled: true, reason: null },
+      }),
+    })
+    await renderWithClient(
+      <SelectedWorkspaceProvider>
+        <ToolsGuardrailsPage only="web_search" />
+      </SelectedWorkspaceProvider>,
+    )
+
+    expect(await screen.findByText("Off in Alpha")).toBeInTheDocument()
+    expect(screen.getByText("Available")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: /otari_web_search/ }))
+    expect(screen.getByText("Why off in Alpha")).toBeInTheDocument()
+    expect(
+      screen.getByText("Turned off for this workspace."),
+    ).toBeInTheDocument()
+  })
+
+  it("claims nothing for a workspace whose answer could not be read", async () => {
+    mockApi({
+      workspaceToolsStatus: 500,
+      context: organizationContext({
+        workspace_memberships: [
+          {
+            workspace_id: "11111111-1111-1111-1111-111111111111",
+            name: "Alpha",
+            role: "admin",
+          },
+        ],
+      }),
+    })
+    await renderWithClient(
+      <SelectedWorkspaceProvider>
+        <ToolsGuardrailsPage only="web_search" />
+      </SelectedWorkspaceProvider>,
+    )
+
+    expect(await screen.findAllByText("Could not read")).toHaveLength(2)
+    expect(screen.queryByText("Available")).not.toBeInTheDocument()
   })
 
   it("keeps the editable settings usable when /api/v1/tools fails", async () => {

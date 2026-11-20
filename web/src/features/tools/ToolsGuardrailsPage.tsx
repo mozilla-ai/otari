@@ -17,6 +17,7 @@ import {
   ToolStatusGroup,
   ToolStatusRow,
 } from "@/features/tools/ToolStatusGroup"
+import { useWorkspaceToolState } from "@/features/tools/useWorkspaceToolState"
 import { WorkspaceCodeExecutionPolicyCard } from "@/features/tools/WorkspaceCodeExecutionPolicyCard"
 import { WorkspaceWebSearchCard } from "@/features/tools/WorkspaceWebSearchCard"
 import { useDeploymentOperator } from "@/shared/api/organizations"
@@ -287,6 +288,9 @@ export function ToolsGuardrailsPage({ only }: { only: ToolServiceName }) {
   const { isOperator } = useDeploymentOperator()
   const query = useToolSettings()
   const tools = useTools()
+  // The rows say what the selected workspace's requests get, which its own
+  // switch and policy narrow.
+  const inWorkspace = useWorkspaceToolState()
   const update = useUpdateToolSettings()
 
   const data = query.data
@@ -371,6 +375,7 @@ export function ToolsGuardrailsPage({ only }: { only: ToolServiceName }) {
             <Status
               key={tool.id}
               tool={tool}
+              inWorkspace={inWorkspace(tool.id)}
               docsHref={toolsDocs(spec.docsAnchor ?? service.docsAnchor)}
               help={spec.help}
               urlFieldKey={

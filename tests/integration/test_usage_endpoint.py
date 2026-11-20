@@ -353,6 +353,8 @@ def test_list_usage_response_shape(
         "cache_write_1h_tokens": None,
         "reasoning_tokens": None,
         "provider_latency_ms": None,
+        "ttft_ms": None,
+        "output_tokens_per_second": None,
         "billing_meters": None,
         "pricing_breakdown": None,
         "cost": 1.23,
