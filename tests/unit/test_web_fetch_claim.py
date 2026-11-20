@@ -177,16 +177,49 @@ def test_an_unclaimed_keyword_is_left_for_the_provider() -> None:
     assert web.remaining_user_tools == [ANTHROPIC_FETCH]
 
 
+def test_otari_web_fetch_takes_max_uses_and_the_domain_lists() -> None:
+    entry = {
+        "type": "otari_web_fetch",
+        "max_uses": 2,
+        "allowed_domains": ["Docs.Example.com."],
+        "blocked_domains": ["Private.Docs.Example.com"],
+    }
+
+    web = extract_web_tools([entry], config=_config(), claims=WebClaims())
+
+    assert web.fetch_tool_entry == {
+        "type": "otari_web_fetch",
+        "max_uses": 2,
+        "allowed_domains": ["docs.example.com"],
+        "blocked_domains": ["private.docs.example.com"],
+    }
+    assert entry["allowed_domains"] == ["Docs.Example.com."]
+
+
+def test_otari_web_fetch_refuses_any_other_field() -> None:
+    with pytest.raises(WebToolDeclarationError, match="otari_web_fetch declarations contain an unsupported field"):
+        validate_web_declarations([{"type": "otari_web_fetch", "max_results": 3}], claims=WebClaims())
+
+
+_FETCH_DECLARATIONS = [
+    pytest.param(ANTHROPIC_FETCH, id="claimed-keyword"),
+    pytest.param({"type": "otari_web_fetch"}, id="otari_web_fetch"),
+]
+
+
+@pytest.mark.parametrize("declaration", _FETCH_DECLARATIONS)
 @pytest.mark.parametrize("max_uses", [-1, True, "2", 1.5])
-def test_an_invalid_max_uses_is_refused_rather_than_uncapped(max_uses: Any) -> None:
+def test_an_invalid_max_uses_is_refused_rather_than_uncapped(declaration: dict[str, str], max_uses: Any) -> None:
     with pytest.raises(WebToolDeclarationError, match="web_fetch max_uses"):
-        extract_web_tools([{**ANTHROPIC_FETCH, "max_uses": max_uses}], config=_config(), claims=WebClaims(fetch=True))
+        extract_web_tools([{**declaration, "max_uses": max_uses}], config=_config(), claims=WebClaims(fetch=True))
 
 
-def test_an_invalid_domain_list_is_refused() -> None:
+@pytest.mark.parametrize("declaration", _FETCH_DECLARATIONS)
+@pytest.mark.parametrize("field", ["allowed_domains", "blocked_domains"])
+def test_an_invalid_domain_list_is_refused(declaration: dict[str, str], field: str) -> None:
     with pytest.raises(WebToolDeclarationError, match="Web fetch allowed_domains"):
         extract_web_tools(
-            [{**ANTHROPIC_FETCH, "allowed_domains": ["https://example.com/path"]}],
+            [{**declaration, field: ["https://example.com/path"]}],
             config=_config(),
             claims=WebClaims(fetch=True),
         )
