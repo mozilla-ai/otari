@@ -28,6 +28,18 @@ Callers send `model: fast`. If the first provider fails before any response is
 sent, Otari tries the fallback. The response keeps the policy name; the Requests
 view of Sessions records the models that were attempted.
 
+A policy stored through the API or the dashboard may also name a target by its
+[catalog spelling](models.md#catalog-spellings), such as `z-ai/glm-5.3`. The
+policy keeps the spelling as written, and each request tries the one offering
+the spelling resolves to at that moment; the policy's own `on_failure` list is
+its only fallback. A spelling the catalog does not know when the policy is
+saved is refused. An organization's own routing page also refuses one that
+resolves to an offering the organization cannot reach; the deployment-wide API
+checks only that the target names a provider it knows, so a target with no
+credential behind it fails when a request arrives. A policy in `config.yml` is
+checked before the catalog is read, so its targets name a provider or an
+instance.
+
 ![Otari tries OpenAI first and moves to Anthropic when OpenAI returns a retryable error.](assets/routing-fallback-flow.webp)
 
 ## Selection and failure are separate

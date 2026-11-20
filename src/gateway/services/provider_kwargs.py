@@ -1035,12 +1035,14 @@ def resolve_static_policy_target(
 
     ``None`` for a name that is not a policy, for a dynamic policy (whose target
     depends on the request), and when routing is disabled. Scoped like an alias, so
-    a user-scoped policy in this workspace resolves to that user's target.
+    a user-scoped policy in this workspace resolves to that user's target. A
+    target written as a catalog spelling is the offering it resolves to, as it
+    is where the completion routes compile the policy.
     """
     spec = resolve_effective_policy(config, model_selector, user_id, workspace_id=workspace_id)
     if spec is None or spec.is_dynamic:
         return None
-    return spec.default_target
+    return resolve_catalog_selector(spec.default_target, workspace_id=workspace_id) or spec.default_target
 
 
 def normalize_pricing_key(config: GatewayConfig, raw_key: str) -> str:

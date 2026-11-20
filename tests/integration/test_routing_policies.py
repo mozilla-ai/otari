@@ -2368,6 +2368,60 @@ def test_a_catalog_id_reaches_the_offering_a_key_may_use(catalog_client: TestCli
     assert [(r["model"], r["selection_reason"]) for r in _usage_rows(catalog_client)] == [("m1-b", "catalog")]
 
 
+def test_a_stored_policy_may_name_a_catalog_id(catalog_client: TestClient) -> None:
+    """A policy accepts the name a request accepts, and dispatches to the offering that name resolves to."""
+    _create_user(catalog_client)
+    created = catalog_client.post(
+        f"{API_ROOT}/routing/policies",
+        json={"name": "by-catalog-id", "spec": _spec(_CATALOG_ID, ["anthropic:claude-haiku-4-5"])},
+        headers=HEADERS,
+    )
+    assert created.status_code == 200, created.text
+    assert created.json()["spec"]["select"] == [{"default": _CATALOG_ID}]
+
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("m1-a"))) as mock:
+        resp = _chat(catalog_client, "by-catalog-id")
+
+    assert resp.status_code == 200, resp.text
+    assert _awaited_model(mock) == "openai:m1-a"
+
+
+def test_a_one_target_policy_on_a_catalog_id_resolves_on_a_non_completion_endpoint(catalog_client: TestClient) -> None:
+    _create_user(catalog_client)
+    created = catalog_client.post(
+        f"{API_ROOT}/routing/policies", json={"name": "embed", "spec": _spec(_CATALOG_ID)}, headers=HEADERS
+    )
+    assert created.status_code == 200, created.text
+    embedding_response = CreateEmbeddingResponse(
+        data=[Embedding(embedding=[0.1, 0.2], index=0, object="embedding")],
+        model="m1-a",
+        object="list",
+        usage=Usage(prompt_tokens=5, total_tokens=5),
+    )
+
+    with patch(
+        "gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=embedding_response
+    ) as mock:
+        resp = catalog_client.post(
+            f"{API_ROOT}/embeddings", json={"model": "embed", "input": "hello", "user": "test-user"}, headers=HEADERS
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert mock.await_args is not None
+    assert (mock.await_args.kwargs["provider"], mock.await_args.kwargs["model"]) == ("openai", "m1-a")
+    assert resp.json()["model"] == "embed"
+
+
+def test_a_stored_policy_may_not_name_an_id_the_catalog_does_not_know(catalog_client: TestClient) -> None:
+    refused = catalog_client.post(
+        f"{API_ROOT}/routing/policies",
+        json={"name": "by-unknown-id", "spec": _spec("acme/m2")},
+        headers=HEADERS,
+    )
+    assert refused.status_code == 400, refused.text
+    assert "acme" in refused.json()["detail"]
+
+
 _LEGACY_ID = "openai/gpt-x"
 _SOLO_ID = "openai/gpt-solo"
 
