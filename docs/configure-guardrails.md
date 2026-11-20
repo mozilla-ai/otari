@@ -90,6 +90,8 @@ In otari.ai's EU region use `https://eu.api.otari.ai/api/v1`; on your own deploy
 
 A request can tighten a mandate but never loosen it ([How the layers compose](guardrails-reference.md#how-the-layers-compose)). The model never sees the guardrail and cannot decline it.
 
+A guardrail from the catalog runs only once it is mandated, on otari.ai as on any deployment, so mandate it before you ask for it in `block` mode. A request can otherwise name only a profile on a guardrails service: one at the `url` the entry gives, or on a deployment you run, the one `guardrails_url` points at. A `block` entry with neither is refused with `424` and `guardrail_not_configured` rather than served unchecked; a `monitor` one is served, and the header reports the check as `not_configured`.
+
 ## Configure a guardrail over the API
 
 For automation, the same work is available over the API. These routes take the deployment's master key or a signed-in dashboard session, not a workspace API key.

@@ -37,6 +37,14 @@ A top-level list on `/api/v1/chat/completions`, `/api/v1/messages` and
 | `credential` | Sent to `url` as `Authorization: Bearer`. Requires `url`, which must then be `https`, and an entry carrying one must be the only entry for its profile. Dropped when an organization or a routing policy mandates the same profile, because the mandate's endpoint replaces yours. |
 | `on` | What the guardrail reads: any of `input`, `tool_results`, `tool_calls` and `output`. Defaults to `["input"]`. See [What a guardrail reads](#what-a-guardrail-reads). |
 
+An entry runs a profile on a guardrails service: the entry's own `url`, or else
+the deployment's `guardrails_url`. A guardrail your organization defined from
+the [catalog](#the-guardrail-catalog) runs only through an organization
+[mandate](#mandate-fields), on otari.ai as on any deployment, so an entry can
+tighten a mandated profile but cannot start a catalog guardrail by naming it.
+An entry with no service to run on is
+[not configured](#when-the-guardrails-service-is-unreachable).
+
 ## What a guardrail reads
 
 `on` lists what a guardrail reads, on all three endpoints:
