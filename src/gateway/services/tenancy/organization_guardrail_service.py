@@ -166,7 +166,7 @@ class OrganizationGuardrailCreate(BaseModel):
             "example": {
                 "profile": "prompt-injection",
                 "mode": "block",
-                "url": "https://guardrails.internal.example/validate",
+                "url": "https://guardrails.internal.example",
                 "credential": "sk-guardrails-...",
                 "applies_to_all_workspaces": True,
             }
@@ -277,7 +277,7 @@ class OrganizationGuardrailUpdate(BaseModel):
         json_schema_extra={
             "example": {
                 "mode": "monitor",
-                "url": "https://guardrails.internal.example/validate",
+                "url": "https://guardrails.internal.example",
                 "credential": "sk-guardrails-...",
             }
         }
