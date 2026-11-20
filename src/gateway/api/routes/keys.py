@@ -659,6 +659,7 @@ async def delete_key(
     key_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
     organization_id: CallerOrganization,
+    api_keys: ApiKeyServiceDep,
 ) -> None:
     """Delete (revoke) an API key in the caller's organization.
 
@@ -666,11 +667,9 @@ async def delete_key(
     """
     key = await _load_key_in_organization(db, key_id, organization_id)
 
-    await db.delete(key)
     try:
-        await db.commit()
+        await api_keys.delete_key(key)
     except DATABASE_ERRORS as exc:
-        await db.rollback()
         raise database_error("delete key", exc) from None
 
 

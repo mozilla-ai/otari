@@ -24,6 +24,7 @@ from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.repositories.api_keys import ApiKeyRepositories
 from gateway.schemas.api_keys import FederationRuleCreate, FederationRulePublic
 from gateway.services.api_keys._declared import apply_declared_key
+from gateway.services.api_keys._deletion_listener import ApiKeyDeletionListener
 from gateway.services.model_access import (
     KEY_MODELS_EXCEED_USER_DETAIL,
     KEY_TOOLS_EXCEED_USER_DETAIL,
@@ -57,16 +58,35 @@ class ApiKeyService:
     lists come from ``users``.
     """
 
-    def __init__(self, uow: UnitOfWork, repositories: ApiKeyRepositories, *, users: UserAccess) -> None:
+    def __init__(
+        self,
+        uow: UnitOfWork,
+        repositories: ApiKeyRepositories,
+        *,
+        users: UserAccess,
+        deletion_listener: ApiKeyDeletionListener,
+    ) -> None:
         self._uow = uow
         self._keys = repositories.keys
         self._federation_rules = repositories.federation_rules
         self._users = users
+        self._deletion_listener = deletion_listener
 
     async def revoke_in_workspaces(self, workspace_ids: Collection[uuid.UUID]) -> None:
         """Revoke every key in these workspaces, so none of them can be enabled again."""
         async with self._uow:
             await self._keys.revoke_in_workspaces(workspace_ids)
+
+    async def delete_key(self, key: APIKey) -> None:
+        """Delete one key row, after letting other domains sweep what it leaves behind.
+
+        The listener runs first, inside this Unit of Work block, so a refusal takes the deletion with it.
+        A key's ``api_token`` spend ceiling is keyed on the key id with no foreign key, so nothing cascades
+        it; the budgets listener is what deletes it, where a raw row delete would strand it.
+        """
+        async with self._uow:
+            await self._deletion_listener.key_deleted(key)
+            await self._keys.delete(key)
 
     async def get_workspace_id_for_key(self, key_id: str) -> uuid.UUID | None:
         """Return the ID of the workspace that owns a key, or None when no key has that ID."""

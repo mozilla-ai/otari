@@ -581,15 +581,14 @@ async def delete_own_key(
     identity: CurrentIdentity,
     db: Annotated[AsyncSession, Depends(get_db)],
     organizations: OrganizationServiceDep,
+    api_keys: ApiKeyServiceDep,
 ) -> None:
     """Delete (revoke) one of the caller's own API keys."""
     key = await _load_own_writable_key(db, organizations, identity, key_id, revoking=True)
 
-    await db.delete(key)
     try:
-        await db.commit()
+        await api_keys.delete_key(key)
     except DATABASE_ERRORS as exc:
-        await db.rollback()
         raise database_error("delete own key", exc) from None
 
 

@@ -15,18 +15,30 @@ from gateway.api.deps.ports import ApiKeyFormatPortDep, get_api_key_format_port
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.repositories.api_keys import ApiKeyRepositories
+from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.tenancy import WorkspaceRepository
 from gateway.services.api_keys import (
+    ApiKeyDeletionListeners,
     ApiKeyService,
     FederatedTokenVerifier,
     FederationTokenExchange,
 )
+from gateway.services.budgets import BudgetKeyDeletionListener
 from gateway.services.secret_box import configured_secret_keys
 
 
 def get_api_key_service(uow: Annotated[UnitOfWork, Depends(get_unit_of_work)]) -> ApiKeyService:
-    """Build the request's API key service on the request's Unit of Work; key owners' lists come from organizations."""
-    return ApiKeyService(uow, ApiKeyRepositories.on(uow), users=get_user_access(uow))
+    """Build the request's API key service on the request's Unit of Work; key owners' lists come from organizations.
+
+    Its deletion listener is the budgets domain's, so deleting a key sweeps the ``api_token`` ceiling that
+    would otherwise be stranded (#1529); the sweep runs in this request's Unit of Work block.
+    """
+    return ApiKeyService(
+        uow,
+        ApiKeyRepositories.on(uow),
+        users=get_user_access(uow),
+        deletion_listener=ApiKeyDeletionListeners(BudgetKeyDeletionListener(BudgetRepositories.on(uow))),
+    )
 
 
 ApiKeyServiceDep = Annotated[ApiKeyService, Depends(get_api_key_service)]

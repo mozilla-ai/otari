@@ -194,6 +194,20 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
             )
         )
 
+    async def delete_for_api_key(self, key_id: str) -> None:
+        """Delete every ceiling keyed on this API key.
+
+        ``scope_id`` is not a foreign key, so nothing cascades when the key row goes, and a ceiling
+        left behind is unreachable (its organization resolves through the key) and refuses its budget's
+        deletion for good.
+        """
+        await self.db.execute(
+            delete(ScopedBudget).where(
+                ScopedBudget.scope_type == SCOPE_API_TOKEN,
+                ScopedBudget.scope_id == key_id,
+            )
+        )
+
     async def delete_for_workspace(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
         """Delete every ceiling keyed on this workspace or on one of these memberships.
 

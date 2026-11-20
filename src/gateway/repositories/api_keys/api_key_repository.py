@@ -86,6 +86,11 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
             .execution_options(synchronize_session=False)
         )
 
+    async def delete(self, key: APIKey) -> None:
+        """Stage the deletion of one key row."""
+        await self.db.delete(key)
+        await self.db.flush()
+
     async def reload_locked(self, key: APIKey) -> None:
         """Re-read ``key`` from the database and lock its row until the commit."""
         await self.db.refresh(key, with_for_update=True)
