@@ -2079,12 +2079,12 @@ class OrganizationService:
         return invitation, membership, organization, invitee
 
     async def _invitation_may_set_password(self, invitee: User | None, organization_id: uuid.UUID) -> bool:
-        """Whether accepting an invitation from ``organization_id`` may choose ``invitee``'s first password.
+        """Whether an invitation from ``organization_id`` may set ``invitee``'s first password.
 
-        The inviter always holds the accept link (it is returned to them whether
-        or not mail went out), so a password chosen through it is the inviting
-        organization vouching for the address, not proof of the mailbox. That is
-        enough for an identity no other organization knows. One another
+        A password chosen through an accept link is the inviting organization
+        recording the address, not proof of the mailbox,
+        because an admin may hold that link.
+        That is enough for an identity no other organization knows. One another
         organization has added (as anything, an owner included) is refused, or
         any admin anywhere could create an organization, invite that address and
         claim the account; it can still claim itself through signup, a password
@@ -2092,7 +2092,7 @@ class OrganizationService:
 
         Only a live membership elsewhere counts: an active one, or an invited
         one with an invitation it can still accept. A revoked, declined, lapsed
-        or removed one vouches for nothing, and counting it would strand an
+        or removed one counts for nothing, and counting it would strand an
         invitee on a deployment with no mail and no provider.
         """
         if invitee is None or not _has_never_signed_in(invitee):
