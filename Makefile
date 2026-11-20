@@ -98,7 +98,7 @@ check-architecture:
 # from one tree, so a change that adds a builder and raises the number to match
 # passes it, and this is the half it cannot reach. The script refuses an empty
 # earlier revision, so a git show that fails here is reported rather than read
-# as an empty comparison. otari-baseline-ratchet.yml runs the same comparison on
+# as an empty comparison. otari-baseline-regression.yml runs the same comparison on
 # a pull request.
 #
 # The branch point is resolved on its own line because `git show ":path"` reads
@@ -108,7 +108,7 @@ check-baselines:
 	@branch_point=$$(git merge-base origin/main HEAD) && \
 	[ -n "$$branch_point" ] && \
 	git show "$$branch_point:scripts/check_architecture.py" | \
-	uv run python scripts/check_baseline_ratchet.py --base - --head scripts/check_architecture.py
+	uv run python scripts/check_no_baseline_regression.py --base - --head scripts/check_architecture.py
 
 # Refuse a branched revision graph. Cheap, and it runs before the suites so a
 # rebase-away-from-correct branch says so in one line instead of failing every

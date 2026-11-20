@@ -4,9 +4,10 @@ Also ends the sessions such an organization has come to refuse, because the sess
 identity domain and the changes that newly refuse somebody do not.
 """
 
+import uuid
 from typing import Protocol
 
-from gateway.models.tenancy import Organization, User
+from gateway.models.tenancy import Organization, OrganizationMemberRole, User
 
 
 class SsoEnforcement(Protocol):
@@ -24,6 +25,17 @@ class SsoEnforcement(Protocol):
 
     async def blocks_membership(self, *, user: User, organization: Organization) -> bool:
         """Whether ``organization``'s own enforcement refuses ``user`` from acting in it."""
+        ...
+
+    async def blocks_joining(
+        self, *, organization_id: uuid.UUID, role: OrganizationMemberRole, user_id: uuid.UUID
+    ) -> bool:
+        """Whether this organization's own SSO enforcement refuses this person joining it as ``role``.
+
+        Asked about somebody who holds no membership yet, which is why it takes a role rather than
+        reading one, and by id rather than by instance, because the enforcement is read where it is
+        decided rather than taken off an instance a caller resolved earlier.
+        """
         ...
 
     async def revoke_refused_sessions(self, *, organization: Organization) -> None:

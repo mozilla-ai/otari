@@ -123,8 +123,8 @@ providers:
 
 Otari then sends reasoning, and carries it across turns, only when the
 deployment name looks like a reasoning model: the `o` series (`o1`, `o3`,
-`o4-mini`), `gpt-5`, or a name containing `codex`. For the `o` series and
-`gpt-5`, the name has to start with the model family (`gpt-5-prod` works,
+`o4-mini`), `gpt-5` and later, or a name containing `codex`. For the `o` series
+and `gpt-5` onward, the name has to start with the model family (`gpt-5-prod` works,
 `prod-gpt-5` does not), and names containing `-chat` are excluded. Name such a
 deployment after its model.
 

@@ -4721,6 +4721,16 @@
             "description": "The pinned spelling the gateway also accepts for this offering: the instance with the model's catalog id (`fireworks:openai/gpt-oss-120b`), which pins the instance and reaches the model's best offering on it. Null for another build on the same instance, or until the gateway has indexed the catalog.",
             "title": "Short Selector"
           },
+          "speed_7d": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OfferingSpeedInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "usage_30d": {
             "anyOf": [
               {
@@ -17575,6 +17585,79 @@
         "title": "OIDCConnectionRequest",
         "type": "object"
       },
+      "OfferingSpeedInfo": {
+        "description": "How fast one offering answered the viewer's organization over the last 7 days.\n\nRead from the organization's own requests, so it describes that traffic rather\nthan the provider in general: an offering that served the long prompts looks\nslower. Only a request a routing plan's first candidate served counts, and\nonly one that ran no gateway tool.",
+        "properties": {
+          "output_tokens_per_second_p50": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Median output tokens per second over the whole request, time to first token included, as OpenRouter measures it. Null on fewer than 20 measured requests.",
+            "title": "Output Tokens Per Second P50"
+          },
+          "output_tokens_per_second_p95": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The 5th percentile of output tokens per second: the slow tail.",
+            "title": "Output Tokens Per Second P95"
+          },
+          "throughput_samples": {
+            "description": "Requests the throughput is read from: those with 20 or more output tokens.",
+            "title": "Throughput Samples",
+            "type": "integer"
+          },
+          "ttft_ms_p50": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Median milliseconds to the first token. Null on fewer than 20 streamed requests.",
+            "title": "Ttft Ms P50"
+          },
+          "ttft_ms_p95": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The 95th percentile of milliseconds to the first token, rounded: the slow tail.",
+            "title": "Ttft Ms P95"
+          },
+          "ttft_samples": {
+            "description": "Streamed requests the time to first token is read from.",
+            "title": "Ttft Samples",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ttft_samples",
+          "ttft_ms_p50",
+          "ttft_ms_p95",
+          "throughput_samples",
+          "output_tokens_per_second_p50",
+          "output_tokens_per_second_p95"
+        ],
+        "title": "OfferingSpeedInfo",
+        "type": "object"
+      },
       "OfferingUsage": {
         "description": "What the viewer's organization actually paid for one offering, last 30 days.\n\nThe listed rate is what a token costs; this is what the tokens cost, which is\nlower wherever prompt caching hit. Absent for a visitor and for an offering\nthe organization never called.",
         "properties": {
@@ -29751,6 +29834,17 @@
             "title": "Model",
             "type": "string"
           },
+          "output_tokens_per_second": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Tokens Per Second"
+          },
           "policy_name": {
             "anyOf": [
               {
@@ -29930,6 +30024,17 @@
             ],
             "title": "Total Tokens"
           },
+          "ttft_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ttft Ms"
+          },
           "user_alias": {
             "anyOf": [
               {
@@ -29975,6 +30080,8 @@
           "status_code",
           "latency_ms",
           "provider_latency_ms",
+          "ttft_ms",
+          "output_tokens_per_second",
           "source",
           "source_label",
           "counts_toward_budget",
@@ -38110,7 +38217,7 @@
     },
     "/api/v1/catalog/models/{model_id}": {
       "get": {
-        "description": "One model and every offering of it this caller may use.\n\nThe whole merged catalog is built and grouped to answer for one model. That\nis deliberate: the identity a model is found by is a property of the group,\nso narrowing the build to one model would need the grouping done first. The\nquery count is constant; the cost is CPU per page view, growing with the\nsize of the catalog rather than with the number of readers.\n\nA model the caller may not see answers 404, the same as one that does not\nexist, so the route cannot be used to probe the catalog behind an allow-list.\nA signed-in caller's offerings also carry their organization's own usage of\neach over the last 30 days, and so do an API key's when it holds ``usage:read``.",
+        "description": "One model and every offering of it this caller may use.\n\nThe whole merged catalog is built and grouped to answer for one model. That\nis deliberate: the identity a model is found by is a property of the group,\nso narrowing the build to one model would need the grouping done first. The\nquery count is constant; the cost is CPU per page view, growing with the\nsize of the catalog rather than with the number of readers.\n\nA model the caller may not see answers 404, the same as one that does not\nexist, so the route cannot be used to probe the catalog behind an allow-list.\nA signed-in caller's offerings also carry their organization's own usage of\neach over the last 30 days, and how fast each answered it over the last 7, and\nso do an API key's when it holds ``usage:read``.",
         "operationId": "catalog-get_catalog_model",
         "parameters": [
           {

@@ -105,9 +105,9 @@ class IngestResult:
     """How one export's records were accounted for.
 
     ``duplicate`` is a success, not a failure: an exporter that resends a batch
-    must not be told anything went wrong. ``rejected`` is the caller's own
-    refusal (an export attributed to a user who is no longer active), so an
-    adapter never sets it.
+    must not be told anything went wrong. ``rejected`` counts records refused
+    outright: by the caller, for an export attributed to a user who is no longer
+    active, or by the adapter, for one admitted before its user's erasure.
     """
 
     accepted: int = 0
@@ -240,8 +240,14 @@ class TelemetryStoragePort(Protocol):
         api_key_id: str,
         user_id: str,
         records: tuple[TelemetryRecord, ...],
+        admitted_at: datetime,
     ) -> IngestResult:
         """Store ``records``, attributed to the key and user that exported them.
+
+        ``admitted_at`` is when the export was let in, before its body uploaded.
+        Records of a user erased by :meth:`purge_user` at or after that moment are
+        refused and counted as ``rejected``, so an export that outlasts its user's
+        erasure stores nothing after it, on any replica.
 
         Idempotent on ``(source, dedup_key)``: a record already stored counts
         as ``duplicate`` and is not stored twice, so an exporter that resends a
@@ -342,5 +348,7 @@ class TelemetryStoragePort(Protocol):
         Separate from :meth:`purge` because it answers an erasure request
         rather than an operator's selection: it takes no window and no other
         filter, so a caller cannot narrow it by accident and leave data behind.
+        It also stands as a barrier: :meth:`record` refuses the user's records
+        from any export admitted before it.
         """
         ...

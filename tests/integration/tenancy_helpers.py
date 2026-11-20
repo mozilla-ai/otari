@@ -5,6 +5,7 @@ start from whatever organization, workspace and membership shape it needs
 without first satisfying authorization rules it is not exercising.
 """
 
+import uuid
 from collections.abc import Collection
 from typing import Any, TypedDict
 
@@ -13,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import get_api_key_service, get_user_access
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.budgets import Budget
-from gateway.models.tenancy import Organization, User, Workspace
+from gateway.models.tenancy import Organization, OrganizationMemberRole, User, Workspace
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
@@ -23,9 +24,8 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.services.budgets import BudgetMembershipListener, BudgetService
-from gateway.services.organizations import InvitationMailLimit
+from gateway.services.organizations import InvitationMailLimit, MembershipListener
 from gateway.services.tenancy.authorization import WorkspaceAccess
-from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import InvitationClaimSettings, OrganizationService
 
 
@@ -80,6 +80,12 @@ class _NoSsoEnforcement:
         return False
 
     async def blocks_membership(self, *, user: User, organization: Organization) -> bool:
+        return False
+
+    async def blocks_joining(
+        self, *, organization_id: uuid.UUID, role: OrganizationMemberRole, user_id: uuid.UUID
+    ) -> bool:
+        del organization_id, role, user_id
         return False
 
     async def revoke_refused_sessions(self, *, organization: Organization) -> None:

@@ -58,6 +58,8 @@ def entry(**overrides: object) -> UsageEntry:
         "status_code": None,
         "latency_ms": None,
         "provider_latency_ms": None,
+        "ttft_ms": None,
+        "output_tokens_per_second": None,
         "source": "gateway",
         "source_label": None,
         "counts_toward_budget": True,
@@ -228,3 +230,34 @@ def test_the_shapes_reach_the_published_spec() -> None:
     breakdown = schemas["UsageEntry"]["properties"]["pricing_breakdown"]
     refs = json.dumps(breakdown)
     assert "TokenChargeLine" in refs and "UnitChargeLine" in refs and "ToolChargeLine" in refs
+
+
+@pytest.mark.parametrize(
+    ("completion_tokens", "stream_cut_by", "expected"),
+    [(300, None, 150.0), (5, None, None), (300, "provider", None), (300, "client", None)],
+)
+def test_an_entry_carries_its_first_token_and_its_rate(
+    completion_tokens: int, stream_cut_by: str | None, expected: float | None
+) -> None:
+    from datetime import UTC, datetime
+
+    from gateway.models.usage import UsageLog
+
+    log = UsageLog(
+        id="req-1",
+        timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+        model="gpt-5.6",
+        endpoint="chat",
+        status="success",
+        source="gateway",
+        counts_toward_budget=True,
+        completion_tokens=completion_tokens,
+        latency_ms=2000,
+        ttft_ms=400,
+        stream_cut_by=stream_cut_by,
+    )
+
+    entry = UsageEntry.from_model(log)
+
+    assert entry.ttft_ms == 400
+    assert entry.output_tokens_per_second == expected

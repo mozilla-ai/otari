@@ -367,7 +367,7 @@ def test_mcp_client_beta_is_removed_for_translated_provider(
         resp = client.post(
             f"{API_ROOT}/messages?beta=true",
             json={
-                "model": "openai:gpt-4o",
+                "model": "mistral:mistral-small-latest",
                 "messages": [{"role": "user", "content": "Use the MCP beta"}],
                 "max_tokens": 100,
             },

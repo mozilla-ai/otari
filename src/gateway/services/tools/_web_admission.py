@@ -39,7 +39,7 @@ from gateway.services.tools._web_declarations import (
     web_search_intercept_enabled,
 )
 from gateway.services.tools._web_names import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
-from gateway.services.tools._web_search import in_loop_search_for, resolve_fetch, resolve_search
+from gateway.services.tools._web_search import in_loop_search_for, resolve_fetch, resolve_search, search_resolves
 from gateway.services.web_retrieval_policy import MAX_WEB_SEARCH_DOMAINS, DomainPolicy, read_domain_list
 
 if TYPE_CHECKING:
@@ -401,6 +401,15 @@ def admit_web_access(
         SearchToolMisconfiguredError: the search's instance cannot be run.
         WebToolDeclarationError: a search is declared and there is nothing to search with.
     """
+    # A workspace with web access off and nothing to search with is told what the
+    # deployment lacks, since turning its switch on would not let the search run.
+    if (
+        web.search_tool_entry is not None
+        and policy is not None
+        and not policy.enabled
+        and not search_resolves(config, policy)
+    ):
+        raise WebToolDeclarationError(WEB_SEARCH_NOT_CONFIGURED_DETAIL)
     grant = apply_web_access_policy(
         policy,
         requested_tools=web.requested_tools,

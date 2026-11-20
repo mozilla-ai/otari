@@ -4,6 +4,7 @@ import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { Dot } from "@/design-system/indicators/Dot"
 import { useIsOrganizationManager } from "@/features/organization/access"
 import type { ToolsView } from "@/features/tools/ToolsFrame"
+import { useWorkspaceToolState } from "@/features/tools/useWorkspaceToolState"
 import { useDeploymentOperator } from "@/shared/api/organizations"
 import {
   useTools,
@@ -50,6 +51,7 @@ export function ToolsOverview() {
   const web = useWorkspaceWebSearchConfig(isManager ? workspaceId : null)
   const code = useWorkspaceCodeExecutionPolicy(isManager ? workspaceId : null)
   const mcp = useWorkspaceMcpServers(workspaceId)
+  const inWorkspace = useWorkspaceToolState()
 
   const toolBy = new Map((tools.data?.data ?? []).map((one) => [one.id, one]))
 
@@ -101,14 +103,21 @@ export function ToolsOverview() {
       }
     }
     if (!isManager) {
-      return {
-        id: toolId,
-        name,
-        state: "Available",
-        tone: "on",
-        line: does,
-        to,
+      // The workspace's own answer, which any member may read.
+      const here = inWorkspace(toolId)
+      if (here?.enabled === null) {
+        return unknown(here.isError ? "Could not read" : "…")
       }
+      return here?.enabled === false
+        ? {
+            id: toolId,
+            name,
+            state: "Off",
+            tone: "off",
+            line: `${here.reason ?? `Off in ${workspace}.`} ${does}`,
+            to,
+          }
+        : { id: toolId, name, state: "Available", tone: "on", line: does, to }
     }
     const switched = unread(here, true)
     if (switched) return unknown(switched)

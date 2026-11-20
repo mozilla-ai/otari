@@ -167,6 +167,9 @@ def test_an_app_registration_refuses_scopes_an_app_key_cannot_hold(scopes: list[
         ("https://shop.example:8443", "https://shop.example:8443/", "shop.example:8443"),
         ("http://localhost:8080", "http://localhost:8080/", "localhost:8080"),
         ("http://127.0.0.1:8080", "http://127.0.0.1:8080/index.html", "127.0.0.1:8080"),
+        ("https://xn--pple-43d.com", "https://xn--pple-43d.com/cb", "xn--pple-43d.com"),
+        ("http://[::1]:8080", "http://[::1]:8080/", "[::1]:8080"),
+        ("https://[2001:db8::1]", "https://[2001:db8::1]/", "[2001:db8::1]"),
     ],
 )
 def test_an_open_app_is_the_site_its_callback_is_on(client_id: str, redirect_uri: str, site: str) -> None:
@@ -180,6 +183,18 @@ def test_an_open_app_is_the_site_its_callback_is_on(client_id: str, redirect_uri
         ("https://someone.github.io/", "https://someone.github.io/"),
         ("https://SOMEONE.github.io", "https://someone.github.io/"),
         ("https://someone.github.io:443", "https://someone.github.io/"),
+        ("https://someone.github.io:443", "https://someone.github.io:443/"),
+        ("https://Someone.github.io", "https://Someone.github.io/"),
+        ("https://shop.example:08443", "https://shop.example:08443/"),
+        ("http://[0:0:0:0:0:0:0:1]:8080", "http://[0:0:0:0:0:0:0:1]:8080/"),
+        ("https://[2001:DB8::1]", "https://[2001:DB8::1]/"),
+        ("https://[::ffff:1.2.3.4]", "https://[::ffff:1.2.3.4]/"),
+        # Lookalike hosts: a browser writes these in punycode, so the name shown would lie.
+        ("https://\u0430pple.com", "https://\u0430pple.com/cb"),
+        ("https://\uff41pple.com", "https://\uff41pple.com/cb"),
+        ("https://apple.com\u200b.evil.io", "https://apple.com\u200b.evil.io/cb"),
+        ("https://a\u00adb.com", "https://a\u00adb.com/cb"),
+        ("https://apple.com\u3002evil.com", "https://apple.com\u3002evil.com/cb"),
         ("http://someone.example", "http://someone.example/"),
         ("http://localhost:8080", "http://localhost:9090/"),
         ("https://someone.github.io", "https://someone.github.io/?next=/"),

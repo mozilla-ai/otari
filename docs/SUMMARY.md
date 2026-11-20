@@ -61,6 +61,7 @@
 * [Billing](billing.md)
 * [Manage workspaces](manage-workspaces.md)
 * [Members and invitations](members.md)
+* [Set up single sign-on](set-up-single-sign-on.md)
 
 # Self-Hosting
 

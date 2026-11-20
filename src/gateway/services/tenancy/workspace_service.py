@@ -47,8 +47,8 @@ from gateway.models.tenancy import (
     WorkspaceUpdate,
 )
 from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRepository
+from gateway.services.organizations import MembershipListener
 from gateway.services.tenancy import authorization
-from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import OrganizationService
 
 

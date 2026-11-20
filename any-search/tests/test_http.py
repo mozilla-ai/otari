@@ -155,3 +155,37 @@ async def test_a_header_that_is_not_ascii_becomes_a_provider_error_without_the_h
             )
     assert (raised.value.tag, raised.value.__context__) == ("invalid_header", None)
     assert "sentinel" not in str(raised.value) and "sentinel" not in repr(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_no_request_follows_a_redirect_even_through_a_client_set_to_follow_them() -> None:
+    sent: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(302, headers={"Location": "https://elsewhere.example/"}, json={})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(answer), follow_redirects=True) as client:
+        with pytest.raises(ProviderError) as raised:
+            await ProviderHttp("p", client, 7.5).request("GET", "https://api.example/", headers={"x-api-key": "k"})
+    assert [request.url.host for request in sent] == ["api.example"]
+    assert (raised.value.status, raised.value.tag, raised.value.__context__) == (302, "http_error", None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [300, 301, 303, 304, 307, 308])
+async def test_an_answer_neither_a_success_nor_an_error_raises_whatever_its_body(status: int) -> None:
+    transport = httpx.MockTransport(lambda request: httpx.Response(status, json={}))
+    async with httpx.AsyncClient(transport=transport) as client:
+        with pytest.raises(ProviderError) as raised:
+            await ProviderHttp("p", client, 7.5).request("GET", "https://api.example/")
+    assert (raised.value.status, raised.value.tag) == (status, "http_error")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [200, 204, 400, 404, 500])
+async def test_a_success_or_an_error_is_returned_for_the_adapter_to_read(status: int) -> None:
+    transport = httpx.MockTransport(lambda request: httpx.Response(status, json={}))
+    async with httpx.AsyncClient(transport=transport) as client:
+        response = await ProviderHttp("p", client, 7.5).request("GET", "https://api.example/")
+    assert response.status_code == status
