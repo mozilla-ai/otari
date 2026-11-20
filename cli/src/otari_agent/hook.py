@@ -695,11 +695,18 @@ def _hook_collect_transcript_commands(transcript_path: Path) -> list[str] | None
     edit_positions: dict[str | None, int] = {}
     denied_ids: set[str] = set()
     position = 0
+    decoder = json.JSONDecoder()
     for line in lines:
-        if not line.strip():
-            continue
+        # Claude Code writes compact records, so `raw_decode` almost always
+        # consumes the whole line; anything else takes `decode`, which is what
+        # `json.loads` does, so the same lines parse and the same are skipped.
         try:
-            record = json.loads(line)
+            record, end = decoder.raw_decode(line)
+        except ValueError:
+            end = -1
+        try:
+            if end != len(line):
+                record = decoder.decode(line)
         except ValueError:
             continue
         if not isinstance(record, dict) or record.get("isSidechain"):
@@ -712,14 +719,15 @@ def _hook_collect_transcript_commands(transcript_path: Path) -> list[str] | None
             if not isinstance(block, dict):
                 continue
             block_type = block.get("type")
-            if block_type == "tool_use" and block.get("name") == "Bash":
+            name = block.get("name")
+            if block_type == "tool_use" and name == "Bash":
                 tool_input = block.get("input")
                 command = tool_input.get("command") if isinstance(tool_input, dict) else None
                 if isinstance(command, str) and command:
                     position += 1
                     tool_use_id = block.get("id")
                     requested.append((tool_use_id if isinstance(tool_use_id, str) else None, command, position))
-            elif block_type == "tool_use" and block.get("name") in _HOOK_EDIT_TOOL_PATH_FIELDS:
+            elif block_type == "tool_use" and name in _HOOK_EDIT_TOOL_PATH_FIELDS:
                 position += 1
                 tool_use_id = block.get("id")
                 edit_positions[tool_use_id if isinstance(tool_use_id, str) else None] = position
