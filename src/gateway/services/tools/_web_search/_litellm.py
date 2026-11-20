@@ -196,6 +196,8 @@ def litellm_results(provider: str, query: SearchQuery, hits: Sequence[any_search
             url=hit.url,
             snippet=(hit.text or hit.snippet)[:limit],
             date=_date(hit, mapping.date_fields),
+            image=hit.image,
+            favicon=hit.favicon,
         )
         for hit in hits
     ]

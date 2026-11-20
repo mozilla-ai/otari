@@ -72,8 +72,8 @@ class FakeProvider(AnySearch):
                 name="hits",
                 type="array",
                 description=(
-                    "The hits to answer with, each an object with url and optionally title, snippet, text and "
-                    "published. An item without url is dropped. Three canned hits when unset."
+                    "The hits to answer with, each an object with url and optionally title, snippet, text, "
+                    "published, image and favicon. An item without url is dropped. Three canned hits when unset."
                 ),
             ),
             OptionSpec(name="cost", type="number", description="A cost in USD to report."),
@@ -149,6 +149,8 @@ class FakeProvider(AnySearch):
                 snippet=item.get("snippet") or "",
                 text=item.get("text"),
                 published=item.get("published"),
+                image=item.get("image"),
+                favicon=item.get("favicon"),
                 raw=item,
             )
             for item in items

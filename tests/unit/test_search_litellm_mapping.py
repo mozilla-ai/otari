@@ -186,6 +186,14 @@ def test_exa_filters_its_own_domains() -> None:
     assert len(litellm_results("exa", SearchQuery(query="q", domain_filter=("arxiv.org",)), hits)) == 1
 
 
+def test_a_hits_image_and_favicon_pass_through() -> None:
+    carried = _hit(image="https://example.com/a.png", favicon="https://example.com/favicon.ico")
+    bare = _hit("https://example.com/b")
+    results = litellm_results("exa", _Q, [carried, bare])
+    assert (results[0].image, results[0].favicon) == ("https://example.com/a.png", "https://example.com/favicon.ico")
+    assert (results[1].image, results[1].favicon) == (None, None)
+
+
 # --------------------------------------------------------------------------- #
 # The domain filter
 # --------------------------------------------------------------------------- #
