@@ -12,6 +12,8 @@ Every field, header and state is in the [Guardrails reference](guardrails-refere
 
 On a deployment you run, a guardrail can also come from a service of your own that `guardrails_url` points at, which can be any service that speaks the [guardrails service contract](guardrails-reference.md#what-a-guardrails-service-answers).
 
+The catalog's guardrails each need a vendor key. With none, [host your own guardrail](host-your-own-guardrail.md) on an open-weight safety model: a small service you run, which an organization or a single request names by `url`, on otari.ai or on a deployment you run.
+
 ## Configure a guardrail
 
 Only organization owners and admins can add, edit, or delete guardrails.
