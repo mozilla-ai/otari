@@ -25,7 +25,7 @@ in a workspace other than their server's, none of which the previous schema
 can hold.
 
 Revision ID: 124a7328c1b3
-Revises: e8c2a4f6b1d3
+Revises: b4d6f8a0c2e5
 Create Date: 2026-11-18
 """
 
@@ -35,7 +35,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "124a7328c1b3"
-down_revision: str | Sequence[str] | None = "e8c2a4f6b1d3"
+down_revision: str | Sequence[str] | None = "b4d6f8a0c2e5"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
