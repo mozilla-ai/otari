@@ -152,24 +152,43 @@ const PERCENTILES: { value: Percentile; label: string }[] = [
   { value: "p95", label: "P95" },
 ]
 
-function latencyOf(
-  offering: CatalogOffering,
-  percentile: Percentile,
-): number | null {
-  const speed = offering.speed_7d
-  if (!speed) return null
-  return percentile === "p50" ? speed.ttft_ms_p50 : speed.ttft_ms_p95
+type SpeedColumn = "latency" | "throughput"
+
+/** Each speed column's header, the figure it reads at a percentile, and how it prints. */
+const SPEED_COLUMNS: Record<
+  SpeedColumn,
+  {
+    header: string
+    read: (
+      speed: NonNullable<CatalogOffering["speed_7d"]>,
+      percentile: Percentile,
+    ) => number | null
+    format: (value: number) => string
+  }
+> = {
+  latency: {
+    header: "Latency",
+    read: (speed, percentile) =>
+      percentile === "p50" ? speed.ttft_ms_p50 : speed.ttft_ms_p95,
+    format: formatLatency,
+  },
+  throughput: {
+    header: "Throughput",
+    read: (speed, percentile) =>
+      percentile === "p50"
+        ? speed.output_tokens_per_second_p50
+        : speed.output_tokens_per_second_p95,
+    format: formatThroughput,
+  },
 }
 
-function throughputOf(
+function speedOf(
   offering: CatalogOffering,
+  column: SpeedColumn,
   percentile: Percentile,
 ): number | null {
   const speed = offering.speed_7d
-  if (!speed) return null
-  return percentile === "p50"
-    ? speed.output_tokens_per_second_p50
-    : speed.output_tokens_per_second_p95
+  return speed ? SPEED_COLUMNS[column].read(speed, percentile) : null
 }
 
 /** An offering with its base rates lifted out, for the table's sort. */
@@ -202,8 +221,7 @@ type OfferingSortColumn =
   | "input"
   | "outputPrice"
   | "cacheRead"
-  | "latency"
-  | "throughput"
+  | SpeedColumn
   | "context"
 
 function compareOfferings(
@@ -225,9 +243,8 @@ function compareOfferings(
       case "cacheRead":
         return row.offering.pricing?.cache_read_price_per_million ?? null
       case "latency":
-        return latencyOf(row.offering, percentile)
       case "throughput":
-        return throughputOf(row.offering, percentile)
+        return speedOf(row.offering, column, percentile)
       default:
         return row.offering.context_window ?? null
     }
@@ -342,36 +359,20 @@ function offeringColumns({
     // Measured on the organization's own requests, so an offering it has not
     // called enough reads as unknown rather than as slow.
     ...(withSpeed
-      ? [
-          {
-            id: "latency",
-            header: "Latency",
-            align: "end" as const,
-            allowsSorting: true,
-            cell: ({ offering: row }: OfferingRow) => {
-              const ms = latencyOf(row, percentile)
-              return (
-                <span className="text-mono-caption whitespace-nowrap">
-                  {ms == null ? "—" : formatLatency(ms)}
-                </span>
-              )
-            },
+      ? (["latency", "throughput"] as const).map((column) => ({
+          id: column,
+          header: SPEED_COLUMNS[column].header,
+          align: "end" as const,
+          allowsSorting: true,
+          cell: ({ offering: row }: OfferingRow) => {
+            const value = speedOf(row, column, percentile)
+            return (
+              <span className="text-mono-caption whitespace-nowrap">
+                {value == null ? "—" : SPEED_COLUMNS[column].format(value)}
+              </span>
+            )
           },
-          {
-            id: "throughput",
-            header: "Throughput",
-            align: "end" as const,
-            allowsSorting: true,
-            cell: ({ offering: row }: OfferingRow) => {
-              const rate = throughputOf(row, percentile)
-              return (
-                <span className="text-mono-caption whitespace-nowrap">
-                  {rate == null ? "—" : formatThroughput(rate)}
-                </span>
-              )
-            },
-          },
-        ]
+        }))
       : []),
     ...(withSource
       ? [
