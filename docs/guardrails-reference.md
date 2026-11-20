@@ -81,6 +81,38 @@ at once.
 The client still holds the original of a tool result Otari withheld; Otari
 replaces it again each time it is sent.
 
+A `403` lists each guardrail that refused:
+
+```json
+{"detail": {"message": "Request blocked by guardrail policy.", "code": "guardrail_violation",
+            "guardrails": [{"profile": "lakera", "explanation": null, "score": 1.0, "categories": ["prompt_attack"]}]}}
+```
+
+`explanation` and `score` are the guardrail's own. `categories` names what the
+guardrail says fired, such as `prompt_attack` or `pii/phone_number`, and is an
+empty list when it names nothing. The Messages endpoint puts the same fields in
+its `error` object. The `Otari-Guardrails` header carries the same names. The
+request's trace carries them too, as long as they fit: it stores them as one
+comma-separated value of at most 128 characters, so it keeps the leading names
+that fit and leaves off the rest. Two 64-character names, for example, leave
+the trace only the first.
+
+Where the names come from:
+
+- A guardrail an organization [defined](#definition-fields): the categories the
+  any-guardrail library reports as triggered. Lakera Guard names the detectors
+  that fired, from the per-detector breakdown it returns while the definition
+  leaves `breakdown` on, which is the default; with `breakdown` off it names
+  nothing. A guardrail whose library reports no categories, such as Bedrock
+  Guardrails, names nothing.
+- A guardrails service: the optional `categories` in its
+  [`/validate` result](#what-a-guardrails-service-answers).
+
+A name comes from a vendor, or from a service the caller chose, so only short
+identifiers are kept: at most 8, each at most 64 characters of letters, digits
+and `_ . : / @ + -`, and none shaped like an email address or a credential.
+Anything else is dropped rather than shown, and so is the vendor's own message.
+
 ## Reading the `Otari-Guardrails` header
 
 When input guardrail results are available, both non-streamed and streamed
@@ -99,6 +131,13 @@ absent at zero:
 
 ```json
 [{"profile": "prompt-injection", "mode": "block", "valid": false, "score": 1.0, "status": "evaluated", "withheld": 1}]
+```
+
+`categories` lists what the guardrail says fired, as a [refusal](#modes) does,
+and is absent when it names nothing:
+
+```json
+[{"profile": "lakera", "mode": "monitor", "valid": false, "score": 1.0, "status": "evaluated", "categories": ["pii/phone_number"]}]
 ```
 
 A streamed response's header is sent before the answer, so it does not count what
@@ -412,6 +451,17 @@ A `url` that already ends in `/validate` is called at
 there, most often `http_404`.
 
 `valid: false` means the input was flagged, and `valid: null` is an inconclusive
-verdict. `GET /profiles` is optional: it lists
+verdict. `categories` is optional and names what fired:
+
+```
+→ {"profile": "...", "result": {"valid": false, "explanation": null, "score": 0.997, "categories": ["prompt_attack"]}}
+```
+
+Each item is a name, or an object with `name` and `triggered` as any-guardrail
+serializes a category, of which only those with `triggered: true` count. A
+result without `categories` names nothing. Otari keeps only the names a
+[refusal](#modes) may show.
+
+`GET /profiles` is optional: it lists
 `[{"name": "prompt-injection", "guardrail_name": "injec_guard"}]` so the
 dashboard can offer the profile in a picker.
