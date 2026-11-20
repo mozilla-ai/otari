@@ -2,7 +2,7 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/840920dea23daeccc62d72b1312ea9b509d9829a/docs/public/openapi.json), the source of truth for paths,
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/ed451b4ece18918994e68de2317a783f314e1027/docs/public/openapi.json), the source of truth for paths,
 parameters, and schemas.
 
 ## Base URL
@@ -264,7 +264,7 @@ apply to its type is left out:
 | `server`, `name` | The MCP server and the tool the model called on it. |
 | `output` | The text an ended MCP call gave the model. A failed call's is Otari's own `[tool error] …` text, never the server's exception. |
 | `truncated` | `true` when `stdout`, `stderr` or `output` was cut to 64 KiB. The model read it whole. |
-| `error` | Why a failed call failed, when Otari can say: `provider`, `status`, `tag` and `retryable`, the same four fields the [Search](#search) endpoint's `Otari-Error-*` headers carry. A call refused past its declaration's `max_uses`, or past the request's `web_search_max_calls`, has `"tag": "call_limit"` and a `null` provider, and a call whose arguments were not a JSON object has `"tag": "invalid_input"`. Absent when Otari can say no more than that the call failed. |
+| `error` | Why a failed call failed, when Otari can say: `provider`, `status`, `tag` and `retryable`, the same four fields the [Search](#search) endpoint's `Otari-Error-*` headers carry. A call refused past its declaration's `max_uses`, or past the request's `web_search_max_calls`, has `"tag": "call_limit"` and a `null` provider, and a call whose arguments were not a JSON object has `"tag": "invalid_input"`. A search or fetch that failed inside Otari for a reason it does not name has `"tag": "internal_error"`. Absent when Otari can say no more than that the call failed. |
 
 A response that is not streamed carries the ended entry of every call, across
 all of the tool loop's rounds:
