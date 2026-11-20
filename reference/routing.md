@@ -430,12 +430,14 @@ request again starts a new tool loop. Shared service failures, such as an unavai
 guardrail or sandbox, also do not improve by changing candidates.
 
 If every candidate of a plan with more than one candidate fails, Otari returns a
-gateway error in its own words, never a provider's message. A plan with one
-candidate answers as naming that model directly would.
+gateway error in its own words. A provider's message is part of it in one
+case: when every candidate rejected the request as invalid in the same words,
+`detail` ends with that sentence. A plan with one candidate answers as naming
+that model directly would.
 
 | Every candidate... | Response |
 | --- | --- |
-| rejected the request as invalid (400) | `400 all_candidates_rejected` |
+| rejected the request as invalid (400) | `400 all_candidates_rejected`, with `detail` giving the reason when every candidate gave the same one |
 | found the prompt too long | `context_length_exceeded` |
 | refused image content the request carries, in wording Otari recognizes | `unsupported_content` |
 | failed to produce output matching the requested JSON schema (Groq's `json_validate_failed`) | `structured_output_failed`. Sending the request again may succeed. |
