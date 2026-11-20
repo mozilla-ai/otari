@@ -1070,6 +1070,21 @@ def test_failure_cause_names_a_tls_error_by_its_reason() -> None:
     assert failure_cause(_wrapped(tls_error)) == "SSLError: CERTIFICATE_VERIFY_FAILED"
 
 
+def test_failure_cause_of_a_tls_error_with_no_reason_is_its_type() -> None:
+    assert failure_cause(_wrapped(ssl.SSLError(1, "constructed by hand"))) == "SSLError"
+
+
+@pytest.mark.asyncio
+async def test_a_tls_error_with_no_reason_still_advances_to_the_next_candidate() -> None:
+    chosen, result = await _walk(
+        [_attempt(1, "gpt-5-mini"), _attempt(2, "claude-haiku-4-5", instance="anthropic")],
+        [ssl.SSLError(1, "constructed by hand"), "ok"],
+    )
+
+    assert chosen.position == 2
+    assert result == "ok"
+
+
 @pytest.mark.parametrize(
     "exc",
     [

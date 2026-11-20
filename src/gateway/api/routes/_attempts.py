@@ -79,7 +79,9 @@ def _transport_detail(exc: BaseException) -> str | None:
         # Worded by the gateway's own address checks.
         return str(exc)
     if isinstance(exc, ssl.SSLError):
-        return exc.reason
+        # Set only on OpenSSL's own error path.
+        reason = getattr(exc, "reason", None)
+        return reason if isinstance(reason, str) else None
     if isinstance(exc, OSError) and isinstance(exc.errno, int):
         # The text comes from the errno, not ``strerror``, which any caller can set.
         name = errno.errorcode.get(exc.errno)
