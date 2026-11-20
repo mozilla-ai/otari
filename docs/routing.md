@@ -444,6 +444,8 @@ that model directly would.
 | refused the request as too large (413) | `413 request_too_large`. Shrink the request; sending it again unchanged does not help. |
 | refused a parameter the request carries (such as `response_format` on a model with no JSON mode), as named by Otari's provider library | `unsupported_parameter`, with `detail` naming the parameters. A parameter a provider refuses with its own 400 counts as an ordinary rejection. |
 | did not know the model (404) | `502` |
+| timed out | `504`, `All upstream providers timed out` |
+| failed, the last by timing out and an earlier one in another way | `504`, `detail` saying the last candidate timed out and how many earlier ones refused the request or failed for another reason. The `Otari-Error-*` headers still describe the last candidate, so `Otari-Error-Retryable: true` does not say the earlier refusals would pass on a retry. |
 | was removed by caller restrictions | `403`, without revealing the hidden targets |
 
 ## In the dashboard
