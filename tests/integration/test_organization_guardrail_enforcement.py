@@ -688,6 +688,8 @@ def test_a_definition_this_worker_does_not_hold_fails_closed(
 
     assert response.status_code == 502
     assert response.json()["error"]["message"] == "guardrail profile 'prompt-injection' could not be evaluated"
+    assert response.json()["code"] == "guardrail_unavailable"
+    assert response.headers["Otari-Error-Code"] == "guardrail_unavailable"
     assert guardrails.calls == []
     assert definition["id"] not in response.text
 

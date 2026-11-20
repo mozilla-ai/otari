@@ -123,7 +123,8 @@ The guardrail's own explanation is never put in the header.
 
 A `block` guardrail that cannot be evaluated at all (service down, no URL
 configured, malformed response) **fails closed**: input it cannot read is
-refused with a `502` rather than forwarded unchecked, and an answer with a `403`.
+refused with a `502` and the code `guardrail_unavailable` rather than forwarded
+unchecked, and an answer with a `403`.
 When the reason is that no guardrails service is configured for the profile,
 the refusal is a `424` with the code `guardrail_not_configured` instead, since
 no retry can fix it. Its message says what to change: a profile you named in

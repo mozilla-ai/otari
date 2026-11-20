@@ -28,7 +28,12 @@ from fastapi import HTTPException, Response, status
 from gateway.api.routes._guardrail_targets import AnswerPart, RequestTarget
 from gateway.api.routes._helpers import GUARDRAILS_RESULT_HEADER
 from gateway.core.env import otari_env
-from gateway.core.error_codes import GUARDRAIL_NOT_CONFIGURED, GUARDRAIL_VIOLATION, error_headers
+from gateway.core.error_codes import (
+    GUARDRAIL_NOT_CONFIGURED,
+    GUARDRAIL_UNAVAILABLE,
+    GUARDRAIL_VIOLATION,
+    error_headers,
+)
 from gateway.exceptions.guardrails_exceptions import AnswerRefused
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig, GuardrailDirection
@@ -353,7 +358,9 @@ class RequestGuardrails:
                     headers=headers | error_headers(GUARDRAIL_NOT_CONFIGURED),
                 ) from exc
             raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.public_detail, headers=headers
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=exc.public_detail,
+                headers=headers | error_headers(GUARDRAIL_UNAVAILABLE),
             ) from exc
         raise _Unchecked(profile) from exc
 
