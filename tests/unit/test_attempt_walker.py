@@ -6,6 +6,7 @@ response. The tests pin that boundary, ordering, and exhausted-plan status.
 """
 
 import asyncio
+import logging
 import uuid
 from typing import Any, Literal, cast
 
@@ -24,6 +25,7 @@ from gateway.api.routes._attempts import (
     CandidateCannotServe,
     all_attempts_rejected_detail,
     classify_local_attempt_error,
+    failure_cause,
     no_attempt_served_detail,
     prompt_too_long_for_every_attempt_detail,
     request_too_large_for_every_attempt_detail,
@@ -38,6 +40,7 @@ from gateway.core.error_codes import (
     UPSTREAM_RATE_LIMITED,
     error_code_of,
 )
+from gateway.log_config import logger as gateway_logger
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.sandbox_backend import SandboxNotReachableError, SandboxUnavailableError
 from gateway.types.attempt import Attempt
@@ -1007,3 +1010,64 @@ async def test_a_skip_after_the_last_candidate_called_is_recorded_when_the_walk_
         )
 
     assert skipped == [("b", "b is full")]
+
+
+# ---------------------------------------------------------------------------
+# What the operator's log says about a failed attempt
+# ---------------------------------------------------------------------------
+
+
+class _SDKConnectionError(Exception):
+    """A provider SDK's connection error: a fixed message, the reason on ``__cause__``."""
+
+
+def _wrapped_transport_failure(reason: str) -> _SDKConnectionError:
+    try:
+        try:
+            raise httpx.ConnectError(reason)
+        except httpx.ConnectError as transport_error:
+            raise _SDKConnectionError("Connection error.") from transport_error
+    except _SDKConnectionError as sdk_error:
+        return sdk_error
+
+
+def test_failure_cause_names_the_transport_error_an_sdk_wrapped() -> None:
+    exc = _wrapped_transport_failure("endpoint refused: destination resolves to a private address")
+
+    assert failure_cause(exc) == "ConnectError: endpoint refused: destination resolves to a private address"
+
+
+def test_failure_cause_follows_any_llms_original_exception() -> None:
+    exc = RuntimeError("wrapped")
+    exc.original_exception = _wrapped_transport_failure("Name or service not known")  # type: ignore[attr-defined]
+
+    assert failure_cause(exc) == "ConnectError: Name or service not known"
+
+
+def test_failure_cause_caps_a_long_message() -> None:
+    cause = failure_cause(RuntimeError("x" * 1000))
+
+    assert cause.startswith("RuntimeError: xxx")
+    assert cause.endswith("...")
+    assert len(cause) == len("RuntimeError: ") + 300
+
+
+def test_failure_cause_of_an_exception_with_no_message_is_its_type() -> None:
+    assert failure_cause(TimeoutError()) == "TimeoutError"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_attempt_logs_why_it_failed(caplog: pytest.LogCaptureFixture) -> None:
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.WARNING, logger="gateway")
+    try:
+        await _walk(
+            [_attempt(1, "gpt-5-mini"), _attempt(2, "claude-haiku-4-5", instance="anthropic")],
+            [_wrapped_transport_failure("endpoint refused: destination resolves to a private address"), "ok"],
+        )
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+    [line] = [record.getMessage() for record in caplog.records if record.getMessage().startswith("Attempt failed")]
+    assert "error=conn_err" in line
+    assert line.endswith("cause=ConnectError: endpoint refused: destination resolves to a private address")

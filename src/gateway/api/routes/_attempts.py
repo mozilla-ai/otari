@@ -67,6 +67,29 @@ LOCKED_IN_DETAIL = (
     "The routing policy's backups were not tried: a gateway-run tool had already run on this model, "
     "and a tool loop cannot move to another provider."
 )
+# A provider can echo a whole request back in its error.
+_MAX_LOGGED_CAUSE_CHARS = 300
+
+
+def failure_cause(exc: BaseException) -> str:
+    """The innermost exception behind ``exc``, as ``Type: message``, for the operator's log.
+
+    A provider SDK raises its own connection error with a fixed message ("Connection
+    error."), so why the connection failed is only on the exception it was raised from.
+    """
+    current = exc
+    seen = {id(current)}
+    while True:
+        context = None if current.__suppress_context__ else current.__context__
+        parent = getattr(current, "original_exception", None) or current.__cause__ or context
+        if not isinstance(parent, BaseException) or id(parent) in seen:
+            break
+        seen.add(id(parent))
+        current = parent
+    message = " ".join(str(current).split())
+    if len(message) > _MAX_LOGGED_CAUSE_CHARS:
+        message = message[: _MAX_LOGGED_CAUSE_CHARS - len("...")] + "..."
+    return f"{type(current).__name__}: {message}" if message else type(current).__name__
 
 
 def provider_failure_http_exc(
@@ -474,7 +497,7 @@ async def walk_attempts(
         except BaseException as exc:
             retryable, error_class = classify_error(exc)
             logger.warning(
-                "Attempt failed policy=%s position=%d instance=%s model=%s error=%s retryable=%s locked_in=%s",
+                "Attempt failed policy=%s position=%d instance=%s model=%s error=%s retryable=%s locked_in=%s cause=%s",
                 policy_name,
                 attempt.position,
                 attempt.instance,
@@ -482,6 +505,7 @@ async def walk_attempts(
                 error_class,
                 retryable,
                 locked_in,
+                failure_cause(exc),
             )
             last_exc = exc
             last_failed = attempt
