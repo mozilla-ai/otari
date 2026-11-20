@@ -2078,8 +2078,8 @@ class OrganizationService:
             raise InvitationAlreadyUsedError
         return invitation, membership, organization, invitee
 
-    async def _invitation_may_set_password(self, invitee: User | None, organization_id: uuid.UUID) -> bool:
-        """Whether an invitation from ``organization_id`` may set ``invitee``'s first password.
+    async def _invitee_is_claimable(self, invitee: User | None, organization_id: uuid.UUID) -> bool:
+        """Whether ``invitee`` is unclaimed and no organization but ``organization_id`` still holds it.
 
         A password chosen through an accept link is the inviting organization recording
         the address, not proof of the mailbox, because an admin may hold that link. That is
@@ -2114,7 +2114,7 @@ class OrganizationService:
         nothing signup's enumeration-safety protects.
         """
         invitation, membership, organization, invitee = await self._resolve_pending_invitation(token)
-        needs_password = await self._invitation_may_set_password(invitee, organization.id)
+        needs_password = await self._invitee_is_claimable(invitee, organization.id)
         can_sign_in = not _has_never_signed_in(invitee)
         return InvitationPreviewPublic(
             email=invitation.email,
@@ -2147,7 +2147,7 @@ class OrganizationService:
         signup has to mail a verification link, but the invitation link already
         stands in for what that link would, since it reached the invitee either
         by email or from an admin who holds it. It is accepted
-        only where ``_invitation_may_set_password`` allows, so a link can claim
+        only where ``_invitee_is_claimable`` allows, so a link can claim
         an unclaimed seat and never take over an account. The verification it
         stamps leaves ``email_proven_at`` null, which domain auto-join does
         not trust. Where the deployment publishes terms
@@ -2180,7 +2180,7 @@ class OrganizationService:
         await self.organizations.lock(organization.id)
         invitation, membership, organization, invitee = await self._resolve_pending_invitation(token)
         if password is not None:
-            if not await self._invitation_may_set_password(invitee, organization.id):
+            if not await self._invitee_is_claimable(invitee, organization.id):
                 raise InvitationPasswordNotAcceptedError(_way_in_without_the_link(claims))
             if sso_blocks_membership(
                 organization=organization,
