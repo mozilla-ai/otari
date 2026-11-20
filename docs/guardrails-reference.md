@@ -21,6 +21,7 @@ Contents:
 - [Which profiles exist, and what they take](#which-profiles-exist-and-what-they-take)
 - [The guardrail catalog](#the-guardrail-catalog)
 - [What a guardrails service answers](#what-a-guardrails-service-answers)
+- [How long a service has to answer](#how-long-a-service-has-to-answer)
 
 ## The `guardrails` request field
 
@@ -390,3 +391,24 @@ POST /validate  {"profile": "...", "input_text": "...", "validate_kwargs": {...}
 verdict. `GET /profiles` is optional: it lists
 `[{"name": "prompt-injection", "guardrail_name": "injec_guard"}]` so the
 dashboard can offer the profile in a picker.
+
+## How long a service has to answer
+
+Otari waits up to 30 seconds for a service behind `guardrails_url`, a mandate's
+`url` or a request's `url`. The limit applies to each phase of the call
+(connecting, sending the request, waiting for the answer and getting a
+connection from the pool) rather than to the whole of it, and nothing retries.
+
+A call that runs out of time is a check that could not run, the same as a
+service that is down: it takes the paths in
+[When the guardrails service is unreachable](#when-the-guardrails-service-is-unreachable).
+A `block` entry with `on_unavailable: block` refuses the request with a `502`.
+A `block` entry with `on_unavailable: monitor`, and any `monitor` entry, serves
+it, and the `Otari-Guardrails` entry reads `"valid": null`, `"status":
+"unavailable"` and `"reason": "evaluation_failed"`. That differs from
+`inconclusive`, which is a service that answered in time with `valid: null`.
+The guardrail runs before the provider is called, so the wait is added to the
+request. A check that timed out is asked again on the next request.
+
+A [definition](#definition-fields) Otari runs itself has 10 seconds per check,
+and its timeout takes the same paths.
