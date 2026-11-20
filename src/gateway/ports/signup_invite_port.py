@@ -1,7 +1,7 @@
 """Invitations a deployment sends that prove which address they reached.
 
 A link emailed to somebody already proves the mailbox answers, so signup can take it instead of
-sending a verification email of its own. A link handed over proves less, and says so.
+sending a verification email of its own. A link shared with an admin proves less, and says so.
 """
 
 from enum import StrEnum
@@ -14,8 +14,8 @@ class AddressProof(StrEnum):
     MAILBOX = "mailbox"
     """An invitation emailed to the address, so its holder receives mail there."""
 
-    VOUCHED = "vouched"
-    """An invitation handed over as a link, so an organization vouches for the address and nobody else does.
+    SHARED = "shared"
+    """An invitation shared with an admin as a link, so only that organization records the address.
 
     Answering ``MAILBOX`` for such a link lets domain auto-join take the account, which is the cost
     of getting this answer wrong.

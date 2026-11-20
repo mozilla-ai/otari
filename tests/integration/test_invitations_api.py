@@ -381,7 +381,7 @@ def test_a_forwarded_link_cannot_set_a_password_on_an_address_that_can_already_s
     assert accept.status_code == 200, accept.text
 
 
-def test_a_link_claim_is_recorded_as_vouched_rather_than_proven(
+def test_a_link_claim_is_verified_rather_than_proved(
     client: TestClient,
     master_key_header: dict[str, str],
     db_session: Session,
@@ -398,7 +398,7 @@ def test_a_link_claim_is_recorded_as_vouched_rather_than_proven(
     assert invitee is not None
     db_session.refresh(invitee)
     assert invitee.email_verified_at is not None
-    assert invitee.email_vouched_at is not None
+    assert invitee.email_proven_at is None
 
 
 def test_a_link_from_another_organization_cannot_claim_an_address_already_on_a_roster(
@@ -440,12 +440,12 @@ def test_a_link_from_another_organization_cannot_claim_an_address_already_on_a_r
     assert accept.status_code == 200, accept.text
 
 
-def test_an_address_another_organization_vouched_for_cannot_be_added_until_it_is_proven(
+def test_an_address_another_organization_only_recorded_cannot_be_added_until_it_is_proved(
     client: TestClient,
     master_key_header: dict[str, str],
     db_session: Session,
 ) -> None:
-    """Pre-claiming: vouch for an address nobody holds yet, then wait for a real organization to add it.
+    """Pre-claiming: record an address nobody holds yet, then wait for a real organization to add it.
 
     Mallory invites a fresh address and chooses its password through her own
     link. The deployment's organization adding or inviting that address later
@@ -474,9 +474,9 @@ def test_an_address_another_organization_vouched_for_cannot_be_added_until_it_is
     )
     assert invited.status_code == 409, invited.text
 
-    # Once the address is proven (a reset by email, a provider sign-in), it is an ordinary identity.
+    # Once the address is proved (a reset by email, a provider sign-in), it is an ordinary identity.
     identity = db_session.query(User).filter(col(User.email) == "lin@example.com").one()
-    identity.email_vouched_at = None
+    identity.email_proven_at = identity.email_verified_at
     db_session.add(identity)
     db_session.commit()
     added = client.post(
@@ -1031,7 +1031,7 @@ def test_revoking_a_stale_invitation_leaves_an_active_member_active(
 def test_a_revoked_invitation_elsewhere_does_not_stop_a_link_setting_a_first_password(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
-    """Only a live membership in another organization vouches for the address."""
+    """Only a live membership in another organization counts for the address."""
     first = _invite(client, master_key_header, email="ada@example.com")
     revoked = client.delete(
         f"{API_ROOT}/organizations/me/member-invitations/{first['invitation_id']}", headers=master_key_header
@@ -1450,9 +1450,9 @@ def test_an_invitee_who_can_already_sign_in_is_told_so(
         f"{API_ROOT}/invitations/accept", json={"token": _token_from(first["accept_link"]), "password": PASSWORD}
     )
     assert claimed.json()["can_sign_in"] is True
-    # Proven since, as a reset by email would, so another organization may invite it.
+    # Proved since, as a reset by email would, so another organization may invite it.
     identity = db_session.execute(select(User).where(col(User.email) == "kim@example.com")).scalar_one()
-    identity.email_vouched_at = None
+    identity.email_proven_at = identity.email_verified_at
     db_session.commit()
     created = client.post(f"{API_ROOT}/organizations", json={"name": "Second"}, headers=master_key_header)
     _switch(client, master_key_header, created.json()["id"])
@@ -1463,7 +1463,7 @@ def test_an_invitee_who_can_already_sign_in_is_told_so(
     assert (preview["needs_password"], preview["can_sign_in"], preview["ways_in"]) == (False, True, [])
 
 
-def test_the_refusal_for_an_address_vouched_elsewhere_does_not_mention_the_other_organization(
+def test_the_refusal_for_an_address_recorded_elsewhere_does_not_mention_the_other_organization(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     home = client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).json()["organization"]["id"]

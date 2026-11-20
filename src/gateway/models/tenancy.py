@@ -206,12 +206,10 @@ class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     # would let either confirm the other's address.
     email_verification_token: str | None = Field(default=None, unique=True, index=True)
     email_verified_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
-    # Set beside ``email_verified_at`` when the verification is an organization
-    # admin's word rather than a proof: a first password chosen through an
-    # invitation link, which the inviter also holds. Domain auto-join ignores a
-    # vouched address, a provider sign-in treats it as unverified, and a
-    # password reset (a mailbox proof) clears it.
-    email_vouched_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
+    # Set beside ``email_verified_at`` where the address was proved by its holder:
+    # a link that reached the mailbox, or a provider that verified it. Null where
+    # the verification is an organization admin's word instead.
+    email_proven_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
     # otari#650's own columns, added alongside rather than reusing
     # ``email_verification_token`` above: that one is carried verbatim for
     # hosted-edition parity and stores a raw token per its own comment, and

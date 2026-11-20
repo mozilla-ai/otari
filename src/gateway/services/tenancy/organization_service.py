@@ -245,15 +245,15 @@ def _has_never_signed_in(user: User) -> bool:
     return user.is_active and user.hashed_password is None and user.email_verified_at is None
 
 
-def _refuse_address_vouched_elsewhere(target: User, membership: OrganizationMember | None, email: str) -> None:
-    """Refuse adding an identity whose address only another organization has vouched for.
+def _refuse_unproven_address(target: User, membership: OrganizationMember | None, email: str) -> None:
+    """Refuse adding an identity whose address only another organization recorded.
 
-    A vouched identity (``email_vouched_at``) carries a password its first
-    organization's admins could have chosen, so a second organization adding it
-    would hand them that organization's access. One already on this roster in
-    any status is this organization's own, and is left alone.
+    An identity verified but not proved (``email_proven_at`` is null) carries a password
+    its first organization's admins could have chosen, so a second organization adding it
+    would hand them that organization's access. One this organization already holds a
+    membership for, in any status, is left alone.
     """
-    if membership is None and target.email_vouched_at is not None:
+    if membership is None and target.email_verified_at is not None and target.email_proven_at is None:
         raise OrganizationMemberAddressUnprovenError(email)
 
 
@@ -1121,7 +1121,7 @@ class OrganizationService:
         block that commits, and so releases the identity's lock, when the caller holds none.
         """
         replaces_unproven = replaces_unproven and identity.email_verified_at is None
-        unproven = identity.email_verified_at is None or identity.email_vouched_at is not None
+        unproven = identity.email_proven_at is None
         if not replaces_unproven and not (open_signup and unproven):
             return False
         assert identity.email is not None  # a claim is always by address
@@ -1496,7 +1496,7 @@ class OrganizationService:
                 membership = await self.members.get_by_organization_and_user(organization.id, target.id)
                 if membership is not None and membership.status == "active":
                     raise OrganizationMemberAlreadyExistsError(email)
-                _refuse_address_vouched_elsewhere(target, membership, email)
+                _refuse_unproven_address(target, membership, email)
 
                 if membership is None:
                     # The same rule the revive branch gets from
@@ -1920,7 +1920,7 @@ class OrganizationService:
         membership = await self.members.get_by_organization_and_user(organization.id, target.id)
         if membership is not None and membership.status == "active":
             raise OrganizationMemberAlreadyExistsError(email)
-        _refuse_address_vouched_elsewhere(target, membership, email)
+        _refuse_unproven_address(target, membership, email)
         if membership is not None and membership.status == "invited":
             # Expiry is lazy: `_resolve_pending_invitation` only flips a
             # `pending` row to `expired` when someone presents its token,
@@ -2081,10 +2081,9 @@ class OrganizationService:
     async def _invitation_may_set_password(self, invitee: User | None, organization_id: uuid.UUID) -> bool:
         """Whether an invitation from ``organization_id`` may set ``invitee``'s first password.
 
-        A password chosen through an accept link is the inviting organization
-        recording the address, not proof of the mailbox,
-        because an admin may hold that link.
-        That is enough for an identity no other organization knows. One another
+        A password chosen through an accept link is the inviting organization recording
+        the address, not proof of the mailbox, because an admin may hold that link. That is
+        enough for an identity no other organization knows. One another
         organization has added (as anything, an owner included) is refused, or
         any admin anywhere could create an organization, invite that address and
         claim the account; it can still claim itself through signup, a password
@@ -2147,11 +2146,11 @@ class OrganizationService:
         ``password`` is what lets a deployment with no mail let an invitee in:
         signup has to mail a verification link, but the invitation link already
         stands in for what that link would, since it reached the invitee either
-        by email or from an admin who vouches for the address. It is accepted
+        by email or from an admin who holds it. It is accepted
         only where ``_invitation_may_set_password`` allows, so a link can claim
         an unclaimed seat and never take over an account. The verification it
-        stamps is recorded as vouched (``email_vouched_at``), which domain
-        auto-join does not trust. Where the deployment publishes terms
+        stamps leaves ``email_proven_at`` null, which domain auto-join does
+        not trust. Where the deployment publishes terms
         (``claims``), a first password needs ``terms_accepted``, as signup and
         a reset claim do.
 
@@ -2193,7 +2192,6 @@ class OrganizationService:
             now = datetime.now(UTC)
             values: dict[str, str | datetime | None] = {
                 "email_verified_at": now,
-                "email_vouched_at": now,
                 "full_name": invitee.full_name or (full_name or "").strip() or None,
             }
             if terms_accepted:
@@ -2300,7 +2298,7 @@ class OrganizationService:
 
         Raises:
             MembershipUpdateError: the role offered would leave the organization with no active owner.
-            OrganizationMemberAddressUnprovenError: only another organization has vouched for the address.
+            OrganizationMemberAddressUnprovenError: only another organization recorded the address.
             OrganizationMemberDeactivatedError: the account is deactivated, so a membership grants nothing.
             OrganizationNotFoundError: the organization no longer exists.
 
@@ -2316,7 +2314,7 @@ class OrganizationService:
             membership, created = await self.members.add_if_absent(
                 organization_id=organization_id, user_id=user_id, role=role
             )
-            _refuse_address_vouched_elsewhere(identity, None if created else membership, identity.email or str(user_id))
+            _refuse_unproven_address(identity, None if created else membership, identity.email or str(user_id))
             if not created:
                 await self._require_an_owner_remains(
                     membership, organization_id=organization_id, new_role=role, new_status=ACTIVE_MEMBERSHIP_STATUS
@@ -2780,7 +2778,7 @@ class OrganizationService:
 
         An accepted invitation says they did. A membership never invited at all
         came from sign-in, domain auto-join, SSO or a direct add, each of which
-        the holder or an operator vouched for, so it counts too.
+        the holder or an operator agreed to, so it counts too.
         """
         statuses = await self.invitations.get_statuses_by_organization_member(membership.id)
         return not statuses or "accepted" in statuses

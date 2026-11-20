@@ -162,8 +162,8 @@ export interface paths {
          *
          *     Refused with 400 when the caller is another operator, when the current password is
          *     missing or wrong, for a session whose account has no password, and for a target that
-         *     is the caller, deactivated, not an operator, or without an unblocked email address that
-         *     is verified rather than only vouched for, and a password.
+         *     is the caller, deactivated, not an operator, or without an unblocked email address the
+         *     owner proved rather than one an organization recorded, and a password.
          *
          *     The master key keeps working and now acts as the new bootstrap operator, including
          *     resetting their password, so rotate it when whoever held it should no longer.
@@ -191,8 +191,8 @@ export interface paths {
          *     Where this deployment can mail links, the link goes to the account's address and is not returned, the
          *     same as "Forgot your password?". Where it cannot, or the send fails, the response carries the link for
          *     you to pass on, which is how a member who forgot their password gets back in on a deployment without
-         *     mail. A password chosen through a link that was not mailed records the address as vouched for rather
-         *     than proven. A new link replaces any earlier reset link for the account.
+         *     mail. A password chosen through a link that was not mailed leaves the address verified rather
+         *     than proved. A new link replaces any earlier reset link for the account.
          *
          *     Refused with 409 for a deactivated account, one with no address, one that has no password and signs in
          *     with a provider or a passkey (its owner adds a password once signed in), and, where open_signup is
@@ -19311,7 +19311,7 @@ export interface components {
             expires_at: string;
             /**
              * Link
-             * @description The link to pass on to the account's owner yourself, set only when mail_sent is false. Choosing a password through it records the address as vouched for rather than proven, since the mailbox never saw the link.
+             * @description The link to pass on to the account's owner yourself, set only when mail_sent is false. Choosing a password through it leaves the address verified rather than proved, since the mailbox never saw the link.
              */
             link?: string | null;
             /**

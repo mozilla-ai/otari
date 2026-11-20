@@ -130,11 +130,13 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
         if identity.oauth_provider is None:
             identity.oauth_provider = external.provider
         password_removed = False
-        if identity.email_verified_at is None or identity.email_vouched_at is not None:
+        if identity.email_proven_at is None:
             password_removed = identity.hashed_password is not None
-            identity.email_verified_at = datetime.now(UTC)
-            identity.email_vouched_at = None
-            # The address was unverified, or only vouched for, when these were set, so they may not be this person's.
+            now = datetime.now(UTC)
+            if identity.email_verified_at is None:
+                identity.email_verified_at = now
+            identity.email_proven_at = now
+            # The address was not proved when these were set, so they may not be this person's.
             identity.hashed_password = None
             identity.email_verification_token_hash = None
             identity.email_verification_token_expires_at = None
