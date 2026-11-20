@@ -33,6 +33,7 @@ from openai.types.responses import (
 )
 from openai.types.responses.response import IncompleteDetails
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
+from openresponses_types.types import InputTokensDetails as BridgedInputTokensDetails
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
@@ -430,6 +431,56 @@ async def test_loop_accumulates_usage_across_iterations(monkeypatch: pytest.Monk
     assert out.usage.output_tokens == 5
     assert out.usage.output_tokens_details.reasoning_tokens == 3
     assert out.usage.total_tokens == 27
+
+
+@pytest.mark.asyncio
+async def test_a_single_round_keeps_its_cache_write_breakdown(monkeypatch: pytest.MonkeyPatch) -> None:
+    response = _response(output=[], input_tokens=12, output_tokens=3)
+    assert response.usage is not None
+    response.usage.input_tokens_details = InputTokensDetails.model_validate(
+        {
+            "cached_tokens": 0,
+            "cache_write_tokens": 5,
+            "cache_write_tokens_details": {"ttl_12h_tokens": 5, "ttl_30m_tokens": 0},
+        }
+    )
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        return response
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+
+    out = await responses_tool_loop(
+        completion_kwargs={"model": "fake", "input_data": "go"},
+        pool=cast(Any, _FakePool(tool_names=["fetch_url"])),
+        max_iterations=5,
+    )
+    assert out.usage is not None
+    details = out.usage.input_tokens_details.cache_write_tokens_details
+    assert details is not None
+    assert details.ttl_12h_tokens == 5
+
+
+@pytest.mark.asyncio
+async def test_usage_without_cache_write_fields_is_accumulated(monkeypatch: pytest.MonkeyPatch) -> None:
+    """any-llm bridges a provider with no Responses API (DeepSeek) with openresponses-types usage."""
+    response = _response(output=[], input_tokens=12, output_tokens=3)
+    assert response.usage is not None
+    response.usage.input_tokens_details = cast(Any, BridgedInputTokensDetails(cached_tokens=4))
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        return response
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+
+    out = await responses_tool_loop(
+        completion_kwargs={"model": "fake", "input_data": "go"},
+        pool=cast(Any, _FakePool(tool_names=["fetch_url"])),
+        max_iterations=5,
+    )
+    assert out.usage is not None
+    assert out.usage.input_tokens_details.cached_tokens == 4
+    assert out.usage.input_tokens_details.cache_write_tokens == 0
 
 
 def _provider_search(item_id: str) -> ResponseFunctionWebSearch:

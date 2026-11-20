@@ -333,7 +333,7 @@ def test_openais_own_auto_object_asks_for_the_same_thing(
 
 
 _NATIVE_DECLARATION = {"type": "code_execution_20250825", "name": "code_execution"}
-_MODEL_WITHOUT_NATIVE_CODE = "openai:gpt-4o-mini"
+_MODEL_WITHOUT_NATIVE_CODE = "mistral:mistral-small-latest"
 
 
 def test_a_stored_container_survives_a_model_swap_under_auto(

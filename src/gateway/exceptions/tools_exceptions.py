@@ -321,13 +321,21 @@ class WebAccessRefusedError(Exception):
         self.message = message
 
 
+def workspace_switch_hint(page: str) -> str:
+    """Where a workspace turns a tool on, for a refusal its switch caused.
+
+    The switch is the workspace's own, which its owners and admins change, so a caller can act on it.
+    """
+    return f"An owner or admin of the workspace allows it under Tools > {page} in the dashboard."
+
+
 class WebAccessNotEnabledError(WebAccessRefusedError):
     """A workspace with web access turned off refuses a request that declares Fetch."""
 
     error_code = WEB_ACCESS_DISABLED
 
     def __init__(self) -> None:
-        super().__init__("web access is not enabled for this workspace")
+        super().__init__(f"web access is not enabled for this workspace. {workspace_switch_hint('Web search')}")
 
 
 class WebAccessToolNotAuthorizedError(WebAccessRefusedError):
@@ -343,7 +351,7 @@ class WebSearchNotEnabledError(WebAccessRefusedError):
     error_code = WEB_ACCESS_DISABLED
 
     def __init__(self) -> None:
-        super().__init__("web search is not enabled for this workspace")
+        super().__init__(f"web search is not enabled for this workspace. {workspace_switch_hint('Web search')}")
 
 
 class WebSearchPolicyResolutionFailure(StrEnum):

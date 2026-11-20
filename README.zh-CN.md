@@ -66,7 +66,7 @@ It is shown only once and carries your master key, so treat it like one.
 
 打开该链接，选择用于登录的邮箱和密码。然后在控制台的 **Hosted providers** 页面添加一个提供商，并在该页面启用默认定价。链接中的密钥就是网关的主密钥，请妥善保管该链接。
 
-在控制台中创建一个 API 密钥（通过 **Overview** 上的设置向导，或在 **API keys** 页面），然后用它发送请求：
+在控制台中创建一个 API 密钥（通过 **Home** 上的设置向导，或在 **API keys** 页面），然后用它发送请求：
 
 ```bash
 curl http://localhost:8000/api/v1/chat/completions \

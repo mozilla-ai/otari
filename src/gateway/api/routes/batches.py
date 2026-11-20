@@ -77,6 +77,7 @@ from gateway.services.model_access import (
     model_not_allowed_detail,
     organization_key_refusal,
     resolve_request_allowlist,
+    unresolvable_selector_detail,
 )
 from gateway.services.pricing import PriceFacts, apply_rules
 from gateway.services.pricing_service import find_model_pricing
@@ -390,7 +391,8 @@ async def create_batch(
     try:
         resolved = resolve_provider_selector(config, request.model, user_id, workspace_id=workspace_id)
     except (ValueError, AnyLLMError) as exc:
-        _raise_for_unresolvable_model(request.model, exc)
+        detail = unresolvable_selector_detail(config, request.model, user_id, workspace_id=workspace_id)
+        _raise_for_unresolvable_model(request.model, exc, detail=detail)
     provider, model = resolved.provider, resolved.model
 
     # Model access control (per-key). Runs before the reservation, so nothing to
@@ -421,7 +423,8 @@ async def create_batch(
             detail=refusal.detail,
             headers=error_headers(refusal.code),
         )
-    country_gate = country_gate_for(config, raw_request)
+    organization_id = await organization_for_workspace_id(db, workspace_id)
+    country_gate = await country_gate_for(config, raw_request, db, organization_id, api_key=api_key)
     try:
         ensure_provider_country(config, country_gate, resolved.instance)
     except CountryNotServedError as exc:
@@ -435,7 +438,6 @@ async def create_batch(
             detail=f"Provider '{provider.value}' does not support batch operations",
         )
 
-    organization_id = await organization_for_workspace_id(db, workspace_id)
     # The last rung of the credential ladder. Nothing is reserved yet.
     try:
         served = await serve_on_hosted_provider(
@@ -628,12 +630,13 @@ async def retrieve_batch(
     if record is not None:
         _authorize_record(record, batch_id, api_key, is_master_key)
     workspace_id = await _lifecycle_workspace_id(db, record, api_key)
+    organization_id = await organization_for_workspace_id(db, workspace_id)
     provider_enum, provider_kwargs, _ = await resolve_provider_by_name(
         config,
         provider,
         port=model_provider_port_on(raw_request, db),
-        country_gate=country_gate_for(config, raw_request),
-        organization_id=await organization_for_workspace_id(db, workspace_id),
+        country_gate=await country_gate_for(config, raw_request, db, organization_id, api_key=api_key),
+        organization_id=organization_id,
         workspace_id=workspace_id,
     )
 
@@ -661,12 +664,13 @@ async def cancel_batch(
     if record is not None:
         _authorize_record(record, batch_id, api_key, is_master_key)
     workspace_id = await _lifecycle_workspace_id(db, record, api_key)
+    organization_id = await organization_for_workspace_id(db, workspace_id)
     provider_enum, provider_kwargs, _ = await resolve_provider_by_name(
         config,
         provider,
         port=model_provider_port_on(raw_request, db),
-        country_gate=country_gate_for(config, raw_request),
-        organization_id=await organization_for_workspace_id(db, workspace_id),
+        country_gate=await country_gate_for(config, raw_request, db, organization_id, api_key=api_key),
+        organization_id=organization_id,
         workspace_id=workspace_id,
     )
 
@@ -710,12 +714,13 @@ async def list_batches(
     """
     api_key, is_master_key = auth_result
     workspace_id = await resolve_workspace_id(db, api_key)
+    organization_id = await organization_for_workspace_id(db, workspace_id)
     provider_enum, provider_kwargs, _ = await resolve_provider_by_name(
         config,
         provider,
         port=model_provider_port_on(raw_request, db),
-        country_gate=country_gate_for(config, raw_request),
-        organization_id=await organization_for_workspace_id(db, workspace_id),
+        country_gate=await country_gate_for(config, raw_request, db, organization_id, api_key=api_key),
+        organization_id=organization_id,
         workspace_id=workspace_id,
     )
 
@@ -792,7 +797,7 @@ async def retrieve_batch_results(
         config,
         provider,
         port=model_provider_port_on(raw_request, db),
-        country_gate=country_gate_for(config, raw_request),
+        country_gate=await country_gate_for(config, raw_request, db, origin_organization_id, api_key=api_key),
         organization_id=origin_organization_id,
         workspace_id=origin_workspace_id,
     )

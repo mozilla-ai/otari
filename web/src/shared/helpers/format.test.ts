@@ -16,6 +16,7 @@ import {
   formatReleaseDate,
   formatScore,
   formatSpend,
+  formatThroughput,
   formatTokens,
   formatTokensCompact,
   formatUnitRate,
@@ -168,6 +169,13 @@ describe("formatUnitRate", () => {
 
   it("renders zero as money rather than as significant digits", () => {
     expect(formatUnitRate(0)).toBe("$0.00")
+  })
+})
+
+describe("formatThroughput", () => {
+  it("reads a rate in whole tokens per second, grouped", () => {
+    expect(formatThroughput(142.6)).toBe("143 tok/s")
+    expect(formatThroughput(5807.2)).toBe("5,807 tok/s")
   })
 })
 

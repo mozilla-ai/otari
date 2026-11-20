@@ -7,7 +7,6 @@ import { useSignup } from "@/shared/api/auth"
 import { ApiError, createSession } from "@/shared/api/client"
 import { navigateTo } from "@/shared/helpers/appLocation"
 import {
-  MAX_PASSWORD_BYTES,
   MIN_PASSWORD_LENGTH,
   newPasswordProblem,
 } from "@/shared/helpers/password"
@@ -333,7 +332,7 @@ export function SignupPage({ route }: { route: string }) {
               }}
               autoComplete="new-password"
               canReveal
-              description={`At least ${MIN_PASSWORD_LENGTH} characters, and at most ${MAX_PASSWORD_BYTES} bytes.`}
+              description={`At least ${MIN_PASSWORD_LENGTH} characters.`}
               errorMessage={problem ?? undefined}
             />
 

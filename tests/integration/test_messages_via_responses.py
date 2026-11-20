@@ -1,4 +1,4 @@
-"""``/api/v1/messages`` served through the Responses API of an instance that sets ``messages_api: responses``."""
+"""``/api/v1/messages`` served through the Responses API: OpenAI's own API by default, any instance that opts in."""
 
 from __future__ import annotations
 
@@ -11,11 +11,11 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from gateway.core.config import API_ROOT, CONVERSATION_HEADER, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, CONVERSATION_HEADER, GatewayConfig
 from gateway.models.usage import UsageLog
 from gateway.services.inference import reasoning_signature
 
-from .conftest import declared_test_providers, shared_test_config
+from .conftest import build_test_client, declared_test_providers, shared_test_config
 
 _ARESPONSES = "gateway.services.inference._messages_responses_bridge.aresponses"
 _AMESSAGES = "gateway.api.routes.messages.amessages"
@@ -210,6 +210,32 @@ def test_an_instance_that_did_not_opt_in_keeps_the_messages_call(
     assert sent, "the native Messages call must run"
     assert sent[0]["messages"][1]["content"] == [{"type": "text", "text": "Earlier"}]
     assert "_otari_responses_instance" not in sent[0]
+
+
+@pytest.mark.parametrize(("setting", "via_responses"), [(None, True), ("completions", False)])
+def test_openai_goes_through_the_responses_api_unless_it_opts_out(
+    postgres_url: str, monkeypatch: pytest.MonkeyPatch, setting: str | None, via_responses: bool
+) -> None:
+    openai = {"api_key": "sk-test"} if setting is None else {"api_key": "sk-test", "messages_api": setting}
+    config = shared_test_config(postgres_url, {**declared_test_providers(), "openai": openai})
+    calls: list[str] = []
+
+    async def fake_aresponses(**_: Any) -> dict[str, Any]:
+        calls.append("responses")
+        return _response()
+
+    async def fake_amessages(**_: Any) -> Any:
+        calls.append("messages")
+        raise RuntimeError("stop")
+
+    monkeypatch.setattr(_ARESPONSES, fake_aresponses)
+    monkeypatch.setattr(_AMESSAGES, fake_amessages)
+    headers = {API_KEY_HEADER: f"Bearer {config.master_key}"}
+    for client in build_test_client(config):
+        _create_user(client, headers, "default-user")
+        client.post(f"{API_ROOT}/messages", json=_body("default-user", model="openai:gpt-6-sol"), headers=headers)
+
+    assert calls == (["responses"] if via_responses else ["messages"])
 
 
 def test_the_conversation_id_keys_the_prompt_cache(
