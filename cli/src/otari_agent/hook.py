@@ -4344,6 +4344,59 @@ def _echo_check_result(gate: GateSpec, result: GateResult, unable_reason: str | 
             click.echo(f"{indent}  {line}")
 
 
+class _CheckReportEntry(NamedTuple):
+    gate: GateSpec
+    result: GateResult
+    unable_reason: str | None = None
+
+
+def _collect_check_report(
+    spec: PolicySpec, results: tuple[GateResult, ...], gate_types: frozenset[_CheckedGateType], head: str | None
+) -> tuple[list[_CheckReportEntry], list[str], list[str], int, list[str]]:
+    """Collect the selected gate results once for text and JSON reports."""
+    selected = {gate_type.value for gate_type in gate_types}
+    lists_command_gates = gate_types == frozenset(_CheckedGateType)
+    results_by_id = {result.gate_id: result for result in results}
+    entries: list[_CheckReportEntry] = []
+    failed_required: list[str] = []
+    failed_advisory: list[str] = []
+    not_applicable = 0
+    unable: list[str] = []
+    for gate in spec.gates:
+        if isinstance(gate, CommandGate | CommandIfChangedGate):
+            if lists_command_gates:
+                result = GateResult(
+                    gate_id=gate.id,
+                    enforcement=gate.enforcement,
+                    outcome=Outcome.NOT_APPLICABLE,
+                    message="",
+                    source=spec.gate_sources.get(gate.id),
+                )
+                reason = "A command or command_if_changed gate cannot run against a change, which carries no commands."
+                entries.append(_CheckReportEntry(gate, result, reason))
+                unable.append(gate.id)
+            continue
+        if gate.type not in selected:
+            continue
+        result = results_by_id[gate.id]
+        if isinstance(gate, VerifierGate) and head is not None:
+            entries.append(
+                _CheckReportEntry(
+                    gate,
+                    result,
+                    "A verifier inspects the working tree, and --head names a commit.",
+                )
+            )
+            continue
+        entries.append(_CheckReportEntry(gate, result))
+        if result.outcome is Outcome.NOT_APPLICABLE:
+            not_applicable += 1
+            continue
+        if result.outcome.is_blocking:
+            (failed_required if gate.enforcement == "required" else failed_advisory).append(gate.id)
+    return entries, failed_required, failed_advisory, not_applicable, unable
+
+
 def _echo_check_report(
     spec: PolicySpec, results: tuple[GateResult, ...], gate_types: frozenset[_CheckedGateType], head: str | None
 ) -> bool:
@@ -4352,30 +4405,14 @@ def _echo_check_report(
     A gate that cannot run against this change is reported as such, and never counts as a failure.
     The command gates are listed only when `gate_types` does not narrow the run.
     """
-    selected = {gate_type.value for gate_type in gate_types}
-    lists_command_gates = gate_types == frozenset(_CheckedGateType)
-    results_by_id = {result.gate_id: result for result in results}
-    failed_required: list[str] = []
-    failed_advisory: list[str] = []
-    not_applicable = 0
-    unable: list[str] = []
-    for gate in spec.gates:
-        if isinstance(gate, CommandGate | CommandIfChangedGate):
-            if lists_command_gates:
-                unable.append(gate.id)
-            continue
-        if gate.type not in selected:
-            continue
-        result = results_by_id[gate.id]
-        if isinstance(gate, VerifierGate) and head is not None:
-            _echo_check_result(gate, result, "A verifier inspects the working tree, and --head names a commit.")
-            continue
-        if result.outcome is Outcome.NOT_APPLICABLE:
-            not_applicable += 1
-            continue
-        _echo_check_result(gate, result)
-        if result.outcome.is_blocking:
-            (failed_required if gate.enforcement == "required" else failed_advisory).append(gate.id)
+    entries, failed_required, failed_advisory, not_applicable, unable = _collect_check_report(
+        spec, results, gate_types, head
+    )
+    for entry in entries:
+        if entry.unable_reason is not None:
+            _echo_check_result(entry.gate, entry.result, entry.unable_reason)
+        else:
+            _echo_check_result(entry.gate, entry.result)
 
     if not_applicable:
         click.echo(f"  {not_applicable} gate(s) do not apply to this change.")
@@ -4388,6 +4425,30 @@ def _echo_check_report(
     click.echo(
         f"{len(failed_required)} required gate(s) did not pass, {len(failed_advisory)} advisory gate(s) did not pass."
     )
+    return bool(failed_required)
+
+
+def _echo_json_check_report(
+    spec: PolicySpec, results: tuple[GateResult, ...], gate_types: frozenset[_CheckedGateType], head: str | None
+) -> bool:
+    """Print a stable machine-readable check report and return its process status."""
+    entries, failed_required, _, _, _ = _collect_check_report(spec, results, gate_types, head)
+    report = {
+        "gates": [
+            {
+                "id": entry.gate.id,
+                "type": entry.gate.type,
+                "enforcement": entry.gate.enforcement,
+                "outcome": "not_applicable" if entry.unable_reason is not None else entry.result.outcome.value,
+                "message": entry.unable_reason or entry.result.message or None,
+                "detail": entry.result.detail,
+                "source": entry.result.source,
+            }
+            for entry in entries
+        ],
+        "exit_status": int(bool(failed_required)),
+    }
+    click.echo(json.dumps(report, ensure_ascii=False, indent=2))
     return bool(failed_required)
 
 
@@ -4418,6 +4479,14 @@ def _echo_check_report(
         "Run only gates of this type. Repeatable. Defaults to every type a change can run, "
         "and then also lists the command gates that cannot run."
     ),
+)
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["text", "json"]),
+    default="text",
+    show_default=True,
+    help="Report results as human-readable text or stable JSON.",
 )
 @click.option(
     "--guardrails-from",
@@ -4452,6 +4521,7 @@ def guardrails_check(
     base: str,
     head: str | None,
     gate_types: frozenset[_CheckedGateType],
+    output_format: str,
     guardrails_from: Path | None,
     judge_model: str | None,
     judge_cli: tuple[str, ...] | None,
@@ -4521,12 +4591,16 @@ def guardrails_check(
     except PolicyCheckError as exc:
         raise click.ClickException(str(exc)) from exc
 
-    source = "" if guardrails_from is None else f" from {guardrails_from}"
-    click.echo(f"{guardrail.name}{source}: {len(spec.gates)} gate(s), schema {spec.schema_version}.")
-    click.echo(
-        f"{len(paths)} changed path(s) since {base} (merge base {diff_range.base[:12]}), "
-        f"up to {head or 'the working tree'}."
-    )
-    click.echo()
-    if _echo_check_report(spec, check.results, gate_types, head):
+    if output_format == "text":
+        source = "" if guardrails_from is None else f" from {guardrails_from}"
+        click.echo(f"{guardrail.name}{source}: {len(spec.gates)} gate(s), schema {spec.schema_version}.")
+        click.echo(
+            f"{len(paths)} changed path(s) since {base} (merge base {diff_range.base[:12]}), "
+            f"up to {head or 'the working tree'}."
+        )
+        click.echo()
+        blocked = _echo_check_report(spec, check.results, gate_types, head)
+    else:
+        blocked = _echo_json_check_report(spec, check.results, gate_types, head)
+    if blocked:
         raise SystemExit(1)

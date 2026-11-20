@@ -136,18 +136,18 @@ jobs:
             export ANTHROPIC_API_KEY="$API_KEY"
           fi
           unset OAUTH_TOKEN API_KEY
-          report="$RUNNER_TEMP/judges.txt"
+          report="$RUNNER_TEMP/judges.json"
           status=0
           .venv/bin/otari guardrails check --base "$BASE_SHA" --head "$HEAD_SHA" --type judge \
-            > "$report" || status=$?
+            --format json > "$report" || status=$?
           token=$(openssl rand -hex 16)
           echo "::stop-commands::$token"
-          cat "$report"
+          jq . "$report"
           echo "::$token::"
-          sed "s/\`\`\`/'''/g" "$report" > "$RUNNER_TEMP/judges-fenced.txt"
+          jq . "$report" | sed "s/\`\`\`/'''/g" > "$RUNNER_TEMP/judges-fenced.txt"
           {
             echo '### Judge gates'
-            echo '```text'
+            echo '```json'
             cat "$RUNNER_TEMP/judges-fenced.txt"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
@@ -177,7 +177,7 @@ jobs:
             echo
             echo "A model read the diff up to $HEAD_SHA against each judge gate. Its findings are advisory and do not block the merge."
             echo
-            echo '```text'
+            echo '```json'
             cat "$RUNNER_TEMP/judges-fenced.txt"
             echo '```'
             echo
@@ -188,7 +188,7 @@ jobs:
           existing=${existing%%$'\n'*}
           if [ -n "$existing" ]; then
             gh api --method PATCH "repos/$REPO/issues/comments/$existing" -F "body=@$body" > /dev/null
-          elif grep -qE '^  fail ' "$RUNNER_TEMP/judges.txt"; then
+          elif jq -e '.gates[] | select(.outcome == "fail")' "$RUNNER_TEMP/judges.json" > /dev/null; then
             gh api --method POST "repos/$REPO/issues/$PR/comments" -F "body=@$body" > /dev/null
           fi
 
@@ -202,14 +202,14 @@ jobs:
       - name: Fail on a judge finding
         if: steps.judges.outcome == 'success'
         run: |
-          report="$RUNNER_TEMP/judges.txt"
-          required=$(grep -oE '^[0-9]+ required gate\(s\) did not pass' "$report" | grep -oE '^[0-9]+' || true)
-          if [ -z "$required" ]; then
+          report="$RUNNER_TEMP/judges.json"
+          required=$(jq -r '.exit_status' "$report")
+          if [ "$required" = "null" ] || [ -z "$required" ]; then
             echo "::warning title=Judge gates::Could not read the required/advisory gate summary; see the job summary."
           elif [ "$required" != "0" ]; then
             echo "::error title=Judge gates::A required gate did not pass. See the job summary."
             exit 1
           fi
-          if grep -qE '^  fail ' "$report"; then
+          if jq -e '.gates[] | select(.outcome == "fail")' "$report" > /dev/null; then
             echo "::warning title=Judge gates::A judge gate did not pass. Its finding is advisory; see the job summary."
           fi
