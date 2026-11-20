@@ -121,8 +121,8 @@ def _declared_size(download: AsyncFileDownload) -> int:
 class _AnyLlmFileSession(ProviderFileSession):
     """Reads and writes one provider account's files through any-llm, with the credential that reaches it.
 
-    Owns the connection its calls run on, so a caller closes it with
-    :meth:`aclose` once it has read everything it wants.
+    Owns the connection its calls run on, unless its credential carries one, so a
+    caller closes it with :meth:`aclose` once it has read everything it wants.
     """
 
     def __init__(self, *, provider: LLMProvider, provider_instance: str, credential: ResolvedCredential) -> None:
@@ -133,14 +133,23 @@ class _AnyLlmFileSession(ProviderFileSession):
         self._credential = credential
         # Handing this client to the provider SDK replaces the one it would have
         # built, whose own default is to follow the redirect a download can answer with.
+        # A credential that carries a client is dialed through it: for an endpoint a
+        # tenant chose, that is the pinned one, which checks every address and follows
+        # no redirect. It is shared, so it is used as it is and left open.
+        given = credential.client_args.get("http_client")
+        self._owns_connection = given is None
         self._timeout: httpx.Timeout | httpx2.Timeout
         self._connection: httpx.AsyncClient | httpx2.AsyncClient
         if provider is LLMProvider.ANTHROPIC:
             self._timeout = _HTTPX2_TIMEOUT
-            self._connection = httpx2.AsyncClient(timeout=_HTTPX2_TIMEOUT, follow_redirects=True)
+            self._connection = (
+                given if given is not None else httpx2.AsyncClient(timeout=_HTTPX2_TIMEOUT, follow_redirects=True)
+            )
         else:
             self._timeout = _TIMEOUT
-            self._connection = httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True)
+            self._connection = (
+                given if given is not None else httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True)
+            )
 
     @property
     def provider(self) -> str:
@@ -176,6 +185,8 @@ class _AnyLlmFileSession(ProviderFileSession):
         A release that fails is logged rather than raised, because the caller has
         already read whatever it came for and can do nothing about it.
         """
+        if not self._owns_connection:
+            return
         try:
             await self._connection.aclose()
         except (httpx.HTTPError, httpx2.HTTPError, RuntimeError):

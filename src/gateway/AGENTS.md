@@ -265,8 +265,9 @@ is held the same way. Its `api_base` is refused at write unless it reaches
 public addresses and its provider is in `TENANT_ENDPOINT_PROVIDERS`
 (`core/provider_params.py`), the SDKs that take an injected client;
 `get_provider_kwargs` then hands that SDK the pinned client on every dispatch,
-and the key's model discovery dials through it too. Its `client_args` are held
-to `tenant_client_args_allowed`, refused at write and dropped from a row
+and the key's model discovery and its provider file sessions
+(`adapters/provider_file_adapter.py`) dial through it too. Its `client_args` are
+held to `tenant_client_args_allowed`, refused at write and dropped from a row
 stored before, because other names reach the SDK constructor and can choose
 the destination, the transport, the headers or an ambient credential.
 
