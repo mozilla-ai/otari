@@ -1060,7 +1060,7 @@ def test_failure_cause_names_a_socket_error_by_its_errno() -> None:
 
 def test_failure_cause_names_a_tls_error_by_its_reason() -> None:
     tls_error = ssl.SSLError(1, "certificate verify failed: confidential")
-    tls_error.reason = "CERTIFICATE_VERIFY_FAILED"  # type: ignore[misc]
+    tls_error.reason = "CERTIFICATE_VERIFY_FAILED"
 
     assert failure_cause(_wrapped(tls_error)) == "SSLError: CERTIFICATE_VERIFY_FAILED"
 
