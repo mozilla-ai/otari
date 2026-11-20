@@ -10869,6 +10869,8 @@ export interface components {
             request_limit: number | null;
             /** Reset Alignment */
             reset_alignment: string | null;
+            /** Reset Timezone */
+            reset_timezone?: string | null;
             /** Rpm Limit */
             rpm_limit?: number | null;
             /** Token Limit */
@@ -12390,9 +12392,14 @@ export interface components {
             request_limit?: number | null;
             /**
              * Reset Alignment
-             * @description Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way to express a calendar month. Mutually exclusive with budget_duration_sec
+             * @description Reset on a calendar boundary instead of a fixed number of seconds, which is the only way to express a calendar month. The boundary is midnight UTC unless reset_timezone names a zone. Mutually exclusive with budget_duration_sec
              */
             reset_alignment?: ("calendar_day" | "calendar_week" | "calendar_month") | null;
+            /**
+             * Reset Timezone
+             * @description IANA timezone whose midnights reset_alignment snaps to, such as 'America/New_York'; null is UTC. Needs reset_alignment. Across a daylight saving change a day runs 23 or 25 hours
+             */
+            reset_timezone?: string | null;
             /**
              * Rpm Limit
              * @description Requests per minute for each user on this budget, across replicas; null is unlimited
@@ -13482,6 +13489,8 @@ export interface components {
             request_limit?: number | null;
             /** Reset Alignment */
             reset_alignment?: string | null;
+            /** Reset Timezone */
+            reset_timezone?: string | null;
             /** Rpm Limit */
             rpm_limit?: number | null;
             /** Token Limit */
@@ -18122,9 +18131,14 @@ export interface components {
             request_limit?: number | null;
             /**
              * Reset Alignment
-             * @description Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way to express a calendar month. Mutually exclusive with budget_duration_sec
+             * @description Reset on a calendar boundary instead of a fixed number of seconds, which is the only way to express a calendar month. The boundary is midnight UTC unless reset_timezone names a zone. Mutually exclusive with budget_duration_sec
              */
             reset_alignment?: ("calendar_day" | "calendar_week" | "calendar_month") | null;
+            /**
+             * Reset Timezone
+             * @description IANA timezone whose midnights reset_alignment snaps to, such as 'America/New_York'; null is UTC. Needs reset_alignment. Across a daylight saving change a day runs 23 or 25 hours
+             */
+            reset_timezone?: string | null;
             /**
              * Token Limit
              * @description Maximum tokens over one period; null caps nothing. Independent of max_budget
@@ -18165,6 +18179,8 @@ export interface components {
             request_limit: number | null;
             /** Reset Alignment */
             reset_alignment: string | null;
+            /** Reset Timezone */
+            reset_timezone?: string | null;
             /** Token Limit */
             token_limit: number | null;
             /** Updated At */
@@ -18205,9 +18221,14 @@ export interface components {
             request_limit?: number | null;
             /**
              * Reset Alignment
-             * @description Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way to express a calendar month. Mutually exclusive with budget_duration_sec
+             * @description Reset on a calendar boundary instead of a fixed number of seconds, which is the only way to express a calendar month. The boundary is midnight UTC unless reset_timezone names a zone. Mutually exclusive with budget_duration_sec
              */
             reset_alignment?: ("calendar_day" | "calendar_week" | "calendar_month") | null;
+            /**
+             * Reset Timezone
+             * @description IANA timezone whose midnights reset_alignment snaps to, such as 'America/New_York'; null is UTC. Needs reset_alignment. Across a daylight saving change a day runs 23 or 25 hours
+             */
+            reset_timezone?: string | null;
             /**
              * Token Limit
              * @description Maximum tokens over one period; null caps nothing. Independent of max_budget
@@ -19088,6 +19109,8 @@ export interface components {
             reserved_tokens: number;
             /** Reset Alignment */
             reset_alignment: string | null;
+            /** Reset Timezone */
+            reset_timezone?: string | null;
             /** Scope Id */
             scope_id: string;
             /** Scope Type */
@@ -21139,6 +21162,8 @@ export interface components {
             reserved_tokens: number;
             /** Reset Alignment */
             reset_alignment: string | null;
+            /** Reset Timezone */
+            reset_timezone?: string | null;
             /** Scope Id */
             scope_id: string;
             /** Scope Type */
@@ -22691,6 +22716,11 @@ export interface components {
             request_limit?: number | null;
             /** Reset Alignment */
             reset_alignment?: ("calendar_day" | "calendar_week" | "calendar_month") | null;
+            /**
+             * Reset Timezone
+             * @description IANA timezone whose midnights reset_alignment snaps to, such as 'America/New_York'; null is UTC. Needs reset_alignment. Across a daylight saving change a day runs 23 or 25 hours
+             */
+            reset_timezone?: string | null;
             /**
              * Rpm Limit
              * @description Requests per minute for each user on this budget, across replicas; null is unlimited
@@ -24639,6 +24669,8 @@ export interface components {
             request_limit: number | null;
             /** Reset Alignment */
             reset_alignment: string | null;
+            /** Reset Timezone */
+            reset_timezone?: string | null;
             /** Token Limit */
             token_limit: number | null;
             /** Updated At */

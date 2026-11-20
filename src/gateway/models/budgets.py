@@ -4,6 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Literal, get_args
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Index, String, Uuid, false, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -49,6 +50,24 @@ ALIGN_DAY: ResetAlignment = "calendar_day"
 ALIGN_WEEK: ResetAlignment = "calendar_week"
 ALIGN_MONTH: ResetAlignment = "calendar_month"
 
+# The longest IANA zone name is 32 characters (America/Argentina/ComodRivadavia).
+MAX_RESET_TIMEZONE_LENGTH = 64
+
+
+def check_reset_timezone(name: str) -> str:
+    """Return ``name`` if it is an IANA timezone this deployment can read, or raise ``ValueError``.
+
+    Checked where a budget is written, so a typo is refused with a 422 or fails the
+    start, rather than surfacing on the first request that rolls the budget.
+    """
+    try:
+        ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        msg = f"reset_timezone '{name}' is not an IANA timezone, such as 'America/New_York' or 'Europe/Berlin'"
+        raise ValueError(msg) from None
+    return name
+
+
 ScopeType = Literal["organization", "workspace", "workspace_member", "org_member", "api_token"]
 SCOPE_TYPES: tuple[ScopeType, ...] = get_args(ScopeType)
 SCOPE_ORGANIZATION: ScopeType = "organization"
@@ -77,6 +96,11 @@ class Budget(Base):
         CheckConstraint(
             "NOT (budget_duration_sec IS NOT NULL AND reset_alignment IS NOT NULL)",
             name="ck_budgets_single_period_source",
+        ),
+        # A timezone places calendar boundaries; a budget with none has nothing to place.
+        CheckConstraint(
+            "reset_timezone IS NULL OR reset_alignment IS NOT NULL",
+            name="ck_budgets_timezone_needs_alignment",
         ),
     )
 
@@ -124,13 +148,16 @@ class Budget(Base):
     rpm_limit: Mapped[int | None] = mapped_column(default=None)
     tpm_limit: Mapped[int | None] = mapped_column(default=None)
     budget_duration_sec: Mapped[int | None] = mapped_column()
-    # Snap the window to a UTC calendar boundary instead of counting a fixed
+    # Snap the window to a calendar boundary instead of counting a fixed
     # number of seconds, which is the only way to express a calendar month (2592000
     # seconds is a different, 1.5 percent more generous, product). It lives here
     # rather than on the rows that enforce a budget because a limit and the period
     # it is spent over are one product decision, and splitting them let a ceiling
     # reset on a cadence the budget defining it had never heard of.
     reset_alignment: Mapped[str | None] = mapped_column(default=None)
+    # The IANA timezone whose midnights ``reset_alignment`` snaps to. NULL is UTC,
+    # which every budget predating the column keeps.
+    reset_timezone: Mapped[str | None] = mapped_column(String(MAX_RESET_TIMEZONE_LENGTH), default=None)
     # ``config`` while config.yml declares this budget, so the dashboard can say
     # that an edit made here lasts until config.yml changes the entry. Cleared on
     # the start after the declaration is removed; the budget itself stays.
@@ -159,6 +186,7 @@ class Budget(Base):
             "request_limit": self.request_limit,
             "budget_duration_sec": self.budget_duration_sec,
             "reset_alignment": self.reset_alignment,
+            "reset_timezone": self.reset_timezone,
             "origin": self.origin,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,

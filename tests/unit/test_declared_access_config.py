@@ -173,6 +173,9 @@ def test_a_key_name_must_be_an_identifier() -> None:
         ({"rpm_limit": 0}, "greater than or equal to 1"),
         ({"reset_alignment": "fortnightly"}, "calendar_day"),
         ({"max_budgt": 1}, "Extra inputs are not permitted"),
+        ({"reset_alignment": "calendar_day", "reset_timezone": "Mars/Olympus"}, "not an IANA timezone"),
+        ({"reset_timezone": "America/New_York"}, "needs reset_alignment"),
+        ({"budget_duration_sec": 86400, "reset_timezone": "America/New_York"}, "needs reset_alignment"),
     ],
 )
 def test_an_invalid_budget_is_refused(budget: dict[str, Any], message: str) -> None:

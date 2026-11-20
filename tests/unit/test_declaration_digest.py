@@ -33,6 +33,31 @@ def test_a_budget_digest_changes_with_any_field() -> None:
     )
 
 
+def test_a_budget_naming_no_timezone_digests_as_before_the_field_existed() -> None:
+    """Otherwise the upgrade would write every declared budget back over changes made through the API."""
+    before = {
+        "name": None,
+        "max_budget": 1.0,
+        "token_limit": None,
+        "request_limit": None,
+        "rpm_limit": None,
+        "tpm_limit": None,
+        "budget_duration_sec": None,
+        "reset_alignment": "calendar_day",
+    }
+
+    assert BudgetConfig(max_budget=1.0, reset_alignment="calendar_day").declaration_digest() == declaration_digest(
+        before
+    )
+
+
+def test_a_budget_digest_changes_with_its_timezone() -> None:
+    utc = BudgetConfig(max_budget=1.0, reset_alignment="calendar_day")
+    new_york = BudgetConfig(max_budget=1.0, reset_alignment="calendar_day", reset_timezone="America/New_York")
+
+    assert utc.declaration_digest() != new_york.declaration_digest()
+
+
 def test_a_key_digest_changes_with_its_settings_and_its_secret() -> None:
     digest = _key().declaration_digest()
 

@@ -71,6 +71,7 @@ class _KeyLimits:
             provider_key_id=None,
             budget_duration_sec=budget.budget_duration_sec,
             reset_alignment=budget.reset_alignment,
+            reset_timezone=budget.reset_timezone,
             usage=CeilingUsage(
                 max_budget=budget.max_budget,
                 current_spend=use.spend,
@@ -117,7 +118,9 @@ def _public(limit: LimitUsage, now: datetime) -> KeyLimitPublic:
     ended = resets_at is not None and now >= resets_at
     if ended:
         try:
-            window = period_window(now, duration=limit.budget_duration_sec, alignment=limit.reset_alignment)
+            window = period_window(
+                now, duration=limit.budget_duration_sec, alignment=limit.reset_alignment, timezone=limit.reset_timezone
+            )
         except ValueError:
             # An alignment written around the API; the gate leaves such a window in place.
             window = None

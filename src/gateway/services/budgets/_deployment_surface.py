@@ -49,7 +49,7 @@ class _DeploymentSurface:
         Every field takes the request's value, so a field left out is cleared, and a budget a concurrent request
         created first is replaced like any other. A replaced budget's ceilings follow a change of reset period.
         """
-        _require_single_period_source(request.budget_duration_sec, request.reset_alignment)
+        _require_single_period_source(request.budget_duration_sec, request.reset_alignment, request.reset_timezone)
         budgets = self._repositories.budgets
         budget = await budgets.get(budget_id)
         created = False
@@ -61,13 +61,13 @@ class _DeploymentSurface:
         if budget.organization_id is not None:
             raise DeploymentBudgetNotReplaceableError(budget_id)
 
-        cadence_before = cadence_of(budget.budget_duration_sec, budget.reset_alignment)
+        cadence_before = cadence_of(budget.budget_duration_sec, budget.reset_alignment, budget.reset_timezone)
         changes = request.model_dump()
         changes["max_budget"] = to_usd_or_none(request.max_budget)
         budget = await budgets.update(budget, changes)
         if created:
             return BudgetResponse.from_model(budget), True
-        if cadence_of(budget.budget_duration_sec, budget.reset_alignment) != cadence_before:
+        if cadence_of(budget.budget_duration_sec, budget.reset_alignment, budget.reset_timezone) != cadence_before:
             period_start, period_end = _current_window(budget)
             await self._repositories.ceilings.retime_for_budget(
                 budget_id, period_start=period_start, period_end=period_end

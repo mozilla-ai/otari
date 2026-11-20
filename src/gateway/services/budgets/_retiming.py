@@ -6,6 +6,7 @@ A ceiling left with no window never rolls, so its spend accumulates while the bu
 """
 
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,18 +14,34 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.models.budgets import ScopedBudget
 from gateway.services.budgets._periods import period_window
 
-__all__ = ["cadence_of", "retime_ceilings_for_budget"]
+__all__ = ["cadence_of", "retime_ceilings_for_budget", "settle_reset_timezone"]
 
 
-def cadence_of(duration: int | None, alignment: str | None) -> tuple[int | None, str | None]:
-    """The pair that decides whether a retiming is needed, as one comparable value.
+def cadence_of(
+    duration: int | None, alignment: str | None, timezone: str | None = None
+) -> tuple[int | None, str | None, str | None]:
+    """The cadence that decides whether a retiming is needed, as one comparable value.
 
     Exists so both callers compare the same thing, read before and after the
     mutation. Keyed on the cadence rather than on "an update happened", because
     retiming on every write would restart a period for a rename or a limit
     change, throwing away the part of it a ceiling had already spent.
     """
-    return (duration, alignment)
+    return (duration, alignment, timezone)
+
+
+def settle_reset_timezone(
+    changes: dict[str, Any], *, stored_alignment: str | None, stored_timezone: str | None
+) -> None:
+    """Fill in the timezone a partial update leaves the budget with, in ``changes``.
+
+    A budget moved off calendar boundaries drops its timezone, which would mean
+    nothing there, unless the same update names one, which is then refused.
+    """
+    if "reset_timezone" in changes:
+        return
+    if changes.get("reset_alignment", stored_alignment) is None and stored_timezone is not None:
+        changes["reset_timezone"] = None
 
 
 async def retime_ceilings_for_budget(
@@ -33,6 +50,7 @@ async def retime_ceilings_for_budget(
     budget_id: str,
     duration: int | None,
     alignment: str | None,
+    timezone: str | None = None,
 ) -> None:
     """Rewrite the window on every ceiling naming this budget.
 
@@ -52,7 +70,7 @@ async def retime_ceilings_for_budget(
     A cadence of neither kind clears the window rather than deriving one, which is
     what "no reset" means and what ``period_window`` returns None for.
     """
-    window = period_window(datetime.now(UTC), duration=duration, alignment=alignment)
+    window = period_window(datetime.now(UTC), duration=duration, alignment=alignment, timezone=timezone)
     period_start, period_end = window if window is not None else (None, None)
     await db.execute(
         update(ScopedBudget)

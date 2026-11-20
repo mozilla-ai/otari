@@ -40,6 +40,11 @@ To cap a single API key, set a budget on the key itself; see [Cap a key's spend]
 
 All resets are automatic. No cleanup is required.
 
+A budget created through the [management API](api-reference.md) or declared in
+[config.yml](configuration.md#budgets-and-api-keys-in-config) can reset at midnight in a timezone of its own instead,
+with `reset_timezone` set to an IANA name such as `America/New_York`. Its days, weeks and months then follow that
+zone's calendar, so a day runs 23 or 25 hours when the clocks change.
+
 ## Enforcement
 
 When a budget is exhausted, Otari blocks matching requests until the next period starts.

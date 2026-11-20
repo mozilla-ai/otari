@@ -10,27 +10,38 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Any
 
-from pydantic import BaseModel, Field
+from pydantic import AfterValidator, BaseModel, Field
 
 from gateway.models.budgets import (
     BUDGET_ID_PATTERN,
     MAX_COUNT_LIMIT,
     MAX_MINUTE_LIMIT,
+    MAX_RESET_TIMEZONE_LENGTH,
     Budget,
     BudgetResetLog,
     ResetAlignment,
     ScopedBudget,
     ScopeType,
     WorkspaceBudgetDefault,
+    check_reset_timezone,
 )
 from gateway.models.money import MAX_USD_LIMIT, as_float
 from gateway.models.users import User
 
 _PERIOD_DESCRIPTION = "Seconds between resets, counted from the last one. Mutually exclusive with reset_alignment"
 _ALIGNMENT_DESCRIPTION = (
-    "Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way "
-    "to express a calendar month. Mutually exclusive with budget_duration_sec"
+    "Reset on a calendar boundary instead of a fixed number of seconds, which is the only way "
+    "to express a calendar month. The boundary is midnight UTC unless reset_timezone names a zone. "
+    "Mutually exclusive with budget_duration_sec"
 )
+_TIMEZONE_DESCRIPTION = (
+    "IANA timezone whose midnights reset_alignment snaps to, such as 'America/New_York'; null is UTC. "
+    "Needs reset_alignment. Across a daylight saving change a day runs 23 or 25 hours"
+)
+
+ResetTimezone = Annotated[
+    str, Field(min_length=1, max_length=MAX_RESET_TIMEZONE_LENGTH), AfterValidator(check_reset_timezone)
+]
 
 # A blank value matches no provider instance, so a ceiling that stored one would never bind.
 _ProviderKeyId = Annotated[str, Field(min_length=1, max_length=255, pattern=r"^\S+$")]
@@ -75,6 +86,7 @@ class CreateBudgetRequest(BaseModel):
         default=None,
         description=_ALIGNMENT_DESCRIPTION,
     )
+    reset_timezone: ResetTimezone | None = Field(default=None, description=_TIMEZONE_DESCRIPTION)
 
 
 class BudgetResponse(BaseModel):
@@ -100,6 +112,7 @@ class BudgetResponse(BaseModel):
     tpm_limit: int | None = None
     budget_duration_sec: int | None
     reset_alignment: str | None
+    reset_timezone: str | None = None
     origin: str | None = Field(
         default=None,
         description=(
@@ -136,6 +149,7 @@ class BudgetResponse(BaseModel):
             tpm_limit=budget.tpm_limit,
             budget_duration_sec=budget.budget_duration_sec,
             reset_alignment=budget.reset_alignment,
+            reset_timezone=budget.reset_timezone,
             origin=budget.origin,
             created_at=budget.created_at.isoformat(),
             updated_at=budget.updated_at.isoformat(),
@@ -179,6 +193,7 @@ class UpdateBudgetRequest(BaseModel):
     )
     budget_duration_sec: int | None = Field(default=None, gt=0)
     reset_alignment: ResetAlignment | None = Field(default=None)
+    reset_timezone: ResetTimezone | None = Field(default=None, description=_TIMEZONE_DESCRIPTION)
 
 
 class EndUsersDeleted(BaseModel):
@@ -248,6 +263,7 @@ class EndUserBudgetPublic(BaseModel):
     tpm_limit: int | None = None
     budget_duration_sec: int | None = None
     reset_alignment: str | None = None
+    reset_timezone: str | None = None
     is_default: bool = Field(description="Whether a new end user starts here when its request names no budget")
     end_user_count: int = Field(description="End users of the key's user on this budget, blocked ones included")
     blocked_end_user_count: int
@@ -281,6 +297,7 @@ class EndUserBudgetPublic(BaseModel):
                 "tpm_limit": budget.tpm_limit,
                 "budget_duration_sec": budget.budget_duration_sec,
                 "reset_alignment": budget.reset_alignment,
+                "reset_timezone": budget.reset_timezone,
             }
         )
 
@@ -363,6 +380,7 @@ class ScopedBudgetFigures(BaseModel):
     reserved_requests: int
     budget_duration_sec: int | None
     reset_alignment: str | None
+    reset_timezone: str | None = None
     period_start: str | None
     period_end: str | None
     created_at: str
@@ -389,6 +407,7 @@ class ScopedBudgetFigures(BaseModel):
             "reserved_requests": ceiling.reserved_requests,
             "budget_duration_sec": budget.budget_duration_sec,
             "reset_alignment": budget.reset_alignment,
+            "reset_timezone": budget.reset_timezone,
             "period_start": ceiling.period_start.isoformat() if ceiling.period_start else None,
             "period_end": ceiling.period_end.isoformat() if ceiling.period_end else None,
             "created_at": ceiling.created_at.isoformat(),
@@ -438,6 +457,7 @@ class OrganizationBudgetRates(BaseModel):
     )
     budget_duration_sec: int | None = Field(default=None, gt=0, description=_PERIOD_DESCRIPTION)
     reset_alignment: ResetAlignment | None = Field(default=None, description=_ALIGNMENT_DESCRIPTION)
+    reset_timezone: ResetTimezone | None = Field(default=None, description=_TIMEZONE_DESCRIPTION)
 
 
 class OrganizationBudgetCreate(OrganizationBudgetRates):
@@ -477,6 +497,7 @@ class OrganizationBudgetPublic(BaseModel):
     request_limit: int | None
     budget_duration_sec: int | None
     reset_alignment: str | None
+    reset_timezone: str | None = None
     ceiling_count: int
     created_at: str
     updated_at: str
@@ -505,6 +526,7 @@ class OrganizationBudgetPublic(BaseModel):
             request_limit=budget.request_limit,
             budget_duration_sec=budget.budget_duration_sec,
             reset_alignment=budget.reset_alignment,
+            reset_timezone=budget.reset_timezone,
             ceiling_count=ceiling_count,
             created_at=budget.created_at.isoformat(),
             updated_at=budget.updated_at.isoformat(),
@@ -625,6 +647,7 @@ class WorkspaceMemberBudgetPolicyPublic(BaseModel):
     request_limit: int | None
     budget_duration_sec: int | None
     reset_alignment: str | None
+    reset_timezone: str | None = None
     created_at: str
     updated_at: str
 
@@ -641,6 +664,7 @@ class WorkspaceMemberBudgetPolicyPublic(BaseModel):
             request_limit=budget.request_limit,
             budget_duration_sec=budget.budget_duration_sec,
             reset_alignment=budget.reset_alignment,
+            reset_timezone=budget.reset_timezone,
             created_at=default.created_at.isoformat(),
             updated_at=default.updated_at.isoformat(),
         )

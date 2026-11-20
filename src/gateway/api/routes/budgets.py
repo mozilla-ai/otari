@@ -33,7 +33,7 @@ SURFACE = Surface("budgets")
 _ZERO = Decimal(0)
 
 
-def _require_single_period_source(duration: int | None, alignment: str | None) -> None:
+def _require_single_period_source(duration: int | None, alignment: str | None, timezone: str | None = None) -> None:
     """Refuse the state the table's CHECK refuses, with a message instead of a 500.
 
     A period comes from a duration or from a calendar boundary. Both set is one
@@ -45,6 +45,11 @@ def _require_single_period_source(duration: int | None, alignment: str | None) -
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="A budget resets on budget_duration_sec or on reset_alignment, not both",
+        )
+    if timezone is not None and alignment is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="reset_timezone places reset_alignment's boundaries, so it needs reset_alignment",
         )
 
 
@@ -72,7 +77,7 @@ async def create_budget(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> BudgetResponse:
     """Create a new budget."""
-    _require_single_period_source(request.budget_duration_sec, request.reset_alignment)
+    _require_single_period_source(request.budget_duration_sec, request.reset_alignment, request.reset_timezone)
     budget = Budget(
         name=request.name,
         max_budget=to_usd_or_none(request.max_budget),
@@ -82,6 +87,7 @@ async def create_budget(
         tpm_limit=request.tpm_limit,
         budget_duration_sec=request.budget_duration_sec,
         reset_alignment=request.reset_alignment,
+        reset_timezone=request.reset_timezone,
     )
 
     db.add(budget)
@@ -178,7 +184,7 @@ async def update_budget(
 
     # Read before the mutation below, because it is what decides whether the
     # ceilings naming this budget have to be retimed.
-    cadence_before = cadence_of(budget.budget_duration_sec, budget.reset_alignment)
+    cadence_before = cadence_of(budget.budget_duration_sec, budget.reset_alignment, budget.reset_timezone)
 
     # Name is tri-state: omit leaves it unchanged, while an explicit null clears
     # it back to unnamed (unlike the numeric fields, where null is not meaningful).
@@ -202,16 +208,20 @@ async def update_budget(
     # of the other: the pair that has to hold is the one the row ends up with, so
     # an omitted field contributes what is stored. Switching a rolling budget to a
     # calendar one is one request that nulls the duration and names the alignment.
-    if {"budget_duration_sec", "reset_alignment"} & request.model_fields_set:
-        duration = (
-            request.budget_duration_sec
-            if "budget_duration_sec" in request.model_fields_set
-            else budget.budget_duration_sec
-        )
-        alignment = request.reset_alignment if "reset_alignment" in request.model_fields_set else budget.reset_alignment
-        _require_single_period_source(duration, alignment)
+    # The timezone settles with them, and a budget moved off calendar boundaries
+    # drops its timezone unless the same request names one, which is then refused.
+    cadence_fields = {"budget_duration_sec", "reset_alignment", "reset_timezone"}
+    if cadence_fields & request.model_fields_set:
+        changes = request.model_dump(include=cadence_fields, exclude_unset=True)
+        if "reset_timezone" not in changes and changes.get("reset_alignment", budget.reset_alignment) is None:
+            changes["reset_timezone"] = None
+        duration = changes.get("budget_duration_sec", budget.budget_duration_sec)
+        alignment = changes.get("reset_alignment", budget.reset_alignment)
+        timezone = changes.get("reset_timezone", budget.reset_timezone)
+        _require_single_period_source(duration, alignment, timezone)
         budget.budget_duration_sec = duration
         budget.reset_alignment = alignment
+        budget.reset_timezone = timezone
 
     # A ceiling holds its own window and reads the cadence through this budget, so
     # changing the cadence without rewriting the windows leaves the two
@@ -222,12 +232,13 @@ async def update_budget(
     # forever. Since `b7e1c4a9d2f5` a budget can also belong to an organization,
     # so the ceilings stranded that way may be a tenant's. Shared with the
     # tenant-scoped surface rather than written twice.
-    if cadence_of(budget.budget_duration_sec, budget.reset_alignment) != cadence_before:
+    if cadence_of(budget.budget_duration_sec, budget.reset_alignment, budget.reset_timezone) != cadence_before:
         await retime_ceilings_for_budget(
             db,
             budget_id=budget.budget_id,
             duration=budget.budget_duration_sec,
             alignment=budget.reset_alignment,
+            timezone=budget.reset_timezone,
         )
 
     try:
