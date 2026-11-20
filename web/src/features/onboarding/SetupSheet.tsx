@@ -62,6 +62,7 @@ export function SetupSheet({
   isChecking,
   checkFailed,
   keyError,
+  isMintingKey,
   isCreatingKey,
   skipError,
   isSkipping,
@@ -72,7 +73,7 @@ export function SetupSheet({
   landed,
 }: {
   workspaceName?: string
-  /** The issued key's plaintext, or undefined until one is created. */
+  /** The issued key's plaintext, or undefined while it is being minted. */
   apiKey?: string
   /** The fingerprint the server stored for the issued key, shown while it is concealed. */
   keyPrefix?: string
@@ -91,10 +92,12 @@ export function SetupSheet({
   isChecking: boolean
   checkFailed: boolean
   keyError: unknown
+  /** Whether the key the sheet asked for as it opened is still on its way. */
+  isMintingKey: boolean
   isCreatingKey: boolean
   skipError: unknown
   isSkipping: boolean
-  /** Mints the key. Nothing is minted until somebody asks, so leaving first leaves no key behind. */
+  /** Mints a key on a press, replacing any setup key the workspace holds. */
   onCreateKey: () => void
   onCheckNow: () => void
   onSkip: () => void
@@ -239,31 +242,39 @@ export function SetupSheet({
           // Not a `CopyField` holding an empty string: every credential field
           // here conceals, so an empty one would show the same run of bullets a
           // real key does and invite a copy that yields nothing. The field
-          // arrives with the key it is for.
+          // arrives with the key it is for. The sheet mints one as it opens; the
+          // button is for when that failed, or found a key someone else holds.
           <div className="flex flex-col items-start gap-2">
             <span className="text-emphasis">Your API key</span>
-            <Button
-              variant="primary"
-              isPending={isCreatingKey}
-              onPress={onCreateKey}
-            >
-              Create API key
-            </Button>
+            {isMintingKey ? (
+              <p
+                aria-live="polite"
+                className="border-border bg-surface-alt text-mono-caption text-subtle border px-3 py-2"
+              >
+                Creating your API key…
+              </p>
+            ) : (
+              <Button
+                variant="primary"
+                isPending={isCreatingKey}
+                onPress={onCreateKey}
+              >
+                Create API key
+              </Button>
+            )}
           </div>
         )}
-        {apiKey === undefined && issuedKey ? (
-          isUsingIssuedKey ? (
-            <p className="text-caption text-subtle">
-              The examples read it from <code>{SNIPPET_KEY_ENV_VAR}</code> in
-              your environment.
-            </p>
-          ) : null
-        ) : (
+        {apiKey !== undefined ? (
           <p className="text-caption text-subtle">
             Shown once. Reveal it to read it, or copy it without. Set it as{" "}
             <code>{SNIPPET_KEY_ENV_VAR}</code> in your environment.
           </p>
-        )}
+        ) : issuedKey && isUsingIssuedKey ? (
+          <p className="text-caption text-subtle">
+            The examples read it from <code>{SNIPPET_KEY_ENV_VAR}</code> in your
+            environment.
+          </p>
+        ) : null}
       </DialogSection>
 
       <DialogSection>

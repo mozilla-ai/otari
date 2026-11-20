@@ -51,6 +51,7 @@ from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
 from gateway.core.sql import utc_iso
 from gateway.exceptions.organizations_exceptions import (
+    SetupKeyAlreadyIssuedError,
     WorkspaceActivationUnavailableError,
     WorkspaceAlreadyActivatedError,
 )
@@ -214,8 +215,8 @@ class WorkspaceActivationPublic(BaseModel):
 class ActivationApiKeyPublic(BaseModel):
     """The API key the guide hands out, with its plaintext.
 
-    Returned once, on the press that asked for it, and never stored in
-    plaintext, like every other key this gateway mints.
+    Returned once, when the guide opens or is asked for a replacement, and
+    never stored in plaintext, like every other key this gateway mints.
     """
 
     key: str
@@ -286,6 +287,7 @@ class WorkspaceActivationService:
         *,
         user: User,
         workspace_id: uuid.UUID,
+        replace: bool = True,
         growth: GrowthSignalPort | None = None,
         background_tasks: BackgroundTasks | None = None,
     ) -> ActivationApiKeyPublic:
@@ -293,6 +295,11 @@ class WorkspaceActivationService:
 
         One row per workspace, rotated in place, so a second press or a second
         manager leaves one key on the Keys page rather than two.
+
+        With ``replace`` false, a key that still authenticates is refused rather
+        than rotated (``SetupKeyAlreadyIssuedError``), whoever holds it. The sheet
+        asks this way as it opens, and the check runs under the row lock, so two
+        tabs or two managers opening it at once leave the first key working.
 
         Refuses once the workspace has activated or the guide was dismissed: a
         retired flow does not get to keep handing out credentials, and a stale
@@ -328,6 +335,8 @@ class WorkspaceActivationService:
             alias=user.full_name or user.email,
         )
         record = await self._existing_key(state)
+        if not replace and record is not None and key_refusal(record, datetime.now(UTC)) is None:
+            raise SetupKeyAlreadyIssuedError
         inserted = record is None
         if record is None:
             record = APIKey(
@@ -382,10 +391,10 @@ class WorkspaceActivationService:
     async def dismiss(self, *, user: User, workspace_id: uuid.UUID) -> None:
         """Retire the guide for this workspace. Permanent, and idempotent.
 
-        The key the guide issued is left as it is. It is minted only on a press,
-        so an unused one means "not used *yet*": revoking it would break the
-        likeliest sequence in the flow, which is copy the key, Skip, and have the
-        first request answer 401. A key's lifecycle belongs to the Keys page.
+        The key the guide issued is left as it is. An unused one may mean "not
+        used *yet*": revoking it would break the likeliest sequence in the flow,
+        which is copy the key, Skip, and have the first request answer 401. A
+        key's lifecycle belongs to the Keys page.
         """
         workspace = await self._resolve_manageable(user=user, workspace_id=workspace_id)
         state = await self._state_for_update(workspace.id)

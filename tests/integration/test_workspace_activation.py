@@ -21,6 +21,7 @@ from gateway.auth.models import hash_key
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.organizations_exceptions import (
     NotAuthorizedError,
+    SetupKeyAlreadyIssuedError,
     WorkspaceActivationUnavailableError,
     WorkspaceAlreadyActivatedError,
     WorkspaceNotFoundError,
@@ -336,6 +337,44 @@ async def test_rotating_the_key_moves_its_owner_to_whoever_asked_last(async_db: 
     keys = await _keys_in(async_db, workspace.id)
     assert len(keys) == 1
     assert keys[0].user_id == str(admin.id)
+
+
+async def test_asking_without_replace_never_rotates_a_key_another_manager_holds(async_db: AsyncSession) -> None:
+    """The sheet asks this way as it opens, so opening it cannot break a key someone pasted."""
+    organization = await _organization(async_db, slug="acme-no-replace")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    admin = await _member(async_db, organization, role="admin", full_name="Admin")
+    workspace = await _workspace(async_db, organization, name="Engineering", owner=owner)
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
+
+    first = await service.issue_api_key(user=owner, workspace_id=workspace.id, replace=False)
+    with pytest.raises(SetupKeyAlreadyIssuedError):
+        await service.issue_api_key(user=admin, workspace_id=workspace.id, replace=False)
+    with pytest.raises(SetupKeyAlreadyIssuedError):
+        await service.issue_api_key(user=owner, workspace_id=workspace.id, replace=False)
+
+    keys = await _keys_in(async_db, workspace.id)
+    assert len(keys) == 1
+    assert keys[0].key_hash == hash_key(first.key)
+    assert keys[0].user_id == str(owner.id)
+
+
+async def test_asking_without_replace_reissues_a_key_that_no_longer_authenticates(async_db: AsyncSession) -> None:
+    """A revoked or expired key serves nobody, so the sheet opening hands out a working one in its place."""
+    owner, workspace = await _setup(async_db, slug="acme-no-replace-revoked")
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
+    issued = await service.issue_api_key(user=owner, workspace_id=workspace.id, replace=False)
+    record = await async_db.get(APIKey, issued.key_id)
+    assert record is not None
+    record.is_active = False
+    await async_db.commit()
+
+    reissued = await service.issue_api_key(user=owner, workspace_id=workspace.id, replace=False)
+
+    assert reissued.key_id == issued.key_id
+    assert reissued.key != issued.key
+    await async_db.refresh(record)
+    assert key_refusal(record, datetime.now(UTC)) is None
 
 
 async def test_issuing_the_key_is_refused_once_the_workspace_has_activated(async_db: AsyncSession) -> None:

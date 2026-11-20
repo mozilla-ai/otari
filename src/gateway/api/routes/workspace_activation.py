@@ -18,8 +18,9 @@ identify: the call issues a key and rotates the previous one.
 """
 
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 
 from gateway.api.deps import (
     CurrentIdentity,
@@ -64,16 +65,30 @@ async def create_workspace_activation_key(
     workspace_id: uuid.UUID,
     growth: PersonGrowthSignalPortDep,
     background_tasks: BackgroundTasks,
+    replace: Annotated[
+        bool,
+        Query(
+            description=(
+                "Whether to rotate a setup key that still authenticates. False answers 409 "
+                "(`setup_key_already_issued`) instead, which is how the guide asks as it opens."
+            )
+        ),
+    ] = True,
 ) -> ActivationApiKeyPublic:
     """Issue the workspace's setup API key, rotating the one the guide already issued.
 
     Workspace owners and admins only, like every other action that changes a
     workspace. The plaintext is returned once and never stored, so a reopened
     guide rotates the same key row rather than collecting a second one, and
-    answers 409 once the workspace has activated or the guide was dismissed.
+    answers 409 once the workspace has activated or the guide was dismissed, or,
+    with ``replace`` false, while a setup key still authenticates.
     """
     return await service.issue_api_key(
-        user=current_identity, workspace_id=workspace_id, growth=growth, background_tasks=background_tasks
+        user=current_identity,
+        workspace_id=workspace_id,
+        replace=replace,
+        growth=growth,
+        background_tasks=background_tasks,
     )
 
 
