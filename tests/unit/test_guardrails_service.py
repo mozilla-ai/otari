@@ -175,12 +175,34 @@ async def test_a_check_with_no_service_configured_says_so() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_check_the_service_failed_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_transport(monkeypatch, lambda _request: httpx.Response(404, json={"detail": "unknown profile"}))
+async def test_a_check_the_service_refused_names_the_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Otari#2993: a `url` that already ends in `/validate` is a 404, and the caller could not tell."""
+    _patch_transport(monkeypatch, lambda _request: httpx.Response(404, json={"detail": "Not Found"}))
     verdict = await run_input_guardrails(
         [GuardrailConfig(profile="prompt-injection", mode="block", on_unavailable="monitor")], "x", default_url=_URL
     )
     assert verdict.results[0].status == "unavailable"
+    assert verdict.results[0].unavailable == "http_404"
+
+
+@pytest.mark.asyncio
+async def test_a_check_that_fails_closed_carries_the_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_transport(monkeypatch, lambda _request: httpx.Response(503))
+    with pytest.raises(GuardrailsNotReachableError) as raised:
+        await run_input_guardrails([GuardrailConfig(profile="prompt-injection", mode="block")], "x", default_url=_URL)
+    assert raised.value.reason == "http_503"
+    assert "503" not in raised.value.public_detail
+
+
+@pytest.mark.asyncio
+async def test_a_check_the_service_could_not_answer_is_a_failed_evaluation(monkeypatch: pytest.MonkeyPatch) -> None:
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    _patch_transport(monkeypatch, refuse)
+    verdict = await run_input_guardrails(
+        [GuardrailConfig(profile="prompt-injection", mode="monitor")], "x", default_url=_URL
+    )
     assert verdict.results[0].unavailable == "evaluation_failed"
 
 
@@ -256,6 +278,34 @@ async def test_unsafe_url_override_rejected_in_block_mode() -> None:
             "x",
             default_url=_URL,
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("url", ["https://guard.example/api?tenant=acme", "https://guard.example/api#top"])
+async def test_a_url_that_is_not_a_base_is_a_malformed_request(url: str) -> None:
+    """`/validate` goes on the end, so it would land inside the query or the fragment."""
+    with pytest.raises(UnsafeURLError, match="query string or a fragment"):
+        await run_input_guardrails([GuardrailConfig(profile="pi", url=url)], "x", default_url=_URL)
+
+
+@pytest.mark.asyncio
+async def test_a_mandated_url_that_is_not_a_base_is_unevaluable(monkeypatch: pytest.MonkeyPatch) -> None:
+    called = False
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(200, json={"profile": "pi", "result": {"valid": True}})
+
+    _patch_transport(monkeypatch, handler)
+    verdict = await run_input_guardrails(
+        [GuardrailConfig(profile="pi", url="https://guard.example/api?tenant=acme", mode="monitor")],
+        "x",
+        default_url=_URL,
+        mandated={"pi"},
+    )
+    assert verdict.results[0].unavailable == "evaluation_failed"
+    assert called is False
 
 
 @pytest.mark.asyncio

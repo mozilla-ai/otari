@@ -88,11 +88,13 @@ def withheld_tool_result(profile: str, *, unchecked: bool = False) -> str:
     )
 
 
-UnavailableReason = Literal["not_configured", "evaluation_failed"]
+UnavailableReason = str
 """Why a guardrail could not run, in words safe to send back to the caller.
 
 ``not_configured`` means no guardrails service was named for the profile.
-``evaluation_failed`` covers every other failure, and the log holds the detail.
+``http_<status>`` means the service answered ``/validate`` with that error
+status. ``evaluation_failed`` covers every other failure, and the log holds
+the detail.
 """
 
 GuardrailStatus = Literal["evaluated", "inconclusive", "unavailable"]
@@ -122,7 +124,8 @@ class GuardrailsNotReachableError(RuntimeError):
 
     Neither message quotes what the endpoint sent back, because an answer can
     echo the prompt. A bad answer is named by its HTTP status, its exception
-    class, or the type of the bad value.
+    class, or the type of the bad value. The status alone also reaches the
+    caller, as :attr:`reason`: it says nothing about where the endpoint is.
     """
 
     def __init__(
@@ -255,6 +258,7 @@ async def _validate_one(
         raise GuardrailsNotReachableError(
             f"guardrail profile {cfg.profile!r} failed against {base_url}: HTTP {exc.response.status_code}",
             public_detail=_unevaluated_detail(cfg.profile),
+            reason=f"http_{exc.response.status_code}",
         ) from exc
     except (httpx.ProtocolError, httpx.DecodingError) as exc:
         raise GuardrailsNotReachableError(
@@ -349,6 +353,26 @@ async def _check_in_process(
     )
 
 
+def require_base_url(url: str) -> None:
+    """Refuse a guardrail ``url`` that ``/validate`` cannot be added to.
+
+    The path goes on the end, so on a URL with a query string or a fragment it
+    would land inside that component and the service would be called at the
+    wrong path.
+
+    Raises:
+        UnsafeURLError: ``url`` carries a query string or a fragment.
+    """
+    if "?" in url or "#" in url:
+        msg = "guardrail URL is a base that '/validate' is added to, so it cannot carry a query string or a fragment"
+        raise UnsafeURLError(msg)
+
+
+async def _check_url(url: str, *, has_credential: bool) -> None:
+    require_base_url(url)
+    await validate_mcp_url(url, has_authorization_token=has_credential)
+
+
 async def check_guardrail_urls(
     guardrails: list[GuardrailConfig],
     *,
@@ -369,11 +393,10 @@ async def check_guardrail_urls(
     mandated = frozenset(mandated or ())
     unsafe: dict[str, UnsafeURLError] = {}
     # Paired with its URL rather than filtered in place, so what reaches
-    # `validate_mcp_url` is a `str` and not a `str | None` narrowed by
-    # inspection.
+    # `_check_url` is a `str` and not a `str | None` narrowed by inspection.
     checked = [(g.profile, g.url) for g in guardrails if g.url is not None]
     outcomes = await asyncio.gather(
-        *(validate_mcp_url(url, has_authorization_token=bool(credentials.get(profile))) for profile, url in checked),
+        *(_check_url(url, has_credential=bool(credentials.get(profile))) for profile, url in checked),
         return_exceptions=True,
     )
     for (profile, _), outcome in zip(checked, outcomes, strict=True):
