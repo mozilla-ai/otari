@@ -96,6 +96,43 @@ def provider_failure_http_exc(
     )
 
 
+def _timeout_detail(failures: Sequence[AttemptFailure]) -> str:
+    """504 detail for a plan whose last candidate timed out: all-timed-out only when every one did."""
+    earlier = [failure.error for failure in failures[:-1]]
+    timed_out = sum(1 for error in earlier if upstream_exception_shape(error)[0] == "timeout")
+    if timed_out == len(earlier):
+        return ALL_ATTEMPTS_TIMED_OUT_DETAIL
+    refused = sum(1 for error in earlier if _refused_the_request(error))
+    other = len(earlier) - refused - timed_out
+    noun = "candidate" if len(earlier) == 1 else "candidates"
+    kinds = [
+        (count, text)
+        for count, text in (
+            (refused, "refused the request"),
+            (timed_out, "timed out"),
+            (other, "failed for another reason"),
+        )
+        if count
+    ]
+    if len(kinds) == 1:
+        return f"The last candidate timed out; the {len(earlier)} earlier {noun} {kinds[0][1]}."
+    parts = [f"{count} {text}" for count, text in kinds]
+    listed = f"{', '.join(parts[:-1])} and {parts[-1]}"
+    return f"The last candidate timed out; of the {len(earlier)} earlier {noun}, {listed}."
+
+
+def _refused_the_request(exc: BaseException) -> bool:
+    """Whether the caller would get a 400 or 413 for this failure that sending the request again would repeat.
+
+    Read from the mapped answer, not the upstream status, so a refusal raised with no status counts while a
+    rejected credential (424), an unknown model (404) and a schema miss that may pass next time do not.
+    """
+    answer = provider_failure_http_exc(exc, fallback_detail="")
+    if answer.status_code not in (status.HTTP_400_BAD_REQUEST, status.HTTP_413_CONTENT_TOO_LARGE):
+        return False
+    return error_code_of(answer.headers) != STRUCTURED_OUTPUT_FAILED
+
+
 def all_attempts_rejected_detail(tried: int, reason: str | None = None) -> str:
     """400 detail for a request every attempt rejected as invalid, with the reason when they all gave one."""
     if reason is None:
@@ -529,7 +566,7 @@ async def walk_attempts(
         on_terminal(last_failed or attempts[-1])
     single = len(failures) <= 1
     if last_exc is not None and upstream_exception_shape(last_exc)[0] == "timeout":
-        detail = "LLM provider timeout" if single else ALL_ATTEMPTS_TIMED_OUT_DETAIL
+        detail = "LLM provider timeout" if single else _timeout_detail(failures)
         raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=detail) from last_exc
     if single and last_exc is not None:
         raise provider_failure_http_exc(last_exc, fallback_detail="LLM provider error") from last_exc
