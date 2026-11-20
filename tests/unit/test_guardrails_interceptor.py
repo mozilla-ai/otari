@@ -504,6 +504,71 @@ def _answering(*results: GuardrailResult) -> Callable[..., Any]:
 
 
 @pytest.mark.asyncio
+async def test_a_block_names_what_fired_beside_the_explanation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Otari#2982: with ``explanation`` null, the categories are what tells prompt defense from PII."""
+    flagged = GuardrailResult(
+        profile="lakera", mode="block", valid=False, score=1.0, categories=("prompt_attack", "pii/phone_number")
+    )
+    monkeypatch.setattr("gateway.api.routes._guardrails.run_input_guardrails", _answering(flagged))
+
+    with pytest.raises(HTTPException) as exc:
+        await apply_input_guardrails([GuardrailConfig(profile="lakera", mode="block")], "x", response=Response())
+
+    assert exc.value.status_code == 403
+    assert cast(dict[str, Any], exc.value.detail)["guardrails"] == [
+        {"profile": "lakera", "explanation": None, "score": 1.0, "categories": ["prompt_attack", "pii/phone_number"]}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_block_that_names_nothing_says_so_with_an_empty_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    flagged = GuardrailResult(profile="pi", mode="block", valid=False, explanation="bad", score=0.9)
+    monkeypatch.setattr("gateway.api.routes._guardrails.run_input_guardrails", _answering(flagged))
+
+    with pytest.raises(HTTPException) as exc:
+        await apply_input_guardrails([GuardrailConfig(profile="pi", mode="block")], "x", response=Response())
+
+    [entry] = cast(dict[str, Any], exc.value.detail)["guardrails"]
+    assert entry["categories"] == []
+    assert entry["explanation"] == "bad"
+
+
+@pytest.mark.asyncio
+async def test_a_refused_answer_names_what_fired(monkeypatch: pytest.MonkeyPatch) -> None:
+    flagged = GuardrailResult(profile="mod", mode="block", valid=False, categories=("hate",))
+    monkeypatch.setattr("gateway.api.routes._guardrails.run_input_guardrails", _answering(flagged))
+    guardrails = RequestGuardrails([GuardrailConfig(profile="mod", mode="block", on=["output"])], response=Response())
+
+    with pytest.raises(AnswerRefused) as exc:
+        await guardrails.finish_answer([_part("an answer")])
+
+    assert cast(dict[str, Any], exc.value.detail)["guardrails"][0]["categories"] == ["hate"]
+
+
+@pytest.mark.asyncio
+async def test_a_monitor_header_names_what_fired_only_when_something_did(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A monitor verdict has no body, so the header is where a caller reads what fired."""
+    monkeypatch.setattr(
+        "gateway.api.routes._guardrails.run_input_guardrails",
+        _answering(
+            GuardrailResult(profile="lakera", mode="monitor", valid=False, categories=("prompt_attack",)),
+            GuardrailResult(profile="pii", mode="monitor", valid=False),
+        ),
+    )
+    response = Response()
+
+    await apply_input_guardrails(
+        [GuardrailConfig(profile="lakera", mode="monitor"), GuardrailConfig(profile="pii", mode="monitor")],
+        "x",
+        response=response,
+    )
+
+    lakera, pii = json.loads(response.headers[GUARDRAILS_RESULT_HEADER])
+    assert lakera["categories"] == ["prompt_attack"]
+    assert "categories" not in pii
+
+
+@pytest.mark.asyncio
 async def test_a_check_records_what_fired_on_the_trace(monkeypatch: pytest.MonkeyPatch) -> None:
     recorded: list[dict[str, Any]] = []
 
