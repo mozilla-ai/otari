@@ -37,6 +37,7 @@ from gateway.core.error_codes import (
     error_code_of,
     error_headers,
 )
+from gateway.core.error_details import ProviderDetail
 from gateway.log_config import logger
 from gateway.services.inference import (
     UpstreamFailure,
@@ -95,9 +96,11 @@ def provider_failure_http_exc(
     )
 
 
-def all_attempts_rejected_detail(tried: int) -> str:
-    """400 detail for a request every attempt rejected as invalid."""
-    return f"No model accepted the request ({tried} attempts). Check the request parameters."
+def all_attempts_rejected_detail(tried: int, reason: str | None = None) -> str:
+    """400 detail for a request every attempt rejected as invalid, with the reason when they all gave one."""
+    if reason is None:
+        return f"No model accepted the request ({tried} attempts). Check the request parameters."
+    return f"No model accepted the request ({tried} attempts): {reason}"
 
 
 def prompt_too_long_for_every_attempt_detail(tried: int) -> str:
@@ -139,6 +142,7 @@ def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | Non
     """The answer for attempts that all rejected the request alike, or ``None`` when they failed differently.
 
     The detail is the gateway's own, because one provider's message does not explain why the whole plan failed.
+    A 400 every attempt worded alike is the exception: that sentence is why the plan failed.
     """
     if len(errors) < 2:
         return None
@@ -196,9 +200,11 @@ def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | Non
         )
     # NOTE: Some 400s are the gateway's fault, such as a provider rejecting a model ID it does not serve.
     # The status cannot tell them apart, so such a plan blames the request.
+    reasons = {answer.detail for answer in answers}
+    shared = reasons.pop() if len(reasons) == 1 else ProviderDetail.BAD_REQUEST
     return HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
-        detail=all_attempts_rejected_detail(len(errors)),
+        detail=all_attempts_rejected_detail(len(errors), None if shared == ProviderDetail.BAD_REQUEST else shared),
         headers=error_headers(ALL_CANDIDATES_REJECTED),
     )
 
