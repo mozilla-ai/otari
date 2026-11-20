@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import errno
 import math
+import os
 import ssl
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
@@ -80,8 +81,9 @@ def _transport_detail(exc: BaseException) -> str | None:
     if isinstance(exc, ssl.SSLError):
         return exc.reason
     if isinstance(exc, OSError) and isinstance(exc.errno, int):
-        name = errno.errorcode.get(exc.errno, str(exc.errno))
-        return f"{name} {exc.strerror}" if exc.strerror else name
+        # The text comes from the errno, not ``strerror``, which any caller can set.
+        name = errno.errorcode.get(exc.errno)
+        return f"{name} {os.strerror(exc.errno)}" if name else f"errno {exc.errno}"
     return None
 
 

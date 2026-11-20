@@ -8,6 +8,7 @@ response. The tests pin that boundary, ordering, and exhausted-plan status.
 import asyncio
 import errno
 import logging
+import os
 import ssl
 import uuid
 from typing import Any, Literal, cast
@@ -1052,10 +1053,14 @@ def test_failure_cause_follows_any_llms_original_exception() -> None:
     assert failure_cause(exc) == f"PinnedTransportError: {_REFUSED}"
 
 
-def test_failure_cause_names_a_socket_error_by_its_errno() -> None:
-    exc = _wrapped(ConnectionResetError(errno.ECONNRESET, "Connection reset by peer"))
+def test_failure_cause_names_a_socket_error_by_its_errno_alone() -> None:
+    exc = _wrapped(ConnectionResetError(errno.ECONNRESET, "invalid request: confidential acquisition plan"))
 
-    assert failure_cause(exc) == "ConnectionResetError: ECONNRESET Connection reset by peer"
+    assert failure_cause(exc) == f"ConnectionResetError: ECONNRESET {os.strerror(errno.ECONNRESET)}"
+
+
+def test_failure_cause_names_an_unknown_errno_by_its_number() -> None:
+    assert failure_cause(OSError(-2, "invalid request: confidential acquisition plan")) == "OSError: errno -2"
 
 
 def test_failure_cause_names_a_tls_error_by_its_reason() -> None:
@@ -1106,6 +1111,10 @@ async def test_a_failed_attempt_logs_why_it_failed(caplog: pytest.LogCaptureFixt
     [
         (RuntimeError("Invalid prompt: confidential acquisition plan"), "RuntimeError"),
         (httpx.ConnectError("invalid request: confidential acquisition plan"), "ConnectError"),
+        (
+            _wrapped(PermissionError(errno.EACCES, "invalid request: confidential acquisition plan")),
+            f"PermissionError: EACCES {os.strerror(errno.EACCES)}",
+        ),
     ],
 )
 async def test_a_failed_attempt_never_logs_echoed_request_text(
