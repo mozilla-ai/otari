@@ -28,7 +28,12 @@ from fastapi import HTTPException, Response, status
 from gateway.api.routes._guardrail_targets import AnswerPart, RequestTarget
 from gateway.api.routes._helpers import GUARDRAILS_RESULT_HEADER
 from gateway.core.env import otari_env
-from gateway.core.error_codes import GUARDRAIL_VIOLATION, error_headers
+from gateway.core.error_codes import (
+    GUARDRAIL_NOT_CONFIGURED,
+    GUARDRAIL_UNAVAILABLE,
+    GUARDRAIL_VIOLATION,
+    error_headers,
+)
 from gateway.exceptions.guardrails_exceptions import AnswerRefused
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig, GuardrailDirection
@@ -112,7 +117,8 @@ class RequestGuardrails:
 
     A ``block`` entry that cannot be evaluated and fails closed
     (see :func:`gateway.services.guardrails.run_input_guardrails`) refuses
-    input or an answer with a ``502`` or a ``403``, and withholds a tool result or
+    input with a ``502`` (a ``424`` when no service is configured for it) and an
+    answer with a ``403``, and withholds a tool result or
     skips a tool call. Every verdict is summarized per profile on the
     :data:`GUARDRAILS_RESULT_HEADER` response header and recorded on the
     request's trace. The header is set on the injected ``response``, so what is
@@ -180,8 +186,9 @@ class RequestGuardrails:
                 502 or a recorded inconclusive instead, per its own settings);
                 ``403`` when a ``block`` guardrail flags the input; ``502`` when a
                 ``block`` guardrail that fails closed can't evaluate
-                the input. The 502 body names the profile and not the endpoint,
-                which goes to the log instead.
+                the input, or ``424`` when that is because no guardrails service
+                is configured for it. The body names the profile and not the
+                endpoint, which goes to the log instead.
         """
         if not self._guardrails:
             return
@@ -341,10 +348,19 @@ class RequestGuardrails:
         if content.target.event == "before_model":
             # An error response does not carry the injected response's headers,
             # so the summary, whose `reason` says why, goes on the exception.
+            headers = {GUARDRAILS_RESULT_HEADER: self._header_value()}
+            if exc.reason == "not_configured":
+                # Not a 5xx: clients retry one, and no retry configures a service.
+                # Still a refusal, since an enforcing check that cannot run is never skipped.
+                raise HTTPException(
+                    status_code=status.HTTP_424_FAILED_DEPENDENCY,
+                    detail=exc.public_detail,
+                    headers=headers | error_headers(GUARDRAIL_NOT_CONFIGURED),
+                ) from exc
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=exc.public_detail,
-                headers={GUARDRAILS_RESULT_HEADER: self._header_value()},
+                headers=headers | error_headers(GUARDRAIL_UNAVAILABLE),
             ) from exc
         raise _Unchecked(profile) from exc
 
