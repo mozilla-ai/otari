@@ -1045,11 +1045,20 @@ def test_failure_cause_follows_any_llms_original_exception() -> None:
 
 
 def test_failure_cause_caps_a_long_message() -> None:
-    cause = failure_cause(RuntimeError("x" * 1000))
+    cause = failure_cause(httpx.ConnectError("x" * 1000))
 
-    assert cause.startswith("RuntimeError: xxx")
+    assert cause.startswith("ConnectError: xxx")
     assert cause.endswith("...")
-    assert len(cause) == len("RuntimeError: ") + 300
+    assert len(cause) == len("ConnectError: ") + 300
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [RuntimeError("Invalid prompt: confidential acquisition plan"), _http_error(400)],
+)
+def test_failure_cause_names_a_provider_error_by_its_type_alone(exc: BaseException) -> None:
+    """A provider's error text can echo the request, so none of it reaches the log."""
+    assert failure_cause(exc) == type(exc).__name__
 
 
 def test_failure_cause_of_an_exception_with_no_message_is_its_type() -> None:
@@ -1071,3 +1080,20 @@ async def test_a_failed_attempt_logs_why_it_failed(caplog: pytest.LogCaptureFixt
     [line] = [record.getMessage() for record in caplog.records if record.getMessage().startswith("Attempt failed")]
     assert "error=conn_err" in line
     assert line.endswith("cause=ConnectError: endpoint refused: destination resolves to a private address")
+
+
+@pytest.mark.asyncio
+async def test_a_failed_attempt_never_logs_the_providers_error_text(caplog: pytest.LogCaptureFixture) -> None:
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.WARNING, logger="gateway")
+    try:
+        await _walk(
+            [_attempt(1, "gpt-5-mini"), _attempt(2, "claude-haiku-4-5", instance="anthropic")],
+            [RuntimeError("Invalid prompt: confidential acquisition plan"), "ok"],
+        )
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+    [line] = [record.getMessage() for record in caplog.records if record.getMessage().startswith("Attempt failed")]
+    assert "confidential" not in line
+    assert line.endswith("cause=RuntimeError")

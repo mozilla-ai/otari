@@ -21,6 +21,8 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
+import httpx
+import httpx2
 from fastapi import HTTPException, status
 
 from gateway.api.routes._attempt_metrics import record_abandoned_attempt
@@ -67,15 +69,19 @@ LOCKED_IN_DETAIL = (
     "The routing policy's backups were not tried: a gateway-run tool had already run on this model, "
     "and a tool loop cannot move to another provider."
 )
-# A provider can echo a whole request back in its error.
 _MAX_LOGGED_CAUSE_CHARS = 300
+# Raised by the local network stack, so their text describes the connection,
+# never a provider's body, which can echo the request.
+_TRANSPORT_ERRORS = (httpx.TransportError, httpx2.TransportError, OSError)
 
 
 def failure_cause(exc: BaseException) -> str:
-    """The innermost exception behind ``exc``, as ``Type: message``, for the operator's log.
+    """The innermost exception behind ``exc``, for the operator's log.
 
     A provider SDK raises its own connection error with a fixed message ("Connection
     error."), so why the connection failed is only on the exception it was raised from.
+    That exception's message is kept only for a transport error; anything else is named
+    by its type alone.
     """
     current = exc
     seen = {id(current)}
@@ -86,6 +92,8 @@ def failure_cause(exc: BaseException) -> str:
             break
         seen.add(id(parent))
         current = parent
+    if not isinstance(current, _TRANSPORT_ERRORS):
+        return type(current).__name__
     message = " ".join(str(current).split())
     if len(message) > _MAX_LOGGED_CAUSE_CHARS:
         message = message[: _MAX_LOGGED_CAUSE_CHARS - len("...")] + "..."
