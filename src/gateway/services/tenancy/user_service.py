@@ -32,7 +32,7 @@ Departures from the port, each for a reason that belongs to this edition:
   organization; a deployment with no overlay is one tenant with several people in
   it (`organization_service`'s own docstring), so this edition's signup
   completes an identity `organization_service.create_active_organization_member_for_user`
-  or ``invite_active_organization_member_for_user`` already put on the roster,
+  or ``invite_active_organization_member_for_user`` already added to an organization,
   password-less. An address nobody has touched is refused rather than
   onboarded from nothing.
 - **Verification and reset tokens are opaque and hashed at rest, not JWTs.**
@@ -45,7 +45,7 @@ Departures from the port, each for a reason that belongs to this edition:
   until it expires; this port closes that gap rather than carrying it over.
 
 An identity with an address and no password is the normal state for someone an
-admin added to the roster (`organization_service`); ``create_user_for_signup``
+admin added to an organization (`organization_service`); ``create_user_for_signup``
 below is what gives it a way to sign in.
 """
 
@@ -282,7 +282,7 @@ async def update_full_name(db: AsyncSession, identity: User, *, full_name: str |
     """Set the name an identity goes by, or clear it, and commit.
 
     Whitespace is collapsed to single spaces and a value that holds nothing else
-    becomes NULL, which is the same state an identity starts in: a roster entry
+    becomes NULL, which is the same state an identity starts in: a member
     added by address has no name until somebody supplies one, and going back to
     that has to be reachable from the surface that supplies it. Every reader
     already falls back to the address, so clearing is a choice rather than a
@@ -329,8 +329,8 @@ async def unverified_identity_is_claimable(
     A verified identity is not this rule's business. Where signup is closed, an
     unverified one is claimable only while it has an active membership or an
     invitation it can still accept: revoking, declining or outliving an
-    invitation, or removing the member, leaves the identity behind, and nobody
-    on the roster still wants it. Every way into an unverified identity asks
+    invitation, or removing the member, leaves the identity behind, and no
+    organization still wants it. Every way into an unverified identity asks
     this at the moment it would let someone in, so a link minted while the
     identity was wanted stops working once it is not.
     """
@@ -409,7 +409,7 @@ async def create_user_for_signup(
     terms_accepted: bool = False,
     proof: AddressProof | None = None,
 ) -> User | None:
-    """Claim an identity ``organization_service`` already put on the roster, register a new
+    """Claim an identity ``organization_service`` already added to an organization, register a new
     one where the deployment allows it, or do nothing.
 
     Which of the three depends on ``open_signup`` (otari-ai#2100). Off, the
@@ -817,7 +817,7 @@ async def reset_password(
     as ``organization_service.accept_invitation`` and ``verify_email`` above.
 
     Where ``open_signup`` is off, an unverified identity is held to signup's
-    rule again here, because the roster can drop it after the link was mailed.
+    rule again here, because an organization can drop it after the link was mailed.
     A link mailed before its address was blocked is refused as invalid, and so
     is one whose identity some organization's own SSO enforcement now refuses.
     """
