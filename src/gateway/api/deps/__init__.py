@@ -24,6 +24,7 @@ from gateway.api.deps._caller import (
     CallerWorkspaceQuery,
     CallerWorkspaces,
 )
+from gateway.api.deps._deployment_access import deployment_administration_access
 from gateway.api.deps.api_keys import (
     ApiKeyFormatPortDep,
     ApiKeyServiceDep,
@@ -60,6 +61,7 @@ from gateway.api.deps.budgets import (
     build_budget_service,
     get_budget_service,
 )
+from gateway.api.deps.catalog import SelectorReindexDep, get_selector_reindex
 from gateway.api.deps.identity import (
     CurrentIdentity,
     DeploymentAdministrationAccessDep,
@@ -111,6 +113,7 @@ from gateway.api.deps.ports import (
     RequestSessionModelProviderPortDep,
     SignupInvitePortDep,
     TelemetryStoragePortDep,
+    account_country_port_on,
     billing_port_on,
     get_agent_model_recommender_port,
     get_api_key_format_port,
@@ -296,7 +299,6 @@ from gateway.services.routing import (
 )
 from gateway.services.tenancy import OrganizationService, organization_guardrail_runner
 from gateway.services.tenancy.authorization import WorkspaceAccess
-from gateway.services.tenancy.deployment_user_service import DeploymentAdministrationAccess
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService, refresh_org_provider_cache
 from gateway.services.tenancy.organization_guardrail_definition_service import (
     OrganizationGuardrailDefinitionService,
@@ -481,7 +483,7 @@ def get_overview_service(
     return OverviewService(
         OverviewRepository(db),
         OrganizationService(db, membership_listener=None),
-        DeploymentAdministrationAccess(db),
+        deployment_administration_access(db),
         # The listener is for writes; this service only reads, and the same
         # pairing is what `get_workspace_service` builds.
         WorkspaceService(db, uow=uow, membership_listener=membership_listener),
@@ -854,7 +856,7 @@ async def master_key_caller_operates_deployment(
     ``DeploymentAdministrationAccess.has_administration_access``; without one, the caller holds the master key.
     """
     if session_identity is not None:
-        return await DeploymentAdministrationAccess(db).has_administration_access(session_identity)
+        return await deployment_administration_access(db).has_administration_access(session_identity)
     return True
 
 
@@ -1232,6 +1234,7 @@ __all__ = [
     "SearchCatalogCallerDep",
     "SearchToolServiceDep",
     "SearchToolTesterDep",
+    "SelectorReindexDep",
     "ServiceKey",
     "SignupInvitePortDep",
     "TRACE_CONTENT_HEADER_INVALID_DETAIL",
@@ -1255,6 +1258,7 @@ __all__ = [
     "WorkspaceServiceDep",
     "WorkspaceWebSearchPoliciesDep",
     "WorkspaceWebSearchServiceDep",
+    "account_country_port_on",
     "asks_to_keep_trace_content",
     "billing_port_on",
     "build_budget_service",
@@ -1318,6 +1322,7 @@ __all__ = [
     "get_search_catalog_caller",
     "get_search_tool_service",
     "get_search_tool_tester",
+    "get_selector_reindex",
     "get_session_identity",
     "get_signup_invite_port",
     "get_telemetry_storage_port",

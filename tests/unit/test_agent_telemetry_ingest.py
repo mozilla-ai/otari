@@ -18,6 +18,7 @@ from gateway.ports.telemetry_storage_port import IngestResult, TelemetryRecord, 
 from gateway.services.agent_telemetry_service import ingest
 
 _TS = datetime(2026, 8, 6, tzinfo=UTC)
+_ADMITTED = datetime(2026, 8, 6, 12, tzinfo=UTC)
 
 
 def _record(dedup_key: str) -> TelemetryRecord:
@@ -47,15 +48,19 @@ def _storage(result: IngestResult) -> AsyncMock:
 
 @pytest.mark.asyncio
 async def test_ingest_hands_the_export_to_storage_with_its_attribution() -> None:
-    """The key and user the export authenticated as travel with the records."""
+    """The key and user the export authenticated as, and when it was let in, travel with the records."""
     storage = _storage(IngestResult(accepted=2))
     api_key = APIKey(id="key-1", user_id="alice", key_hash="h")
     records = [_record("dedup-0"), _record("dedup-1")]
 
-    result = await ingest(_db("alice"), records, api_key=api_key, storage=cast(TelemetryStoragePort, storage))
+    result = await ingest(
+        _db("alice"), records, api_key=api_key, storage=cast(TelemetryStoragePort, storage), admitted_at=_ADMITTED
+    )
 
     assert result.accepted == 2
-    storage.record.assert_awaited_once_with(api_key_id="key-1", user_id="alice", records=tuple(records))
+    storage.record.assert_awaited_once_with(
+        api_key_id="key-1", user_id="alice", records=tuple(records), admitted_at=_ADMITTED
+    )
 
 
 @pytest.mark.asyncio
@@ -65,7 +70,13 @@ async def test_ingest_rejects_an_export_from_a_soft_deleted_user() -> None:
     storage = _storage(IngestResult())
     api_key = APIKey(id="key-1", user_id="alice", key_hash="h")
 
-    result = await ingest(_db(None), [_record("dedup-0")], api_key=api_key, storage=cast(TelemetryStoragePort, storage))
+    result = await ingest(
+        _db(None),
+        [_record("dedup-0")],
+        api_key=api_key,
+        storage=cast(TelemetryStoragePort, storage),
+        admitted_at=_ADMITTED,
+    )
 
     assert (result.accepted, result.rejected) == (0, 1)
     storage.record.assert_not_awaited()
@@ -77,7 +88,11 @@ async def test_ingest_rejects_an_export_from_a_key_with_no_user() -> None:
     api_key = APIKey(id="key-1", user_id=None, key_hash="h")
 
     result = await ingest(
-        _db("alice"), [_record("dedup-0")], api_key=api_key, storage=cast(TelemetryStoragePort, storage)
+        _db("alice"),
+        [_record("dedup-0")],
+        api_key=api_key,
+        storage=cast(TelemetryStoragePort, storage),
+        admitted_at=_ADMITTED,
     )
 
     assert result.rejected == 1
@@ -91,7 +106,7 @@ async def test_ingest_short_circuits_an_empty_export_before_the_gate() -> None:
     db = _db("alice")
     api_key = APIKey(id="key-1", user_id="alice", key_hash="h")
 
-    result = await ingest(db, [], api_key=api_key, storage=cast(TelemetryStoragePort, storage))
+    result = await ingest(db, [], api_key=api_key, storage=cast(TelemetryStoragePort, storage), admitted_at=_ADMITTED)
 
     assert (result.accepted, result.duplicate, result.rejected) == (0, 0, 0)
     storage.record.assert_not_awaited()

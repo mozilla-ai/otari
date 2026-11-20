@@ -1,6 +1,6 @@
 """Deployment-wide account administration.
 
-Thin composition over `gateway.services.tenancy.deployment_user_service`, which
+Thin composition over `gateway.services.identity`'s deployment user service, which
 carries the whole of the reasoning: who counts as an operator, why a refusal is a
 404, and which two changes are guarded against locking a deployment out of
 itself.

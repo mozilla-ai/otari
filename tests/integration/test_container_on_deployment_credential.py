@@ -178,10 +178,13 @@ def test_a_streamed_container_id_is_refused_on_the_deployments_credential(client
 
 
 def test_a_request_with_no_container_is_served_on_the_deployments_credential(client: TestClient) -> None:
-    response, provider = _messages(client, FLEET, None)
+    # OpenAI's own API answers Messages requests through the Responses bridge.
+    bridged = AsyncMock(return_value=_response())
+    with patch("gateway.services.inference._messages_responses_bridge.aresponses", new=bridged):
+        response, _ = _messages(client, FLEET, None)
 
     assert response.status_code == status.HTTP_200_OK, response.text
-    assert provider.call_args.kwargs["api_key"] == "fleet-key"
+    assert bridged.call_args.kwargs["api_key"] == "fleet-key"
 
 
 def test_a_container_id_reaches_the_callers_own_credential(client: TestClient) -> None:

@@ -36,10 +36,12 @@ certain, as otari's domain policy, checks the results itself.
    read the response into the envelope, and write the date parser, the error reader and the cost
    reader. The rules:
    - Send with `self._http.request`, which uses the host's client and the provider's timeout,
-     names the library in the request's `User-Agent` (`any-search/<version>` or
-     `any-fetch/<version>`) and turns a transport failure into a `ProviderError` without its
-     text. An adapter sets no `User-Agent` of its own, even where the provider's SDK names
-     itself: that header is one of two exceptions to the next rule.
+     follows no redirect from the provider's API (a fetched page's redirects are the provider's
+     to follow), names the library in the request's `User-Agent` (`any-search/<version>` or
+     `any-fetch/<version>`), turns a transport failure into a `ProviderError` without its text,
+     and raises `http_error` for any answer below 400 that is not a success. An adapter sets no
+     `User-Agent` of its own, even where the provider's SDK names itself: that header is one of
+     two exceptions to the next rule.
    - By default, send what the provider's own SDK sends, so moving from the SDK changes nothing.
      A caller who wants less passes the native option. What the envelope needs is always asked
      for, and no option turns it off: Exa's page text, Tabstack's metadata, which holds the title.
@@ -501,3 +503,21 @@ The first fetch provider with a cost tier.
 - Fixture recipes: `normal` with `https://example.com/` and `extraction_source=fetch`; `empty`
   with an httpbin `base64` URL holding HTML whose body is empty; `in_body_error` with
   `extraction_source=cache` and a path nobody has fetched; `error` with a made-up key, a 403.
+
+### 2026-11-18, redirects and 3xx answers (both libraries)
+
+Found in CodeRabbit's review of You.com. No adapter turned redirects off, and each took any
+status below 400 as a success; what that cost depended on the provider.
+
+- A key in a header other than `Authorization` follows a redirect to another host. httpx drops
+  `Authorization` on such a redirect but keeps every other header, so the key of Exa
+  (`x-api-key`), Serply (`X-Api-Key`), Brave (`X-Subscription-Token`) or You.com (`X-API-Key`)
+  would reach that host through a host's client set to follow redirects. A Bearer key
+  (DeepSeek, Perplexity, Synthetic, Tavily, Tabstack) was dropped. `self._http.request` turns
+  redirects off per request, whatever the client says, so an adapter needs nothing for it.
+- An answer below 400 is not always a success. A 3xx that is not followed reaches the adapter.
+  Where the result list is optional, its JSON body read as an empty answer (Brave's `web`,
+  You.com search's `results`) or as a page error (You.com fetch's `contents`); where it is
+  required, the adapter already raised `unexpected_response`. `self._http.request` raises
+  `http_error` for it, so an adapter's own check stays `status >= 400`. The conformance suite
+  sends every provider a 302 with a JSON object, through a client set to follow redirects.

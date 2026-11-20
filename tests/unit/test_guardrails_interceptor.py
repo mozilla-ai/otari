@@ -83,6 +83,8 @@ async def test_apply_guardrails_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
     detail = cast(dict[str, Any], exc.value.detail)
     assert detail["code"] == "guardrail_violation"
     assert detail["guardrails"][0]["profile"] == "prompt-injection"
+    # Mapped the documented way, like every other refusal a caller acts on.
+    assert exc.value.headers == {"Otari-Error-Code": "guardrail_violation"}
 
 
 @pytest.mark.asyncio
@@ -150,6 +152,28 @@ async def test_apply_guardrails_unreachable_is_502(monkeypatch: pytest.MonkeyPat
     with pytest.raises(HTTPException) as exc:
         await apply_input_guardrails([GuardrailConfig(profile="prompt-injection")], "x", response=Response())
     assert exc.value.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_the_502_says_why_in_the_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Otari#2993: the refusal is where a caller looks for the cause."""
+
+    async def _runner(*_a: object, **_k: object) -> GuardrailVerdict:
+        failure = GuardrailsNotReachableError("HTTP 404", public_detail="could not be evaluated", reason="http_404")
+        failure.profile = "prompt-injection"
+        raise failure
+
+    monkeypatch.setattr("gateway.api.routes._guardrails.run_input_guardrails", _runner)
+    with pytest.raises(HTTPException) as exc:
+        await apply_input_guardrails(
+            [GuardrailConfig(profile="prompt-injection", mode="block")], "x", response=Response()
+        )
+    assert exc.value.headers is not None
+    header = json.loads(exc.value.headers[GUARDRAILS_RESULT_HEADER])
+    assert header == [
+        {"profile": "prompt-injection", "mode": "block", "valid": None, "score": None}
+        | {"status": "unavailable", "reason": "http_404"}
+    ]
 
 
 _ECHO = "my-private-prompt"

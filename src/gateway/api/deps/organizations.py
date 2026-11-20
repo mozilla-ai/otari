@@ -39,13 +39,13 @@ from gateway.services.organizations import (
     InvitationDelivery,
     InvitationFactsReader,
     InvitationMailLimit,
+    MembershipListener,
+    MembershipListeners,
     OrganizationClaimedDomains,
     UserAccess,
 )
 from gateway.services.tenancy import (
     InvitationClaimSettings,
-    MembershipListener,
-    MembershipListeners,
     OrganizationDomainService,
     OrganizationService,
 )
@@ -117,7 +117,7 @@ def get_invitation_claim_settings(config: Annotated[GatewayConfig, Depends(get_c
     return InvitationClaimSettings(
         terms_url=config.terms_url,
         sign_in_providers=tuple(provider_label(name) for name in config.oauth_providers),
-        can_send_links=Mailer(config).can_send_links,
+        can_deliver_links=Mailer(config).can_deliver_links,
     )
 
 

@@ -109,6 +109,12 @@ def dialect_name(db: AsyncSession) -> str:
 INGEST_LOCK_TIMEOUT_MS = 2000
 
 
+def _values_set_on(rows: Sequence[Any]) -> list[dict[str, Any]]:
+    """The attributes each row has set, so a column a caller left out keeps its default."""
+    columns = {attr.key for attr in sa_inspect(type(rows[0])).column_attrs}
+    return [{key: value for key, value in sa_inspect(row).dict.items() if key in columns} for row in rows]
+
+
 async def insert_ignoring_duplicates(
     db: AsyncSession,
     rows: Sequence[Any],
@@ -131,15 +137,45 @@ async def insert_ignoring_duplicates(
     if not rows:
         return []
     model = type(rows[0])
-    columns = {attr.key for attr in sa_inspect(model).column_attrs}
-    # Only the attributes the caller set, so a column it left out gets its default.
-    values = [{key: value for key, value in sa_inspect(row).dict.items() if key in columns} for row in rows]
+    values = _values_set_on(rows)
     postgres = dialect_name(db) == "postgresql"
     if postgres and lock_timeout_ms is not None:
         await db.execute(text(f"SET LOCAL lock_timeout = {int(lock_timeout_ms)}"))
     insert = postgresql_insert if postgres else sqlite_insert
     statement = insert(model).on_conflict_do_nothing(index_elements=list(conflict)).returning(returning)
     return list((await db.execute(statement, values)).scalars().all())
+
+
+async def insert_replacing_duplicates(
+    db: AsyncSession,
+    rows: Sequence[Any],
+    *,
+    conflict: Sequence[Any],
+    replace: Sequence[Any],
+) -> None:
+    """Insert ORM instances in one statement, replacing ``replace`` on any whose ``conflict`` key exists.
+
+    ``ON CONFLICT DO UPDATE`` rather than a read and then a write: an insert of the
+    same key that another transaction has not committed is waited for and then
+    replaced, where a read would have missed it and collided. Does not commit.
+
+    NOTE: This does not refresh an instance the session already holds, and reading
+    the row again returns that same instance. A caller holding a row it replaced
+    must refresh it (``AsyncSession.refresh``) to see the new values.
+    """
+    if not rows:
+        return
+    model = type(rows[0])
+    values = _values_set_on(rows)
+    insert = postgresql_insert if dialect_name(db) == "postgresql" else sqlite_insert
+    statement = insert(model)
+    await db.execute(
+        statement.on_conflict_do_update(
+            index_elements=list(conflict),
+            set_={column.key: getattr(statement.excluded, column.key) for column in replace},
+        ),
+        values,
+    )
 
 
 def bucket_expr(dialect: str, bucket: BucketGrain, column: Any) -> Any:

@@ -1,4 +1,4 @@
-.PHONY: help dev dashboard test test-unit test-integration test-libs test-frameworks lint lint-python lint-web check-architecture typecheck typecheck-python typecheck-web openapi-check changelog check-migrations
+.PHONY: help dev dashboard test test-unit test-integration test-libs test-frameworks lint lint-python lint-web check-architecture check-baselines typecheck typecheck-python typecheck-web openapi-check changelog check-migrations
 
 help:
 	@printf "Available targets:\n"
@@ -15,6 +15,7 @@ help:
 	@printf "  lint-python Run the pre-commit hooks: architecture, migrations, Ruff lint and format\n"
 	@printf "  lint-web Run Biome over the dashboard\n"
 	@printf "  check-architecture Enforce gateway layer rules (also run by lint)\n"
+	@printf "  check-baselines Check no architecture baseline gains room since the branch point\n"
 	@printf "  typecheck Run every type checker (typecheck-python + typecheck-web)\n"
 	@printf "  typecheck-python Run mypy\n"
 	@printf "  typecheck-web Run tsc over the dashboard\n"
@@ -91,6 +92,23 @@ lint-web: web/node_modules/.install-stamp
 # `make lint-python` runs it, and otari-lint.yml runs it as its own step instead, so a failure is named on the PR.
 check-architecture:
 	uv run python scripts/check_architecture.py
+
+# Check that no baseline of the architecture check records more room than it did
+# at the branch point. The check itself reads the number and the code it measures
+# from one tree, so a change that adds a builder and raises the number to match
+# passes it, and this is the half it cannot reach. The script refuses an empty
+# earlier revision, so a git show that fails here is reported rather than read
+# as an empty comparison. otari-baseline-regression.yml runs the same comparison on
+# a pull request.
+#
+# The branch point is resolved on its own line because `git show ":path"` reads
+# the staged copy, so folding a failed `git merge-base` into the argument would
+# compare the change with itself and pass.
+check-baselines:
+	@branch_point=$$(git merge-base origin/main HEAD) && \
+	[ -n "$$branch_point" ] && \
+	git show "$$branch_point:scripts/check_architecture.py" | \
+	uv run python scripts/check_no_baseline_regression.py --base - --head scripts/check_architecture.py
 
 # Refuse a branched revision graph. Cheap, and it runs before the suites so a
 # rebase-away-from-correct branch says so in one line instead of failing every

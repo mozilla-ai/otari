@@ -458,6 +458,41 @@ async def test_only_an_operator_triggered_rebuild_may_dial(fetch: bool, expected
     assert build.await_args.kwargs["withhold_alias_targets"] is False
 
 
+@pytest.mark.asyncio
+async def test_a_build_that_started_first_does_not_replace_a_later_ones_index() -> None:
+    """A slow build read the catalog before a write that a later build saw, so it must not publish over it."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from gateway.services import selector_index_service
+    from gateway.services.merged_catalog_service import MergedCatalog
+
+    config = GatewayConfig(master_key="k", providers={"nebius": {"api_key": "x"}})
+    release_first = asyncio.Event()
+    calls = 0
+
+    async def merged(*_args: object, **_kwargs: object) -> MergedCatalog:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            await release_first.wait()
+        return MergedCatalog(models={}, aliases={}, dynamic_policies={}, discovered_keys=set())
+
+    with (
+        patch.object(selector_index_service, "build_merged_catalog", new=merged),
+        patch.object(selector_index_service, "resolve_all_organizations_offered_keys", new=AsyncMock(return_value={})),
+        patch.object(selector_index_service, "set_selector_index", new=MagicMock()) as publish,
+    ):
+        first = asyncio.create_task(selector_index_service.rebuild_selector_index(AsyncMock(), config))
+        await asyncio.sleep(0)
+        await selector_index_service.rebuild_selector_index(AsyncMock(), config)
+        assert publish.call_count == 1
+        release_first.set()
+        await first
+
+    assert publish.call_count == 1
+
+
 @pytest.fixture
 def claude_index() -> Iterator[selectors.SelectorIndex]:
     """Claude Code names models bare; ``llama-4`` ends two catalog ids."""
@@ -505,6 +540,41 @@ def test_an_alias_wins_over_a_bare_name(claude_index: selectors.SelectorIndex) -
     )
     resolved = resolve_provider_selector(config, "claude-opus-5-5")
     assert (resolved.instance, resolved.model) == ("bedrock", "anthropic.claude-opus-5-5")
+
+
+@pytest.fixture
+def dotted_index() -> Iterator[selectors.SelectorIndex]:
+    """The catalog writes the version with a dot, Claude Code with a dash; ``gpt-4-1`` is its own model."""
+    rows = [
+        selectors.OfferingRow("anthropic:claude-opus-5-5", "anthropic", "anthropic", 5.0),
+        selectors.OfferingRow("openai:gpt-4.1", "openai", "openai", 2.0),
+        selectors.OfferingRow("acme:gpt-4-1", "acme", "acme", 1.0),
+    ]
+    identities: dict[str, tuple[str, tuple[str, ...]]] = {
+        "anthropic/claude-opus-5.5": ("claude-opus-5.5", ("anthropic:claude-opus-5-5",)),
+        "openai/gpt-4.1": ("gpt-4.1", ("openai:gpt-4.1",)),
+        "acme/gpt-4-1": ("gpt-4-1", ("acme:gpt-4-1",)),
+    }
+    built = selectors.build_selector_index(rows, identities)
+    selectors.set_selector_index(built)
+    yield built
+    selectors.reset_selector_index()
+
+
+def test_a_bare_name_with_a_dashed_version_resolves_as_the_dotted_catalog_id(
+    dotted_index: selectors.SelectorIndex,
+) -> None:
+    assert selectors.resolve_catalog_selector("claude-opus-5-5") == "anthropic:claude-opus-5-5"
+    assert selectors.resolve_catalog_selector("claude-opus-5.5") == "anthropic:claude-opus-5-5"
+    assert selectors.resolve_catalog_offerings("claude-opus-5-5") == dotted_index.offerings["anthropic/claude-opus-5.5"]
+
+
+def test_a_bare_name_the_catalog_spells_exactly_wins_over_its_dashed_reading(
+    dotted_index: selectors.SelectorIndex,
+) -> None:
+    assert dotted_index.dashed["gpt-4-1"] == ("openai/gpt-4.1", "acme/gpt-4-1")
+    assert selectors.resolve_catalog_selector("gpt-4-1") == "acme:gpt-4-1"
+    assert selectors.resolve_catalog_selector("gpt-4.1") == "openai:gpt-4.1"
 
 
 def test_a_bare_name_reaches_an_organizations_own_key_first() -> None:

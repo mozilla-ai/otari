@@ -1,12 +1,12 @@
 import type { UsageGroupRow } from "@/client"
+import { type ModelGroup, rankedModels } from "@/features/usage/modelGroups"
 
 /**
- * The models a person used: every named model with tokens or spend, the
- * costliest first, then the most tokens. The fold of smaller models ("other")
- * is not a model, so it is left out.
+ * The models a person used: every model with tokens or spend, in the order
+ * `rankedModels` gives them.
  */
-export function modelsUsed(rows: readonly UsageGroupRow[]): UsageGroupRow[] {
-  return rows
-    .filter((row) => !row.is_other && (row.tokens > 0 || row.cost > 0))
-    .sort((a, b) => b.cost - a.cost || b.tokens - a.tokens)
+export function modelsUsed(rows: readonly UsageGroupRow[]): ModelGroup[] {
+  return rankedModels(rows).filter(
+    (model) => model.tokens > 0 || model.cost > 0,
+  )
 }

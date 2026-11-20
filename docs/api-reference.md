@@ -264,7 +264,7 @@ apply to its type is left out:
 | `server`, `name` | The MCP server and the tool the model called on it. |
 | `output` | The text an ended MCP call gave the model. A failed call's is Otari's own `[tool error] …` text, never the server's exception. |
 | `truncated` | `true` when `stdout`, `stderr` or `output` was cut to 64 KiB. The model read it whole. |
-| `error` | Why a failed call failed, when Otari can say: `provider`, `status`, `tag` and `retryable`, the same four fields the [Search](#search) endpoint's `Otari-Error-*` headers carry. A call refused past its declaration's `max_uses`, or past the request's `web_search_max_calls`, has `"tag": "call_limit"` and a `null` provider, and a call whose arguments were not a JSON object has `"tag": "invalid_input"`. Absent when Otari can say no more than that the call failed. |
+| `error` | Why a failed call failed, when Otari can say: `provider`, `status`, `tag` and `retryable`, the same four fields the [Search](#search) endpoint's `Otari-Error-*` headers carry. A call refused past its declaration's `max_uses`, or past the request's `web_search_max_calls`, has `"tag": "call_limit"` and a `null` provider, and a call whose arguments were not a JSON object has `"tag": "invalid_input"`. A search or fetch that failed inside Otari for a reason it does not name has `"tag": "internal_error"`. Absent when Otari can say no more than that the call failed. |
 
 A response that is not streamed carries the ended entry of every call, across
 all of the tool loop's rounds:
@@ -807,7 +807,7 @@ query:
 | Header | Value |
 |---|---|
 | `Otari-Error-Provider` | The provider that failed, such as `exa`. |
-| `Otari-Error-Status` | The provider's own HTTP error status; absent when it gave none, as for a timeout, an error inside a successful answer, or an answer that could not be read. |
+| `Otari-Error-Status` | The provider's own HTTP error status, 400 or above; absent otherwise, as for a timeout, a redirect from the provider's API (tagged `http_error`, since Otari's calls to a provider's API follow none), an error inside a successful answer, or an answer that could not be read. |
 | `Otari-Error-Tag` | What failed, in the provider's terms or the library's: `timeout`, `network`, `invalid_header` (a key holding a character that is not ASCII), `http_error`, `invalid_response`, `unexpected_response`, or the provider's own code, such as Exa's `INVALID_API_KEY`. |
 | `Otari-Error-Retryable` | `true` for a timeout, a 429 or a 5xx from the provider, when a retry may help; otherwise `false`. |
 
@@ -959,8 +959,11 @@ safe fields ride as the same headers a [search](#search)'s 502 carries:
 `Otari-Error-Status` (the page's own HTTP status, when the fetcher reports one),
 `Otari-Error-Tag` (the provider's own tag, or the built-in fetcher's: `timeout`,
 `network`, `http_status`, `redirect`, `url_invalid`, `content_type`,
-`extraction`, `content_decoding`) and `Otari-Error-Retryable`. The body never
-carries the URL.
+`extraction`, `content_decoding`) and `Otari-Error-Retryable`. A fetch
+provider whose own API answers with a redirect fails with `http_error` and no
+`Otari-Error-Status`, since Otari's calls to a provider's API follow none; the
+page's own redirects are followed as before, by the provider or by the built-in
+fetcher. The body never carries the URL.
 
 ## Code execution
 
@@ -1261,11 +1264,11 @@ at the top level of the body.
 |---|---|---|---|
 | `budget_exceeded` | 403 | A budget refused the request | `Otari-Budget-Scope`: `user` for the billed user's own budget, otherwise the ceiling's scope: `organization`, `workspace`, `workspace_member`, `org_member` or `api_token`; `Retry-After`: seconds until the refusing budget's window ends, when it resets and the request would fit a fresh one; `end_user` in the body and `Otari-End-User-Budget` naming its budget, when the scope is `user` and the billed user is a service key's [end user](end-users.md#how-end-users-are-billed-and-capped) |
 | `user_blocked` | 403 | The billed user is blocked | `end_user` in the body, when the billed user is a service key's end user |
-| `web_access_disabled` | 403 | The workspace turned web access off, refusing a web search or web fetch | |
+| `web_access_disabled` | 403 | The workspace turned web access off, refusing a web search or web fetch. The message says where an owner or admin of the workspace allows it: Tools > Web search in the dashboard | |
 | `user_not_found` | 404 | The billed user does not exist | |
 | `rate_limited` | 429 | A gateway rate limit is full | `Otari-Rate-Limit-Rule` for a `rate_limits` rule, or `organization_concurrency` for an organization's concurrency limit; `Retry-After` when waiting helps |
 | `upstream_rate_limited` | 429 | The provider rate limited the gateway | `Retry-After` when the provider sent one |
-| `invalid_model` | 400 | The model selector names no configured provider, alias, policy or catalog model id; checked before the key's allow-list, so a restricted key gets it too, and before `require_pricing`, so it is never answered as `pricing_required`. A `provider:model` selector whose provider resolves is not judged here, since only the provider knows its models | |
+| `invalid_model` | 400 | The model selector names no configured provider, alias, policy or catalog model id, and the message points to `GET /api/v1/models`, which lists the caller's aliases and policies. A routing policy that chooses its model per request is refused with this code on every route but chat completions, Messages and Responses, and the message says so. Checked before the key's allow-list, so a restricted key gets it too, and before `require_pricing`, so it is never answered as `pricing_required`. A `provider:model` selector whose provider resolves is not judged here, since only the provider knows its models | |
 | `model_not_allowed` | 403 | The key may not use the model | |
 | `model_not_serving` | 403 | The organization offers the model on a provider key, with its serving switch off | |
 | `model_not_found` | 404 | A provider key of the organization serves the provider, and none offers the model; or no credential serves the provider and neither the caller's catalog nor models.dev knows the model (a misspelled catalog id), when `detail` names up to two of the nearest catalog ids | |
@@ -1276,7 +1279,7 @@ at the top level of the body.
 | `unsupported_parameter` | 400 | The provider cannot express a parameter the request carries for the model, such as `response_format` on a model with no JSON mode. Sent only when Otari's provider library refuses the parameter and names it; a provider's own 400 for it carries the provider's message and no code. A routing policy moves on to its next candidate first, and answers with this code, `detail` naming the parameters, when every candidate refused one | |
 | `structured_output_failed` | 400 | The model failed to produce output matching the request's JSON schema (`response_format` or `text.format`), which the provider reported with its own code (Groq's `json_validate_failed`). Unlike other 400s, resending the same request may succeed, so a client can retry it or send it to another model. The partial output the provider returns is not relayed. A routing policy moves on to its next candidate first, and answers with this code when every candidate failed this way | |
 | `wrong_model_type` | 400 | The model is a kind the endpoint cannot serve. A chat completion, a message or a response is refused for an embedding model, which the provider's model listing or models.dev may name, or for a rerank model, a transcription model or one that writes no text, which only the listing names; for a routing policy or a catalog ID, only when every candidate is such a kind. `/embeddings` is refused only for a model its provider's listing names as another kind; a listed `other` model, and one only models.dev describes, still reach the provider. `detail` names the kind, except for a model the listing says writes no text, which it calls not a chat model. GET /models carries the kind as `type` | |
-| `all_candidates_rejected` | 400 | Every model a routing policy or a catalog ID tried rejected the request as invalid | |
+| `all_candidates_rejected` | 400 | Every model a routing policy or a catalog ID tried rejected the request as invalid. `detail` ends with the provider's sentence when every one of them gave the same sentence, and otherwise names no reason | |
 | `insufficient_funds` | 402 | The organization has no funds paid in to cover what the deployment's account would run: the model, served on a credential the deployment pays for, or a gateway-run tool ([Tools](tools.md#pricing-a-gateway-run-tool)). A tool's refusal names the tool in `detail`; a model's does not name the model. Nothing was sent upstream | `Otari-Billing-Url`, and `billing_url` in the body: where the organization adds funds, when the deployment's billing names a page for it; `detail` then ends `Add funds at <url>.` |
 | `pricing_required` | 402 | `require_pricing` is on and the model resolves but has no price, a direct search has no price (see [Search](#search)), or a gateway-run tool the request declares has no row to price its calls ([Tools](tools.md#pricing-a-gateway-run-tool)). An unpriced model whose provider has no credential answers `provider_not_configured` instead | |
 | `provider_not_configured` | 424 | Nothing declares the model's provider, or its declaration names no key the provider needs, so nothing was sent upstream. Not a 5xx, so a client does not retry it: an operator adds the provider as a [hosted provider](hosted-providers.md) (switching on the model), or the organization adds its own provider key. A provider's environment variable alone serves nothing | |
@@ -1284,6 +1287,7 @@ at the top level of the body.
 | `end_user_budget_not_allowed` | 403 | A service key named an end-user budget that is not on its `end_user_budget_ids` | |
 | `end_user_budget_without_end_user` | 400 | The request sent `Otari-End-User-Budget` but its `user` field (`metadata.user_id` on Messages) names no end user of a service key (the key is not a service key, or the request names no one or the key's own user), so the budget would apply to no one | |
 | `end_user_limit_reached` | 403 | A service key already has as many end users as its `max_end_users` allows, so a request that would create a new end user or revive a deleted one is refused. End users it already has are unaffected | |
+| `guardrail_violation` | 403, or 200 in a stream's error event | A guardrail in `block` mode refused the request before it reached the model, or refused the model's answer, such as a call to a tool your client runs. `detail` keeps `code` beside `message` and lists the `guardrails` behind the refusal, each with `profile`, `score` and `explanation`; on the Messages routes, `error` holds those fields instead. A streamed answer is held until its guardrails finish, after the `200` has gone out, so a refused one ends in the stream's error event, with no `Otari-Error-Code` header. `score` and `explanation` are null for a guardrail on the answer that could not be reached when its **If unreachable** setting refuses; a guardrail on the request in that state answers `502` instead. See [Configure guardrails](configure-guardrails.md) | |
 | `terms_not_accepted` | 400 | The deployment publishes terms (`terms_url`), and creating or first claiming the account needs them accepted: send `terms_accepted` with the signup, the invitation's first password, the password reset, or the OAuth callback | |
 | `invalid_request` | 422, or 400 on the Messages routes | The request body or a parameter failed schema validation. `detail` lists the failing fields, each with `loc`, `msg` and `type`; on the Messages routes, `error.message` names them instead | |
 | `provider_error` | 502, or 200 in a stream's error event | As a 502, the provider answered a non-streamed chat completion with no choices. In a stream's error event, the provider failed after the stream started, for a reason no other code names | |

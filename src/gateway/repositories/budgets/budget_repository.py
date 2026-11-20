@@ -31,6 +31,11 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
         await self.db.refresh(budget)
         return budget
 
+    async def add_lifetime_cap(self, *, organization_id: uuid.UUID | None, name: str, max_budget: Decimal) -> str:
+        """Stage a budget that caps spend at ``max_budget`` and never resets, returning its ID."""
+        budget = await self.add(Budget(organization_id=organization_id, name=name, max_budget=max_budget))
+        return budget.budget_id
+
     async def add_if_absent(self, budget_id: str) -> bool:
         """Stage an empty budget under ``budget_id``, returning False when a concurrent request created it first.
 

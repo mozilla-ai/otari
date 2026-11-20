@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 from starlette.types import Message
 
+from gateway.api.deps import account_country_port_on
 from gateway.api.request_id import set_request_id
 from gateway.core.config import (
     CONVERSATION_HEADER,
@@ -23,6 +24,7 @@ from gateway.core.database import DATA_ERRORS, DATABASE_ERRORS, describe_databas
 from gateway.core.error_codes import COUNTRY_NOT_SUPPORTED, error_headers
 from gateway.log_config import logger
 from gateway.models.tenancy import Workspace
+from gateway.ports.account_country_port import AccountCountryUnavailableError
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.services.inference import is_retry_futile, request_country_gate
 from gateway.services.routing import RoutingSignal
@@ -277,10 +279,53 @@ async def erase_user_records(
         ) from None
 
 
-def country_gate_for(config: GatewayConfig, raw_request: Request) -> CountryGate:
-    """The country gate for ``raw_request``."""
+async def country_gate_for(
+    config: GatewayConfig,
+    raw_request: Request,
+    db: AsyncSession,
+    organization_id: uuid.UUID | None,
+    *,
+    api_key: APIKey | None,
+    session: bool = False,
+) -> CountryGate:
+    """The country gate for ``raw_request``: its country, and the country of the account it is served to.
+
+    The account is ``organization_id``'s, an API key's organization or a
+    dashboard session's, asked of ``AccountCountryPort`` only where a list can
+    refuse it. With a ``provider_supported_countries`` list it is read now,
+    since the routing compiler checks those lists and does no I/O; otherwise
+    the gate reads it when a hosted credential turns out to carry a list of its
+    own (``CountryGate.for_list``), once per request. A master key is the
+    operator, not the default workspace's organization, and a workspace outside
+    every organization has no account, so both are gated on the request's
+    country alone. A port that cannot answer leaves the account unresolved,
+    which a list refuses, and is logged.
+    """
     client = raw_request.client
-    return request_country_gate(config, raw_request.headers, client.host if client is not None else None)
+    client_host = client.host if client is not None else None
+    if organization_id is None or (api_key is None and not session):
+        return request_country_gate(config, raw_request.headers, client_host)
+    port = account_country_port_on(raw_request, db)
+    read: list[CountryGate] = []
+
+    async def with_account() -> CountryGate:
+        if read:
+            return read[0]
+        try:
+            account_country = await port.country(organization_id=organization_id)
+        except AccountCountryUnavailableError as exc:
+            logger.warning(
+                "Account country unavailable for organization %s: %s; a listed provider refuses", organization_id, exc
+            )
+            gate = request_country_gate(config, raw_request.headers, client_host, account_unresolved=True)
+        else:
+            gate = request_country_gate(config, raw_request.headers, client_host, account_country=account_country)
+        read.append(gate)
+        return gate
+
+    if config.provider_supported_countries:
+        return await with_account()
+    return request_country_gate(config, raw_request.headers, client_host, account_lookup=with_account)
 
 
 def country_not_supported(gate: CountryGate, selector: str, *, noun: str = "Model") -> HTTPException:

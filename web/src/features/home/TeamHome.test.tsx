@@ -1,4 +1,4 @@
-import { Outlet, useLocation } from "@tanstack/react-router"
+import { Outlet, useLocation, useRouterState } from "@tanstack/react-router"
 import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -81,6 +81,114 @@ describe("Home, Where it went", () => {
     expect(
       within(table).getByRole("columnheader", { name: "Person" }),
     ).toBeVisible()
+  })
+})
+
+describe("Home, Where it went by model", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  /** Two providers' ids for one model, as the gateway marks them. */
+  const BY_MODEL = [
+    {
+      key: "accounts/fireworks/models/deepseek-v4p1-flash-1017",
+      label: "DeepSeek V4.1 Flash 1017",
+      model_group: "deepseekv41flash1017",
+      cost: 149.33,
+      tokens: 8_590_300_000,
+      requests: 900,
+      is_other: false,
+    },
+    {
+      key: "moonshotai/Kimi-K3.1-Pro",
+      label: "Kimi K3.1 Pro",
+      model_group: "kimik31pro",
+      cost: 70.28,
+      tokens: 314_900_000,
+      requests: 200,
+      is_other: false,
+    },
+    {
+      key: "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      label: "DeepSeek V4.1 Flash 1017",
+      model_group: "deepseekv41flash1017",
+      cost: 50.47,
+      tokens: 2_973_500_000,
+      requests: 300,
+      is_other: false,
+    },
+  ]
+
+  function SessionsProbe() {
+    const search = useRouterState({
+      select: (state) => state.location.searchStr,
+    })
+    return <output aria-label="Sessions search">{search}</output>
+  }
+
+  it("lists one model once, by name, and opens the sessions of every id it ran as", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const path = String(input).slice(API_ROOT.length).split("?")[0]
+      if (path === "/organizations/me") {
+        return Response.json(
+          organizationContext({ role: "owner", deployment_operator: false }),
+        )
+      }
+      if (path === "/organizations/me/members") {
+        return Response.json({ data: [ADA, WEI], count: 2 })
+      }
+      if (path === "/organizations/me/usage/summary") {
+        return Response.json({
+          totals: usageTotals({ cost: 270.08, request_count: 1400 }),
+          series: [],
+          by_user: [],
+          by_api_key: [],
+          by_model: BY_MODEL,
+          errors_by_status_code: [],
+        })
+      }
+      if (path === "/organizations/me/spend-ceilings") {
+        return Response.json({ data: [], count: 0 })
+      }
+      if (path.endsWith("/traces/count")) return Response.json({ count: 3 })
+      if (path === "/workspaces") return Response.json({ data: [], count: 0 })
+      return Response.json([])
+    })
+    await renderWithRouter(<TeamHome />, {
+      url: "/?by=models",
+      routes: [{ path: "/sessions", element: <SessionsProbe /> }],
+      shell: (
+        <Provider>
+          <DeploymentProvider
+            value={bootstrap({ surfaces: [...SURFACES, "traces"] })}
+          >
+            <SelectedWorkspaceProvider>
+              <Outlet />
+            </SelectedWorkspaceProvider>
+          </DeploymentProvider>
+        </Provider>
+      ),
+    })
+
+    const table = await screen.findByRole("grid", { name: "Spend by models" })
+    await within(table).findByText("Kimi K3.1 Pro")
+    const rows = within(table).getAllByRole("row").slice(1)
+    expect(
+      rows.map((row) => within(row).getByRole("rowheader").textContent),
+    ).toEqual(["DeepSeek V4.1 Flash 1017", "Kimi K3.1 Pro"])
+    expect(within(rows[0]).getByText("$199.80")).toBeVisible()
+
+    await userEvent.setup().click(within(rows[0]).getByRole("rowheader"))
+    const search = new URLSearchParams(
+      (await screen.findByRole("status", { name: "Sessions search" }))
+        .textContent ?? "",
+    )
+    expect(search.getAll("model")).toEqual([
+      "accounts/fireworks/models/deepseek-v4p1-flash-1017",
+      "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+    ])
   })
 })
 

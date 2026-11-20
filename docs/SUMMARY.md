@@ -60,6 +60,7 @@
 * [Billing](billing.md)
 * [Manage workspaces](manage-workspaces.md)
 * [Members and invitations](members.md)
+* [Set up single sign-on](set-up-single-sign-on.md)
 
 # Self-Hosting
 
@@ -116,4 +117,4 @@
 
 * [Data Collection](privacy/data-collection.md)
 * [Agent Session Content](privacy/agent-session-content.md)
-* [Zero Data Retention](privacy/zdr.md)
+* [Data Retention](privacy/zdr.md)

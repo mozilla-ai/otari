@@ -277,6 +277,8 @@ async def test_an_unsafe_endpoint_is_refused_at_the_write(async_db: AsyncSession
         await service.create_guardrail(
             user=owner, request=_create(url="http://93.184.216.34/guardrails", credential="s3cret")
         )
+    with pytest.raises(OrganizationGuardrailUnsafeUrlError, match="query string"):
+        await service.create_guardrail(user=owner, request=_create(url="https://93.184.216.34/guardrails?tenant=acme"))
 
 
 async def test_a_credential_needs_an_endpoint_of_its_own(async_db: AsyncSession) -> None:

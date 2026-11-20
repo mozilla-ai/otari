@@ -61,7 +61,10 @@ class GuardrailConfig(BaseModel):
     """Profile name configured on the guardrails service (e.g. ``"alinia"``)."""
 
     url: str | None = Field(default=None, min_length=1)
-    """Optional per-request override of the operator-set ``OTARI_GUARDRAILS_URL``."""
+    """Optional per-request override of the operator-set ``OTARI_GUARDRAILS_URL``.
+
+    The base address of the service: the gateway adds ``/validate`` to it.
+    """
 
     on: Annotated[list[GuardrailDirection], AfterValidator(distinct_directions)] = Field(
         default_factory=_default_directions, min_length=1

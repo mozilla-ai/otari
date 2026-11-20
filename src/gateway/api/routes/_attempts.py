@@ -37,6 +37,7 @@ from gateway.core.error_codes import (
     error_code_of,
     error_headers,
 )
+from gateway.core.error_details import ProviderDetail
 from gateway.log_config import logger
 from gateway.services.inference import (
     UpstreamFailure,
@@ -62,6 +63,10 @@ ALL_ATTEMPTS_TIMED_OUT_DETAIL = "All upstream providers timed out"
 # describe internals to the caller. The compiler raises a specific 403/400 for
 # every *expected* way a plan can end up empty, so reaching this is a defect.
 EMPTY_PLAN_DETAIL = "Routing produced no candidate to try"
+LOCKED_IN_DETAIL = (
+    "The routing policy's backups were not tried: a gateway-run tool had already run on this model, "
+    "and a tool loop cannot move to another provider."
+)
 
 
 def provider_failure_http_exc(
@@ -91,9 +96,11 @@ def provider_failure_http_exc(
     )
 
 
-def all_attempts_rejected_detail(tried: int) -> str:
-    """400 detail for a request every attempt rejected as invalid."""
-    return f"No model accepted the request ({tried} attempts). Check the request parameters."
+def all_attempts_rejected_detail(tried: int, reason: str | None = None) -> str:
+    """400 detail for a request every attempt rejected as invalid, with the reason when they all gave one."""
+    if reason is None:
+        return f"No model accepted the request ({tried} attempts). Check the request parameters."
+    return f"No model accepted the request ({tried} attempts): {reason}"
 
 
 def prompt_too_long_for_every_attempt_detail(tried: int) -> str:
@@ -135,6 +142,7 @@ def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | Non
     """The answer for attempts that all rejected the request alike, or ``None`` when they failed differently.
 
     The detail is the gateway's own, because one provider's message does not explain why the whole plan failed.
+    A 400 every attempt worded alike is the exception: that sentence is why the plan failed.
     """
     if len(errors) < 2:
         return None
@@ -192,9 +200,11 @@ def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | Non
         )
     # NOTE: Some 400s are the gateway's fault, such as a provider rejecting a model ID it does not serve.
     # The status cannot tell them apart, so such a plan blames the request.
+    reasons = {answer.detail for answer in answers}
+    shared = reasons.pop() if len(reasons) == 1 else ProviderDetail.BAD_REQUEST
     return HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
-        detail=all_attempts_rejected_detail(len(errors)),
+        detail=all_attempts_rejected_detail(len(errors), None if shared == ProviderDetail.BAD_REQUEST else shared),
         headers=error_headers(ALL_CANDIDATES_REJECTED),
     )
 
@@ -347,7 +357,9 @@ async def walk_attempts(
     fired, a later failure on that attempt terminates the request instead of
     falling through, because a tool-use loop's intermediate state (provider
     specific tool-call ids, reasoning blocks) cannot be replayed on a different
-    provider.
+    provider. Where a failure that would have fallen over leaves candidates
+    untried, its detail says so (:data:`LOCKED_IN_DETAIL`); its status and code
+    stay the provider's.
 
     Failures that are not the provider's fault do not advance the plan:
     ``MaxToolIterationsExceeded`` is a gateway-side cap (422), and an unreachable
@@ -375,7 +387,7 @@ async def walk_attempts(
     unrecorded_skips: list[tuple[Attempt, HTTPException]] = []
     last_failed: Attempt | None = None
 
-    for planned in attempts:
+    for index, planned in enumerate(attempts):
         # Rebound to the candidate as it is sent once ``credential_attempt`` has run.
         attempt = planned
         locked_in = False
@@ -479,7 +491,10 @@ async def walk_attempts(
             if locked_in or not retryable:
                 if on_terminal is not None:
                     on_terminal(attempt)
-                raise provider_failure_http_exc(exc, fallback_detail="LLM provider error") from exc
+                terminal = provider_failure_http_exc(exc, fallback_detail="LLM provider error")
+                if retryable and index < len(attempts) - 1:
+                    terminal.detail = f"{terminal.detail} {LOCKED_IN_DETAIL}"
+                raise terminal from exc
             failures.append(AttemptFailure(attempt.position, attempt.instance, attempt.model, error_class, exc))
             unabsorbed = (attempt, exc)
             if drop_admission is not None:

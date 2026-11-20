@@ -92,3 +92,32 @@ async def test_a_refresh_after_the_write_reads_it_from_the_rows(monkeypatch: pyt
     await index.refresh_hosted_name_index(_Uow(), GatewayConfig())  # type: ignore[arg-type]
 
     assert index.hosted_implementation("openai-eu") is None
+
+
+@pytest.mark.asyncio
+async def test_a_retention_declaration_stored_while_the_refresh_read_survives_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        index,
+        "HostedProviderRepository",
+        _repository_reading(
+            [_Row("openai-eu", "openai")], lambda: index.remember_hosted_zero_data_retention("openai-eu", True)
+        ),
+    )
+
+    await index.refresh_hosted_name_index(_Uow(), GatewayConfig())  # type: ignore[arg-type]
+
+    assert index.hosted_zero_data_retention("openai-eu")
+
+
+@pytest.mark.asyncio
+async def test_a_refresh_after_a_retention_write_reads_it_from_the_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    index.remember_hosted_zero_data_retention("openai-eu", True)
+    monkeypatch.setattr(
+        index, "HostedProviderRepository", _repository_reading([_Row("openai-eu", "openai")], lambda: None)
+    )
+
+    await index.refresh_hosted_name_index(_Uow(), GatewayConfig())  # type: ignore[arg-type]
+
+    assert not index.hosted_zero_data_retention("openai-eu")

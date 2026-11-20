@@ -27,6 +27,7 @@ from typing import Annotated, Any, Literal, TypedDict, get_args
 from pydantic import BaseModel, ConfigDict, Field
 
 from gateway.core.sql import utc_iso
+from gateway.core.usage import output_tokens_per_second
 from gateway.models.money import as_float
 from gateway.models.usage import SERVED_HERE_SLUG, StreamCutBy, UsageLog
 
@@ -235,6 +236,11 @@ class UsageEntry(BaseModel):
     status_code: int | None
     latency_ms: int | None
     provider_latency_ms: int | None
+    # Milliseconds to the first streamed chunk; null on a request that did not stream.
+    ttft_ms: int | None
+    # Output tokens over the whole request, as the catalog's throughput counts them;
+    # null on a response too short to measure or a stream cut short, whose count may be estimated.
+    output_tokens_per_second: float | None
     source: str
     source_label: str | None
     # The request's tags (from its ``metadata``); null when it sent none.
@@ -298,6 +304,10 @@ class UsageEntry(BaseModel):
             status_code=log.status_code,
             latency_ms=log.latency_ms,
             provider_latency_ms=log.provider_latency_ms,
+            ttft_ms=log.ttft_ms,
+            output_tokens_per_second=(
+                None if log.stream_cut_by else output_tokens_per_second(log.completion_tokens, log.latency_ms)
+            ),
             policy_name=log.policy_name,
             selection_reason=log.selection_reason,
             attempt_position=log.attempt_position,
@@ -382,11 +392,18 @@ class UsageGroupRow(BaseModel):
 
     key: str | None
     # Display name for an opaque key (a user's alias, an API key's name), resolved
-    # in the same GROUP BY. Only ever set for the ``user`` and ``api_key``
-    # dimensions, and null there too when the entity has no label or is gone; a
-    # client falls back to ``key``. Its purpose is to let a client build a user or
-    # key filter from this breakdown alone, rather than reading both whole tables.
+    # in the same GROUP BY. Set for the ``user`` and ``api_key`` dimensions, and
+    # null there too when the entity has no label or is gone; a client falls back
+    # to ``key``. Its purpose is to let a client build a user or key filter from
+    # this breakdown alone, rather than reading both whole tables. A ``model`` row
+    # carries the model's name, the same on every spelling of one model.
     label: str | None = None
+    # A ``model`` row's grouping key, shared by every spelling of one model:
+    # providers name one model differently (``accounts/fireworks/models/glm-5p3``,
+    # ``zai-org/GLM-5.3``) and usage records the spelling sent. The rows stay one
+    # per spelling, since ``key`` is what a model filter matches; this is what lets
+    # a client show them as one. Null on every other dimension and on the fold.
+    model_group: str | None = None
     cost: float
     tokens: int
     requests: int

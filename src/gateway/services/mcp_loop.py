@@ -284,6 +284,7 @@ async def _run_owned_calls(
             yield False, rendering.started(call)
         elif server is not None:
             yield False, [mcp_entry(call, server, "in_progress")]
+        raised = False
         try:
             text = await owner.call_tool(name, args)
         except MaxToolIterationsExceeded:
@@ -297,12 +298,13 @@ async def _run_owned_calls(
             detail = tool_failure_detail(owner, name)
             log_tool_failure(name, detail, exc)
             text = f"[tool error] {detail}"
+            raised = True
         else:
             if capped and budget is not None:
                 budget.record(name, text)
         results.append({"role": "tool", "tool_call_id": tc["id"] or "", "content": text})
         if rendering is not None:
-            yield True, rendering.ran(replace(call, failed=is_tool_error(text)), owner)
+            yield True, rendering.ran(replace(call, failed=is_tool_error(text), raised=raised), owner)
         elif server is not None:
             yield True, [mcp_entry(call, server, "failed" if is_tool_error(text) else "completed", text)]
 

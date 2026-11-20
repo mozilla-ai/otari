@@ -2073,12 +2073,55 @@ def test_two_sibling_modules_importing_each_other_is_flagged(tmp_path: Path) -> 
     assert "gateway.api.deps.one, gateway.api.deps.two" in violations[0]
 
 
-def test_a_package_and_its_own_member_may_import_each_other(tmp_path: Path) -> None:
-    """The package body binds what the member needs before the member runs, so one of them finishes."""
+def test_a_member_reading_a_name_from_its_own_package_is_flagged(tmp_path: Path) -> None:
+    """``from pkg import Name`` waits for the package body, which is itself waiting for the member."""
     _write(tmp_path, "gateway/services/widgets/__init__.py", "from gateway.services.widgets._store import Store\n")
     _write(tmp_path, "gateway/services/widgets/_store.py", "from gateway.services.widgets import Thing\n")
 
+    violations = check.check_import_cycles(tmp_path)
+
+    assert len(violations) == 1
+    assert "gateway.services.widgets, gateway.services.widgets._store" in violations[0]
+
+
+def test_a_member_importing_a_sibling_out_of_its_package_is_not_a_cycle(tmp_path: Path) -> None:
+    """``from pkg import sibling`` loads the submodule, so it waits for the sibling and not the package."""
+    _write(tmp_path, "gateway/services/widgets/__init__.py", "from gateway.services.widgets._store import Store\n")
+    _write(tmp_path, "gateway/services/widgets/_store.py", "from gateway.services.widgets import _rows\n")
+    _write(tmp_path, "gateway/services/widgets/_rows.py", "ROWS = ()\n")
+
     assert check.check_import_cycles(tmp_path) == []
+
+
+def test_a_member_importing_a_sibling_by_its_full_path_is_not_a_cycle(tmp_path: Path) -> None:
+    """A module's own package is already running when its body runs, so passing through it waits for nothing."""
+    _write(tmp_path, "gateway/services/widgets/__init__.py", "from gateway.services.widgets._store import Store\n")
+    _write(tmp_path, "gateway/services/widgets/_store.py", "from gateway.services.widgets._rows import ROWS\n")
+    _write(tmp_path, "gateway/services/widgets/_rows.py", "ROWS = ()\n")
+
+    assert check.check_import_cycles(tmp_path) == []
+
+
+def test_a_cycle_running_through_two_package_roots_is_flagged(tmp_path: Path) -> None:
+    """A root waits for the member it exports, so a member reaching another root closes the ring."""
+    _write(tmp_path, "gateway/services/widgets/__init__.py", "from gateway.services.widgets._store import Store\n")
+    _write(
+        tmp_path,
+        "gateway/services/widgets/_store.py",
+        "from gateway.services.gadgets import Gadget\n\nStore = 1\n",
+    )
+    _write(tmp_path, "gateway/services/gadgets/__init__.py", "from gateway.services.gadgets._parts import Gadget\n")
+    _write(
+        tmp_path,
+        "gateway/services/gadgets/_parts.py",
+        "from gateway.services.widgets import Store\n\nGadget = 2\n",
+    )
+
+    violations = check.check_import_cycles(tmp_path)
+
+    assert len(violations) == 1
+    assert "gateway.services.gadgets, gateway.services.gadgets._parts" in violations[0]
+    assert "gateway.services.widgets, gateway.services.widgets._store" in violations[0]
 
 
 def test_a_cycle_through_three_siblings_is_flagged(tmp_path: Path) -> None:

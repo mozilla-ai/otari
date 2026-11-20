@@ -16,7 +16,7 @@ from gateway.services.provider_kwargs import (
     keyless_placeholder_api_key,
     missing_declared_credential,
 )
-from gateway.services.providers._country_gate import CountryGate, ensure_hosted_country
+from gateway.services.providers._country_gate import ensure_hosted_country
 from gateway.services.providers._hosted_credentials import ResolvedHostedProvider
 from gateway.services.providers._hosted_name_index import hosted_provider_named, remember_served_location
 from gateway.services.providers._hosted_sources import HostedSources
@@ -26,6 +26,7 @@ from gateway.services.providers._workspace_hosted_access import (
     narrow_to_workspace_locations,
     workspace_allowed_data_locations,
 )
+from gateway.types.country_gate import CountryGate
 
 
 def organization_to_serve(organization_id: uuid.UUID | None) -> uuid.UUID:
@@ -147,7 +148,7 @@ async def serve_on_hosted_provider(
         credential.response_provider, resolved.instance
     ):
         return None
-    credential = ensure_hosted_country(country_gate, credential)
+    credential = await ensure_hosted_country(country_gate, credential)
     return dispatch_on_hosted_credential(credential, model=resolved.model, alias=resolved.alias)
 
 

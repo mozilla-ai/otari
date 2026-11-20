@@ -544,6 +544,13 @@ class DirectToolService:
                 provider=unresolved_provider,
                 workspace_id=workspace_id,
             ) from exc
+        # A call with nothing to run on is refused as such before the switch is read,
+        # since turning the switch on would not let it run.
+        if isinstance(picked, TenancyError):
+            standing = stand_in(policy) if stand_in is not None else None
+            if standing is None:
+                raise await refused_pick(picked) from picked
+            picked = standing
         if policy is not None and not policy.enabled:
             refusal = web_access_disabled_refusal(policy_tools)
             raise await refused(
@@ -554,11 +561,6 @@ class DirectToolService:
                 workspace_id=workspace_id,
                 answer_headers=error_headers(WEB_ACCESS_DISABLED),
             )
-        if isinstance(picked, TenancyError):
-            standing = stand_in(policy) if stand_in is not None else None
-            if standing is None:
-                raise await refused_pick(picked) from picked
-            picked = standing
         tool = picked
 
         try:

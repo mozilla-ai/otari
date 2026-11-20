@@ -9,7 +9,6 @@ are in test_invitee_membership_inbox.py, because every one of them needs a
 second identity, and what is here is the route wiring.
 """
 
-import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -21,9 +20,10 @@ from sqlalchemy.orm import Session
 from sqlmodel import col
 
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.log_config import logger as gateway_logger
 from gateway.models.tenancy import Invitation, Organization, OrganizationMember, User
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
+from gateway.services.mail import MailEnvelope
+from gateway.services.mail.transports import SmtpTransport
 
 
 def _invite(
@@ -67,32 +67,23 @@ def test_invite_emails_the_accept_link_when_a_transport_is_configured(
     master_key_header: dict[str, str],
     test_config: GatewayConfig,
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """The other half of the optional-mail design: configured, the message goes out.
 
-    Uses the console transport rather than a patched smtplib, so the whole path
-    an operator's SMTP deployment takes runs for real (readiness, rendering,
-    the off-loaded send) and only the socket is replaced. The gateway logger
-    does not propagate, hence the explicit handler.
+    Reads the envelope the transport was handed, so readiness, rendering and the
+    off-loaded send all run and only the socket is replaced.
     """
-    monkeypatch.setattr(test_config, "mail_transport", "console")
-    monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
-    gateway_logger.addHandler(caplog.handler)
-    caplog.set_level(logging.INFO, logger="gateway")
-    try:
-        result = _invite(client, master_key_header, email="mailed@example.com")
-    finally:
-        gateway_logger.removeHandler(caplog.handler)
+    delivered = _mail_on(test_config, monkeypatch)
+
+    result = _invite(client, master_key_header, email="mailed@example.com")
 
     assert result["mail_sent"] is True
     # Delivered, so the link went to the mailbox alone and not back to the inviter.
     assert result["accept_link"] is None
-    assert "You're invited to join" in caplog.text
+    assert [envelope.to for envelope in delivered] == ["mailed@example.com"]
+    assert "You're invited to join" in delivered[0].message.text
     # Absolute, because it has to mean something outside a browser.
-    assert "https://otari.example.com/accept-invitation#token=" in caplog.text
-    # The recipient is redacted in the log line even on the success path.
-    assert "mailed@example.com" not in caplog.text
+    assert "https://otari.example.com/accept-invitation#token=" in delivered[0].message.text
 
 
 def test_invite_is_not_emailed_without_a_public_base_url(
@@ -351,8 +342,7 @@ def test_accepting_after_an_unverified_signup_says_the_address_still_needs_verif
 ) -> None:
     """Accepting does not verify (whoever signed up may not hold the mailbox), so the page has to say so."""
     result = _invite(client, master_key_header, email="hedy@example.com")
-    monkeypatch.setattr(test_config, "mail_transport", "console")
-    monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
+    _mail_on(test_config, monkeypatch)
     signed_up = client.post(f"{API_ROOT}/auth/signup", json={"email": "hedy@example.com", "password": PASSWORD})
     assert signed_up.status_code == 200, signed_up.text
 
@@ -936,8 +926,7 @@ def test_bulk_invite_emails_every_address_when_a_transport_is_configured(
     test_config: GatewayConfig,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(test_config, "mail_transport", "console")
-    monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
+    _mail_on(test_config, monkeypatch)
 
     result = _bulk_invite(client, master_key_header, [f"mailed{n}@example.com" for n in range(7)])
 
@@ -1083,8 +1072,7 @@ def test_a_refused_first_password_offers_the_provider_and_the_reset_this_deploym
     _switch(client, master_key_header, created.json()["id"])
     # Invited while no mail goes out, so the link comes back to share; the ways in are switched on afterwards.
     token = _token_from(_invite(client, master_key_header, email="kay@example.com")["accept_link"])
-    monkeypatch.setattr(test_config, "mail_transport", "console")
-    monkeypatch.setattr(test_config, "public_base_url", "https://gw.example.com")
+    _mail_on(test_config, monkeypatch)
     monkeypatch.setattr(test_config, "oauth_google_client_id", "google-id")
     monkeypatch.setattr(test_config, "oauth_google_client_secret", "google-secret")
 
@@ -1186,9 +1174,20 @@ def test_an_organization_name_with_a_control_character_is_refused(
 # ---------- invitation mail limits ----------
 
 
-def _mail_on(test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(test_config, "mail_transport", "console")
+def _mail_on(test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch) -> list[MailEnvelope]:
+    """Configure a deployment whose email reaches the invitee, and collect what it delivers.
+
+    Not the console transport, which shows a message to the deployment operator and
+    delivers it to nobody, so a link it carries is still hand-carried. Only the socket
+    is replaced, so readiness, rendering and the off-loaded send all run.
+    """
+    delivered: list[MailEnvelope] = []
+    monkeypatch.setattr(test_config, "mail_transport", "smtp")
+    monkeypatch.setattr(test_config, "smtp_host", "smtp.example.test")
+    monkeypatch.setattr(test_config, "mail_from_email", "otari@example.test")
     monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
+    monkeypatch.setattr(SmtpTransport, "deliver", lambda self, envelope: delivered.append(envelope))
+    return delivered
 
 
 def test_an_organization_over_its_invitation_mail_limit_gets_the_links_instead(
@@ -1373,6 +1372,47 @@ def test_a_deactivated_invitee_cannot_use_a_link_issued_before_the_deactivation(
     # Refused as a link that is no longer valid, without the reason.
     assert "deactivated" not in preview.json()["detail"]
     assert _roster_row(client, master_key_header, "dee@example.com")["status"] == "invited"
+
+
+def test_a_console_transport_hands_the_invite_link_back_rather_than_claiming_a_send(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The console transport shows a message to the deployment operator and reaches no mailbox.
+
+    So an invitation it carries is hand-carried, exactly as one on a deployment with no mail.
+    """
+    monkeypatch.setattr(test_config, "mail_transport", "console")
+    monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
+
+    result = _invite(client, master_key_header, email="console@example.com")
+
+    assert result["mail_sent"] is False
+    assert result["accept_link"] is not None
+
+
+def test_a_console_transport_offers_no_password_reset_as_a_way_in(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reset link the console transport logs reaches no mailbox, so the page must not offer one."""
+    _invite(client, master_key_header, email="new@example.com")
+    created = client.post(f"{API_ROOT}/organizations", json={"name": "Second"}, headers=master_key_header)
+    _switch(client, master_key_header, created.json()["id"])
+    token = _token_from(_invite(client, master_key_header, email="new@example.com")["accept_link"])
+
+    monkeypatch.setattr(test_config, "oauth_google_client_id", "google-id")
+    monkeypatch.setattr(test_config, "oauth_google_client_secret", "google-secret")
+    monkeypatch.setattr(test_config, "mail_transport", "console")
+    monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
+
+    preview = client.post(f"{API_ROOT}/invitations/validate", json={"token": token}).json()
+
+    assert preview["ways_in"] == ["provider"]
 
 
 def test_two_organizations_inviting_one_new_address_tell_it_how_to_get_in(

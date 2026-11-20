@@ -715,6 +715,51 @@ def test_a_parameter_refusal_beside_another_rejection_shares_the_generic_400() -
     assert rejection.headers == {"Otari-Error-Code": "all_candidates_rejected"}
 
 
+def test_attempts_that_all_give_one_reason_share_it() -> None:
+    """#3141: a caller who named one catalog ID could not tell which parameter every candidate refused."""
+    errors = [_openai_status_error(400, _openai_error(_OPENAI_TEMPERATURE_MSG)) for _ in range(2)]
+
+    rejection = get_shared_rejection(errors)
+
+    assert rejection is not None
+    assert rejection.status_code == 400
+    assert rejection.detail == f"No model accepted the request (2 attempts): {_OPENAI_TEMPERATURE_MSG}"
+    assert rejection.headers == {"Otari-Error-Code": "all_candidates_rejected"}
+
+
+def test_attempts_that_give_different_reasons_share_the_generic_400() -> None:
+    errors = [
+        _openai_status_error(400, _openai_error(_OPENAI_TEMPERATURE_MSG)),
+        _openai_status_error(400, _openai_error("Argument not supported on this model: temperature")),
+    ]
+
+    rejection = get_shared_rejection(errors)
+
+    assert rejection is not None
+    assert rejection.detail == "No model accepted the request (2 attempts). Check the request parameters."
+
+
+def test_a_reason_only_some_attempts_give_is_not_shared() -> None:
+    errors = [
+        _openai_status_error(400, _openai_error(_OPENAI_TEMPERATURE_MSG)),
+        _openai_status_error(400, _openai_error("")),
+    ]
+
+    rejection = get_shared_rejection(errors)
+
+    assert rejection is not None
+    assert rejection.detail == "No model accepted the request (2 attempts). Check the request parameters."
+
+
+def test_attempts_that_all_give_no_reason_share_the_generic_400() -> None:
+    errors = [_openai_status_error(400, _openai_error("")) for _ in range(2)]
+
+    rejection = get_shared_rejection(errors)
+
+    assert rejection is not None
+    assert rejection.detail == "No model accepted the request (2 attempts). Check the request parameters."
+
+
 def test_unsupported_parameter_payload_echo_uses_fallback_detail() -> None:
     """A capability error that echoes the payload never returns an empty detail."""
     exc = UnsupportedParameterError(

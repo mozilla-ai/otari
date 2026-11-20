@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
@@ -13,6 +14,7 @@ import gateway.models  # noqa: F401  (registers every table on the metadata)
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.organizations import OrganizationInvitation
 from gateway.repositories.organizations import DueInvitation, NewInvitation
+from gateway.repositories.organizations.membership_origin_repository import MembershipOriginRepository
 from gateway.repositories.organizations.organization_invitation_repository import OrganizationInvitationRepository
 
 pytestmark = pytest.mark.asyncio
@@ -65,6 +67,16 @@ async def store() -> AsyncIterator[tuple[UnitOfWork, OrganizationInvitationRepos
         await engine.dispose()
 
 
+async def _declined_at(repository: OrganizationInvitationRepository, invitation_id: uuid.UUID) -> datetime | str | None:
+    """The row's own ``declined_at``, read from the database, or "gone" when no row holds the id."""
+    rows = (
+        await repository.db.execute(
+            select(OrganizationInvitation.declined_at).where(OrganizationInvitation.id == invitation_id)
+        )
+    ).all()
+    return rows[0][0] if rows else "gone"
+
+
 async def test_deleting_an_invitation_removes_it_from_the_session_too(
     store: tuple[UnitOfWork, OrganizationInvitationRepository],
 ) -> None:
@@ -76,6 +88,63 @@ async def test_deleting_an_invitation_removes_it_from_the_session_too(
 
         assert await repository.delete_in_organization(invitation.id, organization_id) is True
         assert await repository.get(invitation.id) is None
+
+
+async def test_deleting_by_token_hash_returns_the_row_and_leaves_no_trace_of_it(
+    store: tuple[UnitOfWork, OrganizationInvitationRepository],
+) -> None:
+    uow, repository = store
+    organization_id = uuid.uuid4()
+
+    async with uow:
+        invitation = await _add(repository, _invitation(organization_id, email="ada@example.com", token_hash="h1"))
+
+        removed = await repository.delete_by_token_hash("h1")
+
+        assert removed is not None
+        assert (removed.id, removed.email) == (invitation.id, "ada@example.com")
+        assert await repository.delete_by_token_hash("h1") is None
+        assert await _declined_at(repository, invitation.id) == "gone"
+        assert await repository.get(invitation.id) is None
+
+
+async def test_an_origin_is_replaced_rather_than_duplicated_on_sqlite(
+    store: tuple[UnitOfWork, OrganizationInvitationRepository],
+) -> None:
+    """The upsert behind a membership origin runs on SQLite too, which a deployment may be on."""
+    uow, _ = store
+    member_id = uuid.uuid4()
+    origins = MembershipOriginRepository(uow)
+    first = datetime(2026, 1, 1, tzinfo=UTC)
+    second = datetime(2026, 3, 1, tzinfo=UTC)
+
+    async with uow:
+        await origins.record(
+            organization_member_id=member_id, invited_by_user_id=None, invited_at=first, joined_at=first
+        )
+        await origins.record(
+            organization_member_id=member_id, invited_by_user_id=None, invited_at=second, joined_at=second
+        )
+
+        origin = await origins.get(member_id)
+        assert origin is not None
+        assert origin.invited_at == second
+
+
+async def test_declining_by_token_hash_keeps_the_first_time(
+    store: tuple[UnitOfWork, OrganizationInvitationRepository],
+) -> None:
+    uow, repository = store
+    organization_id = uuid.uuid4()
+    first_time = datetime(2026, 2, 1, tzinfo=UTC)
+
+    async with uow:
+        invitation = await _add(repository, _invitation(organization_id, email="ada@example.com", token_hash="h2"))
+
+        assert await repository.decline_by_token_hash("h2", at=first_time) == first_time
+        assert await repository.decline_by_token_hash("h2", at=first_time + timedelta(days=1)) == first_time
+
+        assert await _declined_at(repository, invitation.id) == first_time
 
 
 async def test_a_claim_returns_the_values_of_the_invitation_and_counts_the_attempt(

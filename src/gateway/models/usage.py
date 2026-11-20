@@ -9,7 +9,7 @@ from typing import Any, Literal
 from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, event, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from gateway.models.base import Base
+from gateway.models.base import Base, UtcDateTime
 from gateway.models.money import UsdCost
 
 # Mirrors ``gateway_usage_settlement.pricing_reference`` on the platform.
@@ -326,6 +326,21 @@ class AgentTelemetry(Base):
     temporality: Mapped[str | None] = mapped_column()
     series_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     series_key: Mapped[str | None] = mapped_column()
+
+
+class AgentTelemetryUserBarrier(Base):
+    """When a user's telemetry was last erased, so no export admitted before it is stored after it.
+
+    Erasure sets ``erased_at`` and deletes in one transaction, and each write locks
+    the row of the user it stores for, so an export another replica admitted before
+    the erasure is refused rather than stored after it. The row goes with the user's
+    own, after which the foreign key on ``agent_telemetry`` refuses their writes.
+    """
+
+    __tablename__ = "agent_telemetry_user_barriers"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), primary_key=True)
+    erased_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
 
 
 # Where a hosted provider (or region) name declares it keeps request data,

@@ -16,6 +16,7 @@ import pytest
 from fastapi import APIRouter
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.adapters.account_country_adapter import NullAccountCountryAdapter
 from gateway.adapters.agent_model_recommender_adapter import DecisionProviderRecommender
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.billing_adapter import NullBillingAdapter
@@ -37,6 +38,7 @@ from gateway.container import (
 )
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.ports.account_country_port import AccountCountryPort
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import BillingPort
@@ -47,7 +49,7 @@ from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
-from gateway.services.tenancy.membership_listener import MembershipListener
+from gateway.services.organizations import MembershipListener
 
 # The core adapters ignore the session, so a placeholder stands in for one; a
 # unit test of the wiring has no database and needs none.
@@ -105,6 +107,7 @@ def test_core_defaults_are_bound_for_every_port() -> None:
     container = build_container(membership_listener=_no_membership_listener)
 
     assert isinstance(container.resolve(BillingPort, NO_SESSION), NullBillingAdapter)
+    assert isinstance(container.resolve(AccountCountryPort, NO_SESSION), NullAccountCountryAdapter)
     assert isinstance(container.resolve(EntitlementPort, NO_SESSION), BaseEntitlementAdapter)
     assert isinstance(container.resolve(ModelProviderPort, NO_SESSION), HostedProviderModelProviderAdapter)
     assert isinstance(container.resolve(GrowthSignalPort, NO_SESSION), NullGrowthSignalAdapter)
@@ -123,6 +126,7 @@ def test_no_selector_contributes_no_routers_and_says_so() -> None:
     assert container.router_contributions() == ()
     assert container.summary.startswith("no bootstrap, core defaults for ")
     for port in (
+        AccountCountryPort,
         BillingPort,
         EntitlementPort,
         GrowthSignalPort,
@@ -380,6 +384,93 @@ def register(container):
 
     with pytest.raises(PortShapeError, match="StaleGrowthSignal, bound to GrowthSignalPort, lacks record_action"):
         build_container("stale_growth_bootstrap:register")
+
+
+def test_a_signup_invite_adapter_written_before_proof_for_fails_at_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without the check, a signup carrying an invitation fails as a 500 with no startup signal."""
+    _write_bootstrap(
+        tmp_path,
+        monkeypatch,
+        "stale_invite_bootstrap",
+        """
+from gateway.ports.signup_invite_port import SignupInvitePort
+
+
+class StaleSignupInvite:
+    def __init__(self, session):
+        del session
+
+    async def invited_email(self, token):
+        return None
+
+
+def register(container):
+    container.bind(SignupInvitePort, StaleSignupInvite)
+""",
+    )
+
+    with pytest.raises(PortShapeError, match="StaleSignupInvite, bound to SignupInvitePort, lacks proof_for"):
+        build_container("stale_invite_bootstrap:register")
+
+
+def test_a_signup_invite_adapter_that_inherits_the_port_stub_fails_at_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The port's own stub answers None for every token, so an adapter carrying it proves no address."""
+    _write_bootstrap(
+        tmp_path,
+        monkeypatch,
+        "inherited_stub_bootstrap",
+        """
+from gateway.ports.signup_invite_port import SignupInvitePort
+
+
+class InheritedStubInvite(SignupInvitePort):
+    def __init__(self, session):
+        del session
+
+    async def invited_email(self, token):
+        return None
+
+
+def register(container):
+    container.bind(SignupInvitePort, InheritedStubInvite)
+""",
+    )
+
+    with pytest.raises(PortShapeError, match="InheritedStubInvite, bound to SignupInvitePort, lacks proof_for"):
+        build_container("inherited_stub_bootstrap:register")
+
+
+def test_a_signup_invite_adapter_that_delegates_proof_for_builds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An adapter may carry the method on the instance, which is an implementation like any other."""
+    _write_bootstrap(
+        tmp_path,
+        monkeypatch,
+        "delegating_invite_bootstrap",
+        """
+from gateway.adapters.signup_invite_adapter import NullSignupInviteAdapter
+from gateway.ports.signup_invite_port import SignupInvitePort
+
+
+class DelegatingInvite(SignupInvitePort):
+    def __init__(self, session):
+        del session
+        self.proof_for = NullSignupInviteAdapter().proof_for
+
+
+def register(container):
+    container.bind(SignupInvitePort, DelegatingInvite)
+""",
+    )
+
+    container = build_container("delegating_invite_bootstrap:register")
+
+    assert "SignupInvitePort" in container.summary
 
 
 def test_bootstrap_that_rebinds_nothing_leaves_the_core_defaults(

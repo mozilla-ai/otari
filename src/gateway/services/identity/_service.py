@@ -471,7 +471,7 @@ class IdentityService:
                 would set its password without the current one and so get past the handover's step-up.
 
         """
-        mailed = self._mailer.can_send_links
+        mailed = self._mailer.can_deliver_links
         async with self._uow:
             # Before the row lock, in the order a handover takes the two, so neither waits on the other in a cycle.
             await self._blocked_emails.lock_shared()

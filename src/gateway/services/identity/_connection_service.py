@@ -27,7 +27,14 @@ from gateway.models.identity import (
     OIDCConnection,
     oidc_identity_provider,
 )
-from gateway.models.tenancy import DOMAIN_PROOF_TTL, OWNER_ROLE, Organization, OrganizationMember, User
+from gateway.models.tenancy import (
+    DOMAIN_PROOF_TTL,
+    OWNER_ROLE,
+    Organization,
+    OrganizationMember,
+    OrganizationMemberRole,
+    User,
+)
 from gateway.repositories.identity import IdentityRepositories, OAuthPendingStateRepository
 from gateway.schemas.identity import (
     OIDCConnectionDomain,
@@ -48,7 +55,11 @@ from gateway.services.identity._enforcement import (
 from gateway.services.identity._membership import organization_for_email_domain
 from gateway.services.organizations import ClaimedDomain, ClaimedDomains
 from gateway.services.secret_box import encrypt_secret, secret_box_configured
-from gateway.services.tenancy import OrganizationService, sso_blocks_membership, sso_would_block_membership
+from gateway.services.tenancy import (
+    OrganizationService,
+    sso_blocks_membership,
+    sso_would_block_membership,
+)
 
 # The preflight count is exact; the member list is a sample, so a large organization's
 # response stays bounded.
@@ -736,6 +747,25 @@ class OIDCConnectionService:
             is_linked=linked,
             is_deployment_operator=is_operator,
         )
+
+    async def blocks_joining(
+        self, *, organization_id: uuid.UUID, role: OrganizationMemberRole, user_id: uuid.UUID
+    ) -> bool:
+        """Whether this organization's own SSO enforcement refuses this person joining it as ``role``.
+
+        An account this deployment does not hold is refused, because it can hold no link either.
+        """
+        async with self._uow:
+            organization = await self._organizations.organizations.get(organization_id)
+            user = await self._users.get(user_id)
+            if organization is None or user is None:
+                return True
+            linked = await has_link_to_organization(
+                organization, user_id, connections=self._connections, links=self._links
+            )
+            return await self._organizations.sso_refuses_joining(
+                organization_id=organization_id, is_linked=linked, role=role, user=user
+            )
 
     async def refuses_every_membership(self, *, user: User) -> bool:
         """Whether some organization ``user`` actively belongs to requires sign-in through its own connection."""

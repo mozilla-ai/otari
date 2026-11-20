@@ -90,7 +90,7 @@ from gateway.models.secret_fields import redact_secret_like_values, restore_reda
 from gateway.models.tenancy import User
 from gateway.ports.growth_signal_port import GrowthAction, GrowthActivationEvent, GrowthSignalPort
 from gateway.repositories.tenancy import WorkspaceRepository
-from gateway.services.guardrails import GuardrailsNotReachableError, run_input_guardrails
+from gateway.services.guardrails import GuardrailsNotReachableError, require_base_url, run_input_guardrails
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
     decrypt_secret,
@@ -166,7 +166,7 @@ class OrganizationGuardrailCreate(BaseModel):
             "example": {
                 "profile": "prompt-injection",
                 "mode": "block",
-                "url": "https://guardrails.internal.example/validate",
+                "url": "https://guardrails.internal.example",
                 "credential": "sk-guardrails-...",
                 "applies_to_all_workspaces": True,
             }
@@ -277,7 +277,7 @@ class OrganizationGuardrailUpdate(BaseModel):
         json_schema_extra={
             "example": {
                 "mode": "monitor",
-                "url": "https://guardrails.internal.example/validate",
+                "url": "https://guardrails.internal.example",
                 "credential": "sk-guardrails-...",
             }
         }
@@ -588,6 +588,7 @@ async def _validate_url(url: str, *, has_credential: bool) -> None:
     under a URL that was safe when it was stored.
     """
     try:
+        require_base_url(url)
         await validate_mcp_url(url, has_authorization_token=has_credential)
     except UnsafeURLError as exc:
         raise OrganizationGuardrailUnsafeUrlError(str(exc)) from exc

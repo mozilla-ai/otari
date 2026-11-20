@@ -170,8 +170,7 @@ async def signup(
     verification email would prove nothing more. Only the token's holder learns that.
     """
     throttle_public_auth(request)
-    invited = await invites.invited_email(body.invite) if body.invite else None
-    address_proven = invited is not None and invited.strip().lower() == body.email.strip().lower()
+    proof = await invites.proof_for(body.invite, claimed_address=body.email) if body.invite else None
     try:
         claimed = await create_user_for_signup(
             db,
@@ -184,12 +183,12 @@ async def signup(
             blocked_addresses=identities,
             full_name=body.full_name,
             terms_accepted=body.terms_accepted,
-            address_proven=address_proven,
+            proof=proof,
         )
     except MailNotConfiguredError as exc:
         raise mail_unavailable(exc) from None
     await report_new_account(growth, claimed, background_tasks=background_tasks)
-    if address_proven and claimed is not None:
+    if proof is not None and claimed is not None:
         return SignupResponse(message=_INVITED_MESSAGE, verified=True)
     return SignupResponse(message=_OPEN_SIGNUP_MESSAGE if config.open_signup else _SIGNUP_MESSAGE)
 

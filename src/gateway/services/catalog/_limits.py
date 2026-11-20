@@ -183,8 +183,9 @@ def model_capabilities(
     ``supported_parameters`` names only the request parameters models.dev records
     a flag for, so it is not the full set a model accepts: ``tools`` and
     ``tool_choice`` for ``tool_call``, ``response_format`` for ``structured_output``,
-    ``reasoning`` for ``reasoning``. ``response_format`` is left out where any-llm
-    refuses it for the provider, since a request carrying it would fail.
+    ``reasoning`` for ``reasoning``, ``temperature`` for ``temperature``.
+    ``response_format`` is left out where any-llm refuses it for the provider,
+    since a request carrying it would fail.
 
     An engine that names its parsers overrides two of those flags: it calls
     tools only with a tool-call parser, whatever the model can do, and a
@@ -233,6 +234,7 @@ def model_capabilities(
         (tool_call, ("tools", "tool_choice")),
         (structured_output, ("response_format",)),
         (reasoning, ("reasoning",)),
+        (metadata.temperature if metadata else None, ("temperature",)),
     )
     return ModelCapabilities(
         name=metadata.name if metadata else None,

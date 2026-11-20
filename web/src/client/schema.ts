@@ -1348,7 +1348,8 @@ export interface paths {
          *     A model the caller may not see answers 404, the same as one that does not
          *     exist, so the route cannot be used to probe the catalog behind an allow-list.
          *     A signed-in caller's offerings also carry their organization's own usage of
-         *     each over the last 30 days, and so do an API key's when it holds ``usage:read``.
+         *     each over the last 30 days, and how fast each answered it over the last 7, and
+         *     so do an API key's when it holds ``usage:read``.
          */
         get: operations["catalog-get_catalog_model"];
         put?: never;
@@ -10336,6 +10337,18 @@ export interface components {
              * @constant
              */
             code_challenge_method: "S256";
+            /**
+             * Expiration
+             * @description How long the key lives once it is issued.
+             * @default never
+             * @enum {string}
+             */
+            expiration: "1-hour" | "1-day" | "7-days" | "30-days" | "90-days" | "180-days" | "1-year" | "never";
+            /**
+             * Limit
+             * @description The key's spending limit in USD over its whole life. Null sets none.
+             */
+            limit?: number | string | null;
             /** Redirect Uri */
             redirect_uri: string;
             /**
@@ -10378,6 +10391,16 @@ export interface components {
              * @description The scopes each key this app is issued will hold, from its registration.
              */
             scopes: components["schemas"]["KeyScope"][];
+            /**
+             * Spend Limits
+             * @description Whether a spending limit the person sets binds the key. It does not where the deployment has turned budget enforcement off, so the consent screen does not offer one.
+             */
+            spend_limits: boolean;
+            /**
+             * Verified
+             * @description Whether the operator registered this app. An unregistered app is named after its site, which nothing has checked beyond its callback being on it.
+             */
+            verified: boolean;
         };
         /** AppRevocationRequest */
         AppRevocationRequest: {
@@ -10412,6 +10435,11 @@ export interface components {
         AppTokenResponse: {
             /** Access Token */
             access_token: string;
+            /**
+             * Manage Url
+             * @description The absolute URL of the page where the person sees this key, and revokes it.
+             */
+            manage_url: string;
             /**
              * Scope
              * @description The scopes the key holds, space delimited. Fewer than the registration names where the person approved it before an operator narrowed it.
@@ -11567,6 +11595,7 @@ export interface components {
              * @description The pinned spelling the gateway also accepts for this offering: the instance with the model's catalog id (`fireworks:openai/gpt-oss-120b`), which pins the instance and reaches the model's best offering on it. Null for another build on the same instance, or until the gateway has indexed the catalog.
              */
             short_selector?: string | null;
+            speed_7d?: components["schemas"]["OfferingSpeedInfo"] | null;
             usage_30d?: components["schemas"]["OfferingUsage"] | null;
             /**
              * Zero Data Retention
@@ -17549,6 +17578,47 @@ export interface components {
             issuer: string;
         };
         /**
+         * OfferingSpeedInfo
+         * @description How fast one offering answered the viewer's organization over the last 7 days.
+         *
+         *     Read from the organization's own requests, so it describes that traffic rather
+         *     than the provider in general: an offering that served the long prompts looks
+         *     slower. Only a request a routing plan's first candidate served counts, and
+         *     only one that ran no gateway tool.
+         */
+        OfferingSpeedInfo: {
+            /**
+             * Output Tokens Per Second P50
+             * @description Median output tokens per second over the whole request, time to first token included, as OpenRouter measures it. Null on fewer than 20 measured requests.
+             */
+            output_tokens_per_second_p50: number | null;
+            /**
+             * Output Tokens Per Second P95
+             * @description The 5th percentile of output tokens per second: the slow tail.
+             */
+            output_tokens_per_second_p95: number | null;
+            /**
+             * Throughput Samples
+             * @description Requests the throughput is read from: those with 20 or more output tokens.
+             */
+            throughput_samples: number;
+            /**
+             * Ttft Ms P50
+             * @description Median milliseconds to the first token. Null on fewer than 20 streamed requests.
+             */
+            ttft_ms_p50: number | null;
+            /**
+             * Ttft Ms P95
+             * @description The 95th percentile of milliseconds to the first token, rounded: the slow tail.
+             */
+            ttft_ms_p95: number | null;
+            /**
+             * Ttft Samples
+             * @description Streamed requests the time to first token is read from.
+             */
+            ttft_samples: number;
+        };
+        /**
          * OfferingUsage
          * @description What the viewer's organization actually paid for one offering, last 30 days.
          *
@@ -18261,7 +18331,7 @@ export interface components {
          *       "credential": "sk-guardrails-...",
          *       "mode": "block",
          *       "profile": "prompt-injection",
-         *       "url": "https://guardrails.internal.example/validate"
+         *       "url": "https://guardrails.internal.example"
          *     }
          */
         OrganizationGuardrailCreate: {
@@ -18630,7 +18700,7 @@ export interface components {
          * @example {
          *       "credential": "sk-guardrails-...",
          *       "mode": "monitor",
-         *       "url": "https://guardrails.internal.example/validate"
+         *       "url": "https://guardrails.internal.example"
          *     }
          */
         OrganizationGuardrailUpdate: {
@@ -23084,6 +23154,8 @@ export interface components {
             latency_ms: number | null;
             /** Model */
             model: string;
+            /** Output Tokens Per Second */
+            output_tokens_per_second: number | null;
             /** Policy Name */
             policy_name?: string | null;
             /** Pricing Breakdown */
@@ -23120,6 +23192,8 @@ export interface components {
             timestamp: string;
             /** Total Tokens */
             total_tokens: number | null;
+            /** Ttft Ms */
+            ttft_ms: number | null;
             /** User Alias */
             user_alias?: string | null;
             /** User Id */
@@ -23168,6 +23242,8 @@ export interface components {
             key: string | null;
             /** Label */
             label?: string | null;
+            /** Model Group */
+            model_group?: string | null;
             /** Requests */
             requests: number;
             /** Tokens */
@@ -30523,6 +30599,10 @@ export interface operations {
                 code_challenge: string;
                 code_challenge_method: "S256";
                 response_type?: "code";
+                /** @description A spending limit in USD to suggest for the key. The person can change it on the consent screen, and one the screen cannot use is left blank. */
+                limit?: string | null;
+                /** @description An expiry to suggest for the key: 1-hour, 1-day, 7-days, 30-days, 90-days, 180-days, 1-year or never. The person can change it, and any other value leaves it at never. */
+                expiration?: string | null;
             };
             header?: never;
             path?: never;

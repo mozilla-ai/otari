@@ -17,7 +17,7 @@ describe("pickTopModel", () => {
       row({ key: "small", cost: 1 }),
       row({ key: "big", cost: 9 }),
     ])
-    expect(top).toEqual({ name: "big", cost: 9 })
+    expect(top).toEqual({ name: "big", spellings: ["big"], cost: 9 })
   })
 
   it("breaks a tie on spend by tokens", () => {
@@ -26,6 +26,29 @@ describe("pickTopModel", () => {
       row({ key: "many", cost: 2, tokens: 500 }),
     ])
     expect(top?.name).toBe("many")
+  })
+
+  it("counts a model's ids on every provider as one model, by its name", () => {
+    const top = pickTopModel([
+      row({ key: "solo", cost: 5 }),
+      row({
+        key: "accounts/fireworks/models/glm-5p3",
+        label: "GLM 5.3",
+        model_group: "z-ai/glm-5.3",
+        cost: 3,
+      }),
+      row({
+        key: "zai-org/GLM-5.3",
+        label: "GLM 5.3",
+        model_group: "z-ai/glm-5.3",
+        cost: 3,
+      }),
+    ])
+    expect(top).toEqual({
+      name: "GLM 5.3",
+      spellings: ["accounts/fireworks/models/glm-5p3", "zai-org/GLM-5.3"],
+      cost: 6,
+    })
   })
 
   it("never picks the fold of other models", () => {
@@ -58,10 +81,14 @@ describe("pickTopModel", () => {
 
 describe("topModelShare", () => {
   it("reads the share of the row's spend", () => {
-    expect(topModelShare({ name: "m", cost: 32 }, 33.26)).toBe("96% of spend")
+    expect(
+      topModelShare({ name: "m", spellings: ["m"], cost: 32 }, 33.26),
+    ).toBe("96% of spend")
   })
 
   it("says unpriced when the row has no spend", () => {
-    expect(topModelShare({ name: "m", cost: 0 }, 0)).toBe("unpriced")
+    expect(topModelShare({ name: "m", spellings: ["m"], cost: 0 }, 0)).toBe(
+      "unpriced",
+    )
   })
 })

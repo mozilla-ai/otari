@@ -558,7 +558,7 @@ def test_messages_served_as_a_chat_completion_gets_the_providers_chat_field(
     client = make_client()
     headers, workspace = _keyed_user(client)
 
-    _message(client, headers, model="openai:gpt-4o-mini")
+    _message(client, headers, model="azureopenai:gpt-4o-mini")
 
     assert messages_captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None)
     assert not {"metadata", UPSTREAM_USER_FIELD} & set(messages_captured[0])

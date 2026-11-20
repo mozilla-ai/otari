@@ -3,7 +3,6 @@ import { useState } from "react"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { useMailedLinkStatus, useResetPassword } from "@/shared/api/auth"
 import {
-  MAX_PASSWORD_BYTES,
   MIN_PASSWORD_LENGTH,
   newPasswordProblem,
 } from "@/shared/helpers/password"
@@ -152,7 +151,7 @@ export function ResetPasswordPage({ route }: { route: string }) {
             clearError()
           }}
           autoComplete="new-password"
-          description={`At least ${MIN_PASSWORD_LENGTH} characters, and at most ${MAX_PASSWORD_BYTES} bytes.`}
+          description={`At least ${MIN_PASSWORD_LENGTH} characters.`}
           errorMessage={problem ?? undefined}
         />
         <AuthPasswordField

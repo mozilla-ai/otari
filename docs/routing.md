@@ -28,6 +28,18 @@ Callers send `model: fast`. If the first provider fails before any response is
 sent, Otari tries the fallback. The response keeps the policy name; the Requests
 view of Sessions records the models that were attempted.
 
+A policy stored through the API or the dashboard may also name a target by its
+[catalog spelling](models.md#catalog-spellings), such as `z-ai/glm-5.3`. The
+policy keeps the spelling as written, and each request tries the one offering
+the spelling resolves to at that moment; the policy's own `on_failure` list is
+its only fallback. A spelling the catalog does not know when the policy is
+saved is refused. An organization's own routing page also refuses one that
+resolves to an offering the organization cannot reach; the deployment-wide API
+checks only that the target names a provider it knows, so a target with no
+credential behind it fails when a request arrives. A policy in `config.yml` is
+checked before the catalog is read, so its targets name a provider or an
+instance.
+
 ![Otari tries OpenAI first and moves to Anthropic when OpenAI returns a retryable error.](assets/routing-fallback-flow.webp)
 
 ## Selection and failure are separate
@@ -44,6 +56,12 @@ candidate when:
 - the provider rejects the configured credential (401, or a 403 that does not
   reject the request itself);
 - a Chat Completions candidate answers with no choices.
+
+A request that declares a tool Otari runs (web search, web fetch, code
+execution or an MCP server) is the exception: once a candidate has answered its
+first round, the rest of the tool loop stays on that candidate, and a later
+error, a rate limit included, is returned rather than retried on a backup. See
+[Failure behavior](#failure-behavior).
 
 A candidate nothing declares that one of the deployment's hosted providers
 serves is sent on the deployment's own credential, as a single model is
@@ -398,18 +416,28 @@ streaming failure after the stream begins is returned to the client because
 switching models mid-answer would corrupt the response.
 
 A tool loop that has already produced assistant state cannot be replayed on
-another provider. On Chat Completions, a stream that has reported one of Otari's
-web searches or fetches in `otari_tool_calls` has sent response bytes, so it is
-committed from that report on. Shared service failures, such as an unavailable mandatory
+another provider: its transcript holds that provider's own tool-call IDs and
+reasoning, and its tools have already run. A provider error on a later round,
+such as a `429` while the model is busy, is therefore returned to the caller.
+Before any response bytes are sent, it is the response, answered as the error
+is when the model is named directly: a `429` keeps its status and its `code`,
+and a provider's `500` or `503` is a `502`. When the policy had backups left,
+its `detail` also says they were not tried. On Chat Completions, a stream that
+has reported one of Otari's web searches or fetches in `otari_tool_calls` has
+sent response bytes, so it is committed from that report on: its status is
+already set, and a later error ends it with an error event instead. Sending the
+request again starts a new tool loop. Shared service failures, such as an unavailable mandatory
 guardrail or sandbox, also do not improve by changing candidates.
 
 If every candidate of a plan with more than one candidate fails, Otari returns a
-gateway error in its own words, never a provider's message. A plan with one
-candidate answers as naming that model directly would.
+gateway error in its own words. A provider's message is part of it in one
+case: when every candidate rejected the request as invalid in the same words,
+`detail` ends with that sentence. A plan with one candidate answers as naming
+that model directly would.
 
 | Every candidate... | Response |
 | --- | --- |
-| rejected the request as invalid (400) | `400 all_candidates_rejected` |
+| rejected the request as invalid (400) | `400 all_candidates_rejected`, with `detail` giving the reason when every candidate gave the same one |
 | found the prompt too long | `context_length_exceeded` |
 | refused image content the request carries, in wording Otari recognizes | `unsupported_content` |
 | failed to produce output matching the requested JSON schema (Groq's `json_validate_failed`) | `structured_output_failed`. Sending the request again may succeed. |
