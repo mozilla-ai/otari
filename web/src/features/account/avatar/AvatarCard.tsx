@@ -9,6 +9,7 @@ import { AvatarFace } from "./AvatarFace"
 import { AvatarPickerDialog } from "./AvatarPickerDialog"
 import { useOwnAvatar } from "./avatarChoice"
 import { face } from "./faces"
+import { startPickerSound } from "./sounds"
 
 /**
  * The face drawn for you on the account control and in every member list of
@@ -42,7 +43,10 @@ export function AvatarCard() {
         )}
         <Button
           isDisabled={current === null}
-          onPress={() => setIsOpen(true)}
+          onPress={() => {
+            startPickerSound()
+            setIsOpen(true)
+          }}
           aria-label={
             current === null
               ? "Change avatar"
