@@ -104,11 +104,12 @@ gave no verdict, so `status` says which:
 | --- | --- |
 | `evaluated` | The check ran. `valid` is `true` or `false`. |
 | `inconclusive` | The check ran and the guardrail returned no verdict. |
-| `unavailable` | The check could not run. The request was served anyway, or was refused with a `502` that carries this header. `reason` says why. |
+| `unavailable` | The check could not run. The request was served anyway, or was refused with a `502` or a `424` that carries this header. `reason` says why. |
 
 `reason` appears only on an `unavailable` entry:
 
-- `not_configured`: the deployment has no guardrails service for the profile.
+- `not_configured`: no guardrails service is configured for the profile: the
+  entry names no `url` and the deployment has no `guardrails_url`.
 - `http_<status>`: the service answered the `/validate` call with that error
   status, for example `http_404`. A `404` means the service has no `/validate`
   at the address Otari called, or does not serve the profile.
@@ -123,6 +124,12 @@ The guardrail's own explanation is never put in the header.
 A `block` guardrail that cannot be evaluated at all (service down, no URL
 configured, malformed response) **fails closed**: input it cannot read is
 refused with a `502` rather than forwarded unchecked, and an answer with a `403`.
+When the reason is that no guardrails service is configured for the profile,
+the refusal is a `424` with the code `guardrail_not_configured` instead, since
+no retry can fix it. Its message says what to change: a profile you named in
+the request needs a `url` on its entry, or the entry removed, and a mandated
+one needs an administrator of your organization or of the deployment to
+configure it.
 A tool result it cannot read is withheld instead, as a flagged one is, with a
 message saying it could not be checked, and a tool call Otari would run is
 skipped. A `monitor` guardrail fails open, since it was never enforcing.
@@ -141,7 +148,7 @@ was wrong with it.
 
 | `on_unavailable` | A `block` entry that cannot be evaluated |
 | --- | --- |
-| `block` (default) | Refuses the request with `502`. |
+| `block` (default) | Refuses the request with `502`, or `424` when no service is configured for it. |
 | `monitor` | Serves the request and records the check as `unavailable`, or `inconclusive` when the service gave no verdict, trading enforcement for availability. |
 
 A mandate that names a [definition](#definition-fields) is checked inside the
