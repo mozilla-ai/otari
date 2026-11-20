@@ -109,18 +109,40 @@ def _unevaluated_detail(profile: str) -> str:
     return f"guardrail profile {profile!r} could not be evaluated"
 
 
+def _not_configured_detail(profile: str, *, mandated: bool) -> str:
+    """What a caller is told when no guardrails service serves a profile that enforces.
+
+    Worded for whoever can fix it, which depends on who named the profile. A
+    caller who named it can change the request. One subject to a mandate cannot,
+    and is not sent to a request field the mandate would override. Neither is
+    told to set a deployment setting, which a tenant of a hosted deployment has
+    no way to reach.
+    """
+    if mandated:
+        return (
+            f"guardrail profile {profile!r} is required for this request, but no guardrails service is "
+            "configured for it, so the request was refused. An administrator of your organization or of "
+            "this deployment has to configure it."
+        )
+    return (
+        f"guardrail profile {profile!r} was requested in block mode, but no guardrails service is "
+        "configured for it, so the request was refused. Name a guardrails service with `url` on the "
+        "guardrail entry, or remove the entry. A guardrail your organization defined from the catalog "
+        "runs only through an organization mandate."
+    )
+
+
 class GuardrailsNotReachableError(RuntimeError):
     """Raised when the guardrails service can't be reached or returns malformed data.
 
     Carries two messages, because the two audiences are different. ``str(exc)``
     is for the log and names the endpoint and the underlying failure;
-    :attr:`public_detail` is what reaches the caller in the 502 body and
+    :attr:`public_detail` is what reaches the caller in the error body and
     deliberately does not. Since otari#654 that endpoint may be one an
     organization configured, which the caller was never told about and cannot
     act on, and the root ``AGENTS.md`` rule against leaking internals in a
-    public error response covers exactly that. The one message that stays whole
-    is the no-URL-configured case: it names an environment variable rather than
-    an address, and it is the only one a reader can actually act on.
+    public error response covers exactly that. The no-URL-configured case says
+    what to change instead, worded for whoever named the profile.
 
     Neither message quotes what the endpoint sent back, because an answer can
     echo the prompt. A bad answer is named by its HTTP status, its exception
@@ -463,8 +485,8 @@ async def run_input_guardrails(
     * ``block`` guardrails with ``on_unavailable="block"`` (the
       default) **fail closed** — if one can't be evaluated (service unreachable, no URL
       configured, malformed response) we raise
-      :class:`GuardrailsNotReachableError` (the caller surfaces it as a 502)
-      rather than let an unchecked request through.
+      :class:`GuardrailsNotReachableError` (the caller surfaces it as a 502, or
+      a 424 when no URL is configured) rather than let an unchecked request through.
     * ``block`` guardrails with ``on_unavailable="monitor"`` trade enforcement for
       availability: the check is recorded as inconclusive and the request
       proceeds, the same as a ``monitor`` guardrail. Only reachability is affected;
@@ -507,6 +529,7 @@ async def run_input_guardrails(
     # Either way the unsafe endpoint is never actually called.
     credentials = credentials or {}
     in_process = in_process or {}
+    mandated_profiles = frozenset(mandated or ())
     if unsafe is None:
         unsafe = await check_guardrail_urls(guardrails, credentials=credentials, mandated=mandated)
 
@@ -533,9 +556,9 @@ async def run_input_guardrails(
                     result = await _check_in_process(in_process[cfg.profile], cfg=cfg, input_text=input_text)
                 elif not base_url:
                     raise GuardrailsNotReachableError(
-                        f"guardrail profile {cfg.profile!r} requested but no guardrails service is "
-                        "configured. Set OTARI_GUARDRAILS_URL on the gateway or pass `url` on the "
-                        "guardrail entry.",
+                        f"guardrail profile {cfg.profile!r} has no guardrails service: set "
+                        "OTARI_GUARDRAILS_URL, or give the entry a `url`",
+                        public_detail=_not_configured_detail(cfg.profile, mandated=cfg.profile in mandated_profiles),
                         reason="not_configured",
                     )
                 else:

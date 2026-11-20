@@ -458,12 +458,33 @@ async def test_an_unreachable_endpoint_is_not_named_to_the_caller(monkeypatch: p
 
 
 @pytest.mark.asyncio
-async def test_the_no_url_message_survives_whole(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The one case a caller can act on names an environment variable, not an address."""
+async def test_a_requested_profile_with_no_service_tells_the_caller_what_to_change() -> None:
+    """Otari#2937: the caller named the profile, so the fix is in their request, not in a setting they cannot reach."""
     with pytest.raises(GuardrailsNotReachableError) as exc:
         await run_input_guardrails([GuardrailConfig(profile="prompt-injection", mode="block")], "x", default_url=None)
 
-    assert "OTARI_GUARDRAILS_URL" in exc.value.public_detail
+    assert exc.value.reason == "not_configured"
+    assert "`url`" in exc.value.public_detail
+    assert "mandate" in exc.value.public_detail
+    assert "OTARI_GUARDRAILS_URL" not in exc.value.public_detail
+    assert "OTARI_GUARDRAILS_URL" in str(exc.value), "the operator's log still names the setting"
+
+
+@pytest.mark.asyncio
+async def test_a_mandated_profile_with_no_service_does_not_send_the_caller_to_their_request() -> None:
+    """Otari#2937: a mandate is not the caller's to fix, and they cannot point it at a service."""
+    with pytest.raises(GuardrailsNotReachableError) as exc:
+        await run_input_guardrails(
+            [GuardrailConfig(profile="prompt-injection", mode="block")],
+            "x",
+            default_url=None,
+            mandated={"prompt-injection"},
+        )
+
+    assert exc.value.reason == "not_configured"
+    assert "`url`" not in exc.value.public_detail
+    assert "administrator" in exc.value.public_detail
+    assert "OTARI_GUARDRAILS_URL" not in exc.value.public_detail
 
 
 def _unresolvable(monkeypatch: pytest.MonkeyPatch) -> None:

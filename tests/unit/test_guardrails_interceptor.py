@@ -176,6 +176,22 @@ async def test_the_502_says_why_in_the_header(monkeypatch: pytest.MonkeyPatch) -
     ]
 
 
+@pytest.mark.asyncio
+async def test_a_guardrail_with_no_service_is_a_424_not_an_outage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Otari#2937: a configuration gap that no retry fixes is not a 5xx, and it is still refused."""
+    monkeypatch.delenv("OTARI_GUARDRAILS_URL", raising=False)
+    with pytest.raises(HTTPException) as exc:
+        await apply_input_guardrails(
+            [GuardrailConfig(profile="prompt-injection", mode="block")], "x", response=Response()
+        )
+    assert exc.value.status_code == 424
+    assert exc.value.headers is not None
+    assert exc.value.headers["Otari-Error-Code"] == "guardrail_not_configured"
+    header = json.loads(exc.value.headers[GUARDRAILS_RESULT_HEADER])
+    assert header[0]["reason"] == "not_configured"
+    assert "OTARI_GUARDRAILS_URL" not in str(exc.value.detail)
+
+
 _ECHO = "my-private-prompt"
 
 
