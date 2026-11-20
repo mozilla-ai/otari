@@ -54,6 +54,7 @@ from gateway.services.provider_kwargs import (
     no_candidate_configured_detail,
 )
 from gateway.services.sandbox_backend import SandboxNotReachableError
+from gateway.services.upstream_redaction import redact_upstream_message
 from gateway.services.web_retrieval_backend import WebSearchNotReachableError
 from gateway.types.attempt import Attempt
 
@@ -69,9 +70,8 @@ LOCKED_IN_DETAIL = (
     "The routing policy's backups were not tried: a gateway-run tool had already run on this model, "
     "and a tool loop cannot move to another provider."
 )
-_MAX_LOGGED_CAUSE_CHARS = 300
-# Raised by the local network stack, so their text describes the connection,
-# never a provider's body, which can echo the request.
+# Raised by the local network stack, so their text describes the connection
+# rather than carrying a provider's body, which can echo the request.
 _TRANSPORT_ERRORS = (httpx.TransportError, httpx2.TransportError, OSError)
 
 
@@ -80,8 +80,8 @@ def failure_cause(exc: BaseException) -> str:
 
     A provider SDK raises its own connection error with a fixed message ("Connection
     error."), so why the connection failed is only on the exception it was raised from.
-    That exception's message is kept only for a transport error; anything else is named
-    by its type alone.
+    That exception's message is kept only for a transport error, and only what
+    ``redact_upstream_message`` leaves of it; anything else is named by its type alone.
     """
     current = exc
     seen = {id(current)}
@@ -94,9 +94,7 @@ def failure_cause(exc: BaseException) -> str:
         current = parent
     if not isinstance(current, _TRANSPORT_ERRORS):
         return type(current).__name__
-    message = " ".join(str(current).split())
-    if len(message) > _MAX_LOGGED_CAUSE_CHARS:
-        message = message[: _MAX_LOGGED_CAUSE_CHARS - len("...")] + "..."
+    message = redact_upstream_message(str(current))
     return f"{type(current).__name__}: {message}" if message else type(current).__name__
 
 

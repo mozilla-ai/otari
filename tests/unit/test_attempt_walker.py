@@ -1045,11 +1045,22 @@ def test_failure_cause_follows_any_llms_original_exception() -> None:
 
 
 def test_failure_cause_caps_a_long_message() -> None:
-    cause = failure_cause(httpx.ConnectError("x" * 1000))
+    cause = failure_cause(httpx.ConnectError("connection reset " * 100))
 
-    assert cause.startswith("ConnectError: xxx")
+    assert cause.startswith("ConnectError: connection reset")
     assert cause.endswith("...")
-    assert len(cause) == len("ConnectError: ") + 300
+    assert len(cause) <= len("ConnectError: ") + 400
+
+
+def test_failure_cause_drops_a_transport_message_that_echoes_the_request() -> None:
+    assert failure_cause(httpx.ConnectError("Invalid prompt: confidential acquisition plan")) == "ConnectError"
+
+
+def test_failure_cause_masks_a_url_in_a_transport_message() -> None:
+    cause = failure_cause(httpx.ConnectError("cannot reach https://user:pw@internal.example/v1"))
+
+    assert "internal.example" not in cause
+    assert cause.startswith("ConnectError: cannot reach")
 
 
 @pytest.mark.parametrize(
@@ -1083,17 +1094,26 @@ async def test_a_failed_attempt_logs_why_it_failed(caplog: pytest.LogCaptureFixt
 
 
 @pytest.mark.asyncio
-async def test_a_failed_attempt_never_logs_the_providers_error_text(caplog: pytest.LogCaptureFixture) -> None:
+@pytest.mark.parametrize(
+    ("exc", "cause"),
+    [
+        (RuntimeError("Invalid prompt: confidential acquisition plan"), "RuntimeError"),
+        (httpx.ConnectError("Invalid prompt: confidential acquisition plan"), "ConnectError"),
+    ],
+)
+async def test_a_failed_attempt_never_logs_echoed_request_text(
+    caplog: pytest.LogCaptureFixture, exc: BaseException, cause: str
+) -> None:
     gateway_logger.addHandler(caplog.handler)
     caplog.set_level(logging.WARNING, logger="gateway")
     try:
         await _walk(
             [_attempt(1, "gpt-5-mini"), _attempt(2, "claude-haiku-4-5", instance="anthropic")],
-            [RuntimeError("Invalid prompt: confidential acquisition plan"), "ok"],
+            [exc, "ok"],
         )
     finally:
         gateway_logger.removeHandler(caplog.handler)
 
     [line] = [record.getMessage() for record in caplog.records if record.getMessage().startswith("Attempt failed")]
     assert "confidential" not in line
-    assert line.endswith("cause=RuntimeError")
+    assert line.endswith(f"cause={cause}")
