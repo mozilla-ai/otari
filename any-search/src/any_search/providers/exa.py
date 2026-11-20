@@ -12,10 +12,11 @@ successful search carries no error of its own.
 Every field read from a successful answer is checked, so a change on Exa's
 side fails the call rather than degrading it: ``results`` and each item's
 ``url`` and ``title`` must be there, and ``text``, ``highlights``,
-``publishedDate`` and ``costDollars.total`` must have the right type when they
-are. Anything else raises ``unexpected_response``. Exa documents the cost as
-optional, so a search without one reports none, and the live tests say so. Fields the adapter does not read
-are ignored, so a field Exa adds breaks nothing.
+``publishedDate``, ``image``, ``favicon`` and ``costDollars.total`` must have
+the right type when they are. Anything else raises ``unexpected_response``. Exa
+documents the cost as optional, so a search without one reports none, and the
+live tests say so. Fields the adapter does not read are ignored, so a field Exa
+adds breaks nothing.
 
 API: https://exa.ai/docs/reference/search. Pricing, read 2026-10-08:
 https://exa.ai/docs/admin/pricing.
@@ -214,14 +215,27 @@ def _hit(item: Any, response: httpx.Response) -> SearchHit:
         published = _published(item["publishedDate"])
         if published is None:
             raise _unexpected(response)
+    image = _optional_str(item.get("image"), response)
+    favicon = _optional_str(item.get("favicon"), response)
     return SearchHit(
         url=url,
         title=title,
         snippet=" ".join(part.strip() for part in highlights if part.strip()),
         text=text or None,
         published=published,
+        image=image,
+        favicon=favicon,
         raw=item,
     )
+
+
+def _optional_str(value: Any, response: httpx.Response) -> str | None:
+    """A field Exa sends only sometimes: ``None`` when absent, else a string, else ``unexpected_response``."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise _unexpected(response)
+    return value or None
 
 
 def _published(value: Any) -> datetime | None:

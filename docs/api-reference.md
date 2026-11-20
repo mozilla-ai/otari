@@ -749,7 +749,9 @@ for it works against Otari with its base URL changed. `include_raw` and
       "url": "https://blog.python.org/2025/10/python-3140-final-is-here.html",
       "snippet": "Python 3.14.0 is the newest major release ...",
       "date": "2025-10-01T00:00:00.000Z",
-      "last_updated": null
+      "last_updated": null,
+      "image": "https://blog.python.org/og/python-3140-final-is-here.png",
+      "favicon": null
     }
   ]
 }
@@ -758,7 +760,9 @@ for it works against Otari with its base URL changed. `include_raw` and
 `title` and `snippet` are always strings, empty when the provider gave none.
 `snippet` is the page text when the provider returned it, else its excerpt. `date`
 is the page's date as the provider gave it, else `null`, and `last_updated` is
-`null`. `raw` appears only when the request set `include_raw`.
+`null`. `image` is a preview image for the result and `favicon` the site's icon,
+each a string when the provider returned one and `null` otherwise. `raw` appears
+only when the request set `include_raw`.
 
 A service key's `user` field names one of its end users here as it does on chat
 completions: the search is billed to that end user, under the key's end-user
