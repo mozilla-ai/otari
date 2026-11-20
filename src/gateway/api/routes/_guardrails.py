@@ -66,7 +66,10 @@ def _refusal(message: str, results: Sequence[GuardrailResult]) -> dict[str, Any]
     return {
         "message": message,
         "code": GUARDRAIL_VIOLATION,
-        "guardrails": [{"profile": r.profile, "explanation": r.explanation, "score": r.score} for r in results],
+        "guardrails": [
+            {"profile": r.profile, "explanation": r.explanation, "score": r.score, "categories": list(r.categories)}
+            for r in results
+        ],
     }
 
 
@@ -464,7 +467,8 @@ class RequestGuardrails:
     def _header_value(self) -> str:
         # One entry per profile, kept compact and free of the freeform `explanation`
         # to avoid oversized / non-ASCII headers. `status` and `reason` are fixed
-        # words, so a `valid: null` still says whether the check ran.
+        # words, so a `valid: null` still says whether the check ran, and
+        # `categories` holds only a few short ASCII identifiers.
         return json.dumps(
             [
                 _summary(result, withheld=self._withheld.get(result.profile, 0))
@@ -512,6 +516,8 @@ def _summary(result: GuardrailResult, *, withheld: int = 0) -> dict[str, object]
     }
     if result.unavailable is not None:
         summary["reason"] = result.unavailable
+    if result.categories:
+        summary["categories"] = list(result.categories)
     if withheld:
         summary["withheld"] = withheld
     return summary
