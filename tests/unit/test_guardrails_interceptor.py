@@ -491,3 +491,32 @@ async def test_a_flagged_tool_call_for_the_client_refuses_the_answer(monkeypatch
 
     with pytest.raises(AnswerRefused):
         await guardrails.finish_answer([_part('{"cmd": "rm -rf /"}', "tool_call")])
+
+
+# -- what fired ----------------------------------------------------------------
+
+
+def _answering(*results: GuardrailResult) -> Callable[..., Any]:
+    async def _runner(*_a: object, **_k: object) -> GuardrailVerdict:
+        return GuardrailVerdict(results=list(results))
+
+    return _runner
+
+
+@pytest.mark.asyncio
+async def test_a_check_records_what_fired_on_the_trace(monkeypatch: pytest.MonkeyPatch) -> None:
+    recorded: list[dict[str, Any]] = []
+
+    class _Trace:
+        def record_guardrail(self, **kwargs: Any) -> None:
+            recorded.append(kwargs)
+
+    flagged = GuardrailResult(profile="lakera", mode="monitor", valid=False, categories=("prompt_attack",))
+    monkeypatch.setattr("gateway.api.routes._guardrails.run_input_guardrails", _answering(flagged))
+
+    await apply_input_guardrails(
+        [GuardrailConfig(profile="lakera", mode="monitor")], "x", response=Response(), trace=_Trace()
+    )
+
+    [span] = recorded
+    assert span["categories"] == ("prompt_attack",)
