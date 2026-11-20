@@ -1574,6 +1574,11 @@ def create_app(config: GatewayConfig) -> FastAPI:
             "name": X_API_KEY_HEADER,
             "description": "Anthropic-native clients send credentials here (no Bearer prefix).",
         }
+        openapi_schema["components"]["securitySchemes"]["BearerAuth"] = {
+            "type": "http",
+            "scheme": "bearer",
+            "description": "Send your API key as an Authorization: Bearer token.",
+        }
         validation_error = openapi_schema["components"].get("schemas", {}).get("HTTPValidationError")
         if validation_error is not None:
             # What `_validation_error_handler` adds to FastAPI's own 422 body.
@@ -1587,7 +1592,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
         for path, path_item in openapi_schema.get("paths", {}).items():
             if path in _UNAUTHENTICATED_PATHS or _under(path, _PUBLIC_PREFIXES + _COOKIE_AUTH_PREFIXES):
                 continue
-            requirement: list[dict[str, list[str]]] = [{"ApiKeyAuth": []}, {"XApiKeyAuth": []}]
+            requirement: list[dict[str, list[str]]] = [{"ApiKeyAuth": []}, {"XApiKeyAuth": []}, {"BearerAuth": []}]
             for method, operation in path_item.items():
                 if isinstance(operation, dict):
                     operation["security"] = [] if (method, path) in _UNAUTHENTICATED_OPERATIONS else requirement

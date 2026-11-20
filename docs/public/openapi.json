@@ -34289,6 +34289,11 @@
         "name": "Otari-Key",
         "type": "apiKey"
       },
+      "BearerAuth": {
+        "description": "Send your API key as an Authorization: Bearer token.",
+        "scheme": "bearer",
+        "type": "http"
+      },
       "XApiKeyAuth": {
         "description": "Anthropic-native clients send credentials here (no Bearer prefix).",
         "in": "header",
@@ -34326,6 +34331,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Administration Access",
@@ -34395,6 +34403,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Blocked Emails",
@@ -34443,6 +34454,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Block Email",
@@ -34488,6 +34502,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Unblock Email",
@@ -34576,6 +34593,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Deployment Users",
@@ -34638,6 +34658,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Deployment User",
@@ -34700,6 +34723,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Hand Over Bootstrap Operator",
@@ -34752,6 +34778,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Issue Password Link",
@@ -34802,6 +34831,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Agent Telemetry Rows",
@@ -34944,6 +34976,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Count Agent Telemetry",
@@ -35117,6 +35152,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Agent Telemetry Series",
@@ -35275,6 +35313,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Agent Telemetry Summary",
@@ -35340,6 +35381,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Aliases",
@@ -35388,6 +35432,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Set Alias",
@@ -35469,6 +35516,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Alias",
@@ -35579,6 +35629,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Speech",
@@ -35704,6 +35757,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Transcription",
@@ -35750,6 +35806,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Own Account",
@@ -35902,6 +35961,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Set Dashboard Password",
@@ -36029,6 +36091,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Validate Reset Link",
@@ -36059,6 +36124,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Own Profile",
@@ -36107,6 +36175,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Own Profile",
@@ -36157,6 +36228,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Own Avatar",
@@ -36346,6 +36420,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Callback Sso",
@@ -36396,6 +36473,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Lookup Sso",
@@ -36447,6 +36527,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Authorize Sso",
@@ -36539,6 +36622,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Validate Verification Link",
@@ -36633,6 +36719,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Passkeys",
@@ -36678,6 +36767,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Passkey",
@@ -36738,6 +36830,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Rename Passkey",
@@ -36788,6 +36883,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Register Passkey",
@@ -36818,6 +36916,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Registration Options",
@@ -36899,6 +37000,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Batches",
@@ -36948,6 +37052,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Batch",
@@ -37009,6 +37116,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Retrieve Batch",
@@ -37070,6 +37180,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Cancel Batch",
@@ -37137,6 +37250,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Retrieve Batch Results",
@@ -37231,6 +37347,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Budgets",
@@ -37279,6 +37398,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Budget",
@@ -37323,6 +37445,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Budget",
@@ -37372,6 +37497,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Budget",
@@ -37431,6 +37559,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Budget",
@@ -37503,6 +37634,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Put Budget",
@@ -37581,6 +37715,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Budget Reset Logs",
@@ -37944,6 +38081,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Catalog",
@@ -38015,6 +38155,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Catalog Model",
@@ -38104,6 +38247,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Catalog Providers",
@@ -38202,6 +38348,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Catalog Provider",
@@ -38233,6 +38382,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Refresh Selector Index",
@@ -38319,6 +38471,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Chat Completions",
@@ -38391,6 +38546,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Code Execution Environments",
@@ -38456,6 +38614,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Execute Code",
@@ -38509,6 +38670,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Decision",
@@ -38562,6 +38726,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Embedding",
@@ -38599,6 +38766,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List End User Budgets",
@@ -38696,6 +38866,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete End Users",
@@ -38833,6 +39006,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List End Users",
@@ -38898,6 +39074,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update End User By Query",
@@ -38973,6 +39152,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Put End User By Query",
@@ -39022,6 +39204,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete End User",
@@ -39076,6 +39261,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get End User",
@@ -39140,6 +39328,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update End User",
@@ -39214,6 +39405,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Put End User",
@@ -39291,6 +39485,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Submit Feedback",
@@ -39355,6 +39552,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Fetch",
@@ -39435,6 +39635,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Fetch For Tool",
@@ -39614,6 +39817,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Files",
@@ -39703,6 +39909,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create File",
@@ -39781,6 +39990,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete File",
@@ -39857,6 +40069,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get File",
@@ -39942,6 +40157,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get File Content",
@@ -40001,6 +40219,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Health Check Status",
@@ -40031,6 +40252,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Disable Failing Models",
@@ -40061,6 +40285,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Run Health Checks",
@@ -40091,6 +40318,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Health Check Settings",
@@ -40139,6 +40369,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Health Check Settings",
@@ -40236,6 +40469,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Check Policy",
@@ -40292,6 +40528,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Record Guardrail Definition",
@@ -40360,6 +40599,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Hosted Providers",
@@ -40408,6 +40650,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Hosted Provider",
@@ -40458,6 +40703,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Catalog",
@@ -40508,6 +40756,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Preview Catalog Update",
@@ -40538,6 +40789,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Preview Deployment Provider Migration",
@@ -40586,6 +40840,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Apply Deployment Provider Migration",
@@ -40630,6 +40887,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Discard Deployment Provider",
@@ -40660,6 +40920,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Reencrypt Hosted Providers",
@@ -40710,6 +40973,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Test Hosted Provider",
@@ -40761,6 +41027,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Hosted Provider",
@@ -40820,6 +41089,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Hosted Provider",
@@ -40871,6 +41143,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Available Models",
@@ -41036,6 +41311,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Hosted Models",
@@ -41095,6 +41373,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Add Hosted Model",
@@ -41146,6 +41427,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Refresh Hosted Models",
@@ -41207,6 +41491,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Reset Hosted Model Prices",
@@ -41268,6 +41555,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Switch Hosted Vendor Models",
@@ -41329,6 +41619,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Remove Hosted Model",
@@ -41398,6 +41691,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Hosted Model",
@@ -41459,6 +41755,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Add Hosted Provider Region",
@@ -41519,6 +41818,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Remove Hosted Provider Region",
@@ -41587,6 +41889,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Hosted Provider Region",
@@ -41648,6 +41953,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Hosted Vendor",
@@ -41783,6 +42091,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Edit Image",
@@ -41834,6 +42145,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Image",
@@ -41951,6 +42265,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Key Budget",
@@ -42279,6 +42596,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Key Usage Series",
@@ -42643,6 +42963,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Key Usage Summary",
@@ -42734,6 +43057,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Keys",
@@ -42782,6 +43108,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Key",
@@ -42826,6 +43155,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Key",
@@ -42875,6 +43207,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Key",
@@ -42934,6 +43269,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Key",
@@ -42985,6 +43323,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get End User Count",
@@ -43129,6 +43470,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List End Users",
@@ -43200,6 +43544,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update End User By Query",
@@ -43281,6 +43628,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Put End User By Query",
@@ -43343,6 +43693,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get End User",
@@ -43413,6 +43766,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update End User",
@@ -43493,6 +43849,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Put End User",
@@ -43548,6 +43907,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Federation Rules",
@@ -43607,6 +43969,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Federation Rule",
@@ -43660,6 +44025,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Federation Rule",
@@ -43711,6 +44079,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Rotate Key",
@@ -43795,6 +44166,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Popular Mcp Servers",
@@ -43919,6 +44293,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Search Mcp Catalog",
@@ -43949,6 +44326,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Mcp Catalog Sync",
@@ -44013,6 +44393,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Request Mcp Catalog Sync",
@@ -44063,6 +44446,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Complete Mcp Connection",
@@ -44223,6 +44609,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Execute Mcp Tool",
@@ -44306,6 +44695,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Mcp Servers",
@@ -44451,6 +44843,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Mcp Tools",
@@ -44550,6 +44945,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Message",
@@ -44613,6 +45011,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Count Message Tokens",
@@ -44660,6 +45061,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Clear Model Override",
@@ -44719,6 +45123,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Set Model Override",
@@ -44798,6 +45205,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Models",
@@ -44853,6 +45263,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Discoverable Models",
@@ -44883,6 +45296,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Model Metadata",
@@ -44934,6 +45350,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Model",
@@ -44997,6 +45416,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Moderation",
@@ -45194,6 +45616,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Authorize",
@@ -45430,6 +45855,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "App Workspaces",
@@ -45510,6 +45938,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Exchange Token",
@@ -45570,6 +46001,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Organization",
@@ -45630,6 +46064,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Active Organization",
@@ -45668,6 +46105,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Active Organization Context",
@@ -45716,6 +46156,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Active Organization",
@@ -45795,6 +46238,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Visible Aliases",
@@ -45843,6 +46289,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Set Organization Alias",
@@ -45906,6 +46355,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Organization Alias",
@@ -45967,6 +46419,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Automatic Fallbacks",
@@ -46036,6 +46491,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Organization Budgets",
@@ -46084,6 +46542,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Organization Budget",
@@ -46135,6 +46596,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Organization Budget",
@@ -46194,6 +46658,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Organization Budget",
@@ -46224,6 +46691,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Active Organization Domains",
@@ -46272,6 +46742,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Active Organization Domain",
@@ -46324,6 +46797,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Active Organization Domain",
@@ -46384,6 +46860,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Active Organization Domain",
@@ -46436,6 +46915,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Verify Active Organization Domain",
@@ -46505,6 +46987,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Organization Guardrail Definitions",
@@ -46553,6 +47038,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Organization Guardrail Definition",
@@ -46605,6 +47093,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Organization Guardrail Definition",
@@ -46665,6 +47156,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Organization Guardrail Definition",
@@ -46727,6 +47221,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Test Organization Guardrail Definition",
@@ -46796,6 +47293,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Organization Guardrails",
@@ -46844,6 +47344,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Organization Guardrail",
@@ -46896,6 +47399,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Organization Guardrail",
@@ -46956,6 +47462,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Organization Guardrail",
@@ -47018,6 +47527,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Test Organization Guardrail",
@@ -47106,6 +47618,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Own Keys",
@@ -47154,6 +47669,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Own Key",
@@ -47198,6 +47716,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Own Key",
@@ -47257,6 +47778,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Own Key",
@@ -47308,6 +47832,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Own Key End User Count",
@@ -47452,6 +47979,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Own Key End Users",
@@ -47507,6 +48037,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Own Federation Rules",
@@ -47566,6 +48099,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Own Federation Rule",
@@ -47619,6 +48155,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Own Federation Rule",
@@ -47670,6 +48209,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Rotate Own Key",
@@ -47720,6 +48262,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Invite Active Organization Member",
@@ -47770,6 +48315,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Bulk Invite Active Organization Members",
@@ -47822,6 +48370,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Revoke Active Organization Member Invitation",
@@ -47874,6 +48425,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Reissue Active Organization Member Invitation",
@@ -47962,6 +48516,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Active Organization Members",
@@ -48010,6 +48567,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Active Organization Member",
@@ -48062,6 +48622,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Remove Active Organization Member",
@@ -48122,6 +48685,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Active Organization Member",
@@ -48191,6 +48757,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Caller Organization Memberships",
@@ -48238,6 +48807,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Clear Organization Model Override",
@@ -48300,6 +48872,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Set Organization Model Override",
@@ -48369,6 +48944,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Caller Pending Memberships",
@@ -48421,6 +48999,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Accept Caller Pending Membership",
@@ -48473,6 +49054,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Decline Caller Pending Membership",
@@ -48583,6 +49167,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Organization Pricing",
@@ -48637,6 +49224,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Organization Pricing",
@@ -48685,6 +49275,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Organization Pricing",
@@ -48748,6 +49341,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Replace Organization Pricing",
@@ -48829,6 +49425,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Org Provider Keys",
@@ -48877,6 +49476,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Org Provider Key",
@@ -48929,6 +49531,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Org Provider Key",
@@ -48989,6 +49594,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Org Provider Key",
@@ -49041,6 +49649,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Archive Org Provider Key",
@@ -49093,6 +49704,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Org Provider Key Available Models",
@@ -49145,6 +49759,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Unset Org Provider Key Default",
@@ -49195,6 +49812,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Set Org Provider Key Default",
@@ -49346,6 +49966,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Org Provider Key Models",
@@ -49406,6 +50029,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Add Org Provider Key Model",
@@ -49458,6 +50084,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Refresh Org Provider Key Models",
@@ -49520,6 +50149,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Remove Org Provider Key Model",
@@ -49590,6 +50222,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Set Org Provider Key Model Enabled",
@@ -49642,6 +50277,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Refresh Org Provider Key Model Pricing",
@@ -49694,6 +50332,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Restore Org Provider Key",
@@ -49773,6 +50414,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Visible Routing Policies",
@@ -49821,6 +50465,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Set Organization Routing Policy",
@@ -49871,6 +50518,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Explain Organization Routing Policy",
@@ -49934,6 +50584,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Organization Routing Policy",
@@ -50003,6 +50656,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Organization Spend Ceilings",
@@ -50051,6 +50707,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Organization Spend Ceiling",
@@ -50102,6 +50761,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Organization Spend Ceiling",
@@ -50161,6 +50823,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Organization Spend Ceiling",
@@ -50184,6 +50849,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Organization Sso",
@@ -50212,6 +50880,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Organization Sso",
@@ -50260,6 +50931,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Patch Organization Sso",
@@ -50308,6 +50982,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Put Organization Sso",
@@ -50351,6 +51028,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Put Organization Sso Enforcement",
@@ -50381,6 +51061,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Organization Sso Preflight",
@@ -50411,6 +51094,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Test Organization Sso",
@@ -50461,6 +51147,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Switch Active Organization",
@@ -50771,6 +51460,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Traces",
@@ -50836,6 +51528,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Organization Break Glass Reads",
@@ -51088,6 +51783,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Count Traces",
@@ -51139,6 +51837,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Trace Of Request",
@@ -51409,6 +52110,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Trace Series",
@@ -51479,6 +52183,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Trace",
@@ -51559,6 +52266,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Organization Break Glass",
@@ -51652,6 +52362,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Trace Content Shares",
@@ -51730,6 +52443,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Share Trace Content",
@@ -51803,6 +52519,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "End Trace Content Share",
@@ -51906,6 +52625,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Trace Content Share Reads",
@@ -52310,6 +53032,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Organization Usage",
@@ -52687,6 +53412,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Count Organization Usage",
@@ -53075,6 +53803,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Organization Usage Series",
@@ -53499,6 +54230,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Organization Usage Summary",
@@ -53580,6 +54314,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Org Web Search Keys",
@@ -53628,6 +54365,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Org Web Search Key",
@@ -53673,6 +54413,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Org Web Search Key",
@@ -53733,6 +54476,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Org Web Search Key",
@@ -53785,6 +54531,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Archive Org Web Search Key",
@@ -53837,6 +54586,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Unset Org Default Web Search Key",
@@ -53887,6 +54639,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Set Org Default Web Search Key",
@@ -53939,6 +54694,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Restore Org Web Search Key",
@@ -54000,6 +54758,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Overview",
@@ -54023,6 +54784,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Cancel Platform Connect",
@@ -54051,6 +54815,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Platform Connect",
@@ -54085,6 +54852,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Start Platform Connect",
@@ -54154,6 +54924,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Playground Chat Completions",
@@ -54215,6 +54988,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Playground Comparisons",
@@ -54263,6 +55039,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Save Playground Comparison",
@@ -54308,6 +55087,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Playground Comparison",
@@ -54338,6 +55120,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Read Playground Consent",
@@ -54386,6 +55171,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Playground Consent",
@@ -54447,6 +55235,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Playground Conversations",
@@ -54495,6 +55286,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Save Playground Conversation",
@@ -54540,6 +55334,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Playground Conversation",
@@ -54592,6 +55389,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Read Playground Conversation Messages",
@@ -54653,6 +55453,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Read Playground Favorite Models",
@@ -54722,6 +55525,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Replace Playground Favorite Models",
@@ -54811,6 +55617,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Playground Files",
@@ -54894,6 +55703,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Upload Playground File",
@@ -54964,6 +55776,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Playground File",
@@ -55025,6 +55840,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Read Playground Tools",
@@ -55094,6 +55912,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Pricing",
@@ -55143,6 +55964,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Set Pricing",
@@ -55208,6 +56032,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Current Pricing",
@@ -55267,6 +56094,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Pricing Drift",
@@ -55297,6 +56127,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Pending Pricing Refresh",
@@ -55350,6 +56183,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Reject Pricing Refresh",
@@ -55408,6 +56244,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Pricing Snapshots",
@@ -55488,6 +56327,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Pricing",
@@ -55576,6 +56418,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Pricing",
@@ -55652,6 +56497,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Pricing History",
@@ -55759,6 +56607,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Provider Endpoints",
@@ -55807,6 +56658,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Provider Endpoint",
@@ -55852,6 +56706,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Provider Endpoint",
@@ -55902,6 +56759,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Provider Endpoint",
@@ -55962,6 +56822,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Provider Endpoint",
@@ -55992,6 +56855,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Providers",
@@ -56026,6 +56892,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Provider Catalog",
@@ -56078,6 +56947,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Provider Catalog Detail",
@@ -56131,6 +57003,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Provider Health",
@@ -56161,6 +57036,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Rate Limit Rules",
@@ -56209,6 +57087,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Rate Limit Rule",
@@ -56253,6 +57134,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Rate Limit Rule",
@@ -56312,6 +57196,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Rate Limit Rule",
@@ -56362,6 +57249,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Rerank",
@@ -56451,6 +57341,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Response",
@@ -56519,6 +57412,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Policies",
@@ -56567,6 +57463,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Set Policy",
@@ -56617,6 +57516,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Explain Policy",
@@ -56698,6 +57600,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Policy",
@@ -56758,6 +57663,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Recommend Model For Agent",
@@ -56791,6 +57699,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Agent Recommenders",
@@ -56839,6 +57750,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Agent Recommender",
@@ -56884,6 +57798,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Agent Recommender",
@@ -56944,6 +57861,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Agent Recommender",
@@ -57053,6 +57973,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Scoped Budgets",
@@ -57101,6 +58024,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Scoped Budget",
@@ -57145,6 +58071,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Scoped Budget",
@@ -57194,6 +58123,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Scoped Budget",
@@ -57253,6 +58185,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Scoped Budget",
@@ -57317,6 +58252,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Search",
@@ -57378,6 +58316,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List All Search Tools",
@@ -57426,6 +58367,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Search Tool",
@@ -57495,6 +58439,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Search Tool Catalog",
@@ -57558,6 +58505,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Search Providers",
@@ -57589,6 +58539,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Reencrypt Stored Search Tool Keys",
@@ -57639,6 +58592,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Test Unsaved Search Tool",
@@ -57683,6 +58639,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Stored Search Tool",
@@ -57742,6 +58701,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Search Tool",
@@ -57803,6 +58765,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Test Search Tool",
@@ -57880,6 +58845,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Search For Tool",
@@ -57913,6 +58881,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Settings",
@@ -57961,6 +58932,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Settings",
@@ -57984,6 +58958,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Country Database",
@@ -58012,6 +58989,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Country Database",
@@ -58066,6 +59046,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Upload Country Database",
@@ -58096,6 +59079,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Mail Settings",
@@ -58146,6 +59132,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Send Test Mail",
@@ -58176,6 +59165,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Maintenance Mode",
@@ -58224,6 +59216,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Maintenance Mode",
@@ -58254,6 +59249,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Rotate Master Key",
@@ -58304,6 +59302,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Systemone Decision",
@@ -58337,6 +59338,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Tool Settings",
@@ -58385,6 +59389,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Tool Settings",
@@ -58415,6 +59422,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Builtin Guardrails",
@@ -58446,6 +59456,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Guardrail Profiles",
@@ -58477,6 +59490,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Clear Sandbox Credential",
@@ -58525,6 +59541,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Set Sandbox Credential",
@@ -58586,6 +59605,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Test Service",
@@ -58616,6 +59638,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Tools",
@@ -58647,6 +59672,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Trace Content Policy",
@@ -58957,6 +59985,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Traces",
@@ -59022,6 +60053,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Break Glass Reads",
@@ -59274,6 +60308,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Count Traces",
@@ -59325,6 +60362,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Trace Of Request",
@@ -59595,6 +60635,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Trace Series",
@@ -59665,6 +60708,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Trace",
@@ -59738,6 +60784,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Platform Break Glass",
@@ -59768,6 +60817,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Update Check",
@@ -59816,6 +60868,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Answer Update Check",
@@ -59866,6 +60921,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Usage Rows",
@@ -60268,6 +61326,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Usage",
@@ -60645,6 +61706,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Count Usage",
@@ -60695,6 +61759,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Ingest External Usage",
@@ -60728,6 +61795,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List In Flight",
@@ -60780,6 +61850,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Request Settlement",
@@ -61171,6 +62244,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Usage Series",
@@ -61221,6 +62297,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Set Usage Price Rows",
@@ -61645,6 +62724,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Usage Summary",
@@ -61780,6 +62862,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Users",
@@ -61828,6 +62913,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create User",
@@ -61872,6 +62960,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete User",
@@ -61921,6 +63012,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get User",
@@ -61980,6 +63074,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update User",
@@ -62058,6 +63155,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get User Usage",
@@ -62114,6 +63214,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Videos",
@@ -62165,6 +63268,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Video",
@@ -62219,6 +63325,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Retrieve Video",
@@ -62275,6 +63384,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Retrieve Video Content",
@@ -62347,6 +63459,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Workspaces",
@@ -62395,6 +63510,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Workspace",
@@ -62447,6 +63565,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Workspace",
@@ -62497,6 +63618,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Workspace",
@@ -62557,6 +63681,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Workspace",
@@ -62609,6 +63736,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Workspace Activation",
@@ -62661,6 +63791,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Dismiss Workspace Activation",
@@ -62713,6 +63846,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Workspace Activation Key",
@@ -62765,6 +63901,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Clear Workspace Code Execution Policy",
@@ -62815,6 +63954,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Workspace Code Execution Policy",
@@ -62875,6 +64017,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Set Workspace Code Execution Policy",
@@ -62927,6 +64072,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Workspace Hosted Providers",
@@ -62988,6 +64136,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Reset Workspace Hosted Provider",
@@ -63057,6 +64208,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Set Workspace Hosted Provider",
@@ -63136,6 +64290,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List My Mcp Connections",
@@ -63191,6 +64348,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "End My Mcp Connection",
@@ -63261,6 +64421,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Start Mcp Connection",
@@ -63340,6 +64503,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Mcp Server Requests",
@@ -63409,6 +64575,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Request Mcp Server",
@@ -63474,6 +64643,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Decline Mcp Server Requests",
@@ -63553,6 +64725,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List My Mcp Server Requests",
@@ -63645,6 +64820,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Mcp Server Requesters",
@@ -63703,6 +64881,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Withdraw Mcp Server Request",
@@ -63761,6 +64942,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Acknowledge Mcp Server Request",
@@ -63840,6 +65024,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Workspace Mcp Servers",
@@ -63900,6 +65087,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Workspace Mcp Server",
@@ -63968,6 +65158,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Check Workspace Mcp Server Connection",
@@ -64033,6 +65226,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Workspace Mcp Key Access",
@@ -64112,6 +65308,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Workspace Mcp Server Logos",
@@ -64174,6 +65373,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Workspace Mcp Server",
@@ -64234,6 +65436,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Workspace Mcp Server",
@@ -64304,6 +65509,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Workspace Mcp Server",
@@ -64366,6 +65574,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Workspace Mcp Server Access",
@@ -64454,6 +65665,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Check Workspace Mcp Server Access",
@@ -64526,6 +65740,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Add Workspace Mcp Server Grants",
@@ -64598,6 +65815,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Workspace Mcp Server Grant",
@@ -64678,6 +65898,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Workspace Mcp Server Grant",
@@ -64743,6 +65966,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Check Workspace Mcp Server",
@@ -64815,6 +66041,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Start Workspace Mcp Server Check Sign In",
@@ -64904,6 +66133,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Mcp Server Connections",
@@ -64968,6 +66200,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Remove Mcp Server Connection",
@@ -65030,6 +66265,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Remove Workspace Mcp Server Logo",
@@ -65115,6 +66353,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Set Workspace Mcp Server Logo",
@@ -65177,6 +66418,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get My Workspace Mcp Server Tools",
@@ -65239,6 +66483,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "End Workspace Mcp Server Shared Account",
@@ -65309,6 +66556,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Start Workspace Mcp Server Shared Sign In",
@@ -65388,6 +66638,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Workspace Budget Defaults",
@@ -65448,6 +66701,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Create Workspace Budget Default",
@@ -65509,6 +66765,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Workspace Budget Default",
@@ -65578,6 +66837,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Workspace Budget Default",
@@ -65657,6 +66919,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Workspace Members",
@@ -65719,6 +66984,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Remove Workspace Member",
@@ -65796,6 +67064,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Update Workspace Member Role",
@@ -65894,6 +67165,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Add Workspace Member",
@@ -65946,6 +67220,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Workspace Provider Keys",
@@ -66008,6 +67285,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Reset Workspace Provider Key Override",
@@ -66078,6 +67358,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Set Workspace Provider Key Override",
@@ -66140,6 +67423,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Workspace Provider Key Model Restrictions",
@@ -66210,6 +67496,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Add Workspace Provider Key Model Restriction",
@@ -66281,6 +67570,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Remove Workspace Provider Key Model Restriction",
@@ -66333,6 +67625,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Workspace Provider Policy",
@@ -66393,6 +67688,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Set Workspace Provider Policy",
@@ -66445,6 +67743,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Delete Workspace Trace Content",
@@ -66497,6 +67798,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Clear Workspace Web Search Config",
@@ -66547,6 +67851,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Get Workspace Web Search Config",
@@ -66607,6 +67914,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Set Workspace Web Search Config",
@@ -66686,6 +67996,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "List Workspace Web Search Keys",
@@ -66748,6 +68061,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Reset Workspace Web Search Key Override",
@@ -66818,6 +68134,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Set Workspace Web Search Key Override",
@@ -66846,6 +68165,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Receive Logs",
@@ -66877,6 +68199,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Receive Metrics",
@@ -66908,6 +68233,9 @@
           },
           {
             "XApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
           }
         ],
         "summary": "Receive Traces",
