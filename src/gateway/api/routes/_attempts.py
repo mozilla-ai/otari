@@ -16,13 +16,13 @@ classifier it needs from there is imported where it is called.
 from __future__ import annotations
 
 import asyncio
+import errno
 import math
+import ssl
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
-import httpx
-import httpx2
 from fastapi import HTTPException, status
 
 from gateway.api.routes._attempt_metrics import record_abandoned_attempt
@@ -54,8 +54,8 @@ from gateway.services.provider_kwargs import (
     no_candidate_configured_detail,
 )
 from gateway.services.sandbox_backend import SandboxNotReachableError
-from gateway.services.upstream_redaction import redact_upstream_message
 from gateway.services.web_retrieval_backend import WebSearchNotReachableError
+from gateway.services.web_retrieval_network import PinnedTransportError
 from gateway.types.attempt import Attempt
 
 T = TypeVar("T")
@@ -70,9 +70,19 @@ LOCKED_IN_DETAIL = (
     "The routing policy's backups were not tried: a gateway-run tool had already run on this model, "
     "and a tool loop cannot move to another provider."
 )
-# Raised by the local network stack, so their text describes the connection
-# rather than carrying a provider's body, which can echo the request.
-_TRANSPORT_ERRORS = (httpx.TransportError, httpx2.TransportError, OSError)
+
+
+def _transport_detail(exc: BaseException) -> str | None:
+    """What may be logged of a transport failure: fields a network stack fills in, never a peer's text."""
+    if isinstance(exc, PinnedTransportError):
+        # Worded by the gateway's own address checks.
+        return str(exc)
+    if isinstance(exc, ssl.SSLError):
+        return exc.reason
+    if isinstance(exc, OSError) and isinstance(exc.errno, int):
+        name = errno.errorcode.get(exc.errno, str(exc.errno))
+        return f"{name} {exc.strerror}" if exc.strerror else name
+    return None
 
 
 def failure_cause(exc: BaseException) -> str:
@@ -80,8 +90,8 @@ def failure_cause(exc: BaseException) -> str:
 
     A provider SDK raises its own connection error with a fixed message ("Connection
     error."), so why the connection failed is only on the exception it was raised from.
-    That exception's message is kept only for a transport error, and only what
-    ``redact_upstream_message`` leaves of it; anything else is named by its type alone.
+    A provider's error text can echo the request, so the exception is named by its type,
+    plus only the transport details ``_transport_detail`` allows.
     """
     current = exc
     seen = {id(current)}
@@ -92,10 +102,8 @@ def failure_cause(exc: BaseException) -> str:
             break
         seen.add(id(parent))
         current = parent
-    if not isinstance(current, _TRANSPORT_ERRORS):
-        return type(current).__name__
-    message = redact_upstream_message(str(current))
-    return f"{type(current).__name__}: {message}" if message else type(current).__name__
+    detail = _transport_detail(current)
+    return f"{type(current).__name__}: {detail}" if detail else type(current).__name__
 
 
 def provider_failure_http_exc(

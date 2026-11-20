@@ -6,7 +6,9 @@ response. The tests pin that boundary, ordering, and exhausted-plan status.
 """
 
 import asyncio
+import errno
 import logging
+import ssl
 import uuid
 from typing import Any, Literal, cast
 
@@ -43,6 +45,7 @@ from gateway.core.error_codes import (
 from gateway.log_config import logger as gateway_logger
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.sandbox_backend import SandboxNotReachableError, SandboxUnavailableError
+from gateway.services.web_retrieval_network import PinnedTransportError
 from gateway.types.attempt import Attempt
 
 
@@ -1021,53 +1024,57 @@ class _SDKConnectionError(Exception):
     """A provider SDK's connection error: a fixed message, the reason on ``__cause__``."""
 
 
-def _wrapped_transport_failure(reason: str) -> _SDKConnectionError:
+def _wrapped(cause: BaseException) -> _SDKConnectionError:
     try:
         try:
-            raise httpx.ConnectError(reason)
-        except httpx.ConnectError as transport_error:
+            raise cause
+        except BaseException as transport_error:
             raise _SDKConnectionError("Connection error.") from transport_error
     except _SDKConnectionError as sdk_error:
         return sdk_error
 
 
-def test_failure_cause_names_the_transport_error_an_sdk_wrapped() -> None:
-    exc = _wrapped_transport_failure("endpoint refused: destination resolves to a private address")
+_REFUSED = "endpoint refused: destination resolves to a private address"
 
-    assert failure_cause(exc) == "ConnectError: endpoint refused: destination resolves to a private address"
+
+def _wrapped_transport_failure(reason: str = _REFUSED) -> _SDKConnectionError:
+    return _wrapped(PinnedTransportError(reason))
+
+
+def test_failure_cause_names_the_gateways_own_refusal_an_sdk_wrapped() -> None:
+    assert failure_cause(_wrapped_transport_failure()) == f"PinnedTransportError: {_REFUSED}"
 
 
 def test_failure_cause_follows_any_llms_original_exception() -> None:
     exc = RuntimeError("wrapped")
-    exc.original_exception = _wrapped_transport_failure("Name or service not known")  # type: ignore[attr-defined]
+    exc.original_exception = _wrapped_transport_failure()  # type: ignore[attr-defined]
 
-    assert failure_cause(exc) == "ConnectError: Name or service not known"
-
-
-def test_failure_cause_caps_a_long_message() -> None:
-    cause = failure_cause(httpx.ConnectError("connection reset " * 100))
-
-    assert cause.startswith("ConnectError: connection reset")
-    assert cause.endswith("...")
-    assert len(cause) <= len("ConnectError: ") + 400
+    assert failure_cause(exc) == f"PinnedTransportError: {_REFUSED}"
 
 
-def test_failure_cause_drops_a_transport_message_that_echoes_the_request() -> None:
-    assert failure_cause(httpx.ConnectError("Invalid prompt: confidential acquisition plan")) == "ConnectError"
+def test_failure_cause_names_a_socket_error_by_its_errno() -> None:
+    exc = _wrapped(ConnectionResetError(errno.ECONNRESET, "Connection reset by peer"))
+
+    assert failure_cause(exc) == "ConnectionResetError: ECONNRESET Connection reset by peer"
 
 
-def test_failure_cause_masks_a_url_in_a_transport_message() -> None:
-    cause = failure_cause(httpx.ConnectError("cannot reach https://user:pw@internal.example/v1"))
+def test_failure_cause_names_a_tls_error_by_its_reason() -> None:
+    tls_error = ssl.SSLError(1, "certificate verify failed: confidential")
+    tls_error.reason = "CERTIFICATE_VERIFY_FAILED"  # type: ignore[misc]
 
-    assert "internal.example" not in cause
-    assert cause.startswith("ConnectError: cannot reach")
+    assert failure_cause(_wrapped(tls_error)) == "SSLError: CERTIFICATE_VERIFY_FAILED"
 
 
 @pytest.mark.parametrize(
     "exc",
-    [RuntimeError("Invalid prompt: confidential acquisition plan"), _http_error(400)],
+    [
+        RuntimeError("Invalid prompt: confidential acquisition plan"),
+        _http_error(400),
+        httpx.ConnectError("invalid request: confidential acquisition plan"),
+        OSError("invalid request: confidential acquisition plan"),
+    ],
 )
-def test_failure_cause_names_a_provider_error_by_its_type_alone(exc: BaseException) -> None:
+def test_failure_cause_logs_no_free_text_but_the_gateways_own(exc: BaseException) -> None:
     """A provider's error text can echo the request, so none of it reaches the log."""
     assert failure_cause(exc) == type(exc).__name__
 
@@ -1083,14 +1090,14 @@ async def test_a_failed_attempt_logs_why_it_failed(caplog: pytest.LogCaptureFixt
     try:
         await _walk(
             [_attempt(1, "gpt-5-mini"), _attempt(2, "claude-haiku-4-5", instance="anthropic")],
-            [_wrapped_transport_failure("endpoint refused: destination resolves to a private address"), "ok"],
+            [_wrapped_transport_failure(), "ok"],
         )
     finally:
         gateway_logger.removeHandler(caplog.handler)
 
     [line] = [record.getMessage() for record in caplog.records if record.getMessage().startswith("Attempt failed")]
     assert "error=conn_err" in line
-    assert line.endswith("cause=ConnectError: endpoint refused: destination resolves to a private address")
+    assert line.endswith(f"cause=PinnedTransportError: {_REFUSED}")
 
 
 @pytest.mark.asyncio
@@ -1098,7 +1105,7 @@ async def test_a_failed_attempt_logs_why_it_failed(caplog: pytest.LogCaptureFixt
     ("exc", "cause"),
     [
         (RuntimeError("Invalid prompt: confidential acquisition plan"), "RuntimeError"),
-        (httpx.ConnectError("Invalid prompt: confidential acquisition plan"), "ConnectError"),
+        (httpx.ConnectError("invalid request: confidential acquisition plan"), "ConnectError"),
     ],
 )
 async def test_a_failed_attempt_never_logs_echoed_request_text(
