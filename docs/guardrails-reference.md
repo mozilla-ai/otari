@@ -104,14 +104,17 @@ gave no verdict, so `status` says which:
 | --- | --- |
 | `evaluated` | The check ran. `valid` is `true` or `false`. |
 | `inconclusive` | The check ran and the guardrail returned no verdict. |
-| `unavailable` | The check could not run, and the request was served anyway. `reason` says why. |
+| `unavailable` | The check could not run. The request was served anyway, or was refused with a `502` that carries this header. `reason` says why. |
 
 `reason` appears only on an `unavailable` entry:
 
 - `not_configured`: the deployment has no guardrails service for the profile.
-- `evaluation_failed`: everything else (the service is down, does not serve the
-  profile, or answered something malformed). The detail goes to the gateway's
-  log, not to the caller.
+- `http_<status>`: the service answered the `/validate` call with that error
+  status, for example `http_404`. A `404` means the service has no `/validate`
+  at the address Otari called, or does not serve the profile.
+- `evaluation_failed`: everything else (the service is down or answered
+  something malformed). The detail goes to the gateway's log, not to the
+  caller.
 
 The guardrail's own explanation is never put in the header.
 

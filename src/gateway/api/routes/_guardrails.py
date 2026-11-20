@@ -339,7 +339,13 @@ class RequestGuardrails:
         # (otari#654), and it is not theirs to fix either.
         logger.warning("guardrail check could not be evaluated: %s", exc)
         if content.target.event == "before_model":
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.public_detail) from exc
+            # An error response does not carry the injected response's headers,
+            # so the summary, whose `reason` says why, goes on the exception.
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=exc.public_detail,
+                headers={GUARDRAILS_RESULT_HEADER: self._header_value()},
+            ) from exc
         raise _Unchecked(profile) from exc
 
     async def _verdict(self, text: str, entries: list[GuardrailConfig]) -> GuardrailVerdict:
@@ -433,12 +439,14 @@ class RequestGuardrails:
             )
 
     def _write_header(self) -> None:
-        if not self._reported:
-            return
+        if self._reported:
+            self._response.headers[GUARDRAILS_RESULT_HEADER] = self._header_value()
+
+    def _header_value(self) -> str:
         # One entry per profile, kept compact and free of the freeform `explanation`
         # to avoid oversized / non-ASCII headers. `status` and `reason` are fixed
         # words, so a `valid: null` still says whether the check ran.
-        self._response.headers[GUARDRAILS_RESULT_HEADER] = json.dumps(
+        return json.dumps(
             [
                 _summary(result, withheld=self._withheld.get(result.profile, 0))
                 for result in _per_profile(self._reported)
