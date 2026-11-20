@@ -18331,7 +18331,7 @@ export interface components {
          *       "credential": "sk-guardrails-...",
          *       "mode": "block",
          *       "profile": "prompt-injection",
-         *       "url": "https://guardrails.internal.example/validate"
+         *       "url": "https://guardrails.internal.example"
          *     }
          */
         OrganizationGuardrailCreate: {
@@ -18700,7 +18700,7 @@ export interface components {
          * @example {
          *       "credential": "sk-guardrails-...",
          *       "mode": "monitor",
-         *       "url": "https://guardrails.internal.example/validate"
+         *       "url": "https://guardrails.internal.example"
          *     }
          */
         OrganizationGuardrailUpdate: {
