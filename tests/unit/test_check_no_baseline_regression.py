@@ -1,4 +1,4 @@
-"""Tests for the baseline ratchet check."""
+"""Tests for the non-regression gate over the architecture check's baselines."""
 
 from __future__ import annotations
 
@@ -10,11 +10,11 @@ from types import ModuleType
 
 import pytest
 
-_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "check_baseline_ratchet.py"
+_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "check_no_baseline_regression.py"
 
 
 def _load() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("check_baseline_ratchet", _SCRIPT)
+    spec = importlib.util.spec_from_file_location("check_no_baseline_regression", _SCRIPT)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module

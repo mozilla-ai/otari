@@ -26,6 +26,35 @@ class NoActiveOrganizationError(TenancyNotFoundError):
         super().__init__("You are not an active member of any organization")
 
 
+class InvitationAddressMismatchError(TenancyForbiddenError):
+    """An invitation opened by an account that does not hold the invited address.
+
+    Names the address, because the person reading it holds the link that was sent there.
+    """
+
+    def __init__(self, invited_email: object):
+        super().__init__(f"This invitation is for {invited_email}. Sign in as that address to accept it.")
+
+
+class InvitationNeedsSsoSignInError(TenancyForbiddenError):
+    """An invitation to an organization whose members sign in through its own connection."""
+
+    def __init__(self, invited_email: object):
+        super().__init__(
+            f"Sign in through this organization's own connection as {invited_email} to accept this invitation."
+        )
+
+
+class InvitationNoLongerValidError(TenancyNotFoundError):
+    """An invitation link cannot be used: it was never one, or it expired, was declined, cancelled or blocked.
+
+    One answer for every case, so the link tells its holder nothing about which.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("This invitation is no longer valid")
+
+
 class OrganizationMemberNotFoundError(TenancyNotFoundError):
     def __init__(self, organization_member_id: object):
         super().__init__(f"Organization member {organization_member_id} not found")
@@ -545,7 +574,10 @@ __all__ = [
     "InvitationClosedError",
     "InvitationExpiredError",
     "InvitationLimitCeiling",
+    "InvitationAddressMismatchError",
     "InvitationLimitError",
+    "InvitationNeedsSsoSignInError",
+    "InvitationNoLongerValidError",
     "InvitationNotFoundError",
     "InvitationPasswordNotAcceptedError",
     "InvitationRequestTooLargeError",

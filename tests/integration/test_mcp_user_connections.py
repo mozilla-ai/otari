@@ -72,9 +72,9 @@ from gateway.repositories.tools import (
 from gateway.services import mcp_stateless
 from gateway.services.mcp_stateless import CheckFailure, McpCapacityUnavailable, ServerCheck
 from gateway.services.model_access import McpAccess, mcp_read_tools, revoke_user_mcp_grants
-from gateway.services.organizations import UserAccess
+from gateway.services.organizations import OrganizationReach, UserAccess
 from gateway.services.secret_box import SecretDecryptionError, decrypt_secret, encrypt_secret, generate_secret_key
-from gateway.services.tenancy import OrganizationReach, workspace_mcp_server_service
+from gateway.services.tenancy import workspace_mcp_server_service
 from gateway.services.tenancy.workspace_mcp_server_service import (
     WorkspaceMcpConnectionEligibility,
     WorkspaceMcpServerCheckRequest,

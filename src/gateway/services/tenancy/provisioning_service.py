@@ -44,7 +44,7 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.repositories.users_repository import get_or_create_attribution_user
-from gateway.services.tenancy.membership_listener import MembershipListener
+from gateway.services.organizations import MembershipListener
 
 DEFAULT_ORGANIZATION_NAME = "Default organization"
 DEFAULT_ORGANIZATION_SLUG = "default"

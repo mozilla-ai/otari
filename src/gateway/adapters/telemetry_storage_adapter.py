@@ -15,9 +15,13 @@ seam at all.
 """
 
 from collections import defaultdict
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from sqlalchemy import ColumnElement, case, delete, func, null, select
+from sqlalchemy import ColumnElement, case, delete, func, null, select, text, update
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,7 +37,7 @@ from gateway.core.sql import (
     utc_bound,
 )
 from gateway.log_config import logger
-from gateway.models.usage import AgentTelemetry
+from gateway.models.usage import AgentTelemetry, AgentTelemetryUserBarrier
 from gateway.ports.telemetry_storage_port import (
     BehaviorCounts,
     BehaviorGroup,
@@ -56,6 +60,12 @@ from gateway.ports.telemetry_storage_port import (
 _DEDUP_ONLY_FIELDS = ("tool_use_id", "event_sequence")
 
 _METRIC_KIND = "metric"
+
+# How long after a user's erasure their records are still refused. Absorbs the
+# difference between the clocks of the replica that admitted an export and the
+# one that erased its user, at the cost of refusing a recreated user's first
+# records for that long.
+ERASURE_MARGIN = timedelta(minutes=10)
 
 
 def _conditions(filters: TelemetryFilter) -> list[ColumnElement[bool]]:
@@ -81,32 +91,70 @@ def _build_row(api_key_id: str, user_id: str, record: TelemetryRecord) -> AgentT
     return AgentTelemetry(api_key_id=api_key_id, user_id=user_id, **row_fields)
 
 
-async def _insert_same_source_batch(db: AsyncSession, rows: list[AgentTelemetry]) -> IngestResult:
+async def _lock_barrier(db: AsyncSession, user_id: str, *, lock_timeout_ms: int | None = None) -> datetime | None:
+    """Lock the user's erasure barrier until the transaction ends, creating it if missing; return when they were erased.
+
+    The upsert both creates and locks the row, and on SQLite it is the write that
+    begins the transaction, so the read after it cannot predate an erasure. On
+    PostgreSQL ``lock_timeout_ms`` bounds the wait on an erasure still deleting.
+    """
+    postgres = dialect_name(db) == "postgresql"
+    if postgres and lock_timeout_ms is not None:
+        await db.execute(text(f"SET LOCAL lock_timeout = {int(lock_timeout_ms)}"))
+    insert = postgresql_insert if postgres else sqlite_insert
+    statement = insert(AgentTelemetryUserBarrier).values(user_id=user_id)
+    await db.execute(
+        statement.on_conflict_do_update(
+            index_elements=[AgentTelemetryUserBarrier.user_id], set_={"user_id": statement.excluded.user_id}
+        )
+    )
+    result = await db.execute(
+        select(AgentTelemetryUserBarrier.erased_at).where(AgentTelemetryUserBarrier.user_id == user_id)
+    )
+    return result.scalar_one()
+
+
+# Asked at the start of each transaction that inserts: whether its user's records may still be stored.
+_Admitted = Callable[[], Awaitable[bool]]
+
+
+async def _insert_same_source_batch(db: AsyncSession, rows: list[AgentTelemetry], admitted: _Admitted) -> IngestResult:
     """Insert a same-source batch; a row whose ``(source, dedup_key)`` exists is a duplicate.
 
     One ``ON CONFLICT DO NOTHING`` insert, as ``external_usage_service`` does, so a
     replayed export needs no rollback and retry. Any other refusal fails the whole
     statement, and the batch falls back to row-at-a-time so only the refused rows
-    are lost, counted as duplicates.
+    are lost, counted as duplicates. Once the user's erasure refuses the export,
+    every row not stored yet is rejected.
     """
     try:
-        inserted = await _insert_and_commit(db, rows)
+        inserted = await _insert_and_commit(db, rows, admitted)
     except IntegrityError:
         await db.rollback()
     else:
+        if inserted is None:
+            return IngestResult(rejected=len(rows))
         return IngestResult(accepted=inserted, duplicate=len(rows) - inserted)
 
     accepted = 0
-    for row in rows:
+    for position, row in enumerate(rows):
         try:
-            accepted += await _insert_and_commit(db, [row])
+            inserted = await _insert_and_commit(db, [row], admitted)
         except IntegrityError:
             await db.rollback()
+            continue
+        if inserted is None:
+            rejected = len(rows) - position
+            return IngestResult(accepted=accepted, duplicate=len(rows) - accepted - rejected, rejected=rejected)
+        accepted += inserted
     return IngestResult(accepted=accepted, duplicate=len(rows) - accepted)
 
 
-async def _insert_and_commit(db: AsyncSession, rows: list[AgentTelemetry]) -> int:
-    """Insert and commit ``rows``, returning how many were new."""
+async def _insert_and_commit(db: AsyncSession, rows: list[AgentTelemetry], admitted: _Admitted) -> int | None:
+    """Insert and commit ``rows``, returning how many were new, or ``None`` when their user's erasure refuses them."""
+    if not await admitted():
+        await db.rollback()
+        return None
     inserted = await insert_ignoring_duplicates(
         db,
         rows,
@@ -149,6 +197,7 @@ class DatabaseTelemetryStorageAdapter(TelemetryStoragePort):
         api_key_id: str,
         user_id: str,
         records: tuple[TelemetryRecord, ...],
+        admitted_at: datetime,
     ) -> IngestResult:
         """Store the records, batching by source and treating collisions as replays.
 
@@ -161,10 +210,18 @@ class DatabaseTelemetryStorageAdapter(TelemetryStoragePort):
         onto one dedup key; letting that reach the insert fails the whole batch
         and drops it into the row-at-a-time fallback, turning one bulk insert
         into one commit per record.
+
+        Each transaction first locks the user's erasure barrier, which an erasure
+        holds while it deletes, so this either commits before the erasure and is
+        deleted by it, or sees it and stores nothing more.
         """
         if not records:
             return IngestResult()
         db = self._db
+
+        async def admitted() -> bool:
+            erased_at = await _lock_barrier(db, user_id, lock_timeout_ms=INGEST_LOCK_TIMEOUT_MS)
+            return erased_at is None or admitted_at >= erased_at + ERASURE_MARGIN
 
         by_source: dict[str, list[AgentTelemetry]] = defaultdict(list)
         seen: set[tuple[str, str]] = set()
@@ -177,16 +234,19 @@ class DatabaseTelemetryStorageAdapter(TelemetryStoragePort):
             seen.add(identity)
             by_source[record.source].append(_build_row(api_key_id, user_id, record))
 
-        accepted = 0
+        accepted = rejected = 0
         try:
             for rows in by_source.values():
-                result = await _insert_same_source_batch(db, rows)
+                result = await _insert_same_source_batch(db, rows, admitted)
                 accepted += result.accepted
                 duplicate += result.duplicate
+                rejected += result.rejected
         except SQLAlchemyError:
             await db.rollback()
             raise
-        return IngestResult(accepted=accepted, duplicate=duplicate)
+        if rejected:
+            logger.info("agent_telemetry ingest: refused=%d admitted before their user's erasure", rejected)
+        return IngestResult(accepted=accepted, duplicate=duplicate, rejected=rejected)
 
     async def metric_points(self, *, filters: TelemetryFilter, limit: int) -> tuple[MetricPoint, ...]:
         """Metric readings in scope, as stored, for the caller to diff.
@@ -339,7 +399,29 @@ class DatabaseTelemetryStorageAdapter(TelemetryStoragePort):
         return deleted
 
     async def purge_user(self, *, user_id: str) -> int:
-        """Delete every row attributed to one user."""
+        """Delete every row attributed to one user, and refuse what any replica admitted for them before now.
+
+        The erasure time is recorded in the deletion's transaction, so a write that
+        locked the barrier first commits before this deletes, and one that locks it
+        after sees the erasure.
+        """
+        db = self._db
+        try:
+            await _lock_barrier(db, user_id)
+            await db.execute(
+                update(AgentTelemetryUserBarrier)
+                .where(AgentTelemetryUserBarrier.user_id == user_id)
+                .values(erased_at=datetime.now(UTC))
+            )
+        except IntegrityError:
+            # No such user: their rows lost their owner when the user row went, and
+            # the foreign key refuses any write naming them.
+            await db.rollback()
+            return 0
+        except SQLAlchemyError as exc:
+            await db.rollback()
+            logger.error("agent_telemetry erase failed: %s", describe_database_error(exc))
+            raise
         deleted = await self._delete([AgentTelemetry.user_id == user_id])
         logger.info("agent_telemetry erase for user: removed=%d", deleted)
         return deleted

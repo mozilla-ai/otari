@@ -15,6 +15,7 @@ import { Badge } from "@/design-system/indicators/Badge"
 import { Dot } from "@/design-system/indicators/Dot"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+import { Segmented } from "@/design-system/navigation/Segmented"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
 import {
   CAPABILITY_LABELS,
@@ -46,8 +47,10 @@ import { ProviderMark } from "@/shared/components/marks/BrandMark"
 import { followInAppLink, routeHref } from "@/shared/helpers/appLocation"
 import {
   formatContext,
+  formatLatency,
   formatRate,
   formatReleaseDate,
+  formatThroughput,
 } from "@/shared/helpers/format"
 import { providerDisplayName } from "@/shared/helpers/providers"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
@@ -136,6 +139,58 @@ function hasUsage(offerings: readonly CatalogOffering[]): boolean {
   return offerings.some((offering) => offering.usage_30d != null)
 }
 
+/** Whether any offering carries how fast it answered the organization lately. */
+function hasSpeed(offerings: readonly CatalogOffering[]): boolean {
+  return offerings.some((offering) => offering.speed_7d != null)
+}
+
+/** The typical request, or the slow tail every 20th request falls into. */
+type Percentile = "p50" | "p95"
+
+const PERCENTILES: { value: Percentile; label: string }[] = [
+  { value: "p50", label: "P50" },
+  { value: "p95", label: "P95" },
+]
+
+type SpeedColumn = "latency" | "throughput"
+
+/** Each speed column's header, the figure it reads at a percentile, and how it prints. */
+const SPEED_COLUMNS: Record<
+  SpeedColumn,
+  {
+    header: string
+    read: (
+      speed: NonNullable<CatalogOffering["speed_7d"]>,
+      percentile: Percentile,
+    ) => number | null
+    format: (value: number) => string
+  }
+> = {
+  latency: {
+    header: "Latency",
+    read: (speed, percentile) =>
+      percentile === "p50" ? speed.ttft_ms_p50 : speed.ttft_ms_p95,
+    format: formatLatency,
+  },
+  throughput: {
+    header: "Throughput",
+    read: (speed, percentile) =>
+      percentile === "p50"
+        ? speed.output_tokens_per_second_p50
+        : speed.output_tokens_per_second_p95,
+    format: formatThroughput,
+  },
+}
+
+function speedOf(
+  offering: CatalogOffering,
+  column: SpeedColumn,
+  percentile: Percentile,
+): number | null {
+  const speed = offering.speed_7d
+  return speed ? SPEED_COLUMNS[column].read(speed, percentile) : null
+}
+
 /** An offering with its base rates lifted out, for the table's sort. */
 interface OfferingRow {
   offering: CatalogOffering
@@ -166,11 +221,13 @@ type OfferingSortColumn =
   | "input"
   | "outputPrice"
   | "cacheRead"
+  | SpeedColumn
   | "context"
 
 function compareOfferings(
   column: OfferingSortColumn,
   direction: "asc" | "desc",
+  percentile: Percentile,
 ): (a: OfferingRow, b: OfferingRow) => number {
   const sign = direction === "asc" ? 1 : -1
   const byProvider = (a: OfferingRow, b: OfferingRow) =>
@@ -185,6 +242,9 @@ function compareOfferings(
         return row.output
       case "cacheRead":
         return row.offering.pricing?.cache_read_price_per_million ?? null
+      case "latency":
+      case "throughput":
+        return speedOf(row.offering, column, percentile)
       default:
         return row.offering.context_window ?? null
     }
@@ -204,12 +264,16 @@ function offeringColumns({
   canOverride,
   isOperator,
   withUsage,
+  withSpeed,
+  percentile,
   withSource,
   onEditDetails,
 }: {
   canOverride: boolean
   isOperator: boolean
   withUsage: boolean
+  withSpeed: boolean
+  percentile: Percentile
   withSource: boolean
   onEditDetails: (offering: CatalogOffering) => void
 }): DataTableColumn<OfferingRow>[] {
@@ -292,6 +356,24 @@ function offeringColumns({
         </span>
       ),
     },
+    // Measured on the organization's own requests, so an offering it has not
+    // called enough reads as unknown rather than as slow.
+    ...(withSpeed
+      ? (["latency", "throughput"] as const).map((column) => ({
+          id: column,
+          header: SPEED_COLUMNS[column].header,
+          align: "end" as const,
+          allowsSorting: true,
+          cell: ({ offering: row }: OfferingRow) => {
+            const value = speedOf(row, column, percentile)
+            return (
+              <span className="text-mono-caption whitespace-nowrap">
+                {value == null ? "—" : SPEED_COLUMNS[column].format(value)}
+              </span>
+            )
+          },
+        }))
+      : []),
     ...(withSource
       ? [
           {
@@ -459,6 +541,7 @@ export function ModelDetailView({
     column: OfferingSortColumn
     direction: "asc" | "desc"
   }>({ column: "input", direction: "asc" })
+  const [percentile, setPercentile] = useState<Percentile>("p50")
 
   const model = selected.data
   const recordUseModel = (id: string) =>
@@ -481,14 +564,20 @@ export function ModelDetailView({
         .filter((query): query is string => !!query),
     ),
   ]
+  const withUsage = !publicView && hasUsage(model.offerings)
+  const withSpeed = !publicView && hasSpeed(model.offerings)
+  // A refetch can drop the speed columns while one of them is the sort.
+  const activeSort =
+    !withSpeed && (sort.column === "latency" || sort.column === "throughput")
+      ? ({ column: "input", direction: "asc" } as const)
+      : sort
   const rows: OfferingRow[] = model.offerings
     .filter(
       (offering) =>
         quantization === "all" || offering.quantization === quantization,
     )
     .map((offering) => offeringRow(offering, model.type))
-    .sort(compareOfferings(sort.column, sort.direction))
-  const withUsage = !publicView && hasUsage(model.offerings)
+    .sort(compareOfferings(activeSort.column, activeSort.direction, percentile))
   const unpriced = model.offerings.filter(
     (model) => model.pricing === null,
   ).length
@@ -504,8 +593,8 @@ export function ModelDetailView({
       : list.map((model) => MODALITY_LABELS[model] ?? model).join(", ")
   const title = model.vendor ? `${model.vendor}: ${model.name}` : model.name
   const sortDescriptor: SortDescriptor = {
-    column: sort.column,
-    direction: sort.direction === "asc" ? "ascending" : "descending",
+    column: activeSort.column,
+    direction: activeSort.direction === "asc" ? "ascending" : "descending",
   }
 
   return (
@@ -677,23 +766,38 @@ export function ModelDetailView({
               {withUsage
                 ? " Yours, 30d is the blended input and output price you paid over 30 days."
                 : null}
+              {withSpeed
+                ? " Latency (time to first token) and throughput are your own requests over 7 days."
+                : null}
             </p>
           </div>
           <div className="flex flex-col gap-3 border border-border bg-surface p-3">
-            {quantizations.length > 0 ? (
+            {quantizations.length > 0 || withSpeed ? (
               <div className="otari-toolbar flex flex-wrap items-center gap-2">
-                <FilterSelect
-                  ariaLabel="Filter quantization"
-                  value={quantization}
-                  onChange={setQuantization}
-                  options={[
-                    { value: "all", label: "Any quantization" },
-                    ...quantizations.map((query) => ({
-                      value: query,
-                      label: query,
-                    })),
-                  ]}
-                />
+                {quantizations.length > 0 ? (
+                  <FilterSelect
+                    ariaLabel="Filter quantization"
+                    value={quantization}
+                    onChange={setQuantization}
+                    options={[
+                      { value: "all", label: "Any quantization" },
+                      ...quantizations.map((query) => ({
+                        value: query,
+                        label: query,
+                      })),
+                    ]}
+                  />
+                ) : null}
+                {withSpeed ? (
+                  <Segmented
+                    label="Latency and throughput percentile"
+                    options={PERCENTILES}
+                    value={percentile}
+                    onChange={(next) =>
+                      setPercentile(next === "p95" ? "p95" : "p50")
+                    }
+                  />
+                ) : null}
               </div>
             ) : null}
             <TableScrollFrame className="otari-offerings-table">
@@ -703,6 +807,8 @@ export function ModelDetailView({
                   canOverride,
                   isOperator,
                   withUsage,
+                  withSpeed,
+                  percentile,
                   withSource: !publicView,
                   onEditDetails: setEditing,
                 })}

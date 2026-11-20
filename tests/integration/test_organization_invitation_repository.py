@@ -5,7 +5,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import update
+from sqlalchemy import select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -375,6 +375,169 @@ async def test_deleting_in_the_wrong_organization_leaves_the_row(async_db: Async
 
         assert await repository.delete_in_organization(invitation.id, other.id) is False
         assert await repository.get_in_organization(invitation.id, organization.id) is not None
+
+
+async def test_delete_by_token_hash_returns_the_row_it_removed(async_db: AsyncSession) -> None:
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        organization = await create_organization(async_db, slug="delete-by-hash")
+        repository = OrganizationInvitationRepository(uow)
+        row = await _add(repository, _invitation(organization, email="ada@example.com", token_hash="accept-hash"))
+
+        removed = await repository.delete_by_token_hash("accept-hash")
+
+        assert removed is not None
+        assert (removed.id, removed.email) == (row.id, "ada@example.com")
+        assert await repository.get_by_token_hash("accept-hash") is None
+
+
+async def test_delete_by_token_hash_matches_nothing_the_second_time(async_db: AsyncSession) -> None:
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        organization = await create_organization(async_db, slug="delete-by-hash-twice")
+        repository = OrganizationInvitationRepository(uow)
+        await _add(repository, _invitation(organization, email="ada@example.com", token_hash="once-only"))
+
+        assert await repository.delete_by_token_hash("once-only") is not None
+        assert await repository.delete_by_token_hash("once-only") is None
+
+
+async def test_delete_by_token_hash_leaves_another_invitation_alone(async_db: AsyncSession) -> None:
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        organization = await create_organization(async_db, slug="delete-by-hash-scoped")
+        repository = OrganizationInvitationRepository(uow)
+        kept = await _add(repository, _invitation(organization, email="grace@example.com", token_hash="kept"))
+        await _add(repository, _invitation(organization, email="ada@example.com", token_hash="removed"))
+
+        assert await repository.delete_by_token_hash("removed") is not None
+        assert await repository.get(kept.id) is not None
+
+
+async def test_decline_by_token_hash_keeps_the_first_decline_time(async_db: AsyncSession) -> None:
+    uow = UnitOfWork(async_db)
+    first_time = datetime(2026, 2, 1, tzinfo=UTC)
+    later = datetime(2026, 2, 2, tzinfo=UTC)
+
+    async with uow:
+        organization = await create_organization(async_db, slug="decline-by-hash")
+        repository = OrganizationInvitationRepository(uow)
+        row = await _add(repository, _invitation(organization, email="ada@example.com", token_hash="decline-hash"))
+
+        assert await repository.decline_by_token_hash("decline-hash", at=first_time) == first_time
+        assert await repository.decline_by_token_hash("decline-hash", at=later) == first_time
+
+        declined_at = (
+            await async_db.execute(
+                select(OrganizationInvitation.declined_at).where(OrganizationInvitation.id == row.id)
+            )
+        ).scalar_one()
+        assert declined_at == first_time
+
+
+async def test_decline_by_token_hash_returns_false_for_an_unknown_hash(async_db: AsyncSession) -> None:
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        await create_organization(async_db, slug="decline-unknown-hash")
+        repository = OrganizationInvitationRepository(uow)
+
+        assert await repository.decline_by_token_hash("no-such-hash", at=_NOW) is None
+
+
+async def _backend_pid(session: AsyncSession) -> int:
+    """The PostgreSQL backend serving this session, which also opens its connection."""
+    return int((await session.execute(text("SELECT pg_backend_pid()"))).scalar_one())
+
+
+async def _wait_until_one_backend_blocks_another(
+    watcher: AsyncSession, *, blocked: int, by: int, timeout: float = 10.0
+) -> None:
+    """Wait until PostgreSQL reports the one backend waiting on a lock the other holds.
+
+    Naming both backends is what makes the wait evidence: any other lock wait in
+    this database would otherwise end it, and a statement that never reached
+    PostgreSQL would look the same as one that is waiting.
+    """
+    async with asyncio.timeout(timeout):
+        while True:
+            blockers = await watcher.execute(text("SELECT pg_blocking_pids(:blocked)"), {"blocked": blocked})
+            if by in blockers.scalar_one():
+                return
+            await watcher.rollback()
+            await asyncio.sleep(0.02)
+
+
+async def test_two_deletes_of_one_token_hash_give_one_row(postgres_url: str) -> None:
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def remove(session: AsyncSession) -> OrganizationInvitation | None:
+        return await OrganizationInvitationRepository(session).delete_by_token_hash("raced")
+
+    try:
+        async with sessions() as setup:
+            organization = await create_organization(setup, slug="concurrent-accept")
+            await _add(
+                OrganizationInvitationRepository(setup),
+                _invitation(organization, email="ada@example.com", token_hash="raced"),
+            )
+            await setup.commit()
+
+        async with sessions() as first, sessions() as second, sessions() as watcher:
+            first_pid, second_pid = await _backend_pid(first), await _backend_pid(second)
+            first_result = await remove(first)
+            waiting = asyncio.create_task(remove(second))
+            try:
+                # The second delete reached PostgreSQL and waits on the first one's row lock.
+                await _wait_until_one_backend_blocks_another(watcher, blocked=second_pid, by=first_pid)
+                assert not waiting.done()
+                await first.commit()
+                second_result = await asyncio.wait_for(asyncio.shield(waiting), timeout=10.0)
+            finally:
+                waiting.cancel()
+                await asyncio.gather(waiting, return_exceptions=True)
+    finally:
+        await engine.dispose()
+
+    assert first_result is not None
+    assert second_result is None
+
+
+async def test_a_rejoining_members_origin_records_the_invitation_they_accepted(async_db: AsyncSession) -> None:
+    uow = UnitOfWork(async_db)
+    first_invite = datetime(2026, 1, 1, tzinfo=UTC)
+    second_invite = datetime(2026, 3, 1, tzinfo=UTC)
+
+    async with uow:
+        organization = await create_organization(async_db, slug="origin-rejoin")
+        inviter = await create_member(async_db, organization, role="owner", full_name="Inviter")
+        joiner = await create_member(async_db, organization, role="member", full_name="Joiner")
+        membership = await OrganizationMemberRepository(async_db).get_by_organization_and_user(
+            organization.id, joiner.id
+        )
+        assert membership is not None
+        repository = MembershipOriginRepository(uow)
+
+        await repository.record(
+            organization_member_id=membership.id,
+            invited_by_user_id=None,
+            invited_at=first_invite,
+            joined_at=first_invite,
+        )
+        await repository.record(
+            organization_member_id=membership.id,
+            invited_by_user_id=inviter.id,
+            invited_at=second_invite,
+            joined_at=second_invite,
+        )
+
+        origin = await repository.get(membership.id)
+        assert origin is not None
+        assert (origin.invited_by_user_id, origin.invited_at) == (inviter.id, second_invite)
 
 
 async def test_expired_invitations_older_than_a_cutoff_are_deleted(async_db: AsyncSession) -> None:

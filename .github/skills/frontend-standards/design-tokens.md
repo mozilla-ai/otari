@@ -258,7 +258,7 @@ Its marketing type roles, pre-login gradient, activation-modal and border-beam t
 HubSpot patch dress otari.ai's public site and signup, which do not exist here. The
 first-request setup guide *is* ported (`features/onboarding/SetupGuide.tsx`), and it
 deliberately dresses itself in the status and surface families rather than bringing that
-bespoke `activation-*` set with it: a panel on the Overview page is a card with a status
+bespoke `activation-*` set with it: a panel on the Home page is a card with a status
 row, so the roles the foundation already names are the right ones, and a family with one
 consumer is a second palette to keep in step for no reader benefit.
 

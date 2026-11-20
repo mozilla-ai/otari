@@ -22,6 +22,8 @@ from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.main import create_app
 from gateway.models.tenancy import DashboardSession, User, WebAuthnCredential
+from gateway.services.mail import MailEnvelope
+from gateway.services.mail.transports import SmtpTransport
 
 MASTER_KEY = "sk-test-master"
 PASSWORD = "a-real-password"  # pragma: allowlist secret
@@ -690,6 +692,17 @@ def _password_link(client: TestClient, account_id: str, *, headers: dict[str, st
     return client.post(f"{API_ROOT}/admin/users/{account_id}/password-link", headers=headers)
 
 
+def _delivering(monkeypatch: pytest.MonkeyPatch) -> list[MailEnvelope]:
+    """Stub the SMTP socket and collect what the transport is handed.
+
+    A deployment whose email reaches the recipient, unlike the console transport,
+    which shows a message to the deployment operator and delivers it to nobody.
+    """
+    delivered: list[MailEnvelope] = []
+    monkeypatch.setattr(SmtpTransport, "deliver", lambda self, envelope: delivered.append(envelope))
+    return delivered
+
+
 def _vouched_at(tmp_path: Path, *, email: str) -> object:
     engine = create_engine(f"sqlite:///{tmp_path / 'reset-test.db'}")
     with engine.begin() as connection:
@@ -726,18 +739,49 @@ def test_an_operator_hands_a_member_a_password_link_where_mail_is_off(
     assert _vouched_at(tmp_path, email="ada@example.com") is not None
 
 
-def test_an_operator_password_link_is_mailed_where_mail_is_on(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_an_operator_password_link_is_handed_back_where_the_transport_reaches_nobody(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The console transport shows a message to the operator and delivers it to no mailbox.
+
+    So the link is handed back rather than claimed as sent, and the password chosen through it
+    leaves the address attested rather than proven.
+    """
     with _client(tmp_path) as client:
         _claimed_and_verified(client, caplog, email="ada@example.com")
         account_id = _account_id(client, email="ada@example.com")
 
-        issued = _with_logs(
-            client, caplog, lambda: _password_link(client, account_id, headers={"Otari-Key": MASTER_KEY})
+        issued = _password_link(client, account_id, headers={"Otari-Key": MASTER_KEY})
+        assert issued.status_code == 201, issued.text
+        assert issued.json()["mail_sent"] is False
+        assert issued.json()["link"] is not None
+        token = issued.json()["link"].split("token=", 1)[1]
+
+        confirmed = client.post(
+            f"{API_ROOT}/auth/password/reset/confirm", json={"token": token, "new_password": NEW_PASSWORD}
         )
+        assert confirmed.status_code == 204, confirmed.text
+
+    assert _vouched_at(tmp_path, email="ada@example.com") is not None
+
+
+def test_an_operator_password_link_is_mailed_where_the_transport_reaches_the_mailbox(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Delivered, so the link is not handed back and the mailbox proves the address."""
+    with _client(tmp_path) as client:
+        _claimed_and_verified(client, caplog, email="ada@example.com")
+        account_id = _account_id(client, email="ada@example.com")
+
+    delivered = _delivering(monkeypatch)
+    with _client(
+        tmp_path, mail_transport="smtp", smtp_host="smtp.example.test", mail_from_email="otari@example.test"
+    ) as client:
+        issued = _password_link(client, account_id, headers={"Otari-Key": MASTER_KEY})
         assert issued.status_code == 201, issued.text
         assert issued.json()["mail_sent"] is True
         assert issued.json()["link"] is None
-        token = _extract_token(caplog.text)
+        token = _extract_token(delivered[0].message.text)
 
         confirmed = client.post(
             f"{API_ROOT}/auth/password/reset/confirm", json={"token": token, "new_password": NEW_PASSWORD}

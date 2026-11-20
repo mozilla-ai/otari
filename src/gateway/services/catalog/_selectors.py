@@ -73,6 +73,7 @@ class _Maps:
     model_selectors: dict[str, str]
     rates: dict[str, float | None]
     bare: dict[str, tuple[str, ...]]
+    dashed: dict[str, tuple[str, ...]]
 
 
 @dataclass(frozen=True)
@@ -109,6 +110,9 @@ class OrganizationSelectors:
     unresolved for its callers rather than falling through to the deployment's one ID.
     """
 
+    dashed: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    """``bare`` keyed with every dot written as a dash, kept the same way."""
+
 
 @dataclass(frozen=True)
 class SelectorIndex:
@@ -137,6 +141,10 @@ class SelectorIndex:
 
     bare: dict[str, tuple[str, ...]] = field(default_factory=dict)
     """A bare name, lowercased, to every ``vendor/<name>`` catalog ID that ends in it; it resolves only to one."""
+
+    dashed: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    """``bare`` keyed with every dot written as a dash, for a provider's own id (``claude-opus-5-5``) of a catalog
+    name that writes its version with a dot (``claude-opus-5.5``). Asked only when ``bare`` knows no such name."""
 
     organizations: dict[uuid.UUID, OrganizationSelectors] = field(default_factory=dict)
     """Each organization's own view, keyed by organization."""
@@ -205,10 +213,18 @@ def _catalog_id(index: SelectorIndex, view: OrganizationSelectors | None, spelli
     """The catalog ID a lowercased spelling names: itself, or the one ID its bare model name stands for."""
     if "/" in spelling or ":" in spelling or spelling in index.models or (view is not None and spelling in view.models):
         return spelling
-    candidates = view.bare.get(spelling) if view is not None else None
-    if candidates is None:
-        candidates = index.bare.get(spelling, ())
+    candidates = _bare_candidates(index.bare, view.bare if view is not None else None, spelling)
+    if not candidates:
+        dashed = spelling.replace(".", "-")
+        candidates = _bare_candidates(index.dashed, view.dashed if view is not None else None, dashed)
     return candidates[0] if len(candidates) == 1 else spelling
+
+
+def _bare_candidates(
+    deployment: dict[str, tuple[str, ...]], organization: dict[str, tuple[str, ...]] | None, name: str
+) -> tuple[str, ...]:
+    candidates = organization.get(name) if organization is not None else None
+    return deployment.get(name, ()) if candidates is None else candidates
 
 
 def resolve_undated_selector(model_selector: str, *, workspace_id: uuid.UUID | None = None) -> str | None:
@@ -383,10 +399,12 @@ def _build_maps(
             pinned[f"{instance}:{slug}".lower()] = _ranked(siblings, rates, (own,))[0]
     model_selectors = {target: spelling for spelling, target in pinned.items()}
     by_name: dict[str, list[str]] = {}
+    by_dashed: dict[str, list[str]] = {}
     for slug in ranked:
         _vendor, slash, name = slug.partition("/")
         if slash:
             by_name.setdefault(name, []).append(slug)
+            by_dashed.setdefault(name.replace(".", "-"), []).append(slug)
     return _Maps(
         full=full,
         pinned=pinned,
@@ -395,6 +413,7 @@ def _build_maps(
         model_selectors=model_selectors,
         rates=rates,
         bare={name: tuple(slugs) for name, slugs in by_name.items()},
+        dashed={name: tuple(slugs) for name, slugs in by_dashed.items()},
     )
 
 
@@ -427,6 +446,7 @@ def build_selector_index(
         rates=maps.rates,
         names={slug: name for slug, name in (names or {}).items() if slug in maps.offerings},
         bare=maps.bare,
+        dashed=maps.dashed,
         organizations=dict(organizations or {}),
         workspace_organization=dict(workspace_organization or {}),
     )
@@ -465,4 +485,5 @@ def build_organization_selectors(
         undated=undated_spellings(own),
         names={slug: name for slug, name in (names or {}).items() if slug in touched},
         bare={name: slugs for name, slugs in maps.bare.items() if touched.intersection(slugs)},
+        dashed={name: slugs for name, slugs in maps.dashed.items() if touched.intersection(slugs)},
     )

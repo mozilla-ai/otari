@@ -297,3 +297,22 @@ async def test_a_given_client_is_used_with_the_timeout_and_left_open(provider: s
         expected = {"connect": TIMEOUT, "read": TIMEOUT, "write": TIMEOUT, "pool": TIMEOUT}
         assert all(request.extensions["timeout"] == expected for request in sent)
         assert not client.is_closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", HTTP_PROVIDERS)
+async def test_a_redirect_is_not_followed_and_raises_a_provider_error(provider: str) -> None:
+    scenario = _scenario(provider, "normal")
+    sent: list[httpx.Request] = []
+
+    def redirect(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        # A JSON object, which an adapter with an optional result list could read as an empty answer.
+        return httpx.Response(302, headers={"Location": "https://elsewhere.example/"}, json={})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(redirect), follow_redirects=True) as client:
+        async with _provider(provider, scenario, client=client) as engine:
+            with pytest.raises(ProviderError) as raised:
+                await engine.search("conformance", **scenario.options)
+    assert sent and all(request.url.host != "elsewhere.example" for request in sent)
+    assert (raised.value.provider, raised.value.status, raised.value.tag) == (provider, 302, "http_error")

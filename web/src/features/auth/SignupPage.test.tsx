@@ -280,15 +280,14 @@ describe("SignupPage", () => {
     // background measured against it (otari-ai#2146).
     const user = userEvent.setup()
     renderPage()
-    const description = "At least 8 characters, and at most 72 bytes."
-    expect(screen.getByText(description)).toBeInTheDocument()
+    // The hint and the too-short message share their words, so the check is
+    // that the line is still one line once the field turns invalid.
+    const description = "At least 8 characters."
+    expect(screen.getAllByText(description)).toHaveLength(1)
 
     await user.type(screen.getByLabelText("Password"), "short")
 
-    expect(
-      await screen.findByText("At least 8 characters."),
-    ).toBeInTheDocument()
-    expect(screen.queryByText(description)).toBeNull()
+    expect(screen.getAllByText(description)).toHaveLength(1)
     expect(screen.getByLabelText("Password")).toHaveAttribute(
       "aria-invalid",
       "true",

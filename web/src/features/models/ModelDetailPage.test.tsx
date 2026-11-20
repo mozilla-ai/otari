@@ -976,6 +976,108 @@ describe("ModelDetailPage", () => {
     }
   })
 
+  it("shows how fast each offering answered the organization, at either percentile", async () => {
+    const user = userEvent.setup()
+    const speed = (
+      p50: number,
+      p95: number,
+      rateP50: number,
+      rateP95: number,
+    ) => ({
+      ttft_samples: 40,
+      ttft_ms_p50: p50,
+      ttft_ms_p95: p95,
+      throughput_samples: 40,
+      output_tokens_per_second_p50: rateP50,
+      output_tokens_per_second_p95: rateP95,
+    })
+    mockApi({
+      detail: {
+        ...GLM_DETAIL,
+        offerings: [
+          offering({ speed_7d: speed(420, 1800, 87.4, 41) }),
+          offering({
+            selector: "together:zai-org/GLM-5.3",
+            provider: "together",
+          }),
+        ],
+      },
+    })
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    const grid = await screen.findByRole("grid", {
+      name: "Offerings of GLM-5.3",
+    })
+    expect(
+      within(grid).getByRole("columnheader", { name: "Latency" }),
+    ).toBeInTheDocument()
+    expect(within(grid).getByText("420 ms")).toBeInTheDocument()
+    expect(within(grid).getByText("87 tok/s")).toBeInTheDocument()
+    // Only the page says whose requests these are.
+    expect(
+      screen.getByText(/your own requests over 7 days/),
+    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole("radio", { name: "P95" }))
+
+    expect(within(grid).getByText("1.80 s")).toBeInTheDocument()
+    expect(within(grid).getByText("41 tok/s")).toBeInTheDocument()
+  })
+
+  it("sorts by throughput at the percentile on show", async () => {
+    const user = userEvent.setup()
+    const rates = (p50: number, p95: number) => ({
+      ttft_samples: 0,
+      ttft_ms_p50: null,
+      ttft_ms_p95: null,
+      throughput_samples: 40,
+      output_tokens_per_second_p50: p50,
+      output_tokens_per_second_p95: p95,
+    })
+    mockApi({
+      detail: {
+        ...GLM_DETAIL,
+        // Nebius is faster at the median and slower in the tail.
+        offerings: [
+          offering({ speed_7d: rates(200, 40) }),
+          offering({
+            selector: "together:zai-org/GLM-5.3",
+            provider: "together",
+            speed_7d: rates(100, 90),
+          }),
+        ],
+      },
+    })
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    const grid = await screen.findByRole("grid", {
+      name: "Offerings of GLM-5.3",
+    })
+    const firstRow = () =>
+      within(grid).getAllByRole("row").slice(1)[0] as HTMLElement
+    await user.click(
+      within(grid).getByRole("columnheader", { name: "Throughput" }),
+    )
+    expect(firstRow()).toHaveTextContent(/^Together AI/)
+
+    await user.click(screen.getByRole("radio", { name: "P95" }))
+
+    expect(firstRow()).toHaveTextContent(/^Nebius/)
+  })
+
+  it("leaves the speed columns out when no offering has been measured", async () => {
+    mockApi()
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    const grid = await screen.findByRole("grid", {
+      name: "Offerings of GLM-5.3",
+    })
+    expect(
+      within(grid).queryByRole("columnheader", { name: "Latency" }),
+    ).toBeNull()
+    expect(screen.queryByRole("radiogroup")).toBeNull()
+  })
+
   it("keeps the page read-only for a member", async () => {
     // A member, stated as one: the fixture's default role is owner, and an owner
     // now gets the rate link whether or not they operate the deployment, so a

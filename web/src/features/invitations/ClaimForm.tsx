@@ -6,7 +6,6 @@ import { AuthPasswordField, AuthTextField } from "@/features/auth/AuthFields"
 import { TermsAcceptanceField } from "@/features/auth/TermsAcceptanceField"
 import type { useAcceptInvitation } from "@/shared/api/organizations"
 import {
-  MAX_PASSWORD_BYTES,
   MIN_PASSWORD_LENGTH,
   newPasswordProblem,
 } from "@/shared/helpers/password"
@@ -76,7 +75,7 @@ export function ClaimForm({
         value={password}
         onChange={setPassword}
         autoComplete="new-password"
-        description={`At least ${MIN_PASSWORD_LENGTH} characters, and at most ${MAX_PASSWORD_BYTES} bytes.`}
+        description={`At least ${MIN_PASSWORD_LENGTH} characters.`}
         errorMessage={problem ?? undefined}
       />
       <AuthPasswordField

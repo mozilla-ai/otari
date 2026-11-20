@@ -24,7 +24,7 @@ from any_llm.types.messages import (
 from any_llm.types.responses import Response
 from openai.types.responses import ResponseCompletedEvent, ResponseUsage
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
-from openresponses_types import ResponseResource
+from openresponses_types import ResponseCompletedStreamingEvent, ResponseResource
 
 from gateway.api.routes import chat, messages, responses
 from gateway.schemas.inference import SettledCost
@@ -267,11 +267,8 @@ def test_adapter_does_not_synthesize_usage(adapter: Any, value: Any) -> None:
     assert value.usage is None
 
 
-def test_a_native_responses_providers_response_is_answered_with_its_cost() -> None:
-    """A provider with its own Responses API answers with any-llm's ResponseResource,
-    whose usage drops undeclared fields, so the cost has to survive serialization too.
-    """
-    result = ResponseResource.model_validate(
+def _resource(input_tokens_details: dict[str, int]) -> ResponseResource:
+    return ResponseResource.model_validate(
         {
             "id": "resp-native",
             "object": "response",
@@ -299,7 +296,7 @@ def test_a_native_responses_providers_response_is_answered_with_its_cost() -> No
                 "input_tokens": 10,
                 "output_tokens": 7,
                 "total_tokens": 17,
-                "input_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
+                "input_tokens_details": input_tokens_details,
                 "output_tokens_details": {"reasoning_tokens": 0},
             },
             "max_output_tokens": None,
@@ -313,6 +310,13 @@ def test_a_native_responses_providers_response_is_answered_with_its_cost() -> No
         }
     )
 
+
+def test_a_native_responses_providers_response_is_answered_with_its_cost() -> None:
+    """A provider with its own Responses API answers with any-llm's ResponseResource,
+    whose usage drops undeclared fields, so the cost has to survive serialization too.
+    """
+    result = _resource({"cached_tokens": 0, "cache_write_tokens": 0})
+
     # The adapter is typed for OpenAI's Response, but a native provider hands it this.
     assert responses._ADAPTER.attach_cost(cast(Any, result), _SETTLEMENT) is True
     usage = responses.response_body(result)["usage"]
@@ -321,3 +325,25 @@ def test_a_native_responses_providers_response_is_answered_with_its_cost() -> No
     assert usage["pricing_source"] == _SETTLEMENT.pricing_source
     assert usage["tool_cost_usd"] == _SETTLEMENT.tool_cost_usd
     assert (usage["input_tokens"], usage["output_tokens"]) == (10, 7)
+
+
+def test_a_usage_without_cache_writes_is_answered_in_openais_shape() -> None:
+    """The OpenResponses types have no ``cache_write_tokens``, which OpenAI's Response requires."""
+    result = _resource({"cached_tokens": 3})
+
+    body = responses.response_body(result)
+
+    assert body["usage"]["input_tokens_details"] == {"cached_tokens": 3, "cache_write_tokens": 0}
+    Response.model_validate(body)
+
+
+def test_a_streamed_usage_without_cache_writes_is_answered_in_openais_shape() -> None:
+    event = ResponseCompletedStreamingEvent.model_validate(
+        {"type": "response.completed", "sequence_number": 1, "response": _resource({"cached_tokens": 3})}
+    )
+
+    data = responses._ADAPTER.format_chunk(cast(Any, event)).split("data: ", 1)[1]
+
+    completed = ResponseCompletedEvent.model_validate_json(data)
+    assert completed.response.usage is not None
+    assert completed.response.usage.input_tokens_details.cache_write_tokens == 0
