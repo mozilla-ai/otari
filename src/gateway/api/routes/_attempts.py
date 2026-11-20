@@ -96,6 +96,29 @@ def provider_failure_http_exc(
     )
 
 
+def _timeout_detail(failures: Sequence[AttemptFailure]) -> str:
+    """504 detail for a plan whose last candidate timed out: all-timed-out only when every one did."""
+    earlier = failures[:-1]
+    if all(failure.error_class == "timeout" for failure in earlier):
+        return ALL_ATTEMPTS_TIMED_OUT_DETAIL
+    refused = sum(1 for failure in earlier if _refused_the_request(failure.error))
+    other = len(earlier) - refused
+    noun = "candidate" if len(earlier) == 1 else "candidates"
+    kinds = [text for count, text in ((refused, "refused the request"), (other, "failed for another reason")) if count]
+    if len(kinds) == 2:
+        return (
+            f"The last candidate timed out; of the {len(earlier)} earlier {noun}, "
+            f"{refused} refused the request and {other} failed for another reason."
+        )
+    return f"The last candidate timed out; the {len(earlier)} earlier {noun} {kinds[0]}."
+
+
+def _refused_the_request(exc: BaseException) -> bool:
+    """Whether the provider answered with a 4xx that resending the same request will not change."""
+    status_code = upstream_exception_shape(exc)[1]
+    return status_code is not None and 400 <= status_code < 500 and status_code not in (408, 429)
+
+
 def all_attempts_rejected_detail(tried: int, reason: str | None = None) -> str:
     """400 detail for a request every attempt rejected as invalid, with the reason when they all gave one."""
     if reason is None:
@@ -529,7 +552,7 @@ async def walk_attempts(
         on_terminal(last_failed or attempts[-1])
     single = len(failures) <= 1
     if last_exc is not None and upstream_exception_shape(last_exc)[0] == "timeout":
-        detail = "LLM provider timeout" if single else ALL_ATTEMPTS_TIMED_OUT_DETAIL
+        detail = "LLM provider timeout" if single else _timeout_detail(failures)
         raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=detail) from last_exc
     if single and last_exc is not None:
         raise provider_failure_http_exc(last_exc, fallback_detail="LLM provider error") from last_exc
