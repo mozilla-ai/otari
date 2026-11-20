@@ -33,7 +33,7 @@ A top-level list on `/api/v1/chat/completions`, `/api/v1/messages` and
 | `mode` | `monitor` (default) or `block`. See [Modes](#modes). |
 | `on_unavailable` | `block` (default) or `monitor`. See [When the guardrails service is unreachable](#when-the-guardrails-service-is-unreachable). |
 | `validate_kwargs` | Extra arguments for the check, merged on top of the profile's own. |
-| `url` | A guardrails service to send this check to instead of the deployment's. It must be on a public address: loopback, private and other internal addresses are refused with a `400`, and Otari connects to the address it checked, with no redirect followed. |
+| `url` | A guardrails service to send this check to instead of the deployment's. It is the service's base address: Otari adds `/validate` to it, so `https://guard.example/api` is called at `https://guard.example/api/validate`, and a `url` with a query string or a fragment is refused with a `400`. It must be on a public address: loopback, private and other internal addresses are refused with a `400`, and Otari connects to the address it checked, with no redirect followed. |
 | `credential` | Sent to `url` as `Authorization: Bearer`. Requires `url`, which must then be `https`, and an entry carrying one must be the only entry for its profile. Dropped when an organization or a routing policy mandates the same profile, because the mandate's endpoint replaces yours. |
 | `on` | What the guardrail reads: any of `input`, `tool_results`, `tool_calls` and `output`. Defaults to `["input"]`. See [What a guardrail reads](#what-a-guardrail-reads). |
 
@@ -104,14 +104,17 @@ gave no verdict, so `status` says which:
 | --- | --- |
 | `evaluated` | The check ran. `valid` is `true` or `false`. |
 | `inconclusive` | The check ran and the guardrail returned no verdict. |
-| `unavailable` | The check could not run, and the request was served anyway. `reason` says why. |
+| `unavailable` | The check could not run. The request was served anyway, or was refused with a `502` that carries this header. `reason` says why. |
 
 `reason` appears only on an `unavailable` entry:
 
 - `not_configured`: the deployment has no guardrails service for the profile.
-- `evaluation_failed`: everything else (the service is down, does not serve the
-  profile, or answered something malformed). The detail goes to the gateway's
-  log, not to the caller.
+- `http_<status>`: the service answered the `/validate` call with that error
+  status, for example `http_404`. A `404` means the service has no `/validate`
+  at the address Otari called, or does not serve the profile.
+- `evaluation_failed`: everything else (the service is down or answered
+  something malformed). The detail goes to the gateway's log, not to the
+  caller.
 
 The guardrail's own explanation is never put in the header.
 
@@ -170,7 +173,7 @@ session, and an organization owner or admin) carry:
 | --- | --- |
 | `profile` | The profile on the guardrails service. One entry per profile per organization. |
 | `mode`, `on`, `on_unavailable` | The same three settings a request-body entry has, with the same meanings. `on` defaults to `["input"]`. |
-| `url` | An endpoint of the organization's own, on a public address, held to the same rule as a request's `url`. Omit it to use the deployment's `guardrails_url`, which the operator sets and which may be on a private address. |
+| `url` | The base address of a service of the organization's own, on a public address, held to the same rules as a request's `url`: Otari adds `/validate` to it. Omit it to use the deployment's `guardrails_url`, which the operator sets and which may be on a private address. |
 | `definition_id` | One of the organization's own guardrail definitions, for Otari to build and run the check itself. Exclusive with `url` and `credential`, which name a service instead. An explicit `null` clears it. |
 | `credential` | Sent to that endpoint as `Authorization: Bearer`. Requires `url`, which must then be `https`, so the credential is never sent to the deployment URL, which may be a plain-http sidecar. Encrypted at rest, never returned. |
 | `validate_kwargs` | Forwarded to the guardrails service `/validate` call. A parameter whose name looks credential-shaped (it contains `key`, `secret`, `token`, `password`, `authorization` or `credential`) is read back as `***` rather than its stored value. Sending `***` back keeps what is stored, so editing the rest of an entry does not overwrite the parameter you were never shown. |
@@ -385,6 +388,12 @@ request's `url`, implements:
 POST /validate  {"profile": "...", "input_text": "...", "validate_kwargs": {...}}
 → {"profile": "...", "result": {"valid": false, "explanation": null, "score": 0.997}}
 ```
+
+Each of those addresses is the service's base: Otari adds `/validate` to it and
+calls the result, so a base address carries no query string and no fragment.
+A `url` that already ends in `/validate` is called at
+`/validate/validate`, and the check reports the status the service answers
+there, most often `http_404`.
 
 `valid: false` means the input was flagged, and `valid: null` is an inconclusive
 verdict. `GET /profiles` is optional: it lists

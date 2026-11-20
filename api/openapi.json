@@ -19128,7 +19128,7 @@
           "credential": "sk-guardrails-...",
           "mode": "block",
           "profile": "prompt-injection",
-          "url": "https://guardrails.internal.example/validate"
+          "url": "https://guardrails.internal.example"
         },
         "properties": {
           "applies_to_all_workspaces": {
@@ -19721,7 +19721,7 @@
         "example": {
           "credential": "sk-guardrails-...",
           "mode": "monitor",
-          "url": "https://guardrails.internal.example/validate"
+          "url": "https://guardrails.internal.example"
         },
         "properties": {
           "applies_to_all_workspaces": {
