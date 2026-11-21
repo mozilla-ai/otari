@@ -164,8 +164,8 @@ decides, as for [signup](#signup):
   credentials gets 502. Only a code the provider calls invalid, expired or
   spent gets 400.
 
-**What a first sign-in replaces.** On an address that is unverified, or only
-vouched for by an organization (see [Invitations](members.md#invitations)), the
+**What a first sign-in replaces.** On an address that is unverified, or one an
+organization supplied (see [Invitations](members.md#invitations)), the
 first sign-in marks it verified and removes what was set up before: the
 password, any verification or reset link, sessions signed in with that
 password, and passkeys registered from one. On an unverified address it also
@@ -178,10 +178,10 @@ account page. A password on an already verified address is kept, with its
 sessions and passkeys.
 
 Later linked sign-ins leave the password and verification alone, unless the
-address has since become only vouched for (an operator's
+address has since lost its proof (an operator's
 [password link](#deployment-wide-account-administration) passed on rather than
 mailed does that). Then the sign-in proves the address again and removes what
-was set up through the vouch.
+was set up through the passed-on link.
 
 **Terms.** With `terms_url` set, a sign-in that creates an account, or is the
 first way in to one an owner or admin added or invited, needs the person to
@@ -231,7 +231,7 @@ What an unknown address does depends on `open_signup`:
   (invitation revoked, declined or expired, or member removed) when its owner
   first proves it: by signing up (or verifying that signup), by a first
   provider sign-in, or by choosing a password through "Forgot your password?"
-  while it is unverified or only vouched for (see
+  while it is unverified or unproved (see
   [Invitations](members.md#invitations)). An address is claimed once: someone
   who already proved it and later loses their last organization keeps the
   account, and signs in to the empty state where they can create one. An
@@ -249,8 +249,8 @@ password from **Account settings** while signed in.
 address that has one, or of one an owner or admin added or invited that nobody
 has signed in to yet.
 
-- Completing it verifies the address. Where the address was unverified or only
-  vouched for, it also ends every session and removes every passkey set up
+- Completing it verifies the address. Where the address was unverified or
+  unproved, it also ends every session and removes every passkey set up
   before. Where it was unverified, the signup display name is dropped and the
   organization signup created is renamed after the address, unless someone
   else belongs to it.
@@ -322,7 +322,7 @@ bootstrap operator or the master key may call it, so no other operator can take
 the role for themselves. From a dashboard session it takes the caller's
 `current_password`, as a password change does, and a session whose account has
 no password is refused: set one first, or use the master key. It is refused with 400 for a
-target that is not an active operator with a verified (not only vouched for), unblocked email address
+target that is not an active operator with an unblocked email address its owner proved
 and a password, which is what keeps master-key sign-in retired.
 
 After a handover:
@@ -346,8 +346,8 @@ from a forgotten password on a deployment without mail.
   Otherwise, or if sending fails, the operator gets the link to pass on.
 - It works once, expires after `password_reset_expiry_hours`, and replaces any
   earlier reset link.
-- A password chosen through a passed-on link records the address as vouched
-  for, not proven, like an [invitation](members.md#invitations) link.
+- A password chosen through a passed-on link leaves the address verified but
+  not proved, like an [invitation](members.md#invitations) link.
 - It is refused for a deactivated account, one with no address, one with no
   password that signs in with a provider or passkey, the bootstrap operator's
   account unless the request carries the master key, and, with `open_signup`

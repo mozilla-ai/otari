@@ -53,18 +53,18 @@ async def _signup(session: AsyncSession, *, proof: AddressProof | None) -> User 
     )
 
 
-async def test_a_mailbox_proof_verifies_the_address_and_vouches_for_nothing(async_db: AsyncSession) -> None:
+async def test_a_mailbox_proof_proves_the_address(async_db: AsyncSession) -> None:
     claimed = await _signup(async_db, proof=AddressProof.MAILBOX)
 
     assert claimed is not None
     assert claimed.email_verified_at is not None
-    assert claimed.email_vouched_at is None
+    assert claimed.email_proven_at is not None
 
 
-async def test_a_vouched_proof_is_recorded_as_vouched_for(async_db: AsyncSession) -> None:
-    """Domain auto-join refuses a vouched address, so the stamp is what keeps that rule working."""
-    claimed = await _signup(async_db, proof=AddressProof.VOUCHED)
+async def test_a_shared_proof_verifies_the_address_without_proving_it(async_db: AsyncSession) -> None:
+    """Domain auto-join refuses an unproved address, so the stamp is what keeps that rule working."""
+    claimed = await _signup(async_db, proof=AddressProof.SHARED)
 
     assert claimed is not None
     assert claimed.email_verified_at is not None
-    assert claimed.email_vouched_at is not None
+    assert claimed.email_proven_at is None
