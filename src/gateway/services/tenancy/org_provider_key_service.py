@@ -172,7 +172,7 @@ def _row_to_entry(key: OrgProviderKey) -> dict[str, Any]:
     entry: dict[str, Any] = {}
     if key.api_base:
         if key.provider not in TENANT_ENDPOINT_PROVIDERS:
-            raise UnservableEndpointError(key.provider)
+            raise UnservableEndpointError(f"a {key.provider} key cannot be served on a custom api_base")
         entry["api_base"] = key.api_base
     if client_args := tenant_client_args(key.provider, client_args_of(key)):
         entry["client_args"] = client_args
@@ -331,14 +331,13 @@ async def refresh_org_provider_cache(db: AsyncSession) -> None:
                 continue
             try:
                 new_cache[(workspace_id, provider)] = _row_to_entry(active)
-            except UnservableEndpointError:
+            except UnservableEndpointError as exc:
                 logger.warning(
-                    "Skipping organization provider key '%s' (%s) for workspace %s: "
-                    "a %s key cannot be served on a custom api_base.",
+                    "Skipping organization provider key '%s' (%s) for workspace %s: %s.",
                     active.name,
                     provider,
                     workspace_id,
-                    active.provider,
+                    exc,
                 )
                 continue
             except (SecretBoxUnavailableError, SecretDecryptionError):

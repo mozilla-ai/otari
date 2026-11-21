@@ -343,3 +343,13 @@ def test_a_credential_a_key_may_not_carry_is_refused_even_where_the_request_sent
 
     with pytest.raises(OrgProviderKeyEndpointAuthRefusedError):
         store._gate_endpoint_auth(stored, api_base=None, sent=False)
+
+
+def test_a_key_skipped_for_its_provider_says_that_is_why() -> None:
+    row = _key(endpoint_auth=False)
+    row.provider = "mistral"
+
+    with pytest.raises(store.UnservableEndpointError) as refusal:
+        store._row_to_entry(row)
+
+    assert "api_base" in str(refusal.value)
