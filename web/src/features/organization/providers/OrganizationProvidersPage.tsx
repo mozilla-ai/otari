@@ -223,8 +223,12 @@ function KeyForm({
     !(editing?.slug && draft.apiBase.trim() === "") &&
     isEndpointAuthComplete(endpointAuth, {
       hasStoredSecret: Boolean(editing?.endpoint_auth?.last4),
+      // A move is a new address, as the gateway reads it: clearing the address
+      // takes the credential with it rather than carrying it anywhere.
       addressMoved:
-        editing !== null && draft.apiBase.trim() !== (editing.api_base ?? ""),
+        editing !== null &&
+        draft.apiBase.trim() !== "" &&
+        draft.apiBase.trim() !== (editing.api_base ?? ""),
     })
 
   const submit = () => {
