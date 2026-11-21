@@ -6,6 +6,10 @@ response. The tests pin that boundary, ordering, and exhausted-plan status.
 """
 
 import asyncio
+import errno
+import logging
+import os
+import ssl
 import uuid
 from typing import Any, Literal, cast
 
@@ -24,6 +28,7 @@ from gateway.api.routes._attempts import (
     CandidateCannotServe,
     all_attempts_rejected_detail,
     classify_local_attempt_error,
+    failure_cause,
     no_attempt_served_detail,
     prompt_too_long_for_every_attempt_detail,
     request_too_large_for_every_attempt_detail,
@@ -38,8 +43,10 @@ from gateway.core.error_codes import (
     UPSTREAM_RATE_LIMITED,
     error_code_of,
 )
+from gateway.log_config import logger as gateway_logger
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.sandbox_backend import SandboxNotReachableError, SandboxUnavailableError
+from gateway.services.web_retrieval_network import PinnedTransportError
 from gateway.types.attempt import Attempt
 
 
@@ -1007,3 +1014,137 @@ async def test_a_skip_after_the_last_candidate_called_is_recorded_when_the_walk_
         )
 
     assert skipped == [("b", "b is full")]
+
+
+# ---------------------------------------------------------------------------
+# What the operator's log says about a failed attempt
+# ---------------------------------------------------------------------------
+
+
+class _SDKConnectionError(Exception):
+    """A provider SDK's connection error: a fixed message, the reason on ``__cause__``."""
+
+
+def _wrapped(cause: BaseException) -> _SDKConnectionError:
+    try:
+        try:
+            raise cause
+        except BaseException as transport_error:
+            raise _SDKConnectionError("Connection error.") from transport_error
+    except _SDKConnectionError as sdk_error:
+        return sdk_error
+
+
+_REFUSED = "endpoint refused: destination resolves to a private address"
+
+
+def _wrapped_transport_failure(reason: str = _REFUSED) -> _SDKConnectionError:
+    return _wrapped(PinnedTransportError(reason))
+
+
+def test_failure_cause_names_the_gateways_own_refusal_an_sdk_wrapped() -> None:
+    assert failure_cause(_wrapped_transport_failure()) == f"PinnedTransportError: {_REFUSED}"
+
+
+def test_failure_cause_follows_any_llms_original_exception() -> None:
+    exc = RuntimeError("wrapped")
+    exc.original_exception = _wrapped_transport_failure()  # type: ignore[attr-defined]
+
+    assert failure_cause(exc) == f"PinnedTransportError: {_REFUSED}"
+
+
+def test_failure_cause_names_a_socket_error_by_its_errno_alone() -> None:
+    exc = _wrapped(ConnectionResetError(errno.ECONNRESET, "invalid request: confidential acquisition plan"))
+
+    assert failure_cause(exc) == f"ConnectionResetError: ECONNRESET {os.strerror(errno.ECONNRESET)}"
+
+
+def test_failure_cause_names_an_unknown_errno_by_its_number() -> None:
+    assert failure_cause(OSError(-2, "invalid request: confidential acquisition plan")) == "OSError: errno -2"
+
+
+def test_failure_cause_names_a_tls_error_by_its_reason() -> None:
+    tls_error = ssl.SSLError(1, "certificate verify failed: confidential")
+    tls_error.reason = "CERTIFICATE_VERIFY_FAILED"
+
+    assert failure_cause(_wrapped(tls_error)) == "SSLError: CERTIFICATE_VERIFY_FAILED"
+
+
+def test_failure_cause_of_a_tls_error_with_no_reason_is_its_type() -> None:
+    assert failure_cause(_wrapped(ssl.SSLError(1, "constructed by hand"))) == "SSLError"
+
+
+@pytest.mark.asyncio
+async def test_a_tls_error_with_no_reason_still_advances_to_the_next_candidate() -> None:
+    chosen, result = await _walk(
+        [_attempt(1, "gpt-5-mini"), _attempt(2, "claude-haiku-4-5", instance="anthropic")],
+        [ssl.SSLError(1, "constructed by hand"), "ok"],
+    )
+
+    assert chosen.position == 2
+    assert result == "ok"
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        RuntimeError("Invalid prompt: confidential acquisition plan"),
+        _http_error(400),
+        httpx.ConnectError("invalid request: confidential acquisition plan"),
+        OSError("invalid request: confidential acquisition plan"),
+    ],
+)
+def test_failure_cause_logs_no_free_text_but_the_gateways_own(exc: BaseException) -> None:
+    """A provider's error text can echo the request, so none of it reaches the log."""
+    assert failure_cause(exc) == type(exc).__name__
+
+
+def test_failure_cause_of_an_exception_with_no_message_is_its_type() -> None:
+    assert failure_cause(TimeoutError()) == "TimeoutError"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_attempt_logs_why_it_failed(caplog: pytest.LogCaptureFixture) -> None:
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.WARNING, logger="gateway")
+    try:
+        await _walk(
+            [_attempt(1, "gpt-5-mini"), _attempt(2, "claude-haiku-4-5", instance="anthropic")],
+            [_wrapped_transport_failure(), "ok"],
+        )
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+    [line] = [record.getMessage() for record in caplog.records if record.getMessage().startswith("Attempt failed")]
+    assert "error=conn_err" in line
+    assert line.endswith(f"cause=PinnedTransportError: {_REFUSED}")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("exc", "cause"),
+    [
+        (RuntimeError("Invalid prompt: confidential acquisition plan"), "RuntimeError"),
+        (httpx.ConnectError("invalid request: confidential acquisition plan"), "ConnectError"),
+        (
+            _wrapped(PermissionError(errno.EACCES, "invalid request: confidential acquisition plan")),
+            f"PermissionError: EACCES {os.strerror(errno.EACCES)}",
+        ),
+    ],
+)
+async def test_a_failed_attempt_never_logs_echoed_request_text(
+    caplog: pytest.LogCaptureFixture, exc: BaseException, cause: str
+) -> None:
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.WARNING, logger="gateway")
+    try:
+        await _walk(
+            [_attempt(1, "gpt-5-mini"), _attempt(2, "claude-haiku-4-5", instance="anthropic")],
+            [exc, "ok"],
+        )
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+    [line] = [record.getMessage() for record in caplog.records if record.getMessage().startswith("Attempt failed")]
+    assert "confidential" not in line
+    assert line.endswith(f"cause={cause}")
