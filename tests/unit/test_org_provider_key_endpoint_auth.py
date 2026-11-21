@@ -13,7 +13,7 @@ from gateway.exceptions.providers_exceptions import (
 )
 from gateway.models.provider_keys import OrgProviderKey
 from gateway.repositories.tenancy.org_provider_key_repository import OrgProviderKeyRepository
-from gateway.schemas.providers import EndpointAuthRequest
+from gateway.schemas.providers import EndpointAuthRequest, OrgProviderKeyPublic
 from gateway.services import model_discovery_service
 from gateway.services.catalog._served import _read_engine_settings
 from gateway.services.model_discovery_service import (
@@ -26,7 +26,7 @@ from gateway.services.model_discovery_service import (
 from gateway.services.providers._org_provider_model_service import OrgProviderModelService
 from gateway.services.secret_box import decrypt_secret, encrypt_secret, generate_secret_key
 from gateway.services.tenancy import org_provider_key_service as store
-from gateway.types.endpoint_auth import EndpointAuth, EndpointAuthMethod
+from gateway.types.endpoint_auth import EndpointAuth, EndpointAuthMethod, EndpointAuthState
 
 LATER = datetime.now(UTC) + timedelta(days=90)
 
@@ -415,3 +415,14 @@ async def test_forgetting_an_organization_s_secrets_clears_the_endpoint_credenti
 
 def test_the_refusal_for_a_moved_address_names_every_credential_to_resend() -> None:
     assert "endpoint credential" in str(OrgProviderKeyCredentialRequiredError())
+
+
+def test_the_public_shape_reports_a_credential_against_the_clock_it_is_given() -> None:
+    """The caller holds the clock, so one page cannot read two rows against two of them."""
+    row = _key(endpoint_auth=True)
+    row.endpoint_auth_expires_at = datetime.now(UTC) + timedelta(days=1)
+
+    public = OrgProviderKeyPublic.from_row(row, usable=True, now=datetime.now(UTC) + timedelta(days=365))
+
+    assert public.endpoint_auth is not None
+    assert public.endpoint_auth.state is EndpointAuthState.EXPIRED

@@ -186,7 +186,9 @@ def test_from_row_redacts_credential_shaped_client_arg_keys() -> None:
         "Authorization": "Bearer xyz",
     }
 
-    public = OrgProviderKeyPublic.from_row(_key(name="bedrock-primary"), client_args=client_args, usable=True)
+    public = OrgProviderKeyPublic.from_row(
+        _key(name="bedrock-primary"), client_args=client_args, usable=True, now=datetime.now(UTC)
+    )
 
     assert public.client_args == {
         "region_name": "us-east-1",
@@ -208,4 +210,6 @@ def test_from_row_with_no_credential_shaped_keys_is_unchanged() -> None:
 def test_from_row_client_args_none_stays_none() -> None:
     key = _key(name="plain")
     assert key.encrypted_client_args is None
-    assert OrgProviderKeyPublic.from_row(key, client_args=None, usable=True).client_args is None
+    assert (
+        OrgProviderKeyPublic.from_row(key, client_args=None, usable=True, now=datetime.now(UTC)).client_args is None
+    )

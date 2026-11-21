@@ -640,11 +640,15 @@ class OrgProviderKeyService:
     async def _public_rows(self, rows: Sequence[OrgProviderKey]) -> list[OrgProviderKeyPublic]:
         """The API shape of several keys, with their offered and serving counts read in one query."""
         counts = await OrgProviderKeyModelRepository(self.db).offer_counts_for_keys([row.id for row in rows])
+        # One reading for the whole page, so two rows cannot report their
+        # credentials against different clocks.
+        now = datetime.now(UTC)
         return [
             OrgProviderKeyPublic.from_row(
                 row,
                 client_args=readable_mapping(row.encrypted_client_args),
                 usable=key_is_usable(row),
+                now=now,
                 offered_count=counts.get(row.id, (0, 0))[0],
                 serving_count=counts.get(row.id, (0, 0))[1],
             )

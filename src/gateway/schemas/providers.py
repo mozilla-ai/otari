@@ -13,7 +13,7 @@ the rows in ``models/provider_keys.py``, whose tables are SQLModel too.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, Literal, Self
 
 from pydantic import AwareDatetime, ValidationInfo, field_validator, model_validator
@@ -213,10 +213,14 @@ class OrgProviderKeyPublic(SQLModel):
         *,
         client_args: dict[str, Any] | None,
         usable: bool,
+        now: datetime,
         offered_count: int = 0,
         serving_count: int = 0,
     ) -> OrgProviderKeyPublic:
         """Read one row for the API. Never includes the key, only ``last4``.
+
+        ``now`` is passed rather than read so a caller holds the clock, as the
+        endpoint credential's own state already requires.
 
         ``client_args`` and ``usable`` are both passed in rather than derived
         here: answering either means decrypting, which belongs to the service
@@ -240,7 +244,7 @@ class OrgProviderKeyPublic(SQLModel):
             slug=key.slug,
             api_base=key.api_base,
             client_args=redact_secret_like_values(client_args),
-            endpoint_auth=EndpointAuthPublic.from_row(key, now=datetime.now(UTC)),
+            endpoint_auth=EndpointAuthPublic.from_row(key, now=now),
             last4=key.last4,
             is_org_default=key.is_org_default,
             zero_data_retention=key.zero_data_retention,
