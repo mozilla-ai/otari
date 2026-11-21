@@ -568,6 +568,62 @@ describe("OrganizationProvidersPage", () => {
     })
   })
 
+  it("sends no endpoint credential once the key has no address of its own", async () => {
+    const requests = mockApi({
+      keys: [
+        orgProviderKey({
+          api_base: "https://proxy.example.com/v1",
+          endpoint_auth: {
+            method: "static_header",
+            header_name: "Fastly-Key",
+            last4: "cret",
+            expires_at: "2027-03-01T00:00:00+00:00",
+            state: "valid",
+          },
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await pressRowAction(user, "Edit…")
+    await user.clear(screen.getByRole("textbox", { name: /API base URL/ }))
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => {
+      const patch = requests.find((request) => request.method === "PATCH")
+      expect(patch?.body).toMatchObject({ api_base: null, endpoint_auth: null })
+    })
+  })
+
+  it("can still be saved after the address a half-typed credential belonged to is removed", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider key" }),
+    )
+    await user.click(screen.getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Anthropic" }))
+    await user.type(screen.getByRole("textbox", { name: /Name/ }), "Production")
+    await user.type(
+      screen.getByRole("textbox", { name: /API base URL/ }),
+      "https://proxy.example.com/v1",
+    )
+    await user.type(
+      screen.getByRole("textbox", { name: /Endpoint credential header/ }),
+      "Fastly-Key",
+    )
+    const save = () =>
+      screen.getByRole("button", { name: "Add provider key", hidden: false })
+    expect(save()).toBeDisabled()
+
+    await user.clear(screen.getByRole("textbox", { name: /API base URL/ }))
+
+    expect(save()).toBeEnabled()
+  })
+
   it("still finds a provider by the name the gateway gives it", async () => {
     mockApi({
       catalog: [

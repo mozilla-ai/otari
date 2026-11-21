@@ -209,13 +209,19 @@ function KeyForm({
   // The whole draft against what the form was seeded with, so a guard cannot
   // miss a field the form grows later.
   const { isDirty } = useDirtySnapshot(draft)
+  // A credential belongs to a base URL the organization chose. With no base
+  // URL the fields are not shown, and a field that is not shown decides
+  // nothing: neither whether the form saves nor what it sends.
+  const endpointAuth =
+    draft.apiBase.trim() === "" ? EMPTY_ENDPOINT_AUTH : draft.endpointAuth
+
   const canSubmit =
     parsedClientArgs.ok &&
     Object.keys(credentialErrors).length === 0 &&
     draft.name.trim() !== "" &&
     (editing !== null || draft.provider !== "") &&
     !(editing?.slug && draft.apiBase.trim() === "") &&
-    isEndpointAuthComplete(draft.endpointAuth, {
+    isEndpointAuthComplete(endpointAuth, {
       hasStoredSecret: Boolean(editing?.endpoint_auth?.last4),
     })
 
@@ -230,18 +236,18 @@ function KeyForm({
       draft.redacted,
     )
     const slug = draft.slug.trim()
-    const headerName = draft.endpointAuth.headerName.trim()
+    const headerName = endpointAuth.headerName.trim()
     // Null rather than omitted, so clearing the header clears the credential.
     // The secret is sent only when retyped, as the API key is.
-    const endpointAuth =
+    const endpointAuthBody =
       headerName === ""
         ? null
         : {
             method: "static_header" as const,
             header_name: headerName,
-            expires_at: new Date(draft.endpointAuth.expiresAt).toISOString(),
-            ...(draft.endpointAuth.secret !== ""
-              ? { secret: draft.endpointAuth.secret }
+            expires_at: new Date(endpointAuth.expiresAt).toISOString(),
+            ...(endpointAuth.secret !== ""
+              ? { secret: endpointAuth.secret }
               : {}),
           }
     if (editing) {
@@ -249,7 +255,7 @@ function KeyForm({
         name: draft.name.trim(),
         api_base: apiBase === "" ? null : apiBase,
         client_args: clientArgs,
-        endpoint_auth: endpointAuth,
+        endpoint_auth: endpointAuthBody,
         zero_data_retention: draft.zeroDataRetention,
       }
       // Omitted rather than sent as null when it was left blank: an explicit
@@ -266,7 +272,7 @@ function KeyForm({
       api_base: apiBase === "" ? null : apiBase,
       slug: apiBase !== "" && slug !== "" ? slug : null,
       client_args: clientArgs,
-      endpoint_auth: endpointAuth,
+      endpoint_auth: endpointAuthBody,
       zero_data_retention: draft.zeroDataRetention,
     }
     create.mutate(body, { onSuccess: onClose })
@@ -377,7 +383,7 @@ function KeyForm({
           credential for it is asked for only where there is one. */}
       {draft.apiBase.trim() === "" ? null : (
         <EndpointAuthFields
-          value={draft.endpointAuth}
+          value={endpointAuth}
           onChange={(endpointAuth) => setDraft({ ...draft, endpointAuth })}
           stored={editing?.endpoint_auth ?? null}
         />
