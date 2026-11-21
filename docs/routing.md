@@ -72,6 +72,13 @@ balance covers no candidate, the request is refused once with
 `402 insufficient_funds`, recorded against the plan's first model. A provider's
 own `402` is a provider failure like any other, and the plan moves on.
 
+With `require_pricing` on, a candidate whose model has no price is skipped
+without being called, and the next one is tried. A plan none of whose
+candidates has a price is refused with `402 pricing_required` before any is
+tried. A walk that skips every candidate, for this or another reason, answers
+with one of their refusals: the one whose `Retry-After` is soonest, else the
+last.
+
 When no candidate is left:
 
 | Situation | Response |

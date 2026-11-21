@@ -193,7 +193,7 @@ def _complete(client: TestClient, headers: dict[str, str], model: str = MODEL) -
         id="chatcmpl-hosted",
         object="chat.completion",
         created=0,
-        model=model.split(":", 1)[1],
+        model=model.split(":", 1)[-1],
         choices=[Choice(index=0, message=ChatCompletionMessage(role="assistant", content="hi"), finish_reason="stop")],
         usage=CompletionUsage(prompt_tokens=1000, completion_tokens=500, total_tokens=1500),
     )
@@ -535,3 +535,59 @@ def test_a_zero_override_cannot_carry_an_unpriced_hosted_model_past_require_pric
     assert response.status_code == status.HTTP_402_PAYMENT_REQUIRED, response.text
     assert not captured, "the provider was called for a request nothing prices"
     assert [row.status_code for row in _usage_rows(db_session_factory)] == [status.HTTP_402_PAYMENT_REQUIRED]
+
+
+def test_a_policy_skips_a_hosted_candidate_nothing_prices_at_the_deployments_rate(
+    strict_client: TestClient, db_session_factory: Callable[[], Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The organization's zero admits the plan; the deployment has no rate for the head, so the next serves."""
+
+    async def _two_models(impl_name: str, **_: object) -> ProviderDiscovery:
+        models = [Model(id=name, object="model", created=0, owned_by=impl_name) for name in ("gpt-4o", "gpt-4o-mini")]
+        return ProviderDiscovery(provider=impl_name, models=models)
+
+    monkeypatch.setattr("gateway.services.providers._hosted_provider_service.test_provider_credentials", _two_models)
+    master = {API_KEY_HEADER: "Bearer test-master-key"}
+    _provision(strict_client, master)
+    session = db_session_factory()
+    try:
+        organization = Organization(name="Erin", slug="erin")
+        session.add(organization)
+        session.commit()
+        session.refresh(organization)
+        workspace = Workspace(name="Erin one", organization_id=organization.id)
+        session.add(workspace)
+        session.commit()
+        workspace_id = str(workspace.id)
+        tenant = _Tenant(
+            organization_id=organization.id,
+            owner=_session(session, email="erin@erin.test", organization_id=organization.id),
+            operator="",
+        )
+    finally:
+        session.close()
+    assert _override(strict_client, tenant.owner, 0, MODEL).status_code == status.HTTP_201_CREATED
+    _deployment_price(strict_client, master, "openai:gpt-4o-mini")
+    _hosted_openai(strict_client, master)
+    for offered in strict_client.get(f"{API_ROOT}/hosted-providers/openai/models", headers=master).json()["data"]:
+        enabled = strict_client.patch(
+            f"{API_ROOT}/hosted-providers/openai/models/{offered['id']}", json={"enabled": True}, headers=master
+        )
+        assert enabled.status_code == status.HTTP_200_OK, enabled.text
+    policy = _as(
+        strict_client,
+        tenant.owner,
+        "POST",
+        "/organizations/me/routing-policies",
+        json={
+            "name": "fast",
+            "spec": {"select": [{"default": MODEL}], "on_failure": ["openai:gpt-4o-mini"]},
+            "workspace_id": workspace_id,
+        },
+    )
+    assert policy.status_code == status.HTTP_200_OK, policy.text
+
+    response, captured = _complete(strict_client, _api_key(strict_client, tenant), "fast")
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert captured["model"] == "openai:gpt-4o-mini"

@@ -1557,13 +1557,19 @@ def _hosted_candidate(
         hosted = replace(
             attempt, instance=served.instance, provider=served.provider, kwargs=served.kwargs, deployment_paid=True
         )
-        await _grow_reservation(
-            ctx,
-            hosted.instance,
-            hosted.model,
-            deployment_paid=True,
-            refused_detail=budget_exhausted_mid_failover_detail(),
-        )
+        try:
+            await _grow_reservation(
+                ctx,
+                hosted.instance,
+                hosted.model,
+                deployment_paid=True,
+                refused_detail=budget_exhausted_mid_failover_detail(),
+            )
+        except HTTPException as exc:
+            # Unpriced at the rate the deployment's credential settles at: skipped like any unpriced candidate.
+            if error_code_of(exc.headers) == PRICING_REQUIRED:
+                raise CandidateCannotServe(exc) from exc
+            raise
         try:
             charge = await admit_deployment_paid(
                 billing,
@@ -1934,6 +1940,49 @@ def _row_status(*, error: str | None, attribution: RoutingAttribution | None, in
     if attribution is not None and attribution.absorbed:
         return "absorbed"
     return "error"
+
+
+# What leaves the session unusable until it is rolled back: a failed statement, or one a cancellation interrupted.
+_UNUSABLE_SESSION_ERRORS: tuple[type[BaseException], ...] = (*DATABASE_ERRORS, asyncio.CancelledError)
+
+
+async def _a_later_candidate_is_priced(
+    db: AsyncSession, prices: RequestPrices, plan: CompiledPlan | None, *, require_pricing: bool
+) -> bool:
+    """Whether a candidate after ``plan``'s first has a price ``require_pricing`` accepts.
+
+    Who pays for a candidate is known only once the walk resolves its credential,
+    and an organization's own override prices the request it pays for but not one
+    on the deployment's credential, so either rate admits the plan. The walk then
+    skips each candidate at the rate it settles at.
+    """
+    for attempt in plan.attempts[1:] if plan is not None else ():
+        for deployment_paid in dict.fromkeys((attempt.deployment_paid, True)):
+            resolved = await prices.resolve(db, attempt.instance, attempt.model, deployment_paid=deployment_paid)
+            if not pricing_required_but_missing(
+                resolved.pricing if resolved is not None else None, require_pricing=require_pricing
+            ):
+                return True
+    return False
+
+
+async def _refuse_unpriced(ctx: RequestContext, attempt: Attempt) -> None:
+    """Skip ``attempt`` when ``require_pricing`` refuses its model, so a priced candidate after it serves."""
+    if not ctx.config.require_pricing or ctx.reservation is None or not ctx.reservation.counts_toward_budget:
+        return
+    prices = ctx.prices if ctx.prices is not None else get_request_prices(ctx.db, ctx.organization_id)
+    resolved = await prices.resolve(ctx.db, attempt.instance, attempt.model, deployment_paid=attempt.deployment_paid)
+    pricing = resolved.pricing if resolved is not None else None
+    if pricing_required_but_missing(pricing, require_pricing=True):
+        raise CandidateCannotServe(
+            HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=no_pricing_error_detail(
+                    f"{attempt.instance}:{attempt.model}", unit=pricing.unit if pricing is not None else None
+                ),
+                headers=error_headers(PRICING_REQUIRED),
+            )
+        )
 
 
 async def move_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) -> None:
@@ -3044,7 +3093,26 @@ async def resolve_request_context(
     # we cannot price because we then cannot debit it. A budget-exempt key is
     # never debited, so the gate does not apply: the call proceeds and logs
     # cost=null when unpriced.
+    # A plan whose first candidate is unpriced is served by a later one that is
+    # priced; the walk skips each candidate it cannot price (`_refuse_unpriced`).
+    refuse_unpriced = False
     if not budget_exempt and pricing_required_but_missing(gate_pricing, require_pricing=config.require_pricing):
+        try:
+            refuse_unpriced = not await _a_later_candidate_is_priced(
+                db, prices, plan, require_pricing=config.require_pricing
+            )
+        except _UNUSABLE_SESSION_ERRORS:
+            # The hold is committed, and a failed or interrupted statement leaves the session unusable
+            # for its release, so the transaction is rolled back first.
+            await uow.abandon()
+            with contextlib.suppress(*DATABASE_ERRORS):
+                await refund_reservation(db, reservation)
+            raise
+        except BaseException:
+            # The hold is placed, and nothing after this would release it.
+            await refund_reservation(db, reservation)
+            raise
+    if refuse_unpriced:
         await refund_reservation(db, reservation)
         refusal = await unpriced_model_refusal(
             config,
@@ -6470,13 +6538,15 @@ def _automatic_unhealthy(exc: BaseException) -> bool:
 def _candidate_admission(ctx: RequestContext) -> AdmitAttempt:
     """Admit each candidate of a walk under the budgets and rate limits that bind it.
 
-    Each candidate first moves the reservation onto its provider's budgets, and then passes the rate limits.
+    Each candidate is skipped when ``require_pricing`` refuses its model, then moves the reservation onto its
+    provider's budgets, and then passes the rate limits.
     """
     admit_model = _model_admission(ctx)
 
     async def _admit(attempt: Attempt) -> DropAdmission | None:
         """Apply candidate budgets and rate limits, forgetting affinity when admission refuses it."""
         try:
+            await _refuse_unpriced(ctx, attempt)
             await move_reservation_for_attempt(ctx, attempt)
             return await admit_model(attempt) if admit_model is not None else None
         except CandidateCannotServe:
