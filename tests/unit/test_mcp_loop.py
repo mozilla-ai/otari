@@ -34,6 +34,7 @@ from gateway.log_config import logger
 from gateway.services import mcp_loop as mcp_loop_module
 from gateway.services._tool_loop import (
     INVALID_ARGUMENTS_ERROR,
+    _forces_caller_tool,
     _released_tool_choice,
     _request_chars,
     parse_tool_arguments,
@@ -2790,6 +2791,69 @@ async def test_a_forced_tool_choice_runs_the_tool_once_when_streaming(
 
     assert pool.calls == [("fetch_url", {})]
     assert [r.get("tool_choice") for r in rounds] == [tool_choice, None]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_choice", ["required", {"type": "any"}])
+async def test_a_forced_tool_choice_holds_until_the_model_calls_one_of_the_callers_tools(
+    monkeypatch: pytest.MonkeyPatch, tool_choice: Any
+) -> None:
+    rounds: list[dict[str, Any]] = []
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        rounds.append(kwargs)
+        if len(rounds) == 1:
+            return _completion(finish="tool_calls", tool_calls=[("call_1", "fetch_url", "{}")])
+        if _forced(kwargs):
+            return _completion(finish="tool_calls", tool_calls=[("call_2", "user_tool", "{}")])
+        return _completion(finish="stop", content="answer")
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+    out = await mcp_tool_loop(
+        completion_kwargs={
+            "model": "fake",
+            "messages": [{"role": "user", "content": "go"}],
+            "tools": [{"type": "function", "function": {"name": "user_tool", "parameters": {}}}],
+            "tool_choice": tool_choice,
+        },
+        pool=_FakePool(tool_names=["fetch_url"]),
+        max_iterations=5,
+    )
+
+    assert [call.model_dump()["function"]["name"] for call in out.choices[0].message.tool_calls or []] == ["user_tool"]
+    assert [r.get("tool_choice") for r in rounds] == [tool_choice, tool_choice]
+
+
+_CALLER_TOOL = {"type": "function", "function": {"name": "user_tool", "parameters": {}}}
+
+
+@pytest.mark.parametrize(
+    ("choice", "tools", "owed"),
+    [
+        ("required", [_CALLER_TOOL], True),
+        ({"type": "any"}, [{"name": "user_tool", "input_schema": {}}], True),
+        ({"type": "function", "function": {"name": "user_tool"}}, [_CALLER_TOOL], True),
+        (
+            {"type": "allowed_tools", "mode": "required", "tools": [{"type": "function", "name": "user_tool"}]},
+            [_CALLER_TOOL],
+            True,
+        ),
+        (
+            {"type": "allowed_tools", "mode": "required", "tools": [{"type": "function", "name": "fetch_url"}]},
+            [_CALLER_TOOL],
+            False,
+        ),
+        ({"type": "function", "function": {"name": "fetch_url"}}, [_CALLER_TOOL], False),
+        ({"type": "web_search_preview"}, [_CALLER_TOOL], False),
+        ("required", [{"type": "web_search_preview"}], False),
+        ("required", [], False),
+    ],
+)
+def test_only_a_force_on_the_callers_own_function_tools_is_still_owed(
+    choice: Any, tools: list[dict[str, Any]], owed: bool
+) -> None:
+    assert _forces_caller_tool(choice, tools, _FakePool(tool_names=["fetch_url"])) is owed
 
 
 @pytest.mark.parametrize(
