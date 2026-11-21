@@ -164,10 +164,10 @@ def test_a_user_level_read_gate_adds_read_to_the_matcher(repo: Path, isolated_ho
 
 
 def test_repo_only_writes_the_flag_into_the_registration(repo: Path) -> None:
-    """The flag has to reach the registered command, or a later `setup` run silently drops it.
+    """The flag has to reach the registered command, which is what a later `setup` run reads back.
 
     `_merge_hook_entry` matches an existing entry on the binary and "hook" alone and then replaces
-    the whole command string, so a flag added to the file by hand does not survive a re-run.
+    the whole command string, so the flag survives a re-run only because setup carries it over.
     """
     _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
     result = _invoke("--repo-only")
@@ -176,6 +176,40 @@ def test_repo_only_writes_the_flag_into_the_registration(repo: Path) -> None:
     for event in ("PreToolUse", "Stop"):
         command = settings["hooks"][event][0]["hooks"][0]["command"]
         assert command == f"{_FAKE_OTARI_PATH} hook --harness claude-code --repo-only"
+
+
+def test_rerunning_keeps_repo_only_from_the_existing_registration(repo: Path) -> None:
+    """A re-run without the flag must not turn the person's own gates back on in this repo."""
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    assert _invoke().exit_code == 0
+    settings_path = repo / ".claude" / "settings.local.json"
+    settings = _read_settings(repo)
+    hook_item = settings["hooks"]["PreToolUse"][0]["hooks"][0]
+    hook_item["command"] += " --repo-only"
+    hook_item["timeout"] = 30
+    settings_path.write_text(json.dumps(settings), encoding="utf-8")
+
+    result = _invoke()
+    assert result.exit_code == 0, result.output
+    assert "Keeping --repo-only from the existing registration" in result.output
+    settings = _read_settings(repo)
+    for event in ("PreToolUse", "Stop"):
+        command = settings["hooks"][event][0]["hooks"][0]["command"]
+        assert command == f"{_FAKE_OTARI_PATH} hook --harness claude-code --repo-only"
+    assert settings["hooks"]["PreToolUse"][0]["hooks"][0]["timeout"] == 30
+
+
+def test_no_repo_only_removes_the_flag_from_the_existing_registration(repo: Path) -> None:
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    assert _invoke("--repo-only").exit_code == 0
+
+    result = _invoke("--no-repo-only")
+    assert result.exit_code == 0, result.output
+    assert "Keeping --repo-only" not in result.output
+    settings = _read_settings(repo)
+    for event in ("PreToolUse", "Stop"):
+        command = settings["hooks"][event][0]["hooks"][0]["command"]
+        assert command == f"{_FAKE_OTARI_PATH} hook --harness claude-code"
 
 
 def test_without_repo_only_the_registration_carries_no_such_flag(repo: Path) -> None:
@@ -512,7 +546,7 @@ def test_repo_only_flags_every_existing_otari_registration(repo: Path) -> None:
 
 
 def test_setup_rewrites_every_existing_otari_registration(repo: Path) -> None:
-    """The same holds without the flag: a second entry must not keep a stale command."""
+    """The same holds when the flag is removed: a second entry must not keep a stale command."""
     _write_repo_settings(
         repo,
         [
@@ -522,7 +556,7 @@ def test_setup_rewrites_every_existing_otari_registration(repo: Path) -> None:
     )
     _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
 
-    assert _invoke().exit_code == 0
+    assert _invoke("--no-repo-only").exit_code == 0
 
     assert _otari_commands(repo) == [f"{_FAKE_OTARI_PATH} hook --harness claude-code"] * 2
 

@@ -360,9 +360,8 @@ How the two sets combine is under [Composing several files](agent-guardrails-ref
 otari hook setup --repo-only
 ```
 
-The hook then enforces that repository's guardrail alone. Pass the flag to
-`setup` rather than editing the settings file, because a later `setup` run
-rewrites the entry. If your Claude Code user settings also register the hook for
+The hook then enforces that repository's guardrail alone. A later `setup` run
+keeps the flag; pass `--no-repo-only` to turn your own gates back on. If your Claude Code user settings also register the hook for
 every repository, that entry still enforces your gates; `setup --repo-only` warns
 about it.
 
