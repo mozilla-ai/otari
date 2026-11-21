@@ -3084,11 +3084,17 @@ async def resolve_request_context(
     # cost=null when unpriced.
     # A plan whose first candidate is unpriced is served by a later one that is
     # priced; the walk skips each candidate it cannot price (`_refuse_unpriced`).
-    if (
-        not budget_exempt
-        and pricing_required_but_missing(gate_pricing, require_pricing=config.require_pricing)
-        and not await _a_later_candidate_is_priced(db, prices, plan, require_pricing=config.require_pricing)
-    ):
+    refuse_unpriced = False
+    if not budget_exempt and pricing_required_but_missing(gate_pricing, require_pricing=config.require_pricing):
+        try:
+            refuse_unpriced = not await _a_later_candidate_is_priced(
+                db, prices, plan, require_pricing=config.require_pricing
+            )
+        except BaseException:
+            # The hold is placed, and nothing after this would release it.
+            await refund_reservation(db, reservation)
+            raise
+    if refuse_unpriced:
         await refund_reservation(db, reservation)
         refusal = await unpriced_model_refusal(
             config,

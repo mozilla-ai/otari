@@ -426,6 +426,22 @@ def test_a_policy_none_of_whose_candidates_is_priced_is_refused(routing_config: 
         serve.assert_not_awaited()
 
 
+def test_a_failed_lookup_of_the_later_candidates_prices_releases_the_hold(routing_config: GatewayConfig) -> None:
+    config = routing_config.model_copy(update={"require_pricing": True, "default_pricing": False})
+    refund = AsyncMock()
+
+    for client in build_test_client(config):
+        _create_user(client)
+        with (
+            patch("gateway.api.routes._pipeline._a_later_candidate_is_priced", side_effect=RuntimeError("lost")),
+            patch("gateway.api.routes._pipeline.refund_reservation", new=refund),
+            pytest.raises(RuntimeError),
+        ):
+            _chat(client, "fast")
+
+    refund.assert_awaited_once()
+
+
 def test_a_local_adapter_fault_still_fails_over(client: TestClient) -> None:
     """A fault no retry of the same candidate fixes can still be one the next candidate does not have."""
     _create_user(client)
