@@ -362,6 +362,55 @@ def test_failover_serves_the_next_candidate_and_bills_it_once(client: TestClient
     assert served[0]["request_group_id"] is not None
 
 
+@pytest.mark.parametrize("stream", [False, True], ids=["unstreamed", "streamed"])
+def test_an_unpriced_first_candidate_is_skipped_for_a_priced_fallback(
+    routing_config: GatewayConfig, stream: bool
+) -> None:
+    config = routing_config.model_copy(update={"require_pricing": True, "default_pricing": False})
+    calls: list[str] = []
+
+    async def serve(**kwargs: Any) -> Any:
+        calls.append(kwargs["model"])
+        if not kwargs.get("stream"):
+            return _completion("claude-haiku-4-5")
+
+        async def chunks() -> Any:
+            from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice
+
+            yield ChatCompletionChunk(
+                id="c1",
+                choices=[ChunkChoice(delta=ChoiceDelta(content="hi"), index=0, finish_reason="stop")],
+                created=0,
+                model="claude-haiku-4-5",
+                object="chat.completion.chunk",
+                usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+            )
+
+        return chunks()
+
+    for client in build_test_client(config):
+        _create_user(client)
+        priced = client.post(
+            f"{API_ROOT}/pricing",
+            json={
+                "model_key": "anthropic:claude-haiku-4-5",
+                "input_price_per_million": 1.0,
+                "output_price_per_million": 2.0,
+            },
+            headers=HEADERS,
+        )
+        assert priced.status_code == 200, priced.text
+        with patch("gateway.api.routes.chat.acompletion", new=serve):
+            resp = _chat(client, "fast", stream=stream)
+            resp.read()
+
+        assert resp.status_code == 200, resp.text
+        assert calls == ["anthropic:claude-haiku-4-5"]
+        assert _served_by(resp) == ("anthropic", "claude-haiku-4-5", "1", "true")
+        served = [r for r in _usage_rows(client) if r["status"] == "success"]
+        assert [(r["model"], r["cost"] is not None) for r in served] == [("claude-haiku-4-5", True)]
+
+
 def test_a_local_adapter_fault_still_fails_over(client: TestClient) -> None:
     """A fault no retry of the same candidate fixes can still be one the next candidate does not have."""
     _create_user(client)

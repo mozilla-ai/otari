@@ -72,6 +72,10 @@ balance covers no candidate, the request is refused once with
 `402 insufficient_funds`, recorded against the plan's first model. A provider's
 own `402` is a provider failure like any other, and the plan moves on.
 
+With `require_pricing` on, a candidate whose model has no price is skipped
+without being called, and the next one is tried. The request is refused with
+`402 pricing_required` only when no candidate has a price.
+
 When no candidate is left:
 
 | Situation | Response |
