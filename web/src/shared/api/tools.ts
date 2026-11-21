@@ -1,5 +1,7 @@
 import {
   type QueryClient,
+  useIsFetching,
+  useIsMutating,
   useMutation,
   useQueries,
   useQuery,
@@ -25,6 +27,7 @@ import type {
   SearchToolsResponse,
   SearchToolTestRequest,
   SearchToolTestResponse,
+  SetWorkspaceMcpServerOverrideRequest,
   StoredSearchTool,
   StoredSearchToolTestRequest,
   TestOrganizationGuardrailRequest,
@@ -866,6 +869,101 @@ export function useUpdateMcpServer() {
       }
     },
   })
+}
+
+// Both writes of a workspace's own settings on its organization's server.
+const OVERRIDE_WRITE = [WORKSPACES, "mcp-server-override"]
+
+/**
+ * Whether a write of the workspace's own settings on this server is in flight,
+ * from any control on the page, or the server is being read again. A control
+ * waits for both, so it never starts from a row a write has just changed.
+ */
+export function useWorkspaceMcpServerOverridePending(
+  workspaceId: string,
+  serverId: string,
+): boolean {
+  const reading = useIsFetching({
+    queryKey: mcpServerKey(workspaceMcpScope(workspaceId), serverId),
+    exact: true,
+  })
+  const writing = useIsMutating({
+    mutationKey: OVERRIDE_WRITE,
+    predicate: (mutation) => {
+      const ids = mutation.state.variables as
+        | { workspaceId: string; serverId: string }
+        | undefined
+      return ids?.workspaceId === workspaceId && ids.serverId === serverId
+    },
+  })
+  return writing + reading > 0
+}
+
+/**
+ * What a write to a workspace's own settings on its organization's server
+ * moves: the server as the workspace reads it (seeded from the answer), every
+ * read under the workspace's servers (the list, the access list, each key's
+ * view and the caller's tools), and the Playground's tools menu, which offers
+ * the server or not.
+ */
+function useWorkspaceMcpServerOverrideWrite<
+  Variables extends { workspaceId: string; serverId: string },
+>(request: (variables: Variables) => Promise<WorkspaceMcpServer>) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationKey: OVERRIDE_WRITE,
+    mutationFn: request,
+    onSuccess: (server, { workspaceId, serverId }) => {
+      const scope = workspaceMcpScope(workspaceId)
+      queryClient.setQueryData(mcpServerKey(scope, serverId), server)
+      void queryClient.invalidateQueries({ queryKey: mcpServersKey(scope) })
+      void queryClient.invalidateQueries({
+        queryKey: playgroundToolsKey(workspaceId),
+      })
+    },
+    // A write that failed may still have landed (a lost answer, a read after
+    // the commit that failed), so the server is read again before another edit.
+    onError: (_error, { workspaceId, serverId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: mcpServerKey(workspaceMcpScope(workspaceId), serverId),
+        exact: true,
+      })
+    },
+  })
+}
+
+/**
+ * Changes a workspace's own settings on its organization's server: its switch,
+ * its default access and whether it is attached. Only the fields sent change;
+ * null on the default access or the attach setting takes the server's own.
+ */
+export function useSetWorkspaceMcpServerOverride() {
+  return useWorkspaceMcpServerOverrideWrite(
+    ({
+      workspaceId,
+      serverId,
+      body,
+    }: {
+      workspaceId: string
+      serverId: string
+      body: SetWorkspaceMcpServerOverrideRequest
+    }) =>
+      apiFetch<WorkspaceMcpServer>(
+        `${workspaceServerPath(workspaceId, serverId)}/override`,
+        { method: "PATCH", body: JSON.stringify(body) },
+      ),
+  )
+}
+
+/** Takes a workspace's own settings off its organization's server, so it follows the server's. */
+export function useClearWorkspaceMcpServerOverride() {
+  return useWorkspaceMcpServerOverrideWrite(
+    ({ workspaceId, serverId }: { workspaceId: string; serverId: string }) =>
+      apiFetch<WorkspaceMcpServer>(
+        `${workspaceServerPath(workspaceId, serverId)}/override`,
+        { method: "DELETE" },
+      ),
+  )
 }
 
 // Connects to a stored server now and records the outcome as its `health`. A

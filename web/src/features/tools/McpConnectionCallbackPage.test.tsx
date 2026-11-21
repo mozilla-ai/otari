@@ -201,7 +201,7 @@ describe("McpConnectionCallbackPage", () => {
     expect(screen.queryByText("Server page")).toBeNull()
   })
 
-  it("lands a member's own sign-in to an organization's server on the workspace's list when it named nowhere", async () => {
+  it("lands a member's own sign-in to an organization's server on its page in the workspace when it named nowhere", async () => {
     mockComplete(() =>
       Response.json({
         server_id: SERVER_ID,
@@ -213,9 +213,8 @@ describe("McpConnectionCallbackPage", () => {
     )
     renderCallback({ state: "s", code: "c" })
 
-    // The workspace has no page for the server, and the organization's is for its owners and admins.
-    expect(await screen.findByText("Server list")).toBeVisible()
-    expect(screen.queryByText("Server page")).toBeNull()
+    // The organization's page is for its owners and admins; the workspace shows the server to its members.
+    expect(await screen.findByText("Server page")).toBeVisible()
     expect(screen.queryByText("Organization server page")).toBeNull()
   })
 

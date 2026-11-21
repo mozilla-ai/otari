@@ -802,6 +802,12 @@ export type CreateWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerCreate"]
 export type UpdateWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerUpdate"]
+// On an organization's server read through a workspace: that workspace's own
+// settings on it and the organization's limit there, and the body that sets
+// them (`PATCH .../override`). A field left out of the body keeps the one stored.
+export type McpServerWorkspaceSettings = Schemas["McpServerWorkspaceSettings"]
+export type SetWorkspaceMcpServerOverrideRequest =
+  Schemas["WorkspaceMcpServerSettingsUpdate"]
 export type McpCredentialMode = Schemas["McpCredentialMode"]
 export type McpConnection = Schemas["McpConnectionPublic"]
 export type McpConnections = Schemas["McpConnectionsPublic"]

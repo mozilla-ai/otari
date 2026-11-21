@@ -9128,6 +9128,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Clear Workspace Mcp Server Override
+         * @description Take this workspace's own settings off its organization's server, so it inherits the server's. Idempotent.
+         *
+         *     Organization owners/admins or this workspace's owners/admins. The organization's limit for the workspace stays.
+         */
+        delete: operations["mcp-servers-clear_workspace_mcp_server_override"];
+        options?: never;
+        head?: never;
+        /**
+         * Set Workspace Mcp Server Override
+         * @description Change this workspace's own settings on its organization's server.
+         *
+         *     Organization owners/admins or this workspace's owners/admins. Sets only the fields sent; one left out
+         *     keeps what is stored, so two admins changing different settings do not undo each other. `enabled` is
+         *     the workspace's switch and is never null. `everyone_tools` and `attach_by_default` take null to follow
+         *     the server's own again. The organization's limit for the workspace stays, and caps what is set here.
+         */
+        patch: operations["mcp-servers-set_workspace_mcp_server_override"];
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/shared-account": {
         parameters: {
             query?: never;
@@ -16996,6 +17027,37 @@ export interface components {
             sign_in_url?: string | null;
         };
         /**
+         * McpServerWorkspaceSettings
+         * @description One workspace's settings on its organization's server, and whether the workspace reaches it.
+         */
+        McpServerWorkspaceSettings: {
+            /**
+             * Attach By Default
+             * @description Whether the workspace attaches it; null takes the server's own
+             */
+            attach_by_default: boolean | null;
+            /**
+             * Enabled
+             * @description The workspace's own switch
+             */
+            enabled: boolean;
+            /**
+             * Everyone Tools
+             * @description What every key of the workspace may call; null takes the server's own
+             */
+            everyone_tools: string[] | null;
+            /**
+             * Organization Tools
+             * @description The organization's limit for the workspace, which caps every rule set here; null sets none
+             */
+            organization_tools: string[] | null;
+            /**
+             * Reached
+             * @description The workspace's requests reach the server: neither the organization nor the workspace turned it off here, and the server itself is on
+             */
+            reached: boolean;
+        };
+        /**
          * McpServersResponse
          * @description The enabled stored servers the authenticated key can reach.
          */
@@ -24384,10 +24446,10 @@ export interface components {
             allowed: boolean;
             /**
              * Decided By
-             * @description The key's own grant, its owner's, the server's everyone_tools, or the server itself (disabled, or its allowed_tools leaves the tool out)
+             * @description The key's own grant, its owner's, the server's everyone_tools, the server itself (disabled, or its allowed_tools leaves the tool out), or on an organization's server the organization's limit for the workspace
              * @enum {string}
              */
-            decided_by: "key" | "user" | "everyone" | "server";
+            decided_by: "key" | "user" | "everyone" | "server" | "organization";
             /**
              * Grant Id
              * @description The deciding grant, when a grant decided
@@ -24643,6 +24705,11 @@ export interface components {
             /** Name */
             name: string;
             /**
+             * Organization Tools
+             * @description On an organization's server, its limit for this workspace, which caps every rule; null sets none
+             */
+            organization_tools?: string[] | null;
+            /**
              * Read Tools
              * @description The server's tools labeled read, which '@read' in tools stands for
              */
@@ -24788,6 +24855,8 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** @description On an organization's server read through a workspace: that workspace's own settings on it, and the organization's limit there. The fields above are the organization's definition */
+            in_workspace?: components["schemas"]["McpServerWorkspaceSettings"] | null;
             /** Name */
             name: string;
             /**
@@ -24830,6 +24899,27 @@ export interface components {
              * @description The workspace that owns the server; null for an organization's
              */
             workspace_id: string | null;
+        };
+        /**
+         * WorkspaceMcpServerSettingsUpdate
+         * @description A change to a workspace's own settings on its organization's server. A field left out keeps what is stored.
+         */
+        WorkspaceMcpServerSettingsUpdate: {
+            /**
+             * Attach By Default
+             * @description Whether every request of the workspace gets the server; null takes the server's
+             */
+            attach_by_default?: boolean | null;
+            /**
+             * Enabled
+             * @description The workspace's own switch: false turns the server off for this workspace
+             */
+            enabled?: boolean;
+            /**
+             * Everyone Tools
+             * @description Tool patterns every key of the workspace may call; [] denies everyone; null takes the server's
+             */
+            everyone_tools?: string[] | null;
         };
         /**
          * WorkspaceMcpServerUpdate
@@ -40866,6 +40956,88 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["WorkspaceMcpServerMyTools"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-clear_workspace_mcp_server_override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerPublic"];
+                };
+            };
+            /** @description No organization server by that id reaches the workspace. A workspace's own server is a 404 here too: it is changed with `PATCH /{server_id}`. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-set_workspace_mcp_server_override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceMcpServerSettingsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerPublic"];
+                };
+            };
+            /** @description No organization server by that id reaches the workspace. A workspace's own server is a 404 here too: it is changed with `PATCH /{server_id}`. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

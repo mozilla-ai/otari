@@ -102,13 +102,16 @@ class McpWorkspaceServers:
         self._aliases = aliases
 
     async def seen_from(
-        self, workspace_id: uuid.UUID, rows: Sequence[WorkspaceMcpServer]
+        self, workspace_id: uuid.UUID, rows: Sequence[WorkspaceMcpServer], *, include_hidden: bool = False
     ) -> list[McpServerInWorkspace]:
-        """These rows as the workspace sees them, in their order, leaving out what it does not reach."""
+        """These rows as the workspace sees them, in their order, leaving out what it does not reach.
+
+        ``include_hidden`` keeps an organization's server turned off for the workspace, for its admins.
+        """
         shared = [row.id for row in rows if row.workspace_id is None]
         overrides = await self._overrides.for_workspace(workspace_id, shared) if shared else {}
         views = [McpServerInWorkspace(row, overrides.get(row.id)) for row in rows]
-        return [view for view in views if view.visible]
+        return [view for view in views if include_hidden or view.visible]
 
     async def reaches(self, workspace_id: uuid.UUID, row: WorkspaceMcpServer) -> bool:
         """Whether the workspace reaches a server: its own always, its organization's unless turned off there."""
@@ -146,9 +149,15 @@ class McpWorkspaceServers:
         targets = await self._aliases.targets(workspace_id, ids) if ids else {}
         return list(dict.fromkeys(targets.get(server_id, server_id) for server_id in ids))
 
-    async def every(self, workspace_id: uuid.UUID, organization_id: uuid.UUID) -> list[McpServerInWorkspace]:
-        """Every server the workspace reaches, a disabled one of its own included, oldest first."""
-        return await self.seen_from(workspace_id, await self._servers.in_workspace(workspace_id, organization_id))
+    async def every(
+        self, workspace_id: uuid.UUID, organization_id: uuid.UUID, *, include_hidden: bool = False
+    ) -> list[McpServerInWorkspace]:
+        """Every server the workspace reaches, a disabled one of its own included, oldest first.
+
+        ``include_hidden`` adds the organization's servers turned off for the workspace.
+        """
+        rows = await self._servers.in_workspace(workspace_id, organization_id)
+        return await self.seen_from(workspace_id, rows, include_hidden=include_hidden)
 
     async def enabled(self, workspace_id: uuid.UUID, organization_id: uuid.UUID) -> list[McpServerInWorkspace]:
         """Every enabled server the workspace reaches, oldest first."""
