@@ -5,8 +5,8 @@ A caller moving off the LiteLLM proxy parses the response with LiteLLM's
 result carries ``title``, ``url`` and ``snippet`` as strings, which a provider
 hit without a title or a snippet used to break with a null. The two models
 below mirror LiteLLM's, from ``litellm/llms/base_llm/search/transformation.py``;
-LiteLLM allows extra fields, and otari adds only ``search_tool``, and ``raw``
-when asked.
+LiteLLM allows extra fields, and otari adds only ``search_tool``, ``raw`` when
+asked, and ``image`` and ``favicon`` on a result when the provider returned them.
 """
 
 from typing import Any
@@ -68,8 +68,11 @@ async def test_the_default_response_is_litellms() -> None:
     assert [result.title for result in parsed.results] == ["", "Full"]
     assert [result.snippet for result in parsed.results] == ["", "s"]
     assert [result.date for result in parsed.results] == [None, "2026-01-02T00:00:00+00:00"]
-    # Nothing beyond LiteLLM's own fields on a result, and only the tool's name beside them.
-    assert {key for result in response["results"] for key in result} == set(LiteLLMSearchResult.model_fields)
+    # LiteLLM's own fields, plus otari's own image and favicon; and only the tool's name beside the results.
+    assert {key for result in response["results"] for key in result} == set(LiteLLMSearchResult.model_fields) | {
+        "image",
+        "favicon",
+    }
     assert set(response) == {"object", "search_tool", "results"}
 
 

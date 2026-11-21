@@ -64,6 +64,9 @@ class SearchHit(BaseModel):
     # The page text, when the provider returned it.
     text: str | None = None
     published: datetime | None = None
+    # A preview image and a favicon for the result, when the provider returned them.
+    image: str | None = None
+    favicon: str | None = None
     # The provider's own item, untouched. Never logged, and left out of repr.
     raw: dict[str, Any] = Field(repr=False)
 

@@ -615,6 +615,12 @@ class SearchResultItem(pydantic.BaseModel):
     )
     date: str | None = pydantic.Field(default=None, description="The page's date, as the provider gave it.")
     last_updated: str | None = pydantic.Field(default=None, description="Always null: no provider reports it.")
+    image: str | None = pydantic.Field(
+        default=None, description="A preview image for the result, when the provider returned one."
+    )
+    favicon: str | None = pydantic.Field(
+        default=None, description="The site's favicon, when the provider returned one."
+    )
 
 
 class SearchResponse(pydantic.BaseModel):

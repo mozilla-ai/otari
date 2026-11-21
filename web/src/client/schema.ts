@@ -21403,6 +21403,16 @@ export interface components {
              */
             date?: string | null;
             /**
+             * Favicon
+             * @description The site's favicon, when the provider returned one.
+             */
+            favicon?: string | null;
+            /**
+             * Image
+             * @description A preview image for the result, when the provider returned one.
+             */
+            image?: string | null;
+            /**
              * Last Updated
              * @description Always null: no provider reports it.
              */

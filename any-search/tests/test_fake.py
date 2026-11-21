@@ -43,6 +43,15 @@ async def test_hits_replace_the_canned_ones_and_an_item_without_a_url_is_dropped
 
 
 @pytest.mark.asyncio
+async def test_a_hit_can_carry_an_image_and_favicon() -> None:
+    result = await _search(
+        hits=[{"url": "https://a.example/", "image": "https://a.example/a.png", "favicon": "https://a.example/f.ico"}]
+    )
+    (hit,) = result.hits
+    assert (hit.image, hit.favicon) == ("https://a.example/a.png", "https://a.example/f.ico")
+
+
+@pytest.mark.asyncio
 async def test_max_results_cuts_the_hits() -> None:
     assert len((await _search(max_results=2)).hits) == 2
 
