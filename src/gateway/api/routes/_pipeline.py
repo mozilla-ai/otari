@@ -1942,6 +1942,10 @@ def _row_status(*, error: str | None, attribution: RoutingAttribution | None, in
     return "error"
 
 
+# What leaves the session unusable until it is rolled back: a failed statement, or one a cancellation interrupted.
+_UNUSABLE_SESSION_ERRORS: tuple[type[BaseException], ...] = (*DATABASE_ERRORS, asyncio.CancelledError)
+
+
 async def _a_later_candidate_is_priced(
     db: AsyncSession, prices: RequestPrices, plan: CompiledPlan | None, *, require_pricing: bool
 ) -> bool:
@@ -3090,15 +3094,9 @@ async def resolve_request_context(
             refuse_unpriced = not await _a_later_candidate_is_priced(
                 db, prices, plan, require_pricing=config.require_pricing
             )
-        except DATABASE_ERRORS:
-            # The hold is committed, and a failed statement leaves the session unusable for its release,
-            # so the transaction is rolled back first.
-            await uow.abandon()
-            with contextlib.suppress(*DATABASE_ERRORS):
-                await refund_reservation(db, reservation)
-            raise
-        except asyncio.CancelledError:
-            # Rolled back first for the same reason: an interrupted statement leaves the session unusable.
+        except _UNUSABLE_SESSION_ERRORS:
+            # The hold is committed, and a failed or interrupted statement leaves the session unusable
+            # for its release, so the transaction is rolled back first.
             await uow.abandon()
             with contextlib.suppress(*DATABASE_ERRORS):
                 await refund_reservation(db, reservation)
