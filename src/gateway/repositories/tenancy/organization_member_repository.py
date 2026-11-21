@@ -67,20 +67,42 @@ class OrganizationMemberRepository(
         )
         return result.scalars().first()
 
-    async def active_role(self, organization_id: uuid.UUID, user_id: uuid.UUID) -> OrganizationMemberRole | None:
+    async def lock_for_users(self, organization_id: uuid.UUID, user_ids: Collection[uuid.UUID]) -> None:
+        """Lock these people's memberships of the organization, whatever their status, until the transaction ends.
+
+        Serializes two decisions about what a person keeps in the organization (PostgreSQL only). The rows are
+        taken in one order, so two callers locking overlapping sets cannot deadlock.
+        """
+        if not user_ids:
+            return
+        await self.db.execute(
+            select(col(OrganizationMember.id))
+            .where(
+                col(OrganizationMember.organization_id) == organization_id,
+                col(OrganizationMember.user_id).in_(list(user_ids)),
+            )
+            .order_by(col(OrganizationMember.id))
+            .with_for_update()
+        )
+
+    async def active_role(
+        self, organization_id: uuid.UUID, user_id: uuid.UUID, *, lock: bool = False
+    ) -> OrganizationMemberRole | None:
         """Return the role of the active membership joining a user to an organization, read from the row.
 
         A read rather than an attribute of an instance already in hand,
         because an in-hand instance may predate the write that changed its role,
-        and the attribute would still hold the old value.
+        and the attribute would still hold the old value. ``lock`` holds the membership
+        until the caller's transaction ends (PostgreSQL only).
         """
-        result = await self.db.execute(
-            select(col(OrganizationMember.role)).where(
-                col(OrganizationMember.organization_id) == organization_id,
-                col(OrganizationMember.user_id) == user_id,
-                col(OrganizationMember.status) == "active",
-            )
+        statement = select(col(OrganizationMember.role)).where(
+            col(OrganizationMember.organization_id) == organization_id,
+            col(OrganizationMember.user_id) == user_id,
+            col(OrganizationMember.status) == "active",
         )
+        if lock:
+            statement = statement.with_for_update()
+        result = await self.db.execute(statement)
         role = result.scalar_one_or_none()
         return cast(OrganizationMemberRole, role) if role is not None else None
 

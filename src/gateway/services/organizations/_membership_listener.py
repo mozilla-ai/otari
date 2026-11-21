@@ -4,10 +4,11 @@ The domain that changes membership calls it and never imports the domain that im
 """
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import Protocol
 
-from gateway.models.tenancy import OrganizationMember, WorkspaceMember
+from gateway.models.tenancy import MANAGEMENT_ROLES, OrganizationMember, WorkspaceMember
+from gateway.repositories.tenancy import OrganizationMemberRepository, WorkspaceMemberRepository, WorkspaceRepository
 
 
 class MembershipListener(Protocol):
@@ -72,3 +73,49 @@ class MembershipListeners:
 
 
 __all__ = ["MembershipListener", "MembershipListeners"]
+
+
+class OrganizationReach:
+    """Whether a person reaches an organization: through one of its workspaces, or as one of its owners or admins.
+
+    For a listener that has to know, inside the caller's Unit of Work, what a membership change leaves a person.
+    """
+
+    def __init__(
+        self,
+        workspaces: WorkspaceRepository,
+        members: WorkspaceMemberRepository,
+        organization_members: OrganizationMemberRepository,
+    ) -> None:
+        self._workspaces = workspaces
+        self._members = members
+        self._organization_members = organization_members
+
+    async def organizations_of(self, workspace_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
+        """The organizations these workspaces belong to."""
+        return await self._workspaces.get_organization_ids(workspace_ids)
+
+    async def people_of(self, member_ids: Collection[uuid.UUID]) -> list[uuid.UUID]:
+        """The dashboard accounts these workspace memberships join."""
+        return await self._members.user_ids_for_members(member_ids)
+
+    async def still_reaching(
+        self, organization_id: uuid.UUID, user_ids: Collection[uuid.UUID], *, losing: Collection[uuid.UUID]
+    ) -> set[uuid.UUID]:
+        """Which of these dashboard accounts reach the organization once they lose these workspaces.
+
+        Their memberships of the organization are locked first, so two removals of one person from two
+        workspaces at once decide one after the other, and the second sees the first's.
+        """
+        if not user_ids:
+            return set()
+        await self._organization_members.lock_for_users(organization_id, user_ids)
+        kept = [
+            workspace_id
+            for workspace_id in await self._workspaces.get_ids_by_organization(organization_id)
+            if workspace_id not in losing
+        ]
+        reaching = {user_id for _, user_id in await self._members.get_active_pairs(kept, user_ids)}
+        return reaching | await self._organization_members.active_with_roles(
+            organization_id, set(user_ids) - reaching, MANAGEMENT_ROLES
+        )

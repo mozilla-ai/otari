@@ -131,6 +131,9 @@ class ResolvedMcpServer(BaseModel):
     read_tools: list[str] = Field(default_factory=list)
     purpose_hint: str | None = Field(default=None, max_length=2000)
     allowed_tools: list[str] | None = None
+    # On an organization's server: its limit on the workspace's callers, ``@read`` expanded. Like
+    # ``everyone_tools``, who may reach the server here rather than its configuration, so not in the revision.
+    tool_limit: list[str] | None = None
     # On a per-user server: a new token for the one the server refused, for one retry. Not configuration.
     renew_token: SkipJsonSchema[TokenRenewer | None] = Field(default=None, exclude=True)
 

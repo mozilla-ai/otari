@@ -55,6 +55,15 @@ class WorkspaceMcpServerOverrideRepository(BaseRepository[WorkspaceMcpServerOver
         )
         return list(rows.scalars().all())
 
+    async def attaching_workspace_ids(self) -> frozenset[uuid.UUID]:
+        """Every workspace whose own settings attach one of its organization's servers to every request."""
+        found = await self.db.execute(
+            select(WorkspaceMcpServerOverride.workspace_id)
+            .where(WorkspaceMcpServerOverride.attach_by_default.is_(True))
+            .distinct()
+        )
+        return frozenset(found.scalars())
+
     async def save(
         self,
         override: WorkspaceMcpServerOverride | None,

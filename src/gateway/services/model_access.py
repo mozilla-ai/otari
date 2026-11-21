@@ -312,6 +312,29 @@ def expand_mcp_tool_patterns(patterns: Sequence[str], read_tools: Sequence[str])
     return expanded + [name for name in read_tools if name not in expanded]
 
 
+def _both(pattern: str, other: str) -> str | None:
+    """The one pattern matching exactly the tools both match, or ``None`` where no tool matches both."""
+    if pattern.endswith("*") and other.endswith("*"):
+        if other.startswith(pattern[:-1]):
+            return other
+        return pattern if pattern.startswith(other[:-1]) else None
+    if pattern.endswith("*"):
+        return other if other.startswith(pattern[:-1]) else None
+    if other.endswith("*"):
+        return pattern if pattern.startswith(other[:-1]) else None
+    return pattern if pattern == other else None
+
+
+def clip_mcp_tool_patterns(patterns: Sequence[str], limit: Sequence[str]) -> list[str]:
+    """The tool patterns matching exactly the tools that match both lists, ``@read`` already expanded in each.
+
+    Exact because a pattern is ``*``, ``prefix*`` or a name, and two of those match a common set that one
+    pattern names, or nothing. An empty answer matches no tool.
+    """
+    clipped = (_both(pattern, other) for pattern in patterns for other in limit)
+    return list(dict.fromkeys(pattern for pattern in clipped if pattern is not None))
+
+
 def mcp_read_tools(labeled: Sequence[str] | None, hinted: Sequence[object] | None) -> list[str]:
     """A server's read tools: a manager's labels once they set them, else the tools the server marked read-only.
 
@@ -435,10 +458,17 @@ async def resolve_request_mcp_access(
     key_id, user_id = (api_key.id, api_key.user_id) if api_key is not None else (None, session_user_id)
     key_grants: dict[uuid.UUID, tuple[str, ...]] = {}
     user_grants: dict[uuid.UUID, tuple[str, ...]] = {}
-    server_ids = await WorkspaceMcpServerRepository(db).ids_in_workspace(workspace_id) if workspace_id else None
-    for grant in await WorkspaceMcpServerGrantRepository(db).for_caller(key_id, user_id, server_ids):
-        (key_grants if grant.api_key_id is not None else user_grants)[grant.server_id] = tuple(grant.tools)
     workspace = await WorkspaceRepository(db).get(workspace_id) if workspace_id is not None else None
+    server_ids = (
+        await WorkspaceMcpServerRepository(db).ids_in_workspace(workspace.id, workspace.organization_id)
+        if workspace is not None
+        else None
+    )
+    grants = await WorkspaceMcpServerGrantRepository(db).for_caller(
+        key_id, user_id, server_ids, workspace_id=workspace.id if workspace is not None else None
+    )
+    for grant in grants:
+        (key_grants if grant.api_key_id is not None else user_grants)[grant.server_id] = tuple(grant.tools)
     return McpAccess(
         # The shared ``default`` user stands for "no owner": every key created without one belongs
         # to it, so a connection of its own would be one account behind all of them.

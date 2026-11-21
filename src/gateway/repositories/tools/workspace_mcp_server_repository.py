@@ -8,7 +8,7 @@ import uuid
 from collections.abc import Collection
 from typing import Never
 
-from sqlalchemy import ColumnElement, func, or_, select, update
+from sqlalchemy import ColumnElement, and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
@@ -46,17 +46,39 @@ class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Nev
         rows = await self.db.execute(select(WorkspaceMcpServer).where(WorkspaceMcpServer.id.in_(list(server_ids))))
         return list(rows.scalars().all())
 
-    async def ids_in_workspace(self, workspace_id: uuid.UUID) -> list[uuid.UUID]:
-        """The ids of a workspace's stored servers."""
+    @staticmethod
+    def _reached_from(workspace_id: uuid.UUID, organization_id: uuid.UUID | None) -> ColumnElement[bool]:
+        """A workspace's own servers, and with ``organization_id`` its organization's, before its settings on them."""
+        own = WorkspaceMcpServer.workspace_id == workspace_id
+        if organization_id is None:
+            return own
+        return or_(
+            own,
+            and_(WorkspaceMcpServer.workspace_id.is_(None), WorkspaceMcpServer.organization_id == organization_id),
+        )
+
+    async def ids_in_workspace(
+        self, workspace_id: uuid.UUID, organization_id: uuid.UUID | None = None
+    ) -> list[uuid.UUID]:
+        """The ids of a workspace's stored servers, and with ``organization_id`` of its organization's."""
         return list(
             (
                 await self.db.execute(
-                    select(WorkspaceMcpServer.id).where(WorkspaceMcpServer.workspace_id == workspace_id)
+                    select(WorkspaceMcpServer.id).where(self._reached_from(workspace_id, organization_id))
                 )
             )
             .scalars()
             .all()
         )
+
+    async def ids_of_organization(self, organization_id: uuid.UUID) -> list[uuid.UUID]:
+        """The ids of an organization's own servers, the ones no workspace owns."""
+        rows = await self.db.execute(
+            select(WorkspaceMcpServer.id).where(
+                WorkspaceMcpServer.organization_id == organization_id, WorkspaceMcpServer.workspace_id.is_(None)
+            )
+        )
+        return list(rows.scalars().all())
 
     async def ids_in_workspaces(self, workspace_ids: Collection[uuid.UUID]) -> list[uuid.UUID]:
         """The ids of these workspaces' stored servers."""
@@ -73,27 +95,79 @@ class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Nev
         )
 
     async def for_request(
-        self, workspace_id: uuid.UUID, server_ids: Collection[uuid.UUID], *, attached: bool
+        self,
+        workspace_id: uuid.UUID,
+        organization_id: uuid.UUID,
+        server_ids: Collection[uuid.UUID],
+        *,
+        attached: bool,
     ) -> list[WorkspaceMcpServer]:
-        """A workspace's servers with these ids, and with ``attached`` every one attached by default, oldest first."""
+        """The servers a workspace reaches with these ids, and with ``attached`` each it might attach, oldest first.
+
+        Every organization server is one it might attach, since the workspace's own setting can attach it.
+        """
         wanted: ColumnElement[bool] = WorkspaceMcpServer.id.in_(list(server_ids))
         if attached:
-            wanted = or_(wanted, WorkspaceMcpServer.attach_by_default.is_(True))
+            wanted = or_(
+                wanted, WorkspaceMcpServer.attach_by_default.is_(True), WorkspaceMcpServer.workspace_id.is_(None)
+            )
         query = (
             select(WorkspaceMcpServer)
-            .where(WorkspaceMcpServer.workspace_id == workspace_id, wanted)
+            .where(self._reached_from(workspace_id, organization_id), wanted)
             .order_by(WorkspaceMcpServer.created_at, WorkspaceMcpServer.id)
         )
         return list((await self.db.execute(query)).scalars().all())
 
-    async def enabled_in_workspace(self, workspace_id: uuid.UUID) -> list[WorkspaceMcpServer]:
-        """A workspace's enabled servers, oldest first."""
+    async def enabled_in_workspace(
+        self, workspace_id: uuid.UUID, organization_id: uuid.UUID | None = None
+    ) -> list[WorkspaceMcpServer]:
+        """A workspace's enabled servers, and with ``organization_id`` its organization's, oldest first."""
         query = (
             select(WorkspaceMcpServer)
-            .where(WorkspaceMcpServer.workspace_id == workspace_id, WorkspaceMcpServer.enabled.is_(True))
+            .where(self._reached_from(workspace_id, organization_id), WorkspaceMcpServer.enabled.is_(True))
             .order_by(WorkspaceMcpServer.created_at, WorkspaceMcpServer.id)
         )
         return list((await self.db.execute(query)).scalars().all())
+
+    async def in_workspace(self, workspace_id: uuid.UUID, organization_id: uuid.UUID) -> list[WorkspaceMcpServer]:
+        """A workspace's servers and its organization's, enabled or not, oldest first."""
+        query = (
+            select(WorkspaceMcpServer)
+            .where(self._reached_from(workspace_id, organization_id))
+            .order_by(WorkspaceMcpServer.created_at, WorkspaceMcpServer.id)
+        )
+        return list((await self.db.execute(query)).scalars().all())
+
+    async def enabled_of_organization(self, organization_id: uuid.UUID) -> list[WorkspaceMcpServer]:
+        """An organization's own enabled servers, oldest first."""
+        query = (
+            select(WorkspaceMcpServer)
+            .where(
+                WorkspaceMcpServer.organization_id == organization_id,
+                WorkspaceMcpServer.workspace_id.is_(None),
+                WorkspaceMcpServer.enabled.is_(True),
+            )
+            .order_by(WorkspaceMcpServer.created_at, WorkspaceMcpServer.id)
+        )
+        return list((await self.db.execute(query)).scalars().all())
+
+    async def name_in_use(
+        self, organization_id: uuid.UUID, name: str, *, of_workspace: bool, except_id: uuid.UUID | None
+    ) -> bool:
+        """Whether a server ``name`` would collide with another one a workspace of the organization reaches.
+
+        A workspace's server (``of_workspace``) collides with an organization server of that name, its own
+        workspace's being the unique constraint's to refuse. An organization server collides with any server
+        of the organization of that name, every workspace reaching it.
+        """
+        query = select(WorkspaceMcpServer.id).where(
+            WorkspaceMcpServer.organization_id == organization_id, WorkspaceMcpServer.name == name
+        )
+        if of_workspace:
+            query = query.where(WorkspaceMcpServer.workspace_id.is_(None))
+        if except_id is not None:
+            query = query.where(WorkspaceMcpServer.id != except_id)
+        return (await self.db.execute(query.limit(1))).first() is not None
 
     async def attached_workspace_ids(self) -> frozenset[uuid.UUID]:
         """Every workspace that has an enabled server of its own attached by default."""
@@ -107,6 +181,19 @@ class WorkspaceMcpServerRepository(BaseRepository[WorkspaceMcpServer, Never, Nev
             .distinct()
         )
         return frozenset(workspace_id for workspace_id in found.scalars() if workspace_id is not None)
+
+    async def attached_organization_ids(self) -> frozenset[uuid.UUID]:
+        """Every organization with an enabled server of its own attached by default."""
+        found = await self.db.execute(
+            select(WorkspaceMcpServer.organization_id)
+            .where(
+                WorkspaceMcpServer.attach_by_default.is_(True),
+                WorkspaceMcpServer.enabled.is_(True),
+                WorkspaceMcpServer.workspace_id.is_(None),
+            )
+            .distinct()
+        )
+        return frozenset(found.scalars())
 
     async def has_url(self, workspace_id: uuid.UUID, url: str) -> bool:
         """Whether a workspace stores a server at ``url``, a trailing slash and surrounding whitespace aside.
