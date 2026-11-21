@@ -79,7 +79,7 @@ def _gate(**overrides: object) -> None:
     store._gate_endpoint_auth(
         EndpointAuth(**{**fields, **overrides}),  # type: ignore[arg-type]
         api_base="https://proxy.example/v1",
-        sent=True,
+        stored=EndpointAuth(),
     )
 
 
@@ -107,7 +107,7 @@ def test_an_endpoint_credential_is_refused_on_a_key_with_no_base_url() -> None:
     )
 
     with pytest.raises(OrgProviderKeyEndpointAuthRefusedError):
-        store._gate_endpoint_auth(auth, api_base=None, sent=True)
+        store._gate_endpoint_auth(auth, api_base=None, stored=EndpointAuth())
 
 
 def test_a_stored_row_reports_the_credential_it_carries() -> None:
@@ -323,15 +323,50 @@ def test_a_key_holding_no_endpoint_secret_carries_nothing_to_another_address() -
     assert store._endpoint_secret_survives(None, None, sent=False) is False
 
 
-def test_a_rotation_date_that_passed_does_not_refuse_an_edit_that_leaves_it_alone() -> None:
-    stored = EndpointAuth(
+def _expired() -> EndpointAuth:
+    return EndpointAuth(
         method=EndpointAuthMethod.STATIC_HEADER,
         header_name="Fastly-Key",
         encrypted_secret="gAAAA-x",
         expires_at=datetime.now(UTC) - timedelta(days=1),
     )
 
-    store._gate_endpoint_auth(stored, api_base="https://proxy.example/v1", sent=False)
+
+def test_a_rotation_date_that_passed_does_not_refuse_an_edit_that_leaves_it_alone() -> None:
+    stored = _expired()
+
+    store._gate_endpoint_auth(stored, api_base="https://proxy.example/v1", stored=stored)
+
+
+# The dashboard resends the whole credential on every save, so a date that has
+# passed would otherwise make the key impossible to rename.
+def test_a_rotation_date_that_passed_does_not_refuse_being_sent_back_unchanged() -> None:
+    stored = _expired()
+    resent = EndpointAuth(
+        method=stored.method,
+        header_name=stored.header_name,
+        encrypted_secret=stored.encrypted_secret,
+        expires_at=stored.expires_at,
+    )
+
+    store._gate_endpoint_auth(resent, api_base="https://proxy.example/v1", stored=stored)
+
+
+def test_a_rotation_date_moved_further_into_the_past_is_still_refused() -> None:
+    stored = _expired()
+    moved = EndpointAuth(
+        method=stored.method,
+        header_name=stored.header_name,
+        encrypted_secret=stored.encrypted_secret,
+        expires_at=datetime.now(UTC) - timedelta(days=30),
+    )
+
+    with pytest.raises(OrgProviderKeyEndpointAuthRefusedError):
+        store._gate_endpoint_auth(moved, api_base="https://proxy.example/v1", stored=stored)
+
+
+def test_removing_a_credential_whose_rotation_date_passed_is_allowed() -> None:
+    store._gate_endpoint_auth(EndpointAuth(), api_base="https://proxy.example/v1", stored=_expired())
 
 
 def test_a_credential_a_key_may_not_carry_is_refused_even_where_the_request_sent_none() -> None:
@@ -343,7 +378,7 @@ def test_a_credential_a_key_may_not_carry_is_refused_even_where_the_request_sent
     )
 
     with pytest.raises(OrgProviderKeyEndpointAuthRefusedError):
-        store._gate_endpoint_auth(stored, api_base=None, sent=False)
+        store._gate_endpoint_auth(stored, api_base=None, stored=stored)
 
 
 def test_a_key_skipped_for_its_provider_says_that_is_why() -> None:

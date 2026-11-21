@@ -483,14 +483,15 @@ def _endpoint_secret_survives(stored: str | None, submitted: EndpointAuthRequest
     return submitted is not None and not submitted.secret
 
 
-def _gate_endpoint_auth(auth: EndpointAuth, *, api_base: str | None, sent: bool) -> None:
-    """Refuse an endpoint credential a key may not carry, or one stored with no rotation date.
+def _gate_endpoint_auth(auth: EndpointAuth, *, api_base: str | None, stored: EndpointAuth) -> None:
+    """Refuse an endpoint credential a key may not carry, or a rotation date it may not take.
 
-    The rotation date is held to the future only on a credential the request
-    supplies. A stored date that has passed is a state the key reports, not a
-    reason to refuse an edit that leaves the credential alone.
+    The rotation date is held to the future only where the request changes it.
+    A date already stored is a state the key reports, so an edit that leaves it
+    alone, or one that sends it back unchanged, is refused nothing on its
+    account.
     """
-    expiry = auth.refused_expiry_reason(now=datetime.now(UTC)) if sent else None
+    expiry = auth.refused_expiry_reason(now=datetime.now(UTC)) if auth.expires_at != stored.expires_at else None
     for reason in (auth.refused_reason(has_api_base=bool(api_base)), expiry):
         if reason is not None:
             raise OrgProviderKeyEndpointAuthRefusedError(reason)
@@ -668,7 +669,7 @@ class OrgProviderKeyService:
         await _gate_api_base(provider, request.api_base)
         _check_client_args(provider, request.client_args)
         endpoint_auth = _endpoint_auth_for_storage(request.endpoint_auth, stored=EndpointAuth())
-        _gate_endpoint_auth(endpoint_auth, api_base=request.api_base, sent=True)
+        _gate_endpoint_auth(endpoint_auth, api_base=request.api_base, stored=EndpointAuth())
         slug = await self._slug_for(
             organization.id, request.slug, name=name, provider=provider, api_base=request.api_base
         )
@@ -816,9 +817,7 @@ class OrgProviderKeyService:
                 if "endpoint_auth" in update_data
                 else stored
             )
-            _gate_endpoint_auth(
-                auth, api_base=update_data.get("api_base", key.api_base), sent="endpoint_auth" in update_data
-            )
+            _gate_endpoint_auth(auth, api_base=update_data.get("api_base", key.api_base), stored=stored)
             update_data.pop("endpoint_auth", None)
             update_data["endpoint_auth_method"] = auth.method
             update_data["endpoint_auth_header_name"] = auth.header_name
