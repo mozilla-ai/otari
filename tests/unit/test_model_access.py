@@ -142,6 +142,49 @@ def test_validate_rejects_bad_entries(bad: str) -> None:
         validate_allowed_models(GatewayConfig(), [bad])
 
 
+@pytest.fixture
+def author_namespace_catalog() -> Iterator[None]:
+    """One catalog model whose vendor (mistralai) is no provider, offered on two instances."""
+    selectors = ("deepinfra:mistralai/mistral-small-3", "groq:mistralai/mistral-small-3")
+    rows = [
+        OfferingRow(selectors[0], "deepinfra", "deepinfra", 0.10),
+        OfferingRow(selectors[1], "groq", "groq", 0.20),
+    ]
+    models = {"mistralai/mistral-small-3": ("mistralai/mistral-small-3", selectors)}
+    set_selector_index(build_selector_index(rows, models))
+    yield
+    reset_selector_index()
+
+
+@pytest.mark.usefixtures("author_namespace_catalog")
+def test_validate_translates_a_catalog_id_to_its_offerings() -> None:
+    """The picker offers catalog IDs; the stored list holds the selectors dispatch matches."""
+    assert validate_allowed_models(GatewayConfig(), ["mistralai/mistral-small-3"]) == [
+        "deepinfra:mistralai/mistral-small-3",
+        "groq:mistralai/mistral-small-3",
+    ]
+
+
+@pytest.mark.usefixtures("author_namespace_catalog")
+def test_validate_a_translated_catalog_id_dedupes_against_its_offerings() -> None:
+    assert validate_allowed_models(
+        GatewayConfig(), ["mistralai/mistral-small-3", "groq:mistralai/mistral-small-3"]
+    ) == ["deepinfra:mistralai/mistral-small-3", "groq:mistralai/mistral-small-3"]
+
+
+@pytest.mark.usefixtures("author_namespace_catalog")
+def test_validate_an_unknown_catalog_spelling_still_raises() -> None:
+    with pytest.raises(ValueError, match="unknown provider or instance 'acme'"):
+        validate_allowed_models(GatewayConfig(), ["acme/no-such-model"])
+
+
+@pytest.mark.usefixtures("author_namespace_catalog")
+@pytest.mark.parametrize("entry", ["mistralai/*", "mistralai/mistral-small-*"])
+def test_validate_a_wildcard_catalog_spelling_is_not_translated(entry: str) -> None:
+    with pytest.raises(ValueError, match="unknown provider or instance 'mistralai'"):
+        validate_allowed_models(GatewayConfig(), [entry])
+
+
 # --- search tool access ------------------------------------------------------
 
 # DeepSeek searches and serves models under one prefix: the shape that put tools beside models.

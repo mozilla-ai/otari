@@ -492,8 +492,35 @@ def _known_prefix(config: GatewayConfig, prefix: str) -> bool:
     return True
 
 
-def _validate_entry(config: GatewayConfig, entry: str) -> str:
-    """Validate + canonicalize one allow-list entry, or raise ``ValueError``."""
+def _catalog_offerings(config: GatewayConfig, entry: str) -> list[str] | None:
+    """The canonical entries a catalog ID stands for, or None when it names no catalog model.
+
+    Only the picker's exact spelling translates: a ``vendor/model`` ID, no
+    wildcard, whose vendor is no provider or instance. The vendor is the model
+    author's namespace (``mistralai``, ``alibaba``), which the catalog rather
+    than the provider list is the authority on. The ID itself would match
+    nothing at dispatch, so it expands to its offerings' selectors, each put
+    through the same validation as a hand-written entry. Spellings are the
+    catalog's own, so the match is case-insensitive, as selector resolution is.
+    """
+    if "*" in entry:
+        return None
+    slash, colon = entry.find("/"), entry.find(":")
+    if slash == -1 or (colon != -1 and colon < slash):
+        return None
+    for model in catalog_models():
+        if model.id.lower() == entry.lower():
+            return [validated for offering in model.offerings for validated in _validate_entry(config, offering)]
+    return None
+
+
+def _validate_entry(config: GatewayConfig, entry: str) -> list[str]:
+    """Validate + canonicalize one allow-list entry, or raise ``ValueError``.
+
+    Almost every entry canonicalizes to a list of itself; a catalog ID expands
+    to the canonical selectors of the model's offerings (see
+    :func:`_catalog_offerings`).
+    """
     entry = entry.strip()
     if not entry:
         raise ValueError("an allowed_models entry cannot be empty")
@@ -511,12 +538,15 @@ def _validate_entry(config: GatewayConfig, entry: str) -> str:
         raise ValueError(f"'{entry}': only a single trailing '*' is allowed (openai:* or openai:gpt-4*)")
     canonical = f"{prefix}:{model}"
     if _known_prefix(config, prefix) or canonical in config.legacy_search_tool_keys():
-        return canonical
+        return [canonical]
     if prefix in config.search_tool_providers():
         raise ValueError(
             f"'{entry}' grants no model, and allowed_models grants a search tool only by its exact "
             "<provider>:<tool> key; name tools in allowed_tools"
         )
+    translated = _catalog_offerings(config, entry)
+    if translated is not None:
+        return translated
     raise ValueError(f"'{entry}': unknown provider or instance '{prefix}'")
 
 
@@ -524,7 +554,8 @@ def validate_allowed_models(config: GatewayConfig, entries: list[str] | None) ->
     """Validate + canonicalize a write. ``None`` and ``[]`` pass through as-is.
 
     Raises ``ValueError`` (surfaced by the caller as a 400) on any bad entry.
-    Duplicates are collapsed while order is preserved.
+    Duplicates are collapsed while order is preserved. A catalog ID expands to
+    its offerings' selectors, so the result can be longer than the input.
     """
     if entries is None:
         return None
@@ -534,9 +565,9 @@ def validate_allowed_models(config: GatewayConfig, entries: list[str] | None) ->
     for entry in entries:
         if not isinstance(entry, str):
             raise ValueError("allowed_models entries must be strings")
-        normalized = _validate_entry(config, entry)
-        if normalized not in canonical:
-            canonical.append(normalized)
+        for normalized in _validate_entry(config, entry):
+            if normalized not in canonical:
+                canonical.append(normalized)
     return canonical
 
 
