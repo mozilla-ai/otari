@@ -486,12 +486,12 @@ def _endpoint_secret_survives(stored: str | None, submitted: EndpointAuthRequest
 def _gate_endpoint_auth(auth: EndpointAuth, *, api_base: str | None, stored: EndpointAuth) -> None:
     """Refuse an endpoint credential a key may not carry, or a rotation date it may not take.
 
-    The rotation date is held to the future only where the request changes it.
-    A date already stored is a state the key reports, so an edit that leaves it
-    alone, or one that sends it back unchanged, is refused nothing on its
-    account.
+    The rotation date is held to the future only where the request changes the
+    credential. A date already stored is a state the key reports, so an edit
+    that leaves the credential alone is refused nothing on its account, while
+    one that rotates the value has to say when the new value expires.
     """
-    expiry = auth.refused_expiry_reason(now=datetime.now(UTC)) if auth.expires_at != stored.expires_at else None
+    expiry = auth.refused_expiry_reason(now=datetime.now(UTC)) if auth != stored else None
     for reason in (auth.refused_reason(has_api_base=bool(api_base)), expiry):
         if reason is not None:
             raise OrgProviderKeyEndpointAuthRefusedError(reason)

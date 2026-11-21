@@ -351,10 +351,41 @@ def test_a_rotation_date_that_passed_does_not_refuse_being_sent_back_unchanged()
         method=stored.method,
         header_name=stored.header_name,
         encrypted_secret=stored.encrypted_secret,
+        last4=stored.last4,
         expires_at=stored.expires_at,
     )
 
     store._gate_endpoint_auth(resent, api_base="https://proxy.example/v1", stored=stored)
+
+
+# Rotating the value is the flow the docs describe, and the form seeds the
+# stored date, so a new value would otherwise land on a date already passed.
+def test_rotating_the_value_against_a_date_that_passed_is_refused() -> None:
+    stored = _expired()
+    rotated = EndpointAuth(
+        method=stored.method,
+        header_name=stored.header_name,
+        encrypted_secret="gAAAA-new",
+        last4="-new",
+        expires_at=stored.expires_at,
+    )
+
+    with pytest.raises(OrgProviderKeyEndpointAuthRefusedError):
+        store._gate_endpoint_auth(rotated, api_base="https://proxy.example/v1", stored=stored)
+
+
+def test_renaming_the_header_on_a_date_that_passed_is_refused() -> None:
+    stored = _expired()
+    renamed = EndpointAuth(
+        method=stored.method,
+        header_name="Edge-Key",
+        encrypted_secret=stored.encrypted_secret,
+        last4=stored.last4,
+        expires_at=stored.expires_at,
+    )
+
+    with pytest.raises(OrgProviderKeyEndpointAuthRefusedError):
+        store._gate_endpoint_auth(renamed, api_base="https://proxy.example/v1", stored=stored)
 
 
 def test_a_rotation_date_moved_further_into_the_past_is_still_refused() -> None:
