@@ -13591,7 +13591,7 @@ export interface components {
             /**
              * Expires At
              * Format: date-time
-             * @description When the organization expects to rotate this credential. Must be in the future. It is a rotation date, not a switch: a request is never refused because it passed, since the proxy answers that itself on every request.
+             * @description When the organization expects to rotate this credential. Must carry a UTC offset and be in the future. It is a rotation date, not a switch: a request is never refused because it passed, since the proxy answers that itself on every request.
              */
             expires_at: string;
             /**

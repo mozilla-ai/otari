@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from gateway.exceptions.providers_exceptions import OrgProviderKeyEndpointAuthRefusedError
 from gateway.models.provider_keys import OrgProviderKey
@@ -289,3 +290,9 @@ async def test_a_dial_that_is_refused_reports_it_as_a_refusal(monkeypatch: pytes
 
 def test_a_copied_discovery_keeps_the_refusal() -> None:
     assert _copy_discovery(_rejected(401)).credentials_rejected is True
+
+
+def test_an_expiry_with_no_offset_is_refused_at_the_boundary() -> None:
+    """A naive value cannot be compared with the clock, so it never reaches one."""
+    with pytest.raises(ValidationError):
+        _sent(expires_at="2027-03-01T00:00:00")

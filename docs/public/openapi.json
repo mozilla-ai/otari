@@ -9072,7 +9072,7 @@
         "description": "The credential an edge proxy in front of a key's base URL requires.\n\n``method`` is a closed set of ways to produce request headers. TLS client\nauthentication is not one of them: it is presented when the connection is\nmade, so it would be a field of its own rather than a method here.",
         "properties": {
           "expires_at": {
-            "description": "When the organization expects to rotate this credential. Must be in the future. It is a rotation date, not a switch: a request is never refused because it passed, since the proxy answers that itself on every request.",
+            "description": "When the organization expects to rotate this credential. Must carry a UTC offset and be in the future. It is a rotation date, not a switch: a request is never refused because it passed, since the proxy answers that itself on every request.",
             "format": "date-time",
             "title": "Expires At",
             "type": "string"

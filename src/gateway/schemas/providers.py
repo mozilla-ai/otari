@@ -16,7 +16,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal, Self
 
-from pydantic import ValidationInfo, field_validator, model_validator
+from pydantic import AwareDatetime, ValidationInfo, field_validator, model_validator
 from sqlmodel import Field, SQLModel
 
 from gateway.core.link_urls import normalize_link_url
@@ -63,11 +63,11 @@ class EndpointAuthRequest(SQLModel):
             "the credential is first set, and on any change of base URL."
         ),
     )
-    expires_at: datetime = Field(
+    expires_at: AwareDatetime = Field(
         description=(
-            "When the organization expects to rotate this credential. Must be in the future. It is a "
-            "rotation date, not a switch: a request is never refused because it passed, since the proxy "
-            "answers that itself on every request."
+            "When the organization expects to rotate this credential. Must carry a UTC offset and be in "
+            "the future. It is a rotation date, not a switch: a request is never refused because it "
+            "passed, since the proxy answers that itself on every request."
         )
     )
 
