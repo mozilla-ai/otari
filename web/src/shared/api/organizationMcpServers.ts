@@ -1,14 +1,23 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  type QueryClient,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 
 import type {
   CreateWorkspaceMcpServerRequest,
+  McpCredentialMode,
+  McpServerFoldCandidate,
+  McpServerFoldCandidates,
   OrganizationMcpServerLimitRequest,
   OrganizationMcpServerWorkspace,
   OrganizationMcpServerWorkspaces,
+  PromoteMcpServerRequest,
   WorkspaceMcpServer,
   WorkspaceMcpServers,
 } from "@/client"
-import { apiFetch } from "@/shared/api/client"
+import { apiFetch, withRequestDeadline } from "@/shared/api/client"
 import {
   invalidateEveryWorkspaceMcpView,
   invalidateMcpServers,
@@ -17,7 +26,14 @@ import {
   mcpServersKey,
   mcpServersPath,
   ORGANIZATION_MCP_SCOPE,
+  workspaceMcpScope,
 } from "@/shared/api/mcpServerScope"
+import {
+  MCP_CATALOG,
+  MCP_SERVER_REQUESTS,
+  ORGANIZATION_MCP_SERVERS,
+  WORKSPACES,
+} from "@/shared/api/queryKeys"
 
 // The organization's own MCP servers, under `/organizations/me/mcp-servers`,
 // for its owners and admins. The writes they share with a workspace's servers
@@ -53,6 +69,24 @@ export function useOrganizationMcpServer(serverId: string, enabled = true) {
   })
 }
 
+/**
+ * What a new organization server moves beyond its own list: every workspace
+ * reaches it, the copies it folded are gone from theirs, the gateway approves
+ * every workspace's waiting requests for it, and each workspace's catalog
+ * leaves it out.
+ */
+function invalidateAfterOrganizationServer(queryClient: QueryClient) {
+  invalidateMcpServers(queryClient, SCOPE)
+  void queryClient.invalidateQueries({
+    predicate: ({ queryKey }) =>
+      queryKey[0] === WORKSPACES && queryKey[2] === MCP_SERVER_REQUESTS,
+  })
+  void queryClient.invalidateQueries({
+    predicate: ({ queryKey }) =>
+      queryKey[0] === MCP_CATALOG && queryKey[1] !== "sync",
+  })
+}
+
 export function useCreateOrganizationMcpServer() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -61,7 +95,99 @@ export function useCreateOrganizationMcpServer() {
         method: "POST",
         body: JSON.stringify(body),
       }),
-    onSuccess: () => invalidateMcpServers(queryClient, SCOPE),
+    onSuccess: () => invalidateAfterOrganizationServer(queryClient),
+  })
+}
+
+/**
+ * Reads again what an organization server's add moves, for an add whose
+ * answer was lost: it may have been stored, and its copies folded, all the same.
+ */
+export function useRefreshAfterOrganizationServer(): () => void {
+  const queryClient = useQueryClient()
+  return () => invalidateAfterOrganizationServer(queryClient)
+}
+
+/**
+ * Which copies to look for: those of a server about to be added, or of one
+ * about to be promoted, which is named by its id alone. Sent in a body, so no
+ * URL, which may carry a credential, travels in a request line.
+ */
+export type McpServerCopiesOf =
+  | { url: string; credentialMode: McpCredentialMode; withToken: boolean }
+  | { serverId: string }
+
+function readCopies(
+  of: McpServerCopiesOf,
+  signal?: AbortSignal,
+): Promise<McpServerFoldCandidate[]> {
+  const body =
+    "serverId" in of
+      ? { server_id: of.serverId }
+      : {
+          url: of.url,
+          credential_mode: of.credentialMode,
+          with_token: of.withToken,
+        }
+  return apiFetch<McpServerFoldCandidates>(
+    `${mcpServersPath(SCOPE)}/same-url`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+      // apiFetch's own deadline where none is given.
+      ...(signal ? { signal } : {}),
+    },
+  ).then((answer) => answer.data)
+}
+
+/**
+ * The workspaces' own copies of a server about to be promoted, which it can
+ * take the place of, and what folding each would do. Keyed by the server's id
+ * alone, which names one organization's server.
+ */
+export function useMcpServerCopies(serverId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: [ORGANIZATION_MCP_SERVERS, "same-url", serverId],
+    queryFn: ({ signal }) =>
+      readCopies({ serverId }, withRequestDeadline(signal)),
+    enabled,
+    // Read as the step opens: another admin's write changes it at any time.
+    staleTime: 0,
+  })
+}
+
+/**
+ * The same read, for a form that asks at the moment it is submitted. Not
+ * cached, so the URL, which may carry a credential, is kept nowhere once it
+ * answers, and sent at once rather than held until the browser is online.
+ */
+export function useReadMcpServerCopies(): (
+  of: McpServerCopiesOf,
+) => Promise<McpServerFoldCandidate[]> {
+  return (of) => readCopies(of)
+}
+
+/**
+ * Makes a workspace's own server its organization's, in place: it keeps its
+ * id, settings and sign-ins, and folds the copies named.
+ */
+export function usePromoteWorkspaceMcpServer() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      serverId,
+      body,
+    }: {
+      workspaceId: string
+      serverId: string
+      body: PromoteMcpServerRequest
+    }) =>
+      apiFetch<WorkspaceMcpServer>(
+        `${mcpServerPath(workspaceMcpScope(workspaceId), serverId)}/promote`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+    onSuccess: () => invalidateAfterOrganizationServer(queryClient),
   })
 }
 

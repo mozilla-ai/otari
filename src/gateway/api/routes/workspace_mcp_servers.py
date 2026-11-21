@@ -36,6 +36,9 @@ from gateway.schemas.tools import (
     WorkspaceMcpServerLogosPublic,
 )
 from gateway.services.tenancy.workspace_mcp_server_service import (
+    McpServerFoldCandidates,
+    McpServerFoldLookup,
+    McpServerPromote,
     WorkspaceMcpServerAccess,
     WorkspaceMcpServerAccessCheck,
     WorkspaceMcpServerCheckRequest,
@@ -412,6 +415,22 @@ async def check_workspace_mcp_server_connection(
     return await service.check_connection(user=current_identity, workspace_id=workspace_id, request=body)
 
 
+@router.post("/{server_id}/promote")
+async def promote_workspace_mcp_server(
+    service: WorkspaceMcpServerServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+    server_id: uuid.UUID,
+    body: McpServerPromote,
+) -> WorkspaceMcpServerPublic:
+    """Make this workspace's server its organization's, for every workspace. Organization owners and admins only.
+
+    It keeps its id, its settings and every sign-in to it, and its grants stay this workspace's. Other workspaces'
+    servers at the same URL named in `fold_server_ids` are folded into it.
+    """
+    return await service.promote(user=current_identity, workspace_id=workspace_id, server_id=server_id, request=body)
+
+
 _OVERRIDE_NOT_FOUND: dict[int | str, dict[str, Any]] = {
     status.HTTP_404_NOT_FOUND: {
         "description": "No organization server by that id reaches the workspace. A workspace's own server is a 404 "
@@ -610,6 +629,27 @@ async def check_organization_mcp_server_connection(
 ) -> WorkspaceMcpServerHealth:
     """Check connection details without storing anything. Organization owners and admins only."""
     return await service.check_connection(user=current_identity, workspace_id=None, request=body)
+
+
+@organization_router.post("/same-url")
+async def list_organization_mcp_server_copies(
+    service: WorkspaceMcpServerServiceDep, current_identity: CurrentIdentity, body: McpServerFoldLookup
+) -> McpServerFoldCandidates:
+    """The workspaces' own servers at a URL, which a new organization server can take the place of.
+
+    Organization owners and admins only. A lookup that changes nothing, sent as a body so the URL, which can carry
+    credentials, stays out of the request line. For each one: how many people signed in to it keep their sign-in,
+    how many must sign in again, how many keep working through the sign-in they already hold on the organization's
+    server, and whether a token or shared account of its own would be replaced. Fold them by naming them in
+    `fold_server_ids` when adding the server, or when promoting one.
+    """
+    return await service.fold_candidates(
+        user=current_identity,
+        url=body.url,
+        credential_mode=body.credential_mode,
+        with_token=body.with_token,
+        server_id=body.server_id,
+    )
 
 
 @organization_router.get("/{server_id}")

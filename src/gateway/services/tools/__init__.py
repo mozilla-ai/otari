@@ -13,6 +13,7 @@ the last into ``AdmittedWebTools``,
 ``McpGrantMembershipListener`` removes a member's MCP grants and connections as they leave a workspace,
 ``WorkspaceMcpServerUrls`` says where a workspace's stored MCP servers are, ``McpWorkspaceServers`` reads the
 ones a workspace reaches, its organization's included, as ``McpServerInWorkspace``,
+``McpServerFold`` weighs and folds workspaces' copies of a server into their organization's,
 ``OrganizationMcpServerWorkspaceService`` shows an organization's server across its workspaces and sets the
 organization's limit in one,
 ``McpConnectionService`` runs a user's own sign-in to a per-user MCP server and ends a connection,
@@ -148,6 +149,7 @@ from gateway.services.tools._mcp_connections import (
     StoredMcpOAuthClient,
 )
 from gateway.services.tools._mcp_grant_membership import McpGrantMembershipListener, McpOrganizationReach
+from gateway.services.tools._mcp_server_fold import McpServerFold, McpServerFoldCandidate, McpServerFoldOutcome
 from gateway.services.tools._mcp_server_health import (
     McpServerContact,
     McpServerContacts,
@@ -366,6 +368,9 @@ __all__ = [
     "McpServerRequestService",
     "McpSignedInServers",
     "McpServerInWorkspace",
+    "McpServerFold",
+    "McpServerFoldCandidate",
+    "McpServerFoldOutcome",
     "McpWorkspaceServers",
     "OrganizationMcpServerLimit",
     "OrganizationMcpServerWorkspace",

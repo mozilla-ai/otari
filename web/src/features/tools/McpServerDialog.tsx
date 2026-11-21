@@ -1,5 +1,5 @@
 import { useState } from "react"
-import type { McpCredentialMode } from "@/client"
+import type { McpCredentialMode, McpServerFoldCandidate } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
@@ -8,6 +8,7 @@ import { Field } from "@/design-system/forms/Field"
 import { RadioGroup, type RadioOption } from "@/design-system/forms/RadioGroup"
 import { SecretField } from "@/design-system/forms/SecretField"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
+import { McpFoldChoices } from "@/features/tools/McpFoldChoices"
 import { ALL_TOOLS, isLiteralToolName } from "@/features/tools/mcpAccess"
 import {
   AVAILABILITY_OPTIONS,
@@ -15,6 +16,14 @@ import {
   type McpAvailability,
 } from "@/features/tools/mcpAvailability"
 import {
+  defaultFoldIds,
+  foldableIds,
+  MAX_FOLD_COPIES,
+} from "@/features/tools/mcpFold"
+import {
+  ADD_TARGET_LABEL,
+  addTargetOptions,
+  type McpAddTarget,
   parseAllowedTools,
   SIGN_IN_MODE_LABEL,
   SIGN_IN_MODES,
@@ -22,7 +31,11 @@ import {
 } from "@/features/tools/mcpServerForm"
 import { healthDetail } from "@/features/tools/mcpServerHealth"
 import { ToolChecklist } from "@/features/tools/ToolChecklist"
-import type { McpServerScope } from "@/shared/api/mcpServerScope"
+import {
+  type McpServerScope,
+  ORGANIZATION_MCP_SCOPE,
+} from "@/shared/api/mcpServerScope"
+import { useReadMcpServerCopies } from "@/shared/api/organizationMcpServers"
 import { useTestMcpServerConnection } from "@/shared/api/tools"
 
 // The form that registers a server. Changing one afterwards happens on the
@@ -45,6 +58,17 @@ export interface McpServerDraft {
   oauth_client_secret: string | undefined
   /** Added to every model request from the workspace's keys without being named. */
   attach_by_default: boolean
+  /** On an organization's server: the workspaces' own copies it takes the place of. */
+  fold_server_ids?: string[]
+}
+
+/** The copies found at the draft's URL, once an organization's server is submitted. */
+interface FoldStep {
+  draft: McpServerDraft
+  /** Kept with the draft, so the step adds where it was reviewed for or not at all. */
+  scope: McpServerScope
+  candidates: McpServerFoldCandidate[]
+  selected: string[]
 }
 
 type WhoCanUse = "everyone" | "nobody"
@@ -100,15 +124,26 @@ export interface McpServerDialogProps {
   onOpenChange: (open: boolean) => void
   /** Whose server this adds, and so where Test connection checks the draft, without storing it. */
   scope: McpServerScope
+  /**
+   * On a workspace's scope, whether the caller may add the server for the
+   * whole organization instead: an organization owner or admin is asked, with
+   * the organization preselected.
+   */
+  canAddForOrganization?: boolean
+  /** The workspace's name, which the choice of target says. */
+  workspaceName?: string
   isPending: boolean
   error: unknown
-  onSubmit: (draft: McpServerDraft) => void
+  /** The draft, and whose server it is to be. */
+  onSubmit: (draft: McpServerDraft, scope: McpServerScope) => void
 }
 
 export function McpServerDialog({
   isOpen,
   onOpenChange,
-  scope,
+  scope: givenScope,
+  canAddForOrganization = false,
+  workspaceName = "this workspace",
   isPending,
   error,
   onSubmit,
@@ -126,6 +161,29 @@ export function McpServerDialog({
   const [mode, setMode] = useState<McpCredentialMode>("shared")
   const [clientId, setClientId] = useState("")
   const [clientSecret, setClientSecret] = useState("")
+  const offersTarget = canAddForOrganization && givenScope.kind === "workspace"
+  // The organization is preselected only where the choice is there from the
+  // start: access granted while the draft is open leaves it where it was going.
+  const [target, setTarget] = useState<McpAddTarget>(
+    offersTarget ? "organization" : "workspace",
+  )
+  // Once the choice was offered, the draft keeps the destination picked, even
+  // if organization access ends: it is then refused rather than added to the
+  // workspace, until the admin picks the workspace themselves.
+  const [wasOffered, setWasOffered] = useState(offersTarget)
+  if (offersTarget && !wasOffered) setWasOffered(true)
+  const scope =
+    wasOffered && target === "organization"
+      ? ORGANIZATION_MCP_SCOPE
+      : givenScope
+  const lostTarget =
+    scope.kind === "organization" && !offersTarget && wasOffered
+  // An organization's server is checked for the workspaces' own copies of it
+  // before it is stored, and the copies found are offered to fold.
+  const readCopies = useReadMcpServerCopies()
+  const [isReading, setReading] = useState(false)
+  const [readError, setReadError] = useState<unknown>()
+  const [fold, setFold] = useState<FoldStep>()
 
   const isPerUser = mode === "per_user"
   const typedToken = !isPerUser && token.trim() !== ""
@@ -146,13 +204,19 @@ export function McpServerDialog({
     mode,
     clientId,
     clientSecret,
+    target,
   })
 
   const tokenField = typedToken ? token.trim() : undefined
-  // A test answers for the URL and token it was run with, and stops answering
-  // once either changes. The allow-list is left out on purpose: the picker below
+  // A test answers for the URL, token and destination it was run with, and
+  // stops answering once any changes. The allow-list is left out on purpose: the picker below
   // edits it, and the catalog a test listed does not depend on it.
-  const connection = JSON.stringify([url.trim(), tokenField ?? null])
+  const connection = JSON.stringify([
+    url.trim(),
+    tokenField ?? null,
+    scope.kind,
+    scope.kind === "workspace" ? scope.workspaceId : null,
+  ])
   const copy = SCOPE_COPY[scope.kind]
   const test = useTestMcpServerConnection()
   const [testedConnection, setTestedConnection] = useState<string>()
@@ -172,9 +236,36 @@ export function McpServerDialog({
     })
   }
 
+  const store = (draft: McpServerDraft) => {
+    setReadError(undefined)
+    if (scope.kind === "workspace") {
+      onSubmit(draft, scope)
+      return
+    }
+    // The form is frozen until the read answers, so the draft read for is the one stored.
+    setReading(true)
+    readCopies({
+      url: draft.url,
+      credentialMode: draft.credential_mode,
+      withToken: draft.authorization_token !== undefined,
+    })
+      .then((candidates) => {
+        if (candidates.length === 0) onSubmit(draft, scope)
+        else {
+          setFold({
+            draft,
+            scope,
+            candidates,
+            selected: defaultFoldIds(candidates, draft.enabled),
+          })
+        }
+      }, setReadError)
+      .finally(() => setReading(false))
+  }
+
   const submit = () => {
     if (isInvalid) return
-    onSubmit({
+    store({
       name: name.trim(),
       url: url.trim(),
       purpose_hint: hint.trim() === "" ? null : hint.trim(),
@@ -192,6 +283,61 @@ export function McpServerDialog({
     })
   }
 
+  if (fold) {
+    const count = fold.candidates.length
+    const selected = foldableIds(
+      fold.candidates,
+      fold.selected,
+      fold.draft.enabled,
+    )
+    // Organization access ended while the step was open: it is not added anywhere else instead.
+    const lostOrganization =
+      fold.scope.kind === "organization" &&
+      givenScope.kind !== "organization" &&
+      !canAddForOrganization
+    return (
+      <FormDialog
+        isOpen={isOpen}
+        onOpenChange={onOpenChange}
+        size="lg"
+        title="New MCP server"
+        description={
+          count === 1
+            ? "A workspace has its own server at this URL. Fold it into the organization's?"
+            : `${count} workspaces have their own server at this URL. Fold them into the organization's?`
+        }
+        submitLabel="Add MCP server"
+        onSubmit={() =>
+          onSubmit({ ...fold.draft, fold_server_ids: selected }, fold.scope)
+        }
+        isPending={isPending}
+        isSubmitDisabled={lostOrganization || selected.length > MAX_FOLD_COPIES}
+        isDirty
+        error={error}
+        footerStart={
+          <Button isDisabled={isPending} onPress={() => setFold(undefined)}>
+            Back
+          </Button>
+        }
+      >
+        {lostOrganization ? (
+          <InfoBanner tone="warning">
+            You can no longer add servers for the whole organization. Go back to
+            add it to {workspaceName} instead.
+          </InfoBanner>
+        ) : null}
+        <McpFoldChoices
+          candidates={fold.candidates}
+          selected={selected}
+          targetEnabled={fold.draft.enabled}
+          targetMode={fold.draft.credential_mode}
+          isDisabled={isPending || lostOrganization}
+          onChange={(selected) => setFold({ ...fold, selected })}
+        />
+      </FormDialog>
+    )
+  }
+
   return (
     <FormDialog
       isOpen={isOpen}
@@ -201,10 +347,10 @@ export function McpServerDialog({
       description={copy.description}
       submitLabel="Add MCP server"
       onSubmit={submit}
-      isPending={isPending}
-      isSubmitDisabled={isInvalid}
+      isPending={isPending || isReading}
+      isSubmitDisabled={isInvalid || lostTarget}
       isDirty={isDirty}
-      error={error}
+      error={readError ?? error}
       footerStart={
         // A per-user server is checked with a person's own connection, which
         // exists only once the server is stored.
@@ -212,17 +358,38 @@ export function McpServerDialog({
           <Button
             onPress={runTest}
             isPending={test.isPending}
-            isDisabled={url.trim() === "" || urlReason !== undefined}
+            isDisabled={
+              isReading || url.trim() === "" || urlReason !== undefined
+            }
           >
             Test connection
           </Button>
         )
       }
     >
+      {lostTarget ? (
+        <InfoBanner tone="warning">
+          You can no longer add servers for the whole organization. Choose This
+          workspace to add it to {workspaceName} instead.
+        </InfoBanner>
+      ) : null}
+      {wasOffered ? (
+        <RadioGroup
+          label={ADD_TARGET_LABEL}
+          value={target}
+          isDisabled={isReading}
+          onChange={(next) => {
+            setReadError(undefined)
+            setTarget(next as McpAddTarget)
+          }}
+          options={addTargetOptions(workspaceName)}
+        />
+      ) : null}
       <Field
         label="Name"
         value={name}
         onChange={setName}
+        isDisabled={isReading}
         placeholder="github"
         isRequired
         autoFocus
@@ -232,6 +399,7 @@ export function McpServerDialog({
         label="URL"
         value={url}
         onChange={setUrl}
+        isDisabled={isReading}
         placeholder="https://mcp.example.com/github"
         isRequired
         // On the field rather than at the foot of the dialog, which is five
@@ -244,6 +412,7 @@ export function McpServerDialog({
       <RadioGroup
         label={SIGN_IN_MODE_LABEL}
         value={mode}
+        isDisabled={isReading}
         onChange={(next) => setMode(next as McpCredentialMode)}
         options={SIGN_IN_MODES}
       />
@@ -257,6 +426,7 @@ export function McpServerDialog({
             label="OAuth client ID"
             value={clientId}
             onChange={setClientId}
+            isDisabled={isReading}
             placeholder="Optional"
             description="Only for a server that does not let Otari register itself. Blank registers automatically."
           />
@@ -267,7 +437,7 @@ export function McpServerDialog({
             value={clientSecret}
             onChange={setClientSecret}
             placeholder="Optional"
-            isDisabled={clientId.trim() === ""}
+            isDisabled={isReading || clientId.trim() === ""}
             description={
               clientId.trim() === ""
                 ? "Goes with a client ID. Some providers, such as GitHub, need both."
@@ -284,6 +454,7 @@ export function McpServerDialog({
           label="Authorization token"
           value={token}
           onChange={setToken}
+          isDisabled={isReading}
           placeholder="Optional"
           description="Sent as a bearer token. To sign in for everyone instead, leave this blank and set the account up on the server's page after adding."
         />
@@ -293,6 +464,7 @@ export function McpServerDialog({
         label="Purpose hint"
         value={hint}
         onChange={setHint}
+        isDisabled={isReading}
         placeholder="Use for repository and issue lookups"
         description="Helps the model choose this server's tools."
       />
@@ -301,6 +473,7 @@ export function McpServerDialog({
           label="Allowed tools"
           value={allowedTools}
           onChange={setAllowedTools}
+          isDisabled={isReading}
           placeholder="All tools"
           description="Comma separated. Leave blank for every tool."
         />
@@ -323,6 +496,7 @@ export function McpServerDialog({
               descriptions={listed.tool_descriptions ?? {}}
               isKnown
               selected={allowed}
+              isDisabled={isReading}
               onChange={(next) => setAllowedTools(next.join(", "))}
               allowPatterns={false}
             />
@@ -333,6 +507,7 @@ export function McpServerDialog({
       <RadioGroup
         label="Availability"
         value={availability}
+        isDisabled={isReading}
         onChange={(next) => setAvailability(next as McpAvailability)}
         options={AVAILABILITY_OPTIONS}
       />
@@ -340,6 +515,7 @@ export function McpServerDialog({
       <RadioGroup
         label="Default policy"
         value={whoCanUse}
+        isDisabled={isReading}
         onChange={(next) => setWhoCanUse(next as WhoCanUse)}
         options={copy.whoCanUse}
       />

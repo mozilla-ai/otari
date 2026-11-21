@@ -12,7 +12,7 @@ import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Chip } from "@/design-system/indicators/Chip"
 import { Dot } from "@/design-system/indicators/Dot"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
-import { canManageWorkspace } from "@/features/organization/roles"
+import { canManage, canManageWorkspace } from "@/features/organization/roles"
 import { McpCatalogDialog } from "@/features/tools/McpCatalogDialog"
 import { McpConnectionNoticeBanner } from "@/features/tools/McpConnectionNoticeBanner"
 import { McpKeyScopeNotice } from "@/features/tools/McpKeyScopeNotice"
@@ -37,7 +37,11 @@ import {
 } from "@/features/tools/mcpWorkspaceView"
 import { useMcpServerCheck } from "@/features/tools/useMcpServerCheck"
 import { WorkspaceRequestMcpServers } from "@/features/tools/WorkspaceRequestMcpServers"
-import { workspaceMcpScope } from "@/shared/api/mcpServerScope"
+import {
+  type McpServerScope,
+  workspaceMcpScope,
+} from "@/shared/api/mcpServerScope"
+import { useCreateOrganizationMcpServer } from "@/shared/api/organizationMcpServers"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useCreateWorkspaceMcpServer,
@@ -164,10 +168,14 @@ export function WorkspaceMcpServersCard() {
   // so any member who can see the workspace reads the table and only an owner
   // or admin gets the affordances that change it.
   const manages = canManageWorkspace(context.data, selected?.role)
+  // An organization owner or admin may add a server for every workspace
+  // instead, which the add form and the catalog ask them.
+  const managesOrganization = canManage(context.data)
   const workspaceId = selected ? selected.workspace_id : null
   const query = useWorkspaceMcpServers(workspaceId)
   const mine = useMyMcpConnections(manages ? workspaceId : null)
   const create = useCreateWorkspaceMcpServer()
+  const createForOrganization = useCreateOrganizationMcpServer()
   const remove = useDeleteWorkspaceMcpServer()
   const check = useMcpServerCheck({
     scope: workspaceMcpScope(selected?.workspace_id ?? ""),
@@ -223,6 +231,7 @@ export function WorkspaceMcpServersCard() {
   // 409 over a blank one. Same reset `PasskeysCard` does for the same reason.
   const openAdd = () => {
     create.reset()
+    createForOrganization.reset()
     setOpenCount((count) => count + 1)
     setDialogOpen(true)
   }
@@ -239,12 +248,27 @@ export function WorkspaceMcpServersCard() {
     })
 
   // A new server opens on its own page, where its connection check, its
-  // access list and every later change live.
-  const submit = (draft: McpServerDraft) =>
+  // access list and every later change live: the organization's page for one
+  // added for the whole organization.
+  // The form shows one error, so the other target's earlier refusal is cleared first.
+  const submit = (draft: McpServerDraft, scope: McpServerScope) => {
+    if (scope.kind === "organization") {
+      create.reset()
+      createForOrganization.mutate(draft, {
+        onSuccess: (server) =>
+          void navigate({
+            to: "/organization/mcp-servers/$serverId",
+            params: { serverId: server.id },
+          }),
+      })
+      return
+    }
+    createForOrganization.reset()
     create.mutate(
       { workspaceId: selected.workspace_id, body: draft },
       { onSuccess: (server) => openServer(server.id) },
     )
+  }
 
   const columns: DataTableColumn<WorkspaceMcpServer>[] = [
     {
@@ -432,8 +456,10 @@ export function WorkspaceMcpServersCard() {
         isOpen={isDialogOpen}
         onOpenChange={setDialogOpen}
         scope={workspaceMcpScope(selected.workspace_id)}
-        isPending={create.isPending}
-        error={create.error}
+        canAddForOrganization={managesOrganization}
+        workspaceName={selected.name}
+        isPending={create.isPending || createForOrganization.isPending}
+        error={create.error ?? createForOrganization.error}
         onSubmit={submit}
       />
 
@@ -446,6 +472,7 @@ export function WorkspaceMcpServersCard() {
           workspaceName={selected.name}
           existing={rows}
           initialPicks={requestedPick ? [requestedPick] : undefined}
+          canAddForOrganization={managesOrganization}
           signInUnavailable={query.data?.sign_in_unavailable}
           onAddByUrl={() => {
             setCatalogOpen(false)

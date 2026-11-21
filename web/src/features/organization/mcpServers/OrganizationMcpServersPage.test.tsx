@@ -44,6 +44,10 @@ function mockApi({
         ? (JSON.parse(init.body) as Record<string, unknown>)
         : undefined
     calls.push({ path, method, body })
+    // No workspace has its own copy of a server being added.
+    if (path === `${SERVERS}/same-url` && method === "POST") {
+      return { data: [] } as never
+    }
     if (path.startsWith(SERVERS)) {
       if (method === "POST") {
         return {
@@ -120,6 +124,16 @@ describe("OrganizationMcpServersPage", () => {
 
     await waitFor(() =>
       expect(calls.filter((call) => call.method === "POST")).toEqual([
+        // The workspaces' own copies are looked for first, and there are none.
+        {
+          path: `${SERVERS}/same-url`,
+          method: "POST",
+          body: {
+            url: "https://mcp.example.com/linear",
+            credential_mode: "shared",
+            with_token: false,
+          },
+        },
         expect.objectContaining({
           path: SERVERS,
           body: expect.objectContaining({

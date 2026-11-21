@@ -1,10 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { useParams } from "@tanstack/react-router"
 import { render } from "@testing-library/react"
 import { vi } from "vitest"
 
 import type {
   ApiKey,
   McpServerConnection,
+  McpServerFoldCandidate,
   McpServerWorkspaceSettings,
   OrganizationContext,
   OrganizationMember,
@@ -52,6 +54,7 @@ export function mockMcpServerApi({
   otherWorkspaces = [],
   connections = [],
   myTools,
+  copies = [],
 }: {
   server?: WorkspaceMcpServer
   /**
@@ -80,6 +83,8 @@ export function mockMcpServerApi({
   connections?: McpServerConnection[]
   /** What the caller may use on the server; unknown, under everyone's rule, when left out. */
   myTools?: WorkspaceMcpServerMyTools
+  /** Other workspaces' own copies of the server, as promoting it reads them. */
+  copies?: McpServerFoldCandidate[]
 } = {}): McpCall[] {
   const calls: McpCall[] = []
   // A read after a write of the workspace's own settings answers with them.
@@ -130,6 +135,12 @@ export function mockMcpServerApi({
     // The caller's own sign-ins: none.
     if (url.includes("/mcp-connections")) {
       return Response.json({ data: [], count: 0 })
+    }
+    if (
+      method === "POST" &&
+      url === "/api/v1/organizations/me/mcp-servers/same-url"
+    ) {
+      return Response.json({ data: copies })
     }
     if (url.includes("/mcp-servers/")) {
       // Read from any other workspace, the server is not there.
@@ -206,6 +217,12 @@ export function mcpWrites(calls: McpCall[]): McpCall[] {
   return calls.filter((call) => call.method !== "GET")
 }
 
+/** Names the server it was opened for, so a test can tell which one. */
+function OrganizationServerPageProbe() {
+  const { serverId } = useParams({ strict: false })
+  return <p>Organization server page {serverId}</p>
+}
+
 export function renderMcpServerPage(
   serverId: string,
   search = "",
@@ -226,7 +243,13 @@ export function renderMcpServerPage(
     {
       wrapper: withRouter({
         url,
-        routes: [{ path: "/tools/mcp-servers", element: <p>Server list</p> }],
+        routes: [
+          { path: "/tools/mcp-servers", element: <p>Server list</p> },
+          {
+            path: "/organization/mcp-servers/$serverId",
+            element: <OrganizationServerPageProbe />,
+          },
+        ],
       }),
     },
   )

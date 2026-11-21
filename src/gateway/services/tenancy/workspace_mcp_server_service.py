@@ -61,6 +61,7 @@ from gateway.exceptions.tools_exceptions import (
     McpConnectionFlowError,
     McpConnectionSetupError,
     McpConnectionUnavailableError,
+    McpServerFoldError,
     McpServerIsOrganizationsError,
     McpServerNameTakenError,
     McpSignInLinkNeedsSessionError,
@@ -77,7 +78,7 @@ from gateway.exceptions.tools_exceptions import (
     WorkspaceMcpServerUnsafeUrlError,
 )
 from gateway.log_config import logger
-from gateway.models.mcp import AttachedTimeBudget, McpServerConfig, ResolvedMcpServer
+from gateway.models.mcp import MAX_MCP_SERVER_IDS, AttachedTimeBudget, McpServerConfig, ResolvedMcpServer
 from gateway.models.tenancy import MANAGEMENT_ROLES, User
 from gateway.models.tools import (
     McpCredentialMode,
@@ -140,6 +141,8 @@ from gateway.services.tools import (
     LinkSignIn,
     McpConnectionService,
     McpRevocation,
+    McpServerFold,
+    McpServerFoldCandidate,
     McpServerInWorkspace,
     McpServerRef,
     McpServerRequestService,
@@ -188,6 +191,14 @@ class WorkspaceMcpServerCreate(BaseModel):
 
     name: str = Field(min_length=1, max_length=128, description="Label for the server, unique within the workspace")
     url: str = Field(min_length=1, max_length=2048, description="Streamable HTTP MCP endpoint")
+    fold_server_ids: list[uuid.UUID] = Field(
+        default_factory=list,
+        max_length=MAX_MCP_SERVER_IDS,
+        description="On an organization's server: workspaces' own servers at the same URL to fold into it. Each "
+        "one's rules become its workspace's settings on the new server, its id keeps working there, and it is "
+        "deleted. A personal sign-in is kept where the new server is personal at its very URL and can renew it: "
+        "the sign-in holds a refresh token and was made through the new server's client. The rest end",
+    )
     authorization_token: str | None = Field(
         default=None,
         max_length=8192,
@@ -459,6 +470,39 @@ class WorkspaceMcpServerSettingsUpdate(BaseModel):
     def changes(self) -> dict[str, Any]:
         """The settings this request sets, by name, and nothing it left out."""
         return {name: getattr(self, name) for name in self.model_fields_set}
+
+
+class McpServerFoldCandidates(BaseModel):
+    """The workspaces' own servers an organization's server could take the place of, and what that would do."""
+
+    data: list[McpServerFoldCandidate]
+
+
+class McpServerFoldLookup(BaseModel):
+    """Which workspaces' copies to list: those of a new server at ``url``, or of the server ``server_id`` names."""
+
+    url: str | None = Field(
+        default=None, min_length=1, max_length=2048, description="The URL of the server to add; not sent with server_id"
+    )
+    credential_mode: McpCredentialMode = Field(
+        default=McpCredentialMode.SHARED, description="How the new server signs in, when no server_id is given"
+    )
+    with_token: bool = Field(
+        default=False, description="The new server is added with a token of its own, when no server_id is given"
+    )
+    server_id: uuid.UUID | None = Field(
+        default=None, description="The server about to be made the organization's, whose own URL is matched, if any"
+    )
+
+
+class McpServerPromote(BaseModel):
+    """Making a workspace's own server its organization's."""
+
+    fold_server_ids: list[uuid.UUID] = Field(
+        default_factory=list,
+        max_length=MAX_MCP_SERVER_IDS,
+        description="Other workspaces' own servers at the same URL to fold into it, as for a new organization server",
+    )
 
 
 class WorkspaceMcpServerPublic(BaseModel):
@@ -1055,7 +1099,7 @@ async def _resolve_for_request(
         if server_ids:
             raise WorkspaceMcpServerNotFoundError(server_ids[0])
         return RequestMcpServers()
-    seen, names = await _mcp_views(db).for_request(workspace_id, organization_id, server_ids, attached=attach)
+    seen, names, _ = await _mcp_views(db).for_request(workspace_id, organization_id, server_ids, attached=attach)
     by_id = {view.id: view.row for view in seen}
     in_workspace = {view.id: view for view in seen}
 
@@ -1289,7 +1333,7 @@ async def resolve_workspace_mcp_server(
     organization_id = await WorkspaceRepository(db).get_organization_id(workspace_id)
     if organization_id is None:
         return None
-    seen, _ = await _mcp_views(db).for_request(workspace_id, organization_id, [server_id], attached=False)
+    seen, _, _ = await _mcp_views(db).for_request(workspace_id, organization_id, [server_id], attached=False)
     if not seen:
         return None
     view = seen[0]
@@ -1508,6 +1552,7 @@ class WorkspaceMcpServerService:
         *,
         connections: McpConnectionService | None = None,
         requests: McpServerRequestService | None = None,
+        fold: McpServerFold | None = None,
         config: GatewayConfig | None = None,
     ):
         self.db = db
@@ -1518,6 +1563,8 @@ class WorkspaceMcpServerService:
         self.connections = connections
         # Approves the members' requests a new server answers, in the transaction that stores it.
         self.requests = requests
+        # Folds workspaces' copies of a server into their organization's.
+        self.fold = fold
         self.config = config
         self._tokens = McpUserTokens(McpUserConnectionRepository(db))
 
@@ -1564,7 +1611,16 @@ class WorkspaceMcpServerService:
 
     async def _server_in(self, scope: _Scope, server_id: uuid.UUID) -> WorkspaceMcpServer:
         """One of the servers ``scope`` covers, or a 404, as for a server of another workspace or organization."""
-        server = await self.db.get(WorkspaceMcpServer, server_id)
+        return self._require_in(scope, await self.db.get(WorkspaceMcpServer, server_id), server_id)
+
+    @staticmethod
+    def _require_in(scope: _Scope, server: WorkspaceMcpServer | None, server_id: uuid.UUID) -> WorkspaceMcpServer:
+        """Refuse a server ``scope`` does not cover. Asked again of a row once locked, which a promotion may have moved.
+
+        Raises:
+            McpServerIsOrganizationsError: a workspace's caller named its organization's server.
+            WorkspaceMcpServerNotFoundError: the server is another workspace's or organization's, or gone.
+        """
         if (
             server is not None
             and scope.workspace_id is not None
@@ -1586,14 +1642,21 @@ class WorkspaceMcpServerService:
         """A server the workspace reaches, its own or its organization's, as the workspace sees it.
 
         An organization's server turned off for the workspace is a 404 unless ``all_states``, for the workspace's
-        admins, who may turn it back on.
+        admins, who may turn it back on. The old id of a copy folded into an organization's server names that
+        server in the copy's workspace.
         """
         organization_id = await WorkspaceRepository(self.db).get_organization_id(workspace_id)
-        server = (
-            None
-            if organization_id is None
-            else await WorkspaceMcpServerRepository(self.db).find_reached(server_id, workspace_id, organization_id)
-        )
+        server = None
+        if organization_id is not None:
+            servers = WorkspaceMcpServerRepository(self.db)
+            server = await servers.find_reached(server_id, workspace_id, organization_id)
+            if server is None:
+                # The old id of a copy folded into an organization's server names that server in its workspace.
+                folded_into = (await McpServerAliasRepository(self.db).targets(workspace_id, [server_id])).get(
+                    server_id
+                )
+                if folded_into is not None:
+                    server = await servers.find_reached(folded_into, workspace_id, organization_id)
         # The list's own rule for what the workspace sees of it.
         views = (
             []
@@ -1650,6 +1713,11 @@ class WorkspaceMcpServerService:
             server.oauth_client = None
             McpConnectionService.unpin_client(server)
 
+    async def _read_again(self, server: WorkspaceMcpServer) -> bool:
+        """Read ``server`` as stored now, locked until the caller commits; false once it is gone, as a fold deletes
+        a workspace's copy."""
+        return await WorkspaceMcpServerRepository(self.db).find(server.id, lock=True) is not None
+
     async def _record_check(
         self, server: WorkspaceMcpServer, *, required: bool = False, check_token: str | None = None
     ) -> bool:
@@ -1683,7 +1751,8 @@ class WorkspaceMcpServerService:
                 raise McpCheckSignInRequiredError
             problem = await McpConnectionService.sign_in_problem(server.url)
             if problem is None:
-                await self.db.refresh(server)
+                await self._read_again(server)
+                await self.db.commit()
                 return True
             check = ServerCheck(tool_names=[], failure=problem)
         else:
@@ -1708,7 +1777,11 @@ class WorkspaceMcpServerService:
             except McpCapacityUnavailable:
                 logger.info("MCP server check skipped server_id=%s reason=capacity", server.id)
                 return False
-        await self.db.refresh(server, with_for_update=True)
+        if not await self._read_again(server):
+            # Folded or deleted while the check waited: there is no row left to record it on.
+            await self.db.commit()
+            logger.info("MCP server check dropped server_id=%s reason=gone", server.id)
+            return True
         account_now = None if per_user else await self._tokens.shared_generation(server.id)
         if (
             server.url,
@@ -1912,24 +1985,19 @@ class WorkspaceMcpServerService:
             still_manages = await authorization.has_workspace_management_access(
                 self.db, user=user, workspace=workspace, organizations=self.organizations
             )
+            reaching = [scope.workspace_id]
         else:
-            membership = await self.organizations.members.get_active_by_organization_and_user(organization_id, user.id)
-            still_manages = membership is not None and membership.role in MANAGEMENT_ROLES
+            # Every workspace reaches an organization's server, and each is locked as a member's request locks
+            # it: that request is stored first and answered here, or waits and finds the server. Before any
+            # copy is, in the order a grant's write takes a workspace and then its server.
+            reaching = await workspaces.lock_in_organization(organization_id)
+            still_manages = await self.organizations.members.active_role(organization_id, user.id) in MANAGEMENT_ROLES
         # Asked again under the locks: a removal from the organization that held them has committed by now.
         if not still_manages:
             raise NotAuthorizedError
-        await self._refuse_taken_name(scope, request.name, except_id=None)
-
-        owner = (
-            WorkspaceMcpServer.workspace_id == scope.workspace_id
-            if scope.workspace_id is not None
-            else (WorkspaceMcpServer.organization_id == organization_id) & WorkspaceMcpServer.workspace_id.is_(None)
-        )
-        count = (await self.db.execute(select(func.count()).select_from(WorkspaceMcpServer).where(owner))).scalar_one()
-        if count >= MAX_MCP_SERVERS_PER_WORKSPACE:
-            raise WorkspaceMcpServerLimitReachedError(
-                scope.workspace_id or organization_id, MAX_MCP_SERVERS_PER_WORKSPACE
-            )
+        folding = await self._copies_to_fold(scope, request.url, request.fold_server_ids, enabled=request.enabled)
+        await self._refuse_taken_name(scope, request.name, except_ids=[copy.id for copy in folding])
+        await self._refuse_full(scope)
 
         server = WorkspaceMcpServer(
             organization_id=organization_id,
@@ -1960,16 +2028,16 @@ class WorkspaceMcpServerService:
                 raise McpServerNameTakenError(request.name) from None
             raise WorkspaceMcpServerAlreadyExistsError(workspace_id, request.name) from None
 
-        if self.requests is not None and scope.workspace_id is not None:
-            workspace = await workspaces.get(scope.workspace_id)
-            await self.requests.server_added(
-                workspace_id=scope.workspace_id,
-                workspace_name=workspace.name if workspace is not None else "your workspace",
-                server_id=server.id,
-                url=server.url,
-                added_by=user.id,
-            )
+        folded = await self._fold().fold(server, folding) if folding else None
+        # Read before the requests are answered: a failed read of whom to mail rolls the session back once the
+        # answers have committed, and that expires every row it had loaded.
+        user_id, email = user.id, user.email
+        await self._answer_requests(server, reaching, added_by=user_id)
         await self.db.commit()
+        # Sent at the commit, before anything that can fail: the rows they were read from are gone.
+        if folded is not None:
+            McpConnectionService.revoke_in_background(folded.revocations, unread=folded.unread)
+        await self.db.refresh(server)
         await AttachedMcpServerIndex.refresh_after_write()
         # After the commit, so a server that fails its check is still stored:
         # it may be registered before it is up, and `health` says what failed.
@@ -1978,10 +2046,14 @@ class WorkspaceMcpServerService:
             await growth.record_action(
                 background_tasks=background_tasks,
                 action=GrowthAction.MCP_SERVER_CREATED,
-                user_id=user.id,
-                email=user.email,
+                user_id=user_id,
+                email=email,
                 organization_id=organization_id,
             )
+        if scope.workspace_id is not None and await WorkspaceMcpServerRepository(self.db).find(server.id) is None:
+            # Folded into an organization's server while its check ran: its id names that one in the workspace now,
+            # and the create, which committed, still answers.
+            return await self.get_server(user=user, workspace_id=scope.workspace_id, server_id=server.id)
         return await self._public(server)
 
     async def update_server(
@@ -2003,8 +2075,9 @@ class WorkspaceMcpServerService:
             # takes the two, which then cascades to the server.
             await OrganizationRepository(self.db).lock_settings(server.organization_id)
         await self.db.refresh(server, with_for_update=True)
+        self._require_in(scope, server, server_id)
         if "name" in fields and fields["name"] != server.name:
-            await self._refuse_taken_name(scope, fields["name"], except_id=server.id)
+            await self._refuse_taken_name(scope, fields["name"], except_ids=[server.id])
 
         new_token = fields.pop("authorization_token", _UNSET)
         new_client_id = fields.pop("oauth_client_id", _UNSET)
@@ -2114,7 +2187,7 @@ class WorkspaceMcpServerService:
             await self.db.refresh(server)
         return await self._public(server)
 
-    async def _refuse_taken_name(self, scope: _Scope, name: str, *, except_id: uuid.UUID | None) -> None:
+    async def _refuse_taken_name(self, scope: _Scope, name: str, *, except_ids: Collection[uuid.UUID] = ()) -> None:
         """Refuse a server ``name`` that would put two servers of one name in a workspace of the organization.
 
         The tool loop labels tools by server name, so one workspace must never reach two of one name: a
@@ -2128,8 +2201,197 @@ class WorkspaceMcpServerService:
         await OrganizationRepository(self.db).lock_settings(scope.organization_id)
         servers = WorkspaceMcpServerRepository(self.db)
         of_workspace = scope.workspace_id is not None
-        if await servers.name_in_use(scope.organization_id, name, of_workspace=of_workspace, except_id=except_id):
+        if await servers.name_in_use(scope.organization_id, name, of_workspace=of_workspace, except_ids=except_ids):
             raise McpServerNameTakenError(name)
+
+    async def _refuse_full(self, scope: _Scope) -> None:
+        """Refuse a server more than ``scope`` may hold. The caller holds the lock that makes the count exact.
+
+        Raises:
+            WorkspaceMcpServerLimitReachedError: it holds ``MAX_MCP_SERVERS_PER_WORKSPACE`` already.
+        """
+        count = await WorkspaceMcpServerRepository(self.db).count_owned(scope.organization_id, scope.workspace_id)
+        if count >= MAX_MCP_SERVERS_PER_WORKSPACE:
+            raise WorkspaceMcpServerLimitReachedError(
+                scope.workspace_id or scope.organization_id, MAX_MCP_SERVERS_PER_WORKSPACE
+            )
+
+    async def _answer_requests(
+        self, server: WorkspaceMcpServer, workspace_ids: Collection[uuid.UUID], *, added_by: uuid.UUID
+    ) -> None:
+        """Approve the members' requests ``server`` answers in those of these workspaces that reach it.
+
+        The approvals' block commits the server, its fold and the approvals together.
+        """
+        if self.requests is None:
+            return
+        if server.workspace_id is None:
+            overrides = {
+                override.workspace_id: override
+                for override in await WorkspaceMcpServerOverrideRepository(self.db).for_server(server.id)
+            }
+            workspace_ids = [
+                workspace_id
+                for workspace_id in workspace_ids
+                if McpServerInWorkspace(server, overrides.get(workspace_id)).visible
+            ]
+        reaching = await WorkspaceRepository(self.db).get_by_organization_and_ids(server.organization_id, workspace_ids)
+        await self.requests.server_added(
+            workspaces={workspace.id: workspace.name for workspace in reaching},
+            server_id=server.id,
+            url=server.url,
+            added_by=added_by,
+        )
+
+    def _fold(self) -> McpServerFold:
+        if self.fold is None:
+            raise RuntimeError("WorkspaceMcpServerService was built without the fold a server's copies need")
+        return self.fold
+
+    async def _copies_to_fold(
+        self,
+        scope: _Scope,
+        url: str,
+        server_ids: Sequence[uuid.UUID],
+        *,
+        enabled: bool,
+        promoted: WorkspaceMcpServer | None = None,
+    ) -> list[WorkspaceMcpServer]:
+        """The workspaces' copies at ``url`` these ids name, locked, for an organization's server to take the place of.
+
+        Oldest first, the order the fold step weighs them in, and matched at ``url`` once locked. The caller
+        holds the organization's workspaces. ``enabled`` is whether the organization's server is on.
+
+        Raises:
+            McpServerFoldError: a workspace's own server cannot take others' place, two copies of one workspace
+                were named, a copy in ``promoted``'s own workspace, or a copy that is on while the organization's
+                server is off, which no workspace setting can turn back on.
+            WorkspaceMcpServerNotFoundError: an id names no workspace server of the organization at that URL.
+        """
+        if not server_ids:
+            return []
+        if scope.workspace_id is not None:
+            raise McpServerFoldError("Only an organization's server takes the place of workspaces' own copies")
+        folding = await self._fold().copies(
+            scope.organization_id,
+            url,
+            except_id=promoted.id if promoted is not None else None,
+            ids=set(server_ids),
+            lock=True,
+        )
+        found = {copy.id for copy in folding}
+        missing = [server_id for server_id in server_ids if server_id not in found]
+        if missing:
+            raise WorkspaceMcpServerNotFoundError(missing[0])
+        workspace_ids = [copy.workspace_id for copy in folding]
+        if len(set(workspace_ids)) < len(workspace_ids):
+            # A workspace holds one set of settings on the organization's server, so two copies would collide.
+            raise McpServerFoldError("Fold at most one server of each workspace")
+        if promoted is not None and promoted.workspace_id in workspace_ids:
+            raise McpServerFoldError("A server in the promoted server's own workspace stays that workspace's own")
+        if not enabled and any(copy.enabled for copy in folding):
+            raise McpServerFoldError(
+                "An organization server that is off cannot take the place of a server that is on: turn it on first"
+            )
+        return folding
+
+    async def fold_candidates(
+        self,
+        *,
+        user: User,
+        url: str | None = None,
+        credential_mode: McpCredentialMode = McpCredentialMode.SHARED,
+        with_token: bool = False,
+        server_id: uuid.UUID | None = None,
+    ) -> McpServerFoldCandidates:
+        """The organization's workspaces' own servers at a URL, and what folding each would do.
+
+        Into a new server at ``url`` of ``credential_mode``, with a token of its own when ``with_token``, or with
+        ``server_id`` into that server, matched at its own URL, which is never sent here. A promoted server's own
+        workspace keeps its other servers, so none of them is listed. Organization owners and admins only.
+        """
+        scope = await self._managed(user, None)
+        target = await self.db.get(WorkspaceMcpServer, server_id) if server_id is not None else None
+        if server_id is not None and (target is None or target.organization_id != scope.organization_id):
+            raise WorkspaceMcpServerNotFoundError(server_id)
+        if target is not None:
+            url = target.url
+        if url is None:
+            raise McpServerFoldError("Name the URL of the server to add, or the server to promote")
+        fold = self._fold()
+        copies = await fold.copies(scope.organization_id, url, except_id=server_id)
+        if target is not None and target.workspace_id is not None:
+            copies = [copy for copy in copies if copy.workspace_id != target.workspace_id]
+        workspaces = await WorkspaceRepository(self.db).get_by_organization_and_ids(
+            scope.organization_id, {copy.workspace_id for copy in copies if copy.workspace_id is not None}
+        )
+        weighed = await fold.weigh(
+            copies,
+            target=target,
+            credential_mode=McpCredentialMode(target.credential_mode) if target is not None else credential_mode,
+            with_token=with_token,
+            workspace_names={workspace.id: workspace.name for workspace in workspaces},
+        )
+        return McpServerFoldCandidates(data=weighed)
+
+    async def promote(
+        self,
+        *,
+        user: User,
+        workspace_id: uuid.UUID,
+        server_id: uuid.UUID,
+        request: McpServerPromote,
+    ) -> WorkspaceMcpServerPublic:
+        """Make a workspace's own server its organization's, in place, folding other workspaces' copies into it.
+
+        It keeps its id, its OAuth client and every sign-in to it, which then work in every workspace that
+        reaches it; its grants stay its workspace's. A member's request for it in any workspace that now reaches
+        it is approved. Organization owners and admins only.
+
+        Raises:
+            McpServerNameTakenError: another server of the organization has its name.
+            WorkspaceMcpServerLimitReachedError: the organization holds as many servers as it may.
+        """
+        scope = await self._managed(user, None)
+        resolved_workspace_id = await self._visible_workspace_id(user, workspace_id)
+        await OrganizationRepository(self.db).lock_settings(scope.organization_id)
+        # Every workspace gains the server, so each is locked as a new organization server locks them.
+        reaching = await WorkspaceRepository(self.db).lock_in_organization(scope.organization_id)
+        # Asked again under the locks, as a create asks it: a demotion that held them has committed by now.
+        if await self.organizations.members.active_role(scope.organization_id, user.id) not in MANAGEMENT_ROLES:
+            raise NotAuthorizedError
+        server = await self.db.get(WorkspaceMcpServer, server_id, with_for_update=True)
+        if (
+            server is None
+            or server.workspace_id != resolved_workspace_id
+            or server.organization_id != scope.organization_id
+        ):
+            raise WorkspaceMcpServerNotFoundError(server_id)
+        organization_scope = _Scope(scope.organization_id, None)
+        folding = await self._copies_to_fold(
+            organization_scope, server.url, request.fold_server_ids, enabled=server.enabled, promoted=server
+        )
+        await self._refuse_taken_name(
+            organization_scope, server.name, except_ids=[server.id, *(copy.id for copy in folding)]
+        )
+        await self._refuse_full(organization_scope)
+        server.workspace_id = None
+        await self.db.flush()
+        # Its id names it in its workspace as a folded copy's old id does, so a request there that skipped it while
+        # it was off still skips it, where any other organization server off for the workspace names nothing.
+        await McpServerAliasRepository(self.db).add(server.id, workspace_id=resolved_workspace_id, server=server)
+        folded = await self._fold().fold(server, folding) if folding else None
+        # Nothing loaded is read again until the refresh below: a failed read of whom to mail rolls the session
+        # back once the answers have committed, which expires every row it had loaded.
+        await self._answer_requests(server, reaching, added_by=user.id)
+        await self.db.commit()
+        if folded is not None:
+            McpConnectionService.revoke_in_background(folded.revocations, unread=folded.unread)
+        # A server attached to every request now attaches in every workspace of the organization.
+        await AttachedMcpServerIndex.refresh_after_write()
+        logger.info("MCP server made its organization's server_id=%s folded=%d", server_id, len(folding))
+        await self.db.refresh(server)
+        return await self._public(server)
 
     def _key_service(self) -> ApiKeyService:
         if self.api_keys is None:
@@ -2484,6 +2746,7 @@ class WorkspaceMcpServerService:
         server = await self._server_in(scope, server_id)
         # The server before its connections, in the order a sign-in's completion takes them.
         await self.db.refresh(server, with_for_update=True)
+        self._require_in(scope, server, server_id)
         revocations, unread = await self._revocations(server)
         # Staged here as well as cascaded by the foreign keys, so the tokens go where a database enforces none.
         connections = McpUserConnectionRepository(self.db)
@@ -2721,9 +2984,17 @@ class WorkspaceMcpServerService:
         """
         scope = await self._managed(user, workspace_id)
         server = await self._server_in(scope, server_id)
-        await self._connection_service().disconnect_shared(server_id=server.id)
+        await self._connection_service().disconnect_shared(
+            server_id=server.id, still_managed=lambda row: self._require_in(scope, row, server_id)
+        )
         await self.db.refresh(server)
+        # Made the organization's while the account was revoked upstream, or while the server was checked: answered
+        # as the workspace sees an organization's server, its URL masked, and left for its admins to check.
+        if scope.workspace_id is not None and server.workspace_id != scope.workspace_id:
+            return await self.get_server(user=user, workspace_id=scope.workspace_id, server_id=server_id)
         await self._record_check(server)
+        if scope.workspace_id is not None and server.workspace_id != scope.workspace_id:
+            return await self.get_server(user=user, workspace_id=scope.workspace_id, server_id=server_id)
         return await self._public(server)
 
     async def _record_after_sign_in(self, done: CompletedConnection) -> None:
@@ -2954,7 +3225,9 @@ class WorkspaceMcpServerService:
         """
         scope = await self._managed(user, workspace_id)
         server = await self._server_in(scope, server_id)
-        await self._connection_service().disconnect(server_id=server.id, user_id=user_id)
+        await self._connection_service().disconnect(
+            server_id=server.id, user_id=user_id, still_managed=lambda row: self._require_in(scope, row, server_id)
+        )
 
 
 __all__ = [
@@ -2976,6 +3249,8 @@ __all__ = [
     "WorkspaceMcpServerCheckRequest",
     "WorkspaceMcpServerCreate",
     "WorkspaceMcpServerSettingsUpdate",
+    "McpServerFoldCandidates",
+    "McpServerPromote",
     "McpServerWorkspaceSettings",
     "WorkspaceMcpServerHealth",
     "WorkspaceMcpServerPublic",

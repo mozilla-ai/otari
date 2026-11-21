@@ -4263,6 +4263,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/me/mcp-servers/same-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List Organization Mcp Server Copies
+         * @description The workspaces' own servers at a URL, which a new organization server can take the place of.
+         *
+         *     Organization owners and admins only. A lookup that changes nothing, sent as a body so the URL, which can carry
+         *     credentials, stays out of the request line. For each one: how many people signed in to it keep their sign-in,
+         *     how many must sign in again, how many keep working through the sign-in they already hold on the organization's
+         *     server, and whether a token or shared account of its own would be replaced. Fold them by naming them in
+         *     `fold_server_ids` when adding the server, or when promoting one.
+         */
+        post: operations["mcp-servers-list_organization_mcp_server_copies"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/mcp-servers/{server_id}": {
         parameters: {
             query?: never;
@@ -9157,6 +9183,29 @@ export interface paths {
          *     the server's own again. The organization's limit for the workspace stays, and caps what is set here.
          */
         patch: operations["mcp-servers-set_workspace_mcp_server_override"];
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/promote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Promote Workspace Mcp Server
+         * @description Make this workspace's server its organization's, for every workspace. Organization owners and admins only.
+         *
+         *     It keeps its id, its settings and every sign-in to it, and its grants stay this workspace's. Other workspaces'
+         *     servers at the same URL named in `fold_server_ids` are folded into it.
+         */
+        post: operations["mcp-servers-promote_workspace_mcp_server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}/shared-account": {
@@ -16788,6 +16837,99 @@ export interface components {
             data: components["schemas"]["McpServerConnectionPublic"][];
         };
         /**
+         * McpServerFoldCandidate
+         * @description A workspace's own copy of a server, and what folding it into the organization's would do.
+         */
+        McpServerFoldCandidate: {
+            credential_mode: components["schemas"]["McpCredentialMode"];
+            /**
+             * Enabled
+             * @description Whether it is on. An organization server that is off cannot take the place of one that is on
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Keep Sign In
+             * @description Of those, how many keep their sign-in on the organization's server
+             */
+            keep_sign_in: number;
+            /** Name */
+            name: string;
+            /**
+             * Replaces Shared Credential
+             * @description It holds a token or a shared account, which the organization server's credential replaces
+             */
+            replaces_shared_credential: boolean;
+            /**
+             * Same Credential
+             * @description It signs in the way the organization's server does and holds no token or shared account of its own, so folding it changes no account its calls use. A fold step ticks these by default, unless someone would have to sign in again or go on through another sign-in
+             */
+            same_credential: boolean;
+            /**
+             * Server Id
+             * Format: uuid
+             */
+            server_id: string;
+            /**
+             * Sign In Again
+             * @description Of those, how many must sign in again
+             */
+            sign_in_again: number;
+            /**
+             * Signed In
+             * @description People signed in to it with their own account
+             */
+            signed_in: number;
+            /**
+             * Switch Account
+             * @description Of those, how many already hold a sign-in on the organization's server and go on through it, which may be another account upstream than the one they used here
+             * @default 0
+             */
+            switch_account: number;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /** Workspace Name */
+            workspace_name: string;
+        };
+        /**
+         * McpServerFoldCandidates
+         * @description The workspaces' own servers an organization's server could take the place of, and what that would do.
+         */
+        McpServerFoldCandidates: {
+            /** Data */
+            data: components["schemas"]["McpServerFoldCandidate"][];
+        };
+        /**
+         * McpServerFoldLookup
+         * @description Which workspaces' copies to list: those of a new server at ``url``, or of the server ``server_id`` names.
+         */
+        McpServerFoldLookup: {
+            /**
+             * @description How the new server signs in, when no server_id is given
+             * @default shared
+             */
+            credential_mode: components["schemas"]["McpCredentialMode"];
+            /**
+             * Server Id
+             * @description The server about to be made the organization's, whose own URL is matched, if any
+             */
+            server_id?: string | null;
+            /**
+             * Url
+             * @description The URL of the server to add; not sent with server_id
+             */
+            url?: string | null;
+            /**
+             * With Token
+             * @description The new server is added with a token of its own, when no server_id is given
+             * @default false
+             */
+            with_token: boolean;
+        };
+        /**
          * McpServerLeftOut
          * @description A server the key's access list grants and that is still not listed, and why.
          */
@@ -16810,6 +16952,17 @@ export interface components {
              * @constant
              */
             reason: "key_has_no_user";
+        };
+        /**
+         * McpServerPromote
+         * @description Making a workspace's own server its organization's.
+         */
+        McpServerPromote: {
+            /**
+             * Fold Server Ids
+             * @description Other workspaces' own servers at the same URL to fold into it, as for a new organization server
+             */
+            fold_server_ids?: string[];
         };
         /**
          * McpServerRequestCreate
@@ -24533,6 +24686,11 @@ export interface components {
              * @description What every key of the workspace may call on this server: tool names, '*' for every tool, or 'prefix*', or '@read' for read_tools; [] denies everyone. A grant for a key or its owner overrides it
              */
             everyone_tools?: string[];
+            /**
+             * Fold Server Ids
+             * @description On an organization's server: workspaces' own servers at the same URL to fold into it. Each one's rules become its workspace's settings on the new server, its id keeps working there, and it is deleted. A personal sign-in is kept where the new server is personal at its very URL and can renew it: the sign-in holds a refresh token and was made through the new server's client. The rest end
+             */
+            fold_server_ids?: string[];
             /**
              * Name
              * @description Label for the server, unique within the workspace
@@ -32604,6 +32762,39 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-list_organization_mcp_server_copies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpServerFoldLookup"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerFoldCandidates"];
+                };
             };
             /** @description Validation Error */
             422: {
@@ -41038,6 +41229,42 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "mcp-servers-promote_workspace_mcp_server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpServerPromote"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerPublic"];
+                };
             };
             /** @description Validation Error */
             422: {

@@ -197,6 +197,7 @@ describe("describeRefusal", () => {
   it("carries the gateway's reason", () => {
     expect(describeRefusal("A server named 'x' already exists")).toEqual({
       tone: "danger",
+      isStored: false,
       label: "Not added",
       detail: "A server named 'x' already exists",
     })

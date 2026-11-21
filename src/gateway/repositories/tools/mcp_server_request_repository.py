@@ -9,6 +9,7 @@ from sqlalchemy import case, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.endpoint_urls import bare_url, url_path
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tools import McpServerRequest, McpServerRequestStatus
 from gateway.repositories.base_repository import BaseRepository
@@ -197,6 +198,27 @@ class McpServerRequestRepository(BaseRepository[McpServerRequest, Never, Never])
         )
         return list(rows.scalars().all())
 
+    async def pending_at_url(self, workspace_ids: Collection[uuid.UUID], url: str) -> list[McpServerRequest]:
+        """These workspaces' pending requests for a server at ``url``, locked, oldest first.
+
+        Matched as a stored server's URL is (:func:`~gateway.core.endpoint_urls.bare_url`): SQL narrows to the rows
+        holding the bare path, which every match does, and the comparison is made here.
+        """
+        if not workspace_ids:
+            return []
+        bare = bare_url(url)
+        rows = await self.db.execute(
+            select(McpServerRequest)
+            .where(
+                McpServerRequest.workspace_id.in_(list(workspace_ids)),
+                McpServerRequest.status == _PENDING,
+                McpServerRequest.url.contains(url_path(bare), autoescape=True),
+            )
+            .order_by(McpServerRequest.created_at, McpServerRequest.id)
+            .with_for_update()
+        )
+        return [row for row in rows.scalars().all() if bare_url(row.url) == bare]
+
     async def for_requester(
         self,
         workspace_id: uuid.UUID,
@@ -298,6 +320,41 @@ class McpServerRequestRepository(BaseRepository[McpServerRequest, Never, Never])
             statement = statement.where(McpServerRequest.requester_id == requester_id)
         await self.db.execute(
             statement.values(acknowledged_at=at, updated_at=at).execution_options(synchronize_session=False)
+        )
+
+    async def acknowledge_declined_at_url(
+        self, workspace_ids: Collection[uuid.UUID], url: str, *, at: datetime
+    ) -> None:
+        """Stop showing these workspaces' declined requests for a server at ``url``, matched as
+        :meth:`pending_at_url` matches it. The rows stay."""
+        if not workspace_ids:
+            return
+        bare = bare_url(url)
+        found = await self.db.execute(
+            select(McpServerRequest.id, McpServerRequest.url).where(
+                McpServerRequest.workspace_id.in_(list(workspace_ids)),
+                McpServerRequest.status == McpServerRequestStatus.DECLINED,
+                McpServerRequest.acknowledged_at.is_(None),
+                McpServerRequest.url.contains(url_path(bare), autoescape=True),
+            )
+        )
+        ids = [row.id for row in found if bare_url(row.url) == bare]
+        if not ids:
+            return
+        await self.db.execute(
+            update(McpServerRequest)
+            .where(McpServerRequest.id.in_(ids))
+            .values(acknowledged_at=at, updated_at=at)
+            .execution_options(synchronize_session=False)
+        )
+
+    async def repoint(self, from_server_id: uuid.UUID, to_server_id: uuid.UUID) -> None:
+        """Stage every request that names one server naming another instead, so its history still links somewhere."""
+        await self.db.execute(
+            update(McpServerRequest)
+            .where(McpServerRequest.server_id == from_server_id)
+            .values(server_id=to_server_id)
+            .execution_options(synchronize_session=False)
         )
 
     async def save(self) -> None:
