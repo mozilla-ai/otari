@@ -10,6 +10,7 @@ import httpx2
 import pytest
 from any_llm import AnyLLM, LLMProvider
 
+from gateway.adapters.provider_file_adapter import AnyLlmProviderFiles, _AnyLlmFileSession
 from gateway.core.config import GatewayConfig
 from gateway.core.provider_params import TENANT_ENDPOINT_HTTPX2_PROVIDERS, TENANT_ENDPOINT_PROVIDERS
 from gateway.models.provider_keys import OrgProviderKey
@@ -64,6 +65,25 @@ async def test_an_organization_key_with_an_api_base_dials_through_the_pinned_cli
 
     assert kwargs["client_args"]["http_client"] is owned_endpoint_sdk_client(LLMProvider.OPENAI)
     assert kwargs["client_args"]["timeout"] == 5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", [LLMProvider.OPENAI, LLMProvider.ANTHROPIC])
+async def test_a_file_session_on_an_organization_key_dials_through_the_pinned_client(provider: LLMProvider) -> None:
+    store._org_cache[(WORKSPACE_ID, provider.value)] = {"api_base": "https://proxy.example/v1", "api_key": "sk-1"}
+    kwargs = provider_kwargs.get_provider_kwargs(GatewayConfig(), provider, workspace_id=WORKSPACE_ID)
+    pinned = owned_endpoint_sdk_client(provider)
+
+    session = AnyLlmProviderFiles().open_session(
+        provider=provider, instance=provider.value, credential=provider_kwargs.effective_credential(provider, kwargs)
+    )
+    assert isinstance(session, _AnyLlmFileSession)
+    clients = _sdk_clients(session._llm)
+    await session.aclose()
+
+    assert clients
+    assert all(client is pinned for client in clients)
+    assert not pinned.is_closed
 
 
 @pytest.mark.asyncio
