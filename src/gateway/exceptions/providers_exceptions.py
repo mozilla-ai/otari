@@ -1,5 +1,7 @@
 """Errors the provider-key and hosted-provider surfaces raise, and the HTTP status each carries."""
 
+from collections.abc import Sequence
+
 from gateway.exceptions import (
     TenancyConflictError,
     TenancyError,
@@ -98,10 +100,10 @@ class OrgProviderKeyCredentialRequiredError(TenancyValidationError):
     someone who holds the credential.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, credentials: Sequence[str]) -> None:
+        named = " and ".join(filter(None, (", ".join(credentials[:-1]), credentials[-1])))
         super().__init__(
-            "Changing a key's API base URL sends its credentials to the new host: "
-            "send api_key, the endpoint credential, and any hidden client_args credential, "
+            f"Changing a key's API base URL sends its credentials to the new host: send {named} "
             "again in the same request"
         )
 

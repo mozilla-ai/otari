@@ -483,6 +483,19 @@ def _endpoint_secret_survives(stored: str | None, submitted: EndpointAuthRequest
     return submitted is not None and not submitted.secret
 
 
+def _credentials_that_follow(*, api_key: bool, client_args: bool, endpoint: bool) -> list[str]:
+    """The credentials a key would carry to a new base URL, named for the caller that must resend them."""
+    return [
+        name
+        for name, follows in (
+            ("api_key", api_key),
+            ("any hidden client_args credential", client_args),
+            ("the endpoint credential", endpoint),
+        )
+        if follows
+    ]
+
+
 def _gate_endpoint_auth(auth: EndpointAuth, *, api_base: str | None, stored: EndpointAuth) -> None:
     """Refuse an endpoint credential a key may not carry, or a rotation date it may not take.
 
@@ -796,12 +809,13 @@ class OrgProviderKeyService:
                     request.endpoint_auth,
                     sent="endpoint_auth" in update_data,
                 )
-                if (
-                    (key.encrypted_api_key is not None and "api_key" not in update_data)
-                    or stored_args_follow
-                    or endpoint_secret_follows
-                ):
-                    raise OrgProviderKeyCredentialRequiredError
+                following = _credentials_that_follow(
+                    api_key=key.encrypted_api_key is not None and "api_key" not in update_data,
+                    client_args=stored_args_follow,
+                    endpoint=endpoint_secret_follows,
+                )
+                if following:
+                    raise OrgProviderKeyCredentialRequiredError(following)
         if "client_args" in update_data:
             # ``from_row`` masks a credential-shaped entry, so an editor
             # resubmitting the whole object sends the mask for the entries it was

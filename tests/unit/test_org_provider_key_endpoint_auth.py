@@ -446,8 +446,16 @@ async def test_forgetting_an_organization_s_secrets_clears_the_endpoint_credenti
     assert [name for name in cleared if name not in assignments] == []
 
 
-def test_the_refusal_for_a_moved_address_names_every_credential_to_resend() -> None:
-    assert "endpoint credential" in str(OrgProviderKeyCredentialRequiredError())
+def test_the_refusal_for_a_moved_address_names_only_what_would_follow() -> None:
+    refusal = str(OrgProviderKeyCredentialRequiredError(["api_key", "the endpoint credential"]))
+
+    assert "send api_key and the endpoint credential again" in refusal
+
+
+def test_the_refusal_names_one_credential_without_a_conjunction() -> None:
+    assert "send the endpoint credential again" in str(
+        OrgProviderKeyCredentialRequiredError(["the endpoint credential"])
+    )
 
 
 def test_the_public_shape_reports_a_credential_against_the_clock_it_is_given() -> None:
@@ -468,3 +476,21 @@ def test_the_public_shape_reports_a_credential_against_the_clock_it_is_given() -
 def test_a_public_name_this_change_adds_is_exported(name: str) -> None:
     modules = (providers_exceptions, providers_schemas)
     assert [module.__name__ for module in modules if name in module.__all__]
+
+
+def test_only_the_credentials_that_would_follow_are_named() -> None:
+    assert store._credentials_that_follow(api_key=False, client_args=False, endpoint=True) == [
+        "the endpoint credential"
+    ]
+
+
+def test_a_key_carrying_nothing_across_names_nothing() -> None:
+    assert store._credentials_that_follow(api_key=False, client_args=False, endpoint=False) == []
+
+
+def test_every_credential_that_follows_is_named_in_the_order_a_request_sends_them() -> None:
+    assert store._credentials_that_follow(api_key=True, client_args=True, endpoint=True) == [
+        "api_key",
+        "any hidden client_args credential",
+        "the endpoint credential",
+    ]
