@@ -30,7 +30,7 @@ _USAGE = {
     "completion_tokens": 7,
     "total_tokens": 18,
     "prompt_tokens_details": {"cached_tokens": 3},
-    "completion_tokens_details": {"reasoning_tokens": 2},
+    "completion_tokens_details": {"reasoning_tokens": 2, "image_tokens": 4},
 }
 
 
@@ -304,6 +304,7 @@ async def test_completion_translates_to_a_response() -> None:
     assert result.usage.total_tokens == 18
     assert result.usage.input_tokens_details.cached_tokens == 3
     assert result.usage.output_tokens_details.reasoning_tokens == 2
+    assert getattr(result.usage.output_tokens_details, "image_tokens", None) == 4
 
 
 @pytest.mark.asyncio

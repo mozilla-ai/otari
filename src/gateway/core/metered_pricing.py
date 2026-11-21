@@ -59,9 +59,10 @@ from gateway.core.usage import (
     cache_tokens_in_prompt_of,
     cache_write_1h_tokens_of,
     cache_write_tokens_of,
+    image_output_tokens_of,
 )
 from gateway.log_config import logger
-from gateway.types.models_dev import ModelsDevPricing, ModelsDevUnitPrice
+from gateway.types.models_dev import ModelsDevPricing, ModelsDevUnitPrice, parse_pricing
 from gateway.types.price_unit import PRICE_PER, PriceUnit, current_unit_name, models_dev_unit
 
 RATE_FIELDS: tuple[str, ...] = (
@@ -115,6 +116,8 @@ class BillableUsage:
     cache_read_tokens: int
     cache_write_tokens: int
     cache_write_1h_tokens: int
+    image_output_tokens: int = 0
+    """The completion tokens that are image, which bill at the rate's image output price where it has one."""
 
 
 @dataclass(frozen=True)
@@ -127,6 +130,8 @@ class Rates:
     cache_write_price_per_million: Decimal | None
     cache_write_1h_price_per_million: Decimal | None
     """``None`` when a 1h write bills at ``cache_write_price_per_million`` like any other write."""
+    image_output_price_per_million: Decimal | None = None
+    """``None`` when image output tokens bill at ``output_price_per_million`` like the rest."""
 
 
 def to_decimal(value: typing.Any) -> Decimal | None:
@@ -214,6 +219,7 @@ def billable_usage(
     cache_read_tokens: int = 0,
     cache_write_tokens: int = 0,
     cache_write_1h_tokens: int = 0,
+    image_output_tokens: int = 0,
 ) -> BillableUsage:
     """Normalize reported token counts into the billable meters.
 
@@ -235,6 +241,7 @@ def billable_usage(
     cache_read = max(cache_read_tokens, 0)
     cache_write = max(cache_write_tokens, 0)
     cache_write_1h = min(max(cache_write_1h_tokens, 0), cache_write)
+    image_output = min(max(image_output_tokens, 0), completion_tokens)
 
     if not cache_tokens_included:
         return BillableUsage(
@@ -243,6 +250,7 @@ def billable_usage(
             cache_read_tokens=cache_read,
             cache_write_tokens=cache_write,
             cache_write_1h_tokens=cache_write_1h,
+            image_output_tokens=image_output,
         )
 
     if cache_read + cache_write > prompt_tokens:
@@ -263,6 +271,7 @@ def billable_usage(
         cache_read_tokens=cache_read,
         cache_write_tokens=cache_write,
         cache_write_1h_tokens=cache_write_1h,
+        image_output_tokens=image_output,
     )
 
 
@@ -279,6 +288,7 @@ def billable_usage_of(usage: CompletionUsage) -> BillableUsage:
         cache_read_tokens=cache_read_tokens_of(usage),
         cache_write_tokens=cache_write_tokens_of(usage),
         cache_write_1h_tokens=cache_write_1h_tokens_of(usage),
+        image_output_tokens=image_output_tokens_of(usage),
         cache_tokens_included=cache_tokens_in_prompt_of(usage),
     )
 
@@ -388,7 +398,22 @@ def effective_rates(pricing: typing.Any, total_input_tokens: int) -> Rates:
         cache_write_1h_price_per_million=input_rate * CLAUDE_1H_CACHE_WRITE_INPUT_MULTIPLE
         if cache_write_rate and _is_claude(pricing)
         else None,
+        image_output_price_per_million=_image_output_rate(pricing),
     )
+
+
+def _image_output_rate(pricing: typing.Any) -> Decimal | None:
+    """The per-million price the rate's block gives image output in tokens, or ``None`` when it gives none.
+
+    The columns hold the text prices, so a model that draws images has its image
+    output price in the block alone.
+    """
+    document = getattr(pricing, "rates", None)
+    if not isinstance(document, typing.Mapping) or "image" not in document:
+        return None
+    price = slot_price(parse_pricing(document, path="rates")[0], "image", "output")
+    rate = None if price is None else unit_rate(price)
+    return rate.price if rate is not None and rate.unit == "token" else None
 
 
 def meter_cost(tokens: int | Decimal, rate: Decimal) -> Decimal:
@@ -641,6 +666,9 @@ def _price_meters(
         "cache_write_1h_tokens": usage.cache_write_1h_tokens,
         "completion_tokens": usage.completion_tokens,
     }
+    image_output_tokens = usage.image_output_tokens if rates.image_output_price_per_million is not None else 0
+    if image_output_tokens:
+        meters["image_output_tokens"] = image_output_tokens
     lines: list[ChargeLine] = []
     cost = Decimal(0)
 
@@ -652,7 +680,9 @@ def _price_meters(
             lines.append(_charge_line(meter, units, rate, amount))
 
     charge("input", fresh_input_tokens, rates.input_price_per_million)
-    charge("output", usage.completion_tokens, rates.output_price_per_million)
+    charge("output", usage.completion_tokens - image_output_tokens, rates.output_price_per_million)
+    if rates.image_output_price_per_million is not None:
+        charge("image_output", image_output_tokens, rates.image_output_price_per_million)
     if rates.cache_read_price_per_million is not None:
         charge("cache_read", usage.cache_read_tokens, rates.cache_read_price_per_million)
     if rates.cache_write_price_per_million is not None:
@@ -787,7 +817,9 @@ def estimate_metered_cost(
         candidate_rates.append(rates.cache_write_1h_price_per_million)
     per_input_token_rate = max(candidate_rates)
 
-    estimate = meter_cost(input_tokens, per_input_token_rate) + meter_cost(
-        output_tokens, rates.output_price_per_million
+    # Any output token may be an image one, so it is held at the dearer of the two output prices.
+    per_output_token_rate = max(
+        rate for rate in (rates.output_price_per_million, rates.image_output_price_per_million) if rate is not None
     )
+    estimate = meter_cost(input_tokens, per_input_token_rate) + meter_cost(output_tokens, per_output_token_rate)
     return quantize_cost(estimate)

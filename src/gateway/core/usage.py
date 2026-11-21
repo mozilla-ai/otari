@@ -122,6 +122,12 @@ class GatewayUsage(CompletionUsage):
         return cls(**fields)
 
 
+def image_output_tokens_of(usage: CompletionUsage) -> int:
+    """The image tokens among ``usage``'s completion tokens, as a model that draws images reports them."""
+    details = usage.completion_tokens_details
+    return max(int(getattr(details, "image_tokens", None) or 0), 0) if details is not None else 0
+
+
 def cache_read_tokens_of(usage: CompletionUsage) -> int:
     """Return the cache-read count carried by ``usage``.
 
