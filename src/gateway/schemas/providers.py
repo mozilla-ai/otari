@@ -1503,6 +1503,8 @@ __all__ = [
     "DeploymentProviderMigrationRequest",
     "DeploymentProviderMigrationReviewedRow",
     "DeploymentProviderMigrationRowPublic",
+    "EndpointAuthPublic",
+    "EndpointAuthRequest",
     "HostedAvailableModelsPublic",
     "HostedCatalogKeptGroupPublic",
     "HostedCatalogProviderRefreshPublic",

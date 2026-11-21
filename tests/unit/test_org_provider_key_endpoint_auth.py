@@ -7,12 +7,14 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
+from gateway.exceptions import providers_exceptions
 from gateway.exceptions.providers_exceptions import (
     OrgProviderKeyCredentialRequiredError,
     OrgProviderKeyEndpointAuthRefusedError,
 )
 from gateway.models.provider_keys import OrgProviderKey
 from gateway.repositories.tenancy.org_provider_key_repository import OrgProviderKeyRepository
+from gateway.schemas import providers as providers_schemas
 from gateway.schemas.providers import EndpointAuthRequest, OrgProviderKeyPublic
 from gateway.services import model_discovery_service
 from gateway.services.catalog._served import _read_engine_settings
@@ -426,3 +428,12 @@ def test_the_public_shape_reports_a_credential_against_the_clock_it_is_given() -
 
     assert public.endpoint_auth is not None
     assert public.endpoint_auth.state is EndpointAuthState.EXPIRED
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["OrgProviderKeyEndpointAuthRefusedError", "EndpointAuthRequest", "EndpointAuthPublic"],
+)
+def test_a_public_name_this_change_adds_is_exported(name: str) -> None:
+    modules = (providers_exceptions, providers_schemas)
+    assert [module.__name__ for module in modules if name in module.__all__]

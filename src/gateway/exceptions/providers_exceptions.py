@@ -523,6 +523,7 @@ __all__ = [
     "OrgProviderKeyClientArgsRefusedError",
     "OrgProviderKeyClientArgsUnreadableError",
     "OrgProviderKeyDisabledForWorkspaceError",
+    "OrgProviderKeyEndpointAuthRefusedError",
     "OrgProviderKeyNameRequiredError",
     "OrgProviderKeyNotArchivedError",
     "OrgProviderKeyNotFoundError",
