@@ -46,13 +46,13 @@ A model server on a private address is added by the gateway's operator as a [hos
 
 ### Add an endpoint credential
 
-An endpoint of your own often sits behind a CDN or an identity-aware proxy, such as Fastly, Cloudflare Access or Google IAP, that wants a credential of its own before the request reaches your model server. Give the key one as well as its API key: choose **Static header**, enter the **Header name** the proxy expects, such as `Fastly-Key`, paste its value, and enter the date it expires.
+An endpoint of your own often sits behind a CDN or an identity-aware proxy, such as Fastly, Cloudflare Access or Google IAP, that wants a credential of its own before the request reaches your model server. Give the key one as well as its API key. Enter the **Endpoint credential header** the proxy expects, such as `Fastly-Key`, paste the **Endpoint credential** itself, and set the date you expect to rotate it. The field appears once the key has a base URL, since a proxy sits in front of an address you chose.
 
 Otari sends the header on every request it makes to that base URL, including the model listing. It is stored encrypted, shown only by its last four characters, and never returned to your applications.
 
 The expiry date is yours to record. Otari shows it on the key and marks the key when the date is within two weeks or already past, but it never refuses a request because the date has passed: only your proxy knows whether the credential still works. Update the date when you rotate the credential.
 
-Only a header is supported. A proxy that wants a TLS client certificate instead is not a header credential and cannot be configured here.
+One stored value sent as one header is the only form supported. A proxy that wants a TLS client certificate instead presents it when the connection is made, not as a header, so it cannot be configured here.
 
 ### Client arguments
 

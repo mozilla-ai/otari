@@ -35,6 +35,14 @@ import { kindFilterOf } from "@/features/models/offeredKinds"
 import { PricingOverrideDialog } from "@/features/organization/PricingOverrideDialog"
 import { canManage } from "@/features/organization/roles"
 import {
+  EMPTY_ENDPOINT_AUTH,
+  type EndpointAuthDraft,
+  EndpointAuthFields,
+  endpointAuthDraftFrom,
+  isEndpointAuthComplete,
+} from "@/features/providers/EndpointAuthFields"
+import { EndpointAuthMark } from "@/features/providers/EndpointAuthMark"
+import {
   BYO_UNSUPPORTED_PROVIDERS,
   type CredentialFieldValues,
   credentialFieldsFor,
@@ -121,6 +129,8 @@ interface KeyDraft {
   credentials: CredentialFieldValues
   /** Typed secrets already stored, so blank means "keep it" rather than "clear it". */
   redacted: string[]
+  /** The credential the address's own proxy wants, if it has one. */
+  endpointAuth: EndpointAuthDraft
   zeroDataRetention: boolean
 }
 
@@ -133,6 +143,7 @@ const EMPTY_DRAFT: KeyDraft = {
   clientArgs: "",
   credentials: {},
   redacted: [],
+  endpointAuth: EMPTY_ENDPOINT_AUTH,
   zeroDataRetention: false,
 }
 
@@ -154,6 +165,7 @@ function draftFrom(key: OrgProviderKey): KeyDraft {
     clientArgs: formatClientArgs(rest),
     credentials: typed,
     redacted,
+    endpointAuth: endpointAuthDraftFrom(key.endpoint_auth),
     zeroDataRetention: key.zero_data_retention,
   }
 }
@@ -202,7 +214,10 @@ function KeyForm({
     Object.keys(credentialErrors).length === 0 &&
     draft.name.trim() !== "" &&
     (editing !== null || draft.provider !== "") &&
-    !(editing?.slug && draft.apiBase.trim() === "")
+    !(editing?.slug && draft.apiBase.trim() === "") &&
+    isEndpointAuthComplete(draft.endpointAuth, {
+      hasStoredSecret: Boolean(editing?.endpoint_auth?.last4),
+    })
 
   const submit = () => {
     if (!parsedClientArgs.ok) return
@@ -215,11 +230,26 @@ function KeyForm({
       draft.redacted,
     )
     const slug = draft.slug.trim()
+    const headerName = draft.endpointAuth.headerName.trim()
+    // Null rather than omitted, so clearing the header clears the credential.
+    // The secret is sent only when retyped, as the API key is.
+    const endpointAuth =
+      headerName === ""
+        ? null
+        : {
+            method: "static_header" as const,
+            header_name: headerName,
+            expires_at: new Date(draft.endpointAuth.expiresAt).toISOString(),
+            ...(draft.endpointAuth.secret !== ""
+              ? { secret: draft.endpointAuth.secret }
+              : {}),
+          }
     if (editing) {
       const body: UpdateOrgProviderKeyRequest = {
         name: draft.name.trim(),
         api_base: apiBase === "" ? null : apiBase,
         client_args: clientArgs,
+        endpoint_auth: endpointAuth,
         zero_data_retention: draft.zeroDataRetention,
       }
       // Omitted rather than sent as null when it was left blank: an explicit
@@ -236,6 +266,7 @@ function KeyForm({
       api_base: apiBase === "" ? null : apiBase,
       slug: apiBase !== "" && slug !== "" ? slug : null,
       client_args: clientArgs,
+      endpoint_auth: endpointAuth,
       zero_data_retention: draft.zeroDataRetention,
     }
     create.mutate(body, { onSuccess: onClose })
@@ -341,6 +372,16 @@ function KeyForm({
           description="Requests reach this key's models as prefix:model. It cannot change later."
         />
       ) : null}
+
+      {/* A proxy sits in front of an address the organization chose, so the
+          credential for it is asked for only where there is one. */}
+      {draft.apiBase.trim() === "" ? null : (
+        <EndpointAuthFields
+          value={draft.endpointAuth}
+          onChange={(endpointAuth) => setDraft({ ...draft, endpointAuth })}
+          stored={editing?.endpoint_auth ?? null}
+        />
+      )}
 
       <ZeroDataRetentionField
         isSelected={draft.zeroDataRetention}
@@ -542,8 +583,15 @@ export function OrganizationProvidersPage() {
     {
       id: "api_base",
       header: "API base",
+      // The credential its proxy wants sits under the address it fronts, rather
+      // than in a column of its own that most keys would leave blank.
       cell: (row) => (
-        <span className="text-muted">{row.api_base ?? "provider default"}</span>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-muted">
+            {row.api_base ?? "provider default"}
+          </span>
+          <EndpointAuthMark auth={row.endpoint_auth} />
+        </div>
       ),
     },
     {

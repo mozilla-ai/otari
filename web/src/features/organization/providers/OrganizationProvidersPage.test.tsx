@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { screen, waitFor, within } from "@testing-library/react"
+import { fireEvent, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -438,6 +438,133 @@ describe("OrganizationProvidersPage", () => {
           request.url.endsWith(`${API_ROOT}/organizations/me/provider-keys`),
       )
       expect(post?.body).toMatchObject({ provider: "anthropic", slug: "syn" })
+    })
+  })
+
+  it("asks for an endpoint credential only once the key has an address of its own", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider key" }),
+    )
+    await user.click(screen.getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Anthropic" }))
+    expect(
+      screen.queryByRole("textbox", { name: /Endpoint credential header/ }),
+    ).toBeNull()
+
+    await user.type(
+      screen.getByRole("textbox", { name: /API base URL/ }),
+      "https://proxy.example.com/v1",
+    )
+
+    expect(
+      screen.getByRole("textbox", { name: /Endpoint credential header/ }),
+    ).toBeInTheDocument()
+  })
+
+  it("sends the endpoint credential the key's proxy requires", async () => {
+    const requests = mockApi()
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider key" }),
+    )
+    await user.click(screen.getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Anthropic" }))
+    await user.type(screen.getByRole("textbox", { name: /Name/ }), "Fronted")
+    await user.type(
+      screen.getByRole("textbox", { name: /API base URL/ }),
+      "https://proxy.example.com/v1",
+    )
+    await user.type(
+      screen.getByRole("textbox", { name: /Endpoint credential header/ }),
+      "Fastly-Key",
+    )
+    await user.type(screen.getByLabelText("Endpoint credential"), "edge-s3cret")
+    fireEvent.change(screen.getByLabelText("Credential expires"), {
+      target: { value: "2027-03-01" },
+    })
+    await user.click(
+      screen.getByRole("button", { name: "Add provider key", hidden: false }),
+    )
+
+    await waitFor(() => {
+      const post = requests.find(
+        (request) =>
+          request.method === "POST" &&
+          request.url.endsWith(`${API_ROOT}/organizations/me/provider-keys`),
+      )
+      expect(post?.body).toMatchObject({
+        endpoint_auth: {
+          method: "static_header",
+          header_name: "Fastly-Key",
+          secret: "edge-s3cret",
+        },
+      })
+    })
+  })
+
+  // A credential with no rotation date is refused by the gateway, so the form
+  // does not offer to send one.
+  it("will not add a key whose endpoint credential has no rotation date", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider key" }),
+    )
+    await user.click(screen.getByRole("combobox", { name: "Provider" }))
+    await user.click(await screen.findByRole("option", { name: "Anthropic" }))
+    await user.type(screen.getByRole("textbox", { name: /Name/ }), "Fronted")
+    await user.type(
+      screen.getByRole("textbox", { name: /API base URL/ }),
+      "https://proxy.example.com/v1",
+    )
+    await user.type(
+      screen.getByRole("textbox", { name: /Endpoint credential header/ }),
+      "Fastly-Key",
+    )
+    await user.type(screen.getByLabelText("Endpoint credential"), "edge-s3cret")
+
+    expect(
+      screen.getByRole("button", { name: "Add provider key", hidden: false }),
+    ).toBeDisabled()
+  })
+
+  // Clearing the header is how a key stops carrying one, so the body has to say
+  // so rather than leave the field out, which keeps what is stored.
+  it("clears a stored endpoint credential when its header is removed", async () => {
+    const requests = mockApi({
+      keys: [
+        orgProviderKey({
+          api_base: "https://proxy.example.com/v1",
+          endpoint_auth: {
+            method: "static_header",
+            header_name: "Fastly-Key",
+            last4: "cret",
+            expires_at: "2027-03-01T00:00:00+00:00",
+            state: "valid",
+          },
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPage(<OrganizationProvidersPage />)
+
+    await pressRowAction(user, "Edit…")
+    await user.clear(
+      screen.getByRole("textbox", { name: /Endpoint credential header/ }),
+    )
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => {
+      const patch = requests.find((request) => request.method === "PATCH")
+      expect(patch?.body).toMatchObject({ endpoint_auth: null })
     })
   })
 
