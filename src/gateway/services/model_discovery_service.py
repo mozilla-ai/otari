@@ -71,6 +71,10 @@ class ProviderDiscovery:
     # provider still serves completions, so the dashboard warns that discovery is
     # unavailable instead of calling the provider unreachable (issue #447).
     discovery_unsupported: bool = False
+    # True when the address refused what it was sent rather than failing some
+    # other way. A caller that dialed with more than one credential cannot tell
+    # from the message which of them was refused, so it says so itself.
+    credentials_rejected: bool = False
     # How an SGLang server says it was started; ``None`` from any other provider.
     engine_settings: EngineSettings | None = None
 
@@ -87,6 +91,7 @@ def _copy_discovery(discovery: ProviderDiscovery) -> ProviderDiscovery:
         models=list(discovery.models),
         error=discovery.error,
         discovery_unsupported=discovery.discovery_unsupported,
+        credentials_rejected=discovery.credentials_rejected,
         engine_settings=discovery.engine_settings,
     )
 
@@ -469,6 +474,11 @@ def _short_error(exc: BaseException, provider: str | None = None) -> str:
     return message
 
 
+# Statuses that mean the address refused the credentials it was sent, as opposed
+# to serving no model-listing endpoint there or not answering at all.
+_CREDENTIAL_REJECTION_STATUSES = frozenset({401, 403})
+
+
 # Statuses that mean the backend serves no model-listing endpoint at this URL,
 # as opposed to refusing the credentials (401/403) or not answering at all. An
 # OpenAI-compatible deployment that has not implemented /v1/models answers 404
@@ -515,6 +525,11 @@ def _status_code(exc: BaseException) -> int | None:
 def _is_missing_models_endpoint(exc: BaseException) -> bool:
     """Whether ``exc`` says the provider has no model-listing endpoint."""
     return _status_code(exc) in _MISSING_ENDPOINT_STATUSES
+
+
+def _is_credential_rejection(exc: BaseException) -> bool:
+    """Whether ``exc`` says the address refused the credentials it was sent."""
+    return _status_code(exc) in _CREDENTIAL_REJECTION_STATUSES
 
 
 async def _discover_uncached(config: GatewayConfig, instance: str) -> ProviderDiscovery:
@@ -680,6 +695,7 @@ async def test_provider_credentials(
             models=[],
             error=_short_error(exc, provider=impl_name),
             discovery_unsupported=_is_missing_models_endpoint(exc),
+            credentials_rejected=_is_credential_rejection(exc),
         )
     models = await _serverless_only(
         provider_enum, models, timeout=timeout, api_key=api_key, api_base=api_base, client_args=client_args

@@ -9,8 +9,15 @@ import pytest
 from gateway.exceptions.providers_exceptions import OrgProviderKeyEndpointAuthRefusedError
 from gateway.models.provider_keys import OrgProviderKey
 from gateway.schemas.providers import EndpointAuthRequest
+from gateway.services import model_discovery_service
 from gateway.services.catalog._served import _read_engine_settings
-from gateway.services.model_discovery_service import _default_headers
+from gateway.services.model_discovery_service import (
+    ProviderDiscovery,
+    _copy_discovery,
+    _default_headers,
+    _is_credential_rejection,
+    _short_error,
+)
 from gateway.services.providers._org_provider_model_service import OrgProviderModelService
 from gateway.services.secret_box import decrypt_secret, encrypt_secret, generate_secret_key
 from gateway.services.tenancy import org_provider_key_service as store
@@ -181,3 +188,104 @@ def test_discovery_sends_no_credential_it_cannot_decrypt(monkeypatch: pytest.Mon
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
 
     assert OrgProviderModelService._endpoint_headers(row) == {}
+
+
+def _rejected(status_code: int) -> ProviderDiscovery:
+    """A discovery as ``test_provider_credentials`` builds it from an upstream status."""
+
+    class _Refused(Exception):
+        def __init__(self) -> None:
+            super().__init__("Unauthorized")
+            self.status_code = status_code
+
+    exc = _Refused()
+    return ProviderDiscovery(
+        provider="openai",
+        models=[],
+        error=_short_error(exc, provider="openai"),
+        credentials_rejected=_is_credential_rejection(exc),
+    )
+
+
+def _key(*, endpoint_auth: bool) -> OrgProviderKey:
+    return OrgProviderKey(
+        organization_id=uuid.uuid4(),
+        provider="openai",
+        name="k",
+        created_at=datetime.now(UTC),
+        api_base="https://proxy.example/v1",
+        endpoint_auth_method="static_header" if endpoint_auth else None,
+        endpoint_auth_header_name="Fastly-Key" if endpoint_auth else None,
+        encrypted_endpoint_auth_secret=encrypt_secret("edge-s3cret") if endpoint_auth else None,
+    )
+
+
+@pytest.mark.parametrize("status_code", [401, 403])
+def test_a_refusal_is_read_off_the_status_the_address_returned(status_code: int) -> None:
+    assert _rejected(status_code).credentials_rejected is True
+
+
+@pytest.mark.parametrize("status_code", [404, 429, 500])
+def test_a_failure_that_is_not_a_refusal_is_not_read_as_one(status_code: int) -> None:
+    assert _rejected(status_code).credentials_rejected is False
+
+
+def test_a_refusal_of_a_key_with_an_endpoint_credential_names_both() -> None:
+    named = OrgProviderModelService._named_refusal(_rejected(401), _key(endpoint_auth=True))
+
+    assert named.error is not None
+    assert "endpoint credential" in named.error
+    assert "API key" in named.error
+
+
+def test_a_refusal_of_a_key_with_one_credential_keeps_the_address_s_own_wording() -> None:
+    discovery = _rejected(403)
+    named = OrgProviderModelService._named_refusal(discovery, _key(endpoint_auth=False))
+
+    assert named.error == discovery.error
+
+
+# A key whose stored endpoint secret will not decrypt still declares one, so the
+# admin is told to check it rather than sent to rotate the API key.
+def test_a_refusal_names_an_endpoint_credential_that_will_not_decrypt(monkeypatch: pytest.MonkeyPatch) -> None:
+    key = _key(endpoint_auth=True)
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+
+    named = OrgProviderModelService._named_refusal(_rejected(401), key)
+
+    assert named.error is not None
+    assert "endpoint credential" in named.error
+
+
+def test_a_failure_that_is_not_a_refusal_keeps_its_wording_on_a_key_with_two_credentials() -> None:
+    discovery = _rejected(500)
+    named = OrgProviderModelService._named_refusal(discovery, _key(endpoint_auth=True))
+
+    assert named.error == discovery.error
+
+
+def test_a_named_refusal_echoes_no_part_of_either_credential() -> None:
+    named = OrgProviderModelService._named_refusal(_rejected(401), _key(endpoint_auth=True))
+
+    assert named.error is not None
+    assert "edge-s3cret" not in named.error
+    assert "Fastly-Key" not in named.error
+
+
+@pytest.mark.asyncio
+async def test_a_dial_that_is_refused_reports_it_as_a_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _Refused(Exception):
+        status_code = 401
+
+    async def _refuse(**_: object) -> list[object]:
+        raise _Refused
+
+    monkeypatch.setattr("gateway.services.model_discovery_service.alist_models", _refuse)
+
+    discovery = await model_discovery_service.test_provider_credentials("openai", api_key="sk-1", declared=False)
+
+    assert discovery.credentials_rejected is True
+
+
+def test_a_copied_discovery_keeps_the_refusal() -> None:
+    assert _copy_discovery(_rejected(401)).credentials_rejected is True

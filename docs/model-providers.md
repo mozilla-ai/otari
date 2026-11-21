@@ -44,6 +44,16 @@ The base URL comes from your organization, not from whoever runs the gateway, so
 
 A model server on a private address is added by the gateway's operator as a [hosted provider](hosted-providers.md) instead.
 
+### Add an endpoint credential
+
+An endpoint of your own often sits behind a CDN or an identity-aware proxy, such as Fastly, Cloudflare Access or Google IAP, that wants a credential of its own before the request reaches your model server. Give the key one as well as its API key: choose **Static header**, enter the **Header name** the proxy expects, such as `Fastly-Key`, paste its value, and enter the date it expires.
+
+Otari sends the header on every request it makes to that base URL, including the model listing. It is stored encrypted, shown only by its last four characters, and never returned to your applications.
+
+The expiry date is yours to record. Otari shows it on the key and marks the key when the date is within two weeks or already past, but it never refuses a request because the date has passed: only your proxy knows whether the credential still works. Update the date when you rotate the credential.
+
+Only a header is supported. A proxy that wants a TLS client certificate instead is not a header credential and cannot be configured here.
+
 ### Client arguments
 
 A key's client arguments are the few settings its provider's SDK needs beyond the key: `timeout` and `max_retries` for every provider, plus `region_name`, `aws_access_key_id`, `aws_secret_access_key` and `aws_session_token` for Bedrock, `bill_to` for Hugging Face, `organization` and `project` for OpenAI, `api_version` for Azure OpenAI, `resource` for Azure Anthropic, `project` and `location` for Vertex AI, and `project_id` and `region` for Vertex AI Anthropic. Any other name is refused when the key is saved, and a key saved with one before is served without it.
@@ -114,6 +124,10 @@ If you suspect compromise, create and assign the replacement immediately. Then r
 
 A key with its own [request prefix](#add-a-key-for-your-own-endpoint) is rotated in place, since no other key can take its prefix: edit the key on **Inference**, paste the new API key, and save.
 
+Rotate its [endpoint credential](#add-an-endpoint-credential) the same way: paste the new value and set the new expiry date. Leave the field empty to keep the stored credential and change nothing else about the key. Moving the key to a different base URL does ask for it again, since a credential issued for one address must not be sent to another.
+
+A key that carries both credentials sends them on the same request, so a refusal does not say which one was rejected. Otari reports it as a refusal of the key and asks you to check both.
+
 ## Provider keys vs API keys
 
 These are two different things, and the naming is unfortunately close:
@@ -129,5 +143,6 @@ Your application sends an API key to Otari. Otari uses a provider key to call th
 * **Workspace controls**. Each workspace decides which organization keys are effective for its workloads.
 * **Role gating**. Only admins and owners can add or remove provider key material, or change which keys a workspace can access.
 * **Runtime resolution**. Otari resolves the right provider key at request time. The workspace's API key never carries the upstream secret.
+* **Endpoint credentials**. A key's [endpoint credential](#add-an-endpoint-credential) is sent only to that key's own base URL, as the one header you named. It cannot name a header that carries a provider credential, that the connection itself reserves, or that belongs to Otari.
 
 Removing a provider key from Otari does not revoke it with the upstream provider. After deleting a key from Otari, also revoke it in the provider's dashboard.

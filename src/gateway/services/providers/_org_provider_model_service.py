@@ -38,7 +38,7 @@ resolves community defaults, both of which can take the whole discovery timeout.
 
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -118,6 +118,14 @@ PRICE_SOURCE_DEPLOYMENT: PriceSource = "deployment"
 # row is intact; the configured OTARI_SECRET_KEY just cannot read it any more.
 _UNDECRYPTABLE = (
     "The stored key cannot be decrypted. Was OTARI_SECRET_KEY rotated? Re-enter the credential, then try again."
+)
+
+# What an admin needs when an address refuses a key that carries two
+# credentials. Neither the endpoint nor a proxy in front of it says which one it
+# refused, so naming one would send the admin to rotate the wrong credential.
+_ENDPOINT_CREDENTIAL_REJECTED = (
+    "The endpoint or its proxy rejected a credential. This key sends an API key and an endpoint credential, "
+    "so check both."
 )
 
 _RATE_FIELDS = (
@@ -896,19 +904,36 @@ class OrgProviderModelService:
             return None
 
     @staticmethod
-    def _endpoint_headers(key: OrgProviderKey) -> dict[str, str]:
-        """The headers this key's endpoint credential adds, or none where it has one that will not decrypt."""
-        auth = EndpointAuth(
+    def _endpoint_auth(key: OrgProviderKey) -> EndpointAuth:
+        """The endpoint credential this key carries, whether or not it declares one."""
+        return EndpointAuth(
             method=key.endpoint_auth_method,
             header_name=key.endpoint_auth_header_name,
             encrypted_secret=key.encrypted_endpoint_auth_secret,
         )
+
+    @classmethod
+    def _endpoint_headers(cls, key: OrgProviderKey) -> dict[str, str]:
+        """The headers this key's endpoint credential adds, or none where it has one that will not decrypt."""
+        auth = cls._endpoint_auth(key)
         if auth.encrypted_secret is None:
             return {}
         try:
             return auth.headers(secret=decrypt_secret(auth.encrypted_secret))
         except (SecretBoxUnavailableError, SecretDecryptionError):
             return {}
+
+    @classmethod
+    def _named_refusal(cls, discovery: ProviderDiscovery, key: OrgProviderKey) -> ProviderDiscovery:
+        """The discovery an admin can act on, where a refusal could have named either credential.
+
+        A key that carries an endpoint credential sends two credentials on one
+        request, and a refusal of either arrives the same way. Passing the
+        address's own wording on would read as a verdict on the API key alone.
+        """
+        if discovery.credentials_rejected and cls._endpoint_auth(key).declared:
+            return replace(discovery, error=_ENDPOINT_CREDENTIAL_REJECTED)
+        return discovery
 
     async def _dial(self, key: OrgProviderKey, credential: _DialCredential, *, timeout: float) -> ProviderDiscovery:
         """Ask the provider what it serves on this key, and keep what its engine says.
@@ -931,15 +956,18 @@ class OrgProviderModelService:
             engine_client = owned_endpoint_http_client()
             if headers := self._endpoint_headers(key):
                 client_args["default_headers"] = headers
-        discovery = await test_provider_credentials(
-            key.provider,
-            api_key=api_key if isinstance(api_key, str) else None,
-            api_base=key.api_base,
-            client_args=client_args or None,
-            # An organization's key never borrows the deployment's own credentials.
-            declared=False,
-            timeout=timeout,
-            engine_client=engine_client,
+        discovery = self._named_refusal(
+            await test_provider_credentials(
+                key.provider,
+                api_key=api_key if isinstance(api_key, str) else None,
+                api_base=key.api_base,
+                client_args=client_args or None,
+                # An organization's key never borrows the deployment's own credentials.
+                declared=False,
+                timeout=timeout,
+                engine_client=engine_client,
+            ),
+            key,
         )
         if discovery.error is None:
             await record_served_models(
